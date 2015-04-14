@@ -6,9 +6,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <limits>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -22,8 +25,12 @@
 #include "components/nacl/common/nacl_switches.h"
 #include "components/nacl/loader/nonsfi/nonsfi_sandbox.h"
 #include "components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.h"
+#include "content/public/common/content_switches.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
+#include "sandbox/linux/services/credentials.h"
+#include "sandbox/linux/services/namespace_sandbox.h"
 #include "sandbox/linux/services/proc_util.h"
+#include "sandbox/linux/services/resource_limits.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
 
@@ -48,6 +55,52 @@ base::ScopedFD GetProcSelfTask(int proc_fd) {
       openat(proc_fd, "self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)));
   PCHECK(proc_self_task.is_valid());
   return proc_self_task.Pass();
+}
+
+bool MaybeSetProcessNonDumpable() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kAllowSandboxDebugging)) {
+    return true;
+  }
+
+  if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0) {
+    PLOG(ERROR) << "Failed to set non-dumpable flag";
+    return false;
+  }
+
+  return prctl(PR_GET_DUMPABLE) == 0;
+}
+
+void RestrictAddressSpaceUsage() {
+#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
+    defined(THREAD_SANITIZER)
+  // Sanitizers need to reserve huge chunks of the address space.
+  return;
+#endif
+
+  // Add a limit to the brk() heap that would prevent allocations that can't be
+  // indexed by an int. This helps working around typical security bugs.
+  // This could almost certainly be set to zero. GLibc's allocator and others
+  // would fall-back to mmap if brk() fails.
+  const rlim_t kNewDataSegmentMaxSize = std::numeric_limits<int>::max();
+  CHECK(sandbox::ResourceLimits::Lower(RLIMIT_DATA, kNewDataSegmentMaxSize));
+
+#if defined(ARCH_CPU_64_BITS)
+  // NaCl's x86-64 sandbox allocated 88GB address of space during startup:
+  // - The main sandbox is 4GB
+  // - There are two guard regions of 40GB each.
+  // - 4GB are allocated extra to have a 4GB-aligned address.
+  // See https://crbug.com/455839
+  //
+  // Set the limit to 128 GB and have some margin.
+  const rlim_t kNewAddressSpaceLimit = 1UL << 37;
+#else
+  // Some architectures such as X86 allow 32 bits processes to switch to 64
+  // bits when running under 64 bits kernels. Set a limit in case this happens.
+  const rlim_t kNewAddressSpaceLimit = std::numeric_limits<uint32_t>::max();
+#endif
+  CHECK(sandbox::ResourceLimits::Lower(RLIMIT_AS, kNewAddressSpaceLimit));
 }
 
 }  // namespace
@@ -90,29 +143,41 @@ void NaClSandbox::InitializeLayerOneSandbox() {
     CHECK(!HasOpenDirectory());
 
     // Get sandboxed.
-    CHECK(setuid_sandbox_client_->CreateNewSession());
     CHECK(setuid_sandbox_client_->ChrootMe());
+    CHECK(MaybeSetProcessNonDumpable());
+    CHECK(IsSandboxed());
+    layer_one_enabled_ = true;
+  } else if (sandbox::NamespaceSandbox::InNewUserNamespace()) {
+    CHECK(sandbox::Credentials::MoveToNewUserNS());
+    // This relies on SealLayerOneSandbox() to be called later.
+    CHECK(!HasOpenDirectory());
+    CHECK(sandbox::Credentials::DropFileSystemAccess());
+    CHECK(IsSingleThreaded());
+    CHECK(sandbox::Credentials::DropAllCapabilities());
     CHECK(IsSandboxed());
     layer_one_enabled_ = true;
   }
 }
 
 void NaClSandbox::CheckForExpectedNumberOfOpenFds() {
+  // We expect to have the following FDs open:
+  //  1-3) stdin, stdout, stderr.
+  //  4) The /dev/urandom FD used by base::GetUrandomFD().
+  //  5) A dummy pipe FD used to overwrite kSandboxIPCChannel.
+  //  6) The socket for the Chrome IPC channel that's connected to the
+  //     browser process, kPrimaryIPCChannel.
+  // We also have an fd for /proc (proc_fd_), but CountOpenFds excludes this.
+  //
+  // This sanity check ensures that dynamically loaded libraries don't
+  // leave any FDs open before we enable the sandbox.
+  int expected_num_fds = 6;
   if (setuid_sandbox_client_->IsSuidSandboxChild()) {
-    // We expect to have the following FDs open:
-    //  1-3) stdin, stdout, stderr.
-    //  4) The /dev/urandom FD used by base::GetUrandomFD().
-    //  5) A dummy pipe FD used to overwrite kSandboxIPCChannel.
-    //  6) The socket created by the SUID sandbox helper, used by ChrootMe().
-    //     After ChrootMe(), this is no longer connected to anything.
-    //     (Only present when running under the SUID sandbox.)
-    //  7) The socket for the Chrome IPC channel that's connected to the
-    //     browser process, kPrimaryIPCChannel.
-    //
-    // This sanity check ensures that dynamically loaded libraries don't
-    // leave any FDs open before we enable the sandbox.
-    CHECK_EQ(7, sandbox::ProcUtil::CountOpenFds(proc_fd_.get()));
+    // When using the setuid sandbox, there is one additional socket used for
+    // ChrootMe(). After ChrootMe(), it is no longer connected to anything.
+    ++expected_num_fds;
   }
+
+  CHECK_EQ(expected_num_fds, sandbox::ProcUtil::CountOpenFds(proc_fd_.get()));
 }
 
 void NaClSandbox::InitializeLayerTwoSandbox(bool uses_nonsfi_mode) {
@@ -121,6 +186,8 @@ void NaClSandbox::InitializeLayerTwoSandbox(bool uses_nonsfi_mode) {
   DCHECK(!layer_one_sealed_);
   CHECK(IsSingleThreaded());
   CheckForExpectedNumberOfOpenFds();
+
+  RestrictAddressSpaceUsage();
 
   base::ScopedFD proc_self_task(GetProcSelfTask(proc_fd_.get()));
 

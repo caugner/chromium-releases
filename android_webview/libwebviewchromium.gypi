@@ -7,6 +7,9 @@
   'dependencies': [
     'android_webview_common',
   ],
+  'variables': {
+    'use_native_jni_exports': 1,
+  },
   'conditions': [
     [ 'android_webview_build==1', {
       'dependencies': [
@@ -15,9 +18,13 @@
         # android_webview_java in android_webview/java_library_common.mk.
         '../base/base.gyp:base_java_application_state',
         '../base/base.gyp:base_java_library_load_from_apk_status_codes',
+        '../base/base.gyp:base_java_library_process_type',
         '../base/base.gyp:base_java_memory_pressure_level',
+        '../content/content.gyp:console_message_level_java',
         '../content/content.gyp:content_gamepad_mapping',
         '../content/content.gyp:gesture_event_type_java',
+        '../content/content.gyp:invalidate_types_java',
+        '../content/content.gyp:navigation_controller_java',
         '../content/content.gyp:popup_item_type_java',
         '../content/content.gyp:result_codes_java',
         '../content/content.gyp:screen_orientation_values_java',
@@ -29,6 +36,8 @@
         '../net/net.gyp:network_change_notifier_types_java',
         '../net/net.gyp:net_errors_java',
         '../net/net.gyp:private_key_types_java',
+        '../third_party/WebKit/public/blink_headers.gyp:web_input_event_java',
+        '../third_party/WebKit/public/blink_headers.gyp:web_text_input_type',
         '../ui/android/ui_android.gyp:android_resource_type_java',
         '../ui/android/ui_android.gyp:bitmap_format_java',
         '../ui/android/ui_android.gyp:page_transition_types_java',
@@ -51,4 +60,3 @@
     'lib/main/webview_entry_point.cc',
   ],
 }
-

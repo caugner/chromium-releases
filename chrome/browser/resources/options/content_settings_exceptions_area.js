@@ -69,10 +69,10 @@ cr.define('options.contentSettings', function() {
       select.appendChild(optionAllow);
 
       if (this.contentType == 'plugins') {
-        var optionAsk = cr.doc.createElement('option');
-        optionAsk.textContent = loadTimeData.getString('askException');
-        optionAsk.value = 'ask';
-        select.appendChild(optionAsk);
+        var optionDetect = cr.doc.createElement('option');
+        optionDetect.textContent = loadTimeData.getString('detectException');
+        optionDetect.value = 'detect';
+        select.appendChild(optionDetect);
       }
 
       if (this.contentType == 'cookies') {
@@ -499,7 +499,7 @@ cr.define('options.contentSettings', function() {
     /**
      * Sets the exceptions in the js model.
      *
-     * @param {Array.<options.Exception>} entries A list of dictionaries of
+     * @param {Array<options.Exception>} entries A list of dictionaries of
      *     values, each dictionary represents an exception.
      */
     setExceptions: function(entries) {

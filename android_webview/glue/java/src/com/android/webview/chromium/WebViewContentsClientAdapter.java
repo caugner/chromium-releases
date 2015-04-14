@@ -52,6 +52,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
+import org.chromium.content.browser.ContentViewCore;
 
 import java.lang.ref.WeakReference;
 import java.net.URISyntaxException;
@@ -284,35 +285,35 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
     }
 
     private static class WebResourceRequestImpl implements WebResourceRequest {
-        private final ShouldInterceptRequestParams mParams;
+        private final AwWebResourceRequest mRequest;
 
-        public WebResourceRequestImpl(ShouldInterceptRequestParams params) {
-            mParams = params;
+        public WebResourceRequestImpl(AwWebResourceRequest request) {
+            mRequest = request;
         }
 
         @Override
         public Uri getUrl() {
-            return Uri.parse(mParams.url);
+            return Uri.parse(mRequest.url);
         }
 
         @Override
         public boolean isForMainFrame() {
-            return mParams.isMainFrame;
+            return mRequest.isMainFrame;
         }
 
         @Override
         public boolean hasGesture() {
-            return mParams.hasUserGesture;
+            return mRequest.hasUserGesture;
         }
 
         @Override
         public String getMethod() {
-            return mParams.method;
+            return mRequest.method;
         }
 
         @Override
         public Map<String, String> getRequestHeaders() {
-            return mParams.requestHeaders;
+            return mRequest.requestHeaders;
         }
     }
 
@@ -320,12 +321,12 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
      * @see AwContentsClient#shouldInterceptRequest(java.lang.String)
      */
     @Override
-    public AwWebResourceResponse shouldInterceptRequest(ShouldInterceptRequestParams params) {
+    public AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request) {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.shouldInterceptRequest");
-            if (TRACE) Log.d(TAG, "shouldInterceptRequest=" + params.url);
+            if (TRACE) Log.d(TAG, "shouldInterceptRequest=" + request.url);
             WebResourceResponse response = mWebViewClient.shouldInterceptRequest(mWebView,
-                    new WebResourceRequestImpl(params));
+                    new WebResourceRequestImpl(request));
             if (response == null) return null;
 
             // AwWebResourceResponse should support null headers. b/16332774.
@@ -556,14 +557,10 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
             // onPageStarted is invoked, so in the case we get the Picture before that and
             // no further updates after onPageStarted, we'll fail the test by timing
             // out waiting for a Picture.
-            // To ensure backwards compatibility, we need to defer sending Picture updates
-            // until onPageFinished has been invoked. This work is being done
-            // upstream, and we can revert this hack when it lands.
             if (mPictureListener != null) {
                 ThreadUtils.postOnUiThreadDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        UnimplementedWebViewApi.invoke();
                         if (mPictureListener != null) {
                             if (TRACE) Log.d(TAG, "onPageFinished-fake");
                             mPictureListener.onNewPicture(mWebView, new Picture());
@@ -766,8 +763,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                         new JsPromptResultReceiverAdapter(receiver).getPromptResult();
                 if (TRACE) Log.d(TAG, "onJsAlert");
                 if (!mWebChromeClient.onJsAlert(mWebView, url, message, res)) {
-                    new JsDialogHelper(res, JsDialogHelper.ALERT, null, message, url)
-                            .showDialog(mContext);
+                    if (!showDefaultJsDialog(res, JsDialogHelper.ALERT, null, message, url)) {
+                        receiver.cancel();
+                    }
                 }
             } else {
                 receiver.cancel();
@@ -786,8 +784,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                         new JsPromptResultReceiverAdapter(receiver).getPromptResult();
                 if (TRACE) Log.d(TAG, "onJsBeforeUnload");
                 if (!mWebChromeClient.onJsBeforeUnload(mWebView, url, message, res)) {
-                    new JsDialogHelper(res, JsDialogHelper.UNLOAD, null, message, url)
-                            .showDialog(mContext);
+                    if (!showDefaultJsDialog(res, JsDialogHelper.UNLOAD, null, message, url)) {
+                        receiver.cancel();
+                    }
                 }
             } else {
                 receiver.cancel();
@@ -806,8 +805,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                         new JsPromptResultReceiverAdapter(receiver).getPromptResult();
                 if (TRACE) Log.d(TAG, "onJsConfirm");
                 if (!mWebChromeClient.onJsConfirm(mWebView, url, message, res)) {
-                    new JsDialogHelper(res, JsDialogHelper.CONFIRM, null, message, url)
-                            .showDialog(mContext);
+                    if (!showDefaultJsDialog(res, JsDialogHelper.CONFIRM, null, message, url)) {
+                        receiver.cancel();
+                    }
                 }
             } else {
                 receiver.cancel();
@@ -827,8 +827,10 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                         new JsPromptResultReceiverAdapter(receiver).getPromptResult();
                 if (TRACE) Log.d(TAG, "onJsPrompt");
                 if (!mWebChromeClient.onJsPrompt(mWebView, url, message, defaultValue, res)) {
-                    new JsDialogHelper(res, JsDialogHelper.PROMPT, defaultValue, message, url)
-                            .showDialog(mContext);
+                    if (!showDefaultJsDialog(
+                            res, JsDialogHelper.PROMPT, defaultValue, message, url)) {
+                        receiver.cancel();
+                    }
                 }
             } else {
                 receiver.cancel();
@@ -836,6 +838,23 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.handleJsPrompt");
         }
+    }
+
+    /**
+     * Try to show the default JS dialog and return whether the dialog was shown.
+     */
+    private boolean showDefaultJsDialog(JsPromptResult res, int jsDialogType, String defaultValue,
+            String message, String url) {
+        Context activityContext = ContentViewCore.activityFromContext(mContext);
+        if (activityContext == null) {
+            return false;
+        }
+        // TODO(igsolla): the activity context should be retrieved inside JsDialogHelper.showDialog
+        // but for that we need it to return a boolean. Also, doing it here means that we can fix
+        // problem 2 in crbug/447607 before M is released.
+        new JsDialogHelper(res, jsDialogType, defaultValue, message, url)
+            .showDialog(activityContext);
+        return true;
     }
 
     @Override

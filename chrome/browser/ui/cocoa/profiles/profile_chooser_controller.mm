@@ -166,14 +166,17 @@ NSTextView* BuildFixedWidthTextViewWithLink(
       [[HyperlinkTextView alloc] initWithFrame:NSZeroRect]);
   NSColor* link_color = gfx::SkColorToCalibratedNSColor(
       chrome_style::GetLinkColor());
+  NSMutableString* finalMessage =
+      [NSMutableString stringWithFormat:@"%@\n", message];
+  [finalMessage insertString:link atIndex:link_offset];
   // Adds a padding row at the bottom, because |boundingRectWithSize| below cuts
   // off the last row sometimes.
-  [text_view setMessageAndLink:[NSString stringWithFormat:@"%@\n", message]
-                      withLink:link
-                      atOffset:link_offset
-                          font:[NSFont labelFontOfSize:kTextFontSize]
-                  messageColor:[NSColor blackColor]
-                     linkColor:link_color];
+  [text_view setMessage:finalMessage
+               withFont:[NSFont labelFontOfSize:kTextFontSize]
+           messageColor:[NSColor blackColor]];
+  [text_view addLinkRange:NSMakeRange(link_offset, [link length])
+                 withName:@""
+                linkColor:link_color];
 
   // Removes the underlining from the link.
   [text_view setLinkTextAttributes:nil];
@@ -1208,6 +1211,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       subView = [self buildSwitchUserView];
       break;
     case profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER:
+    case profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER:
     case profiles::BUBBLE_VIEW_MODE_ACCOUNT_MANAGEMENT:
       subView = [self buildProfileChooserView];
       break;
@@ -1240,6 +1244,8 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       [[NSMutableArray alloc] init]);
   // Local and guest profiles cannot lock their profile.
   bool displayLock = false;
+  bool isFastProfileChooser =
+      viewMode_ == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER;
 
   // Loop over the profiles in reverse, so that they are sorted by their
   // y-coordinate, and separate them into active and "other" profiles.
@@ -1275,19 +1281,21 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   // overlap the bubble's rounded corners.
   CGFloat yOffset = 1;
 
-  // Option buttons.
-  NSRect rect = NSMakeRect(0, yOffset, kFixedMenuWidth, 0);
-  NSView* optionsView = [self createOptionsViewWithRect:rect
-                                            displayLock:displayLock];
-  [container addSubview:optionsView];
-  rect.origin.y = NSMaxY([optionsView frame]);
+  if (!isFastProfileChooser) {
+    // Option buttons.
+    NSRect rect = NSMakeRect(0, yOffset, kFixedMenuWidth, 0);
+    NSView* optionsView = [self createOptionsViewWithRect:rect
+                                              displayLock:displayLock];
+    [container addSubview:optionsView];
+    rect.origin.y = NSMaxY([optionsView frame]);
 
-  NSBox* separator = [self horizontalSeparatorWithFrame:rect];
-  [container addSubview:separator];
-  yOffset = NSMaxY([separator frame]);
+    NSBox* separator = [self horizontalSeparatorWithFrame:rect];
+    [container addSubview:separator];
+    yOffset = NSMaxY([separator frame]);
+  }
 
-  if (viewMode_ == profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER &&
-      switches::IsFastUserSwitching()) {
+  if ((viewMode_ == profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER &&
+       switches::IsFastUserSwitching()) || isFastProfileChooser) {
     // Other profiles switcher. The profiles have already been sorted
     // by their y-coordinate, so they can be added in the existing order.
     for (NSView *otherProfileView in otherProfiles.get()) {
@@ -1330,14 +1338,14 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   }
 
   // Active profile card.
-  if (currentProfileView) {
+  if (!isFastProfileChooser && currentProfileView) {
     yOffset += kVerticalSpacing;
     [currentProfileView setFrameOrigin:NSMakePoint(0, yOffset)];
     [container addSubview:currentProfileView];
     yOffset = NSMaxY([currentProfileView frame]) + kVerticalSpacing;
   }
 
-  if (tutorialView) {
+  if (!isFastProfileChooser && tutorialView) {
     [tutorialView setFrameOrigin:NSMakePoint(0, yOffset)];
     [container addSubview:tutorialView];
     yOffset = NSMaxY([tutorialView frame]);
@@ -1635,7 +1643,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
         [[NSImageView alloc] initWithFrame:NSZeroRect]);
     int imageId = browser_->profile()->IsChild()
         ? IDR_ICON_PROFILES_MENU_CHILD
-        : IDR_ICON_PROFILES_MENU_SUPERVISED;
+        : IDR_ICON_PROFILES_MENU_LEGACY_SUPERVISED;
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
     [supervisedIcon setImage:rb->GetNativeImageNamed(imageId).ToNSImage()];
     NSSize size = [[supervisedIcon image] size];
@@ -1781,8 +1789,15 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       imageTitleSpacing:kImageTitleSpacing
         backgroundColor:GetDialogBackgroundColor()]);
   [profileButton setTitle:base::SysUTF16ToNSString(item.name)];
+
+  // Use the low-res, small default avatars in the fast user switcher, like
+  // we do in the menu bar.
+  gfx::Image itemIcon;
+  bool isRectangle;
+  AvatarMenu::GetImageForMenuButton(item.profile_path, &itemIcon, &isRectangle);
+
   [profileButton setDefaultImage:CreateProfileImage(
-      item.icon, kSmallImageSide).ToNSImage()];
+      itemIcon, kSmallImageSide).ToNSImage()];
   [profileButton setImagePosition:NSImageLeft];
   [profileButton setAlignment:NSLeftTextAlignment];
   [profileButton setBordered:NO];

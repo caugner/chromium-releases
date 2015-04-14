@@ -12,18 +12,24 @@
 
 'use strict';
 
-/** @constructor */
-browserTest.FakeClientSession = function() {
+/**
+ * @constructor
+ * @extends {base.EventSourceImpl}
+ */
+browserTest.FakeDesktopConnectedView = function() {
   this.pluginPosition = {
     top: 0,
     left: 0
   };
-  this.defineEvents(Object.keys(remoting.ClientSession.Events));
+  this.defineEvents(Object.keys(remoting.DesktopConnectedView.Events));
 };
 
-base.extend(browserTest.FakeClientSession, base.EventSource);
+base.extend(browserTest.FakeDesktopConnectedView, base.EventSourceImpl);
 
-browserTest.FakeClientSession.prototype.getPluginPositionForTesting =
+/**
+ * @return {{top: number, left:number}} The top-left corner of the plugin.
+ */
+browserTest.FakeDesktopConnectedView.prototype.getPluginPositionForTesting =
     function() {
   return this.pluginPosition;
 };
@@ -31,12 +37,16 @@ browserTest.FakeClientSession.prototype.getPluginPositionForTesting =
 
 /** @constructor */
 browserTest.Bump_Scroll = function() {
-  // To aviod dependencies on the actual host desktop size, we simulate a
+  // To avoid dependencies on the actual host desktop size, we simulate a
   // desktop larger or smaller than the client window. The exact value is
   // arbitrary, but must be positive.
+  /** @type {number} */
   this.kHostDesktopSizeDelta = 10;
 };
 
+/**
+ * @param {{pin:string}} data
+ */
 browserTest.Bump_Scroll.prototype.run = function(data) {
   browserTest.expect(typeof data.pin == 'string');
 
@@ -78,33 +88,43 @@ browserTest.Bump_Scroll.prototype.run = function(data) {
   );
 };
 
+/**
+ * @return {Promise}
+ */
 browserTest.Bump_Scroll.prototype.noScrollWindowed = function() {
-  remoting.clientSession.pluginWidthForBumpScrollTesting =
-      window.innerWidth + this.kHostDesktopSizeDelta;
-  remoting.clientSession.pluginHeightForBumpScrollTesting =
-      window.innerHeight + this.kHostDesktopSizeDelta;
+  remoting.desktopConnectedView.setPluginSizeForBumpScrollTesting(
+      window.innerWidth + this.kHostDesktopSizeDelta,
+      window.innerHeight + this.kHostDesktopSizeDelta);
   this.moveMouseTo(0, 0);
   return this.verifyScroll(undefined, undefined);
 };
 
+/**
+ * @return {Promise}
+ */
 browserTest.Bump_Scroll.prototype.noScrollSmaller = function() {
-  remoting.clientSession.pluginWidthForBumpScrollTesting =
-      window.innerWidth - this.kHostDesktopSizeDelta;
-  remoting.clientSession.pluginHeightForBumpScrollTesting =
-      window.innerHeight - this.kHostDesktopSizeDelta;
+  remoting.desktopConnectedView.setPluginSizeForBumpScrollTesting(
+      window.innerWidth - this.kHostDesktopSizeDelta,
+      window.innerHeight - this.kHostDesktopSizeDelta);
   this.moveMouseTo(0, 0);
   return this.verifyScroll(undefined, undefined);
 };
 
+/**
+ * @param {number} widthFraction
+ * @param {number} heightFraction
+ * @return {Promise}
+ */
 browserTest.Bump_Scroll.prototype.scrollDirection =
     function(widthFraction, heightFraction) {
-  remoting.clientSession.pluginWidthForBumpScrollTesting =
-      screen.width + this.kHostDesktopSizeDelta;
-  remoting.clientSession.pluginHeightForBumpScrollTesting =
-      screen.height + this.kHostDesktopSizeDelta;
+  remoting.desktopConnectedView.setPluginSizeForBumpScrollTesting(
+      screen.width + this.kHostDesktopSizeDelta,
+      screen.height + this.kHostDesktopSizeDelta);
+  /** @type {number} */
   var expectedTop = heightFraction == 0.0 ? 0 :
                     heightFraction == 1.0 ? -this.kHostDesktopSizeDelta :
                     undefined;
+  /** @type {number} */
   var expectedLeft = widthFraction == 0.0 ? 0 :
                      widthFraction == 1.0 ? -this.kHostDesktopSizeDelta :
                      undefined;
@@ -114,6 +134,9 @@ browserTest.Bump_Scroll.prototype.scrollDirection =
   return result;
 };
 
+/**
+ * @return {Promise}
+ */
 browserTest.Bump_Scroll.prototype.activateFullscreen = function() {
   return new Promise(function(fulfill, reject) {
     remoting.fullscreen.activate(true, function() {
@@ -128,6 +151,10 @@ browserTest.Bump_Scroll.prototype.activateFullscreen = function() {
   });
 };
 
+/**
+ * @param {number} x
+ * @param {number} y
+ */
 browserTest.Bump_Scroll.prototype.moveMouseTo = function(x, y) {
   var e = {
     bubbles: true,
@@ -154,11 +181,14 @@ browserTest.Bump_Scroll.prototype.moveMouseTo = function(x, y) {
   document.documentElement.dispatchEvent(event);
 };
 
-// verifyScroll is complicated enough to warrant a test
+/**
+ * verifyScroll() is complicated enough to warrant a test.
+ * @return {Promise}
+ */
 browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
-  var STARTED = remoting.ClientSession.Events.bumpScrollStarted;
-  var STOPPED = remoting.ClientSession.Events.bumpScrollStopped;
-  var fakeSession = new browserTest.FakeClientSession;
+  var STARTED = remoting.DesktopConnectedView.Events.bumpScrollStarted;
+  var STOPPED = remoting.DesktopConnectedView.Events.bumpScrollStopped;
+  var fakeSession = new browserTest.FakeDesktopConnectedView;
   var that = this;
 
   // No events raised (e.g. windowed mode).
@@ -167,7 +197,7 @@ browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
   .then(function() {
     // Start and end events raised, but no scrolling (e.g. full-screen mode
     // with host desktop <= window size).
-    fakeSession = new browserTest.FakeClientSession;
+    fakeSession = new browserTest.FakeDesktopConnectedView;
     var result = that.verifyScroll(undefined, undefined, fakeSession);
     fakeSession.raiseEvent(STARTED, {});
     fakeSession.raiseEvent(STOPPED, {});
@@ -175,7 +205,7 @@ browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
 
   }).then(function() {
     // Start and end events raised, with incorrect scrolling.
-    fakeSession = new browserTest.FakeClientSession;
+    fakeSession = new browserTest.FakeDesktopConnectedView;
     var result = base.Promise.negate(
         that.verifyScroll(2, 2, fakeSession));
     fakeSession.raiseEvent(STARTED, {});
@@ -186,7 +216,7 @@ browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
 
   }).then(function() {
     // Start event raised, but not end event.
-    fakeSession = new browserTest.FakeClientSession;
+    fakeSession = new browserTest.FakeDesktopConnectedView;
     var result = base.Promise.negate(
         that.verifyScroll(2, 2, fakeSession));
     fakeSession.raiseEvent(STARTED, {});
@@ -196,7 +226,7 @@ browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
 
   }).then(function() {
     // Start and end events raised, with correct scrolling.
-    fakeSession = new browserTest.FakeClientSession;
+    fakeSession = new browserTest.FakeDesktopConnectedView;
     var result = that.verifyScroll(2, 2, fakeSession);
     fakeSession.raiseEvent(STARTED, {});
     fakeSession.pluginPosition.top = 2;
@@ -215,22 +245,26 @@ browserTest.Bump_Scroll.prototype.testVerifyScroll = function() {
  *    plugin, or undefined if it is not expected to change.
  * @param {number|undefined} expectedLeft The expected horizontal position of
  *    the plugin, or undefined if it is not expected to change.
- * @param {browserTest.FakeClientSession=} opt_clientSession ClientSession-like
- *     fake, for testing.
+ * @param {browserTest.FakeDesktopConnectedView=} opt_desktopConnectedView
+ *     DesktopConnectedView fake, for testing.
+ * @return {Promise}
  */
 browserTest.Bump_Scroll.prototype.verifyScroll =
-    function (expectedTop, expectedLeft, opt_clientSession) {
-  var clientSession = opt_clientSession || remoting.clientSession;
-  base.debug.assert(clientSession != null);
-  var STARTED = remoting.ClientSession.Events.bumpScrollStarted;
-  var STOPPED = remoting.ClientSession.Events.bumpScrollStopped;
+    function (expectedTop, expectedLeft, opt_desktopConnectedView) {
+  /** @type {browserTest.FakeDesktopConnectedView} */
+  var desktopConnectedView = opt_desktopConnectedView ||
+      remoting.desktopConnectedView;
+  base.debug.assert(desktopConnectedView != null);
+  var STARTED = remoting.DesktopConnectedView.Events.bumpScrollStarted;
+  var STOPPED = remoting.DesktopConnectedView.Events.bumpScrollStopped;
 
-  var initialPosition = clientSession.getPluginPositionForTesting();
+  var initialPosition = desktopConnectedView.getPluginPositionForTesting();
   var initialTop = initialPosition.top;
   var initialLeft = initialPosition.left;
 
+  /** @return {Promise} */
   var verifyPluginPosition = function() {
-    var position = clientSession.getPluginPositionForTesting();
+    var position = desktopConnectedView.getPluginPositionForTesting();
     if (expectedLeft === undefined) {
       expectedLeft = initialLeft;
     }
@@ -247,8 +281,8 @@ browserTest.Bump_Scroll.prototype.verifyScroll =
     }
   };
 
-  var started = browserTest.expectEvent(clientSession, STARTED, 1000);
-  var stopped = browserTest.expectEvent(clientSession, STOPPED, 5000);
+  var started = browserTest.expectEvent(desktopConnectedView, STARTED, 1000);
+  var stopped = browserTest.expectEvent(desktopConnectedView, STOPPED, 5000);
   return started.then(function() {
     return stopped.then(function() {
       return verifyPluginPosition();

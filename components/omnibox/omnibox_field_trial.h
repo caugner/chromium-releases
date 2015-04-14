@@ -240,18 +240,6 @@ class OmniboxFieldTrial {
   static bool HQPAllowMatchInSchemeValue();
 
   // ---------------------------------------------------------
-  // For the DisableInlining experiment that's part of the bundled omnibox
-  // field trial.
-
-  // Returns true if AutocompleteResult should prevent any suggestion with
-  // a non-empty |inline_autocomplete| from being the default match.  In
-  // other words, prevent an inline autocompletion from appearing as the
-  // top suggestion / within the omnibox itself, reordering matches as
-  // necessary to make this true.  Returns false if the experiment isn't
-  // active.
-  static bool DisableInlining();
-
-  // ---------------------------------------------------------
   // For the AnswersInSuggest experiment that's part of the bundled omnibox
   // field trial.
 
@@ -260,20 +248,6 @@ class OmniboxFieldTrial {
   // to be provided in the Omnibox suggestion list. Considers both the
   // field trial state as well as the overriding command-line flags.
   static bool EnableAnswersInSuggest();
-
-  // ---------------------------------------------------------
-  // For the AddUWYTMatchEvenIfPromotedURLs experiment that's part of the
-  // bundled omnibox field trial.
-
-  // Returns true if HistoryURL Provider should add the URL-what-you-typed match
-  // (if valid and reasonable) even if the provider has good inline
-  // autocompletions to offer.  Normally HistoryURL does not add the UWYT match
-  // if there are good inline autocompletions, as the user could simply hit
-  // backspace to delete the completion and get the what-you-typed match.
-  // However, for the disabling inlining experiment we want to have the UWYT
-  // always explicitly displayed at an option if possible.  Returns false if
-  // the experiment isn't active.
-  static bool AddUWYTMatchEvenIfPromotedURLs();
 
   // ---------------------------------------------------------
   // For the DisplayHintTextWhenPossible experiment that's part of the
@@ -296,6 +270,28 @@ class OmniboxFieldTrial {
                                         int* polling_delay_ms);
 
   // ---------------------------------------------------------
+  // For HQP scoring related experiments to control the topicality and scoring
+  // ranges of relevancy scores.
+
+  // Returns true if HQP experimental scoring is enabled. Returns false if
+  // |kHQPExperimentalScoringEnabledParam| is not specified in the field trial.
+  static bool HQPExperimentalScoringEnabled();
+
+  // Returns the scoring buckets for HQP experiments. Returns empty string
+  // in case |kHQPExperimentalScoringBucketsParam| or
+  // |kHQPExperimentalScoringEnabledParam| is not specified in the
+  // field trial. Scoring buckets are stored in string form giving mapping from
+  // (topicality_score, frequency_score) to final relevance score.
+  // Please see GetRelevancyScore() under
+  // chrome/browser/history::ScoredHistoryMatch for details.
+  static std::string HQPExperimentalScoringBuckets();
+
+  // Returns the topicality threshold for HQP experiments. Returns -1 if
+  // |kHQPExperimentalScoringTopicalityThresholdParam| or
+  // |kHQPExperimentalScoringEnabledParam| is not specified in the field trial.
+  static float HQPExperimentalTopicalityThreshold();
+
+  // ---------------------------------------------------------
   // Exposed publicly for the sake of unittests.
   static const char kBundledExperimentFieldTrialName[];
   // Rule names used by the bundled experiment.
@@ -309,9 +305,7 @@ class OmniboxFieldTrial {
   static const char kHQPAllowMatchInSchemeRule[];
   static const char kZeroSuggestRule[];
   static const char kZeroSuggestVariantRule[];
-  static const char kDisableInliningRule[];
   static const char kAnswersInSuggestRule[];
-  static const char kAddUWYTMatchEvenIfPromotedURLsRule[];
   static const char kDisplayHintTextWhenPossibleRule[];
   static const char kDisableResultsCachingRule[];
   static const char kMeasureSuggestPollingDelayFromLastKeystrokeRule[];
@@ -325,6 +319,11 @@ class OmniboxFieldTrial {
   static const char kHUPNewScoringVisitedCountRelevanceCapParam[];
   static const char kHUPNewScoringVisitedCountHalfLifeTimeParam[];
   static const char kHUPNewScoringVisitedCountScoreBucketsParam[];
+
+  // Parameter names used by the HQP experimental scoring experiments.
+  static const char kHQPExperimentalScoringEnabledParam[];
+  static const char kHQPExperimentalScoringBucketsParam[];
+  static const char kHQPExperimentalScoringTopicalityThresholdParam[];
 
   // The amount of time to wait before sending a new suggest request after the
   // previous one unless overridden by a field trial parameter.

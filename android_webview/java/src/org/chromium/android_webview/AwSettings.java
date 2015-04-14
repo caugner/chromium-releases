@@ -12,31 +12,23 @@ import android.os.Process;
 import android.provider.Settings;
 import android.util.Log;
 import android.webkit.WebSettings;
+import android.webkit.WebSettings.LayoutAlgorithm;
 import android.webkit.WebSettings.PluginState;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * Stores Android WebView specific settings that does not need to be synced to WebKit.
- * Use {@link org.chromium.content.browser.ContentSettings} for WebKit settings.
  *
  * Methods in this class can be called from any thread, including threads created by
  * the client of WebView.
  */
 @JNINamespace("android_webview")
 public class AwSettings {
-    // This enum corresponds to WebSettings.LayoutAlgorithm. We use our own to be
-    // able to extend it.
-    public enum LayoutAlgorithm {
-        NORMAL,
-        SINGLE_COLUMN,
-        NARROW_COLUMNS,
-        TEXT_AUTOSIZING,
-    }
-
     // These constants must be kept in sync with the Android framework, defined in WebSettimgs.
     @VisibleForTesting
     public static final int MIXED_CONTENT_ALWAYS_ALLOW = 0;
@@ -272,15 +264,15 @@ public class AwSettings {
         }
     }
 
-    void setWebContents(long nativeWebContents) {
+    void setWebContents(WebContents webContents) {
         synchronized (mAwSettingsLock) {
             if (mNativeAwSettings != 0) {
                 nativeDestroy(mNativeAwSettings);
                 assert mNativeAwSettings == 0;  // nativeAwSettingsGone should have been called.
             }
-            if (nativeWebContents != 0) {
+            if (webContents != null) {
                 mEventHandler.bindUiThread();
-                mNativeAwSettings = nativeInit(nativeWebContents);
+                mNativeAwSettings = nativeInit(webContents);
                 updateEverythingLocked();
             }
         }
@@ -1658,7 +1650,7 @@ public class AwSettings {
         }
     }
 
-    private native long nativeInit(long webContentsPtr);
+    private native long nativeInit(WebContents webContents);
 
     private native void nativeDestroy(long nativeAwSettings);
 

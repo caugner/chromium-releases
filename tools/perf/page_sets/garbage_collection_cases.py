@@ -16,7 +16,7 @@ class SpinningBallsPage(page_module.Page):
       page_set=page_set)
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(SpinningBallsPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         "document.readyState == 'complete'")
     action_runner.ClickElement(selector='input[type="submit"]')
@@ -24,8 +24,7 @@ class SpinningBallsPage(page_module.Page):
         "document.readyState == 'complete'")
 
   def RunPageInteractions(self, action_runner):
-    interaction = action_runner.BeginInteraction(
-        'RunSmoothAllActions', is_fast=True)
+    interaction = action_runner.BeginInteraction('RunSmoothAllActions')
     action_runner.Wait(15)
     interaction.End()
 

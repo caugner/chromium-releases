@@ -132,14 +132,16 @@ CreditCard::CreditCard(const std::string& guid, const std::string& origin)
       record_type_(LOCAL_CARD),
       type_(kGenericCard),
       expiration_month_(0),
-      expiration_year_(0) {
+      expiration_year_(0),
+      server_status_(OK) {
 }
 
 CreditCard::CreditCard(const base::string16& card_number,
                        int expiration_month,
                        int expiration_year)
     : AutofillDataModel(std::string(), std::string()),
-      record_type_(LOCAL_CARD) {
+      record_type_(LOCAL_CARD),
+      server_status_(OK) {
   SetNumber(card_number);
   SetExpirationMonth(expiration_month);
   SetExpirationYear(expiration_year);
@@ -151,7 +153,8 @@ CreditCard::CreditCard(RecordType type, const std::string& server_id)
       type_(kGenericCard),
       expiration_month_(0),
       expiration_year_(0),
-      server_id_(server_id) {
+      server_id_(server_id),
+      server_status_(OK) {
   DCHECK(type == MASKED_SERVER_CARD || type == FULL_SERVER_CARD);
 }
 
@@ -160,7 +163,8 @@ CreditCard::CreditCard()
       record_type_(LOCAL_CARD),
       type_(kGenericCard),
       expiration_month_(0),
-      expiration_year_(0) {
+      expiration_year_(0),
+      server_status_(OK) {
 }
 
 CreditCard::CreditCard(const CreditCard& credit_card)
@@ -181,6 +185,9 @@ const base::string16 CreditCard::StripSeparators(const base::string16& number) {
 base::string16 CreditCard::TypeForDisplay(const std::string& type) {
   if (kGenericCard == type)
     return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_GENERIC);
+  if (kAmericanExpressCard == type)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_AMEX_SHORT);
+
   return ::autofill::TypeForFill(type);
 }
 
@@ -305,6 +312,16 @@ const char* CreditCard::GetCreditCardType(const base::string16& number) {
 void CreditCard::SetTypeForMaskedCard(const char* type) {
   DCHECK_EQ(MASKED_SERVER_CARD, record_type());
   type_ = type;
+}
+
+void CreditCard::SetServerStatus(ServerStatus status) {
+  DCHECK_NE(LOCAL_CARD, record_type());
+  server_status_ = status;
+}
+
+CreditCard::ServerStatus CreditCard::GetServerStatus() const {
+  DCHECK_NE(LOCAL_CARD, record_type());
+  return server_status_;
 }
 
 base::string16 CreditCard::GetRawInfo(ServerFieldType type) const {
@@ -489,6 +506,19 @@ void CreditCard::SetInfoForMonthInputType(const base::string16& value) {
   SetExpirationMonth(num);
 }
 
+void CreditCard::SetExpirationMonth(int expiration_month) {
+  if (expiration_month < 0 || expiration_month > 12)
+    return;
+  expiration_month_ = expiration_month;
+}
+
+void CreditCard::SetExpirationYear(int expiration_year) {
+  if (expiration_year != 0 &&
+      (expiration_year < 2006 || expiration_year > 10000))
+    return;
+  expiration_year_ = expiration_year;
+}
+
 base::string16 CreditCard::LastFourDigits() const {
   static const size_t kNumLastDigits = 4;
 
@@ -515,6 +545,10 @@ base::string16 CreditCard::TypeAndLastFourDigits() const {
 }
 
 void CreditCard::operator=(const CreditCard& credit_card) {
+  set_use_count(credit_card.use_count());
+  set_use_date(credit_card.use_date());
+  set_modification_date(credit_card.modification_date());
+
   if (this == &credit_card)
     return;
 
@@ -525,6 +559,7 @@ void CreditCard::operator=(const CreditCard& credit_card) {
   expiration_month_ = credit_card.expiration_month_;
   expiration_year_ = credit_card.expiration_year_;
   server_id_ = credit_card.server_id_;
+  server_status_ = credit_card.server_status_;
 
   set_guid(credit_card.guid());
   set_origin(credit_card.origin());
@@ -579,6 +614,12 @@ int CreditCard::Compare(const CreditCard& credit_card) const {
   if (comparison != 0)
     return comparison;
 
+  if (static_cast<int>(server_status_) <
+      static_cast<int>(credit_card.server_status_))
+    return -1;
+  if (static_cast<int>(server_status_) >
+      static_cast<int>(credit_card.server_status_))
+    return 1;
   if (static_cast<int>(record_type_) <
       static_cast<int>(credit_card.record_type_))
     return -1;
@@ -706,22 +747,6 @@ void CreditCard::SetNumber(const base::string16& number) {
   // when we have masked cards from the server (last 4 digits).
   if (record_type_ != MASKED_SERVER_CARD)
     type_ = GetCreditCardType(StripSeparators(number_));
-}
-
-void CreditCard::SetExpirationMonth(int expiration_month) {
-  if (expiration_month < 0 || expiration_month > 12)
-    return;
-
-  expiration_month_ = expiration_month;
-}
-
-void CreditCard::SetExpirationYear(int expiration_year) {
-  if (expiration_year != 0 &&
-      (expiration_year < 2006 || expiration_year > 10000)) {
-    return;
-  }
-
-  expiration_year_ = expiration_year;
 }
 
 // So we can compare CreditCards with EXPECT_EQ().

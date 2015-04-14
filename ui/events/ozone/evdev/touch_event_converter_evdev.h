@@ -17,8 +17,9 @@
 
 namespace ui {
 
-class EventModifiersEvdev;
 class TouchEvent;
+
+class DeviceEventDispatcherEvdev;
 
 class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
     : public EventConverterEvdev {
@@ -28,13 +29,13 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
                            base::FilePath path,
                            int id,
                            InputDeviceType type,
-                           EventModifiersEvdev* modifiers,
-                           const EventDispatchCallback& dispatch);
+                           DeviceEventDispatcherEvdev* dispatcher);
   ~TouchEventConverterEvdev() override;
 
   // EventConverterEvdev:
   bool HasTouchscreen() const override;
   gfx::Size GetTouchscreenSize() const override;
+  int GetTouchPoints() const override;
 
   // Unsafe part of initialization.
   virtual void Initialize(const EventDeviceInfo& info);
@@ -70,8 +71,8 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
       const InProgressEvents& event, const base::TimeDelta& delta);
   void ReportEvents(base::TimeDelta delta);
 
-  // Callback for dispatching events.
-  EventDispatchCallback callback_;
+  // Dispatcher for events.
+  DeviceEventDispatcherEvdev* dispatcher_;
 
   // Set if we have seen a SYN_DROPPED and not yet re-synced with the device.
   bool syn_dropped_;
@@ -94,11 +95,11 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
   // Size of the touchscreen as reported by the driver.
   gfx::Size native_size_;
 
+  // Number of touch points reported by driver
+  int touch_points_;
+
   // Touch point currently being updated from the /dev/input/event* stream.
   size_t current_slot_;
-
-  // Modifier key state (shift, ctrl, etc).
-  EventModifiersEvdev* modifiers_;
 
   // In-progress touch points.
   std::vector<InProgressEvents> events_;

@@ -2,13 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// The "onpush" event currently understands two values as message payload
+// data coming from the test. Any other input is passed through to the
+// document unchanged.
+//
+// "shownotification" - Display a Web Notification with event.waitUntil().
+// "shownotification-without-waituntil"
+//     - Display a Web Notification without using event.waitUntil().
 this.onpush = function(event) {
-  // TODO(peter): Remove this check once Blink supports PushMessageData.json().
-  var data = event.data;
-  if (typeof data !== 'string')
-    data = data.text();
+  var data = event.data.text();
+  if (!data.startsWith('shownotification')) {
+    sendMessageToClients('push', data);
+    return;
+  }
 
-  sendMessageToClients('push', data);
+  var result = registration.showNotification('Push test title', {
+    body: 'Push test body',
+    tag: 'push_test_tag'
+  });
+
+  if (data == 'shownotification-without-waituntil') {
+    sendMessageToClients('push', 'immediate:' + data);
+    return;
+  }
+
+  event.waitUntil(result.then(function() {
+    sendMessageToClients('push', data);
+  }, function(ex) {
+    sendMessageToClients('push', String(ex));
+  }));
 };
 
 function sendMessageToClients(type, data) {

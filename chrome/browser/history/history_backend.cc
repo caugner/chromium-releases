@@ -23,21 +23,16 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/download_row.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
-#include "chrome/browser/history/in_memory_history_backend.h"
-#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/history/typed_url_syncable_service.h"
-#include "chrome/browser/history/typed_url_syncable_service.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/importer/imported_favicon_usage.h"
-#include "chrome/common/url_constants.h"
 #include "components/favicon_base/select_favicon_frames.h"
+#include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/download_row.h"
 #include "components/history/core/browser/history_backend_observer.h"
 #include "components/history/core/browser/history_client.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/page_usage_data.h"
@@ -47,6 +42,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/history/android/android_provider_backend.h"
@@ -176,8 +172,7 @@ bool QueuedHistoryDBTask::is_canceled() {
   return is_canceled_.Run();
 }
 
-bool QueuedHistoryDBTask::Run(HistoryBackend* backend,
-                                        HistoryDatabase* db) {
+bool QueuedHistoryDBTask::Run(HistoryBackend* backend, HistoryDatabase* db) {
   return task_->RunOnDBThread(backend, db);
 }
 
@@ -230,9 +225,12 @@ HistoryBackend::~HistoryBackend() {
 #endif
 }
 
-void HistoryBackend::Init(const std::string& languages, bool force_fail) {
+void HistoryBackend::Init(
+    const std::string& languages,
+    bool force_fail,
+    const HistoryDatabaseParams& history_database_params) {
   if (!force_fail)
-    InitImpl(languages);
+    InitImpl(languages, history_database_params);
   delegate_->DBLoaded();
   typed_url_syncable_service_.reset(new TypedUrlSyncableService(this));
   memory_pressure_listener_.reset(new base::MemoryPressureListener(
@@ -578,7 +576,9 @@ void HistoryBackend::AddPage(const HistoryAddPageArgs& request) {
   ScheduleCommit();
 }
 
-void HistoryBackend::InitImpl(const std::string& languages) {
+void HistoryBackend::InitImpl(
+    const std::string& languages,
+    const HistoryDatabaseParams& history_database_params) {
   DCHECK(!db_) << "Initializing HistoryBackend twice";
   // In the rare case where the db fails to initialize a dialog may get shown
   // the blocks the caller, yet allows other messages through. For this reason
@@ -588,7 +588,9 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   TimeTicks beginning_time = TimeTicks::Now();
 
   // Compute the file names.
-  base::FilePath history_name = history_dir_.Append(history::kHistoryFilename);
+  DCHECK(history_dir_ == history_database_params.history_dir);
+  base::FilePath history_name =
+      history_database_params.history_dir.Append(history::kHistoryFilename);
   base::FilePath thumbnail_name = GetFaviconsFileName();
   base::FilePath archived_name = GetArchivedFileName();
 
@@ -596,7 +598,9 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   DeleteFTSIndexDatabases();
 
   // History database.
-  db_.reset(new HistoryDatabase());
+  db_.reset(new HistoryDatabase(
+      history_database_params.download_interrupt_reason_none,
+      history_database_params.download_interrupt_reason_crash));
 
   // Unretained to avoid a ref loop with db_.
   db_->set_error_callback(
@@ -919,23 +923,6 @@ void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url,
   db_->AddURL(url_info);
 }
 
-void HistoryBackend::IterateURLs(
-    const scoped_refptr<visitedlink::VisitedLinkDelegate::URLEnumerator>&
-    iterator) {
-  if (db_) {
-    HistoryDatabase::URLEnumerator e;
-    if (db_->InitURLEnumeratorForEverything(&e)) {
-      URLRow info;
-      while (e.GetNextURL(&info)) {
-        iterator->OnURL(info.url());
-      }
-      iterator->OnComplete(true);  // Success.
-      return;
-    }
-  }
-  iterator->OnComplete(false);  // Failure.
-}
-
 bool HistoryBackend::GetAllTypedURLs(URLRows* urls) {
   if (db_)
     return db_->GetAllTypedUrls(urls);
@@ -1051,10 +1038,9 @@ void HistoryBackend::SetKeywordSearchTermsForURL(const GURL& url,
 
   db_->SetKeywordSearchTermsForURL(row.id(), keyword_id, term);
 
-  BroadcastNotifications(
-      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
-      scoped_ptr<HistoryDetails>(
-          new KeywordSearchUpdatedDetails(row, keyword_id, term)));
+  if (delegate_)
+    delegate_->NotifyKeywordSearchTermUpdated(row, keyword_id, term);
+
   ScheduleCommit();
 }
 
@@ -1075,9 +1061,9 @@ void HistoryBackend::DeleteKeywordSearchTermForURL(const GURL& url) {
     return;
   db_->DeleteKeywordSearchTermForURL(url_id);
 
-  BroadcastNotifications(
-      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED,
-      scoped_ptr<HistoryDetails>(new KeywordSearchDeletedDetails(url_id)));
+  if (delegate_)
+    delegate_->NotifyKeywordSearchTermDeleted(url_id);
+
   ScheduleCommit();
 }
 
@@ -1112,7 +1098,7 @@ void HistoryBackend::RemoveObserver(HistoryBackendObserver* observer) {
 // Downloads -------------------------------------------------------------------
 
 uint32 HistoryBackend::GetNextDownloadId() {
-  return db_ ? db_->GetNextDownloadId() : content::DownloadItem::kInvalidId;
+  return db_ ? db_->GetNextDownloadId() : kInvalidDownloadId;
 }
 
 // Get all the download entries from the database.
@@ -1807,7 +1793,7 @@ void HistoryBackend::CloneFavicons(const GURL& old_page_url,
 }
 
 void HistoryBackend::SetImportedFavicons(
-    const std::vector<ImportedFaviconUsage>& favicon_usage) {
+    const favicon_base::FaviconUsageDataList& favicon_usage) {
   if (!db_ || !thumbnail_db_)
     return;
 
@@ -2478,15 +2464,6 @@ void HistoryBackend::ProcessDBTask(
     ProcessDBTaskImpl();
 }
 
-void HistoryBackend::BroadcastNotifications(
-    int type,
-    scoped_ptr<HistoryDetails> details) {
-  // |delegate_| may be NULL if |this| is in the process of closing (closed by
-  // HistoryService -> HistoryBackend::Closing().
-  if (delegate_)
-    delegate_->BroadcastNotifications(type, details.Pass());
-}
-
 void HistoryBackend::NotifyFaviconChanged(const std::set<GURL>& urls) {
   if (delegate_)
     delegate_->NotifyFaviconChanged(urls);
@@ -2531,19 +2508,22 @@ void HistoryBackend::NotifyURLsDeleted(bool all_history,
                                        bool expired,
                                        const URLRows& rows,
                                        const std::set<GURL>& favicon_urls) {
-  scoped_ptr<URLsDeletedDetails> details(new URLsDeletedDetails);
-  details->all_history = all_history;
-  details->expired = expired;
-  details->rows = rows;
-  details->favicon_urls = favicon_urls;
-
+  URLRows copied_rows(rows);
   if (typed_url_syncable_service_.get()) {
-    typed_url_syncable_service_->OnUrlsDeleted(
-        all_history, expired, &details->rows);
+    typed_url_syncable_service_->OnUrlsDeleted(all_history, expired,
+                                               &copied_rows);
   }
 
-  BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                         details.Pass());
+  FOR_EACH_OBSERVER(
+      HistoryBackendObserver, observers_,
+      OnURLsDeleted(this, all_history, expired, copied_rows, favicon_urls));
+
+  // TODO(sdefresne): turn HistoryBackend::Delegate from HistoryService into
+  // an HistoryBackendObserver and register it so that we can remove this
+  // method.
+  if (delegate_)
+    delegate_->NotifyURLsDeleted(all_history, expired, copied_rows,
+                                 favicon_urls);
 }
 
 // Deleting --------------------------------------------------------------------

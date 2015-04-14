@@ -120,7 +120,7 @@ PrefService* ChromeSigninClient::GetPrefs() { return profile_->GetPrefs(); }
 
 scoped_refptr<TokenWebData> ChromeSigninClient::GetDatabase() {
   return WebDataServiceFactory::GetTokenWebDataForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 bool ChromeSigninClient::CanRevokeCredentials() {
@@ -169,6 +169,12 @@ void ChromeSigninClient::OnSignedOut() {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   size_t index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
+
+  // If sign out occurs because Sync setup was in progress and the Profile got
+  // deleted, then the profile's no longer in the ProfileInfoCache.
+  if (index == std::string::npos)
+    return;
+
   cache.SetLocalAuthCredentialsOfProfileAtIndex(index, std::string());
   cache.SetUserNameOfProfileAtIndex(index, base::string16());
   cache.SetProfileSigninRequiredAtIndex(index, false);
@@ -201,6 +207,20 @@ bool ChromeSigninClient::IsFirstRun() const {
 base::Time ChromeSigninClient::GetInstallDate() {
   return base::Time::FromTimeT(
       g_browser_process->metrics_service()->GetInstallDate());
+}
+
+bool ChromeSigninClient::AreSigninCookiesAllowed() {
+  return ProfileAllowsSigninCookies(profile_);
+}
+
+void ChromeSigninClient::AddContentSettingsObserver(
+    content_settings::Observer* observer) {
+  profile_->GetHostContentSettingsMap()->AddObserver(observer);
+}
+
+void ChromeSigninClient::RemoveContentSettingsObserver(
+    content_settings::Observer* observer) {
+  profile_->GetHostContentSettingsMap()->RemoveObserver(observer);
 }
 
 scoped_ptr<SigninClient::CookieChangedSubscription>

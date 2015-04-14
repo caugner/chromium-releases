@@ -204,6 +204,14 @@ void BridgedNativeWidget::AcquireCapture() {
     return;  // Capture on hidden windows is disallowed.
 
   mouse_capture_.reset(new CocoaMouseCapture(this));
+
+  // Initiating global event capture with addGlobalMonitorForEventsMatchingMask:
+  // will reset the mouse cursor to an arrow. Asking the window for an update
+  // here will restore what we want. However, it can sometimes cause the cursor
+  // to flicker, once, on the initial mouseDown.
+  // TOOD(tapted): Make this unnecessary by only asking for global mouse capture
+  // for the cases that need it (e.g. menus, but not drag and drop).
+  [window_ cursorUpdate:[NSApp currentEvent]];
 }
 
 void BridgedNativeWidget::ReleaseCapture() {
@@ -228,6 +236,10 @@ void BridgedNativeWidget::SetNativeWindowProperty(const char* name,
 void* BridgedNativeWidget::GetNativeWindowProperty(const char* name) const {
   NSString* key = [NSString stringWithUTF8String:name];
   return [[GetWindowProperties() objectForKey:key] pointerValue];
+}
+
+void BridgedNativeWidget::SetCursor(NSCursor* cursor) {
+  [window_delegate_ setCursor:cursor];
 }
 
 void BridgedNativeWidget::OnWindowWillClose() {
@@ -370,7 +382,21 @@ void BridgedNativeWidget::OnVisibilityChangedTo(bool new_visibility) {
 }
 
 void BridgedNativeWidget::OnBackingPropertiesChanged() {
-  UpdateLayerProperties();
+  if (layer())
+    UpdateLayerProperties();
+}
+
+void BridgedNativeWidget::OnWindowKeyStatusChangedTo(bool is_key) {
+  Widget* widget = native_widget_mac()->GetWidget();
+  widget->OnNativeWidgetActivationChanged(is_key);
+  // The contentView is the BridgedContentView hosting the views::RootView. The
+  // focus manager will already know if a native subview has focus.
+  if ([window_ contentView] == [window_ firstResponder]) {
+    if (is_key)
+      widget->GetFocusManager()->RestoreFocusedView();
+    else
+      widget->GetFocusManager()->StoreFocusedView(true);
+  }
 }
 
 InputMethod* BridgedNativeWidget::CreateInputMethod() {
@@ -427,8 +453,6 @@ void BridgedNativeWidget::CreateLayer(ui::LayerType layer_type,
 // BridgedNativeWidget, internal::InputMethodDelegate:
 
 void BridgedNativeWidget::DispatchKeyEventPostIME(const ui::KeyEvent& key) {
-  // Mac key events don't go through this, but some unit tests that use
-  // MockInputMethod do.
   DCHECK(focus_manager_);
   native_widget_mac_->GetWidget()->OnKeyEvent(const_cast<ui::KeyEvent*>(&key));
   if (!key.handled())
@@ -523,6 +547,11 @@ void BridgedNativeWidget::RemoveChildWindow(BridgedNativeWidget* child) {
   DCHECK(location != child_windows_.end());
   child_windows_.erase(location);
   child->parent_ = nullptr;
+
+  // Note the child is sometimes removed already by AppKit. This depends on OS
+  // version, and possibly some unpredictable reference counting. Removing it
+  // here should be safe regardless.
+  [window_ removeChildWindow:child->window_];
 }
 
 void BridgedNativeWidget::NotifyVisibilityChangeDown() {
@@ -629,8 +658,12 @@ void BridgedNativeWidget::AddCompositorSuperview() {
   // Size and resize automatically with |bridged_view_|.
   [compositor_superview_
       setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [compositor_superview_
-      setWantsBestResolutionOpenGLSurface:YES];  // For HiDPI.
+
+  // Enable HiDPI backing when supported (only on 10.7+).
+  if ([compositor_superview_ respondsToSelector:
+      @selector(setWantsBestResolutionOpenGLSurface:)]) {
+    [compositor_superview_ setWantsBestResolutionOpenGLSurface:YES];
+  }
 
   base::scoped_nsobject<CALayer> background_layer([[CALayer alloc] init]);
   [background_layer

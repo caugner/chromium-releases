@@ -1,4 +1,9 @@
+# Copyright 2015 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
 import("//build/config/android/rules.gni")
+import("//testing/test.gni")
 
 assert(is_android)
 
@@ -22,6 +27,7 @@ component("android") {
   defines = [ "UI_ANDROID_IMPLEMENTATION" ]
 
   deps = [
+    "//base",
     "//cc",
     "//skia",
     "//ui/gfx",
@@ -39,10 +45,10 @@ generate_jni("ui_android_jni_headers") {
 
 java_cpp_enum("java_enums_srcjar") {
   sources = [
+    "../base/ime/text_input_type.h",
     "../base/page_transition_types.h",
     "../base/touch/touch_device.h",
     "../base/window_open_disposition.h",
-    "../base/ime/text_input_type.h",
     "../gfx/android/java_bitmap.h",
     "resources/resource_manager.h",
     "resources/system_ui_resource_type.h",
@@ -148,18 +154,10 @@ test("ui_android_unittests") {
     "//base/test:test_support",
     "//cc",
     "//skia",
-    "//testing/android:native_test_native_code",
     "//testing/gtest",
     "//ui/base",
     "//ui/gfx",
     "//ui/resources:ui_test_pak",
   ]
-}
-
-unittest_apk("ui_android_unittests_apk") {
-  deps = [
-    ":ui_android_unittests",
-    ":ui_java",
-  ]
-  unittests_dep = ":ui_android_unittests"
+  apk_deps = [ ":ui_java" ]
 }

@@ -45,6 +45,11 @@ importer.ScanResult = function() {};
 importer.ScanResult.prototype.isFinal;
 
 /**
+ * @return {boolean} true if scanning is invalidated.
+ */
+importer.ScanResult.prototype.isInvalidated;
+
+/**
  * Returns all files entries discovered so far. The list will be
  * complete only after scanning has completed and {@code isFinal}
  * returns {@code true}.
@@ -54,26 +59,26 @@ importer.ScanResult.prototype.isFinal;
 importer.ScanResult.prototype.getFileEntries;
 
 /**
- * Returns the aggregate size, in bytes, of all FileEntries discovered
- * during scanning.
- *
- * @return {number}
- */
-importer.ScanResult.prototype.getTotalBytes;
-
-/**
- * Returns the scan duration in milliseconds.
- *
- * @return {number}
- */
-importer.ScanResult.prototype.getScanDurationMs;
-
-/**
  * Returns a promise that fires when scanning is complete.
  *
  * @return {!Promise.<!importer.ScanResult>}
  */
 importer.ScanResult.prototype.whenFinal;
+
+/**
+ * @return {!importer.ScanResult.Statistics}
+ */
+importer.ScanResult.prototype.getStatistics;
+
+/**
+ * @typedef {{
+ *   scanDuration: number,
+ *   newFileCount: number,
+ *   duplicateFileCount: number,
+ *   sizeBytes: number
+ * }}
+ */
+importer.ScanResult.Statistics;
 
 /**
  * Recursively scans through a list of given files and directories, and creates
@@ -83,14 +88,33 @@ importer.ScanResult.prototype.whenFinal;
  * @struct
  * @implements {importer.MediaScanner}
  *
+ * @param {function(!FileEntry): !Promise.<string>} hashGenerator
  * @param {!importer.HistoryLoader} historyLoader
+ * @param {!importer.DirectoryWatcherFactory} watcherFactory
  */
-importer.DefaultMediaScanner = function(historyLoader) {
+importer.DefaultMediaScanner = function(
+    hashGenerator, historyLoader, watcherFactory) {
+
   /** @private {!importer.HistoryLoader} */
   this.historyLoader_ = historyLoader;
 
+  /**
+   * A little factory for DefaultScanResults which allows us to forgo
+   * the saving it's dependencies in our fields.
+   * @return {!importer.DefaultScanResult}
+   */
+  this.createScanResult_ = function() {
+    return new importer.DefaultScanResult(hashGenerator);
+  };
+
   /** @private {!Array.<!importer.ScanObserver>} */
   this.observers_ = [];
+
+  /**
+   * @private {!importer.DirectoryWatcherFactory}
+   * @const
+   */
+  this.watcherFactory_ = watcherFactory;
 };
 
 /** @override */
@@ -114,79 +138,211 @@ importer.DefaultMediaScanner.prototype.scan = function(entries) {
     throw new Error('Cannot scan empty list of entries.');
   }
 
-  var scanResult = new importer.DefaultScanResult(this.historyLoader_);
-  var scanPromises = entries.map(this.scanEntry_.bind(this, scanResult));
+  var scan = this.createScanResult_();
+  var watcher = this.watcherFactory_(
+      /** @this {importer.DefaultMediaScanner} */
+      function() {
+        scan.invalidateScan();
+        this.notify_(importer.ScanEvent.INVALIDATED, scan);
+      }.bind(this));
+
+  var scanPromises = entries.map(
+      this.scanEntry_.bind(this, scan, watcher));
 
   Promise.all(scanPromises)
-      .then(scanResult.resolveScan.bind(scanResult))
-      .catch(scanResult.rejectScan.bind(scanResult));
+      .then(scan.resolve)
+      .catch(scan.reject);
 
-  scanResult.whenFinal()
+  scan.whenFinal()
       .then(
+          /** @this {importer.DefaultMediaScanner} */
           function() {
-            this.onScanFinished_(scanResult);
+            this.notify_(importer.ScanEvent.FINALIZED, scan);
           }.bind(this));
 
-  return scanResult;
+  return scan;
 };
 
 /**
- * Called when a scan is finished.
+ * Notifies all listeners at some point in the near future.
  *
+ * @param {!importer.ScanEvent} event
  * @param {!importer.DefaultScanResult} result
  * @private
  */
-importer.DefaultMediaScanner.prototype.onScanFinished_ = function(result) {
+importer.DefaultMediaScanner.prototype.notify_ = function(event, result) {
   this.observers_.forEach(
       /** @param {!importer.ScanObserver} observer */
       function(observer) {
-        observer(importer.ScanEvent.FINALIZED, result);
+        observer(event, result);
       });
 };
 
 /**
- * Resolves the entry to a list of {@code FileEntry}.
+ * Resolves the entry by either:
+ * a) recursing on it (when a directory)
+ * b) adding it to the results (when a media type file)
+ * c) ignoring it, if neither a or b
  *
- * @param {!importer.DefaultScanResult} result
+ * @param {!importer.DefaultScanResult} scan
+ * @param {!importer.DirectoryWatcher} watcher
  * @param {!Entry} entry
+ *
  * @return {!Promise}
  * @private
  */
 importer.DefaultMediaScanner.prototype.scanEntry_ =
-    function(result, entry) {
-  return entry.isFile ?
-      result.onFileEntryFound(/** @type {!FileEntry} */ (entry)) :
-      this.scanDirectory_(result, /** @type {!DirectoryEntry} */ (entry));
+    function(scan, watcher, entry) {
+
+  if (entry.isDirectory) {
+    return this.scanDirectory_(
+      scan,
+      watcher,
+      /** @type {!DirectoryEntry} */ (entry));
+  }
+
+  // Since this entry is by client code (and presumably the user)
+  // we add it directly (skipping over the history dupe check).
+  return this.onUniqueFileFound_(scan, /** @type {!FileEntry} */ (entry));
 };
 
 /**
  * Finds all files beneath directory.
  *
- * @param {!importer.DefaultScanResult} result
+ * @param {!importer.DefaultScanResult} scan
+ * @param {!importer.DirectoryWatcher} watcher
  * @param {!DirectoryEntry} entry
  * @return {!Promise}
  * @private
  */
 importer.DefaultMediaScanner.prototype.scanDirectory_ =
-    function(result, entry) {
-  return new Promise(
-      function(resolve, reject) {
-        // Collect promises for all files being added to results.
-        // The directory scan promise can't resolve until all
-        // file entries are completely promised.
-        var promises = [];
-        fileOperationUtil.findFilesRecursively(
-            entry,
-            /** @param  {!FileEntry} fileEntry */
-            function(fileEntry) {
-              promises.push(result.onFileEntryFound(fileEntry));
-            })
-            .then(
-                /** @this {importer.DefaultScanResult} */
-                function() {
-                  Promise.all(promises).then(resolve).catch(reject);
-                });
-      });
+    function(scan, watcher, entry) {
+  // Collect promises for all files being added to results.
+  // The directory scan promise can't resolve until all
+  // file entries are completely promised.
+  var promises = [];
+
+  return fileOperationUtil.findEntriesRecursively(
+      entry,
+      /**
+       * @param  {!Entry} entry
+       * @this {importer.DefaultMediaScanner}
+       */
+      function(entry) {
+        if (watcher.triggered) {
+          return;
+        }
+
+        if (entry.isDirectory) {
+          // Note, there is no need for us to recurse, the utility
+          // function findEntriesRecursively does that. So we
+          // just watch the directory for modifications, and that's it.
+          watcher.addDirectory(/** @type {!DirectoryEntry} */(entry));
+          return;
+        }
+
+        promises.push(
+            this.onFileEntryFound_(scan, /** @type {!FileEntry} */(entry)));
+
+      }.bind(this))
+      .then(Promise.all.bind(Promise, promises));
+};
+
+/**
+ * Finds all files beneath directory.
+ *
+ * @param {!importer.DefaultScanResult} scan
+ * @param {!FileEntry} entry
+ * @return {!Promise}
+ * @private
+ */
+importer.DefaultMediaScanner.prototype.onFileEntryFound_ =
+    function(scan, entry) {
+  return this.hasHistoryDuplicate_(entry)
+      .then(
+          /**
+           * @param {boolean} duplicate
+           * @return {!Promise}
+           * @this {importer.DefaultMediaScanner}
+           */
+          function(duplicate) {
+            return duplicate ?
+                this.onDuplicateFileFound_(scan, entry) :
+                this.onUniqueFileFound_(scan, entry);
+          }.bind(this));
+};
+
+/**
+ * Adds a newly discovered file to the given scan result.
+ *
+ * @param {!importer.DefaultScanResult} scan
+ * @param {!FileEntry} entry
+ * @return {!Promise}
+ * @private
+ */
+importer.DefaultMediaScanner.prototype.onUniqueFileFound_ =
+    function(scan, entry) {
+
+  if (!FileType.isImageOrVideo(entry)) {
+    return Promise.resolve();
+  }
+
+  return scan.addFileEntry(entry)
+      .then(
+          /**
+           * @param {boolean} added
+           * @this {importer.DefaultMediaScanner}
+           */
+          function(added) {
+            if (added) {
+              this.notify_(importer.ScanEvent.UPDATED, scan);
+            }
+          }.bind(this));
+};
+
+/**
+ * Adds a duplicate file to the given scan result.  This is to track the number
+ * of duplicates that are being encountered.
+ *
+ * @param {!importer.DefaultScanResult} scan
+ * @param {!FileEntry} entry
+ * @return {!Promise}
+ * @private
+ */
+importer.DefaultMediaScanner.prototype.onDuplicateFileFound_ =
+    function(scan, entry) {
+  scan.addDuplicateEntry(entry);
+  return Promise.resolve();
+};
+
+/**
+ * @param {!FileEntry} entry
+ * @return {!Promise.<boolean>} True if there is a history-entry-duplicate
+ *     for the file.
+ * @private
+ */
+importer.DefaultMediaScanner.prototype.hasHistoryDuplicate_ = function(entry) {
+  return this.historyLoader_.getHistory()
+      .then(
+          /**
+           * @param {!importer.ImportHistory} history
+           * @return {!Promise}
+           * @this {importer.DefaultMediaScanner}
+           */
+          function(history) {
+            return Promise.all([
+              history.wasCopied(entry, importer.Destination.GOOGLE_DRIVE),
+              history.wasImported(entry, importer.Destination.GOOGLE_DRIVE)
+            ]).then(
+                /**
+                 * @param {!Array.<boolean>} results
+                 * @return {!Promise}
+                 * @this {importer.DefaultMediaScanner}
+                 */
+                function(results) {
+                  return results[0] || results[1];
+                }.bind(this));
+          }.bind(this));
 };
 
 /**
@@ -200,11 +356,13 @@ importer.DefaultMediaScanner.prototype.scanDirectory_ =
  * @struct
  * @implements {importer.ScanResult}
  *
- * @param {!importer.HistoryLoader} historyLoader
+ * @param {function(!FileEntry): !Promise.<string>} hashGenerator Hash-code
+ *     generator used to dedupe within the scan results itself.
  */
-importer.DefaultScanResult = function(historyLoader) {
-  /** @private {!importer.HistoryLoader} */
-  this.historyLoader_ = historyLoader;
+importer.DefaultScanResult = function(hashGenerator) {
+
+  /** @private {function(!FileEntry): !Promise.<string>} */
+  this.createHashcode_ = hashGenerator;
 
   /**
    * List of file entries found while scanning.
@@ -212,8 +370,19 @@ importer.DefaultScanResult = function(historyLoader) {
    */
   this.fileEntries_ = [];
 
+  /**
+   * Hashcodes of all files included captured by this result object so-far.
+   * Used to dedupe newly discovered files against other files withing
+   * the ScanResult.
+   * @private {!Object.<string, !FileEntry>}
+   */
+  this.fileHashcodes_ = {};
+
   /** @private {number} */
   this.totalBytes_ = 0;
+
+  /** @private {number} */
+  this.duplicateFileCount_ = 0;
 
   /**
    * The point in time when the scan was started.
@@ -227,33 +396,32 @@ importer.DefaultScanResult = function(historyLoader) {
    */
   this.lastScanActivity_ = this.scanStarted_;
 
-  /** @private {boolean} */
-  this.settled_ = false;
+  /**
+   * @private {boolean}
+   */
+  this.invalidated_ = false;
 
-  /** @type {function()} */
-  this.resolveScan;
+  /** @private {!importer.Resolver.<!importer.ScanResult>} */
+  this.resolver_ = new importer.Resolver();
+};
 
-  /** @type {function(*)} */
-  this.rejectScan;
+/** @struct */
+importer.DefaultScanResult.prototype = {
 
-  /** @private {!Promise.<!importer.ScanResult>} */
-  this.finishedPromise_ = new Promise(
-      function(resolve, reject) {
-        this.resolveScan = function() {
-          this.settled_ = true;
-          resolve(this);
-        }.bind(this);
+  /** @return {function()} */
+  get resolve() { return this.resolver_.resolve.bind(null, this); },
 
-        this.rejectScan = function() {
-          this.settled_ = true;
-          reject();
-        };
-      }.bind(this));
+  /** @return {function(*=)} */
+  get reject() { return this.resolver_.reject; }
 };
 
 /** @override */
 importer.DefaultScanResult.prototype.isFinal = function() {
-  return this.settled_;
+  return this.resolver_.settled;
+};
+
+importer.DefaultScanResult.prototype.isInvalidated = function() {
+  return this.invalidated_;
 };
 
 /** @override */
@@ -262,91 +430,152 @@ importer.DefaultScanResult.prototype.getFileEntries = function() {
 };
 
 /** @override */
-importer.DefaultScanResult.prototype.getTotalBytes = function() {
-  return this.totalBytes_;
-};
-
-/** @override */
-importer.DefaultScanResult.prototype.getScanDurationMs = function() {
-  return this.lastScanActivity_.getTime() - this.scanStarted_.getTime();
-};
-
-/** @override */
 importer.DefaultScanResult.prototype.whenFinal = function() {
-  return this.finishedPromise_;
+  return this.resolver_.promise;
 };
 
 /**
- * Handles files discovered during scanning.
- *
- * @param {!FileEntry} entry
- * @return {!Promise} Resolves once file entry has been processed
- *     and is represented in results.
+ * Invalidates this scan.
  */
-importer.DefaultScanResult.prototype.onFileEntryFound = function(entry) {
-  this.lastScanActivity_ = new Date();
-
-  if (!FileType.isImageOrVideo(entry)) {
-    return Promise.resolve();
-  }
-
-  return this.historyLoader_.getHistory()
-      .then(
-          /**
-           * @param {!importer.ImportHistory} history
-           * @return {!Promise}
-           * @this {importer.DefaultScanResult}
-           */
-          function(history) {
-            return history.wasImported(
-                entry,
-                importer.Destination.GOOGLE_DRIVE)
-                .then(
-                    /**
-                     * @param {boolean} imported
-                     * @return {!Promise}
-                     * @this {importer.DefaultScanResult}
-                     */
-                    function(imported) {
-                      return imported ?
-                          Promise.resolve() :
-                          this.addFileEntry_(entry);
-                    }.bind(this));
-          }.bind(this));
+importer.DefaultScanResult.prototype.invalidateScan = function() {
+  this.invalidated_ = true;
 };
 
 /**
  * Adds a file to results.
  *
  * @param {!FileEntry} entry
- * @return {!Promise} Resolves once file entry has been processed
- *     and is represented in results.
+ * @return {!Promise.<boolean>} True if the file as added, false if it was
+ *     rejected as a dupe.
+ */
+importer.DefaultScanResult.prototype.addFileEntry = function(entry) {
+  return new Promise(entry.getMetadata.bind(entry)).then(
+      /**
+       * @param {!Metadata} metadata
+       * @this {importer.DefaultScanResult}
+       */
+      function(metadata) {
+        console.assert(
+            'size' in metadata,
+            'size attribute missing from metadata.');
+
+        return this.createHashcode_(entry)
+            .then(
+                /**
+                 * @param {string} hashcode
+                 * @this {importer.DefaultScanResult}
+                 */
+                function(hashcode) {
+                  this.lastScanActivity_ = new Date();
+
+                  if (hashcode in this.fileHashcodes_) {
+                    this.addDuplicateEntry(entry);
+                    return false;
+                  }
+
+                  entry.size = metadata.size;
+                  this.totalBytes_ += metadata.size;
+                  this.fileHashcodes_[hashcode] = entry;
+                  this.fileEntries_.push(entry);
+                  return true;
+                }.bind(this));
+
+    }.bind(this));
+};
+
+/**
+ * Logs the fact that a duplicate file entry was discovered during the scan.
+ * @param {!FileEntry} entry
+ */
+importer.DefaultScanResult.prototype.addDuplicateEntry = function(entry) {
+  this.duplicateFileCount_++;
+};
+
+/** @override */
+importer.DefaultScanResult.prototype.getStatistics = function() {
+  return {
+    scanDuration:
+        this.lastScanActivity_.getTime() - this.scanStarted_.getTime(),
+    newFileCount: this.fileEntries_.length,
+    duplicateFileCount: this.duplicateFileCount_,
+    sizeBytes: this.totalBytes_
+  };
+};
+
+/**
+ * Watcher for directories.
+ * @interface
+ */
+importer.DirectoryWatcher = function() {};
+
+/**
+ * Registers new directory to be watched.
+ * @param {!DirectoryEntry} entry
+ */
+importer.DirectoryWatcher.prototype.addDirectory = function(entry) {};
+
+/**
+ * @typedef {function()}
+ */
+importer.DirectoryWatcherFactoryCallback;
+
+/**
+ * @typedef {function(importer.DirectoryWatcherFactoryCallback):
+ *     !importer.DirectoryWatcher}
+ */
+importer.DirectoryWatcherFactory;
+
+/**
+ * Watcher for directories.
+ * @param {function()} callback Callback to be invoked when one of watched
+ *     directories is changed.
+ * @implements {importer.DirectoryWatcher}
+ * @constructor
+ */
+importer.DefaultDirectoryWatcher = function(callback) {
+  this.callback_ = callback;
+  this.watchedDirectories_ = {};
+  this.triggered = false;
+  this.listener_ = null;
+};
+
+/**
+ * Creates new directory watcher.
+ * @param {function()} callback Callback to be invoked when one of watched
+ *     directories is changed.
+ * @return {!importer.DirectoryWatcher}
+ */
+importer.DefaultDirectoryWatcher.create = function(callback) {
+  return new importer.DefaultDirectoryWatcher(callback);
+};
+
+/**
+ * Registers new directory to be watched.
+ * @param {!DirectoryEntry} entry
+ */
+importer.DefaultDirectoryWatcher.prototype.addDirectory = function(entry) {
+  if (!this.listener_) {
+    this.listener_ = this.onWatchedDirectoryModified_.bind(this);
+    chrome.fileManagerPrivate.onDirectoryChanged.addListener(
+        assert(this.listener_));
+  }
+  this.watchedDirectories_[entry.toURL()] = true;
+  chrome.fileManagerPrivate.addFileWatch(entry.toURL(), function() {});
+};
+
+/**
+ * @param {FileWatchEvent} event
  * @private
  */
-importer.DefaultScanResult.prototype.addFileEntry_ = function(entry) {
-  return new Promise(
-      function(resolve, reject) {
-        // TODO(smckay): Update to use MetadataCache.
-        entry.getMetadata(
-          /**
-           * @param {!Metadata} metadata
-           * @this {importer.DefaultScanResult}
-           */
-          function(metadata) {
-            this.lastScanActivity_ = new Date();
-            if ('size' in metadata) {
-              entry.size = metadata.size;
-              this.totalBytes_ += metadata['size'];
-              this.fileEntries_.push(entry);
-              // Closure compiler currently requires an arg to resolve
-              // and reject. If this is 2015, you can probably remove it.
-              resolve(undefined);
-            } else {
-              // Closure compiler currently requires an arg to resolve
-              // and reject. If this is 2015, you can probably remove it.
-              reject(undefined);
-            }
-          }.bind(this),
-          reject);
-      }.bind(this));
+importer.DefaultDirectoryWatcher.prototype.onWatchedDirectoryModified_ =
+    function(event) {
+  if (!this.watchedDirectories_[event.entry.toURL()])
+    return;
+  this.triggered = true;
+  for (var url in this.watchedDirectories_) {
+    chrome.fileManagerPrivate.removeFileWatch(url, function() {});
+  }
+  chrome.fileManagerPrivate.onDirectoryChanged.removeListener(
+      assert(this.listener_));
+  this.callback_();
 };

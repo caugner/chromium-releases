@@ -13,6 +13,7 @@
       '<(SHARED_INTERMEDIATE_DIR)/wcs_sandbox.html',
       '<(SHARED_INTERMEDIATE_DIR)/background.html',
     ],
+    'dr_webapp_locales_listfile': '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)_locales.txt',
   },
   'dependencies': [
     'remoting_resources',
@@ -22,6 +23,7 @@
     ['run_jscompile != 0', {
       'variables': {
         'success_stamp': '<(PRODUCT_DIR)/<(_target_name)_jscompile.stamp',
+        'success_stamp_bt': '<(PRODUCT_DIR)/<(_target_name)_bt_jscompile.stamp',
       },
       'actions': [
         {
@@ -34,10 +36,32 @@
             '<(success_stamp)',
           ],
           'action': [
-            'python', 'tools/jscompile.py',
+            'python', '../third_party/closure_compiler/checker.py',
+            '--strict',
+            '--no-single-file',
+            '--success-stamp', '<(success_stamp)',
             '<@(remoting_webapp_crd_js_files)',
             '<@(remoting_webapp_js_proto_files)',
-            '--success-stamp', '<(success_stamp)'
+          ],
+        },
+        {
+          'action_name': 'Verify remoting webapp with browsertests',
+          'inputs': [
+            '<@(remoting_webapp_crd_js_files)',
+            '<@(remoting_webapp_browsertest_all_js_files)',
+            '<@(remoting_webapp_js_proto_files)',
+          ],
+          'outputs': [
+            '<(success_stamp_bt)',
+          ],
+          'action': [
+            'python', '../third_party/closure_compiler/checker.py',
+            '--strict',
+            '--no-single-file',
+            '--success-stamp', '<(success_stamp_bt)',
+            '<@(remoting_webapp_crd_js_files)',
+            '<@(remoting_webapp_browsertest_all_js_files)',
+            '<@(remoting_webapp_js_proto_files)',
           ],
         },
       ],  # actions
@@ -45,12 +69,30 @@
   ],
   'actions': [
     {
+      'action_name': 'Build Remoting locales listfile',
+      'inputs': [
+        '<(remoting_localize_path)',
+      ],
+      'outputs': [
+        '<(dr_webapp_locales_listfile)',
+      ],
+      'action': [
+        'python', '<(remoting_localize_path)',
+        '--locale_output',
+        '"<(webapp_locale_dir)/@{json_suffix}/messages.json"',
+        '--locales_listfile',
+        '<(dr_webapp_locales_listfile)',
+        '<@(remoting_locales)',
+      ],
+    },
+    {
       'action_name': 'Build Remoting WebApp',
       'inputs': [
         'webapp/build-webapp.py',
         'webapp/crd/manifest.json.jinja2',
         '<(chrome_version_path)',
         '<(remoting_version_path)',
+        '<(dr_webapp_locales_listfile)',
         '<@(generated_html_files)',
         '<@(remoting_webapp_crd_files)',
         '<@(remoting_webapp_locale_files)',
@@ -71,7 +113,8 @@
         '<@(generated_html_files)',
         '<@(remoting_webapp_crd_files)',
         '<@(extra_files)',
-        '--locales', '<@(remoting_webapp_locale_files)',
+        '--locales_listfile',
+        '<(dr_webapp_locales_listfile)',
       ],
     },
   ],

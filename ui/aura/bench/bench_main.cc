@@ -94,6 +94,7 @@ class BenchCompositorObserver : public ui::CompositorObserver {
         frames_(0),
         max_frames_(max_frames) {
   }
+  virtual ~BenchCompositorObserver() {}
 
   void OnCompositingDidCommit(ui::Compositor* compositor) override {}
 
@@ -122,6 +123,8 @@ class BenchCompositorObserver : public ui::CompositorObserver {
   void OnCompositingAborted(Compositor* compositor) override {}
 
   void OnCompositingLockStateChanged(Compositor* compositor) override {}
+
+  void OnCompositingShuttingDown(ui::Compositor* compositor) override {}
 
   virtual void Draw() {}
 
@@ -297,8 +300,9 @@ int main(int argc, char** argv) {
   gfx::GLSurface::InitializeOneOff();
 
   // The ContextFactory must exist before any Compositors are created.
+  bool context_factory_for_test = false;
   scoped_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory());
+      new ui::InProcessContextFactory(context_factory_for_test, nullptr));
 
   base::i18n::InitializeICU();
 

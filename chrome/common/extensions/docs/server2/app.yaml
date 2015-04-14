@@ -1,5 +1,5 @@
 application: chrome-apps-doc
-version: 3-47-3
+version: 3-47-4
 runtime: python27
 api_version: 1
 threadsafe: false
@@ -19,6 +19,10 @@ handlers:
   secure: always
   login: admin
 - url: /_enqueue/.*
+  script: appengine_main.py
+  secure: always
+  login: admin
+- url: /_reset_commit/.*
   script: appengine_main.py
   secure: always
   login: admin

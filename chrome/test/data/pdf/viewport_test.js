@@ -2,96 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-function MockWindow(width, height, sizer) {
-  this.innerWidth = width;
-  this.innerHeight = height;
-  this.addEventListener = function(e, f) {
-    if (e == 'scroll')
-      this.scrollCallback = f;
-    if (e == 'resize')
-      this.resizeCallback = f;
-  },
-  this.scrollTo = function(x, y) {
-    if (sizer) {
-      x = Math.min(x, parseInt(sizer.style.width) - width);
-      y = Math.min(y, parseInt(sizer.style.height) - height);
-    }
-    this.pageXOffset = Math.max(0, x);
-    this.pageYOffset = Math.max(0, y);
-    this.scrollCallback();
-  };
-  if (sizer) {
-    sizer.resizeCallback_ = function() {
-      this.scrollTo(this.pageXOffset, this.pageYOffset);
-    }.bind(this);
-  }
-  this.pageXOffset = 0;
-  this.pageYOffset = 0;
-  this.scrollCallback = null;
-  this.resizeCallback = null;
-}
-
-function MockSizer() {
-  var sizer = this;
-  this.style = {
-    width_: '0px',
-    height_: '0px',
-    get height() { return this.height_; },
-    set height(height) {
-      this.height_ = height;
-      if (sizer.resizeCallback_)
-        sizer.resizeCallback_();
-    },
-    get width() { return this.width_; },
-    set width(width) {
-      this.width_ = width;
-      if (sizer.resizeCallback_)
-        sizer.resizeCallback_();
-    },
-  };
-}
-
-function MockViewportChangedCallback() {
-  this.wasCalled = false;
-  this.callback = function() {
-    this.wasCalled = true;
-  }.bind(this);
-  this.reset = function() {
-    this.wasCalled = false;
-  };
-}
-
-function MockDocumentDimensions(width, height) {
-  this.width = width || 0;
-  this.height = height ? height : 0;
-  this.pageDimensions = [];
-  this.addPage = function(w, h) {
-    var y = 0;
-    if (this.pageDimensions.length != 0) {
-      y = this.pageDimensions[this.pageDimensions.length - 1].y +
-          this.pageDimensions[this.pageDimensions.length - 1].height;
-    }
-    this.width = Math.max(this.width, w);
-    this.height += h;
-    this.pageDimensions.push({
-      x: 0,
-      y: y,
-      width: w,
-      height: h
-    });
-  };
-  this.reset = function() {
-    this.width = 0;
-    this.height = 0;
-    this.pageDimensions = [];
-  };
-}
-
 var tests = [
   function testDocumentNeedsScrollbars() {
     var viewport =
         new Viewport(new MockWindow(100, 100), new MockSizer(), function() {},
-                     function() {}, function() {}, 10);
+                     function() {}, function() {}, 10, 0);
     var scrollbars;
 
     viewport.setDocumentDimensions(new MockDocumentDimensions(90, 90));
@@ -146,7 +61,7 @@ var tests = [
     var mockWindow = new MockWindow(100, 100, mockSizer);
     var mockCallback = new MockViewportChangedCallback();
     var viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
 
     // Test setting the zoom without the document dimensions set. The sizer
     // shouldn't change size.
@@ -200,7 +115,7 @@ var tests = [
   function testGetMostVisiblePage() {
     var mockWindow = new MockWindow(100, 100);
     var viewport = new Viewport(mockWindow, new MockSizer(), function() {},
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
 
     var documentDimensions = new MockDocumentDimensions(100, 100);
     documentDimensions.addPage(50, 100);
@@ -250,7 +165,7 @@ var tests = [
     var mockSizer = new MockSizer();
     var mockCallback = new MockViewportChangedCallback();
     var viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
     var documentDimensions = new MockDocumentDimensions();
 
     // Test with a document width which matches the window width.
@@ -301,7 +216,7 @@ var tests = [
     // fit to width, which will cause the page height to span outside of the
     // viewport, triggering 15px scrollbars to be shown.
     viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                            function() {}, function() {}, 15);
+                            function() {}, function() {}, 15, 0);
     documentDimensions.reset();
     documentDimensions.addPage(50, 100);
     viewport.setDocumentDimensions(documentDimensions);
@@ -318,7 +233,7 @@ var tests = [
     var mockSizer = new MockSizer();
     var mockCallback = new MockViewportChangedCallback();
     var viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
     var documentDimensions = new MockDocumentDimensions();
 
     // Test with a page size which matches the window size.
@@ -394,6 +309,19 @@ var tests = [
     chrome.test.assertEq(0.25, viewport.zoom);
     chrome.test.assertEq(0, viewport.position.x);
     chrome.test.assertEq(50, viewport.position.y);
+
+    // Test that when the window size changes, fit-to-page occurs but does not
+    // scroll to the top of the page (it should stay at the scaled scroll
+    // position).
+    mockWindow.scrollTo(0, 0);
+    viewport.fitToPage();
+    chrome.test.assertEq(0.5, viewport.zoom);
+    mockWindow.scrollTo(0, 10);
+    mockWindow.setSize(50, 50);
+    chrome.test.assertEq(0.25, viewport.zoom);
+    chrome.test.assertEq(0, viewport.position.x);
+    chrome.test.assertEq(5, viewport.position.y);
+
     chrome.test.succeed();
   },
 
@@ -402,7 +330,7 @@ var tests = [
     var mockSizer = new MockSizer();
     var mockCallback = new MockViewportChangedCallback();
     var viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
     var documentDimensions = new MockDocumentDimensions();
 
     documentDimensions.addPage(100, 100);
@@ -443,7 +371,7 @@ var tests = [
     var mockSizer = new MockSizer();
     var mockCallback = new MockViewportChangedCallback();
     var viewport = new Viewport(mockWindow, mockSizer, mockCallback.callback,
-                                function() {}, function() {}, 0);
+                                function() {}, function() {}, 0, 0);
     var documentDimensions = new MockDocumentDimensions();
     documentDimensions.addPage(100, 100);
     documentDimensions.addPage(200, 200);
@@ -498,7 +426,7 @@ var tests = [
         chrome.test.assertEq(1, viewport.zoom);
     };
     viewport = new Viewport(mockWindow, mockSizer, function() {},
-                            beforeZoom, afterZoom, 0);
+                            beforeZoom, afterZoom, 0, 0);
     viewport.setZoom(0.5);
     chrome.test.succeed();
   }

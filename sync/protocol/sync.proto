@@ -492,6 +492,13 @@ message GetUpdateTriggers {
   //
   // Introduced in M38.
   optional bool initial_sync_in_progress = 7;
+
+  // This flag is set if this GetUpdate request is due to client receiving
+  // conflict response from server, so client needs to sync and then resolve
+  // conflict locally, and then commit again.
+  //
+  // Introduced in M42.
+  optional bool sync_for_resolve_conflict_in_progress = 8;
 }
 
 message GarbageCollectionDirective {
@@ -707,7 +714,7 @@ message DataTypeContext {
 
 message ClientToServerMessage {
   required string share = 1;
-  optional int32 protocol_version = 2 [default = 34];
+  optional int32 protocol_version = 2 [default = 42];
   enum Contents {
     COMMIT = 1;
     GET_UPDATES = 2;
@@ -968,4 +975,22 @@ message ClientToServerResponse {
   // The new per-client state for this client. If set, should be persisted and
   // sent with any subsequent ClientToServerMessages.
   optional ChipBag new_bag_of_chips = 14;
+};
+
+// A message to notify the server of certain sync events. Idempotent. Send these
+// to the /event endpoint.
+message EventRequest {
+  optional SyncDisabledEvent sync_disabled = 1;
+};
+
+message EventResponse {
+};
+
+// A message indicating that the sync engine has been disabled on a client.
+message SyncDisabledEvent {
+  // The GUID that identifies the sync client.
+  optional string cache_guid = 1;
+
+  // The store birthday that the client was using before disabling sync.
+  optional string store_birthday = 2;
 };

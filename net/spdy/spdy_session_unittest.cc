@@ -1194,8 +1194,10 @@ TEST_P(SpdySessionTest, DeleteExpiredPushStreams) {
       NULL, 0, 2, 1, "http://www.google.com/a.dat"));
   scoped_ptr<SpdyFrame> push_a_body(
       spdy_util_.ConstructSpdyBodyFrame(2, false));
+  // In ascii "0" < "a". We use it to verify that we properly handle std::map
+  // iterators inside. See http://crbug.com/443490
   scoped_ptr<SpdyFrame> push_b(spdy_util_.ConstructSpdyPush(
-      NULL, 0, 4, 1, "http://www.google.com/b.dat"));
+      NULL, 0, 4, 1, "http://www.google.com/0.dat"));
   MockWrite writes[] = {CreateMockWrite(*req, 0), CreateMockWrite(*rst, 4)};
   MockRead reads[] = {
       CreateMockRead(*push_a, 1), CreateMockRead(*push_a_body, 2),
@@ -1248,7 +1250,7 @@ TEST_P(SpdySessionTest, DeleteExpiredPushStreams) {
   // Verify that the second pushed stream evicted the first pushed stream.
   EXPECT_EQ(1u, session->num_unclaimed_pushed_streams());
   iter = session->unclaimed_pushed_streams_.find(
-      GURL("http://www.google.com/b.dat"));
+      GURL("http://www.google.com/0.dat"));
   EXPECT_TRUE(session->unclaimed_pushed_streams_.end() != iter);
 
   if (session->flow_control_state_ ==
@@ -1803,10 +1805,6 @@ TEST_P(SpdySessionTest, SynCompressionHistograms) {
           "Net.SpdySynStreamCompressionPercentage", 30, 1);
       break;
     case SPDY4:
-      histogram_tester.ExpectBucketCount(
-          "Net.SpdySynStreamCompressionPercentage", 82, 1);
-      break;
-    case SPDY5:
       histogram_tester.ExpectBucketCount(
           "Net.SpdySynStreamCompressionPercentage", 82, 1);
       break;
@@ -3631,6 +3629,46 @@ TEST_P(SpdySessionTest, SessionFlowControlInactiveStream) {
   EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
             session->session_recv_window_size_);
   EXPECT_EQ(kUploadDataSize, session->session_unacked_recv_window_bytes_);
+
+  data.RunFor(1);
+}
+
+// The frame header is not included in flow control, but frame payload
+// (including optional pad length and padding) is.
+TEST_P(SpdySessionTest, SessionFlowControlPadding) {
+  // Padding only exists in HTTP/2.
+  if (GetParam() < kProtoSPDY4MinimumVersion)
+    return;
+
+  session_deps_.host_resolver->set_synchronous_mode(true);
+
+  const int padding_length = 42;
+  MockConnect connect_data(SYNCHRONOUS, OK);
+  scoped_ptr<SpdyFrame> resp(spdy_util_.ConstructSpdyBodyFrame(
+      1, kUploadData, kUploadDataSize, false, padding_length));
+  MockRead reads[] = {
+      CreateMockRead(*resp, 0), MockRead(ASYNC, 0, 1)  // EOF
+  };
+  DeterministicSocketData data(reads, arraysize(reads), NULL, 0);
+  data.set_connect_data(connect_data);
+  session_deps_.deterministic_socket_factory->AddSocketDataProvider(&data);
+
+  CreateDeterministicNetworkSession();
+  base::WeakPtr<SpdySession> session =
+      CreateInsecureSpdySession(http_session_, key_, BoundNetLog());
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_recv_window_size_);
+  EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
+
+  data.RunFor(1);
+
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_recv_window_size_);
+  EXPECT_EQ(kUploadDataSize + padding_length,
+            session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 }

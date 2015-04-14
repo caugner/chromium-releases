@@ -3,9 +3,12 @@
 # found in the LICENSE file.
 
 import time
+import logging
+import urlparse
 
 from telemetry.page.actions.javascript_click import ClickElementAction
 from telemetry.page.actions.loop import LoopAction
+from telemetry.page.actions.mouse_click import MouseClickAction
 from telemetry.page.actions.navigate import NavigateAction
 from telemetry.page.actions.pinch import PinchAction
 from telemetry.page.actions.play import PlayAction
@@ -30,8 +33,8 @@ class ActionRunner(object):
     action.WillRunAction(self._tab)
     action.RunAction(self._tab)
 
-  def BeginInteraction(self, label, is_fast=False, is_smooth=False,
-                       is_responsive=False, repeatable=False):
+  def BeginInteraction(self, label, is_smooth=False, is_responsive=False,
+                       repeatable=False):
     """Marks the beginning of an interaction record.
 
     An interaction record is a labeled time period containing
@@ -43,8 +46,6 @@ class ActionRunner(object):
     Args:
       label: A label for this particular interaction. This can be any
           user-defined string, but must not contain '/'.
-      is_fast: Whether to measure how fast the browser completes necessary work
-          for this interaction record. See fast_metric.py for details.
       is_smooth: Whether to check for smoothness metrics for this interaction.
       is_responsive: Whether to check for responsiveness metrics for
           this interaction.
@@ -53,8 +54,6 @@ class ActionRunner(object):
           have the same flags.
     """
     flags = []
-    if is_fast:
-      flags.append(timeline_interaction_record.IS_FAST)
     if is_smooth:
       flags.append(timeline_interaction_record.IS_SMOOTH)
     if is_responsive:
@@ -66,8 +65,8 @@ class ActionRunner(object):
     interaction.Begin()
     return interaction
 
-  def BeginGestureInteraction(self, label, is_fast=False, is_smooth=False,
-                              is_responsive=False, repeatable=False):
+  def BeginGestureInteraction(self, label, is_smooth=False, is_responsive=False,
+                              repeatable=False):
     """Marks the beginning of a gesture-based interaction record.
 
     This is similar to normal interaction record, but it will
@@ -81,8 +80,6 @@ class ActionRunner(object):
     Args:
       label: A label for this particular interaction. This can be any
           user-defined string, but must not contain '/'.
-      is_fast: Whether to measure how fast the browser completes necessary work
-          for this interaction record. See fast_metric.py for details.
       is_smooth: Whether to check for smoothness metrics for this interaction.
       is_responsive: Whether to check for responsiveness metrics for
           this interaction.
@@ -90,16 +87,17 @@ class ActionRunner(object):
           as this interaction. All interactions with the same logical name must
           have the same flags.
     """
-    return self.BeginInteraction('Gesture_' + label, is_fast, is_smooth,
-                                 is_responsive, repeatable)
+    return self.BeginInteraction('Gesture_' + label, is_smooth, is_responsive,
+                                 repeatable)
 
   def NavigateToPage(self, page, timeout_in_seconds=60):
-    """Navigate to the given page.
+    """Navigates to the given page.
 
-    Args:
-      page: page is an instance of page.Page
-      timeout_in_seconds: The timeout in seconds (default to 60).
+    TODO(ariblue): Remove this sometime in/after Feb 2015. NavigateToPage has
+    been deprecated since action_runner will support arbitrary user stories
+    and web contents.
     """
+    logging.warn('NavigateToPage is deprecated. Please use Navigate instead.')
     if page.is_file:
       target_side_url = self._tab.browser.http_server.UrlOf(page.file_path_url)
     else:
@@ -109,9 +107,31 @@ class ActionRunner(object):
         script_to_evaluate_on_commit=page.script_to_evaluate_on_commit,
         timeout_in_seconds=timeout_in_seconds))
 
+  def Navigate(self, url, script_to_evaluate_on_commit=None,
+               timeout_in_seconds=60):
+    """Navigates to url.
+
+    If |script_to_evaluate_on_commit| is given, the script source string will be
+    evaluated when the navigation is committed. This is after the context of
+    the page exists, but before any script on the page itself has executed.
+    """
+    if urlparse.urlparse(url).scheme == 'file':
+      url = self._tab.browser.http_server.UrlOf(url[7:])
+
+    self._RunAction(NavigateAction(
+        url=url,
+        script_to_evaluate_on_commit=script_to_evaluate_on_commit,
+        timeout_in_seconds=timeout_in_seconds))
+
   def WaitForNavigate(self, timeout_in_seconds_seconds=60):
+    start_time = time.time()
     self._tab.WaitForNavigate(timeout_in_seconds_seconds)
-    self._tab.WaitForDocumentReadyStateToBeInteractiveOrBetter()
+
+    time_left_in_seconds = (start_time + timeout_in_seconds_seconds
+        - time.time())
+    time_left_in_seconds = max(0, time_left_in_seconds)
+    self._tab.WaitForDocumentReadyStateToBeInteractiveOrBetter(
+        time_left_in_seconds)
 
   def ReloadPage(self):
     """Reloads the page."""
@@ -418,6 +438,14 @@ class ActionRunner(object):
         direction=direction, distance=distance,
         overscroll=overscroll, repeat_count=repeat_count,
         speed_in_pixels_per_second=speed_in_pixels_per_second))
+
+  def MouseClick(self, selector=None):
+    """Mouse click the given element.
+
+    Args:
+      selector: A CSS selector describing the element.
+    """
+    self._RunAction(MouseClickAction(selector=selector))
 
   def SwipePage(self, left_start_ratio=0.5, top_start_ratio=0.5,
                 direction='left', distance=100, speed_in_pixels_per_second=800):

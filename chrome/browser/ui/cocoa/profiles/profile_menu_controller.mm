@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile_info_interface.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -98,7 +99,9 @@ class Observer : public chrome::BrowserListObserver,
 }
 
 - (IBAction)newProfile:(id)sender {
-  avatarMenu_->AddNewProfile(ProfileMetrics::ADD_NEW_USER_MENU);
+  profiles::CreateAndSwitchToNewProfile(chrome::HOST_DESKTOP_TYPE_NATIVE,
+                                        ProfileManager::CreateCallback(),
+                                        ProfileMetrics::ADD_NEW_USER_MENU);
 }
 
 - (BOOL)insertItemsIntoMenu:(NSMenu*)menu
@@ -133,7 +136,13 @@ class Observer : public chrome::BrowserListObserver,
     if (dock) {
       [item setIndentationLevel:1];
     } else {
-      gfx::Image itemIcon = itemData.icon;
+      gfx::Image itemIcon;
+      bool isRectangle;
+      // Always use the low-res, small default avatars in the menu.
+      AvatarMenu::GetImageForMenuButton(itemData.profile_path,
+                                        &itemIcon,
+                                        &isRectangle);
+
       // The image might be too large and need to be resized (i.e. if this is
       // a signed-in user using the GAIA profile photo).
       if (itemIcon.Width() > profiles::kAvatarIconWidth ||

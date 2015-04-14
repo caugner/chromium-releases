@@ -34,6 +34,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/quad_f.h"
+#include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -55,13 +56,12 @@ class MockContentLayerClient : public ContentLayerClient {
  public:
   MockContentLayerClient() {}
   ~MockContentLayerClient() override {}
-  void PaintContents(
-      SkCanvas* canvas,
-      const gfx::Rect& clip,
-      ContentLayerClient::GraphicsContextStatus gc_status) override {}
+  void PaintContents(SkCanvas* canvas,
+                     const gfx::Rect& clip,
+                     PaintingControlSetting picture_control) override {}
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
-      GraphicsContextStatus gc_status) override {
+      PaintingControlSetting picture_control) override {
     NOTIMPLEMENTED();
     return DisplayItemList::Create();
   }
@@ -347,7 +347,7 @@ TEST_F(LayerTreeHostCommonTest, TransformsAboutScrollOffset) {
   scroll_layer->AddChild(sublayer_scoped_ptr.Pass());
   LayerImpl* scroll_layer_raw_ptr = scroll_layer_scoped_ptr.get();
   clip_layer->AddChild(scroll_layer_scoped_ptr.Pass());
-  scroll_layer_raw_ptr->SetScrollOffset(kScrollOffset);
+  scroll_layer_raw_ptr->PushScrollOffsetFromMainThread(kScrollOffset);
 
   scoped_ptr<LayerImpl> root(LayerImpl::Create(host_impl.active_tree(), 3));
   SetLayerPropertiesForTesting(root.get(), identity_matrix, gfx::Point3F(),
@@ -5157,75 +5157,81 @@ TEST_F(LayerTreeHostCommonTest,
   EXPECT_FLOAT_EQ(initial_parent_scale,
                   parent->draw_transform().matrix().get(1, 1));
 
-  // The child surface is scaled up during draw since its subtree is not scaled
+  // The child surface is not scaled up during draw since its subtree is scaled
   // by the transform hierarchy.
   EXPECT_FLOAT_EQ(
-      initial_parent_scale * initial_child_scale,
+      1.f,
       surface_scale->render_surface()->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      initial_parent_scale * initial_child_scale,
+      1.f,
       surface_scale->render_surface()->draw_transform().matrix().get(1, 1));
 
-  // The surface_scale's RenderSurface is scaled during draw, so the layer does
-  // not need to be scaled when drawing into its surface.
-  EXPECT_FLOAT_EQ(1.0, surface_scale->draw_transform().matrix().get(0, 0));
-  EXPECT_FLOAT_EQ(1.0, surface_scale->draw_transform().matrix().get(1, 1));
+  // The surface_scale's RenderSurface is not scaled during draw, so the layer
+  // needs to be scaled when drawing into its surface.
+  EXPECT_FLOAT_EQ(initial_parent_scale * initial_child_scale,
+                  surface_scale->draw_transform().matrix().get(0, 0));
+  EXPECT_FLOAT_EQ(initial_parent_scale * initial_child_scale,
+                  surface_scale->draw_transform().matrix().get(1, 1));
 
-  // The surface_scale_child_scale is scaled when drawing into its surface,
-  // since its content bounds are not scaled by the transform hierarchy.
+  // The surface_scale_child_scale is not scaled when drawing into its surface,
+  // since its content bounds are scaled by the transform hierarchy.
   EXPECT_FLOAT_EQ(
-      initial_child_scale,
+      initial_child_scale * initial_child_scale * initial_parent_scale,
       surface_scale_child_scale->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      initial_child_scale,
+      initial_child_scale * initial_child_scale * initial_parent_scale,
       surface_scale_child_scale->draw_transform().matrix().get(1, 1));
 
-  // The surface_scale_child_no_scale has a fixed contents scale of 1, so it
-  // needs to be scaled by the device and page scale factors, along with the
-  // transform hierarchy.
+  // The surface_scale_child_no_scale is scaled by the device scale, page scale
+  // and transform hierarchy.
   EXPECT_FLOAT_EQ(
-      device_scale_factor * page_scale_factor * initial_child_scale,
+      device_scale_factor * page_scale_factor * initial_parent_scale *
+          initial_child_scale * initial_child_scale,
       surface_scale_child_no_scale->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      device_scale_factor * page_scale_factor * initial_child_scale,
+      device_scale_factor * page_scale_factor * initial_parent_scale *
+          initial_child_scale * initial_child_scale,
       surface_scale_child_no_scale->draw_transform().matrix().get(1, 1));
 
-  // The child surface is scaled up during draw since its subtree is not scaled
+  // The child surface is not scaled up during draw since its subtree is scaled
   // by the transform hierarchy.
   EXPECT_FLOAT_EQ(
-      initial_parent_scale * initial_child_scale,
+      1.f,
       surface_no_scale->render_surface()->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      initial_parent_scale * initial_child_scale,
+      1.f,
       surface_no_scale->render_surface()->draw_transform().matrix().get(1, 1));
 
   // The surface_no_scale layer has a fixed contents scale of 1, so it needs to
   // be scaled by the device and page scale factors. Its surface is already
   // scaled by the transform hierarchy so those don't need to scale the layer's
   // drawing.
-  EXPECT_FLOAT_EQ(device_scale_factor * page_scale_factor,
+  EXPECT_FLOAT_EQ(initial_parent_scale * initial_child_scale *
+                      device_scale_factor * page_scale_factor,
                   surface_no_scale->draw_transform().matrix().get(0, 0));
-  EXPECT_FLOAT_EQ(device_scale_factor * page_scale_factor,
+  EXPECT_FLOAT_EQ(initial_parent_scale * initial_child_scale *
+                      device_scale_factor * page_scale_factor,
                   surface_no_scale->draw_transform().matrix().get(1, 1));
 
   // The surface_no_scale_child_scale has its contents scaled by the page and
   // device scale factors, but needs to be scaled by the transform hierarchy
   // when drawing.
   EXPECT_FLOAT_EQ(
-      initial_child_scale,
+      initial_parent_scale * initial_child_scale * initial_child_scale,
       surface_no_scale_child_scale->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      initial_child_scale,
+      initial_parent_scale * initial_child_scale * initial_child_scale,
       surface_no_scale_child_scale->draw_transform().matrix().get(1, 1));
 
-  // The surface_no_scale_child_no_scale has a fixed contents scale of 1, so it
-  // needs to be scaled by the device and page scale factors. It also needs to
-  // be scaled by any transform heirarchy below its target surface.
+  // The surface_no_scale_child_no_scale needs to be scaled by the device and
+  // page scale factors and by any transform heirarchy below its target surface.
   EXPECT_FLOAT_EQ(
-      device_scale_factor * page_scale_factor * initial_child_scale,
+      device_scale_factor * page_scale_factor * initial_parent_scale *
+          initial_child_scale * initial_child_scale,
       surface_no_scale_child_no_scale->draw_transform().matrix().get(0, 0));
   EXPECT_FLOAT_EQ(
-      device_scale_factor * page_scale_factor * initial_child_scale,
+      device_scale_factor * page_scale_factor * initial_parent_scale *
+          initial_child_scale * initial_child_scale,
       surface_no_scale_child_no_scale->draw_transform().matrix().get(1, 1));
 }
 
@@ -5671,56 +5677,60 @@ using LCDTextTestParam = std::tr1::tuple<bool, bool, bool>;
 class LCDTextTest
     : public LayerTreeHostCommonTestBase,
       public testing::TestWithParam<LCDTextTestParam> {
+ public:
+  LCDTextTest()
+      : host_impl_(&proxy_, &shared_bitmap_manager_),
+        root_(nullptr),
+        child_(nullptr),
+        grand_child_(nullptr) {}
+
  protected:
   void SetUp() override {
     can_use_lcd_text_ = std::tr1::get<0>(GetParam());
     layers_always_allowed_lcd_text_ = std::tr1::get<1>(GetParam());
 
-    root_ = Layer::Create();
-    child_ = Layer::Create();
-    grand_child_ = Layer::Create();
-    child_->AddChild(grand_child_.get());
-    root_->AddChild(child_.get());
+    scoped_ptr<LayerImpl> root_ptr =
+        LayerImpl::Create(host_impl_.active_tree(), 1);
+    scoped_ptr<LayerImpl> child_ptr =
+        LayerImpl::Create(host_impl_.active_tree(), 2);
+    scoped_ptr<LayerImpl> grand_child_ptr =
+        LayerImpl::Create(host_impl_.active_tree(), 3);
+
+    // Stash raw pointers to look at later.
+    root_ = root_ptr.get();
+    child_ = child_ptr.get();
+    grand_child_ = grand_child_ptr.get();
+
+    child_->AddChild(grand_child_ptr.Pass());
+    root_->AddChild(child_ptr.Pass());
+    host_impl_.active_tree()->SetRootLayer(root_ptr.Pass());
 
     root_->SetContentsOpaque(true);
     child_->SetContentsOpaque(true);
     grand_child_->SetContentsOpaque(true);
 
     gfx::Transform identity_matrix;
-    SetLayerPropertiesForTesting(root_.get(),
-                                 identity_matrix,
-                                 gfx::Point3F(),
-                                 gfx::PointF(),
-                                 gfx::Size(1, 1),
-                                 true,
+    SetLayerPropertiesForTesting(root_, identity_matrix, gfx::Point3F(),
+                                 gfx::PointF(), gfx::Size(1, 1), true, false,
+                                 true);
+    SetLayerPropertiesForTesting(child_, identity_matrix, gfx::Point3F(),
+                                 gfx::PointF(), gfx::Size(1, 1), true, false,
+                                 std::tr1::get<2>(GetParam()));
+    SetLayerPropertiesForTesting(grand_child_, identity_matrix, gfx::Point3F(),
+                                 gfx::PointF(), gfx::Size(1, 1), true, false,
                                  false);
-    SetLayerPropertiesForTesting(child_.get(),
-                                 identity_matrix,
-                                 gfx::Point3F(),
-                                 gfx::PointF(),
-                                 gfx::Size(1, 1),
-                                 true,
-                                 false);
-    SetLayerPropertiesForTesting(grand_child_.get(),
-                                 identity_matrix,
-                                 gfx::Point3F(),
-                                 gfx::PointF(),
-                                 gfx::Size(1, 1),
-                                 true,
-                                 false);
-
-    child_->SetForceRenderSurface(std::tr1::get<2>(GetParam()));
-
-    host_ = CreateFakeLayerTreeHost();
-    host_->SetRootLayer(root_);
   }
 
   bool can_use_lcd_text_;
   bool layers_always_allowed_lcd_text_;
-  scoped_ptr<FakeLayerTreeHost> host_;
-  scoped_refptr<Layer> root_;
-  scoped_refptr<Layer> child_;
-  scoped_refptr<Layer> grand_child_;
+
+  FakeImplProxy proxy_;
+  TestSharedBitmapManager shared_bitmap_manager_;
+  FakeLayerTreeHostImpl host_impl_;
+
+  LayerImpl* root_;
+  LayerImpl* child_;
+  LayerImpl* grand_child_;
 };
 
 TEST_P(LCDTextTest, CanUseLCDText) {
@@ -5729,7 +5739,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
 
   // Case 1: Identity transform.
   gfx::Transform identity_matrix;
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_lcd_text, child_->can_use_lcd_text());
@@ -5739,7 +5749,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   gfx::Transform integral_translation;
   integral_translation.Translate(1.0, 2.0);
   child_->SetTransform(integral_translation);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_lcd_text, child_->can_use_lcd_text());
@@ -5749,7 +5759,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   gfx::Transform non_integral_translation;
   non_integral_translation.Translate(1.5, 2.5);
   child_->SetTransform(non_integral_translation);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5759,7 +5769,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   gfx::Transform rotation;
   rotation.Rotate(10.0);
   child_->SetTransform(rotation);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5769,7 +5779,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   gfx::Transform scale;
   scale.Scale(2.0, 2.0);
   child_->SetTransform(scale);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5779,7 +5789,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   gfx::Transform skew;
   skew.SkewX(10.0);
   child_->SetTransform(skew);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5788,7 +5798,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   // Case 7: Translucent.
   child_->SetTransform(identity_matrix);
   child_->SetOpacity(0.5f);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5797,7 +5807,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
   // Case 8: Sanity check: restore transform and opacity.
   child_->SetTransform(identity_matrix);
   child_->SetOpacity(1.f);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_lcd_text, child_->can_use_lcd_text());
@@ -5805,7 +5815,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
 
   // Case 9: Non-opaque content.
   child_->SetContentsOpaque(false);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_not_lcd_text, child_->can_use_lcd_text());
@@ -5813,7 +5823,7 @@ TEST_P(LCDTextTest, CanUseLCDText) {
 
   // Case 10: Sanity check: restore content opaqueness.
   child_->SetContentsOpaque(true);
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_lcd_text, child_->can_use_lcd_text());
@@ -5824,7 +5834,7 @@ TEST_P(LCDTextTest, CanUseLCDTextWithAnimation) {
   bool expect_lcd_text = can_use_lcd_text_ || layers_always_allowed_lcd_text_;
 
   // Sanity check: Make sure can_use_lcd_text_ is set on each node.
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   EXPECT_EQ(expect_lcd_text, root_->can_use_lcd_text());
   EXPECT_EQ(expect_lcd_text, child_->can_use_lcd_text());
@@ -5835,7 +5845,7 @@ TEST_P(LCDTextTest, CanUseLCDTextWithAnimation) {
   AddOpacityTransitionToController(
       child_->layer_animation_controller(), 10.0, 0.9f, 0.1f, false);
 
-  ExecuteCalculateDrawProperties(root_.get(), 1.f, 1.f, NULL, can_use_lcd_text_,
+  ExecuteCalculateDrawProperties(root_, 1.f, 1.f, NULL, can_use_lcd_text_,
                                  layers_always_allowed_lcd_text_);
   // Text AA should not be adjusted while animation is active.
   // Make sure LCD text AA setting remains unchanged.
@@ -6937,6 +6947,27 @@ TEST_F(LayerTreeHostCommonTest, CanRenderToSeparateSurface) {
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
 
     EXPECT_EQ(2u, render_surface_layer_list.size());
+
+    int count_represents_target_render_surface = 0;
+    int count_represents_contributing_render_surface = 0;
+    int count_represents_itself = 0;
+    auto end = LayerIterator<LayerImpl>::End(&render_surface_layer_list);
+    for (auto it = LayerIterator<LayerImpl>::Begin(&render_surface_layer_list);
+         it != end; ++it) {
+      if (it.represents_target_render_surface())
+        count_represents_target_render_surface++;
+      if (it.represents_contributing_render_surface())
+        count_represents_contributing_render_surface++;
+      if (it.represents_itself())
+        count_represents_itself++;
+    }
+
+    // Two render surfaces.
+    EXPECT_EQ(2, count_represents_target_render_surface);
+    // Second render surface contributes to root render surface.
+    EXPECT_EQ(1, count_represents_contributing_render_surface);
+    // All 4 layers represent itself.
+    EXPECT_EQ(4, count_represents_itself);
   }
 
   {
@@ -6947,6 +6978,27 @@ TEST_F(LayerTreeHostCommonTest, CanRenderToSeparateSurface) {
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
 
     EXPECT_EQ(1u, render_surface_layer_list.size());
+
+    int count_represents_target_render_surface = 0;
+    int count_represents_contributing_render_surface = 0;
+    int count_represents_itself = 0;
+    auto end = LayerIterator<LayerImpl>::End(&render_surface_layer_list);
+    for (auto it = LayerIterator<LayerImpl>::Begin(&render_surface_layer_list);
+         it != end; ++it) {
+      if (it.represents_target_render_surface())
+        count_represents_target_render_surface++;
+      if (it.represents_contributing_render_surface())
+        count_represents_contributing_render_surface++;
+      if (it.represents_itself())
+        count_represents_itself++;
+    }
+
+    // Only root layer has a render surface.
+    EXPECT_EQ(1, count_represents_target_render_surface);
+    // No layer contributes a render surface to root render surface.
+    EXPECT_EQ(0, count_represents_contributing_render_surface);
+    // All 4 layers represent itself.
+    EXPECT_EQ(4, count_represents_itself);
   }
 }
 
@@ -7757,6 +7809,90 @@ TEST_F(LayerTreeHostCommonTest, ScrollCompensationWithRounding) {
   }
 }
 
+TEST_F(LayerTreeHostCommonTest,
+       ScrollCompensationMainScrollOffsetFractionalPart) {
+  // This test verifies that a scrolling layer that has fractional scroll offset
+  // from main doesn't move a fixed position child.
+  //
+  // + root
+  //   + container
+  //     + scroller
+  //       + fixed
+  //
+  FakeImplProxy proxy;
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  host_impl.CreatePendingTree();
+  scoped_ptr<LayerImpl> root = LayerImpl::Create(host_impl.active_tree(), 1);
+  scoped_ptr<LayerImpl> container =
+      LayerImpl::Create(host_impl.active_tree(), 2);
+  LayerImpl* container_layer = container.get();
+  scoped_ptr<LayerImpl> scroller =
+      LayerImpl::Create(host_impl.active_tree(), 3);
+  LayerImpl* scroll_layer = scroller.get();
+  scoped_ptr<LayerImpl> fixed = LayerImpl::Create(host_impl.active_tree(), 4);
+  LayerImpl* fixed_layer = fixed.get();
+
+  container->SetIsContainerForFixedPositionLayers(true);
+
+  LayerPositionConstraint constraint;
+  constraint.set_is_fixed_position(true);
+  fixed->SetPositionConstraint(constraint);
+
+  scroller->SetScrollClipLayer(container->id());
+
+  gfx::Transform identity_transform;
+  gfx::Transform container_transform;
+  container_transform.Translate3d(10.0, 20.0, 0.0);
+  gfx::Vector2dF container_offset = container_transform.To2dTranslation();
+
+  SetLayerPropertiesForTesting(root.get(), identity_transform, gfx::Point3F(),
+                               gfx::PointF(), gfx::Size(50, 50), true, false,
+                               true);
+  SetLayerPropertiesForTesting(container.get(), container_transform,
+                               gfx::Point3F(), gfx::PointF(), gfx::Size(40, 40),
+                               true, false, false);
+  SetLayerPropertiesForTesting(scroller.get(), identity_transform,
+                               gfx::Point3F(), gfx::PointF(0.0, 0.0),
+                               gfx::Size(30, 30), true, false, false);
+
+  gfx::ScrollOffset scroll_offset(3.3, 4.2);
+  gfx::Vector2dF main_scroll_fractional_part(0.3f, 0.2f);
+  gfx::Vector2dF scroll_delta(0.1f, 0.4f);
+  // Blink only uses the integer part of the scroll_offset for fixed
+  // position layer.
+  SetLayerPropertiesForTesting(fixed.get(), identity_transform, gfx::Point3F(),
+                               gfx::PointF(3.0f, 4.0f), gfx::Size(50, 50), true,
+                               false, false);
+  scroll_layer->PushScrollOffsetFromMainThread(scroll_offset);
+  scroll_layer->SetScrollDelta(scroll_delta);
+  scroll_layer->SetScrollCompensationAdjustment(main_scroll_fractional_part);
+
+  scroller->AddChild(fixed.Pass());
+  container->AddChild(scroller.Pass());
+  root->AddChild(container.Pass());
+
+  LayerImplList render_surface_layer_list;
+  LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
+      root.get(), root->bounds(), &render_surface_layer_list);
+  LayerTreeHostCommon::CalculateDrawProperties(&inputs);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      container_layer->draw_properties().screen_space_transform,
+      fixed_layer->draw_properties().screen_space_transform);
+  EXPECT_VECTOR_EQ(
+      fixed_layer->draw_properties().screen_space_transform.To2dTranslation(),
+      container_offset);
+
+  gfx::ScrollOffset effective_scroll_offset =
+      ScrollOffsetWithDelta(scroll_offset, scroll_delta);
+  gfx::Vector2d rounded_effective_scroll_offset =
+      ToRoundedVector2d(ScrollOffsetToVector2dF(effective_scroll_offset));
+  EXPECT_VECTOR_EQ(
+      scroll_layer->draw_properties().screen_space_transform.To2dTranslation(),
+      container_offset - rounded_effective_scroll_offset);
+}
+
 class AnimationScaleFactorTrackingLayerImpl : public LayerImpl {
  public:
   static scoped_ptr<AnimationScaleFactorTrackingLayerImpl> Create(
@@ -7881,11 +8017,11 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
       0.f, grand_child_raw->draw_properties().maximum_animation_contents_scale);
 
   grand_parent->layer_animation_controller()->AbortAnimations(
-      Animation::Transform);
+      Animation::TRANSFORM);
   parent_raw->layer_animation_controller()->AbortAnimations(
-      Animation::Transform);
+      Animation::TRANSFORM);
   child_raw->layer_animation_controller()->AbortAnimations(
-      Animation::Transform);
+      Animation::TRANSFORM);
 
   TransformOperations perspective;
   perspective.AppendPerspective(10.f);
@@ -7905,7 +8041,7 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
       0.f, grand_child_raw->draw_properties().maximum_animation_contents_scale);
 
   child_raw->layer_animation_controller()->AbortAnimations(
-      Animation::Transform);
+      Animation::TRANSFORM);
 
   gfx::Transform scale_matrix;
   scale_matrix.Scale(1.f, 2.f);

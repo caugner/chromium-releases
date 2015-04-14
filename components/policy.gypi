@@ -311,6 +311,8 @@
             'policy/core/common/cloud/policy_builder.h',
             'policy/core/common/configuration_policy_provider_test.cc',
             'policy/core/common/configuration_policy_provider_test.h',
+            'policy/core/common/fake_async_policy_loader.cc',
+            'policy/core/common/fake_async_policy_loader.h',
             'policy/core/common/mock_configuration_policy_provider.cc',
             'policy/core/common/mock_configuration_policy_provider.h',
             'policy/core/common/mock_policy_service.cc',
@@ -319,8 +321,16 @@
             'policy/core/common/policy_test_utils.h',
             'policy/core/common/preferences_mock_mac.cc',
             'policy/core/common/preferences_mock_mac.h',
+            'policy/core/common/remote_commands/test_remote_command_job.cc',
+            'policy/core/common/remote_commands/test_remote_command_job.h',
           ],
           'conditions': [
+            ['OS=="android"', {
+              'sources!': [
+                'policy/core/common/fake_async_policy_loader.cc',
+                'policy/core/common/fake_async_policy_loader.h',
+              ],
+            }],
             ['chromeos==1', {
               'sources!': [
                 'policy/core/common/cloud/mock_user_cloud_policy_store.cc',

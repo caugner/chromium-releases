@@ -52,7 +52,7 @@ class MediaSourceDelegate : public media::DemuxerHost {
       int demuxer_client_id,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const scoped_refptr<media::MediaLog> media_log);
-  virtual ~MediaSourceDelegate();
+  ~MediaSourceDelegate() override;
 
   // Initialize the MediaSourceDelegate. |media_source| will be owned by
   // this object after this call.
@@ -105,13 +105,13 @@ class MediaSourceDelegate : public media::DemuxerHost {
 
  private:
   // Methods inherited from DemuxerHost.
-  virtual void AddBufferedTimeRange(base::TimeDelta start,
-                                    base::TimeDelta end) override;
-  virtual void SetDuration(base::TimeDelta duration) override;
-  virtual void OnDemuxerError(media::PipelineStatus status) override;
-  virtual void AddTextStream(media::DemuxerStream* text_stream,
-                             const media::TextTrackConfig& config) override;
-  virtual void RemoveTextStream(media::DemuxerStream* text_stream) override;
+  void AddBufferedTimeRange(base::TimeDelta start,
+                            base::TimeDelta end) override;
+  void SetDuration(base::TimeDelta duration) override;
+  void OnDemuxerError(media::PipelineStatus status) override;
+  void AddTextStream(media::DemuxerStream* text_stream,
+                     const media::TextTrackConfig& config) override;
+  void RemoveTextStream(media::DemuxerStream* text_stream) override;
 
   // Notifies |demuxer_client_| and fires |duration_changed_cb_|.
   void OnDurationChanged(const base::TimeDelta& duration);
@@ -227,9 +227,9 @@ class MediaSourceDelegate : public media::DemuxerHost {
   const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
+  base::WeakPtr<MediaSourceDelegate> main_weak_this_;
   base::WeakPtrFactory<MediaSourceDelegate> main_weak_factory_;
   base::WeakPtrFactory<MediaSourceDelegate> media_weak_factory_;
-  base::WeakPtr<MediaSourceDelegate> main_weak_this_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaSourceDelegate);
 };

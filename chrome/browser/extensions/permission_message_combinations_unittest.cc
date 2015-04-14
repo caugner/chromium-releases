@@ -10,6 +10,7 @@
 #include "base/test/values_test_util.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
@@ -353,8 +354,7 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
       "  },"
       "  'permissions': ["
       "    { 'usbDevices': [{ 'vendorId': 123, 'productId': 456 }] },"
-      "    'serial',"
-      "    'bluetooth'"
+      "    'serial'"
       "  ],"
       "  'bluetooth': {}"
       "}");
@@ -374,8 +374,7 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
       "  },"
       "  'permissions': ["
       "    { 'usbDevices': [{ 'vendorId': 123, 'productId': 456 }] },"
-      "    'serial',"
-      "    'bluetooth'"
+      "    'serial'"
       "  ],"
       "  'bluetooth': {"
       "    'uuids': ['1105', '1106'],"
@@ -946,8 +945,6 @@ TEST_F(PermissionMessageCombinationsUnittest, SocketPermissionMessages) {
       "      'udp-send-to:www.ping.com:50032',"
       "      'udp-send-to:test2.ping.com:50032',"
       "      'udp-bind:test.ping.com:50032',"
-      "      'udp-listen:other.ping.com:50032',"
-      "      'udp-listen:www.google.com:50032',"
       "    ] }"
       "  ]"
       "}");
@@ -1164,18 +1161,11 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "  ]"
       "}");
 
-#ifdef OS_CHROMEOS
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Read your browsing history on all your signed-in devices",
       "Capture content of your screen", "Read and change your bookmarks",
       "Read and change your data on a number of websites",
       "Read and change your accessibility settings"));
-#else
-  ASSERT_TRUE(CheckManifestProducesPermissions(
-      "Read your browsing history on all your signed-in devices",
-      "Capture content of your screen", "Read and change your bookmarks",
-      "Read and change your data on a number of websites"));
-#endif
 
   ASSERT_TRUE(CheckManifestProducesHostPermissions(
       "All go.com sites", "All google.com sites", "All news.com sites",
@@ -1192,7 +1182,6 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "  },"
       "  'permissions': ["
       "    'contextMenus',"
-      "    'bluetooth',"
       "    'permissions',"
       "    'accessibilityFeatures.read',"
       "    'accessibilityFeatures.modify',"
@@ -1215,14 +1204,9 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "  ]"
       "}");
 
-#ifdef OS_CHROMEOS
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Access your serial devices", "Store data in your Google Drive account",
       "Read and change your accessibility settings"));
-#else
-  ASSERT_TRUE(CheckManifestProducesPermissions(
-      "Access your serial devices", "Store data in your Google Drive account"));
-#endif
 
   ASSERT_TRUE(CheckManifestProducesHostPermissions());
 }

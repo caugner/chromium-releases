@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_state_delegate.h"
@@ -15,12 +16,15 @@
 #include "ash/wm/overview/window_selector.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "ui/aura/window.h"
 
 namespace ash {
 
-WindowSelectorController::WindowSelectorController() {
+WindowSelectorController::WindowSelectorController()
+    : swipe_to_close_enabled_(base::CommandLine::ForCurrentProcess()->
+        HasSwitch(switches::kAshEnableSwipeToCloseInOverviewMode)) {
 }
 
 WindowSelectorController::~WindowSelectorController() {
@@ -52,7 +56,9 @@ void WindowSelectorController::ToggleOverview() {
     if (windows.empty())
       return;
 
-    window_selector_.reset(new WindowSelector(windows, this));
+    Shell::GetInstance()->OnOverviewModeStarting();
+    window_selector_.reset(new WindowSelector(this));
+    window_selector_->Init(windows);
     OnSelectionStarted();
   }
 }
@@ -61,11 +67,18 @@ bool WindowSelectorController::IsSelecting() {
   return window_selector_.get() != NULL;
 }
 
+bool WindowSelectorController::IsRestoringMinimizedWindows() const {
+  return window_selector_.get() != NULL &&
+         window_selector_->restoring_minimized_windows();
+}
+
 // TODO(flackr): Make WindowSelectorController observe the activation of
 // windows, so we can remove WindowSelectorDelegate.
 void WindowSelectorController::OnSelectionEnded() {
+  window_selector_->Shutdown();
   window_selector_.reset();
   last_selection_time_ = base::Time::Now();
+  Shell::GetInstance()->OnOverviewModeEnded();
 }
 
 void WindowSelectorController::OnSelectionStarted() {

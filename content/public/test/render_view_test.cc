@@ -40,6 +40,7 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
+using blink::WebGestureEvent;
 using blink::WebInputEvent;
 using blink::WebLocalFrame;
 using blink::WebMouseEvent;
@@ -184,7 +185,7 @@ void RenderViewTest::SetUp() {
   // is already initialized.
   if (!ui::ResourceBundle::HasSharedInstance())
     ui::ResourceBundle::InitSharedInstanceWithLocale(
-        "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
+        "en-US", NULL, ui::ResourceBundle::DO_NOT_LOAD_COMMON_RESOURCES);
 
   compositor_deps_.reset(new FakeCompositorDependencies);
   mock_process_.reset(new MockRenderProcess);
@@ -322,22 +323,42 @@ bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
   gfx::Rect bounds = GetElementBounds(element_id);
   if (bounds.IsEmpty())
     return false;
+  SimulatePointClick(bounds.CenterPoint());
+  return true;
+}
+
+void RenderViewTest::SimulatePointClick(const gfx::Point& point) {
   WebMouseEvent mouse_event;
   mouse_event.type = WebInputEvent::MouseDown;
   mouse_event.button = WebMouseEvent::ButtonLeft;
-  mouse_event.x = bounds.CenterPoint().x();
-  mouse_event.y = bounds.CenterPoint().y();
+  mouse_event.x = point.x();
+  mouse_event.y = point.y();
   mouse_event.clickCount = 1;
-  scoped_ptr<IPC::Message> input_message(
-      new InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->OnMessageReceived(*input_message);
-  return true;
+  impl->OnMessageReceived(
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+  mouse_event.type = WebInputEvent::MouseUp;
+  impl->OnMessageReceived(
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+}
+
+void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
+  WebGestureEvent gesture_event;
+  gesture_event.x = rect.CenterPoint().x();
+  gesture_event.y = rect.CenterPoint().y();
+  gesture_event.data.tap.tapCount = 1;
+  gesture_event.data.tap.width = rect.width();
+  gesture_event.data.tap.height = rect.height();
+  gesture_event.type = WebInputEvent::GestureTap;
+  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
+  impl->OnMessageReceived(
+      InputMsg_HandleInputEvent(0, &gesture_event, ui::LatencyInfo(), false));
+  impl->FocusChangeComplete();
 }
 
 void RenderViewTest::SetFocused(const blink::WebNode& node) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->focusedNodeChanged(node);
+  impl->focusedNodeChanged(blink::WebNode(), node);
 }
 
 void RenderViewTest::Reload(const GURL& url) {

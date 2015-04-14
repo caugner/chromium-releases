@@ -9,7 +9,6 @@ extern "C" {
 #include "ui/gl/gl_surface_glx.h"
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,6 +21,7 @@ extern "C" {
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/x/x11_connection.h"
 #include "ui/gfx/x/x11_types.h"
@@ -211,7 +211,7 @@ class SGIVideoSyncProviderThreadShim {
         return;
 
       TRACE_EVENT_INSTANT0("gpu", "vblank", TRACE_EVENT_SCOPE_THREAD);
-      now = base::TimeTicks::HighResNow();
+      now = base::TimeTicks::Now();
 
       glXMakeCurrent(display_, 0, 0);
     }
@@ -476,6 +476,7 @@ void NativeViewGLSurfaceGLX::Destroy() {
     if (event_source)
       event_source->RemovePlatformEventDispatcher(this);
     XDestroyWindow(g_display, window_);
+    window_ = 0;
     XFlush(g_display);
   }
 }

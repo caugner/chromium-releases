@@ -9,9 +9,9 @@
 #include "media/base/cdm_key_information.h"
 #include "media/base/cdm_promise.h"
 #include "media/mojo/services/media_type_converters.h"
-#include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
-#include "mojo/public/interfaces/application/service_provider.mojom.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/interfaces/application/service_provider.mojom.h"
 #include "url/gurl.h"
 
 namespace media {
@@ -52,7 +52,9 @@ MojoCdm::MojoCdm(mojo::ContentDecryptionModulePtr remote_cdm,
   DCHECK(!session_keys_change_cb_.is_null());
   DCHECK(!session_expiration_update_cb_.is_null());
 
-  remote_cdm_.set_client(this);
+  // TODO(xhwang): Client syntax has been removed, so a new mechanism for client
+  // discovery must be added to this interface.  See http://crbug.com/451321.
+  NOTREACHED();
 }
 
 MojoCdm::~MojoCdm() {
@@ -167,16 +169,6 @@ void MojoCdm::OnSessionExpirationUpdate(const mojo::String& session_id,
                                         int64_t new_expiry_time_usec) {
   session_expiration_update_cb_.Run(
       session_id, base::Time::FromInternalValue(new_expiry_time_usec));
-}
-
-template <typename... T>
-void MojoCdm::OnPromiseResult(scoped_ptr<CdmPromiseTemplate<T...>> promise,
-                              mojo::CdmPromiseResultPtr result,
-                              typename MojoTypeTrait<T>::MojoType... args) {
-  if (result->success)
-    promise->resolve(args.template To<T>()...);  // See ISO C++03 14.2/4.
-  else
-    RejectPromise(promise.Pass(), result.Pass());
 }
 
 }  // namespace media

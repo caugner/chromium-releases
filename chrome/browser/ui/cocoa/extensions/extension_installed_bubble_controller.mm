@@ -30,6 +30,7 @@
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
+#include "chrome/browser/ui/extensions/extension_installed_bubble.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
@@ -44,6 +45,7 @@
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 #import "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
@@ -54,56 +56,38 @@ using extensions::BundleInstaller;
 using extensions::Extension;
 using extensions::UnloadedExtensionInfo;
 
-// C++ class that receives EXTENSION_LOADED notifications and proxies them back
-// to |controller|.
-class ExtensionLoadedNotificationObserver
-    : public content::NotificationObserver {
+class ExtensionInstalledBubbleBridge
+    : public ExtensionInstalledBubble::Delegate {
  public:
-  ExtensionLoadedNotificationObserver(
-      ExtensionInstalledBubbleController* controller, Profile* profile)
-          : controller_(controller) {
-    registrar_.Add(this,
-                   extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
-                   content::Source<Profile>(profile));
-    registrar_.Add(this,
-                   extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-                   content::Source<Profile>(profile));
-  }
+  explicit ExtensionInstalledBubbleBridge(
+      ExtensionInstalledBubbleController* controller);
+  ~ExtensionInstalledBubbleBridge() override;
 
  private:
-  // NotificationObserver implementation. Tells the controller to start showing
-  // its window on the main thread when the extension has finished loading.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    if (type == extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED) {
-      const Extension* extension =
-          content::Details<const Extension>(details).ptr();
-      if (extension == [controller_ extension]) {
-        [controller_ performSelectorOnMainThread:@selector(showWindow:)
-                                      withObject:controller_
-                                   waitUntilDone:NO];
-      }
-    } else if (type == extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED) {
-      const Extension* extension =
-          content::Details<const UnloadedExtensionInfo>(details)->extension;
-      if (extension == [controller_ extension]) {
-        [controller_ performSelectorOnMainThread:@selector(extensionUnloaded:)
-                                      withObject:controller_
-                                   waitUntilDone:NO];
-      }
-    } else {
-      NOTREACHED() << "Received unexpected notification.";
-    }
-  }
+  // ExtensionInstalledBubble::Delegate:
+  bool MaybeShowNow() override;
 
-  content::NotificationRegistrar registrar_;
-  ExtensionInstalledBubbleController* controller_;  // weak, owns us
+  // The (owning) installed bubble controller.
+  ExtensionInstalledBubbleController* controller_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionInstalledBubbleBridge);
 };
+
+ExtensionInstalledBubbleBridge::ExtensionInstalledBubbleBridge(
+    ExtensionInstalledBubbleController* controller)
+    : controller_(controller) {
+}
+
+ExtensionInstalledBubbleBridge::~ExtensionInstalledBubbleBridge() {
+}
+
+bool ExtensionInstalledBubbleBridge::MaybeShowNow() {
+  [controller_ showWindow:controller_];
+  return true;
+}
 
 @implementation ExtensionInstalledBubbleController
 
-@synthesize extension = extension_;
 @synthesize bundle = bundle_;
 // Exposed for unit test.
 @synthesize pageActionPreviewShowing = pageActionPreviewShowing_;
@@ -118,7 +102,6 @@ class ExtensionLoadedNotificationObserver
   if ((self = [super initWithWindowNibPath:nibName
                               parentWindow:parentWindow
                                 anchoredAt:NSZeroPoint])) {
-    extension_ = extension;
     bundle_ = bundle;
     DCHECK(browser);
     browser_ = browser;
@@ -144,11 +127,20 @@ class ExtensionLoadedNotificationObserver
       [self showWindow:self];
     } else {
       // Start showing window only after extension has fully loaded.
-      extensionObserver_.reset(new ExtensionLoadedNotificationObserver(
-          self, browser->profile()));
+      installedBubbleBridge_.reset(new ExtensionInstalledBubbleBridge(self));
+      installedBubble_.reset(new ExtensionInstalledBubble(
+          installedBubbleBridge_.get(),
+          extension,
+          browser,
+          icon));
+      installedBubble_->IgnoreBrowserClosing();
     }
   }
   return self;
+}
+
+- (const Extension*)extension {
+  return installedBubble_->extension();
 }
 
 // Sets |promo_| based on |promoPlaceholder_|, sets |promoPlaceholder_| to nil.
@@ -168,15 +160,14 @@ class ExtensionLoadedNotificationObserver
 
 // Returns YES if the sync promo should be shown in the bubble.
 - (BOOL)showSyncPromo {
-  return extensions::sync_helper::IsSyncableExtension(extension_) &&
-         SyncPromoUI::ShouldShowSyncPromo(browser_->profile());
+  return extensions::sync_helper::IsSyncableExtension([self extension]) &&
+      SyncPromoUI::ShouldShowSyncPromo(browser_->profile());
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
   // Turn off page action icon preview when the window closes, unless we
   // already removed it when the window resigned key status.
   [self removePageActionPreviewIfNecessary];
-  extension_ = NULL;
   browser_ = NULL;
   [closeButton_ setTrackingEnabled:NO];
   [super windowWillClose:notification];
@@ -208,11 +199,11 @@ class ExtensionLoadedNotificationObserver
 
 // Extracted to a function here so that it can be overridden for unit testing.
 - (void)removePageActionPreviewIfNecessary {
-  if (!extension_ || !pageActionPreviewShowing_)
+  if (![self extension] || !pageActionPreviewShowing_)
     return;
   ExtensionAction* page_action =
       extensions::ExtensionActionManager::Get(browser_->profile())->
-      GetPageAction(*extension_);
+      GetPageAction(*[self extension]);
   if (!page_action)
     return;
   pageActionPreviewShowing_ = NO;
@@ -236,62 +227,53 @@ class ExtensionLoadedNotificationObserver
       static_cast<BrowserWindowCocoa*>(browser_->window());
   NSPoint arrowPoint = NSZeroPoint;
 
-  switch(type_) {
-    case extension_installed_bubble::kApp: {
-      TabStripView* view = [window->cocoa_controller() tabStripView];
-      NewTabButton* button = [view getNewTabButton];
-      NSRect bounds = [button bounds];
-      NSPoint anchor = NSMakePoint(
-          NSMidX(bounds),
-          NSMaxY(bounds) - extension_installed_bubble::kAppsBubbleArrowOffset);
-      arrowPoint = [button convertPoint:anchor toView:nil];
-      break;
-    }
-    case extension_installed_bubble::kOmniboxKeyword: {
-      LocationBarViewMac* locationBarView =
-          [window->cocoa_controller() locationBarBridge];
-      arrowPoint = locationBarView->GetPageInfoBubblePoint();
-      break;
-    }
-    case extension_installed_bubble::kBrowserAction: {
-      BrowserActionsController* controller =
-          [[window->cocoa_controller() toolbarController]
-              browserActionsController];
-      arrowPoint = [controller popupPointForId:extension_->id()];
-      break;
-    }
-    case extension_installed_bubble::kPageAction: {
-      LocationBarViewMac* locationBarView =
-          [window->cocoa_controller() locationBarBridge];
+  if (type_ == extension_installed_bubble::kApp) {
+    TabStripView* view = [window->cocoa_controller() tabStripView];
+    NewTabButton* button = [view getNewTabButton];
+    NSRect bounds = [button bounds];
+    NSPoint anchor = NSMakePoint(
+        NSMidX(bounds),
+        NSMaxY(bounds) - extension_installed_bubble::kAppsBubbleArrowOffset);
+    arrowPoint = [button convertPoint:anchor toView:nil];
+  } else if (type_ == extension_installed_bubble::kBrowserAction ||
+             extensions::FeatureSwitch::extension_action_redesign()->
+                 IsEnabled()) {
+    // If the toolbar redesign is enabled, all bubbles for extensions point to
+    // their toolbar action.
+    BrowserActionsController* controller =
+        [[window->cocoa_controller() toolbarController]
+            browserActionsController];
+    arrowPoint = [controller popupPointForId:[self extension]->id()];
+  } else if (type_ == extension_installed_bubble::kPageAction) {
+    LocationBarViewMac* locationBarView =
+        [window->cocoa_controller() locationBarBridge];
 
-      ExtensionAction* page_action =
-          extensions::ExtensionActionManager::Get(browser_->profile())->
-          GetPageAction(*extension_);
+    ExtensionAction* page_action =
+        extensions::ExtensionActionManager::Get(browser_->profile())->
+        GetPageAction(*[self extension]);
 
-      // Tell the location bar to show a preview of the page action icon, which
-      // would ordinarily only be displayed on a page of the appropriate type.
-      // We remove this preview when the extension installed bubble closes.
-      locationBarView->SetPreviewEnabledPageAction(page_action, true);
-      pageActionPreviewShowing_ = YES;
+    // Tell the location bar to show a preview of the page action icon,
+    // which would ordinarily only be displayed on a page of the appropriate
+    // type. We remove this preview when the extension installed bubble
+    // closes.
+    locationBarView->SetPreviewEnabledPageAction(page_action, true);
+    pageActionPreviewShowing_ = YES;
 
-      // Find the center of the bottom of the page action icon.
-      arrowPoint =
-          locationBarView->GetPageActionBubblePoint(page_action);
-      break;
-    }
-    case extension_installed_bubble::kBundle:
-    case extension_installed_bubble::kGeneric: {
-      // Point at the bottom of the wrench menu.
-      NSView* wrenchButton =
-          [[window->cocoa_controller() toolbarController] wrenchButton];
-      const NSRect bounds = [wrenchButton bounds];
-      NSPoint anchor = NSMakePoint(NSMidX(bounds), NSMaxY(bounds));
-      arrowPoint = [wrenchButton convertPoint:anchor toView:nil];
-      break;
-    }
-    default: {
-      NOTREACHED();
-    }
+    // Find the center of the bottom of the page action icon.
+    arrowPoint = locationBarView->GetPageActionBubblePoint(page_action);
+  } else if (type_ == extension_installed_bubble::kOmniboxKeyword) {
+    LocationBarViewMac* locationBarView =
+        [window->cocoa_controller() locationBarBridge];
+    arrowPoint = locationBarView->GetPageInfoBubblePoint();
+  } else {
+    DCHECK(type_ == extension_installed_bubble::kBundle ||
+           type_ == extension_installed_bubble::kGeneric);
+    // Point at the bottom of the wrench menu.
+    NSView* wrenchButton =
+        [[window->cocoa_controller() toolbarController] wrenchButton];
+    const NSRect bounds = [wrenchButton bounds];
+    NSPoint anchor = NSMakePoint(NSMidX(bounds), NSMaxY(bounds));
+    arrowPoint = [wrenchButton convertPoint:anchor toView:nil];
   }
   return arrowPoint;
 }
@@ -350,9 +332,9 @@ class ExtensionLoadedNotificationObserver
   extensions::CommandService* command_service =
       extensions::CommandService::Get(browser_->profile());
   if (type_ == extension_installed_bubble::kPageAction) {
-    if (extensions::CommandsInfo::GetPageActionCommand(extension_) &&
+    if (extensions::CommandsInfo::GetPageActionCommand([self extension]) &&
         command_service->GetPageActionCommand(
-            extension_->id(),
+            [self extension]->id(),
             extensions::CommandService::ACTIVE,
             command,
             NULL)) {
@@ -367,9 +349,9 @@ class ExtensionLoadedNotificationObserver
   extensions::CommandService* command_service =
       extensions::CommandService::Get(browser_->profile());
   if (type_ == extension_installed_bubble::kBrowserAction) {
-    if (extensions::CommandsInfo::GetBrowserActionCommand(extension_) &&
+    if (extensions::CommandsInfo::GetBrowserActionCommand([self extension]) &&
         command_service->GetBrowserActionCommand(
-            extension_->id(),
+            [self extension]->id(),
             extensions::CommandService::ACTIVE,
             command,
             NULL)) {
@@ -444,15 +426,14 @@ class ExtensionLoadedNotificationObserver
         IDS_EXTENSION_INSTALLED_SIGNIN_PROMO_LINK));
     NSString* message(l10n_util::GetNSStringWithFixup(
         IDS_EXTENSION_INSTALLED_SIGNIN_PROMO));
+    message = [link stringByAppendingString:message];
 
     HyperlinkTextView* view = promo_.get();
-    [view setMessageAndLink:message
-                   withLink:link
-                   atOffset:0
-                       font:font
-               messageColor:[NSColor blackColor]
-                  linkColor:gfx::SkColorToCalibratedNSColor(
-                                chrome_style::GetLinkColor())];
+    [view setMessage:message withFont:font messageColor:[NSColor blackColor]];
+    [view addLinkRange:NSMakeRange(0, [link length])
+              withName:@""
+             linkColor:gfx::SkColorToCalibratedNSColor(
+                           chrome_style::GetLinkColor())];
 
     // HACK! The TextView does not report correct height even after you stuff
     // it with text (it tells you it is single-line even if it is multiline), so
@@ -465,7 +446,8 @@ class ExtensionLoadedNotificationObserver
   }
 
   // First part of extension installed message, the heading.
-  base::string16 extension_name = base::UTF8ToUTF16(extension_->name().c_str());
+  base::string16 extension_name =
+      base::UTF8ToUTF16([self extension]->name().c_str());
   base::i18n::AdjustStringForLocaleDirection(&extension_name);
   [heading_ setStringValue:l10n_util::GetNSStringF(
       IDS_EXTENSION_INSTALLED_HEADING, extension_name)];
@@ -492,7 +474,8 @@ class ExtensionLoadedNotificationObserver
   if (type_ == extension_installed_bubble::kOmniboxKeyword) {
     [howToUse_ setStringValue:l10n_util::GetNSStringF(
         IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
-        base::UTF8ToUTF16(extensions::OmniboxInfo::GetKeyword(extension_)))];
+        base::UTF8ToUTF16(extensions::OmniboxInfo::GetKeyword(
+            [self extension])))];
     [howToUse_ setHidden:NO];
     [[howToUse_ cell]
         setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
@@ -615,9 +598,9 @@ class ExtensionLoadedNotificationObserver
   [heading_ setFrame:headingFrame];
 
   NSRect howToManageFrame = [howToManage_ frame];
-  if (!extensions::OmniboxInfo::GetKeyword(extension_).empty() ||
-      extensions::ActionInfo::GetBrowserActionInfo(extension_) ||
-      extensions::ActionInfo::IsVerboseInstallMessage(extension_)) {
+  if (!extensions::OmniboxInfo::GetKeyword([self extension]).empty() ||
+      extensions::ActionInfo::GetBrowserActionInfo([self extension]) ||
+      extensions::ActionInfo::IsVerboseInstallMessage([self extension])) {
     // For browser actions, page actions and omnibox keyword show the
     // 'how to use' message before the 'how to manage' message.
     NSRect howToUseFrame = [howToUse_ frame];
@@ -678,10 +661,6 @@ class ExtensionLoadedNotificationObserver
   return appShortcutLink_;
 }
 
-- (void)extensionUnloaded:(id)sender {
-  extension_ = NULL;
-}
-
 - (IBAction)onManageShortcutClicked:(id)sender {
   [self close];
   std::string configure_url = chrome::kChromeUIExtensionsURL;
@@ -694,7 +673,7 @@ class ExtensionLoadedNotificationObserver
 - (IBAction)onAppShortcutClicked:(id)sender {
   scoped_ptr<extensions::ExtensionInstallUI> install_ui(
       extensions::CreateExtensionInstallUI(browser_->profile()));
-  install_ui->OpenAppInstalledUI(extension_->id());
+  install_ui->OpenAppInstalledUI([self extension]->id());
 }
 
 - (void)awakeFromNib {

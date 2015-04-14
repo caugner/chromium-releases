@@ -16,11 +16,22 @@
 namespace ui {
 
 class DisplayManager;
+class DriCursor;
 class DriWindowDelegate;
 class DriWindowManager;
 class EventFactoryEvdev;
 class DriGpuPlatformSupportHost;
 
+// Implementation of the platform window. This object and its handle |widget_|
+// uniquely identify a window. Since the DRI/GBM platform is split into 2
+// pieces (Browser process and GPU process), internally we need to make sure the
+// state is synchronized between the 2 processes.
+//
+// |widget_| is used in both processes to uniquely identify the window. This
+// means that any state on the browser side needs to be propagated to the GPU.
+// State propagation needs to happen before the state change is acknowledged to
+// |delegate_| as |delegate_| is responsible for initializing the surface
+// associated with the window (the surface is created on the GPU process).
 class DriWindow : public PlatformWindow,
                   public PlatformEventDispatcher,
                   public ChannelObserver {
@@ -29,6 +40,7 @@ class DriWindow : public PlatformWindow,
             const gfx::Rect& bounds,
             DriGpuPlatformSupportHost* sender,
             EventFactoryEvdev* event_factory,
+            DriCursor* cursor,
             DriWindowManager* window_manager,
             DisplayManager* display_manager);
   ~DriWindow() override;
@@ -64,9 +76,12 @@ class DriWindow : public PlatformWindow,
   void OnChannelDestroyed() override;
 
  private:
+  void SendBoundsChange();
+
   PlatformWindowDelegate* delegate_;   // Not owned.
   DriGpuPlatformSupportHost* sender_;  // Not owned.
   EventFactoryEvdev* event_factory_;   // Not owned.
+  DriCursor* cursor_;                  // Not owned.
   DriWindowManager* window_manager_;   // Not owned.
   DisplayManager* display_manager_;    // Not owned.
 

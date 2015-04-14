@@ -48,6 +48,8 @@ source_set("metrics") {
     "metrics_switches.h",
     "persisted_logs.cc",
     "persisted_logs.h",
+    "url_constants.cc",
+    "url_constants.h",
   ]
 
   public_deps = [
@@ -63,6 +65,10 @@ source_set("metrics") {
 
   if (is_chromeos) {
     deps += [ ":serialization" ]
+  }
+
+  if (is_win) {
+    sources -= [ "machine_id_provider_stub.cc" ]
   }
 }
 
@@ -87,10 +93,10 @@ source_set("gpu") {
 # GYP version: components/metrics.gypi:metrics_net
 static_library("net") {
   sources = [
-    "net/network_metrics_provider.cc",
-    "net/network_metrics_provider.h",
     "net/net_metrics_log_uploader.cc",
     "net/net_metrics_log_uploader.h",
+    "net/network_metrics_provider.cc",
+    "net/network_metrics_provider.h",
     "net/wifi_access_point_info_provider.cc",
     "net/wifi_access_point_info_provider.h",
     "net/wifi_access_point_info_provider_chromeos.cc",
@@ -147,10 +153,10 @@ if (is_linux) {
   # GYP version: components/metrics.gypi:metrics_serialization
   source_set("serialization") {
     sources = [
-      "serialization/serialization_utils.cc",
-      "serialization/serialization_utils.h",
       "serialization/metric_sample.cc",
       "serialization/metric_sample.h",
+      "serialization/serialization_utils.cc",
+      "serialization/serialization_utils.h",
     ]
     deps = [
       "//base",

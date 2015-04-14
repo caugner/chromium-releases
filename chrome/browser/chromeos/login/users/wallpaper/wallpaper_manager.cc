@@ -12,7 +12,6 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -28,6 +27,7 @@
 #include "base/sys_info.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -96,8 +96,7 @@ bool ShouldUseCustomizedDefaultWallpaper() {
   PrefService* pref_service = g_browser_process->local_state();
 
   return !(pref_service->FindPreference(
-                             prefs::kCustomizationDefaultWallpaperURL)
-               ->IsDefaultValue());
+      prefs::kCustomizationDefaultWallpaperURL)->IsDefaultValue());
 }
 
 // Returns index of the first public session user found in |users|
@@ -548,7 +547,7 @@ void WallpaperManager::SetCustomWallpaper(
     GetPendingWallpaper(user_id, false)->ResetSetWallpaperImage(image, info);
   }
 
-  wallpaper_cache_[user_id] = CustomWallpaperElement(wallpaper_path, image);
+  wallpaper_cache_[user_id] = image;
 }
 
 void WallpaperManager::SetDefaultWallpaperNow(const std::string& user_id) {
@@ -565,6 +564,7 @@ void WallpaperManager::DoSetDefaultWallpaper(
   // There is no visible background in kiosk mode.
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
     return;
+  current_wallpaper_path_.clear();
   wallpaper_cache_.erase(user_id);
   // Some browser tests do not have a shell instance. As no wallpaper is needed
   // in these tests anyway, avoid loading one, preventing crashes and speeding
@@ -577,9 +577,15 @@ void WallpaperManager::DoSetDefaultWallpaper(
 
   const base::FilePath* file = NULL;
 
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->FindUser(user_id);
+
   if (user_manager::UserManager::Get()->IsLoggedInAsGuest()) {
     file =
         use_small ? &guest_small_wallpaper_file_ : &guest_large_wallpaper_file_;
+  } else if (user && user->GetType() == user_manager::USER_TYPE_CHILD) {
+    file =
+        use_small ? &child_small_wallpaper_file_ : &child_large_wallpaper_file_;
   } else {
     file = use_small ? &default_small_wallpaper_file_
                      : &default_large_wallpaper_file_;
@@ -592,7 +598,7 @@ void WallpaperManager::DoSetDefaultWallpaper(
       default_wallpaper_image_->file_path() != file->value()) {
     default_wallpaper_image_.reset();
     if (!file->empty()) {
-      loaded_wallpapers_for_test_++;
+      loaded_wallpapers_++;
       StartLoadAndSetDefaultWallpaper(
           *file, layout, on_finish.Pass(), &default_wallpaper_image_);
       return;
@@ -633,7 +639,7 @@ void WallpaperManager::SetUserWallpaperInfo(const std::string& user_id,
 void WallpaperManager::ScheduleSetUserWallpaper(const std::string& user_id,
                                                 bool delayed) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Some unit tests come here without a UserManager or without a pref system.
+  // Some unit tests come here without a UserManager or without a pref system.q
   if (!user_manager::UserManager::IsInitialized() ||
       !g_browser_process->local_state()) {
     return;
@@ -689,17 +695,10 @@ void WallpaperManager::ScheduleSetUserWallpaper(const std::string& user_id,
         sub_dir = wallpaper::kOriginalWallpaperSubDir;
       base::FilePath wallpaper_path = GetCustomWallpaperDir(sub_dir);
       wallpaper_path = wallpaper_path.Append(info.location);
-      CustomWallpaperMap::iterator it = wallpaper_cache_.find(user_id);
-      // Do not try to load the wallpaper if the path is the same. Since loading
-      // could still be in progress, we ignore the existence of the image.
-      if (it != wallpaper_cache_.end() && it->second.first == wallpaper_path)
+      if (current_wallpaper_path_ == wallpaper_path)
         return;
-
-      // Set the new path and reset the existing image - the image will be
-      // added once it becomes available.
-      wallpaper_cache_[user_id] =
-          CustomWallpaperElement(wallpaper_path, gfx::ImageSkia());
-      loaded_wallpapers_for_test_++;
+      current_wallpaper_path_ = wallpaper_path;
+      loaded_wallpapers_++;
 
       GetPendingWallpaper(user_id, delayed)
           ->ResetSetCustomWallpaper(info, wallpaper_path);
@@ -723,10 +722,7 @@ void WallpaperManager::SetWallpaperFromImageSkia(
     return;
   WallpaperInfo info;
   info.layout = layout;
-
-  // This is an API call and we do not know the path. So we set the image, but
-  // no path.
-  wallpaper_cache_[user_id] = CustomWallpaperElement(base::FilePath(), image);
+  wallpaper_cache_[user_id] = image;
 
   if (update_wallpaper) {
     GetPendingWallpaper(last_selected_user_, false /* Not delayed */)
@@ -736,35 +732,6 @@ void WallpaperManager::SetWallpaperFromImageSkia(
 
 
 // WallpaperManager, private: --------------------------------------------------
-
-WallpaperManager::PendingWallpaper* WallpaperManager::GetPendingWallpaper(
-    const std::string& user_id,
-    bool delayed) {
-  if (!pending_inactive_) {
-    loading_.push_back(new WallpaperManager::PendingWallpaper(
-        (delayed ? GetWallpaperLoadDelay()
-                 : base::TimeDelta::FromMilliseconds(0)),
-        user_id));
-    pending_inactive_ = loading_.back().get();
-  }
-  return pending_inactive_;
-}
-
-void WallpaperManager::RemovePendingWallpaperFromList(
-    PendingWallpaper* pending) {
-  DCHECK(loading_.size() > 0);
-  for (WallpaperManager::PendingList::iterator i = loading_.begin();
-       i != loading_.end();
-       ++i) {
-    if (i->get() == pending) {
-      loading_.erase(i);
-      break;
-    }
-  }
-
-  if (loading_.empty())
-    FOR_EACH_OBSERVER(Observer, observers_, OnPendingListEmptyForTesting());
-}
 
 void WallpaperManager::ClearObsoleteWallpaperPrefs() {
   PrefService* prefs = g_browser_process->local_state();
@@ -873,8 +840,7 @@ void WallpaperManager::OnWallpaperDecoded(
     return;
   }
 
-  // Update the image, but keep the path which was set earlier.
-  wallpaper_cache_[user_id].second = user_image.image();
+  wallpaper_cache_[user_id] = user_image.image();
 
   if (update_wallpaper) {
     ash::Shell::GetInstance()
@@ -890,12 +856,7 @@ void WallpaperManager::StartLoad(const std::string& user_id,
                                  MovableOnDestroyCallbackHolder on_finish) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TRACE_EVENT_ASYNC_BEGIN0("ui", "LoadAndDecodeWallpaper", this);
-  if (update_wallpaper) {
-    // We are now about to change the wallpaper, so update the path and remove
-    // the existing image.
-    wallpaper_cache_[user_id] = CustomWallpaperElement(wallpaper_path,
-                                                       gfx::ImageSkia());
-  }
+
   wallpaper_loader_->Start(wallpaper_path.value(),
                            0,  // Do not crop.
                            base::Bind(&WallpaperManager::OnWallpaperDecoded,
@@ -955,6 +916,35 @@ void WallpaperManager::OnCustomizedDefaultWallpaperResized(
                           rescaled_files->path_rescaled_large(),
                           large_wallpaper_image.Pass());
   VLOG(1) << "Customized default wallpaper applied.";
+}
+
+WallpaperManager::PendingWallpaper* WallpaperManager::GetPendingWallpaper(
+    const std::string& user_id,
+    bool delayed) {
+  if (!pending_inactive_) {
+    loading_.push_back(new WallpaperManager::PendingWallpaper(
+        (delayed ? GetWallpaperLoadDelay()
+                 : base::TimeDelta::FromMilliseconds(0)),
+        user_id));
+    pending_inactive_ = loading_.back().get();
+  }
+  return pending_inactive_;
+}
+
+void WallpaperManager::RemovePendingWallpaperFromList(
+    PendingWallpaper* pending) {
+  DCHECK(loading_.size() > 0);
+  for (WallpaperManager::PendingList::iterator i = loading_.begin();
+       i != loading_.end();
+       ++i) {
+    if (i->get() == pending) {
+      loading_.erase(i);
+      break;
+    }
+  }
+
+  if (loading_.empty())
+    FOR_EACH_OBSERVER(Observer, observers_, OnPendingListEmptyForTesting());
 }
 
 size_t WallpaperManager::GetPendingListSizeForTesting() const {

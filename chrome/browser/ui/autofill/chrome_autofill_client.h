@@ -46,6 +46,7 @@ class ChromeAutofillClient
   PersonalDataManager* GetPersonalDataManager() override;
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
+  IdentityProvider* GetIdentityProvider() override;
   void HideRequestAutocompleteDialog() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
@@ -74,6 +75,7 @@ class ChromeAutofillClient
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
   void OnFirstUserGestureObserved() override;
+  void LinkClicked(const GURL& url, WindowOpenDisposition disposition) override;
 
   // content::WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* rfh) override;
@@ -81,6 +83,7 @@ class ChromeAutofillClient
       content::RenderFrameHost* render_frame_host,
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override;
+  void MainFrameWasResized(bool width_changed) override;
   void WebContentsDestroyed() override;
 
   // ZoomObserver implementation.
@@ -126,6 +129,9 @@ class ChromeAutofillClient
 
   // The last render frame that called requestAutocomplete.
   content::RenderFrameHost* last_rfh_to_rac_;
+
+  // The identity provider, used for Wallet integration.
+  scoped_ptr<IdentityProvider> identity_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeAutofillClient);
 };

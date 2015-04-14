@@ -6,7 +6,6 @@
 
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
-#include "chrome/browser/extensions/api/alarms/alarm_manager.h"
 #include "chrome/browser/extensions/api/bookmark_manager_private/bookmark_manager_private_api.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmarks_api.h"
 #include "chrome/browser/extensions/api/braille_display_private/braille_display_private_api.h"
@@ -22,11 +21,8 @@
 #include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
-#include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
 #include "chrome/browser/extensions/api/location/location_manager.h"
 #include "chrome/browser/extensions/api/mdns/mdns_api.h"
-#include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_event_router_factory.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/preference/chrome_direct_setting_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
@@ -81,7 +77,6 @@ namespace chrome_extensions {
 void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ActivityLog::GetFactoryInstance();
   extensions::ActivityLogAPI::GetFactoryInstance();
-  extensions::AlarmManager::GetFactoryInstance();
   extensions::ApiResourceManager<
       extensions::UsbDeviceResource>::GetFactoryInstance();
   extensions::BookmarksAPI::GetFactoryInstance();
@@ -109,7 +104,6 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::HistoryAPI::GetFactoryInstance();
   extensions::HotwordPrivateEventService::GetFactoryInstance();
   extensions::IdentityAPI::GetFactoryInstance();
-  extensions::IdleManagerFactory::GetInstance();
   extensions::InstallTrackerFactory::GetInstance();
 #if defined(OS_CHROMEOS)
   extensions::InputImeAPI::GetFactoryInstance();
@@ -120,14 +114,10 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::LogPrivateAPI::GetFactoryInstance();
 #endif
   extensions::MDnsAPI::GetFactoryInstance();
-  extensions::MediaGalleriesPrivateAPI::GetFactoryInstance();
 #if defined(OS_CHROMEOS)
   extensions::MediaPlayerAPI::GetFactoryInstance();
 #endif
   extensions::MenuManagerFactory::GetInstance();
-#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_MACOSX)
-  extensions::NetworkingPrivateEventRouterFactory::GetInstance();
-#endif
   extensions::OmniboxAPI::GetFactoryInstance();
 #if defined(ENABLE_PLUGINS)
   extensions::PluginManager::GetFactoryInstance();

@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.preferences;
 
+import android.annotation.SuppressLint;
 import android.app.Fragment;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -23,6 +24,7 @@ import android.view.MenuItem;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
 
@@ -65,9 +67,47 @@ public abstract class Preferences extends ActionBarActivity implements
      * Opens a URL in a new activity.
      * @param titleResId The resource ID of the title to show above the web page.
      * @param urlResId The resource ID of the URL to load.
+     *
+     * TODO(newt): remove this method when EmbedContentViewActivity is upstreamed.
      */
     public abstract void showUrl(int titleResId, int urlResId);
 
+    /**
+     * Launches the help page for Google translate.
+     */
+    public void showGoogleTranslateHelp() {}
+
+    /**
+     * Launches the help page for privacy settings.
+     */
+    public void showPrivacyPreferencesHelp() {}
+
+    /**
+     * Called when user changes the contextual search preference.
+     * @param newValue Whether contextual search is now enabled.
+     *
+     * TODO(newt): remove this method when contextual search is upstreamed.
+     */
+    public void logContextualSearchToggled(boolean newValue) {}
+
+    /**
+     * Returns whether contextual search is enabled.
+     *
+     * TODO(newt): remove this method when contextual search is upstreamed.
+     */
+    public boolean isContextualSearchEnabled() {
+        return false;
+    }
+
+    /**
+     * Notifies the precache launcher that the user has changed the network prediction preference.
+     *
+     * TODO(newt): remove this method when precache logic is upstreamed.
+     */
+    public void updatePrecachingEnabled() {}
+
+    @SuppressFBWarnings("DM_EXIT")
+    @SuppressLint("InlinedApi")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ensureActivityNotExported();

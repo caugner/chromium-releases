@@ -6,7 +6,7 @@ syntax = "proto2";
 
 package dom_distiller.proto;
 option optimize_for = LITE_RUNTIME;
-option java_package = "com.dom_distiller.proto";
+option java_package = "org.chromium.distiller.proto";
 option java_outer_classname = "DomDistillerProtos";
 
 message DistilledContent {
@@ -102,7 +102,7 @@ message DomDistillerOptions {
   // (3): (2) and extracted paging information
   optional int32 debug_level = 2;
 
-  // The original domain of the page if it's a file://, used for detecting next/prev page links
-  // which expects the same domain for both current page and paging links.
-  optional string original_domain = 3;
+  // The original URL of the page, which is used in the heuristics in
+  // detecting next/prev page links.
+  optional string original_url = 3;
 }

@@ -34,7 +34,7 @@ void ParseFileResourceWithUploadRangeAndRun(
     file_resource = FileResource::CreateFrom(*value);
     if (!file_resource) {
       callback.Run(
-          UploadRangeResponse(GDATA_PARSE_ERROR,
+          UploadRangeResponse(DRIVE_PARSE_ERROR,
                               response.start_position_received,
                               response.end_position_received),
           scoped_ptr<FileResource>());
@@ -48,6 +48,12 @@ void ParseFileResourceWithUploadRangeAndRun(
 }  // namespace
 
 namespace drive {
+
+Property::Property() : visibility_(VISIBILITY_PRIVATE) {
+}
+
+Property::~Property() {
+}
 
 //============================ DriveApiPartialFieldRequest ====================
 
@@ -70,16 +76,20 @@ GURL DriveApiPartialFieldRequest::GetURL() const {
 FilesGetRequest::FilesGetRequest(
     RequestSender* sender,
     const DriveApiUrlGenerator& url_generator,
+    bool use_internal_endpoint,
     const FileResourceCallback& callback)
     : DriveApiDataRequest<FileResource>(sender, callback),
-      url_generator_(url_generator) {
+      url_generator_(url_generator),
+      use_internal_endpoint_(use_internal_endpoint) {
   DCHECK(!callback.is_null());
 }
 
 FilesGetRequest::~FilesGetRequest() {}
 
 GURL FilesGetRequest::GetURLInternal() const {
-  return url_generator_.GetFilesGetUrl(file_id_);
+  return url_generator_.GetFilesGetUrl(file_id_,
+                                       use_internal_endpoint_,
+                                       embed_origin_);
 }
 
 //============================ FilesAuthorizeRequest ===========================
@@ -220,6 +230,27 @@ bool FilesPatchRequest::GetContentData(std::string* upload_content_type,
       parents_value->Append(parent);
     }
     root.Set("parents", parents_value);
+  }
+
+  if (!properties_.empty()) {
+    base::ListValue* properties_value = new base::ListValue;
+    for (const auto& property : properties_) {
+      base::DictionaryValue* const property_value = new base::DictionaryValue;
+      std::string visibility_as_string;
+      switch (property.visibility()) {
+        case Property::VISIBILITY_PRIVATE:
+          visibility_as_string = "PRIVATE";
+          break;
+        case Property::VISIBILITY_PUBLIC:
+          visibility_as_string = "PUBLIC";
+          break;
+      }
+      property_value->SetString("visibility", visibility_as_string);
+      property_value->SetString("key", property.key());
+      property_value->SetString("value", property.value());
+      properties_value->Append(property_value);
+    }
+    root.Set("properties", properties_value);
   }
 
   base::JSONWriter::Write(&root, upload_content);

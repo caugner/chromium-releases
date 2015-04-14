@@ -202,77 +202,45 @@
   },
 
   "RemoteAccessHostFirewallTraversal": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostFirewallTraversal": true },
-    "pref_mappings": [
-      { "pref": "remote_access.host_firewall_traversal" }
-    ],
-
-    "note": "TODO(frankf): Enable on all OS after crbug.com/121066 is fixed."
   },
 
   "RemoteAccessHostRequireTwoFactor": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostRequireTwoFactor": false },
-    "pref_mappings": [
-      { "pref": "remote_access.host_require_two_factor" }
-    ]
   },
 
   "RemoteAccessHostDomain": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostDomain": "" },
-    "pref_mappings": [
-      { "pref": "remote_access.host_domain" }
-    ]
   },
 
   "RemoteAccessHostTalkGadgetPrefix": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostTalkGadgetPrefix": "chromoting-host" },
-    "pref_mappings": [
-      { "pref": "remote_access.host_talkgadget_prefix" }
-    ]
   },
 
   "RemoteAccessHostRequireCurtain": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostRequireCurtain": false },
-    "pref_mappings": [
-      { "pref": "remote_access.host_require_curtain" }
-    ]
   },
 
   "RemoteAccessHostAllowClientPairing": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostAllowClientPairing": true },
-    "pref_mappings": [
-      { "pref": "remote_access.host_allow_client_pairing" }
-    ]
   },
 
   "RemoteAccessHostAllowGnubbyAuth": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostAllowGnubbyAuth": true },
-    "pref_mappings": [
-      { "pref": "remote_access.host_allow_gnubby_auth" }
-    ]
   },
 
   "RemoteAccessHostAllowRelayedConnection": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostAllowRelayedConnection": true },
-    "pref_mappings": [
-      { "pref": "remote_access.host_allow_relayed_connection" }
-    ]
   },
 
   "RemoteAccessHostUdpPortRange": {
-    "os": [],
-    "test_policy": { "RemoteAccessHostUdpPortRange": "12400-12409" },
-    "pref_mappings": [
-      { "pref": "remote_access.host_udp_port_range" }
-    ]
+  },
+
+  "RemoteAccessHostMatchUsername": {
+  },
+
+  "RemoteAccessHostTokenUrl": {
+  },
+
+  "RemoteAccessHostTokenValidationUrl": {
+  },
+
+  "RemoteAccessHostTokenValidationCertificateIssuer": {
+  },
+
+  "RemoteAccessHostDebugOverridePolicies": {
   },
 
   "PrintingEnabled": {
@@ -434,9 +402,9 @@
     ]
   },
 
-  "EnableWebBasedSignin": {
+  "EnableDeprecatedWebBasedSignin": {
     "os": ["win", "linux", "mac"],
-    "test_policy": { "EnableWebBasedSignin": false }
+    "test_policy": { "EnableDeprecatedWebBasedSignin": false }
   },
 
   "UserDataDir": {
@@ -1013,9 +981,7 @@
           { "policy": { "DefaultPluginsSetting": 1 },
             "value": "allow"},
           { "policy": { "DefaultPluginsSetting": 2 },
-            "value": "block"},
-          { "policy": { "DefaultPluginsSetting": 3 },
-            "value": "ask"}
+            "value": "block"}
         ]
       }
     ],
@@ -2273,6 +2239,15 @@
   },
 
   "ReportDeviceUsers": {
+  },
+
+  "ReportDeviceHardwareStatus": {
+  },
+
+  "ReportDeviceSessionStatus": {
+  },
+
+  "ReportUploadFrequency": {
   },
 
   "DeviceAllowNewUsers": {

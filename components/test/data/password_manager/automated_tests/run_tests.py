@@ -3,98 +3,223 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This file allows the bots to be easily configure and run the tests."""
+"""This file allows the bots to be easily configure and run the tests.
 
-import argparse
+Running this script requires passing --config-path with a path to a config file
+of the following structure:
+  [data_files]
+  passwords_path=<path to a file with passwords>
+  [binaries]
+  chrome-path=<chrome binary path>
+  chromedriver-path=<chrome driver path>
+  [run_options]
+  write_to_sheet=[false|true]
+  tests_in_parrallel=<number of parallel tests>
+  # |tests_to_runs| field is optional, if it is absent all tests will be run.
+  tests_to_run=<test names to run, comma delimited>
+  [output]
+  save-path=<file where to save result>
+  [sheet_info]
+  # This section is required only when write_to_sheet=true
+  pkey=full_path
+  client_email=email_assigned_by_google_dev_console
+  sheet_key=sheet_key_from_sheet_url
+"""
+from datetime import datetime
+import ConfigParser
+import sys
+import httplib2
 import os
+import shutil
+import subprocess
 import tempfile
+import time
+sheet_libraries_import_error = None
+try:
+# TODO(vabr) Remove this dependency http://crbug.com/418485#c4.
+  from Sheet import Sheet
+  from apiclient.discovery import build
+  from gdata.gauth import OAuth2TokenFromCredentials
+  from gdata.spreadsheet.service import SpreadsheetsService
+  from oauth2client.client import SignedJwtAssertionCredentials
+  import oauth2client.tools
+except ImportError as err:
+  sheet_libraries_import_error = err
+
 
 from environment import Environment
 import tests
 
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser(
-      description="Password Manager automated tests runner help.")
-  parser.add_argument(
-      "--chrome-path", action="store", dest="chrome_path",
-      help="Set the chrome path (required).", nargs=1, required=True)
-  parser.add_argument(
-      "--chromedriver-path", action="store", dest="chromedriver_path",
-      help="Set the chromedriver path (required).", nargs=1, required=True)
-  parser.add_argument(
-      "--profile-path", action="store", dest="profile_path",
-      help="Set the profile path (required). You just need to choose a "
-           "temporary empty folder. If the folder is not empty all its content "
-           "is going to be removed.",
-      nargs=1, required=True)
-  parser.add_argument(
-      "--passwords-path", action="store", dest="passwords_path",
-      help="Set the usernames/passwords path (required).", nargs=1,
-      required=True)
-  parser.add_argument("--save-path", action="store", nargs=1, dest="save_path",
-      help="Write the results in a file.", required=True)
-  args = parser.parse_args()
+_CREDENTIAL_SCOPES = "https://spreadsheets.google.com/feeds"
 
-  environment = Environment('', '', '', None, False)
-  tests.Tests(environment)
+# TODO(dvadym) Change all prints in this file to correspond logging.
 
-  xml = open(args.save_path[0],"w")
-  xml.write("<xml>")
-  try:
-    results = tempfile.NamedTemporaryFile(
-        dir=os.path.join(tempfile.gettempdir()), delete=False)
-    results_path = results.name
-    results.close()
+# TODO(dvadym) Consider to move this class to separate file.
+class SheetWriter(object):
 
-    full_path = os.path.realpath(__file__)
-    tests_dir = os.path.dirname(full_path)
-    tests_path = os.path.join(tests_dir, "tests.py")
+  def __init__(self, config):
+    self.write_to_sheet = config.getboolean("run_options", "write_to_sheet")
+    if not self.write_to_sheet:
+      return
+    if sheet_libraries_import_error:
+      raise sheet_libraries_import_error
+    self.pkey = config.get("sheet_info", "pkey")
+    self.client_email = config.get("sheet_info", "client_email")
+    self.sheet_key = config.get("sheet_info", "sheet_key")
+    _, self.access_token = self._authenticate()
+    self.sheet = self._spredsheeet_for_logging()
 
-    for websitetest in environment.websitetests:
-      # The tests can be flaky. This is why we try to rerun up to 3 times.
-      for x in range(0, 3):
-        # TODO(rchtara): Using "pkill" is just temporary until a better,
-        # platform-independent solution is found.
-        os.system("pkill chrome")
-        try:
-          os.remove(results_path)
-        except Exception:
-          pass
-        # TODO(rchtara): Using "timeout is just temporary until a better,
-        # platform-independent solution is found.
+  # TODO(melandory): Function _authenticate belongs to separate module.
+  def _authenticate(self):
+    http, token = None, None
+    with open(self.pkey) as pkey_file:
+      private_key = pkey_file.read()
+      credentials = SignedJwtAssertionCredentials(
+          self.client_email, private_key, _CREDENTIAL_SCOPES)
+      http = httplib2.Http()
+      http = credentials.authorize(http)
+      build("drive", "v2", http=http)
+      token = OAuth2TokenFromCredentials(credentials).access_token
+    return http, token
 
-        # The website test runs in two passes, each pass has an internal
-        # timeout of 200s for waiting (see |remaining_time_to_wait| and
-        # Wait() in websitetest.py). Accounting for some more time spent on
-        # the non-waiting execution, 300 seconds should be the upper bound on
-        # the runtime of one pass, thus 600 seconds for the whole test.
-        os.system("timeout 600 python %s %s --chrome-path %s "
-            "--chromedriver-path %s --passwords-path %s --profile-path %s "
-            "--save-path %s" %
-            (tests_path, websitetest.name, args.chrome_path[0],
-             args.chromedriver_path[0], args.passwords_path[0],
-             args.profile_path[0], results_path))
-        if os.path.isfile(results_path):
-          results = open(results_path, "r")
-          count = 0 # Count the number of successful tests.
-          for line in results:
-            xml.write(line)
-            count += line.count("successful='True'")
-          results.close()
-          # There is only two tests running for every website: the prompt and
-          # the normal test. If both of the tests were successful, the tests
-          # would be stopped for the current website.
-          if count == 2:
-            break
-        else:
-          xml.write("<result><test name='%s' type='prompt' successful='false'>"
-              "</test><test name='%s' type='normal' successful='false'></test>"
-              "</result>" % (websitetest.name, websitetest.name))
-  finally:
+  # TODO(melandory): Functionality of _spredsheeet_for_logging belongs
+  # to websitetests, because this way we do not need to write results of run
+  # in separate file and then read it here.
+  def _spredsheeet_for_logging(self):
+    """ Connects to document where result of test run will be logged. """
+    # Connect to trix
+    service = SpreadsheetsService(additional_headers={
+              "Authorization": "Bearer " + self.access_token})
+    sheet = Sheet(service, self.sheet_key)
+    return sheet
+
+  def write_line_to_sheet(self, data):
+    if not self.write_to_sheet:
+      return
     try:
-      os.remove(results_path)
+      self.sheet.InsertRow(self.sheet.row_count, data)
+    except Exception:
+      pass  # TODO(melandory): Sometimes writing to spreadsheet fails. We need
+            # to deal with it better that just ignoring it.
+
+class TestRunner(object):
+
+  def __init__(self, general_test_cmd, test_name):
+    """ Args:
+     general_test_cmd: String contains part of run command common for all tests,
+      [2] is placeholder for test name.
+     test_name: Test name (facebook for example).
+    """
+    self.profile_path = tempfile.mkdtemp()
+    results = tempfile.NamedTemporaryFile(delete=False)
+    self.results_path = results.name
+    results.close()
+    self.test_cmd = general_test_cmd + ["--profile-path", self.profile_path,
+                                        "--save-path", self.results_path]
+    self.test_cmd[2] = self.test_name = test_name
+    # TODO(rchtara): Using "timeout is just temporary until a better,
+    # platform-independent solution is found.
+    # The website test runs in two passes, each pass has an internal
+    # timeout of 200s for waiting (see |remaining_time_to_wait| and
+    # Wait() in websitetest.py). Accounting for some more time spent on
+    # the non-waiting execution, 300 seconds should be the upper bound on
+    # the runtime of one pass, thus 600 seconds for the whole test.
+    self.test_cmd = ["timeout", "600"] + self.test_cmd
+    self.runner_process = None
+    # The tests can be flaky. This is why we try to rerun up to 3 times.
+    self.max_test_runs_left = 3
+    self.failures = []
+    self._run_test()
+
+  def get_test_result(self):
+    """ Return None if result is not ready yet."""
+    test_running = self.runner_process and self.runner_process.poll() is None
+    if test_running: return None
+    # Test is not running, now we have to check if we want to start it again.
+    if self._check_if_test_passed():
+      print "Test " + self.test_name + " passed"
+      return "pass", []
+    if self.max_test_runs_left == 0:
+      print "Test " + self.test_name + " failed"
+      return "fail", self.failures
+    self._run_test()
+    return None
+
+  def _check_if_test_passed(self):
+    if os.path.isfile(self.results_path):
+      results = open(self.results_path, "r")
+      count = 0  # Count the number of successful tests.
+      for line in results:
+        # TODO(melandory): We do not need to send all this data to sheet.
+        self.failures.append(line)
+        count += line.count("successful='True'")
+      results.close()
+      # There is only two tests running for every website: the prompt and
+      # the normal test. If both of the tests were successful, the tests
+      # would be stopped for the current website.
+      print "Test run of %s %s" % (self.test_name, "passed"
+                                   if count == 2 else "failed")
+      if count == 2:
+        return True
+    return False
+
+  def _run_test(self):
+    """Run separate process that once run test for one site."""
+    try:
+      os.remove(self.results_path)
     except Exception:
       pass
+    try:
+      shutil.rmtree(self.profile_path)
+    except Exception:
+      pass
+    self.max_test_runs_left -= 1
+    print "Run of test %s started" % self.test_name
+    self.runner_process = subprocess.Popen(self.test_cmd)
 
-  xml.write("</xml>")
-  xml.close()
+def run_tests(config_path):
+  """ Runs automated tests. """
+  environment = Environment("", "", "", None, False)
+  tests.Tests(environment)
+  config = ConfigParser.ConfigParser()
+  config.read(config_path)
+  date = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+  max_tests_in_parrallel = config.getint("run_options", "tests_in_parrallel")
+  sheet_writer = SheetWriter(config)
+  full_path = os.path.realpath(__file__)
+  tests_dir = os.path.dirname(full_path)
+  tests_path = os.path.join(tests_dir, "tests.py")
+  general_test_cmd =  ["python", tests_path, "test_name_placeholder",
+     "--chrome-path", config.get("binaries", "chrome-path"),
+     "--chromedriver-path", config.get("binaries", "chromedriver-path"),
+     "--passwords-path", config.get("data_files", "passwords_path")]
+  runners = []
+  tests_to_run = [test.name for test in environment.websitetests]
+  if config.has_option("run_options", "tests_to_run"):
+    user_selected_tests = config.get("run_options", "tests_to_run").split(',')
+    # TODO((dvadym) Validate the user selected tests are available.
+    tests_to_run = list(set(tests_to_run) & set(user_selected_tests))
+
+  with open(config.get("output", "save-path"), 'w') as savefile:
+    print "Tests to run %d\nTests: %s" % (len(tests_to_run), tests_to_run)
+    while len(runners) + len(tests_to_run) > 0:
+      i = 0
+      while i < len(runners):
+        result = runners[i].get_test_result()
+        if result:  # This test run is finished.
+          status, log = result
+          testinfo = [runners[i].test_name, status, date, " | ".join(log)]
+          sheet_writer.write_line_to_sheet(testinfo)
+          print>>savefile, " ".join(testinfo)
+          del runners[i]
+        else:
+          i += 1
+      while len(runners) < max_tests_in_parrallel and len(tests_to_run) > 0:
+        runners.append(TestRunner(general_test_cmd, tests_to_run.pop()))
+      time.sleep(1)  # Let us wait for worker process to finish.
+
+if __name__ == "__main__":
+  if len(sys.argv) != 2:
+    print "Synopsis:\n python run_tests.py <config_path>"
+  config_path = sys.argv[1]
+  run_tests(config_path)

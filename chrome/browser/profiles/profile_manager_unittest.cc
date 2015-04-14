@@ -44,7 +44,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -222,7 +222,8 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
             profile_manager->GetInitialProfileDir().value());
 
   const char kTestUserName[] = "test-user@example.com";
-  chromeos::FakeUserManager* user_manager = new chromeos::FakeUserManager();
+  chromeos::FakeChromeUserManager* user_manager =
+      new chromeos::FakeChromeUserManager();
   chromeos::ScopedUserManagerEnabler enabler(user_manager);
 
   const user_manager::User* active_user = user_manager->AddUser(kTestUserName);
@@ -263,15 +264,15 @@ TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
 
   // Force lazy-init of some profile services to simulate use.
   ASSERT_TRUE(profile1->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile1,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile1, ServiceAccessType::EXPLICIT_ACCESS));
   profile1->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile1));
   profile2->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile2));
   ASSERT_TRUE(profile2->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile2,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile2, ServiceAccessType::EXPLICIT_ACCESS));
 
   // Make sure any pending tasks run before we destroy the profiles.
     base::RunLoop().RunUntilIdle();
@@ -382,6 +383,13 @@ TEST_F(ProfileManagerTest, GetGuestProfilePath) {
   base::FilePath expected_path = temp_dir_.path();
   expected_path = expected_path.Append(chrome::kGuestProfileDir);
   EXPECT_EQ(expected_path, guest_path);
+}
+
+TEST_F(ProfileManagerTest, GetSystemProfilePath) {
+  base::FilePath system_profile_path = ProfileManager::GetSystemProfilePath();
+  base::FilePath expected_path = temp_dir_.path();
+  expected_path = expected_path.Append(chrome::kSystemProfileDir);
+  EXPECT_EQ(expected_path, system_profile_path);
 }
 
 class UnittestGuestProfileManager : public UnittestProfileManager {

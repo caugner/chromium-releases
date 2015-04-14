@@ -38,6 +38,16 @@ namespace autofill {
 // entry to the database and how they can affect the matching process.
 
 struct PasswordForm {
+  // Enum to keep track of what information has been sent to the server about
+  // this form regarding password generation.
+  enum GenerationUploadStatus {
+    NO_SIGNAL_SENT,
+    POSITIVE_SIGNAL_SENT,
+    NEGATIVE_SIGNAL_SENT,
+    // Reserve a few values for future use.
+    UNKNOWN_STATUS = 10
+  };
+
   // Enum to differentiate between HTML form based authentication, and dialogs
   // using basic or digest schemes. Default is SCHEME_HTML. Only PasswordForms
   // of the same Scheme will be matched/autofilled against each other.
@@ -191,7 +201,7 @@ struct PasswordForm {
     TYPE_LAST = TYPE_GENERATED
   };
 
-  // The form type. Not used yet. Please see http://crbug.com/152422
+  // The form type.
   Type type;
 
   // The number of times that this username/password has been used to
@@ -207,6 +217,9 @@ struct PasswordForm {
   // When parsing an HTML form, this is normally set.
   FormData form_data;
 
+  // What information has been sent to the Autofill server about this form.
+  GenerationUploadStatus generation_upload_status;
+
   // These following fields are set by a website using the Credential Manager
   // API. They will be empty and remain unused for sites which do not use that
   // API.
@@ -220,9 +233,10 @@ struct PasswordForm {
   // The URL of identity provider used for federated login.
   GURL federation_url;
 
-  // If true, Chrome will sign the user in automatically using the credentials.
-  // This field isn't synced deliberately.
-  bool is_zero_click;
+  // If true, Chrome will not return this credential to a site in response to
+  // 'navigator.credentials.request()' without user interaction.
+  // Once user selects this credential the flag is reseted.
+  bool skip_zero_click;
 
   // Returns true if this match was found using public suffix matching.
   bool IsPublicSuffixMatch() const;

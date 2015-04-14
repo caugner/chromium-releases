@@ -34,6 +34,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/database/database_util.h"
 #include "storage/browser/quota/quota_manager.h"
 
@@ -109,9 +110,9 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     return static_cast<IndexedDBContextImpl*>(partition->GetIndexedDBContext());
   }
 
-  void SetQuota(int quotaKilobytes) {
-    const int kTemporaryStorageQuotaSize = quotaKilobytes
-        * 1024 * QuotaManager::kPerHostTemporaryPortion;
+  void SetQuota(int quota_kilobytes) {
+    const int kTemporaryStorageQuotaSize =
+        quota_kilobytes * 1024 * QuotaManager::kPerHostTemporaryPortion;
     SetTempQuota(kTemporaryStorageQuotaSize,
         BrowserContext::GetDefaultStoragePartition(
             shell()->web_contents()->GetBrowserContext())->GetQuotaManager());
@@ -404,6 +405,22 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CanDeleteWhenOverQuotaTest) {
   SimpleTest(GetTestUrl("indexeddb", "delete_over_quota.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, BlobDidAck) {
+  SimpleTest(GetTestUrl("indexeddb", "blob_did_ack.html"));
+  content::ChromeBlobStorageContext* blob_context =
+      ChromeBlobStorageContext::GetFor(
+          shell()->web_contents()->GetBrowserContext());
+  EXPECT_EQ(0UL, blob_context->context()->blob_count());
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, BlobDidAckPrefetch) {
+  SimpleTest(GetTestUrl("indexeddb", "blob_did_ack_prefetch.html"));
+  content::ChromeBlobStorageContext* blob_context =
+      ChromeBlobStorageContext::GetFor(
+          shell()->web_contents()->GetBrowserContext());
+  EXPECT_EQ(0UL, blob_context->context()->blob_count());
+}
+
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, BlobsCountAgainstQuota) {
   SimpleTest(GetTestUrl("indexeddb", "blobs_use_quota.html"));
 }
@@ -422,6 +439,35 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DeleteForOriginDeletesBlobs) {
                                      ->message_loop_proxy()));
   ASSERT_TRUE(helper->Run());
   EXPECT_EQ(0, RequestDiskUsage());
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DiskFullOnCommit) {
+  // Ignore several preceding transactions:
+  // * The test calls deleteDatabase() which opens the backing store:
+  //   #1: IndexedDBBackingStore::OpenBackingStore
+  //       => IndexedDBBackingStore::SetUpMetadata
+  //   #2: IndexedDBBackingStore::OpenBackingStore
+  //       => IndexedDBBackingStore::CleanUpBlobJournal (no-op)
+  // * Then deletes the database:
+  //   #3: IndexedDBFactoryImpl::DeleteDatabase
+  //       => IndexedDBDatabase::Create
+  //       => IndexedDBBackingStore::CreateIDBDatabaseMetaData
+  //   #4: IndexedDBFactoryImpl::DeleteDatabase
+  //       => IndexedDBDatabase::DeleteDatabase
+  //       => IndexedDBBackingStore::DeleteDatabase
+  //       => IndexedDBBackingStore::CleanUpBlobJournal (no-op)
+  // * The test calls open(), to create a new database:
+  //   #5: IndexedDBFactoryImpl::Open
+  //       => IndexedDBDatabase::Create
+  //       => IndexedDBBackingStore::CreateIDBDatabaseMetaData
+  //   #6: IndexedDBTransaction::Commit - initial "versionchange" transaction
+  // * Once the connection is opened, the test runs:
+  //   #7: IndexedDBTransaction::Commit - the test's "readwrite" transaction)
+  const int instance_num = 7;
+  const int call_num = 1;
+  FailOperation(FAIL_CLASS_LEVELDB_TRANSACTION, FAIL_METHOD_COMMIT_DISK_FULL,
+                instance_num, call_num);
+  SimpleTest(GetTestUrl("indexeddb", "disk_full_on_commit.html"));
 }
 
 namespace {
@@ -452,8 +498,8 @@ static void CorruptIndexedDBDatabase(
 
   CompactIndexedDBBackingStore(context, origin_url);
 
-  int numFiles = 0;
-  int numErrors = 0;
+  int num_files = 0;
+  int num_errors = 0;
   const bool recursive = false;
   for (const base::FilePath& idb_data_path :
        context->GetStoragePaths(origin_url)) {
@@ -465,7 +511,7 @@ static void CorruptIndexedDBDatabase(
       GetFileSize(idb_file, &size);
 
       if (idb_file.Extension() == FILE_PATH_LITERAL(".ldb")) {
-        numFiles++;
+        num_files++;
         base::File file(
             idb_file, base::File::FLAG_WRITE | base::File::FLAG_OPEN_TRUNCATED);
         if (file.IsValid()) {
@@ -473,12 +519,12 @@ static void CorruptIndexedDBDatabase(
           // file size and fill with zeros (corrupting the file).
           file.SetLength(size);
         } else {
-          numErrors++;
+          num_errors++;
         }
       }
     }
-    VLOG(0) << "There were " << numFiles << " in " << idb_data_path.value()
-            << " with " << numErrors << " errors";
+    VLOG(0) << "There were " << num_files << " in " << idb_data_path.value()
+            << " with " << num_errors << " errors";
   }
 
   signal_when_finished->Signal();
@@ -587,13 +633,13 @@ static scoped_ptr<net::test_server::HttpResponse> CorruptDBRequestHandler(
   }
 
   // A request for a test resource
-  base::FilePath resourcePath =
+  base::FilePath resource_path =
       content::GetTestFilePath("indexeddb", request_path.c_str());
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
   http_response->set_code(net::HTTP_OK);
   std::string file_contents;
-  if (!base::ReadFileToString(resourcePath, &file_contents))
+  if (!base::ReadFileToString(resource_path, &file_contents))
     return scoped_ptr<net::test_server::HttpResponse>();
   http_response->set_content(file_contents);
   return http_response.Pass();
@@ -697,8 +743,16 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, VersionChangeCrashResilience) {
                           "pass - part3 - rolled back");
 }
 
+// crbug.com/427529
+// Disable this test for ASAN on Android because it takes too long to run.
+#if defined(ANDROID) && defined(ADDRESS_SANITIZER)
+#define MAYBE_ConnectionsClosedOnTabClose DISABLED_ConnectionsClosedOnTabClose
+#else
+#define MAYBE_ConnectionsClosedOnTabClose ConnectionsClosedOnTabClose
+#endif
 // Verify that open DB connections are closed when a tab is destroyed.
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ConnectionsClosedOnTabClose) {
+IN_PROC_BROWSER_TEST_F(
+    IndexedDBBrowserTest, MAYBE_ConnectionsClosedOnTabClose) {
   NavigateAndWaitForTitle(shell(), "version_change_blocked.html", "#tab1",
                           "setVersion(2) complete");
 

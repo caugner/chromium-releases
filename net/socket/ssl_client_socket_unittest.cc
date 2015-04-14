@@ -35,6 +35,19 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+#if !defined(USE_OPENSSL)
+#include <pk11pub.h>
+#include "crypto/nss_util.h"
+
+#if !defined(CKM_AES_GCM)
+#define CKM_AES_GCM 0x00001087
+#endif
+
+#if !defined(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)
+#define CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256 (CKM_NSS + 24)
+#endif
+#endif
+
 //-----------------------------------------------------------------------------
 
 using testing::_;
@@ -44,8 +57,6 @@ using testing::Truly;
 namespace net {
 
 namespace {
-
-const SSLConfig kDefaultSSLConfig;
 
 // WrappedStreamSocket is a base class that wraps an existing StreamSocket,
 // forwarding the Socket and StreamSocket interfaces to the underlying
@@ -791,7 +802,7 @@ class SSLClientSocketCertRequestInfoTest : public SSLClientSocketTest {
     EXPECT_EQ(OK, rv);
 
     scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-        transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+        transport.Pass(), test_server.host_port_pair(), SSLConfig()));
     EXPECT_FALSE(sock->IsConnected());
 
     rv = sock->Connect(callback.callback());
@@ -991,6 +1002,16 @@ static bool LogContainsSSLConnectEndEvent(
              log, i, NetLog::TYPE_SOCKET_BYTES_SENT, NetLog::PHASE_NONE);
 }
 
+bool SupportsAESGCM() {
+#if defined(USE_OPENSSL)
+  return true;
+#else
+  crypto::EnsureNSSInit();
+  return PK11_TokenExists(CKM_AES_GCM) &&
+         PK11_TokenExists(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256);
+#endif
+}
+
 }  // namespace
 
 TEST_F(SSLClientSocketTest, Connect) {
@@ -1012,7 +1033,7 @@ TEST_F(SSLClientSocketTest, Connect) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1054,7 +1075,7 @@ TEST_F(SSLClientSocketTest, ConnectExpired) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1098,7 +1119,7 @@ TEST_F(SSLClientSocketTest, ConnectMismatched) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1142,7 +1163,7 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthCertRequested) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1200,7 +1221,7 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.send_client_cert = true;
   ssl_config.client_cert = NULL;
 
@@ -1258,7 +1279,7 @@ TEST_F(SSLClientSocketTest, Read) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -1543,7 +1564,7 @@ TEST_F(SSLClientSocketTest, Read_FullDuplex) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -1821,10 +1842,8 @@ TEST_F(SSLClientSocketTest, Connect_WithZeroReturn) {
   EXPECT_EQ(OK, rv);
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.Pass(),
-                            test_server.host_port_pair(),
-                            kDefaultSSLConfig));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   raw_transport->SetNextReadError(0);
 
@@ -1939,7 +1958,7 @@ TEST_F(SSLClientSocketTest, Read_SmallChunks) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -1993,7 +2012,7 @@ TEST_F(SSLClientSocketTest, Read_ManySmallRecords) {
   ASSERT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -2043,7 +2062,7 @@ TEST_F(SSLClientSocketTest, Read_Interrupted) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2094,7 +2113,7 @@ TEST_F(SSLClientSocketTest, Read_FullLogging) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2180,7 +2199,7 @@ TEST_F(SSLClientSocketTest, PrematureApplicationData) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2193,7 +2212,9 @@ TEST_F(SSLClientSocketTest, CipherSuiteDisables) {
   // http://www.iana.org/assignments/tls-parameters/tls-parameters.xml,
   // only disabling those cipher suites that the test server actually
   // implements.
-  const uint16 kCiphersToDisable[] = {0x0005,  // TLS_RSA_WITH_RC4_128_SHA
+  const uint16 kCiphersToDisable[] = {
+      0x0005,  // TLS_RSA_WITH_RC4_128_SHA
+      0xc011,  // TLS_ECDHE_RSA_WITH_RC4_128_SHA
   };
 
   SpawnedTestServer::SSLOptions ssl_options;
@@ -2285,11 +2306,9 @@ TEST_F(SSLClientSocketTest, ClientSocketHandleNotFromPool) {
   scoped_ptr<ClientSocketHandle> socket_handle(new ClientSocketHandle());
   socket_handle->SetSocket(transport.Pass());
 
-  scoped_ptr<SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(socket_handle.Pass(),
-                                             test_server.host_port_pair(),
-                                             kDefaultSSLConfig,
-                                             context_));
+  scoped_ptr<SSLClientSocket> sock(socket_factory_->CreateSSLClientSocket(
+      socket_handle.Pass(), test_server.host_port_pair(), SSLConfig(),
+      context_));
 
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
@@ -2319,7 +2338,7 @@ TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2328,15 +2347,15 @@ TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
   EXPECT_TRUE(sock->IsConnected());
 
   const int kKeyingMaterialSize = 32;
-  const char* kKeyingLabel1 = "client-socket-test-1";
-  const char* kKeyingContext = "";
+  const char kKeyingLabel1[] = "client-socket-test-1";
+  const char kKeyingContext[] = "";
   unsigned char client_out1[kKeyingMaterialSize];
   memset(client_out1, 0, sizeof(client_out1));
   rv = sock->ExportKeyingMaterial(
       kKeyingLabel1, false, kKeyingContext, client_out1, sizeof(client_out1));
   EXPECT_EQ(rv, OK);
 
-  const char* kKeyingLabel2 = "client-socket-test-2";
+  const char kKeyingLabel2[] = "client-socket-test-2";
   unsigned char client_out2[kKeyingMaterialSize];
   memset(client_out2, 0, sizeof(client_out2));
   rv = sock->ExportKeyingMaterial(
@@ -2404,7 +2423,7 @@ TEST_F(SSLClientSocketTest, VerifyServerChainProperlyOrdered) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
   rv = callback.GetResult(rv);
@@ -2511,7 +2530,7 @@ TEST_F(SSLClientSocketTest, VerifyReturnChainProperlyOrdered) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
 
@@ -2759,7 +2778,7 @@ TEST_F(SSLClientSocketTest, ReuseStates) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2855,7 +2874,7 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithSuccess) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
@@ -2892,7 +2911,7 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithDisabledSessionCache) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
@@ -2910,10 +2929,17 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithDisabledSessionCache) {
 
 TEST_F(SSLClientSocketFalseStartTest,
        HandshakeCallbackIsRun_WithFalseStartFailure) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // False Start requires NPN and a forward-secret cipher suite.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
-      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
   client_config.next_protos.push_back(kProtoHTTP11);
@@ -2925,10 +2951,17 @@ TEST_F(SSLClientSocketFalseStartTest,
 
 TEST_F(SSLClientSocketFalseStartTest,
        HandshakeCallbackIsRun_WithFalseStartSuccess) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // False Start requires NPN and a forward-secret cipher suite.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
-      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
   client_config.next_protos.push_back(kProtoHTTP11);
@@ -2939,10 +2972,17 @@ TEST_F(SSLClientSocketFalseStartTest,
 #endif  // defined(USE_OPENSSL)
 
 TEST_F(SSLClientSocketFalseStartTest, FalseStartEnabled) {
-  // False Start requires NPN and a forward-secret cipher suite.
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
+  // False Start requires NPN/ALPN, ECDHE, and an AEAD.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
-      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
   client_config.next_protos.push_back(kProtoHTTP11);
@@ -2952,20 +2992,34 @@ TEST_F(SSLClientSocketFalseStartTest, FalseStartEnabled) {
 
 // Test that False Start is disabled without NPN.
 TEST_F(SSLClientSocketFalseStartTest, NoNPN) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
-      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   SSLConfig client_config;
   client_config.next_protos.clear();
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, false));
 }
 
-// Test that False Start is disabled without a forward-secret cipher suite.
-TEST_F(SSLClientSocketFalseStartTest, NoForwardSecrecy) {
+// Test that False Start is disabled with plain RSA ciphers.
+TEST_F(SSLClientSocketFalseStartTest, RSA) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
   client_config.next_protos.push_back(kProtoHTTP11);
@@ -2973,12 +3027,50 @@ TEST_F(SSLClientSocketFalseStartTest, NoForwardSecrecy) {
       TestFalseStart(server_options, client_config, false));
 }
 
-// Test that sessions are resumable after receiving the server Finished message.
-TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
-  // Start a server.
+// Test that False Start is disabled with DHE_RSA ciphers.
+TEST_F(SSLClientSocketFalseStartTest, DHE_RSA) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
+  server_options.enable_npn = true;
+  SSLConfig client_config;
+  client_config.next_protos.push_back(kProtoHTTP11);
+  ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, false));
+}
+
+// Test that False Start is disabled without an AEAD.
+TEST_F(SSLClientSocketFalseStartTest, NoAEAD) {
+  SpawnedTestServer::SSLOptions server_options;
+  server_options.key_exchanges =
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128;
+  server_options.enable_npn = true;
+  SSLConfig client_config;
+  client_config.next_protos.push_back(kProtoHTTP11);
+  ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, false));
+}
+
+// Test that sessions are resumable after receiving the server Finished message.
+TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
+  // Start a server.
+  SpawnedTestServer::SSLOptions server_options;
+  server_options.key_exchanges =
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
   client_config.next_protos.push_back(kProtoHTTP11);
@@ -3006,10 +3098,17 @@ TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
 // Test that sessions are not resumable before receiving the server Finished
 // message.
 TEST_F(SSLClientSocketFalseStartTest, NoSessionResumptionBeforeFinish) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // Start a server.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
-      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   ASSERT_TRUE(StartTestServer(server_options));
 
@@ -3052,7 +3151,7 @@ TEST_F(SSLClientSocketChannelIDTest, SendChannelID) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;
@@ -3074,7 +3173,7 @@ TEST_F(SSLClientSocketChannelIDTest, FailingChannelID) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableFailingChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;
@@ -3096,7 +3195,7 @@ TEST_F(SSLClientSocketChannelIDTest, FailingChannelIDAsync) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableAsyncFailingChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;

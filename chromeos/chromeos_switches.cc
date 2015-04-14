@@ -5,6 +5,10 @@
 #include "chromeos/chromeos_switches.h"
 
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
+
+// TODO(rsorokin): alphabetize all of these switches so they
+// match the order from the .h file
 
 namespace chromeos {
 namespace switches {
@@ -16,6 +20,11 @@ const char kAppOemManifestFile[] = "app-mode-oem-manifest";
 // is used to override OOBE/sign in WebUI init type.
 // Possible values: parallel|postpone. Default: parallel.
 const char kAshWebUIInit[] = "ash-webui-init";
+
+// Default wallpaper to use for kids accounts
+// (as paths to trusted, non-user-writable JPEG files).
+const char kChildWallpaperLarge[] = "child-wallpaper-large";
+const char kChildWallpaperSmall[] = "child-wallpaper-small";
 
 // Specifies the URL of the consumer device management backend.
 const char kConsumerDeviceManagementUrl[] = "consumer-device-management-url";
@@ -44,6 +53,9 @@ const char kDerelictIdleTimeout[] = "derelict-idle-timeout";
 
 // Disables wallpaper boot animation (except of OOBE case).
 const char kDisableBootAnimation[] = "disable-boot-animation";
+
+// Disables cloud backup feature.
+const char kDisableCloudImport[] = "disable-cloud-import";
 
 // Disables the ChromeOS demo.
 const char kDisableDemoMode[] = "disable-demo-mode";
@@ -89,9 +101,6 @@ const char kDisableNetworkPortalNotification[] =
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[] = "enable-carrier-switching";
 
-// Enables cloud backup feature.
-const char kEnableCloudBackup[] = "enable-cloud-backup";
-
 // Enables consumer management, which allows user to enroll, remotely lock and
 // locate the device.
 const char kEnableConsumerManagement[] = "enable-consumer-management";
@@ -108,12 +117,20 @@ const char kEnableEmbeddedSignin[] = "enable-embedded-signin";
 const char kEnableNewKoreanIme[] = "enable-new-korean-ime";
 
 // If this switch is set, the input view keyboard will be in materia design.
-const char kEnableNewQPInputView[] = "enable-new-qp-input-view";
+const char kEnableNewMDInputView[] = "enable-new-md-input-view";
 
-// If this switch is set, the US keyboard input method will provide suggestions
-// as typing on physical keyboard.
+// If this switch is set, the options for suggestions as typing on physical
+// keyboard will be enabled.
 const char kEnablePhysicalKeyboardAutocorrect[] =
     "enable-physical-keyboard-autocorrect";
+
+// If this switch is set, the options for suggestions as typing on physical
+// keyboard will be disabled.
+const char kDisablePhysicalKeyboardAutocorrect[] =
+    "disable-physical-keyboard-autocorrect";
+
+// If this switch is set, the voice input will be disabled.
+const char kDisableVoiceInput[] = "disable-voice-input";
 
 // Enabled sharing assets for installed default apps.
 const char kEnableExtensionAssetsSharing[]  = "enable-extension-assets-sharing";
@@ -210,6 +227,16 @@ const char kLoginProfile[] = "login-profile";
 // Specifies the user which is already logged in.
 const char kLoginUser[] = "login-user";
 
+// The memory pressure thresholds selection which is used to decide whether and
+// when a memory pressure event needs to get fired.
+const char kMemoryPressureExperimentName[] = "ChromeOSMemoryPressureHandling";
+const char kMemoryPressureHandlingOff[] = "memory-pressure-off";
+const char kMemoryPressureThresholds[] = "memory-pressure-thresholds";
+const char kConservativeThreshold[] = "conservative";
+const char kAggressiveCacheDiscardThreshold[] = "aggressive-cache-discard";
+const char kAggressiveTabDiscardThreshold[] = "aggressive-tab-discard";
+const char kAggressiveThreshold[] = "aggressive";
+
 // Enables natural scroll by default.
 const char kNaturalScrollDefault[] = "enable-natural-scroll-default";
 
@@ -267,11 +294,16 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
 
-// Enable memory pressure checks on ChromeOS.
-const char kUseMemoryPressureSystemChromeOS[] = "use-memory-pressure-chromeos";
+// Disable memory pressure checks on ChromeOS.
+const char kDisableMemoryPressureSystemChromeOS[] =
+    "disable-memory-pressure-chromeos";
 
 // Enables waking the device based on the receipt of some network packets.
 const char kWakeOnPackets[] = "wake-on-packets";
+
+// Specifies the path for GAIA endpoint. The default value is
+// "ServiceLogin?skipvpage=true&sarp=1&rm=hide".
+const char kGaiaEndpointChromeOS[] = "gaia-endpoint-chromeos";
 
 // Screenshot testing: specifies the directory where the golden screenshots are
 // stored.
@@ -284,8 +316,57 @@ const char kArtifactsDir[] = "artifacts-dir";
 const char kEnableCaptivePortalBypassProxy[] =
     "enable-captive-portal-bypass-proxy";
 
+// Disable automatic timezone update.
+const char kDisableTimeZoneTrackingOption[] =
+    "disable-timezone-tracking-option";
+
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
+}
+
+bool MemoryPressureHandlingEnabled() {
+  if ((base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableMemoryPressureSystemChromeOS)) ||
+      (base::FieldTrialList::FindFullName(kMemoryPressureExperimentName) ==
+       kMemoryPressureHandlingOff))
+    return false;
+  return true;
+}
+
+base::MemoryPressureObserverChromeOS::MemoryPressureThresholds
+GetMemoryPressureThresholds() {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kMemoryPressureThresholds)) {
+    const std::string group_name =
+        base::FieldTrialList::FindFullName(kMemoryPressureExperimentName);
+    if (group_name == kConservativeThreshold)
+      return base::MemoryPressureObserverChromeOS::THRESHOLD_CONSERVATIVE;
+    if (group_name == kAggressiveCacheDiscardThreshold)
+      return base::MemoryPressureObserverChromeOS::
+          THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
+    if (group_name == kAggressiveTabDiscardThreshold)
+      return base::MemoryPressureObserverChromeOS::
+          THRESHOLD_AGGRESSIVE_TAB_DISCARD;
+    if (group_name == kAggressiveThreshold)
+      return base::MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE;
+    return base::MemoryPressureObserverChromeOS::THRESHOLD_DEFAULT;
+  }
+
+  const std::string option =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          kMemoryPressureThresholds);
+  if (option == kConservativeThreshold)
+    return base::MemoryPressureObserverChromeOS::THRESHOLD_CONSERVATIVE;
+  if (option == kAggressiveCacheDiscardThreshold)
+    return base::MemoryPressureObserverChromeOS::
+        THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
+  if (option == kAggressiveTabDiscardThreshold)
+    return base::MemoryPressureObserverChromeOS::
+        THRESHOLD_AGGRESSIVE_TAB_DISCARD;
+  if (option == kAggressiveThreshold)
+    return base::MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE;
+
+  return base::MemoryPressureObserverChromeOS::THRESHOLD_DEFAULT;
 }
 
 }  // namespace switches

@@ -58,20 +58,22 @@
         'enable_wexit_time_destructors': 1,
       },
       'sources': [
+        # Note that due to InitializeSandboxInfo, this must be directly linked
+        # into chrome.exe, not into a dependent.
+        '<(DEPTH)/content/app/startup_helper_win.cc',
+        '<(DEPTH)/content/public/common/content_switches.cc',
         'app/chrome_exe_main_aura.cc',
         'app/chrome_exe_main_mac.cc',
         'app/chrome_exe_main_win.cc',
         'app/chrome_exe_resource.h',
+        'app/chrome_watcher_client_win.cc',
+        'app/chrome_watcher_client_win.h',
         'app/chrome_watcher_command_line_win.cc',
         'app/chrome_watcher_command_line_win.h',
         'app/client_util.cc',
         'app/client_util.h',
         'app/signature_validator_win.cc',
         'app/signature_validator_win.h',
-        # Note that due to InitializeSandboxInfo, this must be directly linked
-        # into chrome.exe, not into a dependent.
-        '<(DEPTH)/content/app/startup_helper_win.cc',
-        '<(DEPTH)/content/public/common/content_switches.cc',
       ],
       'mac_bundle_resources': [
         'app/app-Info.plist',
@@ -103,6 +105,7 @@
         ['OS == "win"', {
           'dependencies': [
             'chrome_watcher',
+            'chrome_watcher_client',
             '../components/components.gyp:browser_watcher_client',
           ],
         }],
@@ -185,6 +188,11 @@
               'dependencies': [
                 '../build/linux/system.gyp:x11',
                 '../build/linux/system.gyp:xext',
+              ],
+            }],
+            ['OS=="linux" and enable_plugins==1', {
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
               ],
             }],
           ],
@@ -425,20 +433,6 @@
             # NOTE: chrome/app/theme/chromium/BRANDING and
             # chrome/app/theme/google_chrome/BRANDING have the short name
             # "chrome" etc.; should we try to extract from there instead?
-
-            # CrOS does this in a separate build step.
-            ['OS=="linux" and chromeos==0 and linux_dump_symbols==1', {
-              'dependencies': [
-                '../pdf/pdf.gyp:pdf_linux_symbols',
-              ],
-            }], # OS=="linux" and chromeos==0 and linux_dump_symbols==1
-            # Android doesn't use pdfium.
-            ['OS!="android"', {
-              'dependencies': [
-                # On Mac, this is done in chrome_dll.gypi.
-                '../pdf/pdf.gyp:pdf',
-              ],
-            }], # OS=="android"
           ],
           'dependencies': [
             '../components/components.gyp:startup_metric_utils',
@@ -498,12 +492,12 @@
             '../win8/delegate_execute/delegate_execute.gyp:*',
           ],
           'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
             'app/chrome_crash_reporter_client.cc',
             'app/chrome_crash_reporter_client.h',
             'app/chrome_exe.rc',
             'common/crash_keys.cc',
             'common/crash_keys.h',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
           ],
           'sources!': [
             # We still want the _win entry point for sandbox, etc.
@@ -605,15 +599,15 @@
               'type': 'executable',
               'product_name': 'nacl64',
               'sources': [
-                'app/chrome_crash_reporter_client.cc',
-                'common/crash_keys.cc',
-                'nacl/nacl_exe_win_64.cc',
                 '../content/app/startup_helper_win.cc',
                 '../content/common/sandbox_init_win.cc',
                 '../content/common/sandbox_win.cc',
                 '../content/public/common/content_switches.cc',
                 '../content/public/common/sandboxed_process_launcher_delegate.cc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
+                'app/chrome_crash_reporter_client.cc',
+                'common/crash_keys.cc',
+                'nacl/nacl_exe_win_64.cc',
               ],
               'dependencies': [
                 'chrome_version_resources',

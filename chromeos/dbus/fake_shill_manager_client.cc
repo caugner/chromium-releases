@@ -28,6 +28,9 @@ namespace chromeos {
 
 namespace {
 
+// Allow parsed command line option 'tdls_busy' to set the fake busy count.
+int s_tdls_busy_count = 0;
+
 // Used to compare values for finding entries to erase in a ListValue.
 // (ListValue only implements a const_iterator version of Find).
 struct ValueEquals {
@@ -592,17 +595,17 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
   // IPConfigs
   base::DictionaryValue ipconfig_v4_dictionary;
   ipconfig_v4_dictionary.SetStringWithoutPathExpansion(
-      shill::kAddressProperty, "0.0.0.0");
+      shill::kAddressProperty, "100.0.0.1");
   ipconfig_v4_dictionary.SetStringWithoutPathExpansion(
-      shill::kGatewayProperty, "0.0.0.1");
+      shill::kGatewayProperty, "100.0.0.2");
   ipconfig_v4_dictionary.SetIntegerWithoutPathExpansion(
-      shill::kPrefixlenProperty, 0);
+      shill::kPrefixlenProperty, 1);
   ipconfig_v4_dictionary.SetStringWithoutPathExpansion(
       shill::kMethodProperty, shill::kTypeIPv4);
   ip_configs->AddIPConfig("ipconfig_v4_path", ipconfig_v4_dictionary);
   base::DictionaryValue ipconfig_v6_dictionary;
   ipconfig_v6_dictionary.SetStringWithoutPathExpansion(
-      shill::kAddressProperty, "0:0:0:0:0:0:0:0");
+      shill::kAddressProperty, "0:0:0:0:100:0:0:1");
   ipconfig_v6_dictionary.SetStringWithoutPathExpansion(
       shill::kMethodProperty, shill::kTypeIPv6);
   ip_configs->AddIPConfig("ipconfig_v6_path", ipconfig_v6_dictionary);
@@ -636,6 +639,13 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
   }
 
   // Wifi
+  if (s_tdls_busy_count != 0) {
+    DBusThreadManager::Get()
+        ->GetShillDeviceClient()
+        ->GetTestInterface()
+        ->SetTDLSBusyCount(s_tdls_busy_count);
+  }
+
   state = GetInitialStateForType(shill::kTypeWifi, &enabled);
   if (state != kTechnologyUnavailable) {
     bool portaled = false;
@@ -647,7 +657,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     devices->AddDevice("/device/wifi1", shill::kTypeWifi, "stub_wifi_device1");
     devices->SetDeviceProperty("/device/wifi1",
                                shill::kAddressProperty,
-                               base::StringValue("23456789abc"));
+                               base::StringValue("23456789abcd"));
     base::ListValue wifi_ip_configs;
     wifi_ip_configs.AppendString("ipconfig_v4_path");
     wifi_ip_configs.AppendString("ipconfig_v6_path");
@@ -680,11 +690,19 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     services->SetServiceProperty(kWifi2Path,
                                  shill::kSecurityClassProperty,
                                  base::StringValue(shill::kSecurityPsk));
-
-    base::FundamentalValue strength_value(80);
     services->SetServiceProperty(
-        kWifi2Path, shill::kSignalStrengthProperty, strength_value);
+        kWifi2Path, shill::kSignalStrengthProperty, base::FundamentalValue(80));
     profiles->AddService(shared_profile, kWifi2Path);
+
+    const std::string kWifi3Path = "/service/wifi3";
+    services->AddService(kWifi3Path,
+                         "",  /* empty GUID */
+                         "wifi3" /* name */,
+                         shill::kTypeWifi,
+                         shill::kStateIdle,
+                         add_to_visible);
+    services->SetServiceProperty(
+        kWifi3Path, shill::kSignalStrengthProperty, base::FundamentalValue(40));
 
     if (portaled) {
       const std::string kPortaledWifiPath = "/service/portaled_wifi";
@@ -753,6 +771,9 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                          state,
                          add_to_visible);
     base::StringValue technology_value(shill::kNetworkTechnologyGsm);
+    devices->SetDeviceProperty("/device/cellular1",
+                               shill::kTechnologyFamilyProperty,
+                               technology_value);
     services->SetServiceProperty(kCellularServicePath,
                                  shill::kNetworkTechnologyProperty,
                                  technology_value);
@@ -775,6 +796,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     services->SetServiceProperty(kCellularServicePath,
                                  shill::kRoamingStateProperty,
                                  base::StringValue(shill::kRoamingStateHome));
+    profiles->AddService(shared_profile, kCellularServicePath);
   }
 
   // VPN
@@ -1003,16 +1025,22 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
     base::DictionaryValue* simlock_dict = new base::DictionaryValue;
     simlock_dict->Set(shill::kSIMLockEnabledProperty,
                       new base::FundamentalValue(locked));
-  // TODO(stevenjb): Investigate why non-empty value breaks UI.
-  std::string lock_type = "";  // shill::kSIMLockPin
+    // TODO(stevenjb): Investigate why non-empty value breaks UI.
+    std::string lock_type = "";  // shill::kSIMLockPin
     simlock_dict->SetString(shill::kSIMLockTypeProperty, lock_type);
     simlock_dict->SetInteger(shill::kSIMLockRetriesLeftProperty, 5);
 
-    shill_device_property_map_
-        [shill::kTypeCellular][shill::kSIMLockStatusProperty] = simlock_dict;
+    shill_device_property_map_[shill::kTypeCellular]
+                              [shill::kSIMLockStatusProperty] = simlock_dict;
     shill_device_property_map_
         [shill::kTypeCellular][shill::kTechnologyFamilyProperty] =
             new base::StringValue(shill::kNetworkTechnologyGsm);
+    return true;
+  } else if (arg0 == "tdls_busy") {
+    if (!arg1.empty())
+      base::StringToInt(arg1, &s_tdls_busy_count);
+    else
+      s_tdls_busy_count = 1;
     return true;
   }
   return SetInitialNetworkState(arg0, arg1);

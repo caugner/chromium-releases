@@ -324,7 +324,8 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       profile_->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar);
   localized_strings.SetBoolean("bookmarkbarattached", bookmark_bar_attached);
 
-  webui::SetFontAndTextDirection(&localized_strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &localized_strings);
 
   static const base::StringPiece incognito_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
@@ -377,7 +378,8 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
       l10n_util::GetStringUTF16(guest_tab_link_ids));
   localized_strings.SetString("learnMoreLink", guest_tab_link);
 
-  webui::SetFontAndTextDirection(&localized_strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &localized_strings);
 
   static const base::StringPiece guest_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(guest_tab_ids));
@@ -463,10 +465,10 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LEARN_MORE_URL));
   load_time_data.SetString("learnMore",
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
   load_time_data.SetString("webStoreLink",
       google_util::AppendGoogleLocaleParam(
-          GURL(extension_urls::GetWebstoreLaunchURL()),
-          g_browser_process->GetApplicationLocale()).spec());
+          GURL(extension_urls::GetWebstoreLaunchURL()), app_locale).spec());
   load_time_data.SetString("appInstallHintText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
   load_time_data.SetBoolean("isDiscoveryInNTPEnabled",
@@ -497,16 +499,8 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showWebStoreIcon",
                             !prefs->GetBoolean(prefs::kHideWebStoreIcon));
 
-  bool streamlined_hosted_apps =
-      extensions::util::IsStreamlinedHostedAppsEnabled();
-  load_time_data.SetBoolean("enableStreamlinedHostedApps",
-                            streamlined_hosted_apps);
-  // Use a different string for launching as a regular tab for streamlined
-  // hosted apps.
-  if (streamlined_hosted_apps) {
-    load_time_data.SetString("applaunchtypetab",
-        l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_TAB));
-  }
+  bool bookmark_apps_enabled = extensions::util::IsNewBookmarkAppsEnabled();
+  load_time_data.SetBoolean("enableNewBookmarkApps", bookmark_apps_enabled);
 
 #if defined(OS_CHROMEOS)
   load_time_data.SetString("expandMenu",
@@ -516,7 +510,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
   NTPLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
-  webui::SetFontAndTextDirection(&load_time_data);
+  webui::SetLoadTimeDataDefaults(app_locale, &load_time_data);
 
   // Control fade and resize animations.
   load_time_data.SetBoolean("anim",
@@ -553,7 +547,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   // Determine whether to show the menu for accessing tabs on other devices.
   bool show_other_sessions_menu =
       should_show_other_devices_menu_ &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+     !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableNTPOtherSessionsMenu);
   load_time_data.SetBoolean("showOtherSessionsMenu", show_other_sessions_menu);
   load_time_data.SetBoolean(

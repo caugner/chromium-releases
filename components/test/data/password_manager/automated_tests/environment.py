@@ -87,10 +87,7 @@ class Environment:
     try:
       shutil.rmtree(profile_path)
     except Exception, e:
-      # The tests execution can continue, but this make them less stable.
-      logging.error("Error: Could not wipe the chrome profile directory (%s). \
-          This affects the stability of the tests. Continuing to run tests."
-          % e)
+      pass
     # If |chrome_path| is not defined, this means that we are in the dashboard
     # website, and we just need to get the list of all websites. In this case,
     # we don't need to initilize the webdriver.
@@ -187,6 +184,24 @@ class Environment:
         "  document.querySelector('#delete-passwords-checkbox').click();"
         % negation)
     script += "document.querySelector('#clear-browser-data-commit').click();"
+    self.driver.execute_script(script)
+    time.sleep(2)
+    # Every time we do something to the cache let's enable password saving.
+    # TODO(melandory): We should check why it's off in a first place.
+    # TODO(melandory): Investigate, maybe there is no need to enable it that
+    # often.
+    self.EnablePasswordsSaving()
+
+  def EnablePasswordsSaving(self):
+    logging.info("\nEnablePasswordSaving\n")
+    self.driver.get("chrome://settings")
+    self.driver.switch_to_frame("settings")
+    script = "document.getElementById('advanced-settings-expander').click();"
+    self.driver.execute_script(script)
+    time.sleep(2)
+    script = (
+        "if (!document.querySelector('#password-manager-enabled').checked)"
+        "{ document.querySelector('#password-manager-enabled').click();}")
     self.driver.execute_script(script)
     time.sleep(2)
 
@@ -373,11 +388,11 @@ class Environment:
         self.ClearCache(True)
         websitetest.SuccessfulLoginTest()
         self.ClearCache(True)
-      except Exception:
+      except Exception as e:
         successful = False
-        error = traceback.format_exc()
+        error = e.message
       self.tests_results.append(TestResult(websitetest.name, "normal",
-          successful, escape(error)))
+                                           successful, error))
 
 
   def PromptTestList(self, websitetests):
@@ -397,11 +412,11 @@ class Environment:
       try:
         websitetest.was_run = True
         websitetest.PromptTest()
-      except Exception:
+      except Exception as e:
         successful = False
-        error = traceback.format_exc()
+        error = e.message
       self.tests_results.append(TestResult(websitetest.name, "prompt",
-          successful, escape(error)))
+                                           successful, error))
 
   def Quit(self):
     """Closes the tests."""

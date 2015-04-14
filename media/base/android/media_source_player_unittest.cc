@@ -47,42 +47,39 @@ class MockMediaPlayerManager : public MediaPlayerManager {
         num_resources_requested_(0),
         num_metadata_changes_(0),
         timestamp_updated_(false) {}
-  virtual ~MockMediaPlayerManager() {}
+  ~MockMediaPlayerManager() override {}
 
   // MediaPlayerManager implementation.
-  virtual MediaResourceGetter* GetMediaResourceGetter() override {
-    return NULL;
-  }
-  virtual MediaUrlInterceptor* GetMediaUrlInterceptor() override {
-    return NULL;
-  }
-  virtual void OnTimeUpdate(int player_id,
-                            base::TimeDelta current_time,
-                            base::TimeTicks current_time_ticks) override {
+  MediaResourceGetter* GetMediaResourceGetter() override { return NULL; }
+  MediaUrlInterceptor* GetMediaUrlInterceptor() override { return NULL; }
+  void OnTimeUpdate(int player_id,
+                    base::TimeDelta current_time,
+                    base::TimeTicks current_time_ticks) override {
     timestamp_updated_ = true;
   }
-  virtual void OnMediaMetadataChanged(
-      int player_id, base::TimeDelta duration, int width, int height,
-      bool success) override {
+  void OnMediaMetadataChanged(int player_id,
+                              base::TimeDelta duration,
+                              int width,
+                              int height,
+                              bool success) override {
     num_metadata_changes_++;
   }
-  virtual void OnPlaybackComplete(int player_id) override {
+  void OnPlaybackComplete(int player_id) override {
     playback_completed_ = true;
     if (message_loop_->is_running())
       message_loop_->Quit();
   }
-  virtual void OnMediaInterrupted(int player_id) override {}
-  virtual void OnBufferingUpdate(int player_id, int percentage) override {}
-  virtual void OnSeekComplete(int player_id,
-                              const base::TimeDelta& current_time) override {}
-  virtual void OnError(int player_id, int error) override {}
-  virtual void OnVideoSizeChanged(int player_id, int width,
-                                  int height) override {}
-  virtual MediaPlayerAndroid* GetFullscreenPlayer() override { return NULL; }
-  virtual MediaPlayerAndroid* GetPlayer(int player_id) override { return NULL; }
-  virtual void RequestFullScreen(int player_id) override {}
+  void OnMediaInterrupted(int player_id) override {}
+  void OnBufferingUpdate(int player_id, int percentage) override {}
+  void OnSeekComplete(int player_id,
+                      const base::TimeDelta& current_time) override {}
+  void OnError(int player_id, int error) override {}
+  void OnVideoSizeChanged(int player_id, int width, int height) override {}
+  MediaPlayerAndroid* GetFullscreenPlayer() override { return NULL; }
+  MediaPlayerAndroid* GetPlayer(int player_id) override { return NULL; }
+  void RequestFullScreen(int player_id) override {}
 #if defined(VIDEO_HOLE)
-  virtual bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() override {
+  bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() override {
     return false;
   }
 #endif  // defined(VIDEO_HOLE)
@@ -131,16 +128,16 @@ class MockDemuxerAndroid : public DemuxerAndroid {
         num_data_requests_(0),
         num_seek_requests_(0),
         num_browser_seek_requests_(0) {}
-  virtual ~MockDemuxerAndroid() {}
+  ~MockDemuxerAndroid() override {}
 
-  virtual void Initialize(DemuxerAndroidClient* client) override {}
-  virtual void RequestDemuxerData(DemuxerStream::Type type) override {
+  void Initialize(DemuxerAndroidClient* client) override {}
+  void RequestDemuxerData(DemuxerStream::Type type) override {
     num_data_requests_++;
     if (message_loop_->is_running())
       message_loop_->Quit();
   }
-  virtual void RequestDemuxerSeek(const base::TimeDelta& time_to_seek,
-                                  bool is_browser_seek) override {
+  void RequestDemuxerSeek(const base::TimeDelta& time_to_seek,
+                          bool is_browser_seek) override {
     num_seek_requests_++;
     if (is_browser_seek)
       num_browser_seek_requests_++;
@@ -177,7 +174,7 @@ class MediaSourcePlayerTest : public testing::Test {
                 GURL()),
         decoder_callback_hook_executed_(false),
         surface_texture_a_is_next_(true) {}
-  virtual ~MediaSourcePlayerTest() {}
+  ~MediaSourcePlayerTest() override {}
 
  protected:
   // Get the decoder job from the MediaSourcePlayer. The return value must not
@@ -423,7 +420,7 @@ class MediaSourcePlayerTest : public testing::Test {
     data.type = is_audio ? DemuxerStream::AUDIO : DemuxerStream::VIDEO;
     data.access_units.resize(1);
     data.access_units[0].status = DemuxerStream::kOk;
-    data.access_units[0].end_of_stream = true;
+    data.access_units[0].is_end_of_stream = true;
     return data;
   }
 
@@ -433,6 +430,10 @@ class MediaSourcePlayerTest : public testing::Test {
     data.access_units.resize(1);
     data.access_units[0].status = DemuxerStream::kAborted;
     return data;
+  }
+
+  bool HasData(bool is_audio) {
+    return GetMediaDecoderJob(is_audio)->HasData();
   }
 
   // Helper method for use at test start. It starts an audio decoder job and
@@ -1043,7 +1044,9 @@ TEST_F(MediaSourcePlayerTest, SetEmptySurfaceAndStarveWhileDecoding) {
 
   // Playback resumes once a non-empty surface is passed.
   CreateNextTextureAndSetVideoSurface();
-  EXPECT_EQ(1, demuxer_->num_browser_seek_requests());
+  EXPECT_EQ(0, demuxer_->num_browser_seek_requests());
+  while(demuxer_->num_browser_seek_requests() != 1)
+    message_loop_.RunUntilIdle();
   WaitForVideoDecodeDone();
 }
 
@@ -1532,6 +1535,34 @@ TEST_F(MediaSourcePlayerTest, BrowserSeek_MidStreamReleaseAndStart) {
   player_.OnDemuxerSeekDone(base::TimeDelta());
   EXPECT_EQ(3, demuxer_->num_data_requests());
   EXPECT_EQ(1, demuxer_->num_seek_requests());
+}
+
+TEST_F(MediaSourcePlayerTest, NoBrowserSeekWithKeyFrameInCache) {
+  SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE();
+
+  // Test that browser seek is not needed if a key frame is found in data
+  // cache.
+  CreateNextTextureAndSetVideoSurface();
+  StartVideoDecoderJob();
+  DemuxerData data = CreateReadFromDemuxerAckForVideo(false);
+  data.access_units[0].is_key_frame = true;
+
+  // Simulate demuxer's response to the video data request.
+  player_.OnDemuxerDataAvailable(data);
+
+  // Trigger decoder recreation later by changing surfaces.
+  CreateNextTextureAndSetVideoSurface();
+
+  // Wait for the media codec bridge to finish decoding and be reset.
+  WaitForVideoDecodeDone();
+  EXPECT_FALSE(HasData(false));
+
+  // Send a non key frame to decoder so that decoder can continue. This will
+  // not trigger any browser seeks as the previous key frame is still in the
+  // buffer.
+  player_.OnDemuxerDataAvailable(CreateReadFromDemuxerAckForVideo(false));
+  WaitForVideoDecodeDone();
+  EXPECT_EQ(0, demuxer_->num_browser_seek_requests());
 }
 
 TEST_F(MediaSourcePlayerTest, PrerollAudioAfterSeek) {

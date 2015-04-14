@@ -316,9 +316,10 @@ void ShillToONCTranslator::TranslateWiFiWithState() {
   TranslateWithTableAndSet(shill::kSecurityClassProperty,
                            kWiFiSecurityTable,
                            ::onc::wifi::kSecurity);
+  bool unknown_encoding = true;
   std::string ssid = shill_property_util::GetSSIDFromProperties(
-      *shill_dictionary_, NULL /* ignore unknown encoding */);
-  if (!ssid.empty())
+      *shill_dictionary_, false /* verbose_logging */, &unknown_encoding);
+  if (!unknown_encoding && !ssid.empty())
     onc_object_->SetStringWithoutPathExpansion(::onc::wifi::kSSID, ssid);
 
   bool link_monitor_disable;
@@ -439,8 +440,8 @@ void ShillToONCTranslator::TranslateNetworkWithState() {
     }
     onc_object_->SetStringWithoutPathExpansion(
         ::onc::network_config::kConnectionState, onc_state);
-    // Only set 'RestrictedConnectivity' if true.
-    if (state == shill::kStatePortal) {
+    // Only set 'RestrictedConnectivity' if captive portal state is true.
+    if (NetworkState::NetworkStateIsCaptivePortal(*shill_dictionary_)) {
       onc_object_->SetBooleanWithoutPathExpansion(
           ::onc::network_config::kRestrictedConnectivity, true);
     }
@@ -669,8 +670,8 @@ void ShillToONCTranslator::CopyProperty(
     return;
   }
 
- onc_object_->SetWithoutPathExpansion(field_signature->onc_field_name,
-                                      shill_value->DeepCopy());
+  onc_object_->SetWithoutPathExpansion(field_signature->onc_field_name,
+                                       shill_value->DeepCopy());
 }
 
 void ShillToONCTranslator::TranslateWithTableAndSet(

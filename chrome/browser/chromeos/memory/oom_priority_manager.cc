@@ -121,10 +121,10 @@ class OomMemoryDetails : public MemoryDetails {
   OomMemoryDetails();
 
   // MemoryDetails overrides:
-  virtual void OnDetailsAvailable() override;
+  void OnDetailsAvailable() override;
 
  private:
-  virtual ~OomMemoryDetails() {}
+  ~OomMemoryDetails() override {}
 
   TimeTicks start_time_;
 
@@ -292,7 +292,7 @@ void OomPriorityManager::LogMemoryAndDiscardTab() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Deletes itself upon completion.
   OomMemoryDetails* details = new OomMemoryDetails();
-  details->StartFetch(MemoryDetails::SKIP_USER_METRICS);
+  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -353,13 +353,11 @@ void OomPriorityManager::RecordDiscardStatistics() {
   // TODO(jamescook): Maybe incorporate extension count?
   UMA_HISTOGRAM_CUSTOM_COUNTS(
       "Tabs.Discard.TabCount", GetTabCount(), 1, 100, 50);
-#if !defined(USE_ATHENA)
   // Record the discarded tab in relation to the amount of simultaneously
   // logged in users.
   ash::MultiProfileUMA::RecordDiscardedTab(
       ash::Shell::GetInstance()->session_state_delegate()->
           NumberOfLoggedInUsers());
-#endif
 
   // TODO(jamescook): If the time stats prove too noisy, then divide up users
   // based on how heavily they use Chrome using tab count as a proxy.

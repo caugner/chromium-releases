@@ -24,7 +24,8 @@ var FileAsyncData;
  * @param {!ProgressCenter} progressCenter To notify starting copy operation.
  * @param {!FileOperationManager} fileOperationManager File operation manager
  *     instance.
- * @param {!MetadataCache} metadataCache Metadata cache service.
+ * @param {!FileSystemMetadata} fileSystemMetadata Metadata cache service.
+ * @param {!ThumbnailModel} thumbnailModel
  * @param {!DirectoryModel} directoryModel Directory model instance.
  * @param {!VolumeManagerWrapper} volumeManager Volume manager instance.
  * @param {!FileSelectionHandler} selectionHandler Selection handler.
@@ -37,7 +38,8 @@ function FileTransferController(doc,
                                 multiProfileShareDialog,
                                 progressCenter,
                                 fileOperationManager,
-                                metadataCache,
+                                fileSystemMetadata,
+                                thumbnailModel,
                                 directoryModel,
                                 volumeManager,
                                 selectionHandler) {
@@ -63,11 +65,18 @@ function FileTransferController(doc,
   this.fileOperationManager_ = fileOperationManager;
 
   /**
-   * @type {!MetadataCache}
+   * @type {!FileSystemMetadata}
    * @private
    * @const
    */
-  this.metadataCache_ = metadataCache;
+  this.fileSystemMetadata_ = fileSystemMetadata;
+
+  /**
+   * @type {!ThumbnailModel}
+   * @private
+   * @const
+   */
+  this.thumbnailModel_ = thumbnailModel;
 
   /**
    * @type {!DirectoryModel}
@@ -388,11 +397,14 @@ FileTransferController.prototype.getMultiProfileShareEntries_ =
       // TODO(mtomasz): Move conversion from entry to url to custom bindings.
       // crbug.com/345527.
       var urls = util.entriesToURLs(entries);
-      chrome.fileManagerPrivate.getEntryProperties(urls, callback);
+      // Do not use metadata cache here because the urls come from the different
+      // profile.
+      chrome.fileManagerPrivate.getEntryProperties(
+          urls, ['hosted', 'sharedWithMe'], callback);
     }).then(function(metadatas) {
       return entries.filter(function(entry, i) {
         var metadata = metadatas[i];
-        return metadata && metadata.isHosted && !metadata.sharedWithMe;
+        return metadata && metadata.hosted && !metadata.sharedWithMe;
       });
     });
   };
@@ -544,22 +556,10 @@ FileTransferController.prototype.paste =
  * @private
  */
 FileTransferController.prototype.preloadThumbnailImage_ = function(entry) {
-  var metadataPromise = new Promise(function(fulfill, reject) {
-    this.metadataCache_.getOne(
-        entry,
-        'thumbnail|filesystem',
-        function(metadata) {
-          if (metadata)
-            fulfill(metadata);
-          else
-            reject('Failed to fetch metadata.');
-        });
-  }.bind(this));
-
-  var imagePromise = metadataPromise.then(function(metadata) {
+  var imagePromise = this.thumbnailModel_.get([entry]).then(function(metadata) {
     return new Promise(function(fulfill, reject) {
       var loader = new ThumbnailLoader(
-          entry, ThumbnailLoader.LoaderType.IMAGE, metadata);
+          entry, ThumbnailLoader.LoaderType.IMAGE, metadata[0]);
       loader.loadDetachedImage(function(result) {
         if (result)
           fulfill(loader.getImage());
@@ -570,8 +570,6 @@ FileTransferController.prototype.preloadThumbnailImage_ = function(entry) {
   imagePromise.then(function(image) {
     // Store the image so that we can obtain the image synchronously.
     imagePromise.value = image;
-  }, function(error) {
-    console.error(error.stack || error);
   });
 
   this.preloadedThumbnailImagePromise_ = imagePromise;
@@ -1085,6 +1083,7 @@ FileTransferController.prototype.onFileSelectionChangedThrottled_ = function() {
   for (var i = 0; i < entries.length; i++) {
     if (entries[i].isFile)
       fileEntries.push(entries[i]);
+    asyncData[entries[i].toURL()] = {externalFileUrl: '', file: null};
   }
   var containsDirectory = this.selectionHandler_.selection.directoryCount > 0;
 
@@ -1094,7 +1093,6 @@ FileTransferController.prototype.onFileSelectionChangedThrottled_ = function() {
   // asynchronous operations.
   if (!containsDirectory) {
     for (var i = 0; i < fileEntries.length; i++) {
-      asyncData[fileEntries[i].toURL()] = {externalFileUrl: '', file: null};
       fileEntries[i].file(function(data, file) {
         data.file = file;
       }.bind(null, asyncData[fileEntries[i].toURL()]));
@@ -1108,18 +1106,18 @@ FileTransferController.prototype.onFileSelectionChangedThrottled_ = function() {
     this.preloadThumbnailImage_(entries[0]);
   }
 
-  this.metadataCache_.get(entries, 'external', function(metadataList) {
-    // |Copy| is the only menu item affected by allDriveFilesAvailable_.
-    // It could be open right now, update its UI.
-    this.copyCommand_.disabled = !this.canCopyOrDrag_();
-
-    for (var i = 0; i < entries.length; i++) {
-      if (entries[i].isFile) {
-        asyncData[entries[i].toURL()].externalFileUrl =
-            metadataList[i] ? metadataList[i].externalFileUrl : null;
-      }
-    }
-  }.bind(this));
+  this.fileSystemMetadata_.get(entries, ['externalFileUrl']).then(
+      function(metadataList) {
+        // |Copy| is the only menu item affected by allDriveFilesAvailable_.
+        // It could be open right now, update its UI.
+        this.copyCommand_.disabled = !this.canCopyOrDrag_();
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isFile) {
+            asyncData[entries[i].toURL()].externalFileUrl =
+                metadataList[i].externalFileUrl;
+          }
+        }
+      }.bind(this));
 };
 
 /**

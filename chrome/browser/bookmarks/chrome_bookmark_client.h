@@ -15,11 +15,14 @@
 #include "components/bookmarks/browser/bookmark_client.h"
 #include "components/policy/core/browser/managed_bookmarks_tracker.h"
 
-class BookmarkModel;
 class GURL;
 class HistoryService;
 class HistoryServiceFactory;
 class Profile;
+
+namespace bookmarks {
+class BookmarkModel;
+}
 
 class ChromeBookmarkClient : public bookmarks::BookmarkClient,
                              public bookmarks::BaseBookmarkModelObserver {
@@ -27,20 +30,16 @@ class ChromeBookmarkClient : public bookmarks::BookmarkClient,
   explicit ChromeBookmarkClient(Profile* profile);
   ~ChromeBookmarkClient() override;
 
-  void Init(BookmarkModel* model);
+  void Init(bookmarks::BookmarkModel* model);
 
   // KeyedService:
   void Shutdown() override;
 
-  // Returns the managed_node.
-  const BookmarkNode* managed_node() { return managed_node_; }
-
-  // Returns true if the given node belongs to the managed bookmarks tree.
-  bool IsDescendantOfManagedNode(const BookmarkNode* node);
-
-  // Returns true if there is at least one managed node in the |list|.
-  bool HasDescendantsOfManagedNode(
-      const std::vector<const BookmarkNode*>& list);
+  // The top-level managed bookmarks folder, defined by an enterprise policy.
+  const bookmarks::BookmarkNode* managed_node() { return managed_node_; }
+  // The top-level supervised bookmarks folder, defined by the custodian of a
+  // supervised user.
+  const bookmarks::BookmarkNode* supervised_node() { return supervised_node_; }
 
   // bookmarks::BookmarkClient:
   bool PreferTouchIcon() override;
@@ -53,12 +52,14 @@ class ChromeBookmarkClient : public bookmarks::BookmarkClient,
   void GetTypedCountForNodes(
       const NodeSet& nodes,
       NodeTypedCountPairs* node_typed_count_pairs) override;
-  bool IsPermanentNodeVisible(const BookmarkPermanentNode* node) override;
+  bool IsPermanentNodeVisible(
+      const bookmarks::BookmarkPermanentNode* node) override;
   void RecordAction(const base::UserMetricsAction& action) override;
   bookmarks::LoadExtraCallback GetLoadExtraNodesCallback() override;
-  bool CanSetPermanentNodeTitle(const BookmarkNode* permanent_node) override;
-  bool CanSyncNode(const BookmarkNode* node) override;
-  bool CanBeEditedByUser(const BookmarkNode* node) override;
+  bool CanSetPermanentNodeTitle(
+      const bookmarks::BookmarkNode* permanent_node) override;
+  bool CanSyncNode(const bookmarks::BookmarkNode* node) override;
+  bool CanBeEditedByUser(const bookmarks::BookmarkNode* node) override;
 
  private:
   friend class HistoryServiceFactory;
@@ -66,19 +67,22 @@ class ChromeBookmarkClient : public bookmarks::BookmarkClient,
 
   // bookmarks::BaseBookmarkModelObserver:
   void BookmarkModelChanged() override;
-  void BookmarkNodeRemoved(BookmarkModel* model,
-                           const BookmarkNode* parent,
+  void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* parent,
                            int old_index,
-                           const BookmarkNode* node,
+                           const bookmarks::BookmarkNode* node,
                            const std::set<GURL>& removed_urls) override;
-  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+  void BookmarkAllUserNodesRemoved(bookmarks::BookmarkModel* model,
                                    const std::set<GURL>& removed_urls) override;
-  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkModelLoaded(bookmarks::BookmarkModel* model,
+                           bool ids_reassigned) override;
 
   // Helper for GetLoadExtraNodesCallback().
   static bookmarks::BookmarkPermanentNodeList LoadExtraNodes(
-      scoped_ptr<BookmarkPermanentNode> managed_node,
+      scoped_ptr<bookmarks::BookmarkPermanentNode> managed_node,
       scoped_ptr<base::ListValue> initial_managed_bookmarks,
+      scoped_ptr<bookmarks::BookmarkPermanentNode> supervised_node,
+      scoped_ptr<base::ListValue> initial_supervised_bookmarks,
       int64* next_node_id);
 
   // Returns the management domain that configured the managed bookmarks,
@@ -97,10 +101,17 @@ class ChromeBookmarkClient : public bookmarks::BookmarkClient,
 
   // Pointer to the BookmarkModel. Will be non-NULL from the call to Init to
   // the call to Shutdown. Must be valid for the whole interval.
-  BookmarkModel* model_;
+  bookmarks::BookmarkModel* model_;
 
+  // Managed bookmarks are defined by an enterprise policy.
   scoped_ptr<policy::ManagedBookmarksTracker> managed_bookmarks_tracker_;
-  BookmarkPermanentNode* managed_node_;
+  // The top-level managed bookmarks folder.
+  bookmarks::BookmarkPermanentNode* managed_node_;
+
+  // Supervised bookmarks are defined by the custodian of a supervised user.
+  scoped_ptr<policy::ManagedBookmarksTracker> supervised_bookmarks_tracker_;
+  // The top-level supervised bookmarks folder.
+  bookmarks::BookmarkPermanentNode* supervised_node_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBookmarkClient);
 };

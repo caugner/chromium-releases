@@ -34,7 +34,7 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
   TestPasswordManagerDriver(PasswordManagerClient* client)
       : password_manager_(client),
         password_generation_manager_(client, this),
-        password_autofill_manager_(client, this, NULL) {}
+        password_autofill_manager_(this, NULL) {}
   ~TestPasswordManagerDriver() override {}
 
   // PasswordManagerDriver implementation.
@@ -71,14 +71,12 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
         is_sync_enabled_(false),
         is_off_the_record_(false) {}
 
-  ~TestPasswordManagerClient() override {
-    store_->Shutdown();
-  }
+  ~TestPasswordManagerClient() override { store_->Shutdown(); }
 
-  bool IsOffTheRecord() override { return is_off_the_record_; }
-  PasswordStore* GetPasswordStore() override { return store_.get(); }
+  bool IsOffTheRecord() const override { return is_off_the_record_; }
+  PasswordStore* GetPasswordStore() const override { return store_.get(); }
   PrefService* GetPrefs() override { return prefs_.get(); }
-  bool IsPasswordSyncEnabled(CustomPassphraseState state) override {
+  bool IsPasswordSyncEnabled(CustomPassphraseState state) const override {
     return is_sync_enabled_;
   }
 

@@ -7,6 +7,7 @@ package org.chromium.chrome.browser;
 import android.view.ContextMenu;
 
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * An observer that is notified of changes to a {@link Tab} object.
@@ -44,6 +45,20 @@ public interface TabObserver {
      * @param tab The notifying {@link Tab}.
      */
     void onContentChanged(Tab tab);
+
+    /**
+     * Called when a {@link ContentViewCore} overlay is attached to {@code tab}.
+     * @param tab     The notifying {@link Tab}.
+     * @param content The {@link ContentViewCore} being added.
+     */
+    void onOverlayContentViewCoreAdded(Tab tab, ContentViewCore content);
+
+    /**
+     * Called when a {@link ContentViewCore} overlay is detached from {@code tab}.
+     * @param tab     The notifying {@link Tab}.
+     * @param content The {@link ContentViewCore} being removed.
+     */
+    void onOverlayContentViewCoreRemoved(Tab tab, ContentViewCore content);
 
     /**
      * Called when loadUrl is triggered on a a {@link Tab}.
@@ -259,6 +274,11 @@ public interface TabObserver {
      */
     public void onDidDetachInterstitialPage(Tab tab);
 
+    /**
+     * Called when a navigation is started to a pending entry.
+     * @param tab The notifying {@link Tab}.
+     * @param url The url being navigated to.
+     */
     public void onDidStartNavigationToPendingEntry(Tab tab, String url);
 
     /**
@@ -268,6 +288,15 @@ public interface TabObserver {
      */
     public void onBackgroundColorChanged(Tab tab, int color);
 
-    public void webContentsCreated(Tab tab, long sourceWebContents, long openerRenderFrameId,
-            String frameName, String targetUrl, long newWebContents);
+    /**
+     * Called when a {@link WebContents} object has been created.
+     * @param tab                 The notifying {@link Tab}.
+     * @param sourceWebContents   The {@link WebContents} that triggered the creation.
+     * @param openerRenderFrameId The opener render frame id.
+     * @param frameName           The name of the frame.
+     * @param targetUrl           The target url.
+     * @param newWebContents      The newly created {@link WebContents}.
+     */
+    public void webContentsCreated(Tab tab, WebContents sourceWebContents, long openerRenderFrameId,
+            String frameName, String targetUrl, WebContents newWebContents);
 }

@@ -9,7 +9,7 @@
 #include "android_webview/browser/shared_renderer_state.h"
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "ui/gfx/geometry/rect.h"
@@ -32,7 +32,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
       BrowserViewRendererClient* client,
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
 
-  virtual ~BrowserViewRenderer();
+  ~BrowserViewRenderer() override;
 
   SharedRendererState* GetAwDrawGLViewContext();
   bool RequestDrawGL(bool wait_for_completion);
@@ -80,28 +80,27 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   void TrimMemory(const int level, const bool visible);
 
   // SynchronousCompositorClient overrides.
-  virtual void DidInitializeCompositor(
+  void DidInitializeCompositor(
       content::SynchronousCompositor* compositor) override;
-  virtual void DidDestroyCompositor(content::SynchronousCompositor* compositor)
-      override;
-  virtual void SetContinuousInvalidate(bool invalidate) override;
-  virtual void DidUpdateContent() override;
-  virtual gfx::Vector2dF GetTotalRootLayerScrollOffset() override;
-  virtual void UpdateRootLayerState(
-      const gfx::Vector2dF& total_scroll_offset_dip,
-      const gfx::Vector2dF& max_scroll_offset_dip,
-      const gfx::SizeF& scrollable_size_dip,
-      float page_scale_factor,
-      float min_page_scale_factor,
-      float max_page_scale_factor) override;
-  virtual bool IsExternalFlingActive() const override;
-  virtual void DidOverscroll(gfx::Vector2dF accumulated_overscroll,
-                             gfx::Vector2dF latest_overscroll_delta,
-                             gfx::Vector2dF current_fling_velocity) override;
+  void DidDestroyCompositor(
+      content::SynchronousCompositor* compositor) override;
+  void SetContinuousInvalidate(bool invalidate) override;
+  void DidUpdateContent() override;
+  gfx::Vector2dF GetTotalRootLayerScrollOffset() override;
+  void UpdateRootLayerState(const gfx::Vector2dF& total_scroll_offset_dip,
+                            const gfx::Vector2dF& max_scroll_offset_dip,
+                            const gfx::SizeF& scrollable_size_dip,
+                            float page_scale_factor,
+                            float min_page_scale_factor,
+                            float max_page_scale_factor) override;
+  bool IsExternalFlingActive() const override;
+  void DidOverscroll(gfx::Vector2dF accumulated_overscroll,
+                     gfx::Vector2dF latest_overscroll_delta,
+                     gfx::Vector2dF current_fling_velocity) override;
 
   void UpdateParentDrawConstraints();
   void DidSkipCommitFrame();
-  void InvalidateOnFunctorDestroy();
+  void DetachFunctorFromView();
 
  private:
   void SetTotalRootLayerScrollOffset(gfx::Vector2dF new_value_dip);
@@ -116,9 +115,9 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   bool CompositeSW(SkCanvas* canvas);
   void DidComposite();
   void DidSkipCompositeInDraw();
-  scoped_refptr<base::debug::ConvertableToTraceFormat> RootLayerStateAsValue(
-      const gfx::Vector2dF& total_scroll_offset_dip,
-      const gfx::SizeF& scrollable_size_dip);
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+  RootLayerStateAsValue(const gfx::Vector2dF& total_scroll_offset_dip,
+                        const gfx::SizeF& scrollable_size_dip);
 
   scoped_ptr<cc::CompositorFrame> CompositeHw();
   void ReturnUnusedResource(scoped_ptr<cc::CompositorFrame> frame);

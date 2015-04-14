@@ -21,9 +21,13 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+namespace {
+
 // This is the number of pixels in the border image interior to the actual
 // border.
 const int kBorderInterior = 6;
+
+}  // namespace
 
 class OmniboxPopupContentsView::AutocompletePopupWidget
     : public views::Widget,
@@ -171,7 +175,7 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     const AutocompleteMatch& match = GetMatchAtIndex(i);
     view->SetMatch(match);
     view->SetVisible(i >= hidden_matches);
-    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE) {
+    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
       max_match_contents_width_ = std::max(
           max_match_contents_width_, view->GetMatchContentsWidth());
     }
@@ -406,7 +410,11 @@ OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// OmniboxPopupContentsView, views::View overrides, protected:
+// OmniboxPopupContentsView, views::View overrides, private:
+
+const char* OmniboxPopupContentsView::GetClassName() const {
+  return "OmniboxPopupContentsView";
+}
 
 void OmniboxPopupContentsView::OnPaint(gfx::Canvas* canvas) {
   gfx::Rect contents_bounds = GetContentsBounds();

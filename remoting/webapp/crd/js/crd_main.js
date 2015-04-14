@@ -19,16 +19,16 @@ remoting.initHostlist_ = function() {
       document.getElementById('host-list-loading-indicator'));
 
   isHostModeSupported_().then(
-    /** @param {Boolean} supported */
-    function(supported){
-      if (supported) {
-        var noShare = document.getElementById('chrome-os-no-share');
-        noShare.parentNode.removeChild(noShare);
-      } else {
-        var button = document.getElementById('share-button');
-        button.disabled = true;
-      }
-    });
+      /** @param {Boolean} supported */
+      function(supported) {
+        if (supported) {
+          var noShare = document.getElementById('unsupported-platform-message');
+          noShare.parentNode.removeChild(noShare);
+        } else {
+          var button = document.getElementById('share-button');
+          button.disabled = true;
+        }
+      });
 
   /**
    * @return {Promise} A promise that resolves to the id of the current
@@ -56,26 +56,27 @@ remoting.initHostlist_ = function() {
 
   var onLoad = function() {
     // Parse URL parameters.
-    var urlParams = getUrlParameters_();
+    var urlParams = base.getUrlParameters();
     if ('mode' in urlParams) {
       if (urlParams['mode'] === 'me2me') {
         var hostId = urlParams['hostId'];
         remoting.connectMe2Me(hostId);
         return;
       } else if (urlParams['mode'] === 'hangout') {
-        /** @param {*} id */
-        getCurrentId().then(function(id) {
-          /** @type {string} */
-          var accessCode = urlParams['accessCode'];
-          var connector = remoting.app.getSessionConnector();
-          remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
-          connector.connectIT2Me(accessCode);
+        getCurrentId().then(
+            /** @param {*} id */
+            function(id) {
+              /** @type {string} */
+              var accessCode = urlParams['accessCode'];
+              var connector = remoting.app.getSessionConnector();
+              remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
+              connector.connectIT2Me(accessCode);
 
-          document.body.classList.add('hangout-remote-desktop');
-          var senderId = /** @type {string} */ String(id);
-          var hangoutSession = new remoting.HangoutSession(senderId);
-          hangoutSession.init();
-        });
+              document.body.classList.add('hangout-remote-desktop');
+              var senderId = /** @type {string} */ (String(id));
+              var hangoutSession = new remoting.HangoutSession(senderId);
+              hangoutSession.init();
+            });
         return;
       }
     }
@@ -86,20 +87,16 @@ remoting.initHostlist_ = function() {
 }
 
 /**
- * Returns whether Host mode is supported on this platform for It2me.
- * TODO(kelvinp): Remove this function once It2me is enabled on Chrome OS (See
- * crbug.com/429860).
+ * Returns whether Host mode is supported on this platform for It2Me.
  *
  * @return {Promise} Resolves to true if Host mode is supported.
  */
 function isHostModeSupported_() {
-  if (!remoting.platformIsChromeOS()) {
+  if (remoting.HostInstaller.canInstall()) {
     return Promise.resolve(true);
   }
-  // Sharing on Chrome OS is currently behind a flag.
-  // isInstalled() will return false if the flag is disabled.
-  var hostInstaller = new remoting.HostInstaller();
-  return hostInstaller.isInstalled();
+
+  return remoting.HostInstaller.isInstalled();
 }
 
 /**
@@ -191,7 +188,7 @@ remoting.updateLocalHostState = function() {
  * hold in some corner cases.
  */
 remoting.startDesktopRemotingForTesting = function() {
-  var urlParams = getUrlParameters_();
+  var urlParams = base.getUrlParameters();
   if (urlParams['source'] === 'test') {
     document.getElementById('browser-test-continue-init').addEventListener(
         'click', remoting.startDesktopRemoting, false);
@@ -203,7 +200,7 @@ remoting.startDesktopRemotingForTesting = function() {
 
 
 remoting.startDesktopRemoting = function() {
-  remoting.app = new remoting.Application();
+  remoting.app = new remoting.Application(remoting.app_capabilities());
   var desktop_remoting = new remoting.DesktopRemoting(remoting.app);
   remoting.app.start();
 };

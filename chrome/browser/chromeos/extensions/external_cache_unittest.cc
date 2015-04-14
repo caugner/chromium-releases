@@ -41,7 +41,7 @@ class ExternalCacheTest : public testing::Test,
   ExternalCacheTest()
     : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD) {
   }
-  virtual ~ExternalCacheTest() {}
+  ~ExternalCacheTest() override {}
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner() {
     return background_task_runner_;
@@ -56,7 +56,7 @@ class ExternalCacheTest : public testing::Test,
   }
 
   // testing::Test overrides:
-  virtual void SetUp() override {
+  void SetUp() override {
     request_context_getter_ = new net::TestURLRequestContextGetter(
         content::BrowserThread::GetMessageLoopProxyForThread(
             content::BrowserThread::IO));
@@ -68,19 +68,17 @@ class ExternalCacheTest : public testing::Test,
         pool_owner_->pool()->GetNamedSequenceToken("background"));
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     pool_owner_->pool()->Shutdown();
     base::RunLoop().RunUntilIdle();
   }
 
   // ExternalCache::Delegate:
-  virtual void OnExtensionListsUpdated(
-      const base::DictionaryValue* prefs) override {
+  void OnExtensionListsUpdated(const base::DictionaryValue* prefs) override {
     prefs_.reset(prefs->DeepCopy());
   }
 
-  virtual std::string GetInstalledExtensionVersion(
-      const std::string& id) override {
+  std::string GetInstalledExtensionVersion(const std::string& id) override {
     std::map<std::string, std::string>::iterator it =
         installed_extensions_.find(id);
     return it != installed_extensions_.end() ? it->second : std::string();
@@ -207,13 +205,9 @@ TEST_F(ExternalCacheTest, Basic) {
   base::FilePath temp_dir(CreateTempDir());
   base::FilePath temp_file2 = temp_dir.Append("b.crx");
   CreateFile(temp_file2);
-  external_cache.OnExtensionDownloadFinished(kTestExtensionId2,
-      temp_file2,
-      true,
-      GURL(),
-      "2",
-      extensions::ExtensionDownloaderDelegate::PingResult(),
-      std::set<int>());
+  external_cache.OnExtensionDownloadFinished(
+      extensions::CRXFileInfo(kTestExtensionId2, temp_file2), true, GURL(), "2",
+      extensions::ExtensionDownloaderDelegate::PingResult(), std::set<int>());
 
   WaitForCompletion();
   EXPECT_EQ(provided_prefs()->size(), 3ul);
@@ -236,13 +230,9 @@ TEST_F(ExternalCacheTest, Basic) {
   // Update not from Webstore.
   base::FilePath temp_file4 = temp_dir.Append("d.crx");
   CreateFile(temp_file4);
-  external_cache.OnExtensionDownloadFinished(kTestExtensionId4,
-      temp_file4,
-      true,
-      GURL(),
-      "4",
-      extensions::ExtensionDownloaderDelegate::PingResult(),
-      std::set<int>());
+  external_cache.OnExtensionDownloadFinished(
+      extensions::CRXFileInfo(kTestExtensionId4, temp_file4), true, GURL(), "4",
+      extensions::ExtensionDownloaderDelegate::PingResult(), std::set<int>());
 
   WaitForCompletion();
   EXPECT_EQ(provided_prefs()->size(), 4ul);

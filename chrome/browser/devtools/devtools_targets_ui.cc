@@ -50,9 +50,9 @@ const char kAdbBrowsersList[] = "browsers";
 const char kAdbDeviceIdFormat[] = "device:%s";
 
 const char kAdbBrowserNameField[] = "adbBrowserName";
+const char kAdbBrowserUserField[] = "adbBrowserUser";
 const char kAdbBrowserVersionField[] = "adbBrowserVersion";
 const char kAdbBrowserChromeVersionField[] = "adbBrowserChromeVersion";
-const char kCompatibleVersion[] = "compatibleVersion";
 const char kAdbPagesList[] = "pages";
 
 const char kAdbScreenWidthField[] = "adbScreenWidth";
@@ -372,6 +372,7 @@ void AdbTargetsUIHandler::DeviceListChanged(
       DevToolsAndroidBridge::RemoteBrowser* browser = bit->get();
       base::DictionaryValue* browser_data = new base::DictionaryValue();
       browser_data->SetString(kAdbBrowserNameField, browser->display_name());
+      browser_data->SetString(kAdbBrowserUserField, browser->user());
       browser_data->SetString(kAdbBrowserVersionField, browser->version());
       DevToolsAndroidBridge::RemoteBrowser::ParsedVersion parsed =
           browser->GetParsedVersion();
@@ -381,16 +382,6 @@ void AdbTargetsUIHandler::DeviceListChanged(
       std::string browser_id = SerializeBrowserId(browser);
       browser_data->SetString(kTargetIdField, browser_id);
       browser_data->SetString(kTargetSourceField, source_id());
-
-      base::Version remote_version;
-      remote_version = base::Version(browser->version());
-
-      chrome::VersionInfo version_info;
-      base::Version local_version(version_info.Version());
-
-      browser_data->SetBoolean(kCompatibleVersion,
-          (!remote_version.IsValid()) || (!local_version.IsValid()) ||
-          remote_version.components()[0] <= local_version.components()[0]);
 
       base::ListValue* page_list = new base::ListValue();
       remote_browsers_[browser_id] = browser;

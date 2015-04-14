@@ -310,7 +310,7 @@ fileOperationUtil.findEntriesRecursively = function(entry, onResultCallback) {
                 reader.readEntries(processSubEntries, maybeSettlePromise);
               },
               maybeSettlePromise);
-        }
+        };
 
         processEntry(entry);
       });
@@ -578,8 +578,9 @@ fileOperationUtil.Task.prototype.initialize = function(callback) {
 fileOperationUtil.Task.prototype.requestCancel = function() {
   this.cancelRequested_ = true;
   if (this.cancelCallback_) {
-    this.cancelCallback_();
+    var callback = this.cancelCallback_;
     this.cancelCallback_ = null;
+    callback();
   }
 };
 

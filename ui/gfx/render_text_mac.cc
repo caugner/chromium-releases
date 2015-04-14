@@ -17,14 +17,19 @@
 
 namespace gfx {
 
-RenderTextMac::RenderTextMac() : common_baseline_(0), runs_valid_(false) {
+RenderTextMac::RenderTextMac()
+    : common_baseline_(0), runs_valid_(false) {
 }
 
 RenderTextMac::~RenderTextMac() {
 }
 
 scoped_ptr<RenderText> RenderTextMac::CreateInstanceOfSameType() const {
-  return scoped_ptr<RenderTextMac>(new RenderTextMac);
+  return make_scoped_ptr(new RenderTextMac);
+}
+
+const base::string16& RenderTextMac::GetDisplayText() {
+  return text_elided() ? display_text() : layout_text();
 }
 
 Size RenderTextMac::GetStringSize() {
@@ -58,7 +63,7 @@ std::vector<RenderText::FontSpan> RenderTextMac::GetFontSpansForTesting() {
   return spans;
 }
 
-int RenderTextMac::GetLayoutTextBaseline() {
+int RenderTextMac::GetDisplayTextBaseline() {
   EnsureLayout();
   return common_baseline_;
 }
@@ -87,12 +92,12 @@ std::vector<Rect> RenderTextMac::GetSubstringBounds(const Range& range) {
   return std::vector<Rect>();
 }
 
-size_t RenderTextMac::TextIndexToLayoutIndex(size_t index) const {
+size_t RenderTextMac::TextIndexToDisplayIndex(size_t index) {
   // TODO(asvitkine): Implement this. http://crbug.com/131618
   return index;
 }
 
-size_t RenderTextMac::LayoutIndexToTextIndex(size_t index) const {
+size_t RenderTextMac::DisplayIndexToTextIndex(size_t index) {
   // TODO(asvitkine): Implement this. http://crbug.com/131618
   return index;
 }
@@ -102,11 +107,24 @@ bool RenderTextMac::IsValidCursorIndex(size_t index) {
   return IsValidLogicalIndex(index);
 }
 
-void RenderTextMac::ResetLayout() {
+void RenderTextMac::OnLayoutTextAttributeChanged(bool text_changed) {
+  if (text_changed) {
+    if (elide_behavior() != NO_ELIDE &&
+        elide_behavior() != FADE_TAIL &&
+        !layout_text().empty()) {
+      UpdateDisplayText(GetContentWidth());
+    } else {
+      UpdateDisplayText(0);
+    }
+  }
   line_.reset();
   attributes_.reset();
   runs_.clear();
   runs_valid_ = false;
+}
+
+void RenderTextMac::OnDisplayTextAttributeChanged() {
+  OnLayoutTextAttributeChanged(true);
 }
 
 void RenderTextMac::EnsureLayout() {
@@ -155,7 +173,9 @@ void RenderTextMac::EnsureLayout() {
   CGFloat font_list_baseline = font_list().GetBaseline();
   ascent = std::max(ascent, font_list_baseline);
   descent = std::max(descent, font_list_height - font_list_baseline);
-  string_size_ = SizeF(width, ascent + descent + leading);
+  string_size_ =
+      SizeF(width, std::max(ascent + descent + leading,
+                            static_cast<CGFloat>(min_line_height())));
   common_baseline_ = ascent;
 }
 
@@ -210,9 +230,9 @@ void RenderTextMac::ApplyStyles(CFMutableAttributedStringRef attr_string,
 
   // https://developer.apple.com/library/mac/#documentation/Carbon/Reference/CoreText_StringAttributes_Ref/Reference/reference.html
   internal::StyleIterator style(colors(), styles());
-  const size_t layout_text_length = GetLayoutText().length();
+  const size_t layout_text_length = GetDisplayText().length();
   for (size_t i = 0, end = 0; i < layout_text_length; i = end) {
-    end = TextIndexToLayoutIndex(style.GetRange().end());
+    end = TextIndexToDisplayIndex(style.GetRange().end());
     const CFRange range = CFRangeMake(i, end - i);
     base::ScopedCFTypeRef<CGColorRef> foreground(
         CGColorCreateFromSkColor(style.color()));
@@ -243,7 +263,7 @@ void RenderTextMac::ApplyStyles(CFMutableAttributedStringRef attr_string,
       }
     }
 
-    style.UpdatePosition(LayoutIndexToTextIndex(end));
+    style.UpdatePosition(DisplayIndexToTextIndex(end));
   }
 
   // Undo the temporarily applied composition underlines and selection colors.
@@ -341,10 +361,6 @@ void RenderTextMac::ComputeRuns() {
     run_origin.offset(run_width, 0);
   }
   runs_valid_ = true;
-}
-
-RenderText* RenderText::CreateNativeInstance() {
-  return new RenderTextMac;
 }
 
 }  // namespace gfx

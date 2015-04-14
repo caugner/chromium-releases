@@ -72,6 +72,14 @@ bool IsForCurrentPlatform(const std::string& key) {
   return StartsWithASCII(key, Command::CommandPlatform() + ":", true);
 }
 
+std::string StripCurrentPlatform(const std::string& key) {
+  DCHECK(IsForCurrentPlatform(key));
+  std::string result = key;
+  ReplaceFirstSubstringAfterOffset(&result, 0, Command::CommandPlatform() + ":",
+                                   "");
+  return result;
+}
+
 void SetInitialBindingsHaveBeenAssigned(
     ExtensionPrefs* prefs, const std::string& extension_id) {
   prefs->UpdateExtensionPref(extension_id, kInitialBindingsHaveBeenAssigned,
@@ -300,7 +308,10 @@ void CommandService::OnExtensionWillBeInstalled(
     bool is_update,
     bool from_ephemeral,
     const std::string& old_name) {
-  UpdateKeybindings(extension);
+  // Component extensions don't generate normal install and uninstall events so
+  // those are handled in OnExtensionLoaded.
+  if (extension->location() != Manifest::COMPONENT)
+    UpdateKeybindings(extension);
 }
 
 void CommandService::OnExtensionUninstalled(
@@ -308,6 +319,12 @@ void CommandService::OnExtensionUninstalled(
     const Extension* extension,
     extensions::UninstallReason reason) {
   RemoveKeybindingPrefs(extension->id(), std::string());
+}
+
+void CommandService::OnExtensionLoaded(content::BrowserContext* browser_context,
+                                       const Extension* extension) {
+  if (extension->location() == Manifest::COMPONENT)
+    UpdateKeybindings(extension);
 }
 
 void CommandService::UpdateKeybindingPrefs(const std::string& extension_id,
@@ -804,13 +821,12 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
     std::string key = *it;
     bindings->Remove(key, NULL);
 
-    std::pair<const std::string, const std::string> details =
-        std::make_pair(extension_id, command_name);
+    ExtensionCommandRemovedDetails details(extension_id, command_name,
+                                           StripCurrentPlatform(key));
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
         content::Source<Profile>(profile_),
-        content::Details<std::pair<const std::string, const std::string> >(
-            &details));
+        content::Details<ExtensionCommandRemovedDetails>(&details));
   }
 }
 

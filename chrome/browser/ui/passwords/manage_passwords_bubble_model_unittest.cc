@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/password_manager/content/common/credential_manager_types.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_url_collection_experiment.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -43,7 +44,8 @@ class ManagePasswordsBubbleModelTest : public testing::Test {
   PrefService* prefs() { return profile_.GetPrefs(); }
 
   void PretendNeedToAskUserToSubmitURL() {
-    model_->set_state(password_manager::ui::ASK_USER_REPORT_URL_STATE);
+    model_->set_state(password_manager::ui::
+                      ASK_USER_REPORT_URL_BUBBLE_SHOWN_BEFORE_TRANSITION_STATE);
     EXPECT_FALSE(prefs()->GetBoolean(
         password_manager::prefs::kAllowToCollectURLBubbleWasShown));
     model_->OnBubbleShown(ManagePasswordsBubble::AUTOMATIC);
@@ -65,16 +67,22 @@ class ManagePasswordsBubbleModelTest : public testing::Test {
   }
 
   void PretendPasswordWaiting() {
-    model_->set_state(password_manager::ui::PENDING_PASSWORD_AND_BUBBLE_STATE);
+    model_->set_state(password_manager::ui::PENDING_PASSWORD_STATE);
     model_->OnBubbleShown(ManagePasswordsBubble::AUTOMATIC);
     controller()->SetState(
-        password_manager::ui::PENDING_PASSWORD_AND_BUBBLE_STATE);
+        password_manager::ui::PENDING_PASSWORD_STATE);
   }
 
   void PretendCredentialsWaiting() {
     model_->set_state(password_manager::ui::CREDENTIAL_REQUEST_STATE);
     model_->OnBubbleShown(ManagePasswordsBubble::AUTOMATIC);
     controller()->SetState(password_manager::ui::CREDENTIAL_REQUEST_STATE);
+  }
+
+  void PretendAutoSigningIn() {
+    model_->set_state(password_manager::ui::AUTO_SIGNIN_STATE);
+    model_->OnBubbleShown(ManagePasswordsBubble::AUTOMATIC);
+    controller()->SetState(password_manager::ui::AUTO_SIGNIN_STATE);
   }
 
   void PretendManagingPasswords() {
@@ -139,7 +147,7 @@ TEST_F(ManagePasswordsBubbleModelTest, CloseWithoutInteraction) {
   model_->OnBubbleHidden();
   EXPECT_EQ(model_->dismissal_reason(),
             password_manager::metrics_util::NO_DIRECT_INTERACTION);
-  EXPECT_EQ(password_manager::ui::PENDING_PASSWORD_AND_BUBBLE_STATE,
+  EXPECT_EQ(password_manager::ui::PENDING_PASSWORD_STATE,
             model_->state());
   EXPECT_FALSE(controller()->saved_password());
   EXPECT_FALSE(controller()->never_saved_password());
@@ -257,7 +265,8 @@ TEST_F(ManagePasswordsBubbleModelTest, ClickCredential) {
   PretendCredentialsWaiting();
   EXPECT_FALSE(controller()->choose_credential());
   autofill::PasswordForm form;
-  model_->OnChooseCredentials(form);
+  model_->OnChooseCredentials(
+      form, password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL);
   model_->OnBubbleHidden();
   EXPECT_EQ(model_->dismissal_reason(),
             password_manager::metrics_util::CLICKED_CREDENTIAL);
@@ -400,18 +409,16 @@ TEST_F(ManagePasswordsBubbleModelTest, DismissCredential) {
       1);
 }
 
-TEST_F(ManagePasswordsBubbleModelTest, PasswordPendingUserDecision) {
-  EXPECT_FALSE(password_manager::ui::IsPendingState(model_->state()));
+TEST_F(ManagePasswordsBubbleModelTest, PopupAutoSigninToast) {
+  base::HistogramTester histogram_tester;
+  PretendAutoSigningIn();
+  model_->OnAutoSignInToastTimeout();
+  model_->OnBubbleHidden();
+  EXPECT_EQ(model_->dismissal_reason(),
+            password_manager::metrics_util::AUTO_SIGNIN_TOAST_TIMEOUT);
 
-  model_->set_state(password_manager::ui::INACTIVE_STATE);
-  EXPECT_FALSE(password_manager::ui::IsPendingState(model_->state()));
-  model_->set_state(password_manager::ui::MANAGE_STATE);
-  EXPECT_FALSE(password_manager::ui::IsPendingState(model_->state()));
-  model_->set_state(password_manager::ui::BLACKLIST_STATE);
-  EXPECT_FALSE(password_manager::ui::IsPendingState(model_->state()));
-
-  model_->set_state(password_manager::ui::PENDING_PASSWORD_AND_BUBBLE_STATE);
-  EXPECT_TRUE(password_manager::ui::IsPendingState(model_->state()));
-  model_->set_state(password_manager::ui::PENDING_PASSWORD_STATE);
-  EXPECT_TRUE(password_manager::ui::IsPendingState(model_->state()));
+  histogram_tester.ExpectUniqueSample(
+      kUIDismissalReasonMetric,
+      password_manager::metrics_util::AUTO_SIGNIN_TOAST_TIMEOUT,
+      1);
 }

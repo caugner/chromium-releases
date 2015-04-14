@@ -16,6 +16,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/browser_thread.h"
 
+using bookmarks::BookmarkModel;
 using content::BrowserThread;
 
 namespace browser_sync {
@@ -47,7 +48,7 @@ bool BookmarkDataTypeController::StartModels() {
         BookmarkModelFactory::GetForProfile(profile_);
     bookmark_model_observer_.Add(bookmark_model);
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
     history_service_observer_.Add(history_service);
     return false;
   }
@@ -95,7 +96,7 @@ bool BookmarkDataTypeController::DependentsLoaded() {
     return false;
 
   HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!history || !history->BackendLoaded())
     return false;
 

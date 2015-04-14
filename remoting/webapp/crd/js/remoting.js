@@ -8,9 +8,9 @@
 var remoting = remoting || {};
 
 /**
- * @type {base.EventSource} An event source object for handling global events.
- *    This is an interim hack.  Eventually, we should move functionalities
- *    away from the remoting namespace and into smaller objects.
+ * @type {base.EventSourceImpl} An event source object for handling global
+ *    events. This is an interim hack.  Eventually, we should move
+ *    functionalities away from the remoting namespace and into smaller objects.
  */
 remoting.testEvents;
 
@@ -26,19 +26,13 @@ remoting.initGlobalObjects = function() {
   console.log(remoting.getExtensionInfo());
   l10n.localize();
 
-  if (base.isAppsV2()) {
-    remoting.fullscreen = new remoting.FullscreenAppsV2();
-  } else {
-    remoting.fullscreen = new remoting.FullscreenAppsV1();
-  }
-
   remoting.stats = new remoting.ConnectionStats(
       document.getElementById('statistics'));
   remoting.formatIq = new remoting.FormatIq();
 
   remoting.clipboard = new remoting.Clipboard();
-  var sandbox = /** @type {HTMLIFrameElement} */
-      document.getElementById('wcs-sandbox');
+  var sandbox =
+      /** @type {HTMLIFrameElement} */ (document.getElementById('wcs-sandbox'));
   remoting.wcsSandbox = new remoting.WcsSandboxContainer(sandbox.contentWindow);
 
   // The plugin's onFocus handler sends a paste command to |window|, because
@@ -48,7 +42,7 @@ remoting.initGlobalObjects = function() {
 
   remoting.initModalDialogs();
 
-  remoting.testEvents = new base.EventSource();
+  remoting.testEvents = new base.EventSourceImpl();
   /** @enum {string} */
   remoting.testEvents.Names = {
     uiModeChanged: 'uiModeChanged'
@@ -80,7 +74,7 @@ remoting.getExtensionInfo = function() {
   var v2OrLegacy = base.isAppsV2() ? " (v2)" : " (legacy)";
   var manifest = chrome.runtime.getManifest();
   if (manifest && manifest.version) {
-    var name = chrome.i18n.getMessage('PRODUCT_NAME');
+    var name = remoting.app.getApplicationName();
     return name + ' version: ' + manifest.version + v2OrLegacy;
   } else {
     return 'Failed to get product version. Corrupt manifest?';
@@ -93,8 +87,9 @@ remoting.getExtensionInfo = function() {
  * the more intuitive way to end a Me2Me session, and re-connecting is easy.
  */
 remoting.promptClose = function() {
-  if (remoting.clientSession &&
-      remoting.clientSession.getMode() == remoting.ClientSession.Mode.IT2ME) {
+  if (remoting.desktopConnectedView &&
+      remoting.desktopConnectedView.getMode() ==
+          remoting.DesktopConnectedView.Mode.IT2ME) {
     switch (remoting.currentMode) {
       case remoting.AppMode.CLIENT_CONNECTING:
       case remoting.AppMode.HOST_WAITING_FOR_CODE:
@@ -115,20 +110,20 @@ remoting.promptClose = function() {
  * Also clear all local storage, to avoid leaking information.
  */
 remoting.signOut = function() {
-  remoting.oauth2.clear();
-  chrome.storage.local.clear();
-  remoting.setMode(remoting.AppMode.HOME);
-  document.getElementById('auth-dialog').hidden = false;
+  remoting.oauth2.removeCachedAuthToken(function(){
+    chrome.storage.local.clear();
+    remoting.setMode(remoting.AppMode.HOME);
+    window.location.reload();
+  });
 };
 
 /**
  * Callback function called when the browser window gets a paste operation.
  *
- * @param {Event} eventUncast
+ * @param {Event} event
  * @return {void} Nothing.
  */
-function pluginGotPaste_(eventUncast) {
-  var event = /** @type {remoting.ClipboardEvent} */ eventUncast;
+function pluginGotPaste_(event) {
   if (event && event.clipboardData) {
     remoting.clipboard.toHost(event.clipboardData);
   }
@@ -137,30 +132,16 @@ function pluginGotPaste_(eventUncast) {
 /**
  * Callback function called when the browser window gets a copy operation.
  *
- * @param {Event} eventUncast
+ * @param {Event} event
  * @return {void} Nothing.
  */
-function pluginGotCopy_(eventUncast) {
-  var event = /** @type {remoting.ClipboardEvent} */ eventUncast;
+function pluginGotCopy_(event) {
   if (event && event.clipboardData) {
     if (remoting.clipboard.toOs(event.clipboardData)) {
       // The default action may overwrite items that we added to clipboardData.
       event.preventDefault();
     }
   }
-}
-
-/**
- * @return {Object.<string, string>} The URL parameters.
- */
-function getUrlParameters_() {
-  var result = {};
-  var parts = window.location.search.substring(1).split('&');
-  for (var i = 0; i < parts.length; i++) {
-    var pair = parts[i].split('=');
-    result[pair[0]] = decodeURIComponent(pair[1]);
-  }
-  return result;
 }
 
 /**
@@ -201,9 +182,13 @@ remoting.showErrorMessage = function(error) {
       document.getElementById('token-refresh-error-message'),
       error);
   var auth_failed = (error == remoting.Error.AUTHENTICATION_FAILED);
-  document.getElementById('token-refresh-auth-failed').hidden = !auth_failed;
-  document.getElementById('token-refresh-other-error').hidden = auth_failed;
-  remoting.setMode(remoting.AppMode.TOKEN_REFRESH_FAILED);
+  if (auth_failed && base.isAppsV2()) {
+    remoting.handleAuthFailureAndRelaunch();
+  } else {
+    document.getElementById('token-refresh-auth-failed').hidden = !auth_failed;
+    document.getElementById('token-refresh-other-error').hidden = auth_failed;
+    remoting.setMode(remoting.AppMode.TOKEN_REFRESH_FAILED);
+  }
 };
 
 /**
@@ -230,4 +215,3 @@ function isWindowed_(callback) {
     console.error('chome.tabs is not available.');
   }
 }
-

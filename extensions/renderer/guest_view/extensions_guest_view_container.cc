@@ -6,8 +6,8 @@
 
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/guest_view/guest_view_constants.h"
+#include "extensions/common/guest_view/guest_view_messages.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -62,8 +62,7 @@ void ExtensionsGuestViewContainer::AttachRequest::PerformRequest() {
 
   // Step 1, send the attach params to extensions/.
   container()->render_frame()->Send(
-      new ExtensionHostMsg_AttachGuest(container()->render_view_routing_id(),
-                                       container()->element_instance_id(),
+      new GuestViewHostMsg_AttachGuest(container()->element_instance_id(),
                                        guest_instance_id_,
                                        *params_));
 
@@ -73,8 +72,8 @@ void ExtensionsGuestViewContainer::AttachRequest::PerformRequest() {
 
 void ExtensionsGuestViewContainer::AttachRequest::HandleResponse(
     const IPC::Message& message) {
-  ExtensionMsg_GuestAttached::Param param;
-  if (!ExtensionMsg_GuestAttached::Read(&message, &param))
+  GuestViewMsg_GuestAttached::Param param;
+  if (!GuestViewMsg_GuestAttached::Read(&message, &param))
     return;
 
   // If we don't have a callback then there's nothing more to do.
@@ -140,14 +139,15 @@ void ExtensionsGuestViewContainer::DetachRequest::HandleResponse(
   blink::WebScopedMicrotaskSuppression suppression;
 
   // Call the DetachGuest's callback.
-  callback->Call(context->Global(), 0 /* argc */, NULL);
+  callback->Call(context->Global(), 0 /* argc */, nullptr);
 }
 
 ExtensionsGuestViewContainer::ExtensionsGuestViewContainer(
     content::RenderFrame* render_frame)
     : GuestViewContainer(render_frame),
       ready_(false),
-      destruction_isolate_(nullptr) {
+      destruction_isolate_(nullptr),
+      element_resize_isolate_(nullptr) {
 }
 
 ExtensionsGuestViewContainer::~ExtensionsGuestViewContainer() {
@@ -168,16 +168,15 @@ ExtensionsGuestViewContainer::~ExtensionsGuestViewContainer() {
   v8::Context::Scope context_scope(context);
   blink::WebScopedMicrotaskSuppression suppression;
 
-  callback->Call(context->Global(), 0, nullptr);
+  callback->Call(context->Global(), 0 /* argc */, nullptr);
 }
 
 ExtensionsGuestViewContainer* ExtensionsGuestViewContainer::FromID(
     int element_instance_id) {
   ExtensionsGuestViewContainerMap* guest_view_containers =
       g_guest_view_container_map.Pointer();
-  ExtensionsGuestViewContainerMap::iterator it =
-      guest_view_containers->find(element_instance_id);
-  return it == guest_view_containers->end() ? NULL : it->second;
+  auto it = guest_view_containers->find(element_instance_id);
+  return it == guest_view_containers->end() ? nullptr : it->second;
 }
 
 void ExtensionsGuestViewContainer::IssueRequest(linked_ptr<Request> request) {
@@ -190,6 +189,18 @@ void ExtensionsGuestViewContainer::RegisterDestructionCallback(
     v8::Isolate* isolate) {
   destruction_callback_.reset(callback);
   destruction_isolate_ = isolate;
+}
+
+void ExtensionsGuestViewContainer::RegisterElementResizeCallback(
+    v8::Handle<v8::Function> callback,
+    v8::Isolate* isolate) {
+  element_resize_callback_.reset(callback);
+  element_resize_isolate_ = isolate;
+}
+
+void ExtensionsGuestViewContainer::DidResizeElement(const gfx::Size& old_size,
+                                                    const gfx::Size& new_size) {
+  // TODO(paulmeyer): Call the |element_resize_callback_| callback here.
 }
 
 bool ExtensionsGuestViewContainer::OnMessageReceived(

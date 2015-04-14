@@ -14,6 +14,7 @@
 #include "android_webview/native/aw_dev_tools_server.h"
 #include "android_webview/native/aw_form_database.h"
 #include "android_webview/native/aw_http_auth_handler.h"
+#include "android_webview/native/aw_message_port_service_impl.h"
 #include "android_webview/native/aw_pdf_exporter.h"
 #include "android_webview/native/aw_picture.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
@@ -28,7 +29,7 @@
 #include "android_webview/native/permission/aw_permission_request.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 
 namespace android_webview {
 
@@ -58,6 +59,7 @@ static base::android::RegistrationMethod kWebViewRegisteredMethods[] = {
   { "AwWebResourceResponseImpl", RegisterAwWebResourceResponse },
   { "InputStream", RegisterInputStream },
   { "JavaBrowserViewRendererHelper", RegisterJavaBrowserViewRendererHelper },
+  { "AwMessagePortService", RegisterAwMessagePortService },
 };
 
 bool RegisterJni(JNIEnv* env) {

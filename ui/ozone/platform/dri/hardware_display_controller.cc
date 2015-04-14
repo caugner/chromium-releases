@@ -10,8 +10,8 @@
 #include <xf86drm.h>
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
@@ -24,8 +24,9 @@ namespace ui {
 
 HardwareDisplayController::PageFlipRequest::PageFlipRequest(
     const OverlayPlaneList& planes,
+    bool is_sync,
     const base::Closure& callback)
-    : planes(planes), callback(callback) {
+    : planes(planes), is_sync(is_sync), callback(callback) {
 }
 
 HardwareDisplayController::PageFlipRequest::~PageFlipRequest() {
@@ -63,7 +64,7 @@ bool HardwareDisplayController::Modeset(const OverlayPlane& primary,
   // callback. We use the modeset state since it is the only valid state.
   if (HasPendingPageFlips())
     requests_.push_back(
-        PageFlipRequest(current_planes_, base::Bind(&base::DoNothing)));
+        PageFlipRequest(current_planes_, false, base::Bind(&base::DoNothing)));
 
   return status;
 }
@@ -89,6 +90,7 @@ void HardwareDisplayController::QueueOverlayPlane(const OverlayPlane& plane) {
 }
 
 bool HardwareDisplayController::SchedulePageFlip(
+    bool is_sync,
     const base::Closure& callback) {
   TRACE_EVENT0("dri", "HDC::SchedulePageFlip");
 
@@ -98,7 +100,7 @@ bool HardwareDisplayController::SchedulePageFlip(
     return true;
   }
 
-  requests_.push_back(PageFlipRequest(pending_planes_, callback));
+  requests_.push_back(PageFlipRequest(pending_planes_, is_sync, callback));
   pending_planes_.clear();
 
   // A request is being serviced right now.
@@ -148,17 +150,18 @@ bool HardwareDisplayController::MoveCursor(const gfx::Point& location) {
 
 void HardwareDisplayController::AddCrtc(scoped_ptr<CrtcController> controller) {
   owned_hardware_planes_.add(
-      controller->drm(),
+      controller->drm().get(),
       scoped_ptr<HardwareDisplayPlaneList>(new HardwareDisplayPlaneList()));
   controller->AddObserver(this);
   crtc_controllers_.push_back(controller.release());
 }
 
 scoped_ptr<CrtcController> HardwareDisplayController::RemoveCrtc(
+    const scoped_refptr<DriWrapper>& drm,
     uint32_t crtc) {
   for (ScopedVector<CrtcController>::iterator it = crtc_controllers_.begin();
        it != crtc_controllers_.end(); ++it) {
-    if ((*it)->crtc() == crtc) {
+    if ((*it)->drm() == drm && (*it)->crtc() == crtc) {
       scoped_ptr<CrtcController> controller(*it);
       crtc_controllers_.weak_erase(it);
       // Remove entry from |owned_hardware_planes_| iff no other crtcs share it.
@@ -172,7 +175,7 @@ scoped_ptr<CrtcController> HardwareDisplayController::RemoveCrtc(
         }
       }
       if (!found)
-        owned_hardware_planes_.erase(controller->drm());
+        owned_hardware_planes_.erase(controller->drm().get());
 
       controller->RemoveObserver(this);
       // If a display configuration happens mid page flip we want to make sure
@@ -185,12 +188,14 @@ scoped_ptr<CrtcController> HardwareDisplayController::RemoveCrtc(
     }
   }
 
-  return scoped_ptr<CrtcController>();
+  return nullptr;
 }
 
-bool HardwareDisplayController::HasCrtc(uint32_t crtc) const {
+bool HardwareDisplayController::HasCrtc(const scoped_refptr<DriWrapper>& drm,
+                                        uint32_t crtc) const {
   for (size_t i = 0; i < crtc_controllers_.size(); ++i)
-    if (crtc_controllers_[i]->crtc() == crtc)
+    if (crtc_controllers_[i]->drm() == drm &&
+        crtc_controllers_[i]->crtc() == crtc)
       return true;
 
   return false;
@@ -255,6 +260,14 @@ void HardwareDisplayController::OnPageFlipEvent() {
   }
 }
 
+scoped_refptr<DriWrapper> HardwareDisplayController::GetAllocationDriWrapper()
+    const {
+  DCHECK(!crtc_controllers_.empty());
+  // TODO(dnicoara) When we support mirroring across DRM devices, figure out
+  // which device should be used for allocations.
+  return crtc_controllers_[0]->drm();
+}
+
 bool HardwareDisplayController::HasPendingPageFlips() const {
   for (size_t i = 0; i < crtc_controllers_.size(); ++i)
     if (crtc_controllers_[i]->page_flip_pending())
@@ -281,12 +294,13 @@ bool HardwareDisplayController::ActualSchedulePageFlip() {
   bool status = true;
   for (size_t i = 0; i < crtc_controllers_.size(); ++i) {
     status &= crtc_controllers_[i]->SchedulePageFlip(
-        owned_hardware_planes_.get(crtc_controllers_[i]->drm()),
+        owned_hardware_planes_.get(crtc_controllers_[i]->drm().get()),
         pending_planes);
   }
 
+  bool is_sync = requests_.front().is_sync;
   for (const auto& planes : owned_hardware_planes_) {
-    if (!planes.first->plane_manager()->Commit(planes.second)) {
+    if (!planes.first->plane_manager()->Commit(planes.second, is_sync)) {
       status = false;
     }
   }

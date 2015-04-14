@@ -6,7 +6,7 @@
 #define UI_KEYBOARD_WEBUI_VK_MOJO_HANDLER_H_
 
 #include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/keyboard/webui/keyboard.mojom.h"
 
@@ -22,6 +22,7 @@ class VKMojoHandler : public KeyboardUIHandlerMojo,
   ui::InputMethod* GetInputMethod();
 
   // KeyboardUIHandlerMojo:
+  void SetTextInputTypeObserver(TextInputTypeObserverPtr observer) override;
   void SendKeyEvent(const mojo::String& event_type,
                     int32_t char_value,
                     int32_t key_code,
@@ -38,6 +39,7 @@ class VKMojoHandler : public KeyboardUIHandlerMojo,
   void OnInputMethodDestroyed(const ui::InputMethod* input_method) override;
   void OnShowImeIfNeeded() override;
 
+  TextInputTypeObserverPtr text_input_type_observer_;
   mojo::Binding<KeyboardUIHandlerMojo> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(VKMojoHandler);

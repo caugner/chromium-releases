@@ -161,6 +161,8 @@ int GetEventFlagsFromXState(unsigned int state) {
     flags |= ui::EF_MIDDLE_MOUSE_BUTTON;
   if (state & Button3Mask)
     flags |= ui::EF_RIGHT_MOUSE_BUTTON;
+  // There are no masks for EF_BACK_MOUSE_BUTTON and
+  // EF_FORWARD_MOUSE_BUTTON.
   return flags;
 }
 
@@ -224,6 +226,10 @@ int GetEventFlagsForButton(int button) {
       return ui::EF_MIDDLE_MOUSE_BUTTON;
     case 3:
       return ui::EF_RIGHT_MOUSE_BUTTON;
+    case 8:
+      return ui::EF_BACK_MOUSE_BUTTON;
+    case 9:
+      return ui::EF_FORWARD_MOUSE_BUTTON;
     default:
       return 0;
   }
@@ -737,18 +743,6 @@ base::NativeEvent CopyNativeEvent(const base::NativeEvent& event) {
 
 void ReleaseCopiedNativeEvent(const base::NativeEvent& event) {
   delete event;
-}
-
-void IncrementTouchIdRefCount(const base::NativeEvent& xev) {
-  ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
-  double tracking_id;
-  if (!manager->GetEventData(
-          *xev, ui::DeviceDataManagerX11::DT_TOUCH_TRACKING_ID, &tracking_id)) {
-    return;
-  }
-
-  ui::TouchFactory* factory = ui::TouchFactory::GetInstance();
-  factory->AcquireSlotForTrackingID(tracking_id);
 }
 
 void ClearTouchIdIfReleased(const base::NativeEvent& xev) {

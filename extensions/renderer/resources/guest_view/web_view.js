@@ -17,8 +17,6 @@ var WebViewInternal = require('webViewInternal').WebViewInternal;
 function WebViewImpl(webviewElement) {
   GuestViewContainer.call(this, webviewElement, 'webview');
 
-  this.beforeFirstNavigation = true;
-
   this.setupWebViewAttributes();
   this.setupElementProperties();
 
@@ -71,10 +69,9 @@ WebViewImpl.prototype.onElementAttached = function() {
 // Resets some state upon detaching <webview> element from the DOM.
 WebViewImpl.prototype.onElementDetached = function() {
   this.guest.destroy();
-  this.beforeFirstNavigation = true;
-  this.attributes[WebViewConstants.ATTRIBUTE_PARTITION].validPartitionId =
-      true;
-  this.internalInstanceId = 0;
+  for (var i in this.attributes) {
+    this.attributes[i].reset();
+  }
 };
 
 // Sets the <webview>.request property.
@@ -108,13 +105,12 @@ WebViewImpl.prototype.setupElementProperties = function() {
 // This observer monitors mutations to attributes of the <webview>.
 WebViewImpl.prototype.handleAttributeMutation = function(
     attributeName, oldValue, newValue) {
-  if (!this.attributes[attributeName] ||
-      this.attributes[attributeName].ignoreMutation) {
+  if (!this.attributes[attributeName]) {
     return;
   }
 
   // Let the changed attribute handle its own mutation;
-  this.attributes[attributeName].handleMutation(oldValue, newValue);
+  this.attributes[attributeName].maybeHandleMutation(oldValue, newValue);
 };
 
 WebViewImpl.prototype.onSizeChanged = function(webViewEvent) {
@@ -154,12 +150,7 @@ WebViewImpl.prototype.onSizeChanged = function(webViewEvent) {
 };
 
 WebViewImpl.prototype.createGuest = function() {
-  var params = {
-    'storagePartitionId': this.attributes[
-      WebViewConstants.ATTRIBUTE_PARTITION].getValue()
-  };
-
-  this.guest.create(params, function() {
+  this.guest.create(this.buildParams(), function() {
     this.attachWindow();
   }.bind(this));
 };
@@ -220,7 +211,7 @@ WebViewImpl.prototype.onAttach = function(storagePartitionId) {
       storagePartitionId);
 };
 
-WebViewImpl.prototype.buildAttachParams = function() {
+WebViewImpl.prototype.buildContainerParams = function() {
   var params = { 'userAgentOverride': this.userAgentOverride };
   for (var i in this.attributes) {
     params[i] = this.attributes[i].getValue();
@@ -250,7 +241,7 @@ WebViewImpl.prototype.executeCode = function(func, args) {
   }
 
   var webviewSrc = this.attributes[WebViewConstants.ATTRIBUTE_SRC].getValue();
-  if (this.baseUrlForDataUrl != '') {
+  if (this.baseUrlForDataUrl) {
     webviewSrc = this.baseUrlForDataUrl;
   }
 

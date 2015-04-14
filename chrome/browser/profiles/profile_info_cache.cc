@@ -148,13 +148,6 @@ void DeleteBitmap(const base::FilePath& image_path) {
   base::DeleteFile(image_path, false);
 }
 
-// Used by SaveAvatarImageAtPath to post a task to delete the |downloader|
-// "soon". We can't just delete it directly there because
-// SaveAvatarImageAtPath is called from this very downloader.
-void DeleteDownloader(ProfileAvatarDownloader* downloader) {
-  delete downloader;
-}
-
 }  // namespace
 
 ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
@@ -857,23 +850,6 @@ const base::FilePath& ProfileInfoCache::GetUserDataDir() const {
 }
 
 // static
-std::vector<base::string16> ProfileInfoCache::GetProfileNames() {
-  std::vector<base::string16> names;
-  PrefService* local_state = g_browser_process->local_state();
-  const base::DictionaryValue* cache = local_state->GetDictionary(
-      prefs::kProfileInfoCache);
-  base::string16 name;
-  for (base::DictionaryValue::Iterator it(*cache); !it.IsAtEnd();
-       it.Advance()) {
-    const base::DictionaryValue* info = NULL;
-    it.value().GetAsDictionary(&info);
-    info->GetString(kNameKey, &name);
-    names.push_back(name);
-  }
-  return names;
-}
-
-// static
 void ProfileInfoCache::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kProfileInfoCache);
 }
@@ -914,9 +890,8 @@ void ProfileInfoCache::SaveAvatarImageAtPath(
   if (downloader_iter != avatar_images_downloads_in_progress_.end()) {
     // We mustn't delete the avatar downloader right here, since we're being
     // called by it.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&DeleteDownloader,
-                                       downloader_iter->second));
+    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE,
+                              downloader_iter->second);
     avatar_images_downloads_in_progress_.erase(downloader_iter);
   }
 
@@ -1037,8 +1012,12 @@ const gfx::Image* ProfileInfoCache::GetHighResAvatarOfProfileAtIndex(
   int avatar_index = GetAvatarIconIndexOfProfileAtIndex(index);
   std::string key = profiles::GetDefaultAvatarIconFileNameAtIndex(avatar_index);
 
-  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName()))
-      return NULL;
+  // If this is the placeholder avatar, it is already included in the
+  // resources, so it doesn't need to be downloaded.
+  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName())) {
+    return &ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        profiles::GetPlaceholderAvatarIconResourceID());
+  }
 
   base::FilePath image_path =
       profiles::GetPathOfHighResAvatarAtIndex(avatar_index);

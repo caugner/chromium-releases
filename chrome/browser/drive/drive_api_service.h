@@ -15,7 +15,6 @@
 #include "google_apis/drive/auth_service_interface.h"
 #include "google_apis/drive/auth_service_observer.h"
 #include "google_apis/drive/drive_api_url_generator.h"
-#include "google_apis/drive/gdata_wapi_url_generator.h"
 
 class GURL;
 class OAuth2TokenService;
@@ -47,9 +46,6 @@ class DriveAPIService : public DriveServiceInterface,
   // |base_url| is used to generate URLs for communication with the drive API.
   // |base_download_url| is used to generate URLs for downloading file from the
   // drive API.
-  // |wapi_base_url| is used to generate URLs for shared_url. Unfortunately,
-  // the share_url is not yet supported on Drive API v2, so as a fallback,
-  // we use GData WAPI.
   // |custom_user_agent| will be used for the User-Agent header in HTTP
   // requests issues through the service if the value is not empty.
   DriveAPIService(
@@ -58,7 +54,6 @@ class DriveAPIService : public DriveServiceInterface,
       base::SequencedTaskRunner* blocking_task_runner,
       const GURL& base_url,
       const GURL& base_download_url,
-      const GURL& wapi_base_url,
       const std::string& custom_user_agent);
   ~DriveAPIService() override;
 
@@ -131,6 +126,7 @@ class DriveAPIService : public DriveServiceInterface,
       const std::string& new_title,
       const base::Time& last_modified,
       const base::Time& last_viewed_by_me,
+      const google_apis::drive::Properties& properties,
       const google_apis::FileResourceCallback& callback) override;
   google_apis::CancelCallback AddResourceToDirectory(
       const std::string& parent_resource_id,
@@ -214,7 +210,6 @@ class DriveAPIService : public DriveServiceInterface,
   scoped_ptr<google_apis::RequestSender> sender_;
   ObserverList<DriveServiceObserver> observers_;
   google_apis::DriveApiUrlGenerator url_generator_;
-  google_apis::GDataWapiUrlGenerator wapi_url_generator_;
   const std::string custom_user_agent_;
 
   DISALLOW_COPY_AND_ASSIGN(DriveAPIService);

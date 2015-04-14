@@ -6,14 +6,12 @@
 
 #include "base/bind.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
-#include "components/password_manager/core/browser/password_syncable_service.h"
 
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
 #include "components/password_manager/core/browser/password_syncable_service.h"
@@ -24,17 +22,6 @@ using autofill::PasswordForm;
 namespace password_manager {
 
 namespace {
-
-// Calls |consumer| back with the request result, if |consumer| is still alive.
-// Takes ownership of the elements in |result|, passing ownership to |consumer|
-// if it is still alive.
-void MaybeCallConsumerCallback(base::WeakPtr<PasswordStoreConsumer> consumer,
-                               scoped_ptr<std::vector<PasswordForm*> > result) {
-  if (consumer.get())
-    consumer->OnGetPasswordStoreResults(*result);
-  else
-    STLDeleteElements(result.get());
-}
 
 // http://crbug.com/404012. Let's see where the empty fields come from.
 void CheckForEmptyUsernameAndPassword(const PasswordForm& form) {
@@ -48,35 +35,30 @@ void CheckForEmptyUsernameAndPassword(const PasswordForm& form) {
 
 PasswordStore::GetLoginsRequest::GetLoginsRequest(
     PasswordStoreConsumer* consumer)
-    : consumer_weak_(consumer->GetWeakPtr()),
-      result_(new std::vector<PasswordForm*>()) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+    : consumer_weak_(consumer->GetWeakPtr()) {
   origin_loop_ = base::MessageLoopProxy::current();
 }
 
 PasswordStore::GetLoginsRequest::~GetLoginsRequest() {
 }
 
-void PasswordStore::GetLoginsRequest::ApplyIgnoreLoginsCutoff() {
+void PasswordStore::GetLoginsRequest::NotifyConsumerWithResults(
+    ScopedVector<autofill::PasswordForm> results) {
   if (!ignore_logins_cutoff_.is_null()) {
-    // Count down rather than up since we may be deleting elements.
-    // Note that in principle it could be more efficient to copy the whole array
-    // since that's worst-case linear time, but we expect that elements will be
-    // deleted rarely and lists will be small, so this avoids the copies.
-    for (size_t i = result_->size(); i > 0; --i) {
-      if ((*result_)[i - 1]->date_created < ignore_logins_cutoff_) {
-        delete (*result_)[i - 1];
-        result_->erase(result_->begin() + (i - 1));
+    ScopedVector<autofill::PasswordForm> remaining_logins;
+    remaining_logins.reserve(results.size());
+    for (auto& login : results) {
+      if (login->date_created >= ignore_logins_cutoff_) {
+        remaining_logins.push_back(login);
+        login = nullptr;
       }
     }
+    results = remaining_logins.Pass();
   }
-}
 
-void PasswordStore::GetLoginsRequest::ForwardResult() {
-  origin_loop_->PostTask(FROM_HERE,
-                         base::Bind(&MaybeCallConsumerCallback,
-                                    consumer_weak_,
-                                    base::Passed(result_.Pass())));
+  origin_loop_->PostTask(
+      FROM_HERE, base::Bind(&PasswordStoreConsumer::OnGetPasswordStoreResults,
+                            consumer_weak_, base::Passed(&results)));
 }
 
 PasswordStore::PasswordStore(
@@ -85,7 +67,8 @@ PasswordStore::PasswordStore(
     : main_thread_runner_(main_thread_runner),
       db_thread_runner_(db_thread_runner),
       observers_(new ObserverListThreadSafe<Observer>()),
-      shutdown_called_(false) {}
+      shutdown_called_(false) {
+}
 
 bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare) {
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
@@ -96,47 +79,33 @@ bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare) {
 
 void PasswordStore::AddLogin(const PasswordForm& form) {
   CheckForEmptyUsernameAndPassword(form);
-  ScheduleTask(
-      base::Bind(&PasswordStore::WrapModificationTask, this,
-                 base::Bind(&PasswordStore::AddLoginImpl, this, form)));
+  ScheduleTask(base::Bind(&PasswordStore::AddLoginInternal, this, form));
 }
 
 void PasswordStore::UpdateLogin(const PasswordForm& form) {
   CheckForEmptyUsernameAndPassword(form);
-  ScheduleTask(
-      base::Bind(&PasswordStore::WrapModificationTask, this,
-                 base::Bind(&PasswordStore::UpdateLoginImpl, this, form)));
+  ScheduleTask(base::Bind(&PasswordStore::UpdateLoginInternal, this, form));
 }
 
 void PasswordStore::RemoveLogin(const PasswordForm& form) {
-  ScheduleTask(
-      base::Bind(&PasswordStore::WrapModificationTask, this,
-                 base::Bind(&PasswordStore::RemoveLoginImpl, this, form)));
+  ScheduleTask(base::Bind(&PasswordStore::RemoveLoginInternal, this, form));
 }
 
 void PasswordStore::RemoveLoginsCreatedBetween(base::Time delete_begin,
                                                base::Time delete_end) {
-  ScheduleTask(
-      base::Bind(&PasswordStore::WrapModificationTask, this,
-                 base::Bind(&PasswordStore::RemoveLoginsCreatedBetweenImpl,
-                            this, delete_begin, delete_end)));
+  ScheduleTask(base::Bind(&PasswordStore::RemoveLoginsCreatedBetweenInternal,
+                          this, delete_begin, delete_end));
 }
 
 void PasswordStore::RemoveLoginsSyncedBetween(base::Time delete_begin,
                                               base::Time delete_end) {
-  ScheduleTask(
-      base::Bind(&PasswordStore::WrapModificationTask,
-                 this,
-                 base::Bind(&PasswordStore::RemoveLoginsSyncedBetweenImpl,
-                            this,
-                            delete_begin,
-                            delete_end)));
+  ScheduleTask(base::Bind(&PasswordStore::RemoveLoginsSyncedBetweenInternal,
+                          this, delete_begin, delete_end));
 }
 
-void PasswordStore::GetLogins(
-    const PasswordForm& form,
-    AuthorizationPromptPolicy prompt_policy,
-    PasswordStoreConsumer* consumer) {
+void PasswordStore::GetLogins(const PasswordForm& form,
+                              AuthorizationPromptPolicy prompt_policy,
+                              PasswordStoreConsumer* consumer) {
   // Per http://crbug.com/121738, we deliberately ignore saved logins for
   // http*://www.google.com/ that were stored prior to 2012. (Google now uses
   // https://accounts.google.com/ for all login forms, so these should be
@@ -154,14 +123,10 @@ void PasswordStore::GetLogins(
         { 2012, 1, 0, 1, 0, 0, 0, 0 };  // 00:00 Jan 1 2012
     ignore_logins_cutoff = base::Time::FromUTCExploded(exploded_cutoff);
   }
-  GetLoginsRequest* request = new GetLoginsRequest(consumer);
+  scoped_ptr<GetLoginsRequest> request(new GetLoginsRequest(consumer));
   request->set_ignore_logins_cutoff(ignore_logins_cutoff);
-
-  ConsumerCallbackRunner callback_runner =
-      base::Bind(&PasswordStore::CopyAndForwardLoginsResult,
-                 this, base::Owned(request));
-  ScheduleTask(base::Bind(&PasswordStore::GetLoginsImpl,
-                          this, form, prompt_policy, callback_runner));
+  ScheduleTask(base::Bind(&PasswordStore::GetLoginsImpl, this, form,
+                          prompt_policy, base::Passed(&request)));
 }
 
 void PasswordStore::GetAutofillableLogins(PasswordStoreConsumer* consumer) {
@@ -174,10 +139,15 @@ void PasswordStore::GetBlacklistLogins(PasswordStoreConsumer* consumer) {
 
 void PasswordStore::ReportMetrics(const std::string& sync_username,
                                   bool custom_passphrase_sync_enabled) {
-  ScheduleTask(base::Bind(&PasswordStore::ReportMetricsImpl,
-                          this,
-                          sync_username,
-                          custom_passphrase_sync_enabled));
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
+      GetBackgroundTaskRunner());
+  if (task_runner) {
+    base::Closure task =
+        base::Bind(&PasswordStore::ReportMetricsImpl, this, sync_username,
+                   custom_passphrase_sync_enabled);
+    task_runner->PostDelayedTask(FROM_HERE, task,
+                                 base::TimeDelta::FromSeconds(30));
+  }
 }
 
 void PasswordStore::AddObserver(Observer* observer) {
@@ -205,33 +175,28 @@ void PasswordStore::Shutdown() {
 
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
 base::WeakPtr<syncer::SyncableService>
-    PasswordStore::GetPasswordSyncableService() {
+PasswordStore::GetPasswordSyncableService() {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   DCHECK(syncable_service_);
   return syncable_service_->AsWeakPtr();
 }
 #endif
 
-PasswordStore::~PasswordStore() { DCHECK(shutdown_called_); }
+PasswordStore::~PasswordStore() {
+  DCHECK(shutdown_called_);
+}
 
 scoped_refptr<base::SingleThreadTaskRunner>
 PasswordStore::GetBackgroundTaskRunner() {
   return db_thread_runner_;
 }
 
-void PasswordStore::ForwardLoginsResult(GetLoginsRequest* request) {
-  request->ApplyIgnoreLoginsCutoff();
-  request->ForwardResult();
+void PasswordStore::GetLoginsImpl(const autofill::PasswordForm& form,
+                                  AuthorizationPromptPolicy prompt_policy,
+                                  scoped_ptr<GetLoginsRequest> request) {
+  request->NotifyConsumerWithResults(FillMatchingLogins(form, prompt_policy));
 }
 
-void PasswordStore::CopyAndForwardLoginsResult(
-    PasswordStore::GetLoginsRequest* request,
-    const std::vector<PasswordForm*>& matched_forms) {
-  // Copy the contents of |matched_forms| into the request. The request takes
-  // ownership of the PasswordForm elements.
-  *(request->result()) = matched_forms;
-  ForwardLoginsResult(request);
-}
 
 void PasswordStore::LogStatsForBulkDeletion(int num_deletions) {
   UMA_HISTOGRAM_COUNTS("PasswordManager.NumPasswordsDeletedByBulkDelete",
@@ -247,7 +212,7 @@ void PasswordStore::NotifyLoginsChanged(
     const PasswordStoreChangeList& changes) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (!changes.empty()) {
-    observers_->Notify(&Observer::OnLoginsChanged, changes);
+    observers_->Notify(FROM_HERE, &Observer::OnLoginsChanged, changes);
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
     if (syncable_service_)
       syncable_service_->ActOnPasswordStoreChanges(changes);
@@ -255,19 +220,46 @@ void PasswordStore::NotifyLoginsChanged(
   }
 }
 
-template<typename BackendFunc>
 void PasswordStore::Schedule(
-    BackendFunc func,
+    void (PasswordStore::*func)(scoped_ptr<GetLoginsRequest>),
     PasswordStoreConsumer* consumer) {
-  GetLoginsRequest* request = new GetLoginsRequest(consumer);
+  scoped_ptr<GetLoginsRequest> request(new GetLoginsRequest(consumer));
   consumer->cancelable_task_tracker()->PostTask(
-      GetBackgroundTaskRunner().get(),
-      FROM_HERE,
-      base::Bind(func, this, base::Owned(request)));
+      GetBackgroundTaskRunner().get(), FROM_HERE,
+      base::Bind(func, this, base::Passed(&request)));
 }
 
 void PasswordStore::WrapModificationTask(ModificationTask task) {
   PasswordStoreChangeList changes = task.Run();
+  NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::AddLoginInternal(const PasswordForm& form) {
+  PasswordStoreChangeList changes = AddLoginImpl(form);
+  NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::UpdateLoginInternal(const PasswordForm& form) {
+  PasswordStoreChangeList changes = UpdateLoginImpl(form);
+  NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::RemoveLoginInternal(const PasswordForm& form) {
+  PasswordStoreChangeList changes = RemoveLoginImpl(form);
+  NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::RemoveLoginsCreatedBetweenInternal(base::Time delete_begin,
+                                                       base::Time delete_end) {
+  PasswordStoreChangeList changes =
+      RemoveLoginsCreatedBetweenImpl(delete_begin, delete_end);
+  NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
+                                                      base::Time delete_end) {
+  PasswordStoreChangeList changes =
+      RemoveLoginsSyncedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
 }
 

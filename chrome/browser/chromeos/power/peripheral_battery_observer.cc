@@ -74,10 +74,10 @@ class PeripheralBatteryNotificationDelegate : public NotificationDelegate {
       : id_(id) {}
 
   // Overridden from NotificationDelegate:
-  virtual std::string id() const override { return id_; }
+  std::string id() const override { return id_; }
 
  private:
-  virtual ~PeripheralBatteryNotificationDelegate() {}
+  ~PeripheralBatteryNotificationDelegate() override {}
 
   const std::string id_;
 
@@ -214,7 +214,6 @@ bool PeripheralBatteryObserver::PostNotification(const std::string& address,
       string_text,
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_PERIPHERAL_BATTERY_LOW),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(GURL(kNotificationOriginUrl)),
       base::string16(),
       base::UTF8ToUTF16(address),

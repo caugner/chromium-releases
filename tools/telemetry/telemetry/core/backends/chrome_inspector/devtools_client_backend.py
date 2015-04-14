@@ -6,20 +6,57 @@ import logging
 import re
 
 from telemetry import decorators
+from telemetry.timeline import trace_data as trace_data_module
 from telemetry.core.backends.chrome_inspector import devtools_http
 from telemetry.core.backends.chrome_inspector import inspector_backend
 from telemetry.core.backends.chrome_inspector import tracing_backend
-from telemetry.timeline import trace_data as trace_data_module
+from telemetry.core.platform.tracing_agent import chrome_tracing_agent
+
+
+def IsDevToolsAgentAvailable(port):
+  """Returns True if a DevTools agent is available on the given port."""
+  return _IsDevToolsAgentAvailable(devtools_http.DevToolsHttp(port))
+
+
+# TODO(nednguyen): Find a more reliable way to check whether the devtool agent
+# is still alive.
+def _IsDevToolsAgentAvailable(devtools_http_instance):
+  try:
+    devtools_http_instance.Request('')
+  except devtools_http.DevToolsClientConnectionError:
+    return False
+  else:
+    return True
 
 
 class DevToolsClientBackend(object):
-  def __init__(self, devtools_port, app_backend):
+  def __init__(self, devtools_port, remote_devtools_port, app_backend):
+    """Creates a new DevToolsClientBackend.
+
+    A DevTools agent must exist on the given devtools_port.
+
+    Args:
+      devtools_port: The port to use to connect to DevTools agent.
+      remote_devtools_port: In some cases (e.g., app running on
+          Android device, devtools_port is the forwarded port on the
+          host platform. We also need to know the remote_devtools_port
+          so that we can uniquely identify the DevTools agent.
+      app_backend: For the app that contains the DevTools agent.
+    """
     self._devtools_port = devtools_port
+    self._remote_devtools_port = remote_devtools_port
     self._devtools_http = devtools_http.DevToolsHttp(devtools_port)
     self._tracing_backend = None
     self._app_backend = app_backend
     self._devtools_context_map_backend = _DevToolsContextMapBackend(
         self._app_backend, self)
+
+    chrome_tracing_agent.ChromeTracingAgent.RegisterDevToolsClient(
+      self, self._app_backend.platform_backend)
+
+  @property
+  def remote_port(self):
+    return self._remote_devtools_port
 
   # TODO(chrishenry): This is temporarily exposed during DevTools code
   # refactoring. Please do not introduce new usage! crbug.com/423954
@@ -29,12 +66,7 @@ class DevToolsClientBackend(object):
 
   def IsAlive(self):
     """Whether the DevTools server is available and connectable."""
-    try:
-      self._devtools_http.Request('', timeout=.1)
-    except devtools_http.DevToolsClientConnectionError:
-      return False
-    else:
-      return True
+    return _IsDevToolsAgentAvailable(self.devtools_http)
 
   def Close(self):
     if self._tracing_backend:

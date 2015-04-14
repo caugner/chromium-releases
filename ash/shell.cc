@@ -79,7 +79,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
@@ -120,7 +120,7 @@
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
 #include "ash/ash_constants.h"
-#include "ash/content/display/screen_orientation_delegate_chromeos.h"
+#include "ash/content/display/screen_orientation_controller_chromeos.h"
 #include "ash/display/display_change_observer_chromeos.h"
 #include "ash/display/display_configurator_animation.h"
 #include "ash/display/display_error_observer_chromeos.h"
@@ -138,7 +138,6 @@
 #include "ash/virtual_keyboard_controller.h"
 #include "base/bind_helpers.h"
 #include "base/sys_info.h"
-#include "chromeos/accelerometer/accelerometer_reader.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "ui/chromeos/user_activity_power_manager_notifier.h"
 #include "ui/display/chromeos/display_configurator.h"
@@ -420,8 +419,8 @@ void Shell::OnOverviewModeStarting() {
   FOR_EACH_OBSERVER(ShellObserver, observers_, OnOverviewModeStarting());
 }
 
-void Shell::OnOverviewModeEnding() {
-  FOR_EACH_OBSERVER(ShellObserver, observers_, OnOverviewModeEnding());
+void Shell::OnOverviewModeEnded() {
+  FOR_EACH_OBSERVER(ShellObserver, observers_, OnOverviewModeEnded());
 }
 
 void Shell::OnMaximizeModeStarted() {
@@ -485,9 +484,8 @@ void Shell::RemoveShellObserver(ShellObserver* observer) {
 
 #if defined(OS_CHROMEOS)
 bool Shell::ShouldSaveDisplaySettings() {
-  return !((maximize_mode_controller_->IsMaximizeModeWindowManagerEnabled() &&
-            maximize_mode_controller_->
-                ignore_display_configuration_updates()) ||
+  return !(screen_orientation_controller_
+               ->ignore_display_configuration_updates() ||
            resolution_notification_controller_->DoesNotificationTimeout());
 }
 #endif
@@ -639,7 +637,6 @@ Shell::Shell(ShellDelegate* delegate)
       window_positioner_(new WindowPositioner),
       activation_client_(NULL),
 #if defined(OS_CHROMEOS)
-      accelerometer_reader_(new chromeos::AccelerometerReader()),
       display_configurator_(new ui::DisplayConfigurator()),
 #endif  // defined(OS_CHROMEOS)
       native_cursor_manager_(new AshNativeCursorManager),
@@ -694,15 +691,19 @@ Shell::~Shell() {
   // TooltipController is deleted with the Shell so removing its references.
   RemovePreTargetHandler(tooltip_controller_.get());
 
+#if defined(OS_CHROMEOS)
+  screen_orientation_controller_.reset();
+#endif
+
 // Destroy the virtual keyboard controller before the maximize mode controller
 // since the latters destructor triggers events that the former is listening
 // to but no longer cares about.
 #if defined(OS_CHROMEOS)
   virtual_keyboard_controller_.reset();
 #endif
+
   // Destroy maximize mode controller early on since it has some observers which
   // need to be removed.
-  maximize_mode_controller_->Shutdown();
   maximize_mode_controller_.reset();
 
   // AppList needs to be released before shelf layout manager, which is
@@ -878,8 +879,10 @@ void Shell::Init(const ShellInitParams& init_params) {
   env_filter_.reset(new ::wm::CompoundEventFilter);
   AddPreTargetHandler(env_filter_.get());
 
+  wm::AshFocusRules* focus_rules = new wm::AshFocusRules();
+
   ::wm::FocusController* focus_controller =
-      new ::wm::FocusController(new wm::AshFocusRules);
+      new ::wm::FocusController(focus_rules);
   focus_client_.reset(focus_controller);
   activation_client_ = focus_controller;
   activation_client_->AddObserver(this);
@@ -974,7 +977,8 @@ void Shell::Init(const ShellInitParams& init_params) {
 
   magnification_controller_.reset(
       MagnificationController::CreateInstance());
-  mru_window_tracker_.reset(new MruWindowTracker(activation_client_));
+  mru_window_tracker_.reset(new MruWindowTracker(activation_client_,
+                                                 focus_rules));
 
   partial_magnification_controller_.reset(
       new PartialMagnificationController());
@@ -986,10 +990,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   window_selector_controller_.reset(new WindowSelectorController());
   window_cycle_controller_.reset(new WindowCycleController());
 
-  tooltip_controller_.reset(
-      new views::corewm::TooltipController(
-          scoped_ptr<views::corewm::Tooltip>(
-              new views::corewm::TooltipAura(gfx::SCREEN_TYPE_ALTERNATE))));
+  tooltip_controller_.reset(new views::corewm::TooltipController(
+      scoped_ptr<views::corewm::Tooltip>(new views::corewm::TooltipAura)));
   AddPreTargetHandler(tooltip_controller_.get());
 
   event_client_.reset(new EventClientImpl);
@@ -1063,7 +1065,7 @@ void Shell::Init(const ShellInitParams& init_params) {
       new VideoActivityNotifier(video_detector_.get()));
   bluetooth_notification_controller_.reset(new BluetoothNotificationController);
   last_window_closed_logout_reminder_.reset(new LastWindowClosedLogoutReminder);
-  screen_orientation_delegate_.reset(new ScreenOrientationDelegate());
+  screen_orientation_controller_.reset(new ScreenOrientationController());
 #endif
   // The compositor thread and main message loop have to be running in
   // order to create mirror window. Run it after the main message loop

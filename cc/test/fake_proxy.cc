@@ -12,6 +12,10 @@ void FakeProxy::SetLayerTreeHost(LayerTreeHost* host) {
 
 bool FakeProxy::IsStarted() const { return true; }
 
+bool FakeProxy::CommitToActiveTree() const {
+  return false;
+}
+
 const RendererCapabilities& FakeProxy::GetRendererCapabilities() const {
   return capabilities_;
 }
@@ -38,7 +42,7 @@ bool FakeProxy::MainFrameWillHappenForTesting() {
   return false;
 }
 
-void FakeProxy::AsValueInto(base::debug::TracedValue*) const {
+void FakeProxy::AsValueInto(base::trace_event::TracedValue*) const {
 }
 
 }  // namespace cc

@@ -30,7 +30,6 @@ TouchFactory::TouchFactory()
     : pointer_device_lookup_(),
       touch_events_disabled_(false),
       touch_device_list_(),
-      max_touch_points_(-1),
       virtual_core_keyboard_device_(-1),
       id_generator_(0) {
   if (!DeviceDataManagerX11::GetInstance()->IsXInput2Available())
@@ -83,7 +82,6 @@ void TouchFactory::UpdateDeviceList(Display* display) {
   touch_device_lookup_.reset();
   touch_device_list_.clear();
   touchscreen_ids_.clear();
-  max_touch_points_ = -1;
 
   // NOTE: The new API for retrieving the list of devices (XIQueryDevice) does
   // not provide enough information to detect a touch device. As a result, the
@@ -131,8 +129,6 @@ void TouchFactory::UpdateDeviceList(Display* display) {
           if (tci->mode == XIDirectTouch) {
             touch_device_lookup_[devinfo->deviceid] = true;
             touch_device_list_[devinfo->deviceid] = true;
-            if (tci->num_touches > 0 && tci->num_touches > max_touch_points_)
-              max_touch_points_ = tci->num_touches;
           }
         }
       }
@@ -205,6 +201,8 @@ void TouchFactory::SetupXI2ForXWindow(Window window) {
   XISetMask(mask, XI_ButtonRelease);
   XISetMask(mask, XI_Motion);
 #if defined(OS_CHROMEOS)
+  // XGrabKey() must be replaced with XI2 keyboard grab if XI2 key events are
+  // enabled on desktop Linux.
   if (base::SysInfo::IsRunningOnChromeOS()) {
     XISetMask(mask, XI_KeyPress);
     XISetMask(mask, XI_KeyRelease);
@@ -254,22 +252,12 @@ int TouchFactory::GetSlotForTrackingID(uint32 tracking_id) {
   return id_generator_.GetGeneratedID(tracking_id);
 }
 
-void TouchFactory::AcquireSlotForTrackingID(uint32 tracking_id) {
-  tracking_id_refcounts_[tracking_id]++;
-}
-
 void TouchFactory::ReleaseSlotForTrackingID(uint32 tracking_id) {
-  tracking_id_refcounts_[tracking_id]--;
-  if (tracking_id_refcounts_[tracking_id] == 0)
-    id_generator_.ReleaseNumber(tracking_id);
+  id_generator_.ReleaseNumber(tracking_id);
 }
 
 bool TouchFactory::IsTouchDevicePresent() {
   return !touch_events_disabled_ && touch_device_lookup_.any();
-}
-
-int TouchFactory::GetMaxTouchPoints() const {
-  return max_touch_points_;
 }
 
 void TouchFactory::ResetForTest() {
@@ -278,8 +266,6 @@ void TouchFactory::ResetForTest() {
   touch_events_disabled_ = false;
   touch_device_list_.clear();
   touchscreen_ids_.clear();
-  tracking_id_refcounts_.clear();
-  max_touch_points_ = -1;
   id_generator_.ResetForTest();
 }
 

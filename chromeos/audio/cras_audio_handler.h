@@ -191,22 +191,22 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
  protected:
   explicit CrasAudioHandler(
       scoped_refptr<AudioDevicesPrefHandler> audio_pref_handler);
-  virtual ~CrasAudioHandler();
+  ~CrasAudioHandler() override;
 
  private:
   friend class CrasAudioHandlerTest;
 
   // CrasAudioClient::Observer overrides.
-  virtual void AudioClientRestarted() override;
-  virtual void NodesChanged() override;
-  virtual void ActiveOutputNodeChanged(uint64 node_id) override;
-  virtual void ActiveInputNodeChanged(uint64 node_id) override;
+  void AudioClientRestarted() override;
+  void NodesChanged() override;
+  void ActiveOutputNodeChanged(uint64 node_id) override;
+  void ActiveInputNodeChanged(uint64 node_id) override;
 
   // AudioPrefObserver overrides.
-  virtual void OnAudioPolicyPrefChanged() override;
+  void OnAudioPolicyPrefChanged() override;
 
   // SessionManagerClient::Observer overrides.
-  virtual void EmitLoginPromptVisibleCalled() override;
+  void EmitLoginPromptVisibleCalled() override;
 
   // Sets the active audio output/input node to the node with |node_id|.
   // If |notify|, notifies Active*NodeChange.
@@ -269,7 +269,10 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   // Returns true if there is any device change for for input or output,
   // specified by |is_input|.
-  bool HasDeviceChange(const AudioNodeList& new_nodes, bool is_input);
+  // The new discovered nodes are returned in |new_discovered|.
+  bool HasDeviceChange(const AudioNodeList& new_nodes,
+                       bool is_input,
+                       AudioNodeList* new_discovered);
 
   // Handles dbus callback for GetNodes.
   void HandleGetNodes(const chromeos::AudioNodeList& node_list, bool success);
@@ -290,9 +293,15 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Removes |node_id| from additional active nodes.
   void RemoveActiveNodeInternal(uint64 node_id, bool notify);
 
-  // Returns true if |device| is not found in audio_devices_, or it is found
-  // but changed its |active| property.
-  bool FoundNewOrChangedDevice(const AudioDevice& device);
+  enum DeviceStatus {
+    OLD_DEVICE,
+    NEW_DEVICE,
+    CHANGED_DEVICE,
+  };
+
+  // Checks if |device| is a newly discovered, changed, or existing device for
+  // the nodes sent from NodesChanged signal.
+  DeviceStatus CheckDeviceStatus(const AudioDevice& device);
 
   void NotifyActiveNodeChanged(bool is_input);
 

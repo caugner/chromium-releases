@@ -16,7 +16,6 @@ from telemetry.core import util
 from telemetry.core import wpr_modes
 from telemetry.page import page_set as page_set_module
 from telemetry.page import page_test
-from telemetry.page import shared_page_state
 from telemetry.page.actions import page_action
 from telemetry.results import results_options
 from telemetry.user_story import user_story_filter
@@ -108,6 +107,11 @@ def _RunUserStoryAndProcessErrorIfNeeded(expectations, user_story, results,
   except page_action.PageActionNotSupported as e:
     results.AddValue(
         skip.SkipValue(user_story, 'Unsupported page action: %s' % e))
+  except Exception:
+    results.AddValue(
+        failure.FailureValue(
+            user_story, sys.exc_info(), 'Unhandlable exception raised.'))
+    raise
   else:
     if expectation == 'fail':
       logging.warning(
@@ -207,7 +211,7 @@ def Run(test, user_story_set, expectations, finder_options, results,
   # Reorder page set based on options.
   user_stories = _ShuffleAndFilterUserStorySet(user_story_set, finder_options)
 
-  if (not finder_options.use_live_sites and
+  if (not finder_options.use_live_sites and user_story_set.bucket and
       finder_options.browser_options.wpr_mode != wpr_modes.WPR_RECORD):
     _UpdateUserStoryArchivesIfChanged(user_story_set)
     if not _UpdateAndCheckArchives(

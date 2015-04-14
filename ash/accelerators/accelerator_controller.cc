@@ -864,6 +864,11 @@ void AcceleratorController::RegisterAccelerators(
 bool AcceleratorController::CanPerformAction(
     AcceleratorAction action,
     const ui::Accelerator& accelerator) {
+  if (nonrepeatable_actions_.find(action) != nonrepeatable_actions_.end() &&
+      accelerator.IsRepeat()) {
+    return false;
+  }
+
   AcceleratorProcessingRestriction restriction =
       GetAcceleratorProcessingRestriction(action);
   if (restriction != RESTRICTION_NONE)
@@ -998,17 +1003,12 @@ bool AcceleratorController::CanPerformAction(
   return false;
 }
 
-void  AcceleratorController::PerformAction(AcceleratorAction action,
-                                           const ui::Accelerator& accelerator) {
+void AcceleratorController::PerformAction(AcceleratorAction action,
+                                          const ui::Accelerator& accelerator) {
   AcceleratorProcessingRestriction restriction =
       GetAcceleratorProcessingRestriction(action);
   if (restriction != RESTRICTION_NONE)
     return;
-
-  if (nonrepeatable_actions_.find(action) != nonrepeatable_actions_.end() &&
-      accelerator.IsRepeat()) {
-    return;
-  }
 
   // If your accelerator invokes more than one line of code, please either
   // implement it in your module's controller code (like TOGGLE_MIRROR_MODE
@@ -1218,8 +1218,8 @@ void  AcceleratorController::PerformAction(AcceleratorAction action,
     case POWER_PRESSED:  // fallthrough
     case POWER_RELEASED:
       if (!base::SysInfo::IsRunningOnChromeOS()) {
-        // There is no powerd in linux desktop, so call the
-        // PowerButtonController here.
+        // There is no powerd, the Chrome OS power manager, in linux desktop,
+        // so call the PowerButtonController here.
         Shell::GetInstance()->power_button_controller()->
             OnPowerButtonEvent(action == POWER_PRESSED, base::TimeTicks());
       }
@@ -1319,7 +1319,7 @@ AcceleratorController::GetAcceleratorProcessingRestriction(int action) {
     // cycling through its window elements.
     return RESTRICTION_PREVENT_PROCESSING_AND_PROPAGATION;
   }
-  if (MruWindowTracker::BuildWindowList().empty() &&
+  if (shell->mru_window_tracker()->BuildMruWindowList().empty() &&
       actions_needing_window_.find(action) != actions_needing_window_.end()) {
     Shell::GetInstance()->accessibility_delegate()->TriggerAccessibilityAlert(
         ui::A11Y_ALERT_WINDOW_NEEDED);

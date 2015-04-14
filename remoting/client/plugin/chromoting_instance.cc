@@ -198,8 +198,8 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
   // are not shared with Chrome.
   thread_task_runner_handle_.reset(
       new base::ThreadTaskRunnerHandle(plugin_task_runner_));
-  thread_wrapper_.reset(
-      new jingle_glue::JingleThreadWrapper(plugin_task_runner_));
+  thread_wrapper_ =
+      jingle_glue::JingleThreadWrapper::WrapTaskRunner(plugin_task_runner_);
   media::InitializeCPUSpecificYUVConversions();
 
   // Register a global log handler.
@@ -636,18 +636,21 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
 #endif
   input_handler_.set_input_stub(normalizing_input_filter_.get());
 
-  // 3D renderer is currently disabled because it may be unstable. See
-  // crbug.com/447403 .
-  //
-  // video_renderer_.reset(new PepperVideoRenderer3D());
-  // if (!video_renderer_->Initialize(this, context_, this))
-  //   video_renderer_.reset();
+  // PPB_VideoDecoder is not always enabled because it's broken in some versions
+  // of Chrome. See crbug.com/447403 .
+  bool enable_video_decode_renderer = false;
+  if (data.GetBoolean("enableVideoDecodeRenderer",
+                      &enable_video_decode_renderer) &&
+      enable_video_decode_renderer) {
+    LogToWebapp("Initializing 3D renderer.");
+    video_renderer_.reset(new PepperVideoRenderer3D());
+    if (!video_renderer_->Initialize(this, context_, this))
+      video_renderer_.reset();
+  }
 
-  // If we failed to initialize 3D renderer (because there is no hardware
-  // support on this machine) then use the 2D renderer.
+  // If we didn't initialize 3D renderer then use the 2D renderer.
   if (!video_renderer_) {
-    LOG(WARNING)
-        << "Failed to initialize 3D renderer. Using 2D renderer instead.";
+    LogToWebapp("Initializing 2D renderer.");
     video_renderer_.reset(new PepperVideoRenderer2D());
     if (!video_renderer_->Initialize(this, context_, this))
       video_renderer_.reset();
@@ -1131,6 +1134,19 @@ bool ChromotingInstance::IsCallerAppOrExtension() {
 bool ChromotingInstance::IsConnected() {
   return client_ &&
          (client_->connection_state() == protocol::ConnectionToHost::CONNECTED);
+}
+
+void ChromotingInstance::LogToWebapp(const std::string& message) {
+  DCHECK(plugin_task_runner_->BelongsToCurrentThread());
+
+  LOG(ERROR) << message;
+
+#if !defined(OS_NACL)
+  // Log messages are forwarded to the webapp only in PNaCl version of the
+  // plugin, so ProcessLogToUI() needs to be called explicitly in the non-PNaCl
+  // version.
+  ProcessLogToUI(message);
+#endif  // !defined(OS_NACL)
 }
 
 }  // namespace remoting

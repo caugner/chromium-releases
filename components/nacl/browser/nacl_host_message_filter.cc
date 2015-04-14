@@ -15,7 +15,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_platform_file.h"
-#include "native_client/src/public/nacl_file_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
@@ -284,10 +283,15 @@ void NaClHostMessageFilter::OnMissingArchError(int render_view_id) {
       ShowMissingArchInfobar(render_process_id_, render_view_id);
 }
 
-void NaClHostMessageFilter::OnOpenNaClExecutable(int render_view_id,
-                                                 const GURL& file_url,
-                                                 IPC::Message* reply_msg) {
-  nacl_file_host::OpenNaClExecutable(this, render_view_id, file_url,
+void NaClHostMessageFilter::OnOpenNaClExecutable(
+    int render_view_id,
+    const GURL& file_url,
+    bool enable_validation_caching,
+    IPC::Message* reply_msg) {
+  nacl_file_host::OpenNaClExecutable(this,
+                                     render_view_id,
+                                     file_url,
+                                     enable_validation_caching,
                                      reply_msg);
 }
 

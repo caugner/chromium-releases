@@ -28,7 +28,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
-#include "ui/events/ozone/evdev/event_modifiers_evdev.h"
+#include "ui/events/ozone/evdev/device_event_dispatcher_evdev.h"
 
 namespace {
 
@@ -76,14 +76,13 @@ TouchEventConverterEvdev::TouchEventConverterEvdev(
     base::FilePath path,
     int id,
     InputDeviceType type,
-    EventModifiersEvdev* modifiers,
-    const EventDispatchCallback& callback)
+    DeviceEventDispatcherEvdev* dispatcher)
     : EventConverterEvdev(fd, path, id, type),
-      callback_(callback),
+      dispatcher_(dispatcher),
       syn_dropped_(false),
       is_type_a_(false),
-      current_slot_(0),
-      modifiers_(modifiers) {
+      touch_points_(0),
+      current_slot_(0) {
 }
 
 TouchEventConverterEvdev::~TouchEventConverterEvdev() {
@@ -98,6 +97,8 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
   x_num_tuxels_ = info.GetAbsMaximum(ABS_MT_POSITION_X) - x_min_tuxels_ + 1;
   y_min_tuxels_ = info.GetAbsMinimum(ABS_MT_POSITION_Y);
   y_num_tuxels_ = info.GetAbsMaximum(ABS_MT_POSITION_Y) - y_min_tuxels_ + 1;
+  touch_points_ =
+      std::min<int>(info.GetAbsMaximum(ABS_MT_SLOT) + 1, MAX_FINGERS);
 
   // Apply --touch-calibration.
   if (type() == INPUT_DEVICE_INTERNAL) {
@@ -116,8 +117,7 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
 
   native_size_ = gfx::Size(x_num_tuxels_, y_num_tuxels_);
 
-  events_.resize(
-      std::min<int>(info.GetAbsMaximum(ABS_MT_SLOT) + 1, MAX_FINGERS));
+  events_.resize(touch_points_);
   for (size_t i = 0; i < events_.size(); ++i) {
     events_[i].finger_ = info.GetSlotValue(ABS_MT_TRACKING_ID, i);
     events_[i].type_ =
@@ -147,6 +147,10 @@ gfx::Size TouchEventConverterEvdev::GetTouchscreenSize() const {
   return native_size_;
 }
 
+int TouchEventConverterEvdev::GetTouchPoints() const {
+  return touch_points_;
+}
+
 void TouchEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
   input_event inputs[MAX_FINGERS * 6 + 1];
   ssize_t read_size = read(fd, inputs, sizeof(inputs));
@@ -158,6 +162,9 @@ void TouchEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
     Stop();
     return;
   }
+
+  if (ignore_events_)
+    return;
 
   for (unsigned i = 0; i < read_size / sizeof(*inputs); i++) {
     ProcessInputEvent(inputs[i]);
@@ -246,8 +253,7 @@ void TouchEventConverterEvdev::ProcessSyn(const input_event& input) {
           LOG(ERROR) << "failed to re-initialize device info";
         }
       } else {
-        ReportEvents(base::TimeDelta::FromMicroseconds(
-            input.time.tv_sec * 1000000 + input.time.tv_usec));
+        ReportEvents(EventConverterEvdev::TimeDeltaFromInputEvent(input));
       }
       if (is_type_a_)
         current_slot_ = 0;
@@ -271,33 +277,12 @@ void TouchEventConverterEvdev::ProcessSyn(const input_event& input) {
 }
 
 void TouchEventConverterEvdev::ReportEvent(int touch_id,
-    const InProgressEvents& event, const base::TimeDelta& delta) {
-  float x = event.x_;
-  float y = event.y_;
-
-  double radius_x = event.radius_x_;
-  double radius_y = event.radius_y_;
-
-  // Transform the event according (this is used to align touches
-  // to the image based on display mode).
-  DeviceDataManager::GetInstance()->ApplyTouchTransformer(
-      id_, &x, &y);
-  DeviceDataManager::GetInstance()->ApplyTouchRadiusScale(
-      id_, &radius_x);
-  DeviceDataManager::GetInstance()->ApplyTouchRadiusScale(
-      id_, &radius_y);
-
-  gfx::PointF location(x, y);
-
-  scoped_ptr<TouchEvent> touch_event(
-      new TouchEvent(event.type_, location,
-                     /* flags */ modifiers_->GetModifierFlags(),
-                     /* touch_id */ touch_id, delta,
-                     /* radius_x */ radius_x,
-                     /* radius_y */ radius_y,
-                     /* angle */ 0., event.pressure_));
-  touch_event->set_source_device_id(id_);
-  callback_.Run(touch_event.Pass());
+                                           const InProgressEvents& event,
+                                           const base::TimeDelta& timestamp) {
+  dispatcher_->DispatchTouchEvent(TouchEventParams(
+      id_, touch_id, event.type_, gfx::PointF(event.x_, event.y_),
+      gfx::Vector2dF(event.radius_x_, event.radius_y_), event.pressure_,
+      timestamp));
 }
 
 void TouchEventConverterEvdev::ReportEvents(base::TimeDelta delta) {

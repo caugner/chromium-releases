@@ -148,7 +148,7 @@ var ntpContents;
 
 /**
  * The array of rendered tiles, ordered by appearance.
- * @type {!Array.<Tile>}
+ * @type {!Array<Tile>}
  */
 var tiles = [];
 
@@ -462,7 +462,7 @@ function setAttributionVisibility_(show) {
 
  /**
  * Converts an Array of color components into RRGGBBAA format.
- * @param {Array.<number>} color Array of rgba color components.
+ * @param {Array<number>} color Array of rgba color components.
  * @return {string} Color string in RRGGBBAA format.
  * @private
  */
@@ -475,7 +475,7 @@ function convertToRRGGBBAAColor(color) {
 
  /**
  * Converts an Array of color components into RGBA format "rgba(R,G,B,A)".
- * @param {Array.<number>} color Array of rgba color components.
+ * @param {Array<number>} color Array of rgba color components.
  * @return {string} CSS color in RGBA format.
  * @private
  */
@@ -697,6 +697,10 @@ function createTile(page, position) {
   // Enable tab navigation on the iframe, which will move the selection to the
   // link element (which also has a tabindex).
   titleElem.tabIndex = '0';
+
+  // Make the iframe presentational for accessibility so screen readers perceive
+  // the iframe content as just part of the same page.
+  titleElem.setAttribute('role', 'presentation');
 
   // Why iframes have IDs:
   //
@@ -1078,6 +1082,7 @@ function init() {
   if (configData.isGooglePage) {
     var logo = document.createElement('div');
     logo.id = IDS.LOGO;
+    logo.title = 'Google';
 
     fakebox = document.createElement('div');
     fakebox.id = IDS.FAKEBOX;

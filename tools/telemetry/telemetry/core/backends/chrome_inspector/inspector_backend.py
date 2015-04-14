@@ -14,13 +14,11 @@ from telemetry.core.backends.chrome_inspector import inspector_memory
 from telemetry.core.backends.chrome_inspector import inspector_network
 from telemetry.core.backends.chrome_inspector import inspector_page
 from telemetry.core.backends.chrome_inspector import inspector_runtime
-from telemetry.core.backends.chrome_inspector import inspector_timeline
 from telemetry.core.backends.chrome_inspector import inspector_websocket
 from telemetry.core.backends.chrome_inspector import websocket
 from telemetry.core.heap import model as heap_model_module
 from telemetry.image_processing import image_util
 from telemetry.timeline import model as timeline_model_module
-from telemetry.timeline import recording_options
 from telemetry.timeline import trace_data as trace_data_module
 
 
@@ -53,7 +51,6 @@ class InspectorBackend(object):
     self._page = inspector_page.InspectorPage(
         self._websocket, timeout=timeout)
     self._runtime = inspector_runtime.InspectorRuntime(self._websocket)
-    self._timeline = inspector_timeline.InspectorTimeline(self._websocket)
     self._network = inspector_network.InspectorNetwork(self._websocket)
     self._timeline_model = None
 
@@ -71,11 +68,9 @@ class InspectorBackend(object):
         return c['url']
     return None
 
-  # TODO(chrishenry): Is this intentional? Shouldn't this return
-  # self._context['id'] instead?
   @property
   def id(self):
-    return self.debugger_url
+    return self._context['id']
 
   @property
   def debugger_url(self):
@@ -91,45 +86,11 @@ class InspectorBackend(object):
       # Displays other than 0 mean we are likely running in something like
       # xvfb where screenshotting doesn't work.
       return False
-    return not self.EvaluateJavaScript("""
-        window.chrome.gpuBenchmarking === undefined ||
-        window.chrome.gpuBenchmarking.beginWindowSnapshotPNG === undefined
-      """)
+    return True
 
   def Screenshot(self, timeout):
     assert self.screenshot_supported, 'Browser does not support screenshotting'
-
-    self.EvaluateJavaScript("""
-        if(!window.__telemetry) {
-          window.__telemetry = {}
-        }
-        window.__telemetry.snapshotComplete = false;
-        window.__telemetry.snapshotData = null;
-        window.chrome.gpuBenchmarking.beginWindowSnapshotPNG(
-          function(snapshot) {
-            window.__telemetry.snapshotData = snapshot;
-            window.__telemetry.snapshotComplete = true;
-          }
-        );
-    """)
-
-    def IsSnapshotComplete():
-      return self.EvaluateJavaScript(
-          'window.__telemetry.snapshotComplete')
-
-    util.WaitFor(IsSnapshotComplete, timeout)
-
-    snap = self.EvaluateJavaScript("""
-      (function() {
-        var data = window.__telemetry.snapshotData;
-        delete window.__telemetry.snapshotComplete;
-        delete window.__telemetry.snapshotData;
-        return data;
-      })()
-    """)
-    if snap:
-      return image_util.FromBase64Png(snap['data'])
-    return None
+    return self._page.CaptureScreenshot(timeout)
 
   # Console public methods.
 
@@ -179,34 +140,17 @@ class InspectorBackend(object):
   def timeline_model(self):
     return self._timeline_model
 
-  def StartTimelineRecording(self, options=None):
-    if not options:
-      options = recording_options.TimelineRecordingOptions()
-    if options.record_timeline:
-      self._timeline.Start()
-    if options.record_network:
-      self._network.timeline_recorder.Start()
+  def StartTimelineRecording(self):
+    self._network.timeline_recorder.Start()
 
   def StopTimelineRecording(self):
     builder = trace_data_module.TraceDataBuilder()
 
-    data = self._timeline.Stop()
-    if data:
-      builder.AddEventsTo(trace_data_module.INSPECTOR_TRACE_PART, data)
-
     data = self._network.timeline_recorder.Stop()
     if data:
       builder.AddEventsTo(trace_data_module.INSPECTOR_TRACE_PART, data)
-
-    if builder.HasEventsFor(trace_data_module.INSPECTOR_TRACE_PART):
-      self._timeline_model = timeline_model_module.TimelineModel(
-          builder.AsData(), shift_world_to_zero=False)
-    else:
-      self._timeline_model = None
-
-  @property
-  def is_timeline_recording_running(self):
-    return self._timeline.is_timeline_recording_running
+    self._timeline_model = timeline_model_module.TimelineModel(
+        builder.AsData(), shift_world_to_zero=False)
 
   # Network public methods.
 

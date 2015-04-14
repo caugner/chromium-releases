@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "content/public/common/page_zoom.h"
 #include "content/shell/renderer/test_runner/mock_spell_check.h"
@@ -22,6 +23,7 @@
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebPagePopup.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "v8/include/v8.h"
 
@@ -153,11 +155,12 @@ void PopulateCustomItems(const WebVector<WebMenuItemInfo>& customItems,
       strings->push_back(prefixCopy + kSeparatorIdentifier);
     } else if (customItems[i].type == blink::WebMenuItemInfo::SubMenu) {
       strings->push_back(prefixCopy + customItems[i].label.utf8() +
-          kSubMenuIdentifier);
+          customItems[i].icon.utf8() + kSubMenuIdentifier);
       PopulateCustomItems(customItems[i].subMenuItems, prefixCopy +
           kSubMenuDepthIdentifier, strings);
     } else {
-      strings->push_back(prefixCopy + customItems[i].label.utf8());
+      strings->push_back(prefixCopy + customItems[i].label.utf8() +
+          customItems[i].icon.utf8());
     }
   }
 }
@@ -344,6 +347,9 @@ bool IsSystemKeyEvent(const WebKeyboardEvent& event) {
 #endif
 }
 
+const char* kSourceDeviceStringTouchpad = "touchpad";
+const char* kSourceDeviceStringTouchscreen = "touchscreen";
+
 }  // namespace
 
 class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
@@ -381,7 +387,11 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void SetTouchCancelable(bool cancelable);
   void DumpFilenameBeingDragged();
   void GestureFlingCancel();
-  void GestureFlingStart(float x, float y, float velocity_x, float velocity_y);
+  void GestureFlingStart(float x,
+                         float y,
+                         float velocity_x,
+                         float velocity_y,
+                         gin::Arguments* args);
   void GestureScrollFirstPoint(int x, int y);
   void TouchStart();
   void TouchMove();
@@ -395,6 +405,9 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void GestureScrollBegin(gin::Arguments* args);
   void GestureScrollEnd(gin::Arguments* args);
   void GestureScrollUpdate(gin::Arguments* args);
+  void GesturePinchBegin(gin::Arguments* args);
+  void GesturePinchEnd(gin::Arguments* args);
+  void GesturePinchUpdate(gin::Arguments* args);
   void GestureTap(gin::Arguments* args);
   void GestureTapDown(gin::Arguments* args);
   void GestureShowPress(gin::Arguments* args);
@@ -525,6 +538,9 @@ EventSenderBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("gestureScrollEnd", &EventSenderBindings::GestureScrollEnd)
       .SetMethod("gestureScrollUpdate",
                  &EventSenderBindings::GestureScrollUpdate)
+      .SetMethod("gesturePinchBegin", &EventSenderBindings::GesturePinchBegin)
+      .SetMethod("gesturePinchEnd", &EventSenderBindings::GesturePinchEnd)
+      .SetMethod("gesturePinchUpdate", &EventSenderBindings::GesturePinchUpdate)
       .SetMethod("gestureTap", &EventSenderBindings::GestureTap)
       .SetMethod("gestureTapDown", &EventSenderBindings::GestureTapDown)
       .SetMethod("gestureShowPress", &EventSenderBindings::GestureShowPress)
@@ -713,9 +729,10 @@ void EventSenderBindings::GestureFlingCancel() {
 void EventSenderBindings::GestureFlingStart(float x,
                                             float y,
                                             float velocity_x,
-                                            float velocity_y) {
+                                            float velocity_y,
+                                            gin::Arguments* args) {
   if (sender_)
-    sender_->GestureFlingStart(x, y, velocity_x, velocity_y);
+    sender_->GestureFlingStart(x, y, velocity_x, velocity_y, args);
 }
 
 void EventSenderBindings::GestureScrollFirstPoint(int x, int y) {
@@ -782,6 +799,21 @@ void EventSenderBindings::GestureScrollEnd(gin::Arguments* args) {
 void EventSenderBindings::GestureScrollUpdate(gin::Arguments* args) {
   if (sender_)
     sender_->GestureScrollUpdate(args);
+}
+
+void EventSenderBindings::GesturePinchBegin(gin::Arguments* args) {
+  if (sender_)
+    sender_->GesturePinchBegin(args);
+}
+
+void EventSenderBindings::GesturePinchEnd(gin::Arguments* args) {
+  if (sender_)
+    sender_->GesturePinchEnd(args);
+}
+
+void EventSenderBindings::GesturePinchUpdate(gin::Arguments* args) {
+  if (sender_)
+    sender_->GesturePinchUpdate(args);
 }
 
 void EventSenderBindings::GestureTap(gin::Arguments* args) {
@@ -1247,52 +1279,75 @@ void EventSender::KeyDown(const std::string& code_str,
   int code = 0;
   int text = 0;
   bool needs_shift_key_modifier = false;
+  std::string domString;
 
   if ("\n" == code_str) {
     generate_char = true;
     text = code = ui::VKEY_RETURN;
+    domString.assign("Enter");
   } else if ("rightArrow" == code_str) {
     code = ui::VKEY_RIGHT;
+    domString.assign("ArrowRight");
   } else if ("downArrow" == code_str) {
     code = ui::VKEY_DOWN;
+    domString.assign("ArrowDown");
   } else if ("leftArrow" == code_str) {
     code = ui::VKEY_LEFT;
+    domString.assign("ArrowLeft");
   } else if ("upArrow" == code_str) {
     code = ui::VKEY_UP;
+    domString.assign("ArrowUp");
   } else if ("insert" == code_str) {
     code = ui::VKEY_INSERT;
+    domString.assign("Insert");
   } else if ("delete" == code_str) {
     code = ui::VKEY_DELETE;
+    domString.assign("Delete");
   } else if ("pageUp" == code_str) {
     code = ui::VKEY_PRIOR;
+    domString.assign("PageUp");
   } else if ("pageDown" == code_str) {
     code = ui::VKEY_NEXT;
+    domString.assign("PageDown");
   } else if ("home" == code_str) {
     code = ui::VKEY_HOME;
+    domString.assign("Home");
   } else if ("end" == code_str) {
     code = ui::VKEY_END;
+    domString.assign("End");
   } else if ("printScreen" == code_str) {
     code = ui::VKEY_SNAPSHOT;
+    domString.assign("PrintScreen");
   } else if ("menu" == code_str) {
     code = ui::VKEY_APPS;
+    domString.assign("ContextMenu");
   } else if ("leftControl" == code_str) {
     code = ui::VKEY_LCONTROL;
+    domString.assign("ControlLeft");
   } else if ("rightControl" == code_str) {
     code = ui::VKEY_RCONTROL;
+    domString.assign("ControlRight");
   } else if ("leftShift" == code_str) {
     code = ui::VKEY_LSHIFT;
+    domString.assign("ShiftLeft");
   } else if ("rightShift" == code_str) {
     code = ui::VKEY_RSHIFT;
+    domString.assign("ShiftRight");
   } else if ("leftAlt" == code_str) {
     code = ui::VKEY_LMENU;
+    domString.assign("AltLeft");
   } else if ("rightAlt" == code_str) {
     code = ui::VKEY_RMENU;
+    domString.assign("AltRight");
   } else if ("numLock" == code_str) {
     code = ui::VKEY_NUMLOCK;
+    domString.assign("NumLock");
   } else if ("backspace" == code_str) {
     code = ui::VKEY_BACK;
+    domString.assign("Backspace");
   } else if ("escape" == code_str) {
     code = ui::VKEY_ESCAPE;
+    domString.assign("Escape");
   } else {
     // Compare the input string with the function-key names defined by the
     // DOM spec (i.e. "F1",...,"F24"). If the input string is a function-key
@@ -1301,6 +1356,7 @@ void EventSender::KeyDown(const std::string& code_str,
       std::string function_key_name = base::StringPrintf("F%d", i);
       if (function_key_name == code_str) {
         code = ui::VKEY_F1 + (i - 1);
+        domString = function_key_name;
         break;
       }
     }
@@ -1312,6 +1368,17 @@ void EventSender::KeyDown(const std::string& code_str,
       needs_shift_key_modifier = NeedsShiftModifier(code);
       if ((code & 0xFF) >= 'a' && (code & 0xFF) <= 'z')
         code -= 'a' - 'A';
+      if ((code >= 'A' && code <= 'Z') || (code >= 'a' && code <= 'z')) {
+        domString.assign("Key");
+        domString.push_back(base::ToUpperASCII(code));
+      } else if (code >= '0' && code <= '9') {
+        domString.assign("Digit");
+        domString.push_back(code);
+      } else if (code == ' ') {
+        domString.assign("Space");
+      } else if (code == 9) {
+        domString.assign("Tab");
+      }
       generate_char = true;
     }
 
@@ -1330,6 +1397,8 @@ void EventSender::KeyDown(const std::string& code_str,
   event_down.type = WebInputEvent::RawKeyDown;
   event_down.modifiers = modifiers;
   event_down.windowsKeyCode = code;
+  event_down.domCode = static_cast<int>(
+      ui::KeycodeConverter::CodeStringToDomCode(domString.c_str()));
 
   if (generate_char) {
     event_down.text[0] = text;
@@ -1490,7 +1559,7 @@ void EventSender::SetPageScaleFactor(float scale_factor, int x, int y) {
 }
 
 void EventSender::SetPageScaleFactorLimits(float min_scale, float max_scale) {
-  view_->setPageScaleFactorLimits(min_scale, max_scale);
+  view_->setDefaultPageScaleLimits(min_scale, max_scale);
 }
 
 void EventSender::ClearTouchPoints() {
@@ -1558,6 +1627,9 @@ void EventSender::SetTouchCancelable(bool cancelable) {
 }
 
 void EventSender::DumpFilenameBeingDragged() {
+  if (current_drag_data_.isNull())
+    return;
+
   WebString filename;
   WebVector<WebDragData::Item> items = current_drag_data_.items();
   for (size_t i = 0; i < items.size(); ++i) {
@@ -1582,11 +1654,25 @@ void EventSender::GestureFlingCancel() {
 }
 
 void EventSender::GestureFlingStart(float x,
-                                     float y,
-                                     float velocity_x,
-                                     float velocity_y) {
+                                    float y,
+                                    float velocity_x,
+                                    float velocity_y,
+                                    gin::Arguments* args) {
   WebGestureEvent event;
   event.type = WebInputEvent::GestureFlingStart;
+
+  std::string device_string;
+  if (!args->PeekNext().IsEmpty() && args->PeekNext()->IsString())
+    args->GetNext(&device_string);
+
+  if (device_string == kSourceDeviceStringTouchpad) {
+    event.sourceDevice = blink::WebGestureDeviceTouchpad;
+  } else if (device_string == kSourceDeviceStringTouchscreen) {
+    event.sourceDevice = blink::WebGestureDeviceTouchscreen;
+  } else {
+    args->ThrowError();
+    return;
+  }
 
   event.x = x;
   event.y = y;
@@ -1743,6 +1829,18 @@ void EventSender::GestureScrollEnd(gin::Arguments* args) {
 
 void EventSender::GestureScrollUpdate(gin::Arguments* args) {
   GestureEvent(WebInputEvent::GestureScrollUpdate, args);
+}
+
+void EventSender::GesturePinchBegin(gin::Arguments* args) {
+  GestureEvent(WebInputEvent::GesturePinchBegin, args);
+}
+
+void EventSender::GesturePinchEnd(gin::Arguments* args) {
+  GestureEvent(WebInputEvent::GesturePinchEnd, args);
+}
+
+void EventSender::GesturePinchUpdate(gin::Arguments* args) {
+  GestureEvent(WebInputEvent::GesturePinchUpdate, args);
 }
 
 void EventSender::GestureTap(gin::Arguments* args) {
@@ -1948,15 +2046,35 @@ void EventSender::SendCurrentTouchEvent(WebInputEvent::Type type) {
 
 void EventSender::GestureEvent(WebInputEvent::Type type,
                                gin::Arguments* args) {
+  WebGestureEvent event;
+  event.type = type;
+
+  // If the first argument is a string, it is to specify the device, otherwise
+  // the device is assumed to be a touchscreen (since most tests were written
+  // assuming this).
+  event.sourceDevice = blink::WebGestureDeviceTouchscreen;
+  if (args->PeekNext()->IsString()) {
+    std::string device_string;
+    if (!args->GetNext(&device_string)) {
+      args->ThrowError();
+      return;
+    }
+    if (device_string == kSourceDeviceStringTouchpad) {
+      event.sourceDevice = blink::WebGestureDeviceTouchpad;
+    } else if (device_string == kSourceDeviceStringTouchscreen) {
+      event.sourceDevice = blink::WebGestureDeviceTouchscreen;
+    } else {
+      args->ThrowError();
+      return;
+    }
+  }
+
   double x;
   double y;
   if (!args->GetNext(&x) || !args->GetNext(&y)) {
     args->ThrowError();
     return;
   }
-
-  WebGestureEvent event;
-  event.type = type;
 
   switch (type) {
     case WebInputEvent::GestureScrollUpdate:
@@ -1990,6 +2108,27 @@ void EventSender::GestureEvent(WebInputEvent::Type type,
       event.x = current_gesture_location_.x;
       event.y = current_gesture_location_.y;
       break;
+    case WebInputEvent::GesturePinchBegin:
+    case WebInputEvent::GesturePinchEnd:
+      current_gesture_location_ = WebPoint(x, y);
+      event.x = current_gesture_location_.x;
+      event.y = current_gesture_location_.y;
+      break;
+    case WebInputEvent::GesturePinchUpdate:
+    {
+      float scale = 1;
+      if (!args->PeekNext().IsEmpty()) {
+        if (!args->GetNext(&scale)) {
+          args->ThrowError();
+          return;
+        }
+      }
+      event.data.pinchUpdate.scale = scale;
+      current_gesture_location_ = WebPoint(x, y);
+      event.x = current_gesture_location_.x;
+      event.y = current_gesture_location_.y;
+      break;
+    }
     case WebInputEvent::GestureTap:
     {
       float tap_count = 1;
@@ -2207,12 +2346,18 @@ void EventSender::InitMouseWheelEvent(gin::Arguments* args,
   bool paged = false;
   bool has_precise_scrolling_deltas = false;
   int modifiers = 0;
+  bool can_scroll = true;
   if (!args->PeekNext().IsEmpty()) {
     args->GetNext(&paged);
     if (!args->PeekNext().IsEmpty()) {
       args->GetNext(&has_precise_scrolling_deltas);
-      if (!args->PeekNext().IsEmpty())
-        modifiers = GetKeyModifiersFromV8(args->PeekNext());
+      if (!args->PeekNext().IsEmpty()) {
+        v8::Handle<v8::Value> value;
+        args->GetNext(&value);
+        modifiers = GetKeyModifiersFromV8(value);
+        if (!args->PeekNext().IsEmpty())
+          args->GetNext(&can_scroll);
+      }
     }
   }
 
@@ -2229,7 +2374,7 @@ void EventSender::InitMouseWheelEvent(gin::Arguments* args,
   event->deltaY = event->wheelTicksY;
   event->scrollByPage = paged;
   event->hasPreciseScrollingDeltas = has_precise_scrolling_deltas;
-
+  event->canScroll = can_scroll;
   if (continuous) {
     event->wheelTicksX /= kScrollbarPixelsPerTick;
     event->wheelTicksY /= kScrollbarPixelsPerTick;

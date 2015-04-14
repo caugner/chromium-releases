@@ -8,13 +8,44 @@
     # platforms to include source files on (e.g. files ending in
     # _mac.h or _mac.cc are only compiled on MacOSX).
     'chromium_code': 1,
-    'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/components',
-   },
+  },
   'conditions': [
     ['android_webview_build == 0', {
       'targets': [
         {
-          # GN version: //components/components_unittests
+          'target_name': 'components_tests_pak',
+          'type': 'none',
+          'dependencies': [
+            '../ui/resources/ui_resources.gyp:ui_resources',
+            '../ui/strings/ui_strings.gyp:ui_strings',
+            'components_resources.gyp:components_resources',
+            'components_strings.gyp:components_strings',
+          ],
+          'actions': [
+            {
+              'action_name': 'repack_components_tests_pak',
+              'variables': {
+                'pak_inputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/components/components_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/components/strings/components_strings_en-US.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_resources_100_percent.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/resources/webui_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/strings/app_locale_settings_en-US.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/strings/ui_strings_en-US.pak',
+                ],
+                'pak_output': '<(PRODUCT_DIR)/components_tests_resources.pak',
+              },
+              'includes': [ '../build/repack_action.gypi' ],
+            },
+          ],
+          'direct_dependent_settings': {
+            'mac_bundle_resources': [
+              '<(PRODUCT_DIR)/components_tests_resources.pak',
+            ],
+          },
+        },
+        {
+          # GN version: //components:components_unittests
           'target_name': 'components_unittests',
           'type': '<(gtest_target_type)',
           'sources': [
@@ -72,20 +103,14 @@
             'bookmarks/browser/bookmark_index_unittest.cc',
             'bookmarks/browser/bookmark_model_unittest.cc',
             'bookmarks/browser/bookmark_utils_unittest.cc',
-            'browser_watcher/exit_funnel_win_unittest.cc',
+            'browser_watcher/endsession_watcher_window_win_unittest.cc',
             'browser_watcher/exit_code_watcher_win_unittest.cc',
+            'browser_watcher/exit_funnel_win_unittest.cc',
             'browser_watcher/watcher_client_win_unittest.cc',
             'browser_watcher/watcher_metrics_provider_win_unittest.cc',
-            'crash/app/crash_keys_win_unittest.cc',
             'captive_portal/captive_portal_detector_unittest.cc',
             'cloud_devices/common/cloud_devices_urls_unittest.cc',
             'cloud_devices/common/printer_description_unittest.cc',
-            'component_updater/test/component_patcher_unittest.cc',
-            'component_updater/test/component_updater_ping_manager_unittest.cc',
-            'component_updater/test/crx_downloader_unittest.cc',
-            'component_updater/test/request_sender_unittest.cc',
-            'component_updater/test/update_checker_unittest.cc',
-            'component_updater/test/update_response_unittest.cc',
             'content_settings/core/browser/content_settings_mock_provider.cc',
             'content_settings/core/browser/content_settings_mock_provider.h',
             'content_settings/core/browser/content_settings_provider_unittest.cc',
@@ -93,14 +118,17 @@
             'content_settings/core/browser/content_settings_utils_unittest.cc',
             'content_settings/core/common/content_settings_pattern_parser_unittest.cc',
             'content_settings/core/common/content_settings_pattern_unittest.cc',
+            'crash/app/crash_keys_win_unittest.cc',
             'crx_file/id_util_unittest.cc',
-            'data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol_unittest.cc',
+            'data_reduction_proxy/core/browser/data_reduction_proxy_config_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_configurator_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_interceptor_unittest.cc',
+            'data_reduction_proxy/core/browser/data_reduction_proxy_io_data_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_metrics_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_prefs_unittest.cc',
+            'data_reduction_proxy/core/browser/data_reduction_proxy_request_options_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_settings_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs_unittest.cc',
             'data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection_unittest.cc',
@@ -108,6 +136,7 @@
             'data_reduction_proxy/core/common/data_reduction_proxy_event_store_unittest.cc',
             'data_reduction_proxy/core/common/data_reduction_proxy_headers_unittest.cc',
             'data_reduction_proxy/core/common/data_reduction_proxy_params_unittest.cc',
+            'device_event_log/device_event_log_impl_unittest.cc',
             'dom_distiller/core/article_entry_unittest.cc',
             'dom_distiller/core/distilled_content_store_unittest.cc',
             'dom_distiller/core/distilled_page_prefs_unittests.cc',
@@ -128,7 +157,9 @@
             'domain_reliability/test_util.h',
             'domain_reliability/uploader_unittest.cc',
             'domain_reliability/util_unittest.cc',
+            'favicon_base/select_favicon_frames_unittest.cc',
             # Note: GN tests converted to here, need to do the rest.
+
             'enhanced_bookmarks/enhanced_bookmark_model_unittest.cc',
             'enhanced_bookmarks/image_store_ios_unittest.mm',
             'enhanced_bookmarks/image_store_unittest.cc',
@@ -144,10 +175,11 @@
             'gcm_driver/gcm_stats_recorder_impl_unittest.cc',
             'google/core/browser/google_url_tracker_unittest.cc',
             'google/core/browser/google_util_unittest.cc',
-            'history/core/android/android_history_types_unittest.cc',
+            'history/core/browser/android/android_history_types_unittest.cc',
             'history/core/browser/history_types_unittest.cc',
             'history/core/browser/in_memory_url_index_types_unittest.cc',
             'history/core/browser/top_sites_cache_unittest.cc',
+            'history/core/browser/top_sites_database_unittest.cc',
             'history/core/browser/url_database_unittest.cc',
             'history/core/browser/url_utils_unittest.cc',
             'history/core/browser/visit_database_unittest.cc',
@@ -174,15 +206,16 @@
             'metrics/metrics_reporting_scheduler_unittest.cc',
             'metrics/metrics_service_unittest.cc',
             'metrics/metrics_state_manager_unittest.cc',
+            'metrics/net/net_metrics_log_uploader_unittest.cc',
             'metrics/persisted_logs_unittest.cc',
             'metrics/profiler/profiler_metrics_provider_unittest.cc',
             'navigation_interception/intercept_navigation_resource_throttle_unittest.cc',
             'network_time/network_time_tracker_unittest.cc',
             'omnibox/answers_cache_unittest.cc',
-            'omnibox/base_search_provider_unittest.cc',
             'omnibox/autocomplete_input_unittest.cc',
             'omnibox/autocomplete_match_unittest.cc',
             'omnibox/autocomplete_result_unittest.cc',
+            'omnibox/base_search_provider_unittest.cc',
             'omnibox/keyword_provider_unittest.cc',
             'omnibox/omnibox_field_trial_unittest.cc',
             'omnibox/suggestion_answer_unittest.cc',
@@ -192,9 +225,15 @@
             'ownership/owner_key_util_impl_unittest.cc',
             'packed_ct_ev_whitelist/bit_stream_reader_unittest.cc',
             'packed_ct_ev_whitelist/packed_ct_ev_whitelist_unittest.cc',
+            'password_manager/core/browser/affiliation_backend_unittest.cc',
+            'password_manager/core/browser/affiliation_database_unittest.cc',
+            'password_manager/core/browser/affiliation_fetch_throttler_unittest.cc',
             'password_manager/core/browser/affiliation_fetcher_unittest.cc',
+            'password_manager/core/browser/affiliation_service_unittest.cc',
             'password_manager/core/browser/affiliation_utils_unittest.cc',
             'password_manager/core/browser/browser_save_password_progress_logger_unittest.cc',
+            'password_manager/core/browser/export/csv_writer_unittest.cc',
+            'password_manager/core/browser/import/csv_reader_unittest.cc',
             'password_manager/core/browser/log_router_unittest.cc',
             'password_manager/core/browser/login_database_unittest.cc',
             'password_manager/core/browser/password_autofill_manager_unittest.cc',
@@ -216,6 +255,7 @@
             'rappor/byte_vector_utils_unittest.cc',
             'rappor/log_uploader_unittest.cc',
             'rappor/rappor_metric_unittest.cc',
+            'rappor/rappor_prefs_unittest.cc',
             'rappor/rappor_service_unittest.cc',
             'search/search_android_unittest.cc',
             'search/search_unittest.cc',
@@ -253,13 +293,13 @@
             'suggestions/image_manager_unittest.cc',
             'suggestions/suggestions_service_unittest.cc',
             'suggestions/suggestions_store_unittest.cc',
-            'sync_driver/non_ui_data_type_controller_unittest.cc',
             'sync_driver/data_type_manager_impl_unittest.cc',
             'sync_driver/device_info_data_type_controller_unittest.cc',
             'sync_driver/device_info_sync_service_unittest.cc',
             'sync_driver/generic_change_processor_unittest.cc',
             'sync_driver/model_association_manager_unittest.cc',
             'sync_driver/non_blocking_data_type_controller_unittest.cc',
+            'sync_driver/non_ui_data_type_controller_unittest.cc',
             'sync_driver/shared_change_processor_unittest.cc',
             'sync_driver/sync_prefs_unittest.cc',
             'sync_driver/system_encryptor_unittest.cc',
@@ -275,13 +315,20 @@
             'translate/ios/browser/js_translate_manager_unittest.mm',
             'translate/ios/browser/language_detection_controller_unittest.mm',
             'translate/ios/browser/translate_controller_unittest.mm',
+            'ui/zoom/page_zoom_unittests.cc',
+            'update_client/test/component_patcher_unittest.cc',
+            'update_client/test/crx_downloader_unittest.cc',
+            'update_client/test/ping_manager_unittest.cc',
+            'update_client/test/request_sender_unittest.cc',
+            'update_client/test/update_checker_unittest.cc',
+            'update_client/test/update_response_unittest.cc',
             'update_client/update_query_params_unittest.cc',
+            'url_fixer/url_fixer_unittest.cc',
             'url_matcher/regex_set_matcher_unittest.cc',
             'url_matcher/string_pattern_unittest.cc',
             'url_matcher/substring_set_matcher_unittest.cc',
             'url_matcher/url_matcher_factory_unittest.cc',
             'url_matcher/url_matcher_unittest.cc',
-            'url_fixer/url_fixer_unittest.cc',
             'variations/active_field_trials_unittest.cc',
             'variations/caching_permuted_entropy_provider_unittest.cc',
             'variations/entropy_provider_unittest.cc',
@@ -303,206 +350,114 @@
             '..',
           ],
           'dependencies': [
+            '../base/base.gyp:base',
             '../base/base.gyp:base_prefs_test_support',
             '../base/base.gyp:test_support_base',
-            # TODO(blundell): Eliminate this dependency by having
-            # components_unittests have its own pakfile. crbug.com/348563
-            '../chrome/chrome_resources.gyp:packed_extra_resources',
             # TODO(blundell): Eliminate the need for this dependency in code
             # that iOS shares. crbug.com/325243
             '../content/content_shell_and_tests.gyp:test_support_content',
+            '../google_apis/google_apis.gyp:google_apis_test_support',
+            '../jingle/jingle.gyp:notifier_test_util',
+            '../net/net.gyp:net_test_support',
             '../sql/sql.gyp:test_support_sql',
             '../sync/sync.gyp:sync',
             '../sync/sync.gyp:test_support_sync_api',
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
+            '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
+            '../third_party/libaddressinput/libaddressinput.gyp:libaddressinput_util',
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+            '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber',
+            '../third_party/libxml/libxml.gyp:libxml',
+            '../third_party/protobuf/protobuf.gyp:protobuf_lite',
             '../ui/base/ui_base.gyp:ui_base',
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gfx/gfx.gyp:gfx_test_support',
-
-            'components_resources.gyp:components_resources',
-
-            # Dependencies of auto_login_parser
+            '../ui/resources/ui_resources.gyp:ui_resources',
+            '../ui/strings/ui_strings.gyp:ui_strings',
+            '../url/url.gyp:url_lib',
             'components.gyp:auto_login_parser',
-
-            # Dependencies of autofill
             'components.gyp:autofill_core_browser',
             'components.gyp:autofill_core_common',
             'components.gyp:autofill_core_test_support',
-            'components_strings.gyp:components_strings',
-            '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber',
-            '../third_party/libaddressinput/libaddressinput.gyp:libaddressinput_util',
-
-            # Dependencies of bookmarks
             'components.gyp:bookmarks_browser',
             'components.gyp:bookmarks_test_support',
-
-            # Dependencies of captive_portal
             'components.gyp:captive_portal_test_support',
-            '../net/net.gyp:net_test_support',
-
-            # Dependencies of cloud_devices
             'components.gyp:cloud_devices_common',
-
-            # Dependencies of component_updater
-            'components.gyp:component_updater',
-            'components.gyp:component_updater_test_support',
-            '../third_party/libxml/libxml.gyp:libxml',
-
-            # Dependencies of content_settings
             'components.gyp:content_settings_core_browser',
             'components.gyp:content_settings_core_common',
             'components.gyp:content_settings_core_test_support',
-            
-            # Dependencies of packed CT EV white list
-            'components.gyp:packed_ct_ev_whitelist',
-
-            # Dependencies of crash
             'components.gyp:crash_test_support',
-
-            # Dependencies of crx_file
             'components.gyp:crx_file',
-
-            # Dependencies of data_reduction_proxy
             'components.gyp:data_reduction_proxy_core_browser',
             'components.gyp:data_reduction_proxy_core_common',
             'components.gyp:data_reduction_proxy_test_support',
-
-            # Dependencies of dom_distiller
+            'components.gyp:device_event_log_component',
             'components.gyp:distilled_page_proto',
             'components.gyp:dom_distiller_core',
             'components.gyp:dom_distiller_test_support',
-
-            # Dependencies of domain_reliability
             'components.gyp:domain_reliability',
-
-            # Dependencies of enhanced_bookmarks
             'components.gyp:enhanced_bookmarks',
             'components.gyp:enhanced_bookmarks_test_support',
-
-            # Dependencies of feedback
+            'components.gyp:favicon_base',
             'components.gyp:feedback_component',
-
-            # Dependencies of gcm
             'components.gyp:gcm_driver',
             'components.gyp:gcm_driver_test_support',
-
-            # Dependencies of google
             'components.gyp:google_core_browser',
-
-            # Dependencies of history
             'components.gyp:history_core_browser',
             'components.gyp:history_core_common',
-
-            # Dependencies of invalidation
+            'components.gyp:history_core_test_support',
             'components.gyp:invalidation',
             'components.gyp:invalidation_test_support',
-            '../jingle/jingle.gyp:notifier_test_util',
-            '../third_party/libjingle/libjingle.gyp:libjingle',
-
-            # Dependencies of json_schema
             'components.gyp:json_schema',
-
-            # Dependencies of keyed_service
             'components.gyp:keyed_service_core',
-
-            # Dependencies of language_usage_metrics
             'components.gyp:language_usage_metrics',
-
-            # Dependencies of leveldb_proto
-            '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
             'components.gyp:leveldb_proto',
             'components.gyp:leveldb_proto_test_support',
-
-            # Dependencies of login
             'components.gyp:login',
-
-            # Dependencies of metrics
             'components.gyp:metrics',
             'components.gyp:metrics_gpu',
             'components.gyp:metrics_net',
             'components.gyp:metrics_profiler',
             'components.gyp:metrics_test_support',
-
-            # Dependencies of network_time
             'components.gyp:network_time',
-
-            # Dependencies of omnibox
             'components.gyp:omnibox',
             'components.gyp:omnibox_test_support',
-
-            # Dependencies of os_crypt
             'components.gyp:os_crypt',
-
-            # Dependencies of ownership
             'components.gyp:ownership',
-
-            # Dependencies of password_manager
+            'components.gyp:packed_ct_ev_whitelist',
+            'components.gyp:password_manager_core_browser',
             'components.gyp:password_manager_core_browser',
             'components.gyp:password_manager_core_browser_test_support',
-
-            # Dependencies of precache/core
-            'components.gyp:password_manager_core_browser',
             'components.gyp:precache_core',
-
-            # Dependencies of pref_registry
             'components.gyp:pref_registry_test_support',
-
-            # Dependencies of query_parser
             'components.gyp:query_parser',
-
-            # Dependencies of rappor
             'components.gyp:rappor',
             'components.gyp:rappor_test_support',
-
-            # Dependencies of search
             'components.gyp:search',
-
-            # Dependencies of search_engines
             'components.gyp:search_engines',
             'components.gyp:search_engines_test_support',
-
-            # Dependencies of search_provider_logos
             'components.gyp:search_provider_logos',
-
-            # Dependencies of sessions
-            '../third_party/protobuf/protobuf.gyp:protobuf_lite',
             'components.gyp:sessions_test_support',
-
-            # Dependencies of signin
             'components.gyp:signin_core_browser',
             'components.gyp:signin_core_browser_test_support',
-            '../google_apis/google_apis.gyp:google_apis_test_support',
-
-            # Dependencies of suggestions
             'components.gyp:suggestions',
-
-            # Dependencies of sync_driver
             'components.gyp:sync_driver_test_support',
-
-            # Dependencies of translate.
             'components.gyp:translate_core_browser',
             'components.gyp:translate_core_common',
             'components.gyp:translate_core_language_detection',
-
-            # Dependencies of wallpaper
-            'components.gyp:wallpaper',
-
-            # Dependencies of update_client
+            'components.gyp:ui_zoom',
             'components.gyp:update_client',
-
-            # Dependencies of url_fixer
+            'components.gyp:update_client_test_support',
             'components.gyp:url_fixer',
-            '../url/url.gyp:url_lib',
-
-            # Dependencies of variations
             'components.gyp:variations',
             'components.gyp:variations_http_provider',
-
-            # Dependencies of web_resource
+            'components.gyp:wallpaper',
             'components.gyp:web_resource',
             'components.gyp:web_resource_test_support',
-            '../base/base.gyp:base',
+            'components_resources.gyp:components_resources',
+            'components_strings.gyp:components_strings',
+            'components_tests_pak',
           ],
           'conditions': [
             ['toolkit_views == 1', {
@@ -517,9 +472,8 @@
             }],
             ['OS=="win"', {
               'dependencies': [
-                 # Dependencies of browser_watcher, windows only.
-                 'components.gyp:browser_watcher',
-                 'components.gyp:browser_watcher_client',
+                'components.gyp:browser_watcher',
+                'components.gyp:browser_watcher_client',
               ]
             }],
             ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
@@ -535,66 +489,38 @@
             ['OS != "ios"', {
               'sources': [
                 'autofill/content/renderer/renderer_save_password_progress_logger_unittest.cc',
-                'dns_prefetch/renderer/predictor_queue_unittest.cc',
-                'dns_prefetch/renderer/renderer_net_predictor_unittest.cc',
                 'dom_distiller/content/dom_distiller_viewer_source_unittest.cc',
                 'dom_distiller/content/web_contents_main_frame_observer_unittest.cc',
                 'error_page/renderer/net_error_helper_core_unittest.cc',
                 'metrics/gpu/gpu_metrics_provider_unittest.cc',
-                'password_manager/content/browser/content_credential_manager_dispatcher_unittest.cc',
+                'network_hints/renderer/dns_prefetch_queue_unittest.cc',
+                'network_hints/renderer/renderer_dns_prefetch_unittest.cc',
+                'password_manager/content/browser/credential_manager_dispatcher_unittest.cc',
+                'password_manager/content/common/credential_manager_types_unittest.cc',
                 'power/origin_power_map_unittest.cc',
               ],
               'dependencies': [
-                # Dependencies of autofill
+                '../skia/skia.gyp:skia',
                 'components.gyp:autofill_content_browser',
                 'components.gyp:autofill_content_renderer',
                 'components.gyp:autofill_content_test_support',
-
-                # Dependencies of dns_prefetch
-                'components.gyp:dns_prefetch_renderer',
-
-                # Dependencies of dom_distiller
                 'components.gyp:dom_distiller_content',
-
-                # Dependencies of error_page
                 'components.gyp:error_page_renderer',
-
-                # Dependencies of
-                # intercept_navigation_resource_throttle_unittest.cc
-                '../skia/skia.gyp:skia',
-                'components.gyp:navigation_interception',
-
-                # Dependencies of keyed_service
+                'components.gyp:history_content_browser',
                 'components.gyp:keyed_service_content',
-
-                # Dependencies of password_manager
+                'components.gyp:navigation_interception',
+                'components.gyp:network_hints_renderer',
                 'components.gyp:password_manager_content_browser',
                 'components.gyp:password_manager_content_common',
-
-                # Dependencies of precache/content
-                'components.gyp:precache_content',
-
-                # Dependencies of power
                 'components.gyp:power',
-
-                # Dependencies of sessions
+                'components.gyp:precache_content',
                 'components.gyp:sessions_content',
-
-                # Dependencies of storage monitor
                 'components.gyp:storage_monitor',
                 'components.gyp:storage_monitor_test_support',
-
-                # Dependencies of url_matcher.
                 'components.gyp:url_matcher',
-
-                # Dependencies of visitedlink
                 'components.gyp:visitedlink_browser',
                 'components.gyp:visitedlink_renderer',
-
-                # Dependencies of web_cache
                 'components.gyp:web_cache_browser',
-
-                # Dependencies of web_modal
                 'components.gyp:web_modal',
                 'components.gyp:web_modal_test_support',
               ],
@@ -606,7 +532,6 @@
                 }],
               ],
             }, { # 'OS == "ios"'
-              'includes': ['../chrome/chrome_ios_bundle_resources.gypi'],
               'sources': [
                 'webp_transcode/webp_decoder_unittest.mm',
               ],
@@ -650,21 +575,13 @@
                 ['include', '^webp_transcode/'],
               ],
               'dependencies': [
-                # Dependencies of sessions
-                'components.gyp:sessions_ios',
-
-                # Dependencies of signin
-                'components.gyp:signin_ios_browser',
-
-                # Dependencies of translate
-                'components.gyp:translate_ios_browser',
-
-                # Dependencies of webp_transcode
-                'components.gyp:webp_transcode',
-
                 '../ios/ios_tests.gyp:test_support_ios',
                 '../ios/web/ios_web.gyp:test_support_ios_web',
                 '../third_party/ocmock/ocmock.gyp:ocmock',
+                'components.gyp:sessions_ios',
+                'components.gyp:signin_ios_browser',
+                'components.gyp:translate_ios_browser',
+                'components.gyp:webp_transcode',
               ],
               'actions': [
                 {
@@ -687,12 +604,6 @@
               ],
             }],
             ['disable_nacl==0', {
-              'includes': [
-                'nacl/nacl_defines.gypi',
-              ],
-              'defines': [
-                '<@(nacl_defines)',
-              ],
               'sources': [
                 'nacl/browser/nacl_file_host_unittest.cc',
                 'nacl/browser/nacl_process_host_unittest.cc',
@@ -721,18 +632,21 @@
             }],
             ['OS == "android"', {
               'sources': [
+                'data_reduction_proxy/content/browser/data_reduction_proxy_debug_blocking_page_unittest.cc',
+                'data_reduction_proxy/content/browser/data_reduction_proxy_debug_resource_throttle_unittest.cc',
+                'data_reduction_proxy/content/browser/data_reduction_proxy_debug_ui_manager_unittest.cc',
                 'invalidation/invalidation_service_android_unittest.cc',
               ],
               'sources!': [
+                'feedback/feedback_common_unittest.cc',
+                'feedback/feedback_data_unittest.cc',
+                'feedback/feedback_uploader_unittest.cc',
                 'gcm_driver/gcm_account_mapper_unittest.cc',
                 'gcm_driver/gcm_channel_status_request_unittest.cc',
                 'gcm_driver/gcm_client_impl_unittest.cc',
                 'gcm_driver/gcm_delayed_task_controller_unittest.cc',
                 'gcm_driver/gcm_driver_desktop_unittest.cc',
                 'gcm_driver/gcm_stats_recorder_impl_unittest.cc',
-                'feedback/feedback_common_unittest.cc',
-                'feedback/feedback_data_unittest.cc',
-                'feedback/feedback_uploader_unittest.cc',
                 'signin/core/browser/mutable_profile_oauth2_token_service_unittest.cc',
                 'storage_monitor/media_storage_util_unittest.cc',
                 'storage_monitor/storage_info_unittest.cc',
@@ -740,8 +654,8 @@
                 'web_modal/web_contents_modal_dialog_manager_unittest.cc',
               ],
               'dependencies': [
+                'components.gyp:data_reduction_proxy_content',
                 '../testing/android/native_test.gyp:native_test_native_code',
-                'components.gyp:history_core_android',
               ],
               'dependencies!': [
                 'components.gyp:feedback_component',
@@ -771,20 +685,20 @@
             }],
             ['OS != "ios" and OS != "android"', {
               'sources': [
+                'audio_modem/audio_player_unittest.cc',
+                'audio_modem/audio_recorder_unittest.cc',
+                'audio_modem/modem_unittest.cc',
                 'copresence/copresence_state_unittest.cc',
                 'copresence/handlers/audio/audio_directive_handler_unittest.cc',
                 'copresence/handlers/audio/audio_directive_list_unittest.cc',
                 'copresence/handlers/directive_handler_unittest.cc',
                 'copresence/handlers/gcm_handler_unittest.cc',
-                'copresence/mediums/audio/audio_manager_unittest.cc',
-                'copresence/mediums/audio/audio_player_unittest.cc',
-                'copresence/mediums/audio/audio_recorder_unittest.cc',
                 'copresence/rpc/http_post_unittest.cc',
                 'copresence/rpc/rpc_handler_unittest.cc',
                 'copresence/timed_map_unittest.cc',
                 'proximity_auth/base64url_unittest.cc',
-                'proximity_auth/bluetooth_connection_unittest.cc',
                 'proximity_auth/bluetooth_connection_finder_unittest.cc',
+                'proximity_auth/bluetooth_connection_unittest.cc',
                 'proximity_auth/client_unittest.cc',
                 'proximity_auth/connection_unittest.cc',
                 'proximity_auth/cryptauth/cryptauth_account_token_fetcher_unittest.cc',
@@ -795,22 +709,23 @@
                 'proximity_auth/wire_message_unittest.cc',
               ],
               'dependencies': [
-                # Dependencies for copresence.
-                'components.gyp:copresence',
-                'components.gyp:copresence_test_support',
-
-                # Dependencies of proxmity_auth
-                'components.gyp:proximity_auth',
-                'components.gyp:cryptauth',
                 '../device/bluetooth/bluetooth.gyp:device_bluetooth_mocks',
                 '../google_apis/google_apis.gyp:google_apis_test_support',
                 '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+                'components.gyp:audio_modem',
+                'components.gyp:audio_modem_test_support',
+                'components.gyp:copresence',
+                'components.gyp:copresence_test_support',
+                'components.gyp:cryptauth',
+                'components.gyp:proximity_auth',
               ],
             }],
             ['chromeos==1', {
               'sources': [
                 'pairing/message_buffer_unittest.cc',
                 'timers/alarm_timer_unittest.cc',
+                'wifi_sync/wifi_config_delegate_chromeos_unittest.cc',
+                'wifi_sync/wifi_credential_syncable_service_unittest.cc',
                 'wifi_sync/wifi_credential_unittest.cc',
                 'wifi_sync/wifi_security_class_chromeos_unittest.cc',
                 'wifi_sync/wifi_security_class_unittest.cc',
@@ -819,11 +734,10 @@
                 'storage_monitor/storage_monitor_linux_unittest.cc',
               ],
               'dependencies': [
-	        # Dependencies of wifi_sync
-                'components.gyp:wifi_sync',
-
-                'components.gyp:pairing',
                 '../chromeos/chromeos.gyp:chromeos_test_support',
+                'components.gyp:pairing',
+                'components.gyp:user_manager_test_support',
+                'components.gyp:wifi_sync',
               ],
             }],
             ['OS=="linux"', {
@@ -851,12 +765,12 @@
               ],
             }],
             ['OS=="linux" and component=="shared_library" and use_allocator!="none"', {
-            'dependencies': [
+              'dependencies': [
                 '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-            ],
-            'link_settings': {
+              ],
+              'link_settings': {
                 'ldflags': ['-rdynamic'],
-            },
+              },
             }],
             ['configuration_policy==1', {
               'dependencies': [
@@ -903,6 +817,7 @@
                 'policy/core/common/policy_statistics_collector_unittest.cc',
                 'policy/core/common/preg_parser_win_unittest.cc',
                 'policy/core/common/registry_dict_win_unittest.cc',
+                'policy/core/common/remote_commands/remote_commands_queue_unittest.cc',
                 'policy/core/common/schema_map_unittest.cc',
                 'policy/core/common/schema_registry_tracking_policy_provider_unittest.cc',
                 'policy/core/common/schema_registry_unittest.cc',
@@ -1006,17 +921,36 @@
       ],
     }],
     ['OS!="ios"', {
+      'conditions': [
+        ['test_isolation_mode != "noop"', {
+          'targets': [
+            {
+              'target_name': 'components_browsertests_run',
+              'type': 'none',
+              'dependencies': [ 'components_browsertests' ],
+              'includes': [
+                '../build/isolate.gypi',
+              ],
+              'sources': [
+                'components_browsertests.isolate',
+              ],
+              'conditions': [
+                ['use_x11==1', {
+                  'dependencies': [
+                    '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+                  ],
+                }],
+              ],
+            },
+          ],
+        }],
+      ],
       'targets': [
         {
           'target_name': 'components_browsertests',
           'type': '<(gtest_target_type)',
           'defines!': ['CONTENT_IMPLEMENTATION'],
           'dependencies': [
-            'components.gyp:autofill_content_browser',
-            'components.gyp:autofill_content_renderer',
-            'components.gyp:password_manager_content_renderer',
-            'components.gyp:pref_registry_test_support',
-            'components_resources.gyp:components_resources',
             '../content/content.gyp:content_common',
             '../content/content.gyp:content_gpu',
             '../content/content.gyp:content_plugin',
@@ -1028,11 +962,15 @@
             '../skia/skia.gyp:skia',
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
-
-            # Dependencies of dom_distiller
+            'components.gyp:autofill_content_browser',
+            'components.gyp:autofill_content_renderer',
             'components.gyp:dom_distiller_content',
             'components.gyp:dom_distiller_core',
+            'components.gyp:password_manager_content_renderer',
+            'components.gyp:pref_registry_test_support',
+            'components_resources.gyp:components_resources',
             'components_strings.gyp:components_strings',
+            'components_tests_pak',
           ],
           'include_dirs': [
             '..',
@@ -1046,19 +984,6 @@
             'dom_distiller/content/distiller_page_web_contents_browsertest.cc',
             'password_manager/content/renderer/credential_manager_client_browsertest.cc',
           ],
-          'actions': [
-            {
-              'action_name': 'repack_components_pack',
-              'variables': {
-                'pak_inputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/components/components_resources.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/components/strings/components_strings_en-US.pak',
-                ],
-                'pak_output': '<(PRODUCT_DIR)/components_resources.pak',
-              },
-              'includes': [ '../build/repack_action.gypi' ],
-            },
-          ],
           'conditions': [
             ['OS == "android"', {
               'sources!': [
@@ -1067,9 +992,9 @@
             }],
             ['OS == "linux"', {
               'sources': [
-                  # content_extractor is a standalone content extraction tool built as
+                  # content_extractor_browsertest is a standalone content extraction tool built as
                   # a MANUAL component_browsertest.
-                  'dom_distiller/standalone/content_extractor.cc',
+                  'dom_distiller/standalone/content_extractor_browsertest.cc',
                 ],
             }],
             ['OS=="win"', {
@@ -1113,6 +1038,36 @@
                 '../base/allocator/allocator.gyp:allocator',
               ],
             }],
+            ['OS=="mac"', {
+              'dependencies': [
+        '../content/content_shell_and_tests.gyp:content_shell',  # Needed for Content Shell.app's Helper.
+              ],
+            }],
+            ['enable_basic_printing==1 or enable_print_preview==1', {
+              'dependencies': [
+                'components.gyp:printing_test_support',
+              ],
+              'sources' : [
+                'printing/test/print_web_view_helper_browsertest.cc',
+              ],
+            }]
+          ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'components_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'components_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'components_unittests.isolate',
           ],
         },
       ],

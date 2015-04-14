@@ -21,10 +21,14 @@ shared_library("clearkeycdm") {
     "external_clear_key/clear_key_cdm_common.h",
   ]
 
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+
   defines = [ "CDM_IMPLEMENTATION" ]
 
   deps = [
     "//base",
+    "//media",  # For media::AudioTimestampHelper
     "//media:shared_memory_support",  # For media::AudioBus.
     "//url",
   ]
@@ -40,11 +44,6 @@ shared_library("clearkeycdm") {
     deps += [ "//third_party/ffmpeg" ]
   }
 
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
-  }
-
   # TODO(GYP) on Mac: 'DYLIB_INSTALL_NAME_BASE': '@loader_path',
 }
 
@@ -56,6 +55,6 @@ group("clearkeycdmadapter") {
     ":clearkeycdm",
 
     #":clearkeycdmadapter_resources",  TODO(GYP)
-    "//ppapi:ppapi_cpp",
+    "//ppapi/cpp",
   ]
 }

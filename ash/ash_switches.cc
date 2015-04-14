@@ -29,13 +29,15 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
-// Enables text filtering with the keyboard in Overview Mode.
-const char kAshDisableTextFilteringInOverviewMode[] =
-    "ash-disable-text-filtering-in-overview-mode";
-
 // Disables LockLayoutManager used for LockScreenContainer, return back to
 // WorkspaceLayoutManager.
 const char kAshDisableLockLayoutManager[] = "ash-disable-lock-layout-manager";
+
+#if defined(OS_CHROMEOS)
+// Disable the support for WebContents to lock the screen orientation.
+const char kAshDisableScreenOrientationLock[] =
+    "ash-disable-screen-orientation-lock";
+#endif
 
 // Disable the Touch Exploration Mode. Touch Exploration Mode will no longer be
 // turned on automatically when spoken feedback is enabled when this flag is
@@ -62,6 +64,10 @@ const char kAshEnablePowerButtonQuickLock[] =
 // Enables software based mirroring.
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 
+// Enables gesture swipe to close windows while in Overview mode.
+const char kAshEnableSwipeToCloseInOverviewMode[] =
+    "ash-enable-swipe-to-close-in-overview-mode";
+
 // Enables touch view testing.
 // TODO(skuhne): Remove TOGGLE_TOUCH_VIEW_TESTING accelerator once this
 // flag is removed.
@@ -70,9 +76,6 @@ const char kAshEnableTouchViewTesting[] = "ash-enable-touch-view-testing";
 // When this flag is set, system sounds will be played whether the
 // ChromeVox is enabled or not.
 const char kAshEnableSystemSounds[] = "ash-enable-system-sounds";
-
-// Enables showing the tray bubble by dragging on the shelf.
-const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
 
 // Hides notifications that are irrelevant to Chrome OS device factory testing,
 // such as battery level updates.

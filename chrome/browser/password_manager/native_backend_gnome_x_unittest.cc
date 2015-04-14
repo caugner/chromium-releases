@@ -6,7 +6,6 @@
 
 #include "base/basictypes.h"
 #include "base/prefs/pref_service.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -299,8 +298,7 @@ void CheckPasswordChanges(const PasswordStoreChangeList& expected_list,
     EXPECT_EQ(expected.signon_realm, actual.signon_realm);
     EXPECT_EQ(expected.ssl_valid, actual.ssl_valid);
     EXPECT_EQ(expected.preferred, actual.preferred);
-    // We don't check the date created. It varies due to bug in the
-    // serialization. Integer seconds are saved instead of microseconds.
+    EXPECT_EQ(expected.date_created, actual.date_created);
     EXPECT_EQ(expected.blacklisted_by_user, actual.blacklisted_by_user);
     EXPECT_EQ(expected.type, actual.type);
     EXPECT_EQ(expected.times_used, actual.times_used);
@@ -309,7 +307,9 @@ void CheckPasswordChanges(const PasswordStoreChangeList& expected_list,
     EXPECT_EQ(expected.display_name, actual.display_name);
     EXPECT_EQ(expected.avatar_url, actual.avatar_url);
     EXPECT_EQ(expected.federation_url, actual.federation_url);
-    EXPECT_EQ(expected.is_zero_click, actual.is_zero_click);
+    EXPECT_EQ(expected.skip_zero_click, actual.skip_zero_click);
+    EXPECT_EQ(expected.generation_upload_status,
+              actual.generation_upload_status);
   }
 }
 
@@ -357,7 +357,8 @@ class NativeBackendGnomeTest : public testing::Test {
     form_google_.display_name = UTF8ToUTF16("Joe Schmoe");
     form_google_.avatar_url = GURL("http://www.google.com/avatar");
     form_google_.federation_url = GURL("http://www.google.com/federation_url");
-    form_google_.is_zero_click = true;
+    form_google_.skip_zero_click = true;
+    form_google_.generation_upload_status = PasswordForm::POSITIVE_SIGNAL_SENT;
 
     form_facebook_.origin = GURL("http://www.facebook.com/");
     form_facebook_.action = GURL("http://www.facebook.com/login");
@@ -372,7 +373,8 @@ class NativeBackendGnomeTest : public testing::Test {
     form_facebook_.display_name = UTF8ToUTF16("Joe Schmoe");
     form_facebook_.avatar_url = GURL("http://www.facebook.com/avatar");
     form_facebook_.federation_url = GURL("http://www.facebook.com/federation");
-    form_facebook_.is_zero_click = true;
+    form_facebook_.skip_zero_click = true;
+    form_facebook_.generation_upload_status = PasswordForm::NO_SIGNAL_SENT;
 
     form_isc_.origin = GURL("http://www.isc.org/");
     form_isc_.action = GURL("http://www.isc.org/auth");
@@ -446,7 +448,7 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ("login", item->keyring);
     EXPECT_EQ(form.origin.spec(), item->display_name);
     EXPECT_EQ(UTF16ToUTF8(form.password_value), item->password);
-    EXPECT_EQ(20u, item->attributes.size());
+    EXPECT_EQ(21u, item->attributes.size());
     CheckStringAttribute(item, "origin_url", form.origin.spec());
     CheckStringAttribute(item, "action_url", form.action.spec());
     CheckStringAttribute(item, "username_element",
@@ -470,7 +472,9 @@ class NativeBackendGnomeTest : public testing::Test {
     CheckStringAttribute(item, "display_name", UTF16ToUTF8(form.display_name));
     CheckStringAttribute(item, "avatar_url", form.avatar_url.spec());
     CheckStringAttribute(item, "federation_url", form.federation_url.spec());
-    CheckUint32Attribute(item, "is_zero_click", form.is_zero_click);
+    CheckUint32Attribute(item, "skip_zero_click", form.skip_zero_click);
+    CheckUint32Attribute(item, "generation_upload_status",
+                         form.generation_upload_status);
     CheckStringAttribute(item, "application", app_string);
   }
 
@@ -502,7 +506,7 @@ class NativeBackendGnomeTest : public testing::Test {
       target_form.signon_realm.append("Realm");
       target_form.scheme = scheme;
     }
-    std::vector<PasswordForm*> form_list;
+    ScopedVector<autofill::PasswordForm> form_list;
     BrowserThread::PostTask(
         BrowserThread::DB,
         FROM_HERE,
@@ -523,7 +527,6 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ(1u, form_list.size());
     if (result)
       *result = *form_list[0];
-    STLDeleteElements(&form_list);
     return true;
   }
 
@@ -549,7 +552,7 @@ class NativeBackendGnomeTest : public testing::Test {
     PasswordForm m_facebook_lookup;
     m_facebook_lookup.origin = kMobileURL;
     m_facebook_lookup.signon_realm = kMobileURL.spec();
-    std::vector<PasswordForm*> form_list;
+    ScopedVector<autofill::PasswordForm> form_list;
     BrowserThread::PostTask(
         BrowserThread::DB,
         FROM_HERE,
@@ -561,7 +564,7 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ(1u, mock_keyring_items.size());
     EXPECT_EQ(1u, form_list.size());
     PasswordForm m_facebook = *form_list[0];
-    STLDeleteElements(&form_list);
+    form_list.clear();
     EXPECT_EQ(kMobileURL, m_facebook.origin);
     EXPECT_EQ(kMobileURL.spec(), m_facebook.signon_realm);
 
@@ -621,7 +624,7 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ(kMobileURL, form_list[index_non_psl]->origin);
     EXPECT_EQ(kMobileURL.spec(), form_list[index_non_psl]->signon_realm);
     EXPECT_EQ(kOldPassword, form_list[index_non_psl]->password_value);
-    STLDeleteElements(&form_list);
+    form_list.clear();
 
     // Check that www.facebook.com login was modified by the update.
     BrowserThread::PostTask(
@@ -641,7 +644,6 @@ class NativeBackendGnomeTest : public testing::Test {
     EXPECT_EQ(form_facebook_.signon_realm,
               form_list[index_non_psl]->signon_realm);
     EXPECT_EQ(kNewPassword, form_list[index_non_psl]->password_value);
-    STLDeleteElements(&form_list);
   }
 
   void CheckMatchingWithScheme(const PasswordForm::Scheme& scheme) {
@@ -666,15 +668,13 @@ class NativeBackendGnomeTest : public testing::Test {
     NativeBackendGnome backend(42);
     backend.Init();
 
-    form_google_.date_synced = base::Time();
-    form_isc_.date_synced = base::Time();
-    form_google_.date_created = base::Time();
-    form_isc_.date_created = base::Time();
     base::Time now = base::Time::Now();
     base::Time next_day = now + base::TimeDelta::FromDays(1);
+    form_google_.date_synced = base::Time();
+    form_isc_.date_synced = base::Time();
+    form_google_.date_created = now;
+    form_isc_.date_created = now;
     if (date_to_test == CREATED) {
-      // crbug/374132. Remove the next line once it's fixed.
-      next_day = base::Time::FromTimeT(next_day.ToTimeT());
       form_google_.date_created = now;
       form_isc_.date_created = next_day;
     } else {
@@ -775,7 +775,7 @@ TEST_F(NativeBackendGnomeTest, BasicListLogins) {
       base::Bind(base::IgnoreResult( &NativeBackendGnome::AddLogin),
                  base::Unretained(&backend), form_google_));
 
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -786,7 +786,6 @@ TEST_F(NativeBackendGnomeTest, BasicListLogins) {
 
   // Quick check that we got something back.
   EXPECT_EQ(1u, form_list.size());
-  STLDeleteElements(&form_list);
 
   EXPECT_EQ(1u, mock_keyring_items.size());
   if (mock_keyring_items.size() > 0)
@@ -952,7 +951,7 @@ TEST_F(NativeBackendGnomeTest, RemoveNonexistentLogin) {
                  base::Unretained(&backend), form_isc_));
 
   // Make sure we can still get the first form back.
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -963,7 +962,6 @@ TEST_F(NativeBackendGnomeTest, RemoveNonexistentLogin) {
 
   // Quick check that we got something back.
   EXPECT_EQ(1u, form_list.size());
-  STLDeleteElements(&form_list);
 
   EXPECT_EQ(1u, mock_keyring_items.size());
   if (mock_keyring_items.size() > 0)
@@ -1046,7 +1044,7 @@ TEST_F(NativeBackendGnomeTest, ListLoginsAppends) {
                  base::Unretained(&backend), form_google_));
 
   // Send the same request twice with the same list both times.
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -1062,7 +1060,6 @@ TEST_F(NativeBackendGnomeTest, ListLoginsAppends) {
 
   // Quick check that we got two results back.
   EXPECT_EQ(2u, form_list.size());
-  STLDeleteElements(&form_list);
 
   EXPECT_EQ(1u, mock_keyring_items.size());
   if (mock_keyring_items.size() > 0)
@@ -1080,14 +1077,14 @@ TEST_F(NativeBackendGnomeTest, AndroidCredentials) {
   PasswordForm saved_android_form = observed_android_form;
   saved_android_form.username_value = base::UTF8ToUTF16("randomusername");
   saved_android_form.password_value = base::UTF8ToUTF16("password");
-  saved_android_form.date_created = base::Time::FromTimeT(1);
+  saved_android_form.date_created = base::Time::Now();
 
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(base::IgnoreResult(&NativeBackendGnome::AddLogin),
                  base::Unretained(&backend), saved_android_form));
 
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(base::IgnoreResult(&NativeBackendGnome::GetLogins),

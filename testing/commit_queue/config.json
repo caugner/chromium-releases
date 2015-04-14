@@ -5,13 +5,18 @@
             "trybots": {
                 "launched": {
                     "tryserver.chromium.linux": {
-                        "linux_chromium_asan_rel_ng": ["defaulttests"]
+                        "cast_shell": ["defaulttests"],
+                        "cast_shell_apk": ["defaulttests"],
+                        "linux_android_rel_ng": ["defaulttests"],
+                        "linux_chromium_asan_rel_ng": ["defaulttests"],
+                        "linux_chromium_clobber_rel_ng": ["defaulttests"]
                     },
                     "tryserver.chromium.mac": {
+                        "mac_chromium_gn_rel": ["defaulttests"]
                     },
                     "tryserver.chromium.win": {
                         "win8_chromium_ng": ["defaulttests"],
-                        "win_chromium_compile_dbg_ng": ["defaulttests"]
+                        "win8_chromium_gn_rel": ["defaulttests"]
                     }
                 }
             }
@@ -54,10 +59,11 @@
               "linux_chromium_asan_rel": ["defaulttests"],
               "linux_chromium_chromeos_compile_dbg_ng": ["defaulttests"],
               "linux_chromium_chromeos_rel_ng": ["defaulttests"],
+              "linux_chromium_gn_chromeos_rel": ["defaulttests"],
               "linux_chromium_gn_dbg": ["defaulttests"],
               "linux_chromium_gn_rel": ["defaulttests"],
               "linux_chromium_rel_ng": ["defaulttests"],
-              "android_dbg_tests_recipe": ["defaulttests"],
+              "android_rel_tests_recipe": ["defaulttests"],
               "android_arm64_dbg_recipe": ["defaulttests"],
               "android_clang_dbg_recipe": ["defaulttests"],
               "android_aosp": ["compile"],
@@ -79,27 +85,17 @@
                   "sync_unit_tests",
                   "gfx_unittests"
               ],
-              "ios_rel_device": ["compile"],
-              "ios_rel_device_ninja": ["compile"]
+              "ios_rel_device_ng": ["defaulttests"],
+              "ios_rel_device_ninja_ng": ["defaulttests"]
             },
             "tryserver.chromium.win": {
-              "win_chromium_compile_dbg": ["defaulttests"],
+              "win8_chromium_rel": ["defaulttests"],
+              "win_chromium_compile_dbg_ng": ["defaulttests"],
               "win_chromium_rel_ng": ["defaulttests"],
-              "win_chromium_x64_rel_ng": ["defaulttests"],
-              "win8_chromium_rel": ["defaulttests"]
-            },
-            "tryserver.chromium.gpu": {
-                "linux_gpu": ["defaulttests"],
-                "linux_gpu_triggered_tests": ["defaulttests"],
-                "win_gpu": ["defaulttests"],
-                "win_gpu_triggered_tests": ["defaulttests"]
+              "win_chromium_x64_rel_ng": ["defaulttests"]
             }
         },
         "triggered": {
-            "tryserver.chromium.gpu": {
-                "linux_gpu_triggered_tests": "linux_gpu",
-                "win_gpu_triggered_tests": "win_gpu"
-            }
         }
     }
 }

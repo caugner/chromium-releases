@@ -13,6 +13,7 @@ sys.path.append(os.path.join(SRC, 'third_party', 'pymock'))
 
 import bisect_perf_regression
 import bisect_utils
+import fetch_build
 import mock
 import source_control
 
@@ -151,10 +152,12 @@ def _GenericDryRun(options, print_results=False):
   Returns:
     The results dictionary as returned by the bisect Run method.
   """
+  _AbortIfThereAreStagedChanges()
   # Disable rmtree to avoid deleting local trees.
   old_rmtree = shutil.rmtree
+  shutil.rmtree = lambda path, on_error: None
+  # git reset HEAD may be run during the dry run, which removes staged changes.
   try:
-    shutil.rmtree = lambda path, onerror: None
     bisect_instance = _GetBisectPerformanceMetricsInstance(options)
     results = bisect_instance.Run(
         bisect_instance.opts.command, bisect_instance.opts.bad_revision,
@@ -168,6 +171,21 @@ def _GenericDryRun(options, print_results=False):
     shutil.rmtree = old_rmtree
 
 
+def _AbortIfThereAreStagedChanges():
+  """Exits the test prematurely if there are staged changes."""
+  # The output of "git status --short" will be an empty string if there are
+  # no staged changes in the current branch. Untracked files are ignored
+  # because when running the presubmit on the trybot there are sometimes
+  # untracked changes to the run-perf-test.cfg and bisect.cfg files.
+  status_output = bisect_utils.CheckRunGit(
+      ['status', '--short', '--untracked-files=no'])
+  if status_output:
+    print 'There are un-committed changes in the current branch.'
+    print 'Aborting the tests to avoid destroying local changes. Changes:'
+    print status_output
+    sys.exit(1)
+
+
 class BisectPerfRegressionTest(unittest.TestCase):
   """Test case for other functions and classes in bisect-perf-regression.py."""
 
@@ -178,6 +196,12 @@ class BisectPerfRegressionTest(unittest.TestCase):
 
   def tearDown(self):
     os.chdir(self.cwd)
+
+  def testBisectOptionsCanPrintHelp(self):
+    """Tests that the argument parser can be made and can print help."""
+    bisect_options = bisect_perf_regression.BisectOptions()
+    parser = bisect_options._CreateCommandLineParser()
+    parser.format_help()
 
   def testParseDEPSStringManually(self):
     """Tests DEPS parsing."""
@@ -433,6 +457,7 @@ class BisectPerfRegressionTest(unittest.TestCase):
   @mock.patch('bisect_utils.RunGClient')
   def testSyncToRevisionForChromium(self, mock_RunGClient):
     bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
+    mock_RunGClient.return_value = 0
     bisect_instance._SyncRevision(
         'chromium', 'e6db23a037cad47299a94b155b95eebd1ee61a58', 'gclient')
     expected_params = [
@@ -583,7 +608,7 @@ class GitTryJobTestCases(unittest.TestCase):
                                  bisect_perf_regression._PrepareBisectBranch,
                                  parent_branch, new_branch)
 
-  def testBuilderTryJobForException(self):
+  def testStartBuilderTryJobForException(self):
     git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
     bot_name = 'linux_perf_bisect_builder'
     bisect_job_name = 'testBisectJobname'
@@ -601,16 +626,17 @@ class GitTryJobTestCases(unittest.TestCase):
         (['branch', '--set-upstream-to', parent_branch],
          ('Setuptream fails', 0)),
         (['try',
-          '-b', bot_name,
-          '-r', git_revision,
-          '-n', bisect_job_name,
-          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
+          '--bot=%s' % bot_name,
+          '--revision=%s' % git_revision,
+          '--name=%s' % bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.PERF_SVN_REPO_URL,
           '--diff=%s' % patch_content
          ], (None, 1)),
     ]
-    self._AssertRunGitExceptions(try_cmd,
-                                 bisect_perf_regression._BuilderTryjob,
-                                 git_revision, bot_name, bisect_job_name, patch)
+    self._AssertRunGitExceptions(
+        try_cmd, bisect_perf_regression._StartBuilderTryJob,
+        fetch_build.PERF_BUILDER, git_revision, bot_name, bisect_job_name,
+        patch)
 
   def testBuilderTryJob(self):
     git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
@@ -630,18 +656,18 @@ class GitTryJobTestCases(unittest.TestCase):
         (['branch', '--set-upstream-to', parent_branch],
          ('Setuptream fails', 0)),
         (['try',
-          '-b', bot_name,
-          '-r', git_revision,
-          '-n', bisect_job_name,
-          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
+          '--bot=%s' % bot_name,
+          '--revision=%s' % git_revision,
+          '--name=%s' % bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.PERF_SVN_REPO_URL,
           '--diff=%s' % patch_content
          ], (None, 0)),
     ]
     self._SetupRunGitMock(try_cmd)
-    bisect_perf_regression._BuilderTryjob(
-        git_revision, bot_name, bisect_job_name, patch)
+    bisect_perf_regression._StartBuilderTryJob(
+        fetch_build.PERF_BUILDER, git_revision, bot_name, bisect_job_name,
+        patch)
 
 
 if __name__ == '__main__':
   unittest.main()
-

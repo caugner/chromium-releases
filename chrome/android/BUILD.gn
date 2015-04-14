@@ -6,6 +6,7 @@ import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//build/module_args/v8.gni")
 import("//chrome/version.gni")
+import("//testing/test.gni")
 import("//third_party/icu/config.gni")
 import("channel.gni")
 
@@ -16,6 +17,7 @@ android_resources("chrome_java_resources") {
     ":chrome_strings_grd",
     "//content/public/android:content_java_resources",
     "//chrome/app:java_strings_grd",
+    "//third_party/android_data_chart:android_data_chart_java_resources",
     "//third_party/android_tools:android_support_v7_appcompat_resources",
   ]
   custom_package = "org.chromium.chrome"
@@ -89,20 +91,19 @@ android_library("chrome_java") {
     "//content/public/android:content_java",
     "//printing:printing_java",
     "//sync/android:sync_java",
+    "//third_party/android_data_chart:android_data_chart_java",
     "//third_party/android_protobuf:protobuf_nano_javalib",
     "//third_party/android_tools:android_support_v13_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
     "//third_party/cacheinvalidation:cacheinvalidation_javalib",
     "//third_party/cacheinvalidation:cacheinvalidation_proto_java",
     "//third_party/jsr-305:jsr_305_javalib",
-    "//third_party/libaddressinput:android_addressinput_widget_java",
-    "//third_party/libaddressinput:android_addressinput_widget_resources",
     "//ui/android:ui_java",
     "//ui/android:ui_java_resources",
+    google_play_services_library,
   ]
 
   srcjar_deps = [
-    ":app_banner_metrics_ids_javagen",
     ":chrome_android_java_enums_srcjar",
     ":chrome_version_srcjar",
     ":resource_id_javagen",
@@ -137,17 +138,6 @@ java_cpp_enum("chrome_android_java_enums_srcjar") {
   ]
 }
 
-# GYP: //chrome/chrome_browser.gypi:app_banner_metrics_ids_java
-java_cpp_template("app_banner_metrics_ids_javagen") {
-  sources = [
-    "java/AppBannerMetricsIds.template",
-  ]
-  package_name = "org/chromium/chrome/browser/banners"
-  inputs = [
-    "../browser/android/banners/app_banner_metrics_id_list.h",
-  ]
-}
-
 # GYP: //chrome/chrome_browser.gypi:document_tab_model_info_proto_java
 proto_java_library("document_tab_model_info_proto_java") {
   proto_path = "java/src/org/chromium/chrome/browser/tabmodel/document"
@@ -168,12 +158,7 @@ java_cpp_template("resource_id_javagen") {
 }
 
 # GYP: //chrome/chrome_shell.gypi:libchromeshell_base
-static_library("chrome_shell_base") {
-  sources = [
-    "shell/chrome_shell_google_location_settings_helper.cc",
-    "shell/chrome_shell_google_location_settings_helper.h",
-  ]
-
+group("chrome_shell_base") {
   deps = [
     "//chrome/browser/ui",
     "//chrome:chrome_android_core",
@@ -182,18 +167,9 @@ static_library("chrome_shell_base") {
     "//content/public/app:browser",
     "//skia",
   ]
-
-  # Some android targets still depend on --gc-sections to link.
-  # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
-  ldflags = [ "-Wl,--gc-sections" ]
-
   # TODO(GYP):
   #[ 'order_profiling!=0', {
-  #'conditions': [
-  #[ 'OS=="android"', {
   #'dependencies': [ '../tools/cygprofile/cygprofile.gyp:cygprofile', ],
-  #}],
-  #],
   #}],
 }
 
@@ -201,9 +177,6 @@ static_library("chrome_shell_base") {
 shared_library("chrome_shell") {
   testonly = true
   sources = [
-    # This file must always be included in the shared_library step to ensure
-    # JNI_OnLoad is exported.
-    "//chrome/app/android/chrome_jni_onload.cc",
     "shell/chrome_main_delegate_chrome_shell_android.cc",
     "shell/chrome_main_delegate_chrome_shell_android.h",
   ]
@@ -224,9 +197,6 @@ shared_library("chrome_shell") {
 shared_library("chrome_sync_shell") {
   testonly = true
   sources = [
-    # This file must always be included in the shared_library step to ensure
-    # JNI_OnLoad is exported.
-    #"//chrome/app/android/chrome_jni_onload.cc",
     #"sync_shell/chrome_main_delegate_chrome_sync_shell_android.cc",
     #"sync_shell/chrome_main_delegate_chrome_sync_shell_android.h",
   ]
@@ -352,6 +322,7 @@ jinja_template("chrome_shell_manifest") {
 android_apk("chrome_shell_apk") {
   testonly = true
   deps = [
+    "//base:base_java",
     ":chrome_shell_resources",
     ":chrome_shell_java",
     ":chrome_shell_assets",
@@ -388,6 +359,7 @@ jinja_template("chrome_sync_shell_manifest") {
 android_apk("chrome_sync_shell_apk") {
   testonly = true
   deps = [
+    "//base:base_java",
     ":chrome_shell_resources",
     ":chrome_shell_java",
     ":chrome_shell_assets",
@@ -476,6 +448,7 @@ android_apk("chrome_sync_shell_test_apk") {
     "//sync:sync_java_test_support",
     "//third_party/android_tools:android_support_v13_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
+    "//ui/android:ui_java",
   ]
   apk_name = "ChromeSyncShellTest"
   DEPRECATED_java_in_dir = "sync_shell/javatests/src"

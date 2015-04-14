@@ -7,15 +7,17 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
+#include "chrome/browser/supervised_user/supervised_user_bookmarks_handler.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-
-using base::FundamentalValue;
+#include "components/bookmarks/common/bookmark_pref_names.h"
 
 namespace {
 
@@ -63,7 +65,10 @@ SupervisedUserPrefStore::SupervisedUserPrefStore(
 
 bool SupervisedUserPrefStore::GetValue(const std::string& key,
                                        const base::Value** value) const {
-  DCHECK(prefs_);
+  // TODO(bauerb): Temporary CHECK to force a clean crash while investigating
+  // https://crbug.com/425785. Remove (or change back to DCHECK) once the bug
+  // is fixed.
+  CHECK(prefs_);
   return prefs_->GetValue(key, value);
 }
 
@@ -117,6 +122,15 @@ void SupervisedUserPrefStore::OnNewSettingsAvailable(
       prefs_->SetInteger(prefs::kIncognitoModeAvailability,
                          record_history ? IncognitoModePrefs::DISABLED
                                         : IncognitoModePrefs::ENABLED);
+    }
+
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableSupervisedUserManagedBookmarksFolder)) {
+      // Reconstruct bookmarks from split settings.
+      prefs_->SetValue(
+          bookmarks::prefs::kSupervisedBookmarks,
+          SupervisedUserBookmarksHandler::BuildBookmarksTree(*settings)
+              .release());
     }
   }
 

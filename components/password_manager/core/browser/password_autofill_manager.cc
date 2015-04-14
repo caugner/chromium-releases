@@ -15,7 +15,6 @@
 #include "components/autofill/core/browser/suggestion.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_data_validation.h"
-#include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/strings/grit/components_strings.h"
 #include "grit/components_strings.h"
@@ -91,11 +90,9 @@ void GetSuggestions(const autofill::PasswordFormFillData& fill_data,
 // PasswordAutofillManager, public:
 
 PasswordAutofillManager::PasswordAutofillManager(
-    PasswordManagerClient* password_manager_client,
     PasswordManagerDriver* password_manager_driver,
     autofill::AutofillClient* autofill_client)
-    : password_manager_client_(password_manager_client),
-      password_manager_driver_(password_manager_driver),
+    : password_manager_driver_(password_manager_driver),
       autofill_client_(autofill_client),
       weak_ptr_factory_(this) {
 }
@@ -239,8 +236,7 @@ bool PasswordAutofillManager::GetPasswordForUsername(
   // Scan additional logins for a match.
   for (autofill::PasswordFormFillData::LoginCollection::const_iterator iter =
            fill_data.additional_logins.begin();
-       iter != fill_data.additional_logins.end();
-       ++iter) {
+       iter != fill_data.additional_logins.end(); ++iter) {
     if (CompareUsernameSuggestion(iter->first, current_username)) {
       *password = iter->second.password;
       return true;

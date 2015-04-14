@@ -7,18 +7,23 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_delegate.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_delegate_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/onc/onc_constants.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/networking_private/networking_private_delegate.h"
+#include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
 #include "extensions/common/switches.h"
 
 namespace extensions {
 
 // This tests just the interface for the networkingPrivate API, i.e. it ensures
 // that the delegate methods are called as expected.
+
+// The implementations (which differ significantly between chromeos and
+// windows/mac) are tested independently in
+// networking_private_[chromeos|service_client]_apitest.cc.
+// See also crbug.com/460119.
 
 namespace {
 

@@ -5,13 +5,18 @@
 #ifndef UI_OZONE_PLATFORM_DRI_DRI_UTIL_H_
 #define UI_OZONE_PLATFORM_DRI_DRI_UTIL_H_
 
+#include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
 
 typedef struct _drmModeModeInfo drmModeModeInfo;
 
 namespace ui {
+
+class DriWrapper;
+class ScreenManager;
 
 // Representation of the information required to initialize and configure a
 // native display.
@@ -43,6 +48,11 @@ bool MapDumbBuffer(int fd,
                    uint32_t handle,
                    uint32_t size,
                    void** pixels);
+
+void ForceInitializationOfPrimaryDisplay(const scoped_refptr<DriWrapper>& drm,
+                                         ScreenManager* screen_manager);
+
+base::FilePath GetFirstDisplayCardPath();
 
 }  // namespace ui
 

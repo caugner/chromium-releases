@@ -16,11 +16,13 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_internal_extension_provider.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_custom_extension_provider.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
+#include "chrome/browser/extensions/app_data_migrator.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/data_deleter.h"
@@ -271,7 +273,8 @@ ExtensionService::ExtensionService(Profile* profile,
       installs_delayed_for_gc_(false),
       is_first_run_(false),
       block_extensions_(false),
-      shared_module_service_(new extensions::SharedModuleService(profile_)) {
+      shared_module_service_(new extensions::SharedModuleService(profile_)),
+      app_data_migrator_(new extensions::AppDataMigrator(profile_, registry_)) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Figure out if extension installation should be enabled.
@@ -382,7 +385,7 @@ const Extension* ExtensionService::GetExtensionById(
 
 void ExtensionService::Init() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
+  TRACE_EVENT0("browser,startup", "ExtensionService::Init");
   base::Time begin_time = base::Time::Now();
 
   DCHECK(!is_ready());  // Can't redo init.
@@ -472,8 +475,7 @@ void ExtensionService::LoadGreylistFromPrefs() {
   }
 }
 
-bool ExtensionService::UpdateExtension(const std::string& id,
-                                       const base::FilePath& extension_path,
+bool ExtensionService::UpdateExtension(const extensions::CRXFileInfo& file,
                                        bool file_ownership_passed,
                                        CrxInstaller** out_crx_installer) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -484,6 +486,8 @@ bool ExtensionService::UpdateExtension(const std::string& id,
     // the file is in the OS temp directory which should be cleaned up for us.
     return false;
   }
+
+  const std::string& id = file.extension_id;
 
   const extensions::PendingExtensionInfo* pending_extension_info =
       pending_extension_manager()->GetById(id);
@@ -496,8 +500,7 @@ bool ExtensionService::UpdateExtension(const std::string& id,
     // that would do it for us.
     if (!GetFileTaskRunner()->PostTask(
             FROM_HERE,
-            base::Bind(
-                &extensions::file_util::DeleteFile, extension_path, false)))
+            base::Bind(&extensions::file_util::DeleteFile, file.path, false)))
       NOTREACHED();
 
     return false;
@@ -555,7 +558,7 @@ bool ExtensionService::UpdateExtension(const std::string& id,
 
   installer->set_delete_source(file_ownership_passed);
   installer->set_install_cause(extension_misc::INSTALL_CAUSE_UPDATE);
-  installer->InstallCrx(extension_path);
+  installer->InstallCrxFile(file);
 
   if (out_crx_installer)
     *out_crx_installer = installer.get();
@@ -1029,8 +1032,11 @@ void ExtensionService::NotifyExtensionLoaded(const Extension* extension) {
           Profile::FromBrowserContext(host->GetBrowserContext());
       if (host_profile->GetOriginalProfile() ==
           profile_->GetOriginalProfile()) {
+        // We don't need to include tab permisisons here, since the extension
+        // was just loaded.
         std::vector<ExtensionMsg_Loaded_Params> loaded_extensions(
-            1, ExtensionMsg_Loaded_Params(extension));
+            1, ExtensionMsg_Loaded_Params(extension,
+                                          false /* no tab permissions */));
         host->Send(
             new ExtensionMsg_Loaded(loaded_extensions));
       }
@@ -1408,11 +1414,14 @@ void ExtensionService::ReloadExtensionsForTest() {
 }
 
 void ExtensionService::SetReadyAndNotifyListeners() {
+  const base::TimeTicks start_time = base::TimeTicks::Now();
   ready_->Signal();
   content::NotificationService::current()->Notify(
       extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
       content::Source<Profile>(profile_),
       content::NotificationService::NoDetails());
+  UMA_HISTOGRAM_TIMES("Extensions.ExtensionServiceNotifyReadyListenersTime",
+                      base::TimeTicks::Now() - start_time);
 }
 
 void ExtensionService::OnLoadedInstalledExtensions() {
@@ -1856,6 +1865,16 @@ void ExtensionService::AddNewOrUpdatedExtension(
   delayed_installs_.Remove(extension->id());
   if (InstallVerifier::NeedsVerification(*extension))
     system_->install_verifier()->VerifyExtension(extension->id());
+
+  const Extension* old = GetInstalledExtension(extension->id());
+  if (extensions::AppDataMigrator::NeedsMigration(old, extension)) {
+    app_data_migrator_->DoMigrationAndReply(
+        old, extension,
+        base::Bind(&ExtensionService::FinishInstallation, AsWeakPtr(),
+                   make_scoped_refptr(extension), was_ephemeral));
+    return;
+  }
+
   FinishInstallation(extension, was_ephemeral);
 }
 
@@ -2028,6 +2047,7 @@ const Extension* ExtensionService::GetPendingExtensionUpdate(
 
 void ExtensionService::RegisterContentSettings(
     HostContentSettingsMap* host_content_settings_map) {
+  TRACE_EVENT0("browser,startup", "ExtensionService::RegisterContentSettings");
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   host_content_settings_map->RegisterProvider(
       HostContentSettingsMap::INTERNAL_EXTENSION_PROVIDER,

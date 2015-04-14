@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 
+#include "base/timer/timer.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -12,6 +14,7 @@
 #include "chrome/browser/ui/passwords/save_password_refusal_combobox_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
+#include "chrome/browser/ui/views/passwords/manage_credential_item_view.h"
 #include "chrome/browser/ui/views/passwords/manage_password_items_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_view.h"
 #include "chrome/grit/generated_resources.h"
@@ -38,6 +41,7 @@
 
 namespace {
 
+const int kAutoSigninToastTimeout = 5;
 const int kDesiredBubbleWidth = 370;
 
 enum ColumnSetType {
@@ -186,6 +190,12 @@ class ManagePasswordsBubbleView::AccountChooserView
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
+  // Adds |password_forms| to the layout remembering their |type|.
+  void AddCredentialItemsWithType(
+      views::GridLayout* layout,
+      const ScopedVector<autofill::PasswordForm>& password_forms,
+      password_manager::CredentialType type);
+
   ManagePasswordsBubbleView* parent_;
   views::LabelButton* cancel_button_;
 };
@@ -207,13 +217,13 @@ ManagePasswordsBubbleView::AccountChooserView::AccountChooserView(
   BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
   AddTitleRow(layout, parent_->model());
 
-  const auto& pending_credentials = parent_->model()->pending_credentials();
-  for (autofill::PasswordForm* form : pending_credentials) {
-    CredentialsItemView* credential_view = new CredentialsItemView(this, *form);
-    // Add the title to the layout with appropriate padding.
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-    layout->AddView(credential_view);
-  }
+  AddCredentialItemsWithType(
+      layout, parent_->model()->local_pending_credentials(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL);
+
+  AddCredentialItemsWithType(
+      layout, parent_->model()->federated_pending_credentials(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED);
 
   // Button row.
   BuildColumnSet(layout, SINGLE_BUTTON_COLUMN_SET);
@@ -230,16 +240,81 @@ ManagePasswordsBubbleView::AccountChooserView::AccountChooserView(
 ManagePasswordsBubbleView::AccountChooserView::~AccountChooserView() {
 }
 
+void ManagePasswordsBubbleView::AccountChooserView::AddCredentialItemsWithType(
+    views::GridLayout* layout,
+    const ScopedVector<autofill::PasswordForm>& password_forms,
+    password_manager::CredentialType type) {
+  net::URLRequestContextGetter* request_context =
+      parent_->model()->GetProfile()->GetRequestContext();
+  for (autofill::PasswordForm* form : password_forms) {
+    // Add the title to the layout with appropriate padding.
+    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
+    layout->AddView(new CredentialsItemView(
+        this, *form, type, CredentialsItemView::ACCOUNT_CHOOSER,
+        request_context));
+  }
+}
+
 void ManagePasswordsBubbleView::AccountChooserView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender != cancel_button_) {
     // ManagePasswordsBubbleModel should care about calling a callback in case
     // the bubble is dismissed by any other means.
     CredentialsItemView* view = static_cast<CredentialsItemView*>(sender);
-    parent_->model()->OnChooseCredentials(view->form());
+    parent_->model()->OnChooseCredentials(view->form(),
+                                          view->credential_type());
   } else {
     parent_->model()->OnNopeClicked();
   }
+  parent_->Close();
+}
+
+// ManagePasswordsBubbleView::AutoSigninView ----------------------------------
+
+// A view containing just one credential that was used for for automatic signing
+// in.
+class ManagePasswordsBubbleView::AutoSigninView
+    : public views::View,
+      public views::ButtonListener {
+ public:
+  explicit AutoSigninView(ManagePasswordsBubbleView* parent);
+
+ private:
+  // views::ButtonListener:
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+
+  void OnTimer();
+
+  base::OneShotTimer<AutoSigninView> timer_;
+  ManagePasswordsBubbleView* parent_;
+};
+
+ManagePasswordsBubbleView::AutoSigninView::AutoSigninView(
+    ManagePasswordsBubbleView* parent)
+    : parent_(parent) {
+  SetLayoutManager(new views::FillLayout);
+  CredentialsItemView* credential = new CredentialsItemView(
+      this,
+      parent_->model()->pending_password(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_LOCAL,
+      CredentialsItemView::AUTO_SIGNIN,
+      parent_->model()->GetProfile()->GetRequestContext());
+  AddChildView(credential);
+  // TODO(vasilii): enable the button to switch to the "Managed" state.
+  credential->SetEnabled(false);
+  parent_->set_initially_focused_view(credential);
+
+  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(kAutoSigninToastTimeout),
+               this, &AutoSigninView::OnTimer);
+}
+
+void ManagePasswordsBubbleView::AutoSigninView::ButtonPressed(
+    views::Button* sender, const ui::Event& event) {
+  // TODO(vasilii): close the toast and switch to the "Managed" state.
+}
+
+void ManagePasswordsBubbleView::AutoSigninView::OnTimer() {
+  parent_->model()->OnAutoSignInToastTimeout();
   parent_->Close();
 }
 
@@ -623,6 +698,40 @@ void ManagePasswordsBubbleView::ManageView::LinkClicked(views::Link* source,
   parent_->Close();
 }
 
+// ManagePasswordsBubbleView::ManageAccountsView ------------------------------
+
+// A view offering the user a list of his currently saved through the Credential
+// Manager API accounts for the current page.
+class ManagePasswordsBubbleView::ManageAccountsView : public views::View {
+ public:
+   explicit ManageAccountsView(ManagePasswordsBubbleView* parent);
+
+ private:
+   ManagePasswordsBubbleView* parent_;
+};
+
+ManagePasswordsBubbleView::ManageAccountsView::ManageAccountsView(
+    ManagePasswordsBubbleView* parent)
+    : parent_(parent) {
+  views::GridLayout* layout = new views::GridLayout(this);
+  layout->set_minimum_size(gfx::Size(kDesiredBubbleWidth, 0));
+  SetLayoutManager(layout);
+
+  // Add the title.
+  BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
+  AddTitleRow(layout, parent_->model());
+
+  for (const autofill::PasswordForm* form :
+           parent_->model()->local_pending_credentials()) {
+    // Add the title to the layout with appropriate padding.
+    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
+    layout->AddView(new ManageCredentialItemView(parent_->model(), form));
+  }
+
+  // Extra padding for visual awesomeness.
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+}
+
 // ManagePasswordsBubbleView::BlacklistedView ---------------------------------
 
 // A view offering the user the ability to re-enable the password manager for
@@ -839,7 +948,6 @@ void ManagePasswordsBubbleView::ShowBubble(content::WebContents* web_contents,
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
   DCHECK(browser);
   DCHECK(browser->window());
-  DCHECK(browser->fullscreen_controller());
 
   if (IsShowing())
     return;
@@ -939,7 +1047,7 @@ void ManagePasswordsBubbleView::Close() {
 void ManagePasswordsBubbleView::Refresh() {
   RemoveAllChildViews(true);
   initially_focused_view_ = NULL;
-  if (password_manager::ui::IsPendingState(model()->state())) {
+  if (model()->state() == password_manager::ui::PENDING_PASSWORD_STATE) {
     if (model()->never_save_passwords())
       AddChildView(new ConfirmNeverView(this));
     else
@@ -950,8 +1058,11 @@ void ManagePasswordsBubbleView::Refresh() {
     AddChildView(new BlacklistedView(this));
   } else if (model()->state() == password_manager::ui::CONFIRMATION_STATE) {
     AddChildView(new SaveConfirmationView(this));
-  } else if (password_manager::ui::IsCredentialsState(model()->state())) {
+  } else if (model()->state() ==
+                 password_manager::ui::CREDENTIAL_REQUEST_STATE) {
     AddChildView(new AccountChooserView(this));
+  } else if (model()->state() == password_manager::ui::AUTO_SIGNIN_STATE) {
+    AddChildView(new AutoSigninView(this));
   } else {
     AddChildView(new ManageView(this));
   }

@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/screens/model_view_channel.h"
 #include "components/login/base_screen_handler_utils.h"
 #include "content/public/browser/web_ui.h"
@@ -23,60 +22,13 @@ class ListValue;
 class Value;
 }
 
+namespace login {
+class LocalizedValuesBuilder;
+}
+
 namespace chromeos {
 
 class BaseScreen;
-
-// Class that collects Localized Values for translation.
-class LocalizedValuesBuilder {
- public:
-  explicit LocalizedValuesBuilder(base::DictionaryValue* dict);
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message| is text of the message.
-  void Add(const std::string& key, const std::string& message);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message| is text of the message.
-  void Add(const std::string& key, const base::string16& message);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message_id| is a resource id of message.
-  void Add(const std::string& key, int message_id);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message_id| is a resource id of message. Message is expected to have
-  // one format parameter subsituted by |a|.
-  void AddF(const std::string& key,
-            int message_id,
-            const base::string16& a);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message_id| is a resource id of message. Message is expected to have
-  // two format parameters subsituted by |a| and |b| respectively.
-  void AddF(const std::string& key,
-            int message_id,
-            const base::string16& a,
-            const base::string16& b);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message_id| is a resource id of message. Message is expected to have
-  // one format parameter subsituted by resource identified by |message_id_a|.
-  void AddF(const std::string& key,
-            int message_id,
-            int message_id_a);
-
-  // Method to declare localized value. |key| is the i18n key used in html.
-  // |message_id| is a resource id of message. Message is expected to have
-  // two format parameters subsituted by resource identified by |message_id_a|
-  // and |message_id_b| respectively.
-  void AddF(const std::string& key,
-            int message_id,
-            int message_id_a,
-            int message_id_b);
- private:
-  // Not owned.
-  base::DictionaryValue* dict_;
-};
 
 // Base class for the OOBE/Login WebUI handlers.
 class BaseScreenHandler : public content::WebUIMessageHandler,
@@ -88,17 +40,17 @@ class BaseScreenHandler : public content::WebUIMessageHandler,
   // C-tor used when JS screen prefix is needed.
   explicit BaseScreenHandler(const std::string& js_screen_path);
 
-  virtual ~BaseScreenHandler();
+  ~BaseScreenHandler() override;
 
   // Gets localized strings to be used on the page.
   void GetLocalizedStrings(
       base::DictionaryValue* localized_strings);
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
 
   // ModelViewChannel implementation:
-  virtual void CommitContextChanges(const base::DictionaryValue& diff) override;
+  void CommitContextChanges(const base::DictionaryValue& diff) override;
 
   // This method is called when page is ready. It propagates to inherited class
   // via virtual Initialize() method (see below).
@@ -113,7 +65,8 @@ class BaseScreenHandler : public content::WebUIMessageHandler,
 
  protected:
   // All subclasses should implement this method to provide localized values.
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) = 0;
+  virtual void DeclareLocalizedValues(
+      ::login::LocalizedValuesBuilder* builder) = 0;
 
   // All subclasses should implement this method to register callbacks for JS
   // messages.

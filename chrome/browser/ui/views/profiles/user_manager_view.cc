@@ -34,6 +34,12 @@
 #include "ui/views/win/hwnd_util.h"
 #endif
 
+#if defined(USE_ASH)
+#include "ash/shelf/shelf_util.h"
+#include "ash/wm/window_util.h"
+#include "grit/ash_resources.h"
+#endif
+
 namespace {
 
 // An open User Manager window. There can only be one open at a time. This
@@ -50,7 +56,7 @@ void UserManager::Show(
     profiles::UserManagerProfileSelected profile_open_action) {
   DCHECK(profile_path_to_focus != ProfileManager::GetGuestProfilePath());
 
-  ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::OPEN_USER_MANAGER);
+  ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::OPEN_USER_MANAGER);
   if (instance_) {
     // If we are showing the User Manager after locking a profile, change the
     // active profile to Guest.
@@ -61,13 +67,13 @@ void UserManager::Show(
     return;
   }
 
-  // Create the guest profile, if necessary, and open the user manager
-  // from the guest profile.
-  profiles::CreateGuestProfileForUserManager(
+  // Create the system profile, if necessary, and open the user manager
+  // from the system profile.
+  profiles::CreateSystemProfileForUserManager(
       profile_path_to_focus,
       tutorial_mode,
       profile_open_action,
-      base::Bind(&UserManagerView::OnGuestProfileCreated,
+      base::Bind(&UserManagerView::OnSystemProfileCreated,
                  base::Passed(make_scoped_ptr(new UserManagerView))));
 }
 
@@ -91,9 +97,9 @@ UserManagerView::~UserManagerView() {
 }
 
 // static
-void UserManagerView::OnGuestProfileCreated(
+void UserManagerView::OnSystemProfileCreated(
     scoped_ptr<UserManagerView> instance,
-    Profile* guest_profile,
+    Profile* system_profile,
     const std::string& url) {
   // If we are showing the User Manager after locking a profile, change the
   // active profile to Guest.
@@ -101,11 +107,11 @@ void UserManagerView::OnGuestProfileCreated(
 
   DCHECK(!instance_);
   instance_ = instance.release();  // |instance_| takes over ownership.
-  instance_->Init(guest_profile, GURL(url));
+  instance_->Init(system_profile, GURL(url));
 }
 
-void UserManagerView::Init(Profile* guest_profile, const GURL& url) {
-  web_view_ = new views::WebView(guest_profile);
+void UserManagerView::Init(Profile* system_profile, const GURL& url) {
+  web_view_ = new views::WebView(system_profile);
   web_view_->set_allow_accelerators(true);
   AddChildView(web_view_);
   SetLayoutManager(new views::FillLayout);
@@ -149,8 +155,14 @@ void UserManagerView::Init(Profile* guest_profile, const GURL& url) {
   // Set the app id for the task manager to the app id of its parent
   ui::win::SetAppIdForWindow(
       ShellIntegration::GetChromiumModelIdForProfile(
-          guest_profile->GetPath()),
+          system_profile->GetPath()),
       views::HWNDForWidget(GetWidget()));
+#endif
+
+#if defined(USE_ASH)
+  gfx::NativeWindow native_window = GetWidget()->GetNativeWindow();
+  ash::SetShelfItemDetailsForDialogWindow(
+      native_window, IDR_ASH_SHELF_LIST_BROWSER, native_window->title());
 #endif
 
   web_view_->LoadInitialURL(url);
@@ -159,9 +171,8 @@ void UserManagerView::Init(Profile* guest_profile, const GURL& url) {
   if (rwhv)
     rwhv->SetBackgroundColor(profiles::kUserManagerBackgroundColor);
 
-  web_view_->RequestFocus();
-
   GetWidget()->Show();
+  web_view_->RequestFocus();
 }
 
 bool UserManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {

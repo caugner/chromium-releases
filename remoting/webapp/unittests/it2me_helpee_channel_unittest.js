@@ -34,7 +34,6 @@ module('It2MeHelpeeChannel', {
 
     // HostInstaller
     hostInstaller = {
-      isInstalled: function() {},
       download: function() {}
     };
 
@@ -48,6 +47,11 @@ module('It2MeHelpeeChannel', {
 
     // remoting.settings
     remoting.settings = new remoting.Settings();
+    remoting.identity = new remoting.Identity();
+  },
+  tearDown: function() {
+    remoting.settings = null;
+    remoting.identity = null;
   }
 });
 
@@ -64,7 +68,8 @@ test('hello() should return supportedFeatures', function() {
 QUnit.asyncTest(
     'isHostInstalled() should return false if host is not installed',
     function() {
-  sinon.stub(hostInstaller, 'isInstalled').returns(Promise.resolve(false));
+  sinon.stub(remoting.HostInstaller, 'isInstalled')
+      .returns(Promise.resolve(false));
 
   var MessageTypes = remoting.It2MeHelpeeChannel.HangoutMessageTypes;
   hangoutPort.onMessage.mock$fire({
@@ -72,6 +77,7 @@ QUnit.asyncTest(
   });
 
   window.requestAnimationFrame(function() {
+    remoting.HostInstaller.isInstalled.restore();
     sinon.assert.calledWith(hangoutPort.postMessage, {
       method: MessageTypes.IS_HOST_INSTALLED_RESPONSE,
       result: false
@@ -82,7 +88,8 @@ QUnit.asyncTest(
 
 QUnit.asyncTest('isHostInstalled() should return true if host is installed',
     function() {
-  sinon.stub(hostInstaller, 'isInstalled').returns(Promise.resolve(true));
+  sinon.stub(remoting.HostInstaller, 'isInstalled')
+      .returns(Promise.resolve(true));
 
   var MessageTypes = remoting.It2MeHelpeeChannel.HangoutMessageTypes;
   hangoutPort.onMessage.mock$fire({
@@ -90,6 +97,7 @@ QUnit.asyncTest('isHostInstalled() should return true if host is installed',
   });
 
   window.requestAnimationFrame(function() {
+    remoting.HostInstaller.isInstalled.restore();
     sinon.assert.calledWith(hangoutPort.postMessage, {
       method: MessageTypes.IS_HOST_INSTALLED_RESPONSE,
       result: true
@@ -109,27 +117,21 @@ test('downloadHost() should trigger a host download',
   sinon.assert.called(hostInstaller.download);
 });
 
-test('connect() should return error if email is missing',
-    function() {
-  var MessageTypes = remoting.It2MeHelpeeChannel.HangoutMessageTypes;
-
-  hangoutPort.onMessage.mock$fire({
-    method: MessageTypes.CONNECT
-  });
-
-  sinon.assert.calledWithMatch(hangoutPort.postMessage, {
-      method: MessageTypes.ERROR
-  });
-});
-
 QUnit.asyncTest('connect() should return access code',
     function() {
   // Stubs authentication.
   sinon.stub(base, 'isAppsV2').returns(true);
-  sinon.stub(remoting.MessageWindow, 'showConfirmWindow')
-      .callsArgWith(4, 1 /* 1 for OK. */);
+  sinon.stub(remoting.HangoutConsentDialog, 'getInstance').returns({
+    show : function() {
+      return Promise.resolve();
+    }
+  });
   sinon.stub(chrome.identity, 'getAuthToken')
       .callsArgWith(1, 'token');
+  sinon.stub(remoting.identity, 'callWithToken')
+      .callsArgWith(0, 'token');
+  sinon.stub(remoting.identity, 'getEmail')
+      .callsArgWith(0, {token: 'token', email: 'test@chromium.org'});
   // Stubs Host behavior.
   sinon.stub(host, 'initialized').returns(true);
   sinon.stub(host, 'connect')
@@ -139,7 +141,7 @@ QUnit.asyncTest('connect() should return access code',
   var MessageTypes = remoting.It2MeHelpeeChannel.HangoutMessageTypes;
   hangoutPort.onMessage.mock$fire({
     method: MessageTypes.CONNECT,
-    email: 'test@chromium.org'
+    hangoutBounds: {widht: 10, height: 10, left:10, top: 10}
   });
 
   window.requestAnimationFrame(function(){
@@ -151,7 +153,6 @@ QUnit.asyncTest('connect() should return access code',
 
     chrome.identity.getAuthToken.restore();
     base.isAppsV2.restore();
-    remoting.MessageWindow.showConfirmWindow.restore();
     QUnit.start();
   });
 });

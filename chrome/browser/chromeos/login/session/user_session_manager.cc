@@ -30,9 +30,11 @@
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/login/auth/chrome_cryptohome_authenticator.h"
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
+#include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter_factory.h"
@@ -68,12 +70,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "chromeos/login/auth/stub_authenticator.h"
 #include "chromeos/login/user_names.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "chromeos/network/portal_detector/network_portal_detector_strategy.h"
@@ -88,12 +92,9 @@
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "url/gurl.h"
-
-#if defined(USE_ATHENA)
-#include "athena/main/public/athena_launcher.h"
-#endif
 
 namespace chromeos {
 
@@ -315,14 +316,16 @@ void UserSessionManager::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 UserSessionManager::UserSessionManager()
-    : delegate_(NULL),
+    : delegate_(nullptr),
+      authenticator_(nullptr),
       has_auth_cookies_(false),
       user_sessions_restored_(false),
       user_sessions_restore_in_progress_(false),
       exit_after_session_restore_(false),
       session_restore_strategy_(
           OAuth2LoginManager::RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN),
-      running_easy_unlock_key_ops_(false) {
+      running_easy_unlock_key_ops_(false),
+      should_launch_browser_(true) {
   net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   user_manager::UserManager::Get()->AddSessionStateObserver(this);
 }
@@ -367,14 +370,35 @@ void UserSessionManager::CompleteGuestSessionLogin(const GURL& start_url) {
   RestartChrome(cmd_line_str);
 }
 
+scoped_refptr<Authenticator> UserSessionManager::CreateAuthenticator(
+    AuthStatusConsumer* consumer) {
+  // Screen locker needs new Authenticator instance each time.
+  if (ScreenLocker::default_screen_locker()) {
+    if (authenticator_.get())
+      authenticator_->SetConsumer(NULL);
+    authenticator_ = NULL;
+  }
+
+  if (authenticator_.get() == NULL) {
+    if (injected_user_context_) {
+      authenticator_ =
+          new StubAuthenticator(consumer, *injected_user_context_.get());
+    } else {
+      authenticator_ = new ChromeCryptohomeAuthenticator(consumer);
+    }
+  } else {
+    // TODO(nkostylev): Fix this hack by improving Authenticator dependencies.
+    authenticator_->SetConsumer(consumer);
+  }
+  return authenticator_;
+}
+
 void UserSessionManager::StartSession(
     const UserContext& user_context,
     StartSessionType start_session_type,
-    scoped_refptr<Authenticator> authenticator,
     bool has_auth_cookies,
     bool has_active_session,
     UserSessionManagerDelegate* delegate) {
-  authenticator_ = authenticator;
   delegate_ = delegate;
   start_session_type_ = start_session_type;
 
@@ -390,6 +414,11 @@ void UserSessionManager::StartSession(
   // ready to be used (http://crbug.com/361528).
   NotifyUserLoggedIn();
   PrepareProfile();
+}
+
+void UserSessionManager::DelegateDeleted(UserSessionManagerDelegate* delegate) {
+  if (delegate_ == delegate)
+    delegate_ = nullptr;
 }
 
 void UserSessionManager::PerformPostUserLoggedInActions() {
@@ -416,7 +445,7 @@ void UserSessionManager::RestoreAuthenticationSession(Profile* user_profile) {
     return;
   }
 
-  user_manager::User* user =
+  const user_manager::User* user =
       ProfileHelper::Get()->GetUserByProfile(user_profile);
   DCHECK(user);
   if (!net::NetworkChangeNotifier::IsOffline()) {
@@ -584,6 +613,16 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
     return false;
 
   if (early_restart && !CanPerformEarlyRestart())
+    return false;
+
+  // We can't really restart if we've already restarted as a part of
+  // user session restore after crash of in case when flags were changed inside
+  // user session.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginUser))
+    return false;
+
+  // We can't restart if that's a second user sign in that is happening.
+  if (user_manager::UserManager::Get()->GetLoggedInUsers().size() > 1)
     return false;
 
   const base::CommandLine user_flags(CreatePerSessionCommandLine(profile));
@@ -819,7 +858,13 @@ void UserSessionManager::OnProfileCreated(const UserContext& user_context,
 void UserSessionManager::InitProfilePreferences(
     Profile* profile,
     const UserContext& user_context) {
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
+  if (user->GetType() == user_manager::USER_TYPE_KIOSK_APP &&
+      profile->IsNewProfile()) {
+    ChromeUserManager::Get()->SetIsCurrentUserNew(true);
+  }
+
   if (user->is_active()) {
     input_method::InputMethodManager* manager =
         input_method::InputMethodManager::Get();
@@ -981,7 +1026,7 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   bool browser_launched = InitializeUserSession(profile);
 
   // TODO(nkostylev): This pointer should probably never be NULL, but it looks
-  // like LoginUtilsImpl::OnProfileCreated() may be getting called before
+  // like OnProfileCreated() may be getting called before
   // UserSessionManager::PrepareProfile() has set |delegate_| when Chrome is
   // killed during shutdown in tests -- see http://crosbug.com/18269.  Replace
   // this 'if' statement with a CHECK(delegate_) once the underlying issue is
@@ -1066,8 +1111,7 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
     }
   }
 
-  LoginUtils::Get()->DoBrowserLaunch(profile,
-                                     LoginDisplayHostImpl::default_host());
+  DoBrowserLaunch(profile, LoginDisplayHostImpl::default_host());
   return true;
 }
 
@@ -1130,13 +1174,27 @@ void UserSessionManager::RestoreAuthSessionImpl(
   OAuth2LoginManager* login_manager =
       OAuth2LoginManagerFactory::GetInstance()->GetForProfile(profile);
   login_manager->AddObserver(this);
-  login_manager->RestoreSession(
-      authenticator_.get() && authenticator_->authentication_context()
-          ? authenticator_->authentication_context()->GetRequestContext()
-          : NULL,
-      session_restore_strategy_,
-      oauth2_refresh_token_,
-      user_context_.GetAuthCode());
+  net::URLRequestContextGetter* auth_request_context = NULL;
+
+  if (StartupUtils::IsWebviewSigninEnabled()) {
+    // Webview uses different partition storage than iframe. We need to get
+    // cookies from the right storage for url request to get auth token into
+    // session.
+    GURL oobe_url(chrome::kChromeUIOobeURL);
+    GURL guest_url(std::string(content::kGuestScheme) +
+                   url::kStandardSchemeSeparator + oobe_url.GetContent());
+    content::StoragePartition* partition =
+        content::BrowserContext::GetStoragePartitionForSite(
+            ProfileHelper::GetSigninProfile(), guest_url);
+    auth_request_context = partition->GetURLRequestContext();
+  } else if (authenticator_.get() && authenticator_->authentication_context()) {
+    auth_request_context =
+        authenticator_->authentication_context()->GetRequestContext();
+  }
+
+  login_manager->RestoreSession(auth_request_context, session_restore_strategy_,
+                                oauth2_refresh_token_,
+                                user_context_.GetAuthCode());
 }
 
 void UserSessionManager::InitRlzImpl(Profile* profile, bool disabled) {
@@ -1266,7 +1324,6 @@ void UserSessionManager::RestorePendingUserSessions() {
     // (and session) has been loaded on Chrome startup.
     StartSession(user_context,
                  SECONDARY_USER_SESSION_AFTER_CRASH,
-                 NULL,   // authenticator
                  false,  // has_auth_cookies
                  true,   // has_active_session, this is restart after crash
                  this);
@@ -1429,22 +1486,22 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
   VLOG(1) << "Launching browser...";
   TRACE_EVENT0("login", "LaunchBrowser");
 
-#if defined(USE_ATHENA)
-  athena::StartAthenaSessionWithContext(profile);
-#else
-  StartupBrowserCreator browser_creator;
-  int return_code;
-  chrome::startup::IsFirstRun first_run =
-      ::first_run::IsChromeFirstRun() ? chrome::startup::IS_FIRST_RUN
-                                      : chrome::startup::IS_NOT_FIRST_RUN;
+  if (should_launch_browser_) {
+    StartupBrowserCreator browser_creator;
+    chrome::startup::IsFirstRun first_run =
+        ::first_run::IsChromeFirstRun() ? chrome::startup::IS_FIRST_RUN
+                                        : chrome::startup::IS_NOT_FIRST_RUN;
 
-  browser_creator.LaunchBrowser(
-      *base::CommandLine::ForCurrentProcess(), profile, base::FilePath(),
-      chrome::startup::IS_PROCESS_STARTUP, first_run, &return_code);
+    browser_creator.LaunchBrowser(
+        *base::CommandLine::ForCurrentProcess(), profile, base::FilePath(),
+        chrome::startup::IS_PROCESS_STARTUP, first_run);
 
-  // Triggers app launcher start page service to load start page web contents.
-  app_list::StartPageService::Get(profile);
-#endif
+    // Triggers app launcher start page service to load start page web contents.
+    app_list::StartPageService::Get(profile);
+  } else {
+    LOG(WARNING) << "Browser hasn't been launched, should_launch_browser_"
+                 << " is false. This is normal in some tests.";
+  }
 
   // Mark login host for deletion after browser starts.  This
   // guarantees that the message loop will be referenced by the
@@ -1462,7 +1519,7 @@ void UserSessionManager::RespectLocalePreferenceWrapper(
   if (browser_shutdown::IsTryingToQuit())
     return;
 
-  user_manager::User* const user =
+  const user_manager::User* const user =
       ProfileHelper::Get()->GetUserByProfile(profile);
   locale_util::SwitchLanguageCallback locale_switched_callback(base::Bind(
       &UserSessionManager::RunCallbackOnLocaleLoaded, callback,
@@ -1483,6 +1540,12 @@ void UserSessionManager::RunCallbackOnLocaleLoaded(
 
 void UserSessionManager::RemoveProfileForTesting(Profile* profile) {
   default_ime_states_.erase(profile);
+}
+
+void UserSessionManager::InjectStubUserContext(
+    const UserContext& user_context) {
+  injected_user_context_.reset(new UserContext(user_context));
+  authenticator_ = NULL;
 }
 
 }  // namespace chromeos

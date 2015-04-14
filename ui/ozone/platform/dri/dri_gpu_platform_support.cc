@@ -7,13 +7,11 @@
 #include "base/bind.h"
 #include "base/thread_task_runner_handle.h"
 #include "ipc/ipc_message_macros.h"
-#include "ui/display/types/display_mode.h"
-#include "ui/display/types/display_snapshot.h"
-#include "ui/ozone/common/display_util.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/common/gpu/ozone_gpu_messages.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_impl.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_manager.h"
+#include "ui/ozone/platform/dri/dri_wrapper.h"
 #include "ui/ozone/platform/dri/native_display_delegate_dri.h"
 
 namespace ui {
@@ -28,17 +26,26 @@ void MessageProcessedOnMain(
 
 class DriGpuPlatformSupportMessageFilter : public IPC::MessageFilter {
  public:
-  DriGpuPlatformSupportMessageFilter(DriWindowDelegateManager* window_manager,
-                                     IPC::Listener* main_thread_listener)
+  typedef base::Callback<void(
+      const scoped_refptr<base::SingleThreadTaskRunner>&)>
+      OnFilterAddedCallback;
+
+  DriGpuPlatformSupportMessageFilter(
+      DriWindowDelegateManager* window_manager,
+      const OnFilterAddedCallback& on_filter_added_callback,
+      IPC::Listener* main_thread_listener)
       : window_manager_(window_manager),
+        on_filter_added_callback_(on_filter_added_callback),
         main_thread_listener_(main_thread_listener),
         main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
         pending_main_thread_operations_(0),
-        cursor_animating_(false),
-        start_on_main_(true) {}
+        cursor_animating_(false) {}
 
   void OnFilterAdded(IPC::Sender* sender) override {
     io_thread_task_runner_ = base::ThreadTaskRunnerHandle::Get();
+    main_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(on_filter_added_callback_, io_thread_task_runner_));
   }
 
   // This code is meant to be very temporary and only as a special case to fix
@@ -60,8 +67,7 @@ class DriGpuPlatformSupportMessageFilter : public IPC::MessageFilter {
     bool cursor_was_animating = cursor_animating_;
     UpdateAnimationState(message);
     if (cursor_state_message || pending_main_thread_operations_ ||
-        cursor_animating_ || cursor_was_animating || start_on_main_) {
-      start_on_main_ = false;
+        cursor_animating_ || cursor_was_animating) {
       pending_main_thread_operations_++;
 
       base::Closure main_thread_message_handler =
@@ -148,31 +154,29 @@ class DriGpuPlatformSupportMessageFilter : public IPC::MessageFilter {
   }
 
   DriWindowDelegateManager* window_manager_;
+  OnFilterAddedCallback on_filter_added_callback_;
   IPC::Listener* main_thread_listener_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
   int32 pending_main_thread_operations_;
   bool cursor_animating_;
-  // The filter is not installed early enough, so some messages may
-  // get routed to main thread. Once we get our first message on io, send it
-  // to main to ensure all prior main thread operations are finished before we
-  // continue on io.
-  // TODO: remove this once filter is properly installed.
-  bool start_on_main_;
 };
 }
 
 DriGpuPlatformSupport::DriGpuPlatformSupport(
-    DriWrapper* drm,
+    DrmDeviceManager* drm_device_manager,
     DriWindowDelegateManager* window_manager,
     ScreenManager* screen_manager,
     scoped_ptr<NativeDisplayDelegateDri> ndd)
     : sender_(NULL),
-      drm_(drm),
+      drm_device_manager_(drm_device_manager),
       window_manager_(window_manager),
       screen_manager_(screen_manager),
       ndd_(ndd.Pass()) {
-  filter_ = new DriGpuPlatformSupportMessageFilter(window_manager, this);
+  filter_ = new DriGpuPlatformSupportMessageFilter(
+      window_manager, base::Bind(&DriGpuPlatformSupport::SetIOTaskRunner,
+                                 base::Unretained(this)),
+      this);
 }
 
 DriGpuPlatformSupport::~DriGpuPlatformSupport() {
@@ -224,16 +228,10 @@ bool DriGpuPlatformSupport::OnMessageReceived(const IPC::Message& message) {
 
 void DriGpuPlatformSupport::OnCreateWindowDelegate(
     gfx::AcceleratedWidget widget) {
-  // Due to how the GPU process starts up this IPC call may happen after the IPC
-  // to create a surface. Since a surface wants to know the window associated
-  // with it, we create it ahead of time. So when this call happens we do not
-  // create a delegate if it already exists.
-  if (!window_manager_->HasWindowDelegate(widget)) {
-    scoped_ptr<DriWindowDelegate> delegate(new DriWindowDelegateImpl(
-        widget, drm_, window_manager_, screen_manager_));
-    delegate->Initialize();
-    window_manager_->AddWindowDelegate(widget, delegate.Pass());
-  }
+  scoped_ptr<DriWindowDelegate> delegate(
+      new DriWindowDelegateImpl(widget, drm_device_manager_, screen_manager_));
+  delegate->Initialize();
+  window_manager_->AddWindowDelegate(widget, delegate.Pass());
 }
 
 void DriGpuPlatformSupport::OnDestroyWindowDelegate(
@@ -262,70 +260,20 @@ void DriGpuPlatformSupport::OnCursorMove(gfx::AcceleratedWidget widget,
 }
 
 void DriGpuPlatformSupport::OnRefreshNativeDisplays() {
-  std::vector<DisplaySnapshot_Params> displays;
-  std::vector<DisplaySnapshot*> native_displays = ndd_->GetDisplays();
-
-  for (size_t i = 0; i < native_displays.size(); ++i)
-    displays.push_back(GetDisplaySnapshotParams(*native_displays[i]));
-
-  sender_->Send(new OzoneHostMsg_UpdateNativeDisplays(displays));
+  sender_->Send(new OzoneHostMsg_UpdateNativeDisplays(ndd_->GetDisplays()));
 }
 
 void DriGpuPlatformSupport::OnConfigureNativeDisplay(
     int64_t id,
     const DisplayMode_Params& mode_param,
     const gfx::Point& origin) {
-  DisplaySnapshot* display = ndd_->FindDisplaySnapshot(id);
-  if (!display) {
-    LOG(ERROR) << "There is no display with ID " << id;
-    sender_->Send(new OzoneHostMsg_DisplayConfigured(id, false));
-    return;
-  }
-
-  const DisplayMode* mode = NULL;
-  for (size_t i = 0; i < display->modes().size(); ++i) {
-    if (mode_param.size == display->modes()[i]->size() &&
-        mode_param.is_interlaced == display->modes()[i]->is_interlaced() &&
-        mode_param.refresh_rate == display->modes()[i]->refresh_rate()) {
-      mode = display->modes()[i];
-      break;
-    }
-  }
-
-  // If the display doesn't have the mode natively, then lookup the mode from
-  // other displays and try using it on the current display (some displays
-  // support panel fitting and they can use different modes even if the mode
-  // isn't explicitly declared).
-  if (!mode)
-    mode = ndd_->FindDisplayMode(mode_param.size, mode_param.is_interlaced,
-                                 mode_param.refresh_rate);
-
-  if (!mode) {
-    LOG(ERROR) << "Failed to find mode: size=" << mode_param.size.ToString()
-               << " is_interlaced=" << mode_param.is_interlaced
-               << " refresh_rate=" << mode_param.refresh_rate;
-    sender_->Send(new OzoneHostMsg_DisplayConfigured(id, false));
-    return;
-  }
-
-  bool success = ndd_->Configure(*display, mode, origin);
-  if (success) {
-    display->set_origin(origin);
-    display->set_current_mode(mode);
-  }
-
-  sender_->Send(new OzoneHostMsg_DisplayConfigured(id, success));
+  sender_->Send(new OzoneHostMsg_DisplayConfigured(
+      id, ndd_->ConfigureDisplay(id, mode_param, origin)));
 }
 
 void DriGpuPlatformSupport::OnDisableNativeDisplay(int64_t id) {
-  DisplaySnapshot* display = ndd_->FindDisplaySnapshot(id);
-  bool success = false;
-  if (display)
-    success = ndd_->Configure(*display, NULL, gfx::Point());
-  else
-    LOG(ERROR) << "There is no display with ID " << id;
-
-  sender_->Send(new OzoneHostMsg_DisplayConfigured(id, success));
+  sender_->Send(
+      new OzoneHostMsg_DisplayConfigured(id, ndd_->DisableDisplay(id)));
 }
 
 void DriGpuPlatformSupport::OnTakeDisplayControl() {
@@ -336,17 +284,24 @@ void DriGpuPlatformSupport::OnRelinquishDisplayControl() {
   ndd_->RelinquishDisplayControl();
 }
 
-void DriGpuPlatformSupport::OnAddGraphicsDevice(const base::FilePath& path) {
-  NOTIMPLEMENTED();
+void DriGpuPlatformSupport::OnAddGraphicsDevice(
+    const base::FilePath& path,
+    const base::FileDescriptor& fd) {
+  ndd_->AddGraphicsDevice(path, fd);
 }
 
 void DriGpuPlatformSupport::OnRemoveGraphicsDevice(const base::FilePath& path) {
-  NOTIMPLEMENTED();
+  ndd_->RemoveGraphicsDevice(path);
 }
 
 void DriGpuPlatformSupport::RelinquishGpuResources(
     const base::Closure& callback) {
   callback.Run();
+}
+
+void DriGpuPlatformSupport::SetIOTaskRunner(
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
+  ndd_->InitializeIOTaskRunner(io_task_runner);
 }
 
 IPC::MessageFilter* DriGpuPlatformSupport::GetMessageFilter() {

@@ -12,9 +12,12 @@ var default_content_settings = {
   "javascript": "block",
   "plugins": "allow",
   "popups": "block",
-  // TODO(bauerb)
-  // "geolocation": "ask",
-  "notifications": "ask"
+  "location": "ask",
+  "notifications": "ask",
+  "fullscreen": "ask",
+  "mouselock": "ask",
+  "unsandboxedPlugins": "ask",
+  "automaticDownloads": "ask"
 };
 
 var settings = {
@@ -23,8 +26,12 @@ var settings = {
   "javascript": "block",
   "plugins": "block",
   "popups": "allow",
-  // "geolocation": "block",
-  "notifications": "block"
+  "location": "block",
+  "notifications": "block",
+  "fullscreen": "allow",
+  "mouselock": "block",
+  "unsandboxedPlugins": "block",
+  "automaticDownloads": "block"
 };
 
 Object.prototype.forEach = function(f) {

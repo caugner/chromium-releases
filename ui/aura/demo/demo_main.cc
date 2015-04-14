@@ -7,6 +7,8 @@
 #include "base/i18n/icu_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/power_monitor/power_monitor.h"
+#include "base/power_monitor/power_monitor_device_source.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_tree_client.h"
@@ -45,6 +47,7 @@ class DemoWindowDelegate : public aura::WindowDelegate {
 
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
+  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -81,7 +84,7 @@ class DemoWindowTreeClient : public aura::client::WindowTreeClient {
   }
 
   ~DemoWindowTreeClient() override {
-    aura::client::SetWindowTreeClient(window_, NULL);
+    aura::client::SetWindowTreeClient(window_, nullptr);
   }
 
   // Overridden from aura::client::WindowTreeClient:
@@ -117,12 +120,16 @@ int DemoMain() {
 #endif
 
   // The ContextFactory must exist before any Compositors are created.
+  bool context_factory_for_test = false;
   scoped_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory());
+      new ui::InProcessContextFactory(context_factory_for_test, nullptr));
   context_factory->set_use_test_surface(false);
 
   // Create the message-loop here before creating the root window.
   base::MessageLoopForUI message_loop;
+
+  base::PowerMonitor power_monitor(make_scoped_ptr(
+      new base::PowerMonitorDeviceSource));
 
   aura::Env::CreateInstance(true);
   aura::Env::GetInstance()->set_context_factory(context_factory.get());

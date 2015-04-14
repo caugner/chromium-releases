@@ -31,6 +31,7 @@ import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
+import org.chromium.android_webview.AwDataReductionProxyManager;
 import org.chromium.android_webview.AwDevToolsServer;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
@@ -43,6 +44,7 @@ import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.ContentViewStatics;
@@ -82,6 +84,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     // Read/write protected by mLock.
     private boolean mStarted;
+    private AwDataReductionProxyManager mProxyManager;
 
     private SharedPreferences mWebViewPrefs;
     private WebViewDelegate mWebViewDelegate;
@@ -234,7 +237,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         ResourceExtractor.setMandatoryPaksToExtract("");
 
         try {
-            LibraryLoader.ensureInitialized();
+            LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW).ensureInitialized();
         } catch (ProcessInitException e) {
             throw new RuntimeException("Error initializing WebView library", e);
         }
@@ -270,6 +273,10 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         }
         mWebViewsToStart.clear();
         mWebViewsToStart = null;
+
+        // Start listening for data reduction proxy setting changes.
+        mProxyManager = new AwDataReductionProxyManager();
+        mProxyManager.start(mWebViewDelegate.getApplication());
     }
 
     boolean hasStarted() {

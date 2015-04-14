@@ -9,6 +9,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_credentials_getter.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/cryptohome_client.h"
@@ -34,17 +35,18 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/networking_private/networking_private_chromeos.h"
+#include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/switches.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
-// This tests the Chrome OS implementaiton of the networkingPrivate API.
-// Note: the expectations in test/data/extensions/api_test/networking/test.js
-// are shared between this and the Win/Mac tests. TODO(stevenjb): Develop
-// a mechanism to specify the test expecations from here to eliminate that
-// dependency.
+// This tests the Chrome OS implementation of the networkingPrivate API
+// (NetworkingPrivateChromeOS). Note: The test expectations for chromeos, and
+// win/mac (NetworkingPrivateServiceClient) are different to reflect the
+// different implementations, but should be kept similar where possible.
 
 using testing::Return;
 using testing::_;
@@ -61,12 +63,43 @@ using chromeos::ShillManagerClient;
 using chromeos::ShillProfileClient;
 using chromeos::ShillServiceClient;
 
+using extensions::NetworkingPrivateDelegate;
+using extensions::NetworkingPrivateDelegateFactory;
+using extensions::NetworkingPrivateChromeOS;
+
 namespace {
 
 const char kUser1ProfilePath[] = "/profile/user1/shill";
 const char kWifiDevicePath[] = "/device/stub_wifi_device1";
 const char kCellularDevicePath[] = "/device/stub_cellular_device1";
 const char kIPConfigPath[] = "/ipconfig/ipconfig1";
+
+// Stub Verify* methods implementation to satisfy expectations of
+// networking_private_apitest.
+class CryptoVerifyStub : public NetworkingPrivateDelegate::VerifyDelegate {
+  void VerifyDestination(
+      const VerificationProperties& verification_properties,
+      const BoolCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    success_callback.Run(true);
+  }
+
+  void VerifyAndEncryptCredentials(
+      const std::string& guid,
+      const VerificationProperties& verification_properties,
+      const StringCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    success_callback.Run("encrypted_credentials");
+  }
+
+  void VerifyAndEncryptData(
+      const VerificationProperties& verification_properties,
+      const std::string& data,
+      const StringCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    success_callback.Run("encrypted_data");
+  }
+};
 
 class TestListener : public content::NotificationObserver {
  public:
@@ -103,7 +136,7 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
         device_test_(NULL) {}
 
   bool RunNetworkingSubtest(const std::string& subtest) {
-    return RunExtensionSubtest("networking",
+    return RunExtensionSubtest("networking_private/chromeos",
                                "main.html?" + subtest,
                                kFlagEnableFileAccess | kFlagLoadAsComponent);
   }
@@ -196,12 +229,21 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
                               true /* add_to_visible */);
   }
 
+  static KeyedService* CreateNetworkingPrivateServiceClient(
+      content::BrowserContext* profile) {
+    scoped_ptr<CryptoVerifyStub> crypto_verify(new CryptoVerifyStub);
+    return new NetworkingPrivateChromeOS(profile, crypto_verify.Pass());
+  }
+
   void SetUpOnMainThread() override {
     detector_ = new NetworkPortalDetectorTestImpl();
     NetworkPortalDetector::InitializeForTesting(detector_);
 
     ExtensionApiTest::SetUpOnMainThread();
     content::RunAllPendingInMessageLoop();
+
+    NetworkingPrivateDelegateFactory::GetInstance()->SetTestingFactory(
+        profile(), &CreateNetworkingPrivateServiceClient);
 
     InitializeSanitizedUsername();
 
@@ -270,13 +312,18 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
     service_test_->SetServiceProperty("stub_wifi1",
                                       shill::kDeviceProperty,
                                       base::StringValue(kWifiDevicePath));
-    profile_test->AddService(kUser1ProfilePath, "stub_wifi1");
+    base::DictionaryValue static_ipconfig;
+    static_ipconfig.SetStringWithoutPathExpansion(shill::kAddressProperty,
+                                                  "1.2.3.4");
+    service_test_->SetServiceProperty(
+        "stub_wifi1", shill::kStaticIPConfigProperty, static_ipconfig);
     base::ListValue frequencies1;
     frequencies1.AppendInteger(2400);
     service_test_->SetServiceProperty(
         "stub_wifi1", shill::kWifiFrequencyListProperty, frequencies1);
     service_test_->SetServiceProperty(
         "stub_wifi1", shill::kWifiFrequency, base::FundamentalValue(2400));
+    profile_test->AddService(kUser1ProfilePath, "stub_wifi1");
 
     AddService("stub_wifi2", "wifi2_PSK", shill::kTypeWifi, shill::kStateIdle);
     service_test_->SetServiceProperty("stub_wifi2",
@@ -443,9 +490,9 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetManagedProperties) {
       "      \"Type\": \"WiFi\","
       "      \"Name\": \"My WiFi Network\","
       "      \"WiFi\": {"
+      "        \"HexSSID\": \"77696669325F50534B\","  // "wifi2_PSK"
       "        \"Passphrase\": \"passphrase\","
       "        \"Recommended\": [ \"AutoConnect\", \"Passphrase\" ],"
-      "        \"SSID\": \"wifi2_PSK\","
       "        \"Security\": \"WPA-PSK\" }"
       "    }"
       "  ],"
@@ -498,10 +545,12 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, VerifyAndEncryptData) {
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
                        SetWifiTDLSEnabledState) {
+  device_test_->SetTDLSState(shill::kTDLSConnectedState);
   EXPECT_TRUE(RunNetworkingSubtest("setWifiTDLSEnabledState")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetWifiTDLSStatus) {
+  device_test_->SetTDLSState(shill::kTDLSConnectedState);
   EXPECT_TRUE(RunNetworkingSubtest("getWifiTDLSStatus")) << message_;
 }
 

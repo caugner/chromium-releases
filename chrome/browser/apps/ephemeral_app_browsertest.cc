@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/common/extensions/api/alarms.h"
 #include "content/public/browser/power_save_blocker.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -35,6 +34,7 @@
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/uninstall_reason.h"
+#include "extensions/common/api/alarms.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
@@ -58,7 +58,7 @@ using extensions::ResultCatcher;
 
 namespace {
 
-namespace alarms = extensions::api::alarms;
+namespace alarms = extensions::core_api::alarms;
 
 const char kPowerTestApp[] = "ephemeral_apps/power";
 
@@ -273,8 +273,8 @@ const Extension* EphemeralAppTestBase::UpdateEphemeralApp(
       content::Source<extensions::CrxInstaller>(crx_installer));
   ExtensionService* service =
       ExtensionSystem::Get(profile())->extension_service();
-  EXPECT_TRUE(service->UpdateExtension(app_id, app_v2_path, true,
-                                       &crx_installer));
+  EXPECT_TRUE(service->UpdateExtension(
+      extensions::CRXFileInfo(app_id, app_v2_path), true, &crx_installer));
   windowed_observer.Wait();
 
   return ExtensionRegistry::Get(profile())
@@ -490,6 +490,7 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
                               enable_from_sync,
                               false /* incognito enabled */,
                               false /* remote install */,
+                              extensions::ExtensionSyncData::BOOLEAN_UNSET,
                               kAppLaunchOrdinal,
                               kPageOrdinal,
                               extensions::LAUNCH_TYPE_REGULAR);

@@ -28,7 +28,7 @@ class FileSystemApiTestForDrive : public PlatformAppBrowserTest {
 
   // Sets up fake Drive service for tests (this has to be injected before the
   // real DriveIntegrationService instance is created.)
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     PlatformAppBrowserTest::SetUpInProcessBrowserTestFixture();
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
 
@@ -44,7 +44,7 @@ class FileSystemApiTestForDrive : public PlatformAppBrowserTest {
 
   // Ensure the fake service's data is fetch in the local file system. This is
   // necessary because the fetch starts lazily upon the first read operation.
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     PlatformAppBrowserTest::SetUpOnMainThread();
 
     scoped_ptr<drive::ResourceEntry> entry;
@@ -56,7 +56,7 @@ class FileSystemApiTestForDrive : public PlatformAppBrowserTest {
     ASSERT_EQ(drive::FILE_ERROR_OK, error);
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     FileSystemChooseEntryFunction::StopSkippingPickerForTest();
     PlatformAppBrowserTest::TearDown();
   };
@@ -90,7 +90,7 @@ class FileSystemApiTestForDrive : public PlatformAppBrowserTest {
                    const std::string& data,
                    const std::string& parent_id) {
     scoped_ptr<google_apis::FileResource> entry;
-    google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+    google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
     fake_drive_service_->AddNewFile(
         "text/plain", data, parent_id, title, false,
         google_apis::test_util::CreateCopyResultCallback(&error, &entry));
@@ -101,7 +101,7 @@ class FileSystemApiTestForDrive : public PlatformAppBrowserTest {
   std::string AddTestDirectory(const std::string& title,
                                const std::string& parent_id) {
     scoped_ptr<google_apis::FileResource> entry;
-    google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+    google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
     fake_drive_service_->AddNewDirectory(
         parent_id, title,
         drive::DriveServiceInterface::AddNewDirectoryOptions(),

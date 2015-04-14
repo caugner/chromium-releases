@@ -189,6 +189,15 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="AboutFlags_mark-non-secure-as">
+  <owner>palmer@chromium.org</owner>
+  <owner>felt@chromium.org</owner>
+  <description>
+    This flag lets users opt into or out of marking HTTP as Dubious or as
+    Non-Secure. The action is emitted once per startup when the flag is active.
+  </description>
+</action>
+
 <action name="AboutFlags_match-preview">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -1118,6 +1127,14 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="BadMessageTerminate_EVG">
+  <owner>fsamuel@chromium.org</owner>
+  <description>
+    Indicates that an ExtensionViewGuest was terminated due to a navigation to
+    an origin other than the extension it is embedding.
+  </description>
+</action>
+
 <action name="BadMessageTerminate_FAMF">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -1251,8 +1268,12 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="BadMessageTerminate_WC">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of the metric.</description>
+  <owner>nasko@chromium.org</owner>
+  <description>
+    Indicates that a renderer process was terminated due to receiving a
+    malformed or unexpected IPC message. The process was terminated by the
+    WebContentsImpl class.
+  </description>
 </action>
 
 <action name="BadMessageTerminate_WPH">
@@ -2544,7 +2565,7 @@ should be able to be added at any place in this file.
 <action name="DomDistiller_DistilledPageOpened">
   <owner>smaslo@chromium.org</owner>
   <owner>yfriedman@chromium.org</owner>
-  <description>User opens a distilled page.</description>
+  <description>User opens reader mode on a page.</description>
 </action>
 
 <action name="DomDistiller_DistilledPagePrefsOpened">
@@ -7100,6 +7121,34 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="ManagedUsers_Whitelist_Added">
+  <owner>bauerb@chromium.org</owner>
+  <owner>treib@chromium.org</owner>
+  <owner>pam@chromium.org</owner>
+  <description>
+    A new whitelist has been installed for a supervised user.
+  </description>
+</action>
+
+<action name="ManagedUsers_Whitelist_Removed">
+  <owner>bauerb@chromium.org</owner>
+  <owner>treib@chromium.org</owner>
+  <owner>pam@chromium.org</owner>
+  <description>
+    A whitelist has been uninstalled for a supervised user.
+  </description>
+</action>
+
+<action name="ManagedUsers_Whitelist_UncleanUninstall">
+  <owner>bauerb@chromium.org</owner>
+  <owner>treib@chromium.org</owner>
+  <owner>pam@chromium.org</owner>
+  <description>
+    Recorded at startup if an unregistered whitelist has been found. This
+    usually means that an uninstallation did not complete.
+  </description>
+</action>
+
 <action name="MaxButton_Clk_ExitFS">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -7541,6 +7590,16 @@ should be able to be added at any place in this file.
 <action name="MobileNewTabOpened">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="MobileOmniboxClipboardChanged">
+  <owner>jif@chromium.org</owner>
+  <description>
+    Emitted when Chrome detects that the clipboard contains a new URL. This
+    occurs either when Chrome enters the foreground and notices that the content
+    of the clipboard changed, or when the clipboard changes while Chrome is in
+    the foreground.
+  </description>
 </action>
 
 <action name="MobileOmniboxRefineSuggestion">
@@ -8023,6 +8082,13 @@ should be able to be added at any place in this file.
 <action name="NavEntryCommitted.SRP">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Net.ForceAlternateProtocol">
+  <owner>bnc@chromium.org</owner>
+  <description>
+    User forces alternate protocol via command line flag.
+  </description>
 </action>
 
 <action name="Net.URLRequest_StartJob_InvalidReferrer">
@@ -9174,6 +9240,16 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="Options_RapporEnabledCheckbox_Disable">
+  <owner>holte@chromium.org</owner>
+  <description>Settings: Privacy: RAPPOR disabled</description>
+</action>
+
+<action name="Options_RapporEnabledCheckbox_Enable">
+  <owner>holte@chromium.org</owner>
+  <description>Settings: Privacy: RAPPOR enabled</description>
+</action>
+
 <action name="Options_ResetAutoOpenFiles">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -9182,6 +9258,16 @@ should be able to be added at any place in this file.
 <action name="Options_ResetToDefaults">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Options_ResolveTimezoneByGeoLocation_Disable">
+  <owner>alemate@chromium.org</owner>
+  <description>ChromeOS periodic timezone refresh disabled.</description>
+</action>
+
+<action name="Options_ResolveTimezoneByGeoLocation_Enable">
+  <owner>alemate@chromium.org</owner>
+  <description>ChromeOS periodic timezone refresh enabled.</description>
 </action>
 
 <action name="Options_SSL2_Disable">
@@ -9579,6 +9665,7 @@ should be able to be added at any place in this file.
 <action name="OriginChipPress">
   <owner>macourteau@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This flag no longer exists.</obsolete>
 </action>
 
 <action name="OutdatedPluginInfobar.AllowThisTime">

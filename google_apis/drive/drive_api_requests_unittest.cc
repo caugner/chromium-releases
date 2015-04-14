@@ -51,7 +51,7 @@ const char kTestDownloadPathPrefix[] = "/download/";
 
 // Used as a GetContentCallback.
 void AppendContent(std::string* out,
-                   GDataErrorCode error,
+                   DriveApiErrorCode error,
                    scoped_ptr<std::string> content) {
   EXPECT_EQ(HTTP_SUCCESS, error);
   out->append(*content);
@@ -390,7 +390,7 @@ TEST_F(DriveApiRequestsTest, DriveApiDataRequest_Fields) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/about.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
 
   {
@@ -433,7 +433,7 @@ TEST_F(DriveApiRequestsTest, FilesInsertRequest) {
   expected_data_file_path_ =
       test_util::GetTestFilePath("drive/directory_entry.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
   // Create "new directory" in the root directory.
@@ -490,7 +490,7 @@ TEST_F(DriveApiRequestsTest, FilesPatchRequest) {
   expected_data_file_path_ =
       test_util::GetTestFilePath("drive/file_entry.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
   {
@@ -511,6 +511,20 @@ TEST_F(DriveApiRequestsTest, FilesPatchRequest) {
         base::Time::FromUTCExploded(kLastViewedByMeDate));
     request->add_parent("parent_resource_id");
 
+    drive::Property private_property;
+    private_property.set_key("key1");
+    private_property.set_value("value1");
+
+    drive::Property public_property;
+    public_property.set_visibility(drive::Property::VISIBILITY_PUBLIC);
+    public_property.set_key("key2");
+    public_property.set_value("value2");
+
+    drive::Properties properties;
+    properties.push_back(private_property);
+    properties.push_back(public_property);
+    request->set_properties(properties);
+
     request_sender_->StartRequestWithRetry(request);
     run_loop.Run();
   }
@@ -523,11 +537,15 @@ TEST_F(DriveApiRequestsTest, FilesPatchRequest) {
 
   EXPECT_EQ("application/json", http_request_.headers["Content-Type"]);
   EXPECT_TRUE(http_request_.has_content);
-  EXPECT_EQ("{\"lastViewedByMeDate\":\"2013-07-19T15:59:13.123Z\","
-            "\"modifiedDate\":\"2012-07-19T15:59:13.123Z\","
-            "\"parents\":[{\"id\":\"parent_resource_id\"}],"
-            "\"title\":\"new title\"}",
-            http_request_.content);
+  EXPECT_EQ(
+      "{\"lastViewedByMeDate\":\"2013-07-19T15:59:13.123Z\","
+      "\"modifiedDate\":\"2012-07-19T15:59:13.123Z\","
+      "\"parents\":[{\"id\":\"parent_resource_id\"}],"
+      "\"properties\":["
+      "{\"key\":\"key1\",\"value\":\"value1\",\"visibility\":\"PRIVATE\"},"
+      "{\"key\":\"key2\",\"value\":\"value2\",\"visibility\":\"PUBLIC\"}],"
+      "\"title\":\"new title\"}",
+      http_request_.content);
   EXPECT_TRUE(file_resource);
 }
 
@@ -536,7 +554,7 @@ TEST_F(DriveApiRequestsTest, AboutGetRequest_ValidJson) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/about.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
 
   {
@@ -570,7 +588,7 @@ TEST_F(DriveApiRequestsTest, AboutGetRequest_InvalidJson) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/testfile.txt");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
 
   {
@@ -586,7 +604,7 @@ TEST_F(DriveApiRequestsTest, AboutGetRequest_InvalidJson) {
   }
 
   // "parse error" should be returned, and the about resource should be NULL.
-  EXPECT_EQ(GDATA_PARSE_ERROR, error);
+  EXPECT_EQ(DRIVE_PARSE_ERROR, error);
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
   EXPECT_EQ("/drive/v2/about", http_request_.relative_url);
   EXPECT_FALSE(about_resource);
@@ -597,7 +615,7 @@ TEST_F(DriveApiRequestsTest, AppsListRequest) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/applist.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<AppList> app_list;
 
   {
@@ -624,7 +642,7 @@ TEST_F(DriveApiRequestsTest, ChangesListRequest) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/changelist.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<ChangeList> result;
 
   {
@@ -653,7 +671,7 @@ TEST_F(DriveApiRequestsTest, ChangesListNextPageRequest) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/changelist.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<ChangeList> result;
 
   {
@@ -683,7 +701,7 @@ TEST_F(DriveApiRequestsTest, FilesCopyRequest) {
   expected_data_file_path_ =
       test_util::GetTestFilePath("drive/file_entry.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
   // Copy the file to a new file named "new title".
@@ -722,7 +740,7 @@ TEST_F(DriveApiRequestsTest, FilesCopyRequest_EmptyParentResourceId) {
   expected_data_file_path_ =
       test_util::GetTestFilePath("drive/file_entry.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
   // Copy the file to a new file named "new title".
@@ -755,7 +773,7 @@ TEST_F(DriveApiRequestsTest, FilesListRequest) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/filelist.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileList> result;
 
   {
@@ -783,7 +801,7 @@ TEST_F(DriveApiRequestsTest, FilesListNextPageRequest) {
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/filelist.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileList> result;
 
   {
@@ -806,7 +824,7 @@ TEST_F(DriveApiRequestsTest, FilesListNextPageRequest) {
 }
 
 TEST_F(DriveApiRequestsTest, FilesDeleteRequest) {
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
 
   // Delete a resource with the given resource id.
   {
@@ -835,7 +853,7 @@ TEST_F(DriveApiRequestsTest, FilesTrashRequest) {
   expected_data_file_path_ =
       test_util::GetTestFilePath("drive/directory_entry.json");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
   // Trash a resource with the given resource id.
@@ -864,7 +882,7 @@ TEST_F(DriveApiRequestsTest, ChildrenInsertRequest) {
   expected_content_type_ = "application/json";
   expected_content_ = kTestChildrenResponse;
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
 
   // Add a resource with "resource_id" to a directory with
   // "parent_resource_id".
@@ -893,7 +911,7 @@ TEST_F(DriveApiRequestsTest, ChildrenInsertRequest) {
 }
 
 TEST_F(DriveApiRequestsTest, ChildrenDeleteRequest) {
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
 
   // Remove a resource with "resource_id" from a directory with
   // "parent_resource_id".
@@ -928,7 +946,7 @@ TEST_F(DriveApiRequestsTest, UploadNewFileRequest) {
       temp_dir_.path().AppendASCII("upload_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with
@@ -1021,7 +1039,7 @@ TEST_F(DriveApiRequestsTest, UploadNewEmptyFileRequest) {
       temp_dir_.path().AppendASCII("empty_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1110,7 +1128,7 @@ TEST_F(DriveApiRequestsTest, UploadNewLargeFileRequest) {
       temp_dir_.path().AppendASCII("upload_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1289,7 +1307,7 @@ TEST_F(DriveApiRequestsTest, UploadNewFileWithMetadataRequest) {
   const char kTestContentType[] = "text/plain";
   const std::string kTestContent(100, 'a');
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1342,7 +1360,7 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequest) {
       temp_dir_.path().AppendASCII("upload_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1429,7 +1447,7 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETag) {
       temp_dir_.path().AppendASCII("upload_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1518,7 +1536,7 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETagConflicting) {
   const char kTestContentType[] = "text/plain";
   const std::string kTestContent(100, 'a');
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1563,7 +1581,7 @@ TEST_F(DriveApiRequestsTest,
       temp_dir_.path().AppendASCII("upload_file.txt");
   ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1659,7 +1677,7 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileWithMetadataRequest) {
   const char kTestContentType[] = "text/plain";
   const std::string kTestContent(100, 'a');
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_url;
 
   // Initiate uploading a new file to the directory with "parent_resource_id".
@@ -1712,7 +1730,7 @@ TEST_F(DriveApiRequestsTest, DownloadFileRequest) {
       temp_dir_.path().AppendASCII("cache_file");
   const std::string kTestId("dummyId");
 
-  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  DriveApiErrorCode result_code = DRIVE_OTHER_ERROR;
   base::FilePath temp_file;
   {
     base::RunLoop run_loop;
@@ -1748,7 +1766,7 @@ TEST_F(DriveApiRequestsTest, DownloadFileRequest_GetContentCallback) {
       temp_dir_.path().AppendASCII("cache_file");
   const std::string kTestId("dummyId");
 
-  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  DriveApiErrorCode result_code = DRIVE_OTHER_ERROR;
   base::FilePath temp_file;
   std::string contents;
   {
@@ -1782,7 +1800,7 @@ TEST_F(DriveApiRequestsTest, PermissionsInsertRequest) {
   expected_content_type_ = "application/json";
   expected_content_ = kTestPermissionResponse;
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
 
   // Add comment permission to the user "user@example.com".
   {
@@ -1818,7 +1836,7 @@ TEST_F(DriveApiRequestsTest, PermissionsInsertRequest) {
   EXPECT_TRUE(base::Value::Equals(expected.get(), result.get()));
 
   // Add "can edit" permission to users in "example.com".
-  error = GDATA_OTHER_ERROR;
+  error = DRIVE_OTHER_ERROR;
   {
     base::RunLoop run_loop;
     drive::PermissionsInsertRequest* request =

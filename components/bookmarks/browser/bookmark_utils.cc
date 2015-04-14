@@ -258,7 +258,7 @@ void PasteFromClipboard(BookmarkModel* model,
     index = parent->child_count();
   ScopedGroupBookmarkActions group_paste(model);
 
-  if (bookmark_data.elements.size() == 1 &&
+  if (bookmark_data.size() == 1 &&
       model->IsBookmarked(bookmark_data.elements[0].url)) {
     MakeTitleUnique(model,
                     parent,
@@ -508,6 +508,20 @@ bool IsBookmarkedByUser(BookmarkModel* model, const GURL& url) {
 const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model, int64 id) {
   // TODO(sky): TreeNode needs a method that visits all nodes using a predicate.
   return GetNodeByID(model->root_node(), id);
+}
+
+bool IsDescendantOf(const bookmarks::BookmarkNode* node,
+                    const bookmarks::BookmarkNode* root) {
+  return node && node->HasAncestor(root);
+}
+
+bool HasDescendantsOf(const std::vector<const bookmarks::BookmarkNode*>& list,
+                      const bookmarks::BookmarkNode* root) {
+  for (const BookmarkNode* node : list) {
+    if (IsDescendantOf(node, root))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace bookmarks

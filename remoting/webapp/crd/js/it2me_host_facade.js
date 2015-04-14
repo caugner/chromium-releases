@@ -7,50 +7,38 @@
  * Class to communicate with the It2me Host component via Native Messaging.
  */
 
-'use strict';
-
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
+(function() {
+
+'use strict';
+
 /**
  * @constructor
+ * @implements {base.Disposable}
  */
 remoting.It2MeHostFacade = function() {
-  /**
-   * @type {number}
-   * @private
-   */
+  /** @private {number} */
   this.nextId_ = 0;
 
-  /**
-   * @type {?chrome.runtime.Port}
-   * @private
-   */
+  /** @private {?chrome.runtime.Port} */
   this.port_ = null;
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.accessCode_ = '';
 
-  /**
-   * @type {number}
-   * @private
-   */
+  /** @private {number} */
   this.accessCodeLifetime_ = 0;
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.clientId_ = '';
 
-  /**
-   * @type {boolean}
-   * @private
-   */
+  /** @private {boolean} */
   this.initialized_ = false;
+
+  /** @private {base.Disposables} */
+  this.eventHooks_ = null;
 
   /**
    * @type {?function():void}
@@ -67,7 +55,7 @@ remoting.It2MeHostFacade = function() {
   /**
    * Called if the It2Me Native Messaging host sends a malformed message:
    * missing required attributes, attributes with incorrect types, etc.
-   * @param {remoting.Error} error
+   * @type {?function(remoting.Error):void}
    * @private
    */
   this.onError_ = function(error) {};
@@ -85,15 +73,24 @@ remoting.It2MeHostFacade = function() {
   this.onNatPolicyChanged_ = function() {};
 };
 
+remoting.It2MeHostFacade.prototype.dispose = function() {
+  base.dispose(this.eventHooks_);
+  this.eventHooks_ = null;
+  if (this.port_) {
+    this.port_.disconnect();
+    this.port_ = null;
+  }
+};
+
 /**
  * Sets up connection to the Native Messaging host process and exchanges
  * 'hello' messages. If Native Messaging is not supported or if the it2me
  * native messaging host is not installed, onInitializationFailed is invoked.
  * Otherwise, onInitialized is invoked.
  *
- * @param {function():void} onInitialized Called after successful
+ * @param {function(*=):void} onInitialized Called after successful
  *     initialization.
- * @param {function():void} onInitializationFailed Called if cannot connect to
+ * @param {function(*=):void} onInitializationFailed Called if cannot connect to
  *     the native messaging host.
  * @return {void}
  */
@@ -105,12 +102,14 @@ remoting.It2MeHostFacade.prototype.initialize =
   try {
     this.port_ = chrome.runtime.connectNative(
         'com.google.chrome.remote_assistance');
-    this.port_.onMessage.addListener(this.onIncomingMessage_.bind(this));
-    this.port_.onDisconnect.addListener(this.onHostDisconnect_.bind(this));
+    this.eventHooks_ = new base.Disposables(
+        new base.ChromeEventHook(this.port_.onMessage,
+                                 this.onIncomingMessage_.bind(this)),
+        new base.ChromeEventHook(this.port_.onDisconnect,
+                                 this.onHostDisconnect_.bind(this)));
     this.port_.postMessage({type: 'hello'});
-  } catch (err) {
-    console.log('Native Messaging initialization failed: ',
-                /** @type {*} */ (err));
+  } catch (/** @type {*} */ err) {
+    console.log('Native Messaging initialization failed: ', err);
     onInitializationFailed();
     return;
   }
@@ -329,4 +328,6 @@ remoting.It2MeHostFacade.prototype.onHostDisconnect_ = function() {
     this.port_ = null;
     this.onError_(remoting.Error.UNEXPECTED);
   }
-}
+};
+
+})();

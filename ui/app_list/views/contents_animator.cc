@@ -12,10 +12,20 @@
 #include "ui/app_list/views/start_page_view.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace app_list {
+
+namespace {
+
+gfx::ShadowValue GetSearchBoxShadowForState(AppListModel::State state) {
+  return GetShadowForZHeight(state == AppListModel::STATE_SEARCH_RESULTS ? 1
+                                                                         : 2);
+}
+
+}  // namespace
 
 // ContentsAnimator
 
@@ -24,25 +34,6 @@ ContentsAnimator::ContentsAnimator(ContentsView* contents_view)
 }
 
 ContentsAnimator::~ContentsAnimator() {
-}
-
-gfx::Rect ContentsAnimator::GetOnscreenPageBounds(int page_index) const {
-  return contents_view_->IsStateActive(AppListModel::STATE_CUSTOM_LAUNCHER_PAGE)
-             ? contents_view_->GetContentsBounds()
-             : contents_view_->GetDefaultContentsBounds();
-}
-
-gfx::Rect ContentsAnimator::GetOffscreenPageBounds(int page_index) const {
-  gfx::Rect bounds(contents_view_->GetContentsBounds());
-  // The start page and search page origins are above; all other pages' origins
-  // are below.
-  int page_height = bounds.height();
-  bool origin_above = contents_view_->GetPageIndexForState(
-                          AppListModel::STATE_START) == page_index ||
-                      contents_view_->GetPageIndexForState(
-                          AppListModel::STATE_SEARCH_RESULTS) == page_index;
-  bounds.set_y(origin_above ? -page_height : page_height);
-  return bounds;
 }
 
 void ContentsAnimator::UpdateCustomPageForDefaultAnimation(double progress,
@@ -61,7 +52,8 @@ void ContentsAnimator::UpdateCustomPageForDefaultAnimation(double progress,
   views::View* custom_page = contents_view()->GetPageView(custom_page_index);
   gfx::Rect custom_page_collapsed(
       contents_view()->GetCustomPageCollapsedBounds());
-  gfx::Rect custom_page_origin(GetOffscreenPageBounds(custom_page_index));
+  gfx::Rect custom_page_origin(
+      contents_view()->GetOffscreenPageBounds(custom_page_index));
   gfx::Rect custom_page_rect;
 
   if (from_page == start_page_index) {
@@ -95,9 +87,27 @@ void ContentsAnimator::UpdateSearchBoxForDefaultAnimation(double progress,
   gfx::Rect search_box_rect =
       gfx::Tween::RectValueBetween(progress, search_box_from, search_box_to);
 
-  views::View* search_box = contents_view()->GetSearchBoxView();
+  AppListModel::State from_state =
+      contents_view()->GetStateForPageIndex(from_page);
+  AppListModel::State to_state = contents_view()->GetStateForPageIndex(to_page);
+
+  gfx::ShadowValue original_shadow = GetSearchBoxShadowForState(from_state);
+  gfx::ShadowValue target_shadow = GetSearchBoxShadowForState(to_state);
+
+  SearchBoxView* search_box = contents_view()->GetSearchBoxView();
+  gfx::Point offset(gfx::Tween::LinearIntValueBetween(
+                        progress, original_shadow.x(), target_shadow.x()),
+                    gfx::Tween::LinearIntValueBetween(
+                        progress, original_shadow.y(), target_shadow.y()));
+  search_box->SetShadow(gfx::ShadowValue(
+      offset, gfx::Tween::LinearIntValueBetween(
+                  progress, original_shadow.blur(), target_shadow.blur()),
+      gfx::Tween::ColorValueBetween(progress, original_shadow.color(),
+                                    target_shadow.color())));
+
   search_box->GetWidget()->SetBounds(
-      contents_view()->ConvertRectToWidget(search_box_rect));
+      search_box->GetViewBoundsForSearchBoxContentsBounds(
+          contents_view()->ConvertRectToWidget(search_box_rect)));
 }
 
 void ContentsAnimator::ClipSearchResultsPageToOnscreenBounds(
@@ -127,10 +137,12 @@ std::string DefaultAnimator::NameForTests() const {
 void DefaultAnimator::Update(double progress, int from_page, int to_page) {
   // Move the from page from 0 to its origin. Move the to page from its origin
   // to 0.
-  gfx::Rect from_page_onscreen(GetOnscreenPageBounds(from_page));
-  gfx::Rect to_page_onscreen(GetOnscreenPageBounds(to_page));
-  gfx::Rect from_page_origin(GetOffscreenPageBounds(from_page));
-  gfx::Rect to_page_origin(GetOffscreenPageBounds(to_page));
+  gfx::Rect from_page_onscreen(
+      contents_view()->GetOnscreenPageBounds(from_page));
+  gfx::Rect to_page_onscreen(contents_view()->GetOnscreenPageBounds(to_page));
+  gfx::Rect from_page_origin(
+      contents_view()->GetOffscreenPageBounds(from_page));
+  gfx::Rect to_page_origin(contents_view()->GetOffscreenPageBounds(to_page));
   gfx::Rect from_page_rect(gfx::Tween::RectValueBetween(
       progress, from_page_onscreen, from_page_origin));
   gfx::Rect to_page_rect(
@@ -163,13 +175,16 @@ void StartToAppsAnimator::Update(double progress,
                                  int apps_page) {
   // TODO(mgiuca): This is just a clone of DefaultAnimator's animation. Write a
   // custom animation for the All Apps button on the Start page.
-  gfx::Rect on_screen(contents_view()->GetDefaultContentsBounds());
-  gfx::Rect from_page_origin(GetOffscreenPageBounds(start_page));
-  gfx::Rect to_page_origin(GetOffscreenPageBounds(apps_page));
-  gfx::Rect from_page_rect(
-      gfx::Tween::RectValueBetween(progress, on_screen, from_page_origin));
+  gfx::Rect from_page_onscreen(
+      contents_view()->GetOnscreenPageBounds(start_page));
+  gfx::Rect to_page_onscreen(contents_view()->GetOnscreenPageBounds(apps_page));
+  gfx::Rect from_page_origin(
+      contents_view()->GetOffscreenPageBounds(start_page));
+  gfx::Rect to_page_origin(contents_view()->GetOffscreenPageBounds(apps_page));
+  gfx::Rect from_page_rect(gfx::Tween::RectValueBetween(
+      progress, from_page_onscreen, from_page_origin));
   gfx::Rect to_page_rect(
-      gfx::Tween::RectValueBetween(progress, to_page_origin, on_screen));
+      gfx::Tween::RectValueBetween(progress, to_page_origin, to_page_onscreen));
 
   contents_view()->GetPageView(start_page)->SetBoundsRect(from_page_rect);
   contents_view()->GetPageView(apps_page)->SetBoundsRect(to_page_rect);
@@ -191,9 +206,12 @@ std::string StartToCustomAnimator::NameForTests() const {
 void StartToCustomAnimator::Update(double progress,
                                    int start_page,
                                    int custom_page) {
-  gfx::Rect start_page_on_screen(GetOnscreenPageBounds(start_page));
-  gfx::Rect custom_page_on_screen(GetOnscreenPageBounds(custom_page));
-  gfx::Rect start_page_origin(GetOffscreenPageBounds(start_page));
+  gfx::Rect start_page_on_screen(
+      contents_view()->GetOnscreenPageBounds(start_page));
+  gfx::Rect custom_page_on_screen(
+      contents_view()->GetOnscreenPageBounds(custom_page));
+  gfx::Rect start_page_origin(
+      contents_view()->GetOffscreenPageBounds(start_page));
   gfx::Rect custom_page_origin(contents_view()->GetCustomPageCollapsedBounds());
   gfx::Rect start_page_rect(gfx::Tween::RectValueBetween(
       progress, start_page_on_screen, start_page_origin));

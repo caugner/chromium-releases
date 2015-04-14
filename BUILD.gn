@@ -68,7 +68,7 @@ group("root") {
     "//mojo",
     "//net",
     "//pdf",
-    "//ppapi:ppapi_c",
+    "//ppapi/examples",
     "//printing",
     "//remoting/client/plugin",
     "//sandbox",
@@ -170,7 +170,7 @@ group("root") {
     deps += [ "//rlz:rlz_lib" ]
   }
 
-  if (cpu_arch == "x86" || cpu_arch == "x64") {
+  if (current_cpu == "x86" || current_cpu == "x64") {
     # YASM is x86/x64 only.
     deps += [ "//third_party/yasm($host_toolchain)" ]
   }
@@ -220,7 +220,7 @@ group("root") {
       "//extensions/common/api",
       "//extensions/renderer",
       "//pdf",  # Not compiled on Android in GYP yet, either.
-      "//ppapi:ppapi_c",
+      "//ppapi/examples",
       "//third_party/libusb",
       "//ui/keyboard",  # Blocked on content.
 
@@ -299,66 +299,6 @@ group("root") {
   }
 
   if (is_mac || is_ios) {
-    deps -= [
-      "//ui/touch_selection",
-    ]
-  }
-
-  if (is_win) {
-    deps -= [
-      "//apps",
-      "//ash",
-      "//chrome/browser",
-      "//chrome/browser/devtools",
-      "//chrome/common",
-      "//chrome/plugin",
-      "//chrome/renderer",
-      "//chrome/test",
-      "//chrome/utility",
-      "//components:all_components",
-      "//cc",
-      "//cc/blink",
-      "//content",
-      "//content/shell:content_shell",
-      "//content/test:test_support",
-      "//device/bluetooth",
-      "//extensions/browser",
-      "//extensions/common",
-      "//extensions/common/api",
-      "//extensions/renderer",
-      "//google_apis",
-      "//google_apis/gcm",
-      "//jingle:notifier",
-      "//media",
-      "//media/blink",
-      "//media/cast",
-      "//media/mojo",
-      "//mojo",
-      "//pdf",
-      "//ppapi:ppapi_c",
-      "//printing",
-      "//remoting/client/plugin",
-      "//storage/browser",
-      "//sync",
-      "//third_party/WebKit/public:all_blink",
-      "//third_party/angle:translator",
-      "//third_party/ffmpeg",
-      "//third_party/leveldatabase",
-      "//third_party/libjingle",
-      "//third_party/usrsctp",
-      "//third_party/webrtc",
-      "//ui/accessibility",
-      "//ui/app_list",
-      "//ui/aura",
-      "//ui/keyboard",
-      "//ui/native_theme",
-      "//ui/snapshot",
-      "//ui/surface",
-      "//ui/touch_selection",
-      "//ui/views",
-      "//ui/views/controls/webview",
-      "//ui/web_dialogs",
-      "//ui/wm",
-    ]
+    deps -= [ "//ui/touch_selection" ]
   }
 }

@@ -13,6 +13,7 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_image_linux_dma_buffer.h"
 #include "ui/gl/scoped_binders.h"
+#include "ui/ozone/gpu/gpu_memory_buffer_factory_ozone_native_buffer.h"
 #include "ui/ozone/public/native_pixmap.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/surface_factory_ozone.h"
@@ -124,6 +125,14 @@ bool VaapiDrmPicture::DownloadFromSurface(
     const scoped_refptr<VASurface>& va_surface) {
   return vaapi_wrapper_->BlitSurface(va_surface->id(), va_surface->size(),
                                      va_surface_->id(), va_surface_->size());
+}
+
+scoped_refptr<gfx::GLImage> VaapiDrmPicture::GetImageToBind() {
+  return gl_image_;
+}
+
+bool VaapiDrmPicture::AllowOverlay() const {
+  return true;
 }
 
 }  // namespace

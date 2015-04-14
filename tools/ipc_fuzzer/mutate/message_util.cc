@@ -28,6 +28,10 @@ const char kHelpSwitch[] = "help";
 const char kHelpSwitchHelp[] =
     "display this message.";
 
+const char kInSwitch[] = "in";
+const char kInSwitchHelp[] =
+    "output only the messages at the specified positions in the file.";
+
 const char kInvertSwitch[] = "invert";
 const char kInvertSwitchHelp[] =
     "output messages NOT meeting above criteria.";
@@ -48,6 +52,7 @@ void usage() {
             << "  ipc_message_util"
             << " [--" << kStartSwitch << "=n]"
             << " [--" << kEndSwitch << "=m]"
+            << " [--" << kInSwitch << "=i[,j,...]]"
             << " [--" << kRegexpSwitch << "=x]"
             << " [--" << kInvertSwitch << "]"
             << " [--" << kDumpSwitch << "]"
@@ -56,6 +61,7 @@ void usage() {
 
   std::cerr << "    --" << kStartSwitch << "  - " << kStartSwitchHelp << "\n"
             << "    --" << kEndSwitch << "    - " << kEndSwitchHelp << "\n"
+            << "    --" << kInSwitch << "     - " << kInSwitchHelp << "\n"
             << "    --" << kRegexpSwitch << " - " << kRegexpSwitchHelp << "\n"
             << "    --" << kInvertSwitch << " - " << kInvertSwitchHelp << "\n"
             << "    --" << kDumpSwitch << "   - " << kDumpSwitchHelp << "\n"
@@ -85,7 +91,7 @@ int main(int argc, char** argv) {
   size_t start_index = 0;
   if (cmd->HasSwitch(kStartSwitch)) {
     int temp = atoi(cmd->GetSwitchValueASCII(kStartSwitch).c_str());
-    if (temp > 0 )
+    if (temp > 0)
       start_index = static_cast<size_t>(temp);
   }
 
@@ -102,8 +108,8 @@ int main(int argc, char** argv) {
   bool invert = cmd->HasSwitch(kInvertSwitch);
   bool perform_dump = cmd->HasSwitch(kDumpSwitch);
 
-  std::vector<std::string> input_file_names;
-  std::string output_file_name;
+  std::vector<base::FilePath::StringType> input_file_names;
+  base::FilePath::StringType output_file_name;
   base::SplitString(args[0], ',', &input_file_names);
 
   if (!perform_dump) {
@@ -115,14 +121,29 @@ int main(int argc, char** argv) {
   }
 
   ipc_fuzzer::MessageVector input_message_vector;
-  for (std::vector<std::string>::iterator it = input_file_names.begin();
-      it != input_file_names.end(); ++it) {
+  for (std::vector<base::FilePath::StringType>::iterator
+      it = input_file_names.begin(); it != input_file_names.end(); ++it) {
     ipc_fuzzer::MessageVector message_vector;
     if (!ipc_fuzzer::MessageFile::Read(base::FilePath(*it), &message_vector))
       return EXIT_FAILURE;
     input_message_vector.insert(input_message_vector.end(),
                                 message_vector.begin(), message_vector.end());
     message_vector.weak_clear();
+  }
+
+  bool has_indices = cmd->HasSwitch(kInSwitch);
+  std::vector<bool> indices;
+
+  if (has_indices) {
+    indices.resize(input_message_vector.size(), false);
+    std::vector<std::string> index_strings;
+    base::SplitString(cmd->GetSwitchValueASCII(kInSwitch), ',', &index_strings);
+    for (std::vector<std::string>::iterator it = index_strings.begin();
+         it != index_strings.end(); ++it) {
+      int index = atoi(it->c_str());
+      if (index >= 0 && static_cast<size_t>(index) < indices.size())
+        indices[index] = true;
+    }
   }
 
   ipc_fuzzer::MessageVector output_message_vector;
@@ -132,6 +153,9 @@ int main(int argc, char** argv) {
     bool valid = (i >= start_index && i < end_index);
     if (valid && has_regexp) {
       valid = MessageMatches(input_message_vector[i], filter_pattern);
+    }
+    if (valid && has_indices) {
+      valid = indices[i];
     }
     if (valid != invert) {
       output_message_vector.push_back(input_message_vector[i]);

@@ -5,18 +5,30 @@
 package org.chromium.android_webview;
 
 import org.chromium.content.browser.WebContentsObserver;
+import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.NetError;
+import org.chromium.ui.base.PageTransition;
+
+import java.lang.ref.WeakReference;
 
 /**
  * Routes notifications from WebContents to AwContentsClient and other listeners.
  */
 public class AwWebContentsObserver extends WebContentsObserver {
+    private final WeakReference<AwContents> mAwContents;
     private final AwContentsClient mAwContentsClient;
+    private boolean mStartedNonApiProvisionalLoadInMainFrame = false;
 
-    public AwWebContentsObserver(WebContents webContents, AwContentsClient awContentsClient) {
+    public AwWebContentsObserver(
+            WebContents webContents, AwContents awContents,  AwContentsClient awContentsClient) {
         super(webContents);
+        mAwContents = new WeakReference<AwContents>(awContents);
         mAwContentsClient = awContentsClient;
+    }
+
+    boolean hasStartedNonApiProvisionalLoadInMainFrame() {
+        return mStartedNonApiProvisionalLoadInMainFrame;
     }
 
     @Override
@@ -66,5 +78,24 @@ public class AwWebContentsObserver extends WebContentsObserver {
     @Override
     public void didNavigateAnyFrame(String url, String baseUrl, boolean isReload) {
         mAwContentsClient.doUpdateVisitedHistory(url, isReload);
+    }
+
+    @Override
+    public void didStartProvisionalLoadForFrame(
+            long frameId,
+            long parentFrameId,
+            boolean isMainFrame,
+            String validatedUrl,
+            boolean isErrorPage,
+            boolean isIframeSrcdoc) {
+        if (!isMainFrame) return;
+        AwContents awContents = mAwContents.get();
+        if (awContents != null) {
+            NavigationEntry pendingEntry = awContents.getNavigationController().getPendingEntry();
+            if (pendingEntry != null
+                    && (pendingEntry.getTransition() & PageTransition.FROM_API) == 0) {
+                mStartedNonApiProvisionalLoadInMainFrame = true;
+            }
+        }
     }
 }

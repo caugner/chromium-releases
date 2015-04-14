@@ -22,7 +22,9 @@ ASH_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_EXPORT extern const char kAshCopyHostBackgroundAtBoot[];
 ASH_EXPORT extern const char kAshDebugShortcuts[];
 ASH_EXPORT extern const char kAshDisableLockLayoutManager[];
-ASH_EXPORT extern const char kAshDisableTextFilteringInOverviewMode[];
+#if defined(OS_CHROMEOS)
+ASH_EXPORT extern const char kAshDisableScreenOrientationLock[];
+#endif
 ASH_EXPORT extern const char kAshDisableTouchExplorationMode[];
 #if defined(OS_CHROMEOS)
 ASH_EXPORT extern const char kAshEnableFullscreenAppList[];
@@ -31,9 +33,9 @@ ASH_EXPORT extern const char kAshEnableMagnifierKeyScroller[];
 ASH_EXPORT extern const char kAshEnableMirroredScreen[];
 ASH_EXPORT extern const char kAshEnablePowerButtonQuickLock[];
 ASH_EXPORT extern const char kAshEnableSoftwareMirroring[];
+ASH_EXPORT extern const char kAshEnableSwipeToCloseInOverviewMode[];
 ASH_EXPORT extern const char kAshEnableSystemSounds[];
 ASH_EXPORT extern const char kAshEnableTouchViewTesting[];
-ASH_EXPORT extern const char kAshEnableTrayDragging[];
 ASH_EXPORT extern const char kAshHideNotificationsForFactory[];
 ASH_EXPORT extern const char kAshHostWindowBounds[];
 ASH_EXPORT extern const char kAshSecondaryDisplayLayout[];

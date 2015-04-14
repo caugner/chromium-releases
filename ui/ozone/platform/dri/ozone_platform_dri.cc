@@ -5,6 +5,7 @@
 #include "ui/ozone/platform/dri/ozone_platform_dri.h"
 
 #include "base/at_exit.h"
+#include "base/thread_task_runner_handle.h"
 #include "ui/base/cursor/ozone/bitmap_cursor_factory_ozone.h"
 #include "ui/events/ozone/device/device_manager.h"
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
@@ -16,16 +17,20 @@
 #include "ui/ozone/platform/dri/dri_gpu_platform_support.h"
 #include "ui/ozone/platform/dri/dri_gpu_platform_support_host.h"
 #include "ui/ozone/platform/dri/dri_surface_factory.h"
+#include "ui/ozone/platform/dri/dri_util.h"
 #include "ui/ozone/platform/dri/dri_window.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_impl.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_manager.h"
 #include "ui/ozone/platform/dri/dri_window_manager.h"
 #include "ui/ozone/platform/dri/dri_wrapper.h"
+#include "ui/ozone/platform/dri/drm_device_generator.h"
+#include "ui/ozone/platform/dri/drm_device_manager.h"
+#include "ui/ozone/platform/dri/gpu_lock.h"
 #include "ui/ozone/platform/dri/native_display_delegate_dri.h"
 #include "ui/ozone/platform/dri/native_display_delegate_proxy.h"
 #include "ui/ozone/platform/dri/screen_manager.h"
+#include "ui/ozone/public/ozone_gpu_test_helper.h"
 #include "ui/ozone/public/ozone_platform.h"
-#include "ui/ozone/public/ui_thread_gpu.h"
 
 #if defined(USE_XKBCOMMON)
 #include "ui/events/ozone/layout/xkb/xkb_evdev_codes.h"
@@ -38,8 +43,6 @@ namespace ui {
 
 namespace {
 
-const char kDefaultGraphicsCardPath[] = "/dev/dri/card0";
-
 // OzonePlatform for Linux DRI (Direct Rendering Infrastructure)
 //
 // This platform is Linux without any display server (no X, wayland, or
@@ -47,10 +50,11 @@ const char kDefaultGraphicsCardPath[] = "/dev/dri/card0";
 class OzonePlatformDri : public OzonePlatform {
  public:
   OzonePlatformDri()
-      : dri_(new DriWrapper(kDefaultGraphicsCardPath, true)),
-        buffer_generator_(new DriBufferGenerator(dri_.get())),
-        screen_manager_(new ScreenManager(dri_.get(), buffer_generator_.get())),
-        device_manager_(CreateDeviceManager()) {}
+      : dri_(new DriWrapper(GetFirstDisplayCardPath())),
+        buffer_generator_(new DriBufferGenerator()),
+        screen_manager_(new ScreenManager(buffer_generator_.get())),
+        device_manager_(CreateDeviceManager()),
+        window_delegate_manager_() {}
   ~OzonePlatformDri() override {}
 
   // OzonePlatform:
@@ -77,31 +81,41 @@ class OzonePlatformDri : public OzonePlatform {
       const gfx::Rect& bounds) override {
     scoped_ptr<DriWindow> platform_window(
         new DriWindow(delegate, bounds, gpu_platform_support_host_.get(),
-                      event_factory_ozone_.get(), window_manager_.get(),
-                      display_manager_.get()));
+                      event_factory_ozone_.get(), cursor_.get(),
+                      window_manager_.get(), display_manager_.get()));
     platform_window->Initialize();
     return platform_window.Pass();
   }
   scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateProxy(
+    return make_scoped_ptr(new NativeDisplayDelegateProxy(
         gpu_platform_support_host_.get(), device_manager_.get(),
         display_manager_.get()));
   }
   void InitializeUI() override {
-    dri_->Initialize();
+#if defined(OS_CHROMEOS)
+    gpu_lock_.reset(new GpuLock());
+#endif
+    if (!dri_->Initialize())
+      LOG(FATAL) << "Failed to initialize primary DRM device";
+
+    // This makes sure that simple targets that do not handle display
+    // configuration can still use the primary display.
+    ForceInitializationOfPrimaryDisplay(dri_, screen_manager_.get());
+    drm_device_manager_.reset(new DrmDeviceManager(dri_));
     display_manager_.reset(new DisplayManager());
+    window_manager_.reset(new DriWindowManager());
+    cursor_.reset(new DriCursor(window_manager_.get()));
     surface_factory_ozone_.reset(
-        new DriSurfaceFactory(dri_.get(), &window_delegate_manager_));
-    scoped_ptr<NativeDisplayDelegateDri> ndd(
-        new NativeDisplayDelegateDri(dri_.get(), screen_manager_.get()));
-    ndd->Initialize();
-    gpu_platform_support_.reset(
-        new DriGpuPlatformSupport(dri_.get(), &window_delegate_manager_,
-                                  screen_manager_.get(), ndd.Pass()));
-    gpu_platform_support_host_.reset(new DriGpuPlatformSupportHost());
+        new DriSurfaceFactory(&window_delegate_manager_));
+    scoped_ptr<NativeDisplayDelegateDri> ndd(new NativeDisplayDelegateDri(
+        screen_manager_.get(), dri_,
+        scoped_ptr<DrmDeviceGenerator>(new DrmDeviceGenerator())));
+    gpu_platform_support_.reset(new DriGpuPlatformSupport(
+        drm_device_manager_.get(), &window_delegate_manager_,
+        screen_manager_.get(), ndd.Pass()));
+    gpu_platform_support_host_.reset(
+        new DriGpuPlatformSupportHost(cursor_.get()));
     cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone);
-    window_manager_.reset(
-        new DriWindowManager(gpu_platform_support_host_.get()));
 #if defined(USE_XKBCOMMON)
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(make_scoped_ptr(
         new XkbKeyboardLayoutEngine(xkb_evdev_code_converter_)));
@@ -110,26 +124,30 @@ class OzonePlatformDri : public OzonePlatform {
         make_scoped_ptr(new StubKeyboardLayoutEngine()));
 #endif
     event_factory_ozone_.reset(new EventFactoryEvdev(
-        window_manager_->cursor(), device_manager_.get(),
+        cursor_.get(), device_manager_.get(),
         KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()));
 
-    if (!ui_thread_gpu_.Initialize())
+    if (!gpu_helper_.Initialize(base::ThreadTaskRunnerHandle::Get(),
+                                base::ThreadTaskRunnerHandle::Get()))
       LOG(FATAL) << "Failed to initialize dummy channel.";
   }
 
   void InitializeGPU() override {}
 
  private:
-  scoped_ptr<DriWrapper> dri_;
+  scoped_ptr<GpuLock> gpu_lock_;
+  scoped_refptr<DriWrapper> dri_;
+  scoped_ptr<DrmDeviceManager> drm_device_manager_;
   scoped_ptr<DriBufferGenerator> buffer_generator_;
   scoped_ptr<ScreenManager> screen_manager_;
   scoped_ptr<DeviceManager> device_manager_;
 
   scoped_ptr<DriSurfaceFactory> surface_factory_ozone_;
   scoped_ptr<BitmapCursorFactoryOzone> cursor_factory_ozone_;
+  scoped_ptr<DriWindowManager> window_manager_;
+  scoped_ptr<DriCursor> cursor_;
   scoped_ptr<EventFactoryEvdev> event_factory_ozone_;
 
-  scoped_ptr<DriWindowManager> window_manager_;
   scoped_ptr<DisplayManager> display_manager_;
 
   scoped_ptr<DriGpuPlatformSupport> gpu_platform_support_;
@@ -137,7 +155,7 @@ class OzonePlatformDri : public OzonePlatform {
 
   DriWindowDelegateManager window_delegate_manager_;
 
-  UiThreadGpu ui_thread_gpu_;
+  OzoneGpuTestHelper gpu_helper_;
 
 #if defined(USE_XKBCOMMON)
   XkbEvdevCodes xkb_evdev_code_converter_;

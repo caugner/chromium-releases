@@ -18,6 +18,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/dri/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/dri/overlay_plane.h"
 #include "ui/ozone/platform/dri/page_flip_observer.h"
@@ -86,7 +87,7 @@ class DriWrapper;
 // only a subset of connectors can be active independently, showing different
 // framebuffers. Though, in this case, it would be possible to have all
 // connectors active if some use the same CRTC to mirror the display.
-class HardwareDisplayController
+class OZONE_EXPORT HardwareDisplayController
     : public base::SupportsWeakPtr<HardwareDisplayController>,
       public PageFlipObserver {
  public:
@@ -122,7 +123,7 @@ class HardwareDisplayController
   // called again before the page flip occurrs.
   //
   // Returns true if the page flip was successfully registered, false otherwise.
-  bool SchedulePageFlip(const base::Closure& callback);
+  bool SchedulePageFlip(bool is_sync, const base::Closure& callback);
 
   // Set the hardware cursor to show the contents of |surface|.
   bool SetCursor(const scoped_refptr<ScanoutBuffer>& buffer);
@@ -133,8 +134,9 @@ class HardwareDisplayController
   bool MoveCursor(const gfx::Point& location);
 
   void AddCrtc(scoped_ptr<CrtcController> controller);
-  scoped_ptr<CrtcController> RemoveCrtc(uint32_t crtc);
-  bool HasCrtc(uint32_t crtc) const;
+  scoped_ptr<CrtcController> RemoveCrtc(const scoped_refptr<DriWrapper>& drm,
+                                        uint32_t crtc);
+  bool HasCrtc(const scoped_refptr<DriWrapper>& drm, uint32_t crtc) const;
   bool IsMirrored() const;
   bool IsDisabled() const;
   gfx::Size GetModeSize() const;
@@ -149,6 +151,8 @@ class HardwareDisplayController
   const std::vector<CrtcController*>& crtc_controllers() const {
     return crtc_controllers_.get();
   }
+
+  scoped_refptr<DriWrapper> GetAllocationDriWrapper() const;
 
  private:
   // Returns true if any of the CRTCs is waiting for a page flip.
@@ -165,10 +169,12 @@ class HardwareDisplayController
 
   struct PageFlipRequest {
     PageFlipRequest(const OverlayPlaneList& planes,
+                    bool is_sync,
                     const base::Closure& callback);
     ~PageFlipRequest();
 
     OverlayPlaneList planes;
+    bool is_sync;
     base::Closure callback;
   };
 

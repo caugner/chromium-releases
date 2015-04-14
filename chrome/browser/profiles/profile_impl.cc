@@ -10,12 +10,12 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -25,6 +25,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/trace_event/trace_event.h"
 #include "base/version.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/shortcuts_backend.h"
@@ -38,14 +39,10 @@
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
@@ -83,11 +80,6 @@
 #include "chrome/grit/chromium_strings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -159,6 +151,7 @@
 using base::Time;
 using base::TimeDelta;
 using base::UserMetricsAction;
+using bookmarks::BookmarkModel;
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
 
@@ -274,10 +267,10 @@ PrefStore* CreateExtensionPrefStore(Profile* profile,
 Profile* Profile::CreateProfile(const base::FilePath& path,
                                 Delegate* delegate,
                                 CreateMode create_mode) {
-  TRACE_EVENT_BEGIN1("browser",
-                     "Profile::CreateProfile",
-                     "profile_path",
-                     path.value().c_str());
+  TRACE_EVENT1("browser,startup",
+               "Profile::CreateProfile",
+               "profile_path",
+               path.AsUTF8Unsafe());
 
   // Get sequenced task runner for making sure that file operations of
   // this profile (defined by |path|) are executed in expected order
@@ -290,9 +283,9 @@ Profile* Profile::CreateProfile(const base::FilePath& path,
     CreateProfileDirectory(sequenced_task_runner.get(), path);
   } else if (create_mode == CREATE_MODE_SYNCHRONOUS) {
     if (!base::PathExists(path)) {
-      // TODO(tc): http://b/1094718 Bad things happen if we can't write to the
-      // profile directory.  We should eventually be able to run in this
-      // situation.
+      // TODO(rogerta): http://crbug/160553 - Bad things happen if we can't
+      // write to the profile directory.  We should eventually be able to run in
+      // this situation.
       if (!base::CreateDirectory(path))
         return NULL;
     }
@@ -419,7 +412,7 @@ ProfileImpl::ProfileImpl(
       start_time_(Time::Now()),
       delegate_(delegate),
       predictor_(NULL) {
-  TRACE_EVENT0("browser", "ProfileImpl::ctor")
+  TRACE_EVENT0("browser,startup", "ProfileImpl::ctor")
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
 
@@ -428,6 +421,9 @@ ProfileImpl::ProfileImpl(
       TimeDelta::FromMilliseconds(kCreateSessionServiceDelayMS), this,
       &ProfileImpl::EnsureSessionServiceCreated);
 #endif
+
+  set_is_guest_profile(path == ProfileManager::GetGuestProfilePath());
+  set_is_system_profile(path == ProfileManager::GetSystemProfilePath());
 
   // Determine if prefetch is enabled for this profile.
   // If not profile_manager is present, it means we are in a unittest.
@@ -462,7 +458,7 @@ ProfileImpl::ProfileImpl(
 #endif
 #endif
   profile_policy_connector_ =
-      policy::ProfilePolicyConnectorFactory::CreateForProfile(
+      policy::ProfilePolicyConnectorFactory::CreateForBrowserContext(
           this, force_immediate_policy_load);
 
   DCHECK(create_mode == CREATE_MODE_ASYNCHRONOUS ||
@@ -639,67 +635,6 @@ void ProfileImpl::DoFinalInit() {
     session_cookie_mode = content::CookieStoreConfig::RESTORED_SESSION_COOKIES;
   }
 
-  ChromeNetLog* const net_log = g_browser_process->io_thread()->net_log();
-
-  base::Callback<void(bool)> data_reduction_proxy_unavailable;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-      data_reduction_proxy_params;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator> configurator;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-      data_reduction_proxy_statistics_prefs;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore> event_store;
-  DataReductionProxyChromeSettings* data_reduction_proxy_chrome_settings =
-      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(this);
-  data_reduction_proxy_params =
-      data_reduction_proxy_chrome_settings->params()->Clone();
-  data_reduction_proxy_unavailable =
-      base::Bind(
-          &data_reduction_proxy::DataReductionProxySettings::SetUnreachable,
-          base::Unretained(data_reduction_proxy_chrome_settings));
-  // The event_store is used by DataReductionProxyChromeSettings, configurator,
-  // and ProfileIOData. Ownership is passed to the latter via
-  // ProfileIOData::Handle, which is only destroyed after
-  // BrowserContextKeyedServices, including DataReductionProxyChromeSettings
-  event_store.reset(
-      new data_reduction_proxy::DataReductionProxyEventStore(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)));
-  // The configurator is used by DataReductionProxyChromeSettings and
-  // ProfileIOData. Ownership is passed to the latter via ProfileIOData::Handle,
-  // which is only destroyed after BrowserContextKeyedServices,
-  // including DataReductionProxyChromeSettings.
-  configurator.reset(
-      new data_reduction_proxy::DataReductionProxyConfigurator(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-          net_log,
-          event_store.get()));
-  // Retain a raw pointer to use for initialization of data reduction proxy
-  // settings after ownership is passed
-  data_reduction_proxy::DataReductionProxyEventStore*
-      data_reduction_proxy_event_store = event_store.get();
-  // Retain a raw pointer to use for initialization of data reduction proxy
-  // settings after ownership is passed.
-  data_reduction_proxy::DataReductionProxyConfigurator*
-      data_reduction_proxy_configurator = configurator.get();
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  // On mobile we write data reduction proxy prefs directly to the pref service.
-  // On desktop we store data reduction proxy prefs in memory, writing to disk
-  // every 60 minutes and on termination. Shutdown hooks must be added for
-  // Android and iOS in order for non-zero delays to be supported.
-  // (http://crbug.com/408264)
-  base::TimeDelta commit_delay = base::TimeDelta();
-#else
-  base::TimeDelta commit_delay = base::TimeDelta::FromMinutes(60);
-#endif
-  // TODO(bengr): Remove this in M-43.
-  data_reduction_proxy::MigrateStatisticsPrefs(g_browser_process->local_state(),
-                                               prefs_.get());
-  data_reduction_proxy_statistics_prefs =
-      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>(
-          new data_reduction_proxy::DataReductionProxyStatisticsPrefs(
-              prefs_.get(),
-              base::MessageLoopProxy::current(),
-              commit_delay));
-
   // Make sure we initialize the ProfileIOData after everything else has been
   // initialized that we might be reading from the IO thread.
 
@@ -707,20 +642,7 @@ void ProfileImpl::DoFinalInit() {
                 cache_max_size, media_cache_path, media_cache_max_size,
                 extensions_cookie_path, GetPath(), infinite_cache_path,
                 predictor_, session_cookie_mode, GetSpecialStoragePolicy(),
-                CreateDomainReliabilityMonitor(local_state),
-                data_reduction_proxy_unavailable,
-                configurator.Pass(),
-                data_reduction_proxy_params.Pass(),
-                data_reduction_proxy_statistics_prefs->GetWeakPtr(),
-                event_store.Pass());
-  data_reduction_proxy_chrome_settings->InitDataReductionProxySettings(
-      data_reduction_proxy_configurator,
-      prefs_.get(),
-      g_browser_process->local_state(),
-      data_reduction_proxy_statistics_prefs.Pass(),
-      GetRequestContext(),
-      net_log,
-      data_reduction_proxy_event_store);
+                CreateDomainReliabilityMonitor(local_state));
 
 #if defined(ENABLE_PLUGINS)
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
@@ -744,12 +666,6 @@ void ProfileImpl::DoFinalInit() {
   // The DomDistillerViewerSource is not a normal WebUI so it must be registered
   // as a URLDataSource early.
   RegisterDomDistillerViewerSource(this);
-
-  // Creation has been finished.
-  TRACE_EVENT_END1("browser",
-                   "Profile::CreateProfile",
-                   "profile_path",
-                   path_.value().c_str());
 
 #if defined(OS_CHROMEOS)
   if (chromeos::UserSessionManager::GetInstance()
@@ -822,9 +738,6 @@ ProfileImpl::~ProfileImpl() {
   BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(
       this);
 
-  if (top_sites_.get())
-    top_sites_->Shutdown();
-
   if (pref_proxy_config_tracker_)
     pref_proxy_config_tracker_->DetachFromPrefService();
 
@@ -836,9 +749,9 @@ ProfileImpl::~ProfileImpl() {
     SetExitType(EXIT_NORMAL);
 }
 
-std::string ProfileImpl::GetProfileName() {
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(this);
+std::string ProfileImpl::GetProfileUserName() const {
+  const SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfileIfExists(this);
   if (signin_manager)
     return signin_manager->GetAuthenticatedUsername();
 
@@ -930,7 +843,8 @@ ExtensionSpecialStoragePolicy*
 }
 
 void ProfileImpl::OnPrefsLoaded(bool success) {
-  TRACE_EVENT0("browser", "ProfileImpl::OnPrefsLoaded")
+  TRACE_EVENT0("browser", "ProfileImpl::OnPrefsLoaded");
+  SCOPED_UMA_HISTOGRAM_TIMER("Profile.OnPrefsLoadedTime");
   if (!success) {
     if (delegate_)
       delegate_->OnProfileCreated(this, false, false);
@@ -1021,6 +935,11 @@ Profile::ExitType ProfileImpl::GetLastSessionExitType() {
 }
 
 PrefService* ProfileImpl::GetPrefs() {
+  return const_cast<PrefService*>(
+      static_cast<const ProfileImpl*>(this)->GetPrefs());
+}
+
+const PrefService* ProfileImpl::GetPrefs() const {
   DCHECK(prefs_);  // Should explicitly be initialized.
   return prefs_.get();
 }
@@ -1165,18 +1084,6 @@ bool ProfileImpl::IsSameProfile(Profile* profile) {
 
 Time ProfileImpl::GetStartTime() const {
   return start_time_;
-}
-
-history::TopSites* ProfileImpl::GetTopSites() {
-  if (!top_sites_.get()) {
-    top_sites_ = history::TopSites::Create(
-        this, GetPath().Append(chrome::kTopSitesFilename));
-  }
-  return top_sites_.get();
-}
-
-history::TopSites* ProfileImpl::GetTopSitesWithoutCreating() {
-  return top_sites_.get();
 }
 
 #if defined(ENABLE_SESSION_SERVICE)

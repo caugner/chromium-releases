@@ -49,6 +49,8 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
         'files': [
           '../testing/xvfb.py',
@@ -93,6 +95,17 @@
         ],
       },
     }],
+    ['OS=="mac" and asan==1 and fastbuild==0', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework.dSYM/',
+          '<(PRODUCT_DIR)/exif.so.dSYM/',
+          '<(PRODUCT_DIR)/ffmpegsumo.so.dSYM/',
+          '<(PRODUCT_DIR)/osmesa.so.dSYM/',
+          '<(PRODUCT_DIR)/unit_tests.dSYM/',
+        ],
+      },
+    }],
     ['OS=="mac" or OS=="win"', {
       'variables': {
         'command': [
@@ -102,6 +115,8 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
       },
     }],

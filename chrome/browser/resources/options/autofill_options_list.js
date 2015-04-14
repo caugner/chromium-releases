@@ -210,17 +210,23 @@ cr.define('options.autofillOptions', function() {
         if (this.isPlaceholder) {
           // It is important that updateIndex is done before validateAndSave.
           // Otherwise we can not be sure about AddRow index.
-          this.list.dataModel.updateIndex(i);
+          this.list.ignoreChangeEvents(function() {
+            this.list.dataModel.updateIndex(i);
+          }.bind(this));
           this.list.validateAndSave(i, 0, value);
         } else {
           this.list.validateAndSave(i, 1, value);
         }
       } else {
         // Reject empty values and duplicates.
-        if (!this.isPlaceholder)
-          this.list.dataModel.splice(i, 1);
-        else
+        if (!this.isPlaceholder) {
+          this.list.ignoreChangeEvents(function() {
+            this.list.dataModel.splice(i, 1);
+          }.bind(this));
+          this.list.selectIndexWithoutFocusing(i);
+        } else {
           this.clearValue_();
+        }
       }
     },
   };
@@ -229,7 +235,7 @@ cr.define('options.autofillOptions', function() {
    * Creates a new name value list item.
    * @param {options.autofillOptions.AutofillNameValuesList} list The parent
    *     list of this item.
-   * @param {Array.<string>} entry An array of [first, middle, last] names.
+   * @param {Array<string>} entry An array of [first, middle, last] names.
    * @constructor
    * @extends {options.autofillOptions.ValuesListItem}
    */
@@ -444,7 +450,10 @@ cr.define('options.autofillOptions', function() {
      * @param {string} value The value of the item to insert.
      */
     validateAndSave: function(index, remove, value) {
-      this.dataModel.splice(index, remove, value);
+      this.ignoreChangeEvents(function() {
+        this.dataModel.splice(index, remove, value);
+      }.bind(this));
+      this.selectIndexWithoutFocusing(index);
     },
   };
 
@@ -460,7 +469,7 @@ cr.define('options.autofillOptions', function() {
 
     /**
      * @override
-     * @param {Array.<string>} entry
+     * @param {Array<string>} entry
      */
     createItem: function(entry) {
       return new NameListItem(this, entry);
@@ -499,7 +508,7 @@ cr.define('options.autofillOptions', function() {
 
     /**
      * Pending Promise resolver functions.
-     * @type {Array.<!Function>}
+     * @type {Array<!Function>}
      * @private
      */
     validationPromiseResolvers_: [],
@@ -515,8 +524,6 @@ cr.define('options.autofillOptions', function() {
         while (this.validationPromiseResolvers_.length) {
           this.validationPromiseResolvers_.pop()();
         }
-        // List has been repopulated. Focus the placeholder.
-        this.focusPlaceholder();
       }
     },
 

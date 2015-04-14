@@ -7,9 +7,11 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
+#include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_assets.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
+#include "android_webview/native/aw_message_port_service_impl.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
 #include "android_webview/native/aw_web_contents_view_delegate.h"
 #include "android_webview/native/aw_web_preferences_populater_impl.h"
@@ -73,16 +75,24 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // File system API not supported (requires some new API; internal bug 6930981)
   cl->AppendSwitch(switches::kDisableFileSystem);
 
+  // Web Notification API and the Push API are not supported (crbug.com/434712)
+  cl->AppendSwitch(switches::kDisableNotifications);
+
 #if defined(VIDEO_HOLE)
-  // Support EME/L1 with hole-punching.
+  // Support EME with hole-punching. For example, Widevine L1.
   cl->AppendSwitch(switches::kMediaDrmEnableNonCompositing);
+  cl->AppendSwitch(switches::kDisableEncryptedMedia);
 #endif
 
   // WebRTC hardware decoding is not supported, internal bug 15075307
   cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
+  cl->AppendSwitch(switches::kDisableAcceleratedVideoDecode);
 
   // This is needed for sharing textures across the different GL threads.
   cl->AppendSwitch(switches::kEnableThreadedTextureMailboxes);
+
+  // WebView does not yet support screen orientation locking.
+  cl->AppendSwitch(switches::kDisableScreenOrientationLock);
 
   // This is needed to be able to mmap the V8 snapshot and ICU data file
   // directly from the WebView .apk.
@@ -91,10 +101,20 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // In multi-process mode this code would live in
   // AwContentBrowserClient::GetAdditionalMappedFilesForChildProcess.
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#ifdef __LP64__
+  const char kNativesFileName[] = "natives_blob_64.bin";
+  const char kSnapshotFileName[] = "snapshot_blob_64.bin";
+#else
+  const char kNativesFileName[] = "natives_blob_32.bin";
+  const char kSnapshotFileName[] = "snapshot_blob_32.bin";
+#endif // __LP64__
+  // TODO(gsennton) we should use
+  // gin::IsolateHolder::kNativesFileName/kSnapshotFileName
+  // here when those files have arch specific names http://crbug.com/455699
   CHECK(AwAssets::RegisterAssetWithGlobalDescriptors(
-      kV8NativesDataDescriptor, gin::IsolateHolder::kNativesFileName));
+      kV8NativesDataDescriptor, kNativesFileName));
   CHECK(AwAssets::RegisterAssetWithGlobalDescriptors(
-      kV8SnapshotDataDescriptor, gin::IsolateHolder::kSnapshotFileName));
+      kV8SnapshotDataDescriptor, kSnapshotFileName));
 #endif
   // TODO(mkosiba): make this CHECK when the android_webview_build uses an asset
   // from the .apk too.
@@ -112,6 +132,8 @@ void AwMainDelegate::PreSandboxStartup() {
   // cpu_brand info.
   base::CPU cpu_info;
 #endif
+
+  crash_reporter::EnableMicrodumpCrashReporter();
 }
 
 void AwMainDelegate::SandboxInitialized(const std::string& process_type) {
@@ -169,6 +191,10 @@ content::WebContentsViewDelegate* AwMainDelegate::CreateViewDelegate(
 
 AwWebPreferencesPopulater* AwMainDelegate::CreateWebPreferencesPopulater() {
   return new AwWebPreferencesPopulaterImpl();
+}
+
+AwMessagePortService* AwMainDelegate::CreateAwMessagePortService() {
+  return new AwMessagePortServiceImpl();
 }
 
 #if defined(VIDEO_HOLE)

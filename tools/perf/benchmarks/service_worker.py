@@ -174,14 +174,20 @@ class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
         browser_process, 'IOThread', filter_text , results)
 
 
+# TODO(simonhatch): Temporarily disabling (http://crbug.com/433943)
+@benchmark.Disabled
 class ServiceWorkerPerfTest(benchmark.Benchmark):
   """Performance test on public applications using ServiceWorker"""
   test = _ServiceWorkerMeasurement
   page_set = page_sets.ServiceWorkerPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'service_worker.service_worker'
+
 
 # Disabled due to redness on the tree. crbug.com/442752
-@benchmark.Disabled('reference', 'xp')
+@benchmark.Disabled
 class ServiceWorkerMicroBenchmarkPerfTest(benchmark.Benchmark):
   """This test measures the performance of pages using ServiceWorker.
 
@@ -193,3 +199,7 @@ class ServiceWorkerMicroBenchmarkPerfTest(benchmark.Benchmark):
   """
   test = _ServiceWorkerMicroBenchmarkMeasurement
   page_set = page_sets.ServiceWorkerMicroBenchmarkPageSet
+  @classmethod
+  def Name(cls):
+    return 'service_worker.service_worker_micro_benchmark'
+

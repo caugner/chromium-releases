@@ -62,6 +62,7 @@
 #include "ui/views/widget/widget.h"
 
 using base::UserMetricsAction;
+using bookmarks::BookmarkModel;
 using content::WebContents;
 using ui::MenuModel;
 using views::CustomButton;
@@ -639,11 +640,16 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
     WebContents* selected_tab =
         menu()->browser_->tab_strip_model()->GetActiveWebContents();
     int zoom = 100;
-    if (selected_tab)
-      zoom = ui_zoom::ZoomController::FromWebContents(selected_tab)
-                 ->GetZoomPercent();
-    increment_button_->SetEnabled(zoom < selected_tab->GetMaximumZoomPercent());
-    decrement_button_->SetEnabled(zoom > selected_tab->GetMinimumZoomPercent());
+    if (selected_tab) {
+      auto zoom_controller =
+          ui_zoom::ZoomController::FromWebContents(selected_tab);
+      if (zoom_controller)
+        zoom = zoom_controller->GetZoomPercent();
+      increment_button_->SetEnabled(zoom <
+                                    selected_tab->GetMaximumZoomPercent());
+      decrement_button_->SetEnabled(zoom >
+                                    selected_tab->GetMinimumZoomPercent());
+    }
     zoom_label_->SetText(
         l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, zoom));
 
@@ -781,12 +787,13 @@ class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
 // WrenchMenu ------------------------------------------------------------------
 
 WrenchMenu::WrenchMenu(Browser* browser, int run_flags)
-    : root_(NULL),
+    : root_(nullptr),
       browser_(browser),
-      selected_menu_model_(NULL),
+      selected_menu_model_(nullptr),
       selected_index_(0),
-      bookmark_menu_(NULL),
-      feedback_menu_item_(NULL),
+      bookmark_menu_(nullptr),
+      feedback_menu_item_(nullptr),
+      screenshot_menu_item_(nullptr),
       run_flags_(run_flags) {
   registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
                  content::Source<Profile>(browser_->profile()));
@@ -998,7 +1005,7 @@ bool WrenchMenu::IsCommandEnabled(int command_id) const {
 
 void WrenchMenu::ExecuteCommand(int command_id, int mouse_event_flags) {
   if (IsBookmarkCommand(command_id)) {
-    UMA_HISTOGRAM_TIMES("WrenchMenu.TimeToAction.BookmarkOpen",
+    UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.OpenBookmark",
                         menu_opened_timer_.Elapsed());
     UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction",
                               MENU_ACTION_BOOKMARK_OPEN, LIMIT_MENU_ACTION);
@@ -1047,10 +1054,11 @@ void WrenchMenu::WillShowMenu(MenuItemView* menu) {
 
 void WrenchMenu::WillHideMenu(MenuItemView* menu) {
   // Turns off the fade out animation of the wrench menus if
-  // |feedback_menu_item_| is selected.  This excludes the wrench menu itself
-  // from the snapshot in the feedback UI.
-  if (menu->HasSubmenu() && feedback_menu_item_ &&
-      feedback_menu_item_->IsSelected()) {
+  // |feedback_menu_item_| or |screenshot_menu_item_| is selected.  This
+  // excludes the wrench menu itself from the screenshot.
+  if (menu->HasSubmenu() &&
+      ((feedback_menu_item_ && feedback_menu_item_->IsSelected()) ||
+       (screenshot_menu_item_ && screenshot_menu_item_->IsSelected()))) {
     // It's okay to just turn off the animation and no to take care the
     // animation back because the menu widget will be recreated next time
     // it's opened. See ToolbarView::RunMenu() and Init() of this class.
@@ -1152,6 +1160,13 @@ void WrenchMenu::PopulateMenu(MenuItemView* parent,
       case IDC_FEEDBACK:
         DCHECK(!feedback_menu_item_);
         feedback_menu_item_ = item;
+        break;
+#endif
+
+#if defined(OS_CHROMEOS)
+      case IDC_TAKE_SCREENSHOT:
+        DCHECK(!screenshot_menu_item_);
+        screenshot_menu_item_ = item;
         break;
 #endif
 

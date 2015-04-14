@@ -129,6 +129,8 @@ class BrowserProcessImpl : public BrowserProcess,
   CRLSetFetcher* crl_set_fetcher() override;
   component_updater::PnaclComponentInstaller* pnacl_component_installer()
       override;
+  component_updater::SupervisedUserWhitelistInstaller*
+  supervised_user_whitelist_installer() override;
   MediaFileSystemRegistry* media_file_system_registry() override;
   bool created_local_state() const override;
 #if defined(ENABLE_WEBRTC)
@@ -258,7 +260,7 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
 
-  scoped_refptr<PromoResourceService> promo_resource_service_;
+  scoped_ptr<PromoResourceService> promo_resource_service_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;
@@ -277,12 +279,15 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;
 
 #if !defined(DISABLE_NACL)
-  scoped_ptr<component_updater::PnaclComponentInstaller>
+  scoped_refptr<component_updater::PnaclComponentInstaller>
       pnacl_component_installer_;
 #endif
 
+  scoped_ptr<component_updater::SupervisedUserWhitelistInstaller>
+      supervised_user_whitelist_installer_;
+
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-  scoped_refptr<PluginsResourceService> plugins_resource_service_;
+  scoped_ptr<PluginsResourceService> plugins_resource_service_;
 #endif
 
   scoped_ptr<BrowserProcessPlatformPart> platform_part_;

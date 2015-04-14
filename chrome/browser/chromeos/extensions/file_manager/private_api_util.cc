@@ -174,7 +174,7 @@ void VolumeInfoToVolumeMetadata(
 
   // TODO(kinaba): fill appropriate information once multi-profile support is
   // implemented.
-  volume_metadata->profile.display_name = profile->GetProfileName();
+  volume_metadata->profile.display_name = profile->GetProfileUserName();
   volume_metadata->profile.is_current_profile = true;
 
   if (!volume_info.source_path.empty()) {
@@ -274,6 +274,18 @@ void VolumeInfoToVolumeMetadata(
     case chromeos::disks::MOUNT_CONDITION_UNSUPPORTED_FILESYSTEM:
       volume_metadata->mount_condition =
           file_manager_private::MOUNT_CONDITION_UNSUPPORTED;
+      break;
+  }
+
+  // If the context is known, then pass it.
+  switch (volume_info.mount_context) {
+    case MOUNT_CONTEXT_USER:
+      volume_metadata->mount_context = file_manager_private::MOUNT_CONTEXT_USER;
+      break;
+    case MOUNT_CONTEXT_AUTO:
+      volume_metadata->mount_context = file_manager_private::MOUNT_CONTEXT_AUTO;
+      break;
+    case MOUNT_CONTEXT_UNKNOWN:
       break;
   }
 }

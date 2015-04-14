@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "content/common/content_export.h"
@@ -27,12 +28,12 @@ struct ANativeWindow;
 namespace cc {
 class Layer;
 class LayerTreeHost;
+class OnscreenDisplayClient;
 class SurfaceIdAllocator;
 }
 
 namespace content {
 class CompositorClient;
-class OnscreenDisplayClient;
 
 // -----------------------------------------------------------------------------
 // Browser-side compositor that manages a tree of content and UI layers.
@@ -44,7 +45,7 @@ class CONTENT_EXPORT CompositorImpl
       public ui::WindowAndroidCompositor {
  public:
   CompositorImpl(CompositorClient* client, gfx::NativeWindow root_window);
-  virtual ~CompositorImpl();
+  ~CompositorImpl() override;
 
   static bool IsInitialized();
 
@@ -52,52 +53,52 @@ class CONTENT_EXPORT CompositorImpl
 
  private:
   // Compositor implementation.
-  virtual void SetRootLayer(scoped_refptr<cc::Layer> root) override;
-  virtual void SetSurface(jobject surface) override;
-  virtual void SetVisible(bool visible) override;
-  virtual void setDeviceScaleFactor(float factor) override;
-  virtual void SetWindowBounds(const gfx::Size& size) override;
-  virtual void SetHasTransparentBackground(bool flag) override;
-  virtual void SetNeedsComposite() override;
-  virtual ui::UIResourceProvider& GetUIResourceProvider() override;
-  virtual ui::ResourceManager& GetResourceManager() override;
+  void SetRootLayer(scoped_refptr<cc::Layer> root) override;
+  void SetSurface(jobject surface) override;
+  void SetVisible(bool visible) override;
+  void setDeviceScaleFactor(float factor) override;
+  void SetWindowBounds(const gfx::Size& size) override;
+  void SetHasTransparentBackground(bool flag) override;
+  void SetNeedsComposite() override;
+  ui::UIResourceProvider& GetUIResourceProvider() override;
+  ui::ResourceManager& GetResourceManager() override;
 
   // LayerTreeHostClient implementation.
-  virtual void WillBeginMainFrame(int frame_id) override {}
-  virtual void DidBeginMainFrame() override {}
-  virtual void BeginMainFrame(const cc::BeginFrameArgs& args) override {}
-  virtual void Layout() override;
-  virtual void ApplyViewportDeltas(
-      const gfx::Vector2d& inner_delta,
-      const gfx::Vector2d& outer_delta,
-      const gfx::Vector2dF& elastic_overscroll_delta,
-      float page_scale,
-      float top_controls_delta) override {}
-  virtual void ApplyViewportDeltas(
-      const gfx::Vector2d& scroll_delta,
-      float page_scale,
-      float top_controls_delta) override {}
-  virtual void RequestNewOutputSurface() override;
-  virtual void DidInitializeOutputSurface() override;
-  virtual void DidFailToInitializeOutputSurface() override;
-  virtual void WillCommit() override {}
-  virtual void DidCommit() override;
-  virtual void DidCommitAndDrawFrame() override {}
-  virtual void DidCompleteSwapBuffers() override;
+  void WillBeginMainFrame() override {}
+  void DidBeginMainFrame() override {}
+  void BeginMainFrame(const cc::BeginFrameArgs& args) override {}
+  void BeginMainFrameNotExpectedSoon() override {}
+  void Layout() override;
+  void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
+                           const gfx::Vector2dF& outer_delta,
+                           const gfx::Vector2dF& elastic_overscroll_delta,
+                           float page_scale,
+                           float top_controls_delta) override {}
+  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                           float page_scale,
+                           float top_controls_delta) override {}
+  void RequestNewOutputSurface() override;
+  void DidInitializeOutputSurface() override;
+  void DidFailToInitializeOutputSurface() override;
+  void WillCommit() override {}
+  void DidCommit() override;
+  void DidCommitAndDrawFrame() override {}
+  void DidCompleteSwapBuffers() override;
+  void DidCompletePageScaleAnimation() override {}
 
   // LayerTreeHostSingleThreadClient implementation.
-  virtual void ScheduleComposite() override;
-  virtual void ScheduleAnimation() override;
-  virtual void DidPostSwapBuffers() override;
-  virtual void DidAbortSwapBuffers() override;
+  void ScheduleComposite() override;
+  void ScheduleAnimation() override;
+  void DidPostSwapBuffers() override;
+  void DidAbortSwapBuffers() override;
 
   // WindowAndroidCompositor implementation.
-  virtual void AttachLayerForReadback(scoped_refptr<cc::Layer> layer) override;
-  virtual void RequestCopyOfOutputOnRootLayer(
+  void AttachLayerForReadback(scoped_refptr<cc::Layer> layer) override;
+  void RequestCopyOfOutputOnRootLayer(
       scoped_ptr<cc::CopyOutputRequest> request) override;
-  virtual void OnVSync(base::TimeTicks frame_time,
-                       base::TimeDelta vsync_period) override;
-  virtual void SetNeedsAnimate() override;
+  void OnVSync(base::TimeTicks frame_time,
+               base::TimeDelta vsync_period) override;
+  void SetNeedsAnimate() override;
 
   void SetWindowSurface(ANativeWindow* window);
 
@@ -132,6 +133,9 @@ class CONTENT_EXPORT CompositorImpl
   }
   void CreateLayerTreeHost();
 
+  void OnGpuChannelEstablished();
+  void OnGpuChannelTimeout();
+
   // root_layer_ is the persistent internal root layer, while subroot_layer_
   // is the one attached by the compositor client.
   scoped_refptr<cc::Layer> root_layer_;
@@ -141,7 +145,7 @@ class CONTENT_EXPORT CompositorImpl
   ui::UIResourceProvider ui_resource_provider_;
   ui::ResourceManagerImpl resource_manager_;
 
-  scoped_ptr<OnscreenDisplayClient> display_client_;
+  scoped_ptr<cc::OnscreenDisplayClient> display_client_;
   scoped_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
 
   gfx::Size size_;
@@ -187,10 +191,13 @@ class CONTENT_EXPORT CompositorImpl
   base::TimeDelta vsync_period_;
   base::TimeTicks last_vsync_;
 
-  // If set, a pending task to request or create a new OutputSurface for the
-  // current host. Cancelled when |host_| gets destroyed, so we don't call
-  // into the new LayerTreeHost with an old LTH's request.
-  scoped_ptr<base::CancelableClosure> output_surface_task_for_host_;
+  base::OneShotTimer<CompositorImpl> establish_gpu_channel_timeout_;
+
+  // Whether there is an OutputSurface request pending from the current
+  // |host_|. Becomes |true| if RequestNewOutputSurface is called, and |false|
+  // if |host_| is deleted or we succeed in creating *and* initializing an
+  // OutputSurface (which is essentially the contract with cc).
+  bool output_surface_request_pending_;
 
   base::WeakPtrFactory<CompositorImpl> weak_factory_;
 

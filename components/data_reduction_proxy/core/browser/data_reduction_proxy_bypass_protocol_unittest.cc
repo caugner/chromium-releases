@@ -8,16 +8,15 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
@@ -26,6 +25,7 @@
 #include "net/base/network_delegate.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_transaction_test_util.h"
+#include "net/proxy/proxy_server.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -41,17 +41,16 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-using net::HttpResponseHeaders;
 using net::HostPortPair;
+using net::HttpResponseHeaders;
 using net::MockRead;
 using net::MockWrite;
 using net::ProxyRetryInfoMap;
 using net::ProxyService;
 using net::StaticSocketDataProvider;
 using net::TestDelegate;
-using net::URLRequest;
 using net::TestURLRequestContext;
-
+using net::URLRequest;
 
 namespace data_reduction_proxy {
 
@@ -79,29 +78,30 @@ class BadEntropyProvider : public base::FieldTrial::EntropyProvider {
 class DataReductionProxyProtocolTest : public testing::Test {
  public:
   DataReductionProxyProtocolTest() : http_user_agent_settings_("", "") {
-    proxy_params_.reset(
-        new TestDataReductionProxyParams(
-            DataReductionProxyParams::kAllowed |
-            DataReductionProxyParams::kFallbackAllowed |
-            DataReductionProxyParams::kPromoAllowed,
-            TestDataReductionProxyParams::HAS_EVERYTHING &
-            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
     simple_interceptor_.reset(new SimpleURLRequestInterceptor());
     net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
         "http", "www.google.com", simple_interceptor_.Pass());
   }
+
   ~DataReductionProxyProtocolTest() override {
     // URLRequestJobs may post clean-up tasks on destruction.
     net::URLRequestFilter::GetInstance()->RemoveHostnameHandler(
             "http", "www.google.com");
-    base::RunLoop().RunUntilIdle();
+    test_context_->RunUntilIdle();
   }
 
   void SetUp() override {
+    test_context_.reset(new DataReductionProxyTestContext(
+        DataReductionProxyParams::kAllowed |
+            DataReductionProxyParams::kFallbackAllowed |
+            DataReductionProxyParams::kPromoAllowed,
+        TestDataReductionProxyParams::HAS_EVERYTHING &
+            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN,
+        DataReductionProxyTestContext::DEFAULT_TEST_CONTEXT_OPTIONS));
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
     net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
-    base::RunLoop().RunUntilIdle();
+    test_context_->RunUntilIdle();
   }
 
   // Sets up the |TestURLRequestContext| with the provided |ProxyService|.
@@ -118,13 +118,14 @@ class DataReductionProxyProtocolTest : public testing::Test {
     // to requests.
     context_->set_http_user_agent_settings(&http_user_agent_settings_);
     usage_stats_.reset(new DataReductionProxyUsageStats(
-        proxy_params_.get(), base::MessageLoopProxy::current()));
+        test_context_->config()->params(),
+        test_context_->data_reduction_proxy_service()->GetWeakPtr(),
+        test_context_->task_runner()));
 
-    event_store_.reset(
-        new DataReductionProxyEventStore(base::MessageLoopProxy::current()));
     DataReductionProxyInterceptor* interceptor =
-        new DataReductionProxyInterceptor(
-            proxy_params_.get(), usage_stats_.get(), event_store_.get());
+        new DataReductionProxyInterceptor(test_context_->config()->params(),
+                                          usage_stats_.get(),
+                                          test_context_->event_store());
     scoped_ptr<net::URLRequestJobFactoryImpl> job_factory_impl(
         new net::URLRequestJobFactoryImpl());
     job_factory_.reset(new net::URLRequestInterceptingJobFactory(
@@ -277,11 +278,11 @@ class DataReductionProxyProtocolTest : public testing::Test {
 
   // Returns the key to the |ProxyRetryInfoMap|.
   std::string GetProxyKey(std::string proxy) {
-    GURL gurl(proxy);
-    std::string host_port = HostPortPair::FromURL(GURL(proxy)).ToString();
-    if (gurl.SchemeIs("https"))
-      return "https://" + host_port;
-    return host_port;
+    net::ProxyServer proxy_server = net::ProxyServer::FromURI(
+        proxy, net::ProxyServer::SCHEME_HTTP);
+    if (!proxy_server.is_valid())
+      return HostPortPair::FromURL(GURL(std::string())).ToString();
+    return proxy_server.host_port_pair().ToString();
   }
 
   // Checks that |expected_num_bad_proxies| proxies are on the proxy retry list.
@@ -322,16 +323,14 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoopForIO loop_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   scoped_ptr<net::URLRequestInterceptor> simple_interceptor_;
   net::MockClientSocketFactory mock_socket_factory_;
   scoped_ptr<net::TestNetworkDelegate> network_delegate_;
   scoped_ptr<ProxyService> proxy_service_;
-  scoped_ptr<TestDataReductionProxyParams> proxy_params_;
+  scoped_ptr<DataReductionProxyTestContext> test_context_;
   scoped_ptr<DataReductionProxyUsageStats> usage_stats_;
-  scoped_ptr<DataReductionProxyEventStore> event_store_;
   net::StaticHttpUserAgentSettings http_user_agent_settings_;
 
   scoped_ptr<net::URLRequestInterceptingJobFactory> job_factory_;
@@ -404,19 +403,6 @@ TEST_F(DataReductionProxyProtocolTest, BypassLogic) {
       true,
       -1,
       BYPASS_EVENT_TYPE_MAX,
-    },
-    // Valid data reduction proxy response with older, but still valid via
-    // header.
-    { "GET",
-      "HTTP/1.1 200 OK\r\n"
-      "Server: proxy\r\n"
-      "Via: 1.1 Chrome Compression Proxy\r\n\r\n",
-      false,
-      false,
-      0u,
-      true,
-      -1,
-      BYPASS_EVENT_TYPE_MAX
     },
     // Valid data reduction proxy response with chained via header,
     // no bypass message.
@@ -758,13 +744,16 @@ TEST_F(DataReductionProxyProtocolTest, BypassLogic) {
       BYPASS_EVENT_TYPE_SHORT
     },
   };
-  std::string primary = proxy_params_->DefaultOrigin();
-  std::string fallback = proxy_params_->DefaultFallbackOrigin();
+  std::string primary = test_context_->config()->test_params()->DefaultOrigin();
+  std::string fallback =
+      test_context_->config()->test_params()->DefaultFallbackOrigin();
   for (size_t i = 0; i < arraysize(tests); ++i) {
     ConfigureTestDependencies(ProxyService::CreateFixedFromPacResult(
-        "PROXY " +
-        HostPortPair::FromURL(GURL(primary)).ToString() + "; PROXY " +
-        HostPortPair::FromURL(GURL(fallback)).ToString() + "; DIRECT"));
+        net::ProxyServer::FromURI(
+            primary, net::ProxyServer::SCHEME_HTTP).ToPacString() + "; " +
+            net::ProxyServer::FromURI(
+                fallback,
+                net::ProxyServer::SCHEME_HTTP).ToPacString() + "; DIRECT"));
     TestProxyFallback(tests[i].method,
                       tests[i].first_response,
                       tests[i].expected_retry,
@@ -781,16 +770,20 @@ TEST_F(DataReductionProxyProtocolTest, BypassLogic) {
 
 TEST_F(DataReductionProxyProtocolTest,
        RelaxedMissingViaHeaderOtherBypassLogic) {
-  std::string primary = proxy_params_->DefaultOrigin();
-  std::string fallback = proxy_params_->DefaultFallbackOrigin();
+  std::string primary = test_context_->config()->test_params()->DefaultOrigin();
+  std::string fallback =
+      test_context_->config()->test_params()->DefaultFallbackOrigin();
   base::FieldTrialList field_trial_list(new BadEntropyProvider());
   base::FieldTrialList::CreateFieldTrial(
       "DataReductionProxyRemoveMissingViaHeaderOtherBypass", "Relaxed");
 
   ConfigureTestDependencies(ProxyService::CreateFixedFromPacResult(
-      "PROXY " +
-      HostPortPair::FromURL(GURL(primary)).ToString() + "; PROXY " +
-      HostPortPair::FromURL(GURL(fallback)).ToString() + "; DIRECT"));
+      net::ProxyServer::FromURI(
+          primary, net::ProxyServer::SCHEME_HTTP).ToPacString() + "; " +
+          net::ProxyServer::FromURI(
+              fallback,
+              net::ProxyServer::SCHEME_HTTP).ToPacString() +
+              "; DIRECT"));
 
   // This response with the DRP via header should be accepted without causing a
   // bypass.
@@ -819,7 +812,7 @@ TEST_F(DataReductionProxyProtocolTest,
   // The first response after a network change is missing the DRP via header, so
   // this should cause a bypass.
   net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
-  base::RunLoop().RunUntilIdle();
+  test_context_->RunUntilIdle();
   TestProxyFallback("GET",
                     "HTTP/1.1 200 OK\r\n\r\n",
                     true /* expected_retry */,

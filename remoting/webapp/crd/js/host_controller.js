@@ -12,13 +12,12 @@ remoting.HostController = function() {
   this.hostDaemonFacade_ = this.createDaemonFacade_();
 };
 
-// Note that the values in the enums below are copied from
-// daemon_controller.h and must be kept in sync.
+// The values in the enums below are duplicated in daemon_controller.h except
+// for NOT_INSTALLED.
 /** @enum {number} */
 remoting.HostController.State = {
-  NOT_IMPLEMENTED: -1,
-  NOT_INSTALLED: 0,
-  INSTALLING: 1,
+  NOT_IMPLEMENTED: 0,
+  NOT_INSTALLED: 1,
   STOPPED: 2,
   STARTING: 3,
   STARTED: 4,
@@ -130,10 +129,10 @@ remoting.HostController.prototype.start = function(hostPin, consent, onDone,
   function generateUuid() {
     var random = new Uint16Array(8);
     window.crypto.getRandomValues(random);
-    /** @type {Array.<string>} */
+    /** @type {Array<string>} */
     var e = new Array();
     for (var i = 0; i < 8; i++) {
-      e[i] = (/** @type {number} */random[i] + 0x10000).
+      e[i] = (/** @type {number} */ (random[i]) + 0x10000).
           toString(16).substring(1);
     }
     return e[0] + e[1] + '-' + e[2] + '-' + e[3] + '-' +
@@ -169,9 +168,9 @@ remoting.HostController.prototype.start = function(hostPin, consent, onDone,
    * @param {string} hostName
    * @param {string} publicKey
    * @param {string} privateKey
-   * @param {string} xmppLogin
-   * @param {string} refreshToken
-   * @param {string} clientBaseJid
+   * @param {?string} xmppLogin
+   * @param {?string} refreshToken
+   * @param {?string} clientBaseJid
    * @param {string} hostSecretHash
    */
   function startHostWithHash(hostName, publicKey, privateKey, xmppLogin,
@@ -268,7 +267,7 @@ remoting.HostController.prototype.start = function(hostPin, consent, onDone,
    * @param {string} hostName
    * @param {string} privateKey
    * @param {string} publicKey
-   * @param {string} hostClientId
+   * @param {?string} hostClientId
    * @param {string} oauthToken
    */
   function doRegisterHost(
@@ -474,7 +473,7 @@ remoting.HostController.prototype.getLocalHostId = function(onDone) {
   function onConfig(config) {
     var hostId = null;
     if (isHostConfigValid_(config)) {
-      hostId = /** @type {string} */ config['host_id'];
+      hostId = /** @type {string} */ (config['host_id']);
     }
     onDone(hostId);
   };
@@ -487,7 +486,7 @@ remoting.HostController.prototype.getLocalHostId = function(onDone) {
 /**
  * Fetch the list of paired clients for this host.
  *
- * @param {function(Array.<remoting.PairedClient>):void} onDone
+ * @param {function(Array<remoting.PairedClient>):void} onDone
  * @param {function(remoting.Error):void} onError
  * @return {void}
  */
@@ -554,7 +553,8 @@ remoting.HostController.prototype.getClientBaseJid_ = function(
     }
   };
 
-  signalStrategy = remoting.SignalStrategy.create(onState);
+  signalStrategy = remoting.SignalStrategy.create();
+  signalStrategy.setStateChangedCallback(onState);
 
   /** @param {string} token */
   function connectSignalingWithToken(token) {

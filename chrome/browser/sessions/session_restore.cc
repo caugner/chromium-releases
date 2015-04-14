@@ -73,19 +73,6 @@ TabLoader* shared_tab_loader = NULL;
 // Pointers to SessionRestoreImpls which are currently restoring the session.
 std::set<SessionRestoreImpl*>* active_session_restorers = NULL;
 
-// Sends a session restore notification to |callbacks|.
-void NotifySessionRestored(SessionRestore::CallbackList* callbacks) {
-  // TODO(sque): This is the old notification that's being phased out.
-  // Remove this once all listeners of NOTIFICATION_SESSION_RESTORE_DONE are
-  // using callbacks instead of notification service.
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SESSION_RESTORE_DONE,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
-
-  callbacks->Notify();
-}
-
 // TabLoader ------------------------------------------------------------------
 
 // TabLoader is responsible for loading tabs after session restore has finished
@@ -348,7 +335,7 @@ void TabLoader::LoadNextTab() {
   // When the session restore is done synchronously, notification is sent from
   // SessionRestoreImpl::Restore .
   if (tabs_to_load_.empty() && !SessionRestore::IsRestoringSynchronously()) {
-    NotifySessionRestored(on_session_restored_callbacks_);
+    on_session_restored_callbacks_->Notify();
   }
 }
 
@@ -428,6 +415,8 @@ void TabLoader::Observe(int type,
           got_first_paint_ = true;
           base::TimeDelta time_to_paint =
               base::TimeTicks::Now() - restore_started_;
+          // TODO(danduong): to remove this with 467680, to make sure we
+          // don't forget to clean this up.
           UMA_HISTOGRAM_CUSTOM_TIMES("SessionRestore.ForegroundTabFirstPaint",
                                      time_to_paint,
                                      base::TimeDelta::FromMilliseconds(10),
@@ -445,6 +434,23 @@ void TabLoader::Observe(int type,
                   100,
                   base::Histogram::kUmaTargetedHistogramFlag);
           counter_for_count->AddTime(time_to_paint);
+          UMA_HISTOGRAM_CUSTOM_TIMES("SessionRestore.ForegroundTabFirstPaint2",
+                                     time_to_paint,
+                                     base::TimeDelta::FromMilliseconds(100),
+                                     base::TimeDelta::FromMinutes(16),
+                                     50);
+          // Record a time for the number of tabs, to help track down
+          // contention.
+          std::string time_for_count2 = base::StringPrintf(
+              "SessionRestore.ForegroundTabFirstPaint2_%d", tab_count_);
+          base::HistogramBase* counter_for_count2 =
+              base::Histogram::FactoryTimeGet(
+                  time_for_count2,
+                  base::TimeDelta::FromMilliseconds(100),
+                  base::TimeDelta::FromMinutes(16),
+                  50,
+                  base::Histogram::kUmaTargetedHistogramFlag);
+          counter_for_count2->AddTime(time_to_paint);
         } else if (render_widget_hosts_loading_.find(render_widget_host) ==
             render_widget_hosts_loading_.end()) {
           // If this is a host for a tab we're not loading some other tab
@@ -655,7 +661,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
         quit_closure_for_sync_restore_ = base::Closure();
       }
       Browser* browser = ProcessSessionWindows(&windows_, active_window_id_);
-      NotifySessionRestored(on_session_restored_callbacks_);
+      on_session_restored_callbacks_->Notify();
       delete this;
       return browser;
     }

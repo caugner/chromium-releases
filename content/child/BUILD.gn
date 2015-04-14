@@ -17,17 +17,18 @@ source_set("child") {
                         "//content")
 
   public_deps = [
-    "//mojo/edk/system",
+    "//third_party/mojo/src/mojo/edk/system",
   ]
 
   deps = [
     "//base",
     "//components/tracing",
+    "//content/common:mojo_bindings",
     "//mojo/common",
     "//mojo/environment:chromium",
-    "//mojo/public/interfaces/application",
     "//skia",
     "//third_party/icu",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -47,7 +48,7 @@ source_set("child") {
   }
 
   if (enable_plugins) {
-    deps += [ "//ppapi:ppapi_proxy" ]
+    deps += [ "//ppapi/proxy" ]
   } else {
     sources -= [
       "browser_font_resource_trusted.cc",
@@ -96,7 +97,10 @@ source_set("child") {
     }
   }
 
-  configs += [ "//content:content_implementation" ]
+  configs += [
+    "//content:content_implementation",
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   if (is_ios) {
     # iOS only needs a small portion of content; exclude all the

@@ -4,18 +4,21 @@
 
 package org.chromium.android_webview.test;
 
+import android.os.Build;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.net.test.util.TestWebServer;
 
 /**
  * Tests for the ContentViewClient.onPageFinished() method.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class ClientOnPageFinishedTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient;
@@ -275,5 +278,81 @@ public class ClientOnPageFinishedTest extends AwTestBase {
         } finally {
             webServer.shutdown();
         }
+    }
+
+    @MediumTest
+    @Feature({"AndroidWebView"})
+    public void testOnPageFinishedNotCalledOnDomModificationForBlankWebView() throws Throwable {
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            doTestOnPageFinishedNotCalledOnDomMutation(webServer, null);
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    @MediumTest
+    @Feature({"AndroidWebView"})
+    public void testOnPageFinishedNotCalledOnDomModificationAfterNonCommittedLoadFromApi()
+            throws Throwable {
+        enableJavaScriptOnUiThread(mAwContents);
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            final String noContentUrl = webServer.setResponseWithNoContentStatus("/nocontent.html");
+            loadUrlAsync(mAwContents, noContentUrl);
+            doTestOnPageFinishedNotCalledOnDomMutation(webServer, noContentUrl);
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    @MediumTest
+    @Feature({"AndroidWebView"})
+    public void testOnPageFinishedNotCalledOnDomModificationAfterLoadUrl() throws Throwable {
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            final String testUrl =
+                    webServer.setResponse("/test.html", CommonResources.ABOUT_HTML, null);
+            loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(), testUrl);
+            doTestOnPageFinishedNotCalledOnDomMutation(webServer, null);
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    @MediumTest
+    @Feature({"AndroidWebView"})
+    public void testOnPageFinishedNotCalledOnDomModificationAfterLoadData()
+            throws Throwable {
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
+                    CommonResources.ABOUT_HTML, "text/html", false);
+            doTestOnPageFinishedNotCalledOnDomMutation(webServer, null);
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    private void doTestOnPageFinishedNotCalledOnDomMutation(TestWebServer webServer, String syncUrl)
+            throws Throwable {
+        enableJavaScriptOnUiThread(mAwContents);
+        TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
+                mContentsClient.getOnPageFinishedHelper();
+        final int onPageFinishedCallCount = onPageFinishedHelper.getCallCount();
+        // Mutate DOM.
+        executeJavaScriptAndWaitForResult(mAwContents, mContentsClient,
+                "document.body.innerHTML='Hello, World!'");
+        // Rather than wait a fixed time to see that an onPageFinished callback isn't issued
+        // we load another valid page. Since callbacks arrive sequentially if the next callback
+        // we get is for the synchronizationUrl we know that DOM mutation did not schedule
+        // a callback for the iframe.
+        if (syncUrl == null) {
+            syncUrl = webServer.setResponse("/sync.html", "", null);
+            loadUrlAsync(mAwContents, syncUrl);
+        }
+        onPageFinishedHelper.waitForCallback(onPageFinishedCallCount);
+        assertEquals(syncUrl, onPageFinishedHelper.getUrl());
+        assertEquals(onPageFinishedCallCount + 1, onPageFinishedHelper.getCallCount());
     }
 }

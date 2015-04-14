@@ -461,9 +461,10 @@ scoped_ptr<PolicyBundle> PolicyLoaderWin::Load() {
     // timeout on it more aggressively. For now, there's no justification for
     // the additional effort this would introduce.
 
-    if (is_enterprise || !ReadPolicyFromGPO(scope, &gpo_dict, &status)) {
-      VLOG_IF(1, !is_enterprise) << "Failed to read GPO files for " << scope
-                                 << " falling back to registry.";
+    bool is_registry_forced = is_enterprise || gpo_provider_ == nullptr;
+    if (is_registry_forced || !ReadPolicyFromGPO(scope, &gpo_dict, &status)) {
+      VLOG_IF(1, !is_registry_forced) << "Failed to read GPO files for "
+                                      << scope << " falling back to registry.";
       gpo_dict.ReadRegistry(kScopes[i].hive, chrome_policy_key_);
     }
 
@@ -683,7 +684,8 @@ void PolicyLoaderWin::SetupWatches() {
 void PolicyLoaderWin::OnObjectSignaled(HANDLE object) {
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("PolicyLoaderWin_OnObjectSignaled"));
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 PolicyLoaderWin::OnObjectSignaled"));
 
   DCHECK(object == user_policy_changed_event_.handle() ||
          object == machine_policy_changed_event_.handle())

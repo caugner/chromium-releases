@@ -1448,12 +1448,15 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         return mAwContents.zoomOut();
     }
 
+    // TODO(paulmiller) Return void for consistency with AwContents.zoomBy and WebView.zoomBy -
+    // tricky because frameworks WebViewProvider.zoomBy must change simultaneously
     @Override
     public boolean zoomBy(float factor) {
         mFactory.startYourEngines(true);
         // This is an L API and therefore we can enforce stricter threading constraints.
         checkThread();
-        return mAwContents.zoomBy(factor);
+        mAwContents.zoomBy(factor);
+        return true;
     }
 
     @Override
@@ -1702,7 +1705,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        UnimplementedWebViewApi.invoke();
         return false;
     }
 
@@ -1718,7 +1720,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        UnimplementedWebViewApi.invoke();
         return false;
     }
 
@@ -2122,7 +2123,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     private class InternalAccessAdapter implements AwContents.InternalAccessDelegate {
         @Override
         public boolean drawChild(Canvas arg0, View arg1, long arg2) {
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 
@@ -2134,7 +2134,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
         @Override
         public boolean super_dispatchKeyEventPreIme(KeyEvent arg0) {
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 
@@ -2167,8 +2166,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
         @Override
         public boolean super_awakenScrollBars(int arg0, boolean arg1) {
-            // TODO: need method on WebView.PrivateAccess?
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 

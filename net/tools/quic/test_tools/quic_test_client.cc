@@ -107,7 +107,6 @@ MockableQuicClient::MockableQuicClient(
     : QuicClient(server_address,
                  server_id,
                  supported_versions,
-                 false,
                  epoll_server),
       override_connection_id_(0),
       test_writer_(nullptr) {}
@@ -121,7 +120,6 @@ MockableQuicClient::MockableQuicClient(
     : QuicClient(server_address,
                  server_id,
                  supported_versions,
-                 false,
                  config,
                  epoll_server),
       override_connection_id_(0),
@@ -257,17 +255,22 @@ ssize_t QuicTestClient::SendMessage(const HTTPMessage& message) {
   scoped_ptr<BalsaHeaders> munged_headers(MungeHeaders(message.headers(),
                                           secure_));
   ssize_t ret = GetOrCreateStream()->SendRequest(
-      munged_headers.get() ? *munged_headers.get() : *message.headers(),
-      message.body(),
-      message.has_complete_message());
+      munged_headers.get() ? *munged_headers : *message.headers(),
+      message.body(), message.has_complete_message());
   WaitForWriteToFlush();
   return ret;
 }
 
 ssize_t QuicTestClient::SendData(string data, bool last_data) {
+  return SendData(data, last_data, nullptr);
+}
+
+ssize_t QuicTestClient::SendData(string data,
+                                 bool last_data,
+                                 QuicAckNotifier::DelegateInterface* delegate) {
   QuicSpdyClientStream* stream = GetOrCreateStream();
   if (!stream) { return 0; }
-  GetOrCreateStream()->SendBody(data, last_data);
+  GetOrCreateStream()->SendBody(data, last_data, delegate);
   WaitForWriteToFlush();
   return data.length();
 }

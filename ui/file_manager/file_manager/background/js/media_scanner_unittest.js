@@ -17,11 +17,23 @@ var scanner;
 /** @type {!importer.TestImportHistory} */
 var importHistory;
 
+/** @type {!importer.TestDirectoryWatcher} */
+var watcher;
+
 // Set up the test components.
 function setUp() {
 
   importHistory = new importer.TestImportHistory();
-  scanner = new importer.DefaultMediaScanner(importHistory);
+  scanner = new importer.DefaultMediaScanner(
+      /** @param {!FileEntry} entry */
+      function(entry) {
+        return Promise.resolve(entry.name);
+      },
+      importHistory,
+      function(callback) {
+        watcher = new TestDirectoryWatcher(callback);
+        return watcher;
+      });
 }
 
 /**
@@ -258,10 +270,78 @@ function testMultipleDirectories(callback) {
       callback);
 }
 
+function testDedupesFiles(callback) {
+  var filenames = [
+    [
+      'a',
+      'foo.jpg',
+      'bar.jpg'
+    ],
+    [
+      'b',
+      'foo.jpg',
+      'bar.jpg',
+      'wee.jpg'
+    ]
+  ];
+  // Expected file paths from the scan.  We're scanning the two subdirectories
+  // only.
+  var expectedFiles = [
+    '/testDedupesFiles/a/foo.jpg',
+    '/testDedupesFiles/a/bar.jpg',
+    '/testDedupesFiles/b/wee.jpg'
+  ];
+
+  var getDirectory = function(root, dirname) {
+    return new Promise(function(resolve, reject) {
+      root.getDirectory(
+          dirname, {create: false}, resolve, reject);
+    });
+  };
+
+  reportPromise(
+      makeTestFileSystemRoot('testDedupesFiles')
+          .then(populateDir.bind(null, filenames))
+          .then(
+              /**
+               * Scans the directories.
+               * @param {!DirectoryEntry} root
+               */
+              function(root) {
+                return Promise.all(['a', 'b'].map(
+                    getDirectory.bind(null, root))).then(
+                        function(directories) {
+                          return scanner.scan(directories).whenFinal();
+                        });
+              })
+          .then(assertResults.bind(null, expectedFiles)),
+      callback);
+}
+
+function testInvalidation(callback) {
+  var invalidatePromise = new Promise(function(fulfill) {
+    scanner.addObserver(fulfill);
+  });
+  reportPromise(
+      makeTestFileSystemRoot('testInvalidation')
+          .then(populateDir.bind(null, ['DCIM']))
+          .then(
+              /**
+               * Scans the directories.
+               * @param {!DirectoryEntry} root
+               */
+              function(root) {
+                scan = scanner.scan([root]);
+                watcher.callback();
+                return invalidatePromise;
+              }),
+              callback);
+}
+
 /**
  * Verifies the results of the media scan are as expected.
  * @param {!Array.<string>} expected
- * @param {!impoter.ScanResults} results
+ * @param {!importer.ScanResults} results
  */
 function assertResults(expected, results) {
   assertFileEntryPathsEqual(expected, results.getFileEntries());

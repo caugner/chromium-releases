@@ -30,6 +30,7 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/url_request/url_fetcher.h"
+#include "policy/policy_constants.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
@@ -45,13 +46,12 @@
 #include "remoting/host/config_watcher.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_connector.h"
-#include "remoting/host/dns_blackhole_checker.h"
-#include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_change_notification_listener.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_main.h"
+#include "remoting/host/host_signaling_manager.h"
 #include "remoting/host/host_status_logger.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
@@ -59,7 +59,7 @@
 #include "remoting/host/logging.h"
 #include "remoting/host/me2me_desktop_environment.h"
 #include "remoting/host/pairing_registry_delegate.h"
-#include "remoting/host/policy_hack/policy_watcher.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/shutdown_watchdog.h"
 #include "remoting/host/signaling_connector.h"
@@ -143,15 +143,19 @@ const char kWindowIdSwitchName[] = "window-id";
 // of the process.
 const int kShutdownTimeoutSeconds = 15;
 
+// Maximum time to wait for reporting host-offline-reason to the service,
+// before continuing normal process shutdown.
+const int kHostOfflineReasonTimeoutSeconds = 10;
+
 }  // namespace
 
 namespace remoting {
 
-class HostProcess
-    : public ConfigWatcher::Delegate,
-      public HostChangeNotificationListener::Listener,
-      public IPC::Listener,
-      public base::RefCountedThreadSafe<HostProcess> {
+class HostProcess : public ConfigWatcher::Delegate,
+                    public HostSignalingManager::Listener,
+                    public HostChangeNotificationListener::Listener,
+                    public IPC::Listener,
+                    public base::RefCountedThreadSafe<HostProcess> {
  public:
   // |shutdown_watchdog| is armed when shutdown is started, and should be kept
   // alive as long as possible until the process exits (since destroying the
@@ -254,23 +258,26 @@ class HostProcess
   bool OnPairingPolicyUpdate(base::DictionaryValue* policies);
   bool OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies);
 
+  scoped_ptr<HostSignalingManager> CreateHostSignalingManager();
+
+  void StartHostIfReady();
   void StartHost();
 
-  void OnHeartbeatSuccessful();
-  void OnUnknownHostIdError();
-
-  void OnAuthFailed();
+  // Overrides for HostSignalingManager::Listener interface.
+  void OnHeartbeatSuccessful() override;
+  void OnUnknownHostIdError() override;
+  void OnAuthFailed() override;
 
   void RestartHost();
 
   // Stops the host and shuts down the process with the specified |exit_code|.
   void ShutdownHost(HostExitCodes exit_code);
 
-  void ScheduleHostShutdown();
+  // Private helper used by ShutdownHost method to initiate sending of
+  // host-offline-reason before continuing shutdown.
+  void SendOfflineReasonAndShutdownOnNetworkThread(HostExitCodes exit_code);
 
   void ShutdownOnNetworkThread();
-
-  void OnPolicyWatcherShutdown();
 
 #if defined(OS_WIN)
   // Initializes the pairing registry on Windows. This should be invoked on the
@@ -288,9 +295,6 @@ class HostProcess
                const int& line_number);
 
   scoped_ptr<ChromotingHostContext> context_;
-
-  // Created on the UI thread but used from the network thread.
-  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   // Accessed on the UI thread.
   scoped_ptr<IPC::ChannelProxy> daemon_channel_;
@@ -320,7 +324,8 @@ class HostProcess
   bool enable_vp9_;
   int64_t frame_recorder_buffer_size_;
 
-  scoped_ptr<policy_hack::PolicyWatcher> policy_watcher_;
+  scoped_ptr<PolicyWatcher> policy_watcher_;
+  bool policies_loaded_;
   std::string host_domain_;
   bool host_username_match_required_;
   bool allow_nat_traversal_;
@@ -334,17 +339,17 @@ class HostProcess
   ThirdPartyAuthConfig third_party_auth_config_;
   bool enable_gnubby_auth_;
 
-  // Boolean to change flow, where ncessary, if we're
+  // Boolean to change flow, where necessary, if we're
   // capturing a window instead of the entire desktop.
   bool enable_window_capture_;
 
   // Used to specify which window to stream, if enabled.
   webrtc::WindowId window_id_;
 
-  scoped_ptr<OAuthTokenGetter> oauth_token_getter_;
-  scoped_ptr<XmppSignalStrategy> signal_strategy_;
-  scoped_ptr<SignalingConnector> signaling_connector_;
-  scoped_ptr<HeartbeatSender> heartbeat_sender_;
+  // Used to send heartbeats while running, and the reason for going offline
+  // when shutting down.
+  scoped_ptr<HostSignalingManager> host_signaling_manager_;
+
   scoped_ptr<HostChangeNotificationListener> host_change_notification_listener_;
   scoped_ptr<HostStatusLogger> host_status_logger_;
   scoped_ptr<HostEventLogger> host_event_logger_;
@@ -364,6 +369,8 @@ class HostProcess
   scoped_refptr<PairingRegistry> pairing_registry_;
 
   ShutdownWatchdog* shutdown_watchdog_;
+
+  DISALLOW_COPY_AND_ASSIGN(HostProcess);
 };
 
 HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
@@ -374,6 +381,7 @@ HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
       use_service_account_(false),
       enable_vp9_(false),
       frame_recorder_buffer_size_(0),
+      policies_loaded_(false),
       host_username_match_required_(false),
       allow_nat_traversal_(true),
       allow_relay_(true),
@@ -544,26 +552,18 @@ void HostProcess::OnConfigUpdated(
   }
 
   if (state_ == HOST_INITIALIZING) {
-    // TODO(sergeyu): Currently OnPolicyUpdate() assumes that host config is
-    // already loaded so PolicyWatcher has to be started here. Separate policy
-    // loading from policy verifications and move |policy_watcher_|
-    // initialization to StartOnNetworkThread().
-    policy_watcher_ = policy_hack::PolicyWatcher::Create(
-        nullptr, context_->network_task_runner());
-    policy_watcher_->StartWatching(
-        base::Bind(&HostProcess::OnPolicyUpdate, base::Unretained(this)),
-        base::Bind(&HostProcess::OnPolicyError, base::Unretained(this)));
-  } else {
+    StartHostIfReady();
+  } else if (state_ == HOST_STARTED) {
+    DCHECK(policies_loaded_);
+
     // Reapply policies that could be affected by a new config.
     ApplyHostDomainPolicy();
     ApplyUsernamePolicy();
 
-    if (state_ == HOST_STARTED) {
-      // TODO(sergeyu): Here we assume that PIN is the only part of the config
-      // that may change while the service is running. Change ApplyConfig() to
-      // detect other changes in the config and restart host if necessary here.
-      CreateAuthenticatorFactory();
-    }
+    // TODO(sergeyu): Here we assume that PIN is the only part of the config
+    // that may change while the service is running. Change ApplyConfig() to
+    // detect other changes in the config and restart host if necessary here.
+    CreateAuthenticatorFactory();
   }
 }
 
@@ -721,6 +721,12 @@ void HostProcess::StartOnUiThread() {
     return;
   }
 
+  policy_watcher_ =
+      PolicyWatcher::Create(nullptr, context_->file_task_runner());
+  policy_watcher_->StartWatching(
+      base::Bind(&HostProcess::OnPolicyUpdate, base::Unretained(this)),
+      base::Bind(&HostProcess::OnPolicyError, base::Unretained(this)));
+
 #if defined(OS_LINUX)
   // If an audio pipe is specific on the command-line then initialize
   // AudioCapturerLinux to capture from it.
@@ -778,9 +784,10 @@ void HostProcess::ShutdownOnUiThread() {
   DCHECK(context_->ui_task_runner()->BelongsToCurrentThread());
 
   // Tear down resources that need to be torn down on the UI thread.
-  network_change_notifier_.reset();
   daemon_channel_.reset();
   desktop_environment_factory_.reset();
+
+  policy_watcher_.reset();
 
   // It is now safe for the HostProcess to be deleted.
   self_ = nullptr;
@@ -794,7 +801,6 @@ void HostProcess::ShutdownOnUiThread() {
 #endif
 }
 
-// Overridden from HeartbeatSender::Listener
 void HostProcess::OnUnknownHostIdError() {
   LOG(ERROR) << "Host ID not found.";
   ShutdownHost(kInvalidHostIdExitCode);
@@ -900,7 +906,8 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
   }
 
   if (!oauth_refresh_token_.empty()) {
-    // SignalingConnector is responsible for getting OAuth token.
+    // SignalingConnector (inside HostSignalingManager) is responsible for
+    // getting OAuth token.
     xmpp_server_config_.auth_token = "";
     xmpp_server_config_.auth_service = "oauth2";
   } else if (!config.GetString(kXmppAuthServiceConfigPath,
@@ -955,8 +962,9 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
 
 void HostProcess::OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
   if (!context_->network_task_runner()->BelongsToCurrentThread()) {
-    context_->network_task_runner()->PostTask(FROM_HERE, base::Bind(
-        &HostProcess::OnPolicyUpdate, this, base::Passed(&policies)));
+    context_->network_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&HostProcess::OnPolicyUpdate, this,
+                              base::Passed(&policies)));
     return;
   }
 
@@ -973,23 +981,30 @@ void HostProcess::OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
   restart_required |= OnPairingPolicyUpdate(policies.get());
   restart_required |= OnGnubbyAuthPolicyUpdate(policies.get());
 
+  policies_loaded_ = true;
+
   if (state_ == HOST_INITIALIZING) {
-    StartHost();
-  } else if (state_ == HOST_STARTED && restart_required) {
-    RestartHost();
+    StartHostIfReady();
+  } else if (state_ == HOST_STARTED) {
+    if (restart_required)
+      RestartHost();
   }
 }
 
 void HostProcess::OnPolicyError() {
-  context_->network_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &HostProcess::ShutdownHost,
-          this,
-          kInvalidHostConfigurationExitCode));
+  if (!context_->network_task_runner()->BelongsToCurrentThread()) {
+    context_->network_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&HostProcess::OnPolicyError, this));
+    return;
+  }
+
+  ShutdownHost(kInvalidHostConfigurationExitCode);
 }
 
 void HostProcess::ApplyHostDomainPolicy() {
+  if (state_ != HOST_STARTED)
+    return;
+
   HOST_LOG << "Policy sets host domain: " << host_domain_;
 
   if (!host_domain_.empty()) {
@@ -1014,8 +1029,8 @@ bool HostProcess::OnHostDomainPolicyUpdate(base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetString(policy_hack::PolicyWatcher::kHostDomainPolicyName,
-                          &host_domain_)) {
+  if (!policies->GetString(policy::key::kRemoteAccessHostDomain,
+                           &host_domain_)) {
     return false;
   }
 
@@ -1024,6 +1039,9 @@ bool HostProcess::OnHostDomainPolicyUpdate(base::DictionaryValue* policies) {
 }
 
 void HostProcess::ApplyUsernamePolicy() {
+  if (state_ != HOST_STARTED)
+    return;
+
   if (host_username_match_required_) {
     HOST_LOG << "Policy requires host username match.";
 
@@ -1070,9 +1088,8 @@ bool HostProcess::OnUsernamePolicyUpdate(base::DictionaryValue* policies) {
   // Returns false: never restart the host after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(
-      policy_hack::PolicyWatcher::kHostMatchUsernamePolicyName,
-      &host_username_match_required_)) {
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostMatchUsername,
+                            &host_username_match_required_)) {
     return false;
   }
 
@@ -1084,8 +1101,8 @@ bool HostProcess::OnNatPolicyUpdate(base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(policy_hack::PolicyWatcher::kNatPolicyName,
-                           &allow_nat_traversal_)) {
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostFirewallTraversal,
+                            &allow_nat_traversal_)) {
     return false;
   }
 
@@ -1101,8 +1118,9 @@ bool HostProcess::OnRelayPolicyUpdate(base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(policy_hack::PolicyWatcher::kRelayPolicyName,
-                           &allow_relay_)) {
+  if (!policies->GetBoolean(
+          policy::key::kRemoteAccessHostAllowRelayedConnection,
+          &allow_relay_)) {
     return false;
   }
 
@@ -1119,7 +1137,7 @@ bool HostProcess::OnUdpPortPolicyUpdate(base::DictionaryValue* policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   std::string udp_port_range;
-  if (!policies->GetString(policy_hack::PolicyWatcher::kUdpPortRangePolicyName,
+  if (!policies->GetString(policy::key::kRemoteAccessHostUdpPortRange,
                            &udp_port_range)) {
     return false;
   }
@@ -1152,9 +1170,8 @@ bool HostProcess::OnCurtainPolicyUpdate(base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(
-          policy_hack::PolicyWatcher::kHostRequireCurtainPolicyName,
-          &curtain_required_)) {
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostRequireCurtain,
+                            &curtain_required_)) {
     return false;
   }
 
@@ -1194,9 +1211,8 @@ bool HostProcess::OnHostTalkGadgetPrefixPolicyUpdate(
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetString(
-          policy_hack::PolicyWatcher::kHostTalkGadgetPrefixPolicyName,
-          &talkgadget_prefix_)) {
+  if (!policies->GetString(policy::key::kRemoteAccessHostTalkGadgetPrefix,
+                           &talkgadget_prefix_)) {
     return false;
   }
 
@@ -1210,22 +1226,20 @@ bool HostProcess::OnHostTokenUrlPolicyUpdate(base::DictionaryValue* policies) {
 
   bool token_policy_changed = false;
   std::string token_url_string;
-  if (policies->GetString(
-          policy_hack::PolicyWatcher::kHostTokenUrlPolicyName,
-          &token_url_string)) {
+  if (policies->GetString(policy::key::kRemoteAccessHostTokenUrl,
+                          &token_url_string)) {
     token_policy_changed = true;
     third_party_auth_config_.token_url = GURL(token_url_string);
   }
   std::string token_validation_url_string;
-  if (policies->GetString(
-          policy_hack::PolicyWatcher::kHostTokenValidationUrlPolicyName,
-          &token_validation_url_string)) {
+  if (policies->GetString(policy::key::kRemoteAccessHostTokenValidationUrl,
+                          &token_validation_url_string)) {
     token_policy_changed = true;
     third_party_auth_config_.token_validation_url =
         GURL(token_validation_url_string);
   }
   if (policies->GetString(
-          policy_hack::PolicyWatcher::kHostTokenValidationCertIssuerPolicyName,
+          policy::key::kRemoteAccessHostTokenValidationCertificateIssuer,
           &third_party_auth_config_.token_validation_cert_issuer)) {
     token_policy_changed = true;
   }
@@ -1245,9 +1259,8 @@ bool HostProcess::OnHostTokenUrlPolicyUpdate(base::DictionaryValue* policies) {
 bool HostProcess::OnPairingPolicyUpdate(base::DictionaryValue* policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(
-          policy_hack::PolicyWatcher::kHostAllowClientPairing,
-          &allow_pairing_)) {
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostAllowClientPairing,
+                            &allow_pairing_)) {
     return false;
   }
 
@@ -1262,9 +1275,8 @@ bool HostProcess::OnPairingPolicyUpdate(base::DictionaryValue* policies) {
 bool HostProcess::OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetBoolean(
-          policy_hack::PolicyWatcher::kHostAllowGnubbyAuthPolicyName,
-          &enable_gnubby_auth_)) {
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostAllowGnubbyAuth,
+                            &enable_gnubby_auth_)) {
     return false;
   }
 
@@ -1280,44 +1292,41 @@ bool HostProcess::OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies) {
   return true;
 }
 
+scoped_ptr<HostSignalingManager> HostProcess::CreateHostSignalingManager() {
+  DCHECK(!host_id_.empty());  // |ApplyConfig| should already have been run.
+
+  scoped_ptr<OAuthTokenGetter::OAuthCredentials> oauth_credentials(
+      new OAuthTokenGetter::OAuthCredentials(xmpp_server_config_.username,
+                                             oauth_refresh_token_,
+                                             use_service_account_));
+
+  return HostSignalingManager::Create(this, context_->network_task_runner(),
+                                      context_->url_request_context_getter(),
+                                      xmpp_server_config_, talkgadget_prefix_,
+                                      host_id_, key_pair_, directory_bot_jid_,
+                                      oauth_credentials.Pass());
+}
+
+void HostProcess::StartHostIfReady() {
+  DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
+  DCHECK_EQ(state_, HOST_INITIALIZING);
+
+  // Start the host if both the config and the policies are loaded.
+  if (!serialized_config_.empty() && policies_loaded_)
+    StartHost();
+}
+
 void HostProcess::StartHost() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
   DCHECK(!host_);
-  DCHECK(!signal_strategy_.get());
+  DCHECK(!host_signaling_manager_);
+
   DCHECK(state_ == HOST_INITIALIZING || state_ == HOST_STOPPING_TO_RESTART ||
-         state_ == HOST_STOPPED) << state_;
+         state_ == HOST_STOPPED)
+      << "state_ = " << state_;
   state_ = HOST_STARTED;
 
-  signal_strategy_.reset(
-      new XmppSignalStrategy(net::ClientSocketFactory::GetDefaultFactory(),
-                             context_->url_request_context_getter(),
-                             xmpp_server_config_));
-
-  scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker(
-      new DnsBlackholeChecker(context_->url_request_context_getter(),
-                              talkgadget_prefix_));
-
-  // Create a NetworkChangeNotifier for use by the signaling connector.
-  network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
-
-  signaling_connector_.reset(new SignalingConnector(
-      signal_strategy_.get(),
-      dns_blackhole_checker.Pass(),
-      base::Bind(&HostProcess::OnAuthFailed, this)));
-
-  if (!oauth_refresh_token_.empty()) {
-    scoped_ptr<OAuthTokenGetter::OAuthCredentials> oauth_credentials;
-    oauth_credentials.reset(
-        new OAuthTokenGetter::OAuthCredentials(
-            xmpp_server_config_.username, oauth_refresh_token_,
-            use_service_account_));
-
-    oauth_token_getter_.reset(new OAuthTokenGetter(
-        oauth_credentials.Pass(), context_->url_request_context_getter(),
-        false));
-
-    signaling_connector_->EnableOAuth(oauth_token_getter_.get());
-  }
+  host_signaling_manager_ = CreateHostSignalingManager();
 
   uint32 network_flags = 0;
   if (allow_nat_traversal_) {
@@ -1341,15 +1350,14 @@ void HostProcess::StartHost() {
   }
 
   host_.reset(new ChromotingHost(
-      signal_strategy_.get(),
+      host_signaling_manager_->signal_strategy(),
       desktop_environment_factory_.get(),
-      CreateHostSessionManager(signal_strategy_.get(), network_settings,
+      CreateHostSessionManager(host_signaling_manager_->signal_strategy(),
+                               network_settings,
                                context_->url_request_context_getter()),
-      context_->audio_task_runner(),
-      context_->input_task_runner(),
+      context_->audio_task_runner(), context_->input_task_runner(),
       context_->video_capture_task_runner(),
-      context_->video_encode_task_runner(),
-      context_->network_task_runner(),
+      context_->video_encode_task_runner(), context_->network_task_runner(),
       context_->ui_task_runner()));
 
   if (enable_vp9_) {
@@ -1371,17 +1379,13 @@ void HostProcess::StartHost() {
   host_->SetMaximumSessionDuration(base::TimeDelta::FromHours(20));
 #endif
 
-  heartbeat_sender_.reset(new HeartbeatSender(
-      base::Bind(&HostProcess::OnHeartbeatSuccessful, base::Unretained(this)),
-      base::Bind(&HostProcess::OnUnknownHostIdError, base::Unretained(this)),
-      host_id_, signal_strategy_.get(), key_pair_, directory_bot_jid_));
-
   host_change_notification_listener_.reset(new HostChangeNotificationListener(
-      this, host_id_, signal_strategy_.get(), directory_bot_jid_));
+      this, host_id_, host_signaling_manager_->signal_strategy(),
+      directory_bot_jid_));
 
-  host_status_logger_.reset(
-      new HostStatusLogger(host_->AsWeakPtr(), ServerLogEntry::ME2ME,
-                           signal_strategy_.get(), directory_bot_jid_));
+  host_status_logger_.reset(new HostStatusLogger(
+      host_->AsWeakPtr(), ServerLogEntry::ME2ME,
+      host_signaling_manager_->signal_strategy(), directory_bot_jid_));
 
   // Set up reporting the host status notifications.
 #if defined(REMOTING_MULTI_PROCESS)
@@ -1396,6 +1400,9 @@ void HostProcess::StartHost() {
   host_->Start(host_owner_email_);
 
   CreateAuthenticatorFactory();
+
+  ApplyHostDomainPolicy();
+  ApplyUsernamePolicy();
 }
 
 void HostProcess::OnAuthFailed() {
@@ -1410,6 +1417,16 @@ void HostProcess::RestartHost() {
   ShutdownOnNetworkThread();
 }
 
+void HostProcess::SendOfflineReasonAndShutdownOnNetworkThread(
+    HostExitCodes exit_code) {
+  DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
+  DCHECK(host_signaling_manager_);
+  host_signaling_manager_.release()->SendHostOfflineReasonAndDelete(
+      ExitCodeToString(exit_code),
+      base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds));
+  ShutdownOnNetworkThread();
+}
+
 void HostProcess::ShutdownHost(HostExitCodes exit_code) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
@@ -1418,14 +1435,14 @@ void HostProcess::ShutdownHost(HostExitCodes exit_code) {
   switch (state_) {
     case HOST_INITIALIZING:
       state_ = HOST_STOPPING;
-      ShutdownOnNetworkThread();
+      DCHECK(!host_signaling_manager_);
+      host_signaling_manager_ = CreateHostSignalingManager();
+      SendOfflineReasonAndShutdownOnNetworkThread(exit_code);
       break;
 
     case HOST_STARTED:
       state_ = HOST_STOPPING;
-      heartbeat_sender_->SetHostOfflineReason(
-          ExitCodeToString(exit_code), base::Bind(base::DoNothing));
-      ScheduleHostShutdown();
+      SendOfflineReasonAndShutdownOnNetworkThread(exit_code);
       break;
 
     case HOST_STOPPING_TO_RESTART:
@@ -1439,28 +1456,14 @@ void HostProcess::ShutdownHost(HostExitCodes exit_code) {
   }
 }
 
-// TODO(weitaosu): shut down the host once we get an ACK for the offline status
-//                  XMPP message.
-void HostProcess::ScheduleHostShutdown() {
-  // Delay the shutdown by 2 second to allow SendOfflineStatus to complete.
-  context_->network_task_runner()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&HostProcess::ShutdownOnNetworkThread, base::Unretained(this)),
-      base::TimeDelta::FromSeconds(2));
-}
-
 void HostProcess::ShutdownOnNetworkThread() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   host_.reset();
   host_event_logger_.reset();
   host_status_logger_.reset();
-  heartbeat_sender_.reset();
+  host_signaling_manager_.reset();
   host_change_notification_listener_.reset();
-  signaling_connector_.reset();
-  oauth_token_getter_.reset();
-  signal_strategy_.reset();
-  network_change_notifier_.reset();
 
   if (state_ == HOST_STOPPING_TO_RESTART) {
     StartHost();
@@ -1470,24 +1473,15 @@ void HostProcess::ShutdownOnNetworkThread() {
     shutdown_watchdog_->SetExitCode(*exit_code_out_);
     shutdown_watchdog_->Arm();
 
-    if (policy_watcher_.get()) {
-      policy_watcher_->StopWatching(
-          base::Bind(&HostProcess::OnPolicyWatcherShutdown, this));
-    } else {
-      OnPolicyWatcherShutdown();
-    }
+    config_watcher_.reset();
+
+    // Complete the rest of shutdown on the main thread.
+    context_->ui_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&HostProcess::ShutdownOnUiThread, this));
   } else {
     // This method is only called in STOPPING_TO_RESTART and STOPPING states.
     NOTREACHED();
   }
-}
-
-void HostProcess::OnPolicyWatcherShutdown() {
-  policy_watcher_.reset();
-
-  // Complete the rest of shutdown on the main thread.
-  context_->ui_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&HostProcess::ShutdownOnUiThread, this));
 }
 
 void HostProcess::OnCrash(const std::string& function_name,
@@ -1528,6 +1522,17 @@ int HostProcessMain() {
           message_loop.message_loop_proxy(), base::MessageLoop::QuitClosure()));
   if (!context)
     return kInitializationFailed;
+
+  // NetworkChangeNotifier must be initialized after MessageLoop.
+  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier(
+      net::NetworkChangeNotifier::Create());
+
+  // BasicURLRequestContext holds references to threads, so it needs to be
+  // dereferences on UI threads. Store the reference to the URLRequestGetter to
+  // make sure it's not destroyed on other threads.
+  // TODO(sergeyu): Consider fixing it in BasicURLRequestContext.
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter =
+      context->url_request_context_getter();
 
   // Create & start the HostProcess using these threads.
   // TODO(wez): The HostProcess holds a reference to itself until Shutdown().

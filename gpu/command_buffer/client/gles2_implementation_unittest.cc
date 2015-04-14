@@ -378,6 +378,8 @@ class GLES2ImplementationTest : public testing::Test {
   static const GLint kMaxVertexUniformVectors = 128;
   static const GLint kNumCompressedTextureFormats = 0;
   static const GLint kNumShaderBinaryFormats = 0;
+  static const GLuint kMaxTransformFeedbackSeparateAttribs = 4;
+  static const GLuint kMaxUniformBufferBindings = 36;
   static const GLuint kStartId = 1024;
   static const GLuint kBuffersStartId =
       GLES2Implementation::kClientSideArrayId + 2 * kNumTestContexts;
@@ -439,6 +441,9 @@ class GLES2ImplementationTest : public testing::Test {
       capabilities.num_compressed_texture_formats =
           kNumCompressedTextureFormats;
       capabilities.num_shader_binary_formats = kNumShaderBinaryFormats;
+      capabilities.max_transform_feedback_separate_attribs =
+          kMaxTransformFeedbackSeparateAttribs;
+      capabilities.max_uniform_buffer_bindings = kMaxUniformBufferBindings;
       capabilities.bind_generates_resource_chromium =
           bind_generates_resource_service ? 1 : 0;
       EXPECT_CALL(*gpu_control_, GetCapabilities())
@@ -894,59 +899,6 @@ TEST_F(GLES2ImplementationTest, GetShaderPrecisionFormat) {
   EXPECT_EQ(range4[0], 3);
   EXPECT_EQ(range4[1], 5);
   EXPECT_EQ(precision4, 7);
-}
-
-TEST_F(GLES2ImplementationTest, ShaderSource) {
-  const uint32 kBucketId = GLES2Implementation::kResultBucketId;
-  const GLuint kShaderId = 456;
-  const char* kString1 = "foobar";
-  const char* kString2 = "barfoo";
-  const size_t kString1Size = strlen(kString1);
-  const size_t kString2Size = strlen(kString2);
-  const size_t kString3Size = 1;  // Want the NULL;
-  const size_t kSourceSize = kString1Size + kString2Size + kString3Size;
-  const size_t kPaddedString1Size =
-      transfer_buffer_->RoundToAlignment(kString1Size);
-  const size_t kPaddedString2Size =
-      transfer_buffer_->RoundToAlignment(kString2Size);
-  const size_t kPaddedString3Size =
-      transfer_buffer_->RoundToAlignment(kString3Size);
-  struct Cmds {
-    cmd::SetBucketSize set_bucket_size;
-    cmd::SetBucketData set_bucket_data1;
-    cmd::SetToken set_token1;
-    cmd::SetBucketData set_bucket_data2;
-    cmd::SetToken set_token2;
-    cmd::SetBucketData set_bucket_data3;
-    cmd::SetToken set_token3;
-    cmds::ShaderSourceBucket shader_source_bucket;
-    cmd::SetBucketSize clear_bucket_size;
-  };
-
-  ExpectedMemoryInfo mem1 = GetExpectedMemory(kPaddedString1Size);
-  ExpectedMemoryInfo mem2 = GetExpectedMemory(kPaddedString2Size);
-  ExpectedMemoryInfo mem3 = GetExpectedMemory(kPaddedString3Size);
-
-  Cmds expected;
-  expected.set_bucket_size.Init(kBucketId, kSourceSize);
-  expected.set_bucket_data1.Init(
-      kBucketId, 0, kString1Size, mem1.id, mem1.offset);
-  expected.set_token1.Init(GetNextToken());
-  expected.set_bucket_data2.Init(
-      kBucketId, kString1Size, kString2Size, mem2.id, mem2.offset);
-  expected.set_token2.Init(GetNextToken());
-  expected.set_bucket_data3.Init(
-      kBucketId, kString1Size + kString2Size,
-      kString3Size, mem3.id, mem3.offset);
-  expected.set_token3.Init(GetNextToken());
-  expected.shader_source_bucket.Init(kShaderId, kBucketId);
-  expected.clear_bucket_size.Init(kBucketId, 0);
-  const char* strings[] = {
-    kString1,
-    kString2,
-  };
-  gl_->ShaderSource(kShaderId, 2, strings, NULL);
-  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
 TEST_F(GLES2ImplementationTest, GetShaderSource) {
@@ -2072,6 +2024,108 @@ TEST_F(GLES2ImplementationTest, GetProgramInfoCHROMIUMBadArgs) {
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
 }
 
+TEST_F(GLES2ImplementationTest, GetUniformBlocksCHROMIUMGoodArgs) {
+  const uint32 kBucketId = GLES2Implementation::kResultBucketId;
+  const GLuint kProgramId = 123;
+  const char kBad = 0x12;
+  GLsizei size = 0;
+  const Str7 kString = {"foobar"};
+  char buf[20];
+
+  ExpectedMemoryInfo mem1 =
+      GetExpectedMemory(MaxTransferBufferSize());
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(cmd::GetBucketStart::Result));
+  ExpectedMemoryInfo result2 =
+      GetExpectedResultMemory(sizeof(cmds::GetError::Result));
+
+  memset(buf, kBad, sizeof(buf));
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(DoAll(SetMemory(result1.ptr, uint32(sizeof(kString))),
+                      SetMemory(mem1.ptr, kString)))
+      .WillOnce(SetMemory(result2.ptr, GLuint(GL_NO_ERROR)))
+      .RetiresOnSaturation();
+
+  struct Cmds {
+    cmd::SetBucketSize set_bucket_size1;
+    cmds::GetUniformBlocksCHROMIUM get_uniform_blocks;
+    cmd::GetBucketStart get_bucket_start;
+    cmd::SetToken set_token1;
+    cmd::SetBucketSize set_bucket_size2;
+  };
+  Cmds expected;
+  expected.set_bucket_size1.Init(kBucketId, 0);
+  expected.get_uniform_blocks.Init(kProgramId, kBucketId);
+  expected.get_bucket_start.Init(
+      kBucketId, result1.id, result1.offset,
+      MaxTransferBufferSize(), mem1.id, mem1.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_bucket_size2.Init(kBucketId, 0);
+  gl_->GetUniformBlocksCHROMIUM(kProgramId, sizeof(buf), &size, &buf);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), gl_->GetError());
+  EXPECT_EQ(sizeof(kString), static_cast<size_t>(size));
+  EXPECT_STREQ(kString.str, buf);
+  EXPECT_EQ(buf[sizeof(kString)], kBad);
+}
+
+TEST_F(GLES2ImplementationTest, GetUniformBlocksCHROMIUMBadArgs) {
+  const uint32 kBucketId = GLES2Implementation::kResultBucketId;
+  const GLuint kProgramId = 123;
+  GLsizei size = 0;
+  const Str7 kString = {"foobar"};
+  char buf[20];
+
+  ExpectedMemoryInfo mem1 = GetExpectedMemory(MaxTransferBufferSize());
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(cmd::GetBucketStart::Result));
+  ExpectedMemoryInfo result2 =
+      GetExpectedResultMemory(sizeof(cmds::GetError::Result));
+  ExpectedMemoryInfo result3 =
+      GetExpectedResultMemory(sizeof(cmds::GetError::Result));
+  ExpectedMemoryInfo result4 =
+      GetExpectedResultMemory(sizeof(cmds::GetError::Result));
+
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(DoAll(SetMemory(result1.ptr, uint32(sizeof(kString))),
+                      SetMemory(mem1.ptr,  kString)))
+      .WillOnce(SetMemory(result2.ptr, GLuint(GL_NO_ERROR)))
+      .WillOnce(SetMemory(result3.ptr, GLuint(GL_NO_ERROR)))
+      .WillOnce(SetMemory(result4.ptr, GLuint(GL_NO_ERROR)))
+      .RetiresOnSaturation();
+
+  // try bufsize not big enough.
+  struct Cmds {
+    cmd::SetBucketSize set_bucket_size1;
+    cmds::GetUniformBlocksCHROMIUM get_uniform_blocks;
+    cmd::GetBucketStart get_bucket_start;
+    cmd::SetToken set_token1;
+    cmd::SetBucketSize set_bucket_size2;
+  };
+  Cmds expected;
+  expected.set_bucket_size1.Init(kBucketId, 0);
+  expected.get_uniform_blocks.Init(kProgramId, kBucketId);
+  expected.get_bucket_start.Init(
+      kBucketId, result1.id, result1.offset,
+      MaxTransferBufferSize(), mem1.id, mem1.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_bucket_size2.Init(kBucketId, 0);
+  gl_->GetUniformBlocksCHROMIUM(kProgramId, 6, &size, &buf);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_OPERATION), gl_->GetError());
+  ClearCommands();
+
+  // try bad bufsize
+  gl_->GetUniformBlocksCHROMIUM(kProgramId, -1, &size, &buf);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
+  ClearCommands();
+  // try no size ptr.
+  gl_->GetUniformBlocksCHROMIUM(kProgramId, sizeof(buf), NULL, &buf);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
+}
+
 // Test that things are cached
 TEST_F(GLES2ImplementationTest, GetIntegerCacheRead) {
   struct PNameValue {
@@ -2647,6 +2701,9 @@ TEST_F(GLES2ImplementationTest, TexImage3DSingleCommand) {
       &size, &unpadded_row_size, &padded_row_size));
   // Makes sure we can just send over the data in one command.
   const GLsizei kHeight = MaxTransferBufferSize() / padded_row_size / kDepth;
+  ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
+      kWidth, kHeight, kDepth, kFormat, kType, kPixelStoreUnpackAlignment,
+      &size, NULL, NULL));
 
   scoped_ptr<uint8[]> pixels(new uint8[size]);
   for (uint32 ii = 0; ii < size; ++ii) {
@@ -3509,6 +3566,70 @@ TEST_F(GLES2ImplementationTest, AllowNestedTracesCHROMIUM) {
   // No more corresponding begin tracer marker should error.
   gl_->TraceEndCHROMIUM();
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+}
+
+TEST_F(GLES2ImplementationTest, IsEnabled) {
+  // If we use a valid enum, its state is cached on client side, so no command
+  // is actually generated, and this test will fail.
+  // TODO(zmo): it seems we never need the command. Maybe remove it.
+  GLenum kCap = 1;
+  struct Cmds {
+    cmds::IsEnabled cmd;
+  };
+
+  Cmds expected;
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(cmds::IsEnabled::Result));
+  expected.cmd.Init(kCap, result1.id, result1.offset);
+
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(SetMemory(result1.ptr, uint32_t(GL_TRUE)))
+      .RetiresOnSaturation();
+
+  GLboolean result = gl_->IsEnabled(kCap);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_TRUE(result);
+}
+
+TEST_F(GLES2ImplementationTest, ClientWaitSync) {
+  const GLuint client_sync_id = 36;
+  struct Cmds {
+    cmds::ClientWaitSync cmd;
+  };
+
+  Cmds expected;
+  ExpectedMemoryInfo result1 =
+      GetExpectedResultMemory(sizeof(cmds::ClientWaitSync::Result));
+  const GLuint64 kTimeout = 0xABCDEF0123456789;
+  uint32_t v32_0 = 0, v32_1 = 0;
+  GLES2Util::MapUint64ToTwoUint32(kTimeout, &v32_0, &v32_1);
+  expected.cmd.Init(client_sync_id, GL_SYNC_FLUSH_COMMANDS_BIT,
+                    v32_0, v32_1, result1.id, result1.offset);
+
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(SetMemory(result1.ptr, uint32_t(GL_CONDITION_SATISFIED)))
+      .RetiresOnSaturation();
+
+  GLenum result = gl_->ClientWaitSync(
+      reinterpret_cast<GLsync>(client_sync_id), GL_SYNC_FLUSH_COMMANDS_BIT,
+      kTimeout);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(static_cast<GLenum>(GL_CONDITION_SATISFIED), result);
+}
+
+TEST_F(GLES2ImplementationTest, WaitSync) {
+  const GLuint kClientSyncId = 36;
+  struct Cmds {
+    cmds::WaitSync cmd;
+  };
+  Cmds expected;
+  const GLuint64 kTimeout = GL_TIMEOUT_IGNORED;
+  uint32_t v32_0 = 0, v32_1 = 0;
+  GLES2Util::MapUint64ToTwoUint32(kTimeout, &v32_0, &v32_1);
+  expected.cmd.Init(kClientSyncId, 0, v32_0, v32_1);
+
+  gl_->WaitSync(reinterpret_cast<GLsync>(kClientSyncId), 0, kTimeout);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
 TEST_F(GLES2ImplementationManualInitTest, LoseContextOnOOM) {

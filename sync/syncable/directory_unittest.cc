@@ -1044,6 +1044,56 @@ TEST_F(SyncableDirectoryTest, ChangeEntryIDAndUpdateChildren_ParentAndChild) {
   EXPECT_EQ(OPENED, SimulateSaveAndReloadDir());
 }
 
+// A test that roughly mimics the directory interaction that occurs when a
+// type root folder is created locally and then re-created (updated) from the
+// server.
+TEST_F(SyncableDirectoryTest, ChangeEntryIDAndUpdateChildren_ImplicitParent) {
+  TestIdFactory id_factory;
+  Id orig_parent_id;
+  Id child_id;
+
+  {
+    // Create two client-side items, a parent and child.
+    WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
+
+    MutableEntry parent(&trans, CREATE, PREFERENCES, id_factory.root(),
+                        "parent");
+    parent.PutIsDir(true);
+    parent.PutIsUnsynced(true);
+
+    // The child has unset parent ID. The parent is inferred from the type.
+    MutableEntry child(&trans, CREATE, PREFERENCES, "child");
+    child.PutIsUnsynced(true);
+
+    orig_parent_id = parent.GetId();
+    child_id = child.GetId();
+  }
+
+  {
+    // Simulate what happens after committing two items.  Their IDs will be
+    // replaced with server IDs.  The child is renamed first, then the parent.
+    WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
+
+    MutableEntry parent(&trans, GET_BY_ID, orig_parent_id);
+
+    ChangeEntryIDAndUpdateChildren(&trans, &parent, id_factory.NewServerId());
+    parent.PutIsUnsynced(false);
+    parent.PutBaseVersion(1);
+    parent.PutServerVersion(1);
+  }
+
+  // Final check for validity.
+  EXPECT_EQ(OPENED, SimulateSaveAndReloadDir());
+
+  // Verify that child's PARENT_ID hasn't been updated.
+  {
+    ReadTransaction trans(FROM_HERE, dir().get());
+    Entry child(&trans, GET_BY_ID, child_id);
+    EXPECT_TRUE(child.good());
+    EXPECT_TRUE(child.GetParentId().IsNull());
+  }
+}
+
 // A test based on the scenario where we create a bookmark folder and entry
 // locally, but with a twist.  In this case, the bookmark is deleted before we
 // are able to sync either it or its parent folder.  This scenario used to cause
@@ -1764,6 +1814,70 @@ TEST_F(SyncableDirectoryTest, Directory_GetAttachmentIdsToUpload) {
     dir()->GetAttachmentIdsToUpload(&trans, PREFERENCES, &id_set);
   }
   ASSERT_TRUE(id_set.empty());
+}
+
+// Verify that the directory accepts entries with unset parent ID.
+TEST_F(SyncableDirectoryTest, MutableEntry_ImplicitParentId) {
+  TestIdFactory id_factory;
+  const Id root_id = TestIdFactory::root();
+  const Id p_root_id = id_factory.NewServerId();
+  const Id a_root_id = id_factory.NewServerId();
+  const Id item1_id = id_factory.NewServerId();
+  const Id item2_id = id_factory.NewServerId();
+  const Id item3_id = id_factory.NewServerId();
+  // Create two type root folders that are necessary (for now)
+  // for creating items without explicitly set Parent ID
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
+    MutableEntry p_root(&trans, CREATE, PREFERENCES, root_id, "P");
+    ASSERT_TRUE(p_root.good());
+    p_root.PutIsDir(true);
+    p_root.PutId(p_root_id);
+    p_root.PutBaseVersion(1);
+
+    MutableEntry a_root(&trans, CREATE, AUTOFILL, root_id, "A");
+    ASSERT_TRUE(a_root.good());
+    a_root.PutIsDir(true);
+    a_root.PutId(a_root_id);
+    a_root.PutBaseVersion(1);
+  }
+
+  // Create two entries with implicit parent nodes and one entry with explicit
+  // parent node.
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
+    MutableEntry item1(&trans, CREATE, PREFERENCES, "P1");
+    item1.PutBaseVersion(1);
+    item1.PutId(item1_id);
+    MutableEntry item2(&trans, CREATE, AUTOFILL, "A1");
+    item2.PutBaseVersion(1);
+    item2.PutId(item2_id);
+    // Placing an AUTOFILL item under the root isn't expected,
+    // but let's test it to verify that explicit root overrides the implicit
+    // one and this entry doesn't end up under the "A" root.
+    MutableEntry item3(&trans, CREATE, AUTOFILL, root_id, "A2");
+    item3.PutBaseVersion(1);
+    item3.PutId(item3_id);
+  }
+
+  {
+    ReadTransaction trans(FROM_HERE, dir().get());
+    // Verify that item1 and item2 are good and have no ParentId.
+    Entry item1(&trans, GET_BY_ID, item1_id);
+    ASSERT_TRUE(item1.good());
+    ASSERT_TRUE(item1.GetParentId().IsNull());
+    Entry item2(&trans, GET_BY_ID, item2_id);
+    ASSERT_TRUE(item2.good());
+    ASSERT_TRUE(item2.GetParentId().IsNull());
+    // Verify that p_root and a_root have exactly one child each
+    // (subtract one to exclude roots themselves).
+    Entry p_root(&trans, GET_BY_ID, p_root_id);
+    ASSERT_EQ(item1_id, p_root.GetFirstChildId());
+    ASSERT_EQ(1, p_root.GetTotalNodeCount() - 1);
+    Entry a_root(&trans, GET_BY_ID, a_root_id);
+    ASSERT_EQ(item2_id, a_root.GetFirstChildId());
+    ASSERT_EQ(1, a_root.GetTotalNodeCount() - 1);
+  }
 }
 
 }  // namespace syncable

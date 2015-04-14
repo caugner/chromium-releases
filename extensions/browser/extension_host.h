@@ -5,16 +5,19 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_HOST_H_
 #define EXTENSIONS_BROWSER_EXTENSION_HOST_H_
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "base/timer/elapsed_timer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/deferred_start_render_host.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/common/stack_frame.h"
 #include "extensions/common/view_type.h"
@@ -31,6 +34,8 @@ class SiteInstance;
 namespace extensions {
 class Extension;
 class ExtensionHostDelegate;
+class ExtensionHostObserver;
+class ExtensionHostQueue;
 class WindowController;
 
 // This class is the browser component of an extension component's RenderView.
@@ -40,13 +45,12 @@ class WindowController;
 //
 // If you are adding code that only affects visible extension views (and not
 // invisible background pages) you should add it to ExtensionViewHost.
-class ExtensionHost : public content::WebContentsDelegate,
+class ExtensionHost : public DeferredStartRenderHost,
+                      public content::WebContentsDelegate,
                       public content::WebContentsObserver,
                       public ExtensionFunctionDispatcher::Delegate,
                       public content::NotificationObserver {
  public:
-  class ProcessCreationQueue;
-
   ExtensionHost(const Extension* extension,
                 content::SiteInstance* site_instance,
                 const GURL& url, ViewType host_type);
@@ -75,7 +79,26 @@ class ExtensionHost : public content::WebContentsDelegate,
   // (can be NULL). This happens delayed to avoid locking the UI.
   void CreateRenderViewSoon();
 
-  // content::WebContentsObserver
+  // Closes this host (results in [possibly asynchronous] deletion).
+  void Close();
+
+  // Typical observer interface.
+  void AddObserver(ExtensionHostObserver* observer);
+  void RemoveObserver(ExtensionHostObserver* observer);
+
+  // Called when an IPC message is dispatched to the RenderView associated with
+  // this ExtensionHost.
+  void OnMessageDispatched(const std::string& event_name, int message_id);
+
+  // Called by the ProcessManager when a network request is started by the
+  // extension corresponding to this ExtensionHost.
+  void OnNetworkRequestStarted(uint64 request_id);
+
+  // Called by the ProcessManager when a previously started network request is
+  // finished.
+  void OnNetworkRequestDone(uint64 request_id);
+
+  // content::WebContentsObserver:
   bool OnMessageReceived(const IPC::Message& message) override;
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void RenderViewDeleted(content::RenderViewHost* render_view_host) override;
@@ -84,13 +107,13 @@ class ExtensionHost : public content::WebContentsDelegate,
   void DocumentAvailableInMainFrame() override;
   void DidStopLoading(content::RenderViewHost* render_view_host) override;
 
-  // content::WebContentsDelegate
+  // content::WebContentsDelegate:
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   void CloseContents(content::WebContents* contents) override;
@@ -103,7 +126,7 @@ class ExtensionHost : public content::WebContentsDelegate,
                                   content::MediaStreamType type) override;
   bool IsNeverVisible(content::WebContents* web_contents) override;
 
-  // content::NotificationObserver
+  // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
@@ -115,27 +138,19 @@ class ExtensionHost : public content::WebContentsDelegate,
   // EXTENSION_HOST_DID_STOP_LOADING notification is sent.
   virtual void OnDidStopLoading();
 
-  // Called once when the document first becomes available.
-  virtual void OnDocumentAvailable();
-
   // Navigates to the initial page.
   virtual void LoadInitialURL();
 
   // Returns true if we're hosting a background page.
   virtual bool IsBackgroundPage() const;
 
-  // Closes this host (results in deletion).
-  void Close();
-
  private:
-  friend class ProcessCreationQueue;
-
-  // Actually create the RenderView for this host. See CreateRenderViewSoon.
-  void CreateRenderViewNow();
+  // DeferredStartRenderHost:
+  void CreateRenderViewNow() override;
 
   // Message handlers.
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
-  void OnEventAck();
+  void OnEventAck(int message_id);
   void OnIncrementLazyKeepaliveCount();
   void OnDecrementLazyKeepaliveCount();
 
@@ -168,6 +183,9 @@ class ExtensionHost : public content::WebContentsDelegate,
   // The original URL of the page being hosted.
   GURL initial_url_;
 
+  // Messages sent out to the renderer that have not been acknowledged yet.
+  std::set<int> unacked_messages_;
+
   content::NotificationRegistrar registrar_;
 
   ExtensionFunctionDispatcher extension_function_dispatcher_;
@@ -175,8 +193,10 @@ class ExtensionHost : public content::WebContentsDelegate,
   // The type of view being hosted.
   ViewType extension_host_type_;
 
-  // Used to measure how long it's been since the host was created.
-  base::ElapsedTimer since_created_;
+  // Measures how long since the initial URL started loading.
+  scoped_ptr<base::ElapsedTimer> load_start_;
+
+  ObserverList<ExtensionHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

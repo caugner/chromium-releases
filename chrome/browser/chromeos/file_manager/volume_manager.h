@@ -57,6 +57,15 @@ enum VolumeType {
   NUM_VOLUME_TYPE,
 };
 
+// Says how was the mount performed, whether due to user interaction, or
+// automatic. User interaction includes both hardware (pluggins a USB stick)
+// or software (mounting a ZIP archive) interaction.
+enum MountContext {
+  MOUNT_CONTEXT_USER,
+  MOUNT_CONTEXT_AUTO,
+  MOUNT_CONTEXT_UNKNOWN
+};
+
 struct VolumeInfo {
   VolumeInfo();
   ~VolumeInfo();
@@ -92,6 +101,10 @@ struct VolumeInfo {
 
   // The mounting condition. See the enum for the details.
   chromeos::disks::MountCondition mount_condition;
+
+  // The context of the mount. Whether mounting was performed due to a user
+  // interaction or not.
+  MountContext mount_context;
 
   // Path of the system device this device's block is a part of.
   // (e.g. /sys/devices/pci0000:00/.../8:0:0:0/)
@@ -130,7 +143,7 @@ class VolumeManager : public KeyedService,
       chromeos::PowerManagerClient* power_manager_client,
       chromeos::disks::DiskMountManager* disk_mount_manager,
       chromeos::file_system_provider::Service* file_system_provider_service);
-  virtual ~VolumeManager();
+  ~VolumeManager() override;
 
   // Returns the instance corresponding to the |context|.
   static VolumeManager* Get(content::BrowserContext* context);
@@ -139,7 +152,7 @@ class VolumeManager : public KeyedService,
   void Initialize();
 
   // Disposes this instance.
-  virtual void Shutdown() override;
+  void Shutdown() override;
 
   // Adds an observer.
   void AddObserver(VolumeManagerObserver* observer);
@@ -166,32 +179,30 @@ class VolumeManager : public KeyedService,
                                chromeos::DeviceType device_type);
 
   // drive::DriveIntegrationServiceObserver overrides.
-  virtual void OnFileSystemMounted() override;
-  virtual void OnFileSystemBeingUnmounted() override;
+  void OnFileSystemMounted() override;
+  void OnFileSystemBeingUnmounted() override;
 
   // chromeos::disks::DiskMountManager::Observer overrides.
-  virtual void OnDiskEvent(
+  void OnDiskEvent(
       chromeos::disks::DiskMountManager::DiskEvent event,
       const chromeos::disks::DiskMountManager::Disk* disk) override;
-  virtual void OnDeviceEvent(
-      chromeos::disks::DiskMountManager::DeviceEvent event,
-      const std::string& device_path) override;
-  virtual void OnMountEvent(
-      chromeos::disks::DiskMountManager::MountEvent event,
-      chromeos::MountError error_code,
-      const chromeos::disks::DiskMountManager::MountPointInfo& mount_info)
-      override;
-  virtual void OnFormatEvent(
-      chromeos::disks::DiskMountManager::FormatEvent event,
-      chromeos::FormatError error_code,
-      const std::string& device_path) override;
+  void OnDeviceEvent(chromeos::disks::DiskMountManager::DeviceEvent event,
+                     const std::string& device_path) override;
+  void OnMountEvent(chromeos::disks::DiskMountManager::MountEvent event,
+                    chromeos::MountError error_code,
+                    const chromeos::disks::DiskMountManager::MountPointInfo&
+                        mount_info) override;
+  void OnFormatEvent(chromeos::disks::DiskMountManager::FormatEvent event,
+                     chromeos::FormatError error_code,
+                     const std::string& device_path) override;
 
   // chromeos::file_system_provider::Observer overrides.
-  virtual void OnProvidedFileSystemMount(
+  void OnProvidedFileSystemMount(
       const chromeos::file_system_provider::ProvidedFileSystemInfo&
           file_system_info,
+      chromeos::file_system_provider::MountContext context,
       base::File::Error error) override;
-  virtual void OnProvidedFileSystemUnmount(
+  void OnProvidedFileSystemUnmount(
       const chromeos::file_system_provider::ProvidedFileSystemInfo&
           file_system_info,
       base::File::Error error) override;
@@ -200,9 +211,9 @@ class VolumeManager : public KeyedService,
   void OnExternalStorageDisabledChanged();
 
   // RemovableStorageObserver overrides.
-  virtual void OnRemovableStorageAttached(
+  void OnRemovableStorageAttached(
       const storage_monitor::StorageInfo& info) override;
-  virtual void OnRemovableStorageDetached(
+  void OnRemovableStorageDetached(
       const storage_monitor::StorageInfo& info) override;
 
   SnapshotManager* snapshot_manager() { return snapshot_manager_.get(); }

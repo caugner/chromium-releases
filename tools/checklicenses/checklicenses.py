@@ -129,10 +129,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'courgette/third_party/bsdiff_create.cc': [  # http://crbug.com/98095
         'UNKNOWN',
     ],
-    # This code is not shipped.
-    'mojo/public/third_party/ply': [
-        'UNKNOWN',
-    ],
     'native_client': [  # http://crbug.com/98099
         'UNKNOWN',
     ],
@@ -219,10 +215,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'third_party/lcov/contrib/galaxy/genflat.pl': [
         'GPL (v2 or later)',
-    ],
-    'third_party/libc++/trunk/test': [
-        # http://llvm.org/bugs/show_bug.cgi?id=18291
-        'UNKNOWN',
     ],
     'third_party/libevent': [  # http://crbug.com/98309
         'UNKNOWN',

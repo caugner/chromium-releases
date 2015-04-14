@@ -59,6 +59,8 @@ void GetKeyExchangesList(int key_exchange, base::ListValue* values) {
     values->Append(new base::StringValue("rsa"));
   if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA)
     values->Append(new base::StringValue("dhe_rsa"));
+  if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA)
+    values->Append(new base::StringValue("ecdhe_rsa"));
 }
 
 void GetCiphersList(int cipher, base::ListValue* values) {
@@ -70,6 +72,8 @@ void GetCiphersList(int cipher, base::ListValue* values) {
     values->Append(new base::StringValue("aes256"));
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_3DES)
     values->Append(new base::StringValue("3des"));
+  if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES128GCM)
+    values->Append(new base::StringValue("aes128gcm"));
 }
 
 base::StringValue* GetTLSIntoleranceType(

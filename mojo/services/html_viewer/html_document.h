@@ -9,26 +9,28 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "mojo/public/cpp/application/interface_factory.h"
-#include "mojo/public/cpp/application/lazy_interface_ptr.h"
-#include "mojo/public/cpp/application/service_provider_impl.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
-#include "mojo/public/interfaces/application/application.mojom.h"
-#include "mojo/services/content_handler/public/interfaces/content_handler.mojom.h"
 #include "mojo/services/html_viewer/ax_provider_impl.h"
-#include "mojo/services/navigation/public/interfaces/navigation.mojom.h"
 #include "mojo/services/network/public/interfaces/url_loader.mojom.h"
-#include "mojo/services/view_manager/public/cpp/view_manager_client_factory.h"
-#include "mojo/services/view_manager/public/cpp/view_manager_delegate.h"
-#include "mojo/services/view_manager/public/cpp/view_observer.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
+#include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "third_party/WebKit/public/web/WebViewClient.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/interface_factory.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/lazy_interface_ptr.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/service_provider_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/interfaces/application/application.mojom.h"
+#include "third_party/mojo_services/src/content_handler/public/interfaces/content_handler.mojom.h"
+#include "third_party/mojo_services/src/navigation/public/interfaces/navigation.mojom.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view_manager_client_factory.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view_manager_delegate.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view_observer.h"
 
 namespace base {
 class MessageLoopProxy;
 }
 
 namespace media {
+class MediaPermission;
 class WebEncryptedMediaClientImpl;
 }
 
@@ -52,13 +54,13 @@ class HTMLDocument : public blink::WebViewClient,
  public:
   // Load a new HTMLDocument with |response|.
   //
-  // |service_provider_request| should be used to implement a
-  // ServiceProvider which exposes services to the connecting application.
+  // |services| should be used to implement a ServiceProvider which exposes
+  // services to the connecting application.
   // Commonly, the connecting application is the ViewManager and it will
   // request ViewManagerClient.
   //
   // |shell| is the Shell connection for this mojo::Application.
-  HTMLDocument(mojo::ServiceProviderPtr provider,
+  HTMLDocument(mojo::InterfaceRequest<mojo::ServiceProvider> services,
                mojo::URLResponsePtr response,
                mojo::Shell* shell,
                scoped_refptr<base::MessageLoopProxy> compositor_thread,
@@ -83,8 +85,10 @@ class HTMLDocument : public blink::WebViewClient,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client,
       blink::WebContentDecryptionModule* initial_cdm);
-  virtual blink::WebFrame* createChildFrame(blink::WebLocalFrame* parent,
-                                            const blink::WebString& frameName);
+  virtual blink::WebFrame* createChildFrame(
+      blink::WebLocalFrame* parent,
+      const blink::WebString& frameName,
+      blink::WebSandboxFlags sandboxFlags);
   virtual void frameDetached(blink::WebFrame*);
   virtual blink::WebCookieJar* cookieJar(blink::WebLocalFrame* frame);
   virtual blink::WebNavigationPolicy decidePolicyForNavigation(
@@ -104,10 +108,9 @@ class HTMLDocument : public blink::WebViewClient,
   virtual blink::WebEncryptedMediaClient* encryptedMediaClient();
 
   // ViewManagerDelegate methods:
-  void OnEmbed(
-      mojo::View* root,
-      mojo::ServiceProviderImpl* embedee_service_provider_impl,
-      scoped_ptr<mojo::ServiceProvider> embedder_service_provider) override;
+  void OnEmbed(mojo::View* root,
+               mojo::InterfaceRequest<mojo::ServiceProvider> services,
+               mojo::ServiceProviderPtr exposed_services) override;
   void OnViewManagerDisconnected(mojo::ViewManager* view_manager) override;
 
   // ViewObserver methods:
@@ -125,7 +128,7 @@ class HTMLDocument : public blink::WebViewClient,
 
   mojo::URLResponsePtr response_;
   mojo::ServiceProviderImpl exported_services_;
-  scoped_ptr<mojo::ServiceProvider> embedder_service_provider_;
+  mojo::ServiceProviderPtr embedder_service_provider_;
   mojo::Shell* shell_;
   mojo::LazyInterfacePtr<mojo::NavigatorHost> navigator_host_;
   blink::WebView* web_view_;
@@ -136,7 +139,8 @@ class HTMLDocument : public blink::WebViewClient,
   WebMediaPlayerFactory* web_media_player_factory_;
 
   // EncryptedMediaClient attached to this frame; lazily initialized.
-  media::WebEncryptedMediaClientImpl* web_encrypted_media_client_;
+  scoped_ptr<media::WebEncryptedMediaClientImpl> web_encrypted_media_client_;
+  scoped_ptr<media::MediaPermission> media_permission_;
 
   // HTMLDocument owns these pointers.
   std::set<AxProviderImpl*> ax_provider_impls_;

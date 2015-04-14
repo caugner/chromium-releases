@@ -17,14 +17,25 @@ config("password_manager_config") {
 
 static_library("browser") {
   sources = [
-    "affiliation_fetcher_delegate.h",
+    "affiliation_backend.cc",
+    "affiliation_backend.h",
+    "affiliation_database.cc",
+    "affiliation_database.h",
+    "affiliation_fetch_throttler.cc",
+    "affiliation_fetch_throttler.h",
+    "affiliation_fetch_throttler_delegate.h",
     "affiliation_fetcher.cc",
     "affiliation_fetcher.h",
+    "affiliation_fetcher_delegate.h",
+    "affiliation_service.cc",
+    "affiliation_service.h",
     "affiliation_utils.cc",
     "affiliation_utils.h",
     "browser_save_password_progress_logger.cc",
     "browser_save_password_progress_logger.h",
-    "credential_manager_dispatcher.h",
+    "facet_manager.cc",
+    "facet_manager.h",
+    "facet_manager_host.h",
     "log_receiver.h",
     "log_router.cc",
     "log_router.h",
@@ -62,6 +73,7 @@ static_library("browser") {
     "password_store_sync.h",
     "psl_matching_helper.cc",
     "psl_matching_helper.h",
+    "test_affiliation_fetcher_factory.h",
     "webdata/logins_table.cc",
     "webdata/logins_table.h",
     "webdata/logins_table_win.cc",
@@ -87,11 +99,10 @@ static_library("browser") {
     # TODO(blundell): Provide the iOS login DB implementation and then
     # also exclude the POSIX one from iOS. http://crbug.com/341429
     sources -= [ "login_database_posix.cc" ]
-  } else if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
   }
 
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   public_configs = [ ":password_manager_config" ]
 
   # Sync (not supported in Android WebView).
@@ -113,10 +124,16 @@ proto_library("proto") {
 source_set("test_support") {
   testonly = true
   sources = [
+    "fake_affiliation_api.cc",
+    "fake_affiliation_api.h",
+    "fake_affiliation_fetcher.cc",
+    "fake_affiliation_fetcher.h",
+    "mock_affiliation_consumer.cc",
+    "mock_affiliation_consumer.h",
     "mock_password_store.cc",
     "mock_password_store.h",
-    "password_form_data.cc",
-    "password_form_data.h",
+    "password_manager_test_utils.cc",
+    "password_manager_test_utils.h",
     "stub_password_manager_client.cc",
     "stub_password_manager_client.h",
     "stub_password_manager_driver.cc",

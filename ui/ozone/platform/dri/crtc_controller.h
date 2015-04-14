@@ -11,6 +11,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/dri/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/dri/overlay_plane.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
@@ -25,14 +26,17 @@ class PageFlipObserver;
 // One CRTC can be paired up with one or more connectors. The simplest
 // configuration represents one CRTC driving one monitor, while pairing up a
 // CRTC with multiple connectors results in hardware mirroring.
-class CrtcController : public base::SupportsWeakPtr<CrtcController> {
+class OZONE_EXPORT CrtcController
+    : public base::SupportsWeakPtr<CrtcController> {
  public:
-  CrtcController(DriWrapper* drm, uint32_t crtc, uint32_t connector);
+  CrtcController(const scoped_refptr<DriWrapper>& drm,
+                 uint32_t crtc,
+                 uint32_t connector);
   ~CrtcController();
 
   uint32_t crtc() const { return crtc_; }
   uint32_t connector() const { return connector_; }
-  DriWrapper* drm() const { return drm_; }
+  const scoped_refptr<DriWrapper>& drm() const { return drm_; }
   bool is_disabled() const { return is_disabled_; }
   bool page_flip_pending() const { return page_flip_pending_; }
   uint64_t time_of_last_flip() const { return time_of_last_flip_; }
@@ -71,7 +75,7 @@ class CrtcController : public base::SupportsWeakPtr<CrtcController> {
   void RemoveObserver(PageFlipObserver* observer);
 
  private:
-  DriWrapper* drm_;  // Not owned.
+  scoped_refptr<DriWrapper> drm_;
 
   HardwareDisplayPlaneManager* overlay_plane_manager_;  // Not owned.
 

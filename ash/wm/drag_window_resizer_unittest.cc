@@ -36,9 +36,9 @@ const int kRootHeight = 600;
 class DragWindowResizerTest : public test::AshTestBase {
  public:
   DragWindowResizerTest() {}
-  virtual ~DragWindowResizerTest() {}
+  ~DragWindowResizerTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     AshTestBase::SetUp();
     UpdateDisplay(base::StringPrintf("800x%d", kRootHeight));
 
@@ -87,7 +87,7 @@ class DragWindowResizerTest : public test::AshTestBase {
     ParentWindowInPrimaryRootWindow(panel_window_.get());
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     window_.reset();
     always_on_top_window_.reset();
     system_modal_window_.reset();
@@ -127,7 +127,6 @@ class DragWindowResizerTest : public test::AshTestBase {
         Shell::GetInstance()->mouse_cursor_filter();
     bool is_warped = event_filter->WarpMouseCursorIfNecessaryForTest(
         target_root, point_in_screen);
-    event_filter->reset_was_mouse_warped_for_test();
     return is_warped;
   }
 

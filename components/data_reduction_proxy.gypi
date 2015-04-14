@@ -5,6 +5,33 @@
 
 {
   'targets': [
+   {
+      # GN Version: //components/data_reduction_proxy/content
+      'target_name': 'data_reduction_proxy_content',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../content/content.gyp:content_browser',
+        '../skia/skia.gyp:skia',
+        '../ui/base/ui_base.gyp:ui_base',
+        'components_resources.gyp:components_resources',
+        'components_strings.gyp:components_strings',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        # Note: sources list duplicated in GN build.
+        'data_reduction_proxy/content/browser/content_data_reduction_proxy_debug_ui_service.cc',
+        'data_reduction_proxy/content/browser/content_data_reduction_proxy_debug_ui_service.h',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_blocking_page.cc',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_blocking_page.h',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_resource_throttle.cc',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_resource_throttle.h',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_ui_manager.cc',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_debug_ui_manager.h',
+      ],
+    },
     {
       # GN version: //components/data_reduction_proxy/core/browser
       'target_name': 'data_reduction_proxy_core_browser',
@@ -30,22 +57,29 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
-        'data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.cc',
-        'data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h',
+        "data_reduction_proxy/core/browser/data_reduction_proxy_debug_ui_service.h",
         'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_configurator.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_delegate.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_delegate.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_io_data.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_metrics.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_prefs.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_request_options.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_service.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_service.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.cc',
@@ -92,6 +126,7 @@
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        'data_reduction_proxy_content',
         'data_reduction_proxy_core_browser',
         'data_reduction_proxy_core_common',
       ],
@@ -100,8 +135,14 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_configurator_test_utils.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_configurator_test_utils.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h',
         'data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.cc',
         'data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.h',
         'data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.cc',
@@ -143,4 +184,3 @@
 
   ],
 }
-

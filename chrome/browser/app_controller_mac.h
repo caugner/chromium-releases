@@ -10,6 +10,7 @@
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
+#include "base/files/file_path.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -37,6 +38,7 @@ class WorkAreaWatcherObserver;
 // This handles things like responding to menus when there are no windows
 // open, etc and acts as the NSApplication delegate.
 @interface AppController : NSObject<NSUserInterfaceValidations,
+                                    NSMenuDelegate,
                                     NSApplicationDelegate> {
  @private
   // Manages the state of the command menu items.
@@ -56,7 +58,7 @@ class WorkAreaWatcherObserver;
   // a weak pointer that is updated to match the corresponding cache entry
   // during a profile switch.
   BookmarkMenuBridge* bookmarkMenuBridge_;
-  std::map<Profile*, BookmarkMenuBridge*> profileBookmarkMenuBridgeMap_;
+  std::map<base::FilePath, BookmarkMenuBridge*> profileBookmarkMenuBridgeMap_;
 
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
 
@@ -78,7 +80,6 @@ class WorkAreaWatcherObserver;
   // tabs it has.
   IBOutlet NSMenuItem* closeTabMenuItem_;
   IBOutlet NSMenuItem* closeWindowMenuItem_;
-  BOOL fileMenuUpdatePending_;  // ensure we only do this once per notificaion.
 
   // Outlet for the help menu so we can bless it so Cocoa adds the search item
   // to it.
@@ -106,6 +107,9 @@ class WorkAreaWatcherObserver;
   // Observes changes to the active URL.
   scoped_ptr<HandoffActiveURLObserverBridge>
       handoff_active_url_observer_bridge_;
+
+  // This will be true after receiving a NSWorkspaceWillPowerOffNotification.
+  BOOL isPoweringOff_;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;
@@ -119,6 +123,9 @@ class WorkAreaWatcherObserver;
 // Stop trying to terminate the application. That is, prevent the final browser
 // window closure from causing the application to quit.
 - (void)stopTryingToTerminateApplication:(NSApplication*)app;
+
+// Indicate that the system is powering off or logging out.
+- (void)willPowerOff:(NSNotification*)inNotification;
 
 // Returns true if there is a modal window (either window- or application-
 // modal) blocking the active browser. Note that tab modal dialogs (HTTP auth

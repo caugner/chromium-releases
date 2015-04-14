@@ -384,8 +384,6 @@ public class ContentViewCore
 
     private ContentViewClient mContentViewClient;
 
-    private ContentSettings mContentSettings;
-
     // Native pointer to C++ ContentViewCoreImpl object which will be set by nativeInit().
     private long mNativeContentViewCore = 0;
 
@@ -424,6 +422,8 @@ public class ContentViewCore
 
     // Cached copy of all positions and scales as reported by the renderer.
     private final RenderCoordinates mRenderCoordinates;
+
+    private boolean mIsMobileOptimizedHint;
 
     // Tracks whether a selection is currently active.  When applied to selected text, indicates
     // whether the last selected text is still highlighted.
@@ -523,6 +523,15 @@ public class ContentViewCore
     private ContextualSearchClient mContextualSearchClient;
 
     /**
+     * @param webContents The {@link WebContents} to find a {@link ContentViewCore} of.
+     * @return            A {@link ContentViewCore} that is connected to {@code webContents} or
+     *                    {@code null} if none exists.
+     */
+    public static ContentViewCore fromWebContents(WebContents webContents) {
+        return nativeFromWebContentsAndroid(webContents);
+    }
+
+    /**
      * Constructs a new ContentViewCore. Embedders must call initialize() after constructing
      * a ContentViewCore and before using it.
      *
@@ -572,11 +581,6 @@ public class ContentViewCore
      */
     public WebContents getWebContents() {
         return mWebContents;
-    }
-
-    /* TODO(aelias): Remove this after downstream callers switch to setTopControlsHeight. */
-    public void setViewportSizeOffset(int offsetXPix, int offsetYPix) {
-        setTopControlsHeight(mTopControlsHeightPix, offsetYPix != 0);
     }
 
     /**
@@ -644,7 +648,7 @@ public class ContentViewCore
         return mViewAndroid;
     }
 
-    private ImeAdapter createImeAdapter(Context context) {
+    private ImeAdapter createImeAdapter() {
         return new ImeAdapter(mInputMethodManagerWrapper,
                 new ImeAdapter.ImeAdapterDelegate() {
                     @Override
@@ -657,6 +661,12 @@ public class ContentViewCore
                     @Override
                     public void onDismissInput() {
                         getContentViewClient().onImeStateChangeRequested(false);
+                    }
+
+                    @Override
+                    public void onKeyboardBoundsUnchanged() {
+                        assert mWebContents != null;
+                        mWebContents.scrollFocusedEditableNodeIntoView();
                     }
 
                     @Override
@@ -698,7 +708,7 @@ public class ContentViewCore
      * @param containerView The view that will act as a container for all views created by this.
      * @param internalDispatcher Handles dispatching all hidden or super methods to the
      *                           containerView.
-     * @param nativeWebContents A pointer to the native web contents.
+     * @param webContents A WebContents instance to connect to.
      * @param windowAndroid An instance of the WindowAndroid.
      */
     // Perform important post-construction set up of the ContentViewCore.
@@ -711,7 +721,7 @@ public class ContentViewCore
     // Note that the caller remains the owner of the nativeWebContents and is responsible for
     // deleting it after destroying the ContentViewCore.
     public void initialize(ViewGroup containerView, InternalAccessDelegate internalDispatcher,
-            long nativeWebContents, WindowAndroid windowAndroid) {
+            WebContents webContents, WindowAndroid windowAndroid) {
         createContentViewAndroidDelegate();
         setContainerView(containerView);
         long windowNativePointer = windowAndroid.getNativePointer();
@@ -724,20 +734,29 @@ public class ContentViewCore
         mZoomControlsDelegate = NO_OP_ZOOM_CONTROLS_DELEGATE;
 
         mNativeContentViewCore = nativeInit(
-                nativeWebContents, viewAndroidNativePointer, windowNativePointer,
+                webContents, viewAndroidNativePointer, windowNativePointer,
                 mRetainedJavaScriptObjects);
         mWebContents = nativeGetWebContentsAndroid(mNativeContentViewCore);
-        mContentSettings = new ContentSettings(this, mNativeContentViewCore);
 
         setContainerViewInternals(internalDispatcher);
         mRenderCoordinates.reset();
         initPopupZoomer(mContext);
-        mImeAdapter = createImeAdapter(mContext);
+        mImeAdapter = createImeAdapter();
         attachImeAdapter();
 
         mAccessibilityInjector = AccessibilityInjector.newInstance(this);
 
         mWebContentsObserver = new WebContentsObserver(mWebContents) {
+            @Override
+            public void didStartLoading(String url) {
+                mAccessibilityInjector.onPageLoadStarted();
+            }
+
+            @Override
+            public void didStopLoading(String url) {
+                mAccessibilityInjector.onPageLoadStopped();
+            }
+
             @Override
             public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
                     String description, String failingUrl) {
@@ -751,9 +770,9 @@ public class ContentViewCore
             public void didNavigateMainFrame(String url, String baseUrl,
                     boolean isNavigationToDifferentPage, boolean isFragmentNavigation) {
                 if (!isNavigationToDifferentPage) return;
+                mIsMobileOptimizedHint = false;
                 hidePopupsAndClearSelection();
                 resetScrollInProgress();
-                resetGestureDetection();
             }
 
             @Override
@@ -818,7 +837,6 @@ public class ContentViewCore
 
             mContainerView = containerView;
             mPositionObserver = new ViewPositionObserver(mContainerView);
-            mContainerView.setWillNotDraw(false); // TODO(epenner): Remove (http://crbug.com/436689)
             mContainerView.setClickable(true);
             mViewAndroidDelegate.updateCurrentContainerView();
             for (ContainerViewObserver observer : mContainerViewObservers) {
@@ -940,7 +958,6 @@ public class ContentViewCore
         mWebContents = null;
         if (mViewAndroid != null) mViewAndroid.destroy();
         mNativeContentViewCore = 0;
-        mContentSettings = null;
         mJavaScriptInterfaces.clear();
         mRetainedJavaScriptObjects.clear();
         unregisterAccessibilityContentObserver();
@@ -1338,6 +1355,17 @@ public class ContentViewCore
     }
 
     /**
+     * Sets whether or not this {@link ContentViewCore} will visibly display it's content. By
+     * default this is set to {@code true} so there is no need to call this to start showing content
+     * when initially creating a {@link ContentViewCore}.
+     * @param draws Whether or not this {@link ContentViewCore} should draw.
+     */
+    public void setDrawsContent(boolean draws) {
+        if (mNativeContentViewCore == 0) return;
+        nativeSetDrawsContent(mNativeContentViewCore, draws);
+    }
+
+    /**
      * To be called when the ContentView is shown.
      */
     public void onShow() {
@@ -1363,16 +1391,6 @@ public class ContentViewCore
         hidePopupsAndPreserveSelection();
         setInjectedAccessibility(false);
         mWebContents.onHide();
-    }
-
-    /**
-     * Return the ContentSettings object used to retrieve the settings for this
-     * ContentViewCore. For modifications, ChromeNativePreferences is to be used.
-     * @return A ContentSettings object that can be used to retrieve this
-     *         ContentViewCore's settings.
-     */
-    public ContentSettings getContentSettings() {
-        return mContentSettings;
     }
 
     private void hidePopupsAndClearSelection() {
@@ -1513,8 +1531,7 @@ public class ContentViewCore
 
             if (newConfig.keyboard != Configuration.KEYBOARD_NOKEYS) {
                 if (mNativeContentViewCore != 0) {
-                    mImeAdapter.attach(nativeGetNativeImeAdapter(mNativeContentViewCore),
-                            TextInputType.NONE, 0 /* no flags */);
+                    mImeAdapter.attach(nativeGetNativeImeAdapter(mNativeContentViewCore));
                 }
                 mInputMethodManagerWrapper.restartInput(mContainerView);
             }
@@ -2176,10 +2193,6 @@ public class ContentViewCore
             default:
                 assert false : "Invalid selection event type.";
         }
-
-        // TODO(donnd): remove this line once downstream changes from using the ContentViewClient to
-        // using the CoontextualSearchClient.  See crbug.com/403001.
-        getContentViewClient().onSelectionEvent(eventType, x, y);
         if (mContextualSearchClient != null) {
             mContextualSearchClient.onSelectionEvent(eventType, x, y);
         }
@@ -2221,8 +2234,10 @@ public class ContentViewCore
             float pageScaleFactor, float minPageScaleFactor, float maxPageScaleFactor,
             float contentWidth, float contentHeight,
             float viewportWidth, float viewportHeight,
-            float controlsOffsetYCss, float contentOffsetYCss) {
+            float controlsOffsetYCss, float contentOffsetYCss,
+            boolean isMobileOptimizedHint) {
         TraceEvent.begin("ContentViewCore:updateFrameInfo");
+        mIsMobileOptimizedHint = isMobileOptimizedHint;
         // Adjust contentWidth/Height to be always at least as big as
         // the actual viewport (as set by onSizeChanged).
         final float deviceScale = mRenderCoordinates.getDeviceScaleFactor();
@@ -2417,9 +2432,6 @@ public class ContentViewCore
     @CalledByNative
     private void onSelectionChanged(String text) {
         mLastSelectedText = text;
-        // TODO(donnd): remove this line once downstream changes from using the ContentViewClient to
-        // using the CoontextualSearchClient.  See crbug.com/403001.
-        getContentViewClient().onSelectionChanged(text);
         if (mContextualSearchClient != null) {
             mContextualSearchClient.onSelectionChanged(text);
         }
@@ -2823,7 +2835,7 @@ public class ContentViewCore
                 return false;
             }
 
-            if (!mContentSettings.getJavaScriptEnabled()) {
+            if (!mContentViewClient.isJavascriptEnabled()) {
                 return false;
             }
 
@@ -2934,6 +2946,15 @@ public class ContentViewCore
         return mRenderCoordinates;
     }
 
+    /**
+     * @return Whether the current page seems to be mobile-optimized. This hint is based upon
+     *         rendered frames and may return different values when called multiple times for the
+     *         same page (particularly during page load).
+     */
+    public boolean getIsMobileOptimizedHint() {
+        return mIsMobileOptimizedHint;
+    }
+
     @CalledByNative
     private static Rect createRect(int x, int y, int right, int bottom) {
         return new Rect(x, y, right, bottom);
@@ -3017,9 +3038,9 @@ public class ContentViewCore
         if (potentiallyActiveFlingCount > 0) updateGestureStateListener(GestureEventType.FLING_END);
     }
 
-    private native long nativeInit(long webContentsPtr,
+    private native long nativeInit(WebContents webContents,
             long viewAndroidPtr, long windowAndroidPtr, HashSet<Object> retainedObjectSet);
-
+    private static native ContentViewCore nativeFromWebContentsAndroid(WebContents webContents);
     ContentVideoViewClient getContentVideoViewClient() {
         return getContentViewClient().getContentVideoViewClient();
     }
@@ -3170,4 +3191,6 @@ public class ContentViewCore
             int x, int y, int w, int h);
 
     private native void nativeSetBackgroundOpaque(long nativeContentViewCoreImpl, boolean opaque);
+
+    private native void nativeSetDrawsContent(long nativeContentViewCoreImpl, boolean draws);
 }

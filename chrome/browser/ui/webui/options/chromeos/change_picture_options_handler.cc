@@ -215,18 +215,13 @@ void ChangePictureOptionsHandler::HandleChooseFile(
 void ChangePictureOptionsHandler::HandleTakePhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
-#if !defined(USE_ATHENA)
-  // crbug.com/408733
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_CAMERA_SNAP);
-#endif
 }
 
 void ChangePictureOptionsHandler::HandleDiscardPhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
-#if !defined(USE_ATHENA)
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_OBJECT_DELETE);
-#endif
 }
 
 void ChangePictureOptionsHandler::HandlePhotoTaken(
@@ -476,9 +471,10 @@ void ChangePictureOptionsHandler::OnDecodeImageFailed(
   NOTREACHED() << "Failed to decode PNG image from WebUI";
 }
 
-user_manager::User* ChangePictureOptionsHandler::GetUser() const {
+const user_manager::User* ChangePictureOptionsHandler::GetUser() const {
   Profile* profile = Profile::FromWebUI(web_ui());
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
   if (!user)
     return user_manager::UserManager::Get()->GetActiveUser();
   return user;

@@ -11,12 +11,13 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/browser/thumbnails/thumbnail_service.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/common/url_constants.h"
+#include "components/history/core/browser/top_sites.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request.h"
 
@@ -94,15 +95,17 @@ void ThumbnailListSource::StartDataRequest(
     int render_process_id,
     int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
-  if (!profile_->GetTopSites()) {
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
+  if (!top_sites) {
     callback.Run(NULL);
     return;
   }
 
-  profile_->GetTopSites()->GetMostVisitedURLs(
+  top_sites->GetMostVisitedURLs(
       base::Bind(&ThumbnailListSource::OnMostVisitedURLsAvailable,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback), true);
+                 weak_ptr_factory_.GetWeakPtr(), callback),
+      true);
 }
 
 std::string ThumbnailListSource::GetMimeType(const std::string& path) const {

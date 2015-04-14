@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/android/autofill/card_unmask_prompt_view_android.h"
 
+#include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/ui/autofill/card_unmask_prompt_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/CardUnmaskBridge_jni.h"
@@ -44,6 +45,9 @@ void CardUnmaskPromptViewAndroid::Show() {
   java_object_.Reset(Java_CardUnmaskBridge_create(
       env, reinterpret_cast<intptr_t>(this), dialog_title.obj(),
       instructions.obj(),
+      ResourceMapper::MapFromChromiumId(controller_->GetCvcImageRid()),
+      controller_->ShouldRequestExpirationDate(),
+      controller_->GetStoreLocallyStartState(),
       view_android->GetWindowAndroid()->GetJavaObject().obj()));
 
   Java_CardUnmaskBridge_show(env, java_object_.obj());
@@ -58,9 +62,15 @@ bool CardUnmaskPromptViewAndroid::CheckUserInputValidity(JNIEnv* env,
 
 void CardUnmaskPromptViewAndroid::OnUserInput(JNIEnv* env,
                                               jobject obj,
-                                              jstring response) {
+                                              jstring cvc,
+                                              jstring month,
+                                              jstring year,
+                                              jboolean should_store_locally) {
   controller_->OnUnmaskResponse(
-      base::android::ConvertJavaStringToUTF16(env, response));
+      base::android::ConvertJavaStringToUTF16(env, cvc),
+      base::android::ConvertJavaStringToUTF16(env, month),
+      base::android::ConvertJavaStringToUTF16(env, year),
+      should_store_locally);
 }
 
 void CardUnmaskPromptViewAndroid::PromptDismissed(JNIEnv* env, jobject obj) {

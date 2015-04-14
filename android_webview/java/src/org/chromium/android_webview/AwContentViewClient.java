@@ -85,6 +85,10 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
         return mAwContentsClient.getVideoLoadingProgressView();
     }
 
+    @Override
+    public void setSystemUiVisibility(boolean enterFullscreen) {
+    }
+
     /**
      * Called to show the web contents in fullscreen mode.
      *
@@ -123,5 +127,10 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
             mAwContents.exitFullScreen();
             mAwContentsClient.onHideCustomView();
         }
+    }
+
+    @Override
+    public boolean isJavascriptEnabled() {
+        return mAwSettings != null && mAwSettings.getJavaScriptEnabled();
     }
 }

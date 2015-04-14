@@ -8,8 +8,9 @@
 // included file but that's all right since any javascript file should start
 // with a copyright comment anyway.
 
-//<include src="../../file_manager/foreground/js/metrics_base.js">
-//<include src="../../file_manager/foreground/js/metrics.js">
+//<include src="../../file_manager/common/js/metrics_base.js">
+//<include src="../../file_manager/common/js/metrics.js">
+//<include src="../../file_manager/foreground/js/metrics_start.js">
 
 //<include src="../../file_manager/common/js/lru_cache.js">
 //<include src="../../image_loader/image_loader_client.js">
@@ -18,6 +19,7 @@
 //<include src="../../../webui/resources/js/util.js">
 //<include src="../../../webui/resources/js/event_tracker.js">
 //<include src="../../../webui/resources/js/load_time_data.js">
+//<include src="../../../webui/resources/js/i18n_template_no_process.js">
 
 //<include src="../../../webui/resources/js/cr/ui.js">
 //<include src="../../../webui/resources/js/cr/event_target.js">
@@ -66,6 +68,7 @@
 //<include src="gallery.js">
 //<include src="gallery_data_model.js">
 //<include src="gallery_item.js">
+//<include src="gallery_util.js">
 //<include src="mosaic_mode.js">
 //<include src="ribbon.js">
 //<include src="slide_mode.js">
@@ -74,6 +77,8 @@
 window.ImageUtil = ImageUtil;
 window.ImageUtil.metrics = metrics;
 window.Gallery = Gallery;
-window.util = util;
+
+window.reload = reload;  // will be called by the background.
+window.gallery = gallery;  // for debug.
 
 })();

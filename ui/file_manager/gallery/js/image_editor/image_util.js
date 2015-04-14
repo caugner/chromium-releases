@@ -95,18 +95,6 @@ function ImageRect(left, top, width, height) {
 }
 
 /**
- * Creates an image rect with a canvas.
- * @param {!HTMLCanvasElement} canvas A canvas.
- * @return {!ImageRect}
- *
- * TODO(yawano): Since createFromImage accepts HTMLCanvasElement, delete this
- *     method later.
- */
-ImageRect.createFromCanvas = function(canvas) {
-  return ImageRect.createFromImage(canvas);
-};
-
-/**
  * Creates an image rect with an image or a canvas.
  * @param {!(HTMLImageElement|HTMLCanvasElement)} image An image or a canvas.
  * @return {!ImageRect}
@@ -144,20 +132,6 @@ ImageRect.createFromBounds = function(bound) {
  */
 ImageRect.createFromWidthAndHeight = function(width, height) {
   return new ImageRect(0, 0, width, height);
-};
-
-/**
- * Creates an image rect with left, top, width and height.
- * @param {number} left Left.
- * @param {number} top Top.
- * @param {number} width Width.
- * @param {number} height Height.
- * @return {!ImageRect}
- *
- * TODO(yawano): Remove createWith calls and call constructor directly.
- */
-ImageRect.createWith = function(left, top, width, height) {
-  return new ImageRect(left, top, width, height);
 };
 
 ImageRect.prototype = /** @struct */ ({

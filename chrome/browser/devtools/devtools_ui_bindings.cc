@@ -14,7 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -33,6 +32,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -249,7 +249,8 @@ class DevToolsUIBindings::FrontendWebContentsObserver
   // TODO(creis): Replace with RenderFrameCreated when http://crbug.com/425397
   // is fixed.  See also http://crbug.com/424641.
   void AboutToNavigateRenderFrame(
-      content::RenderFrameHost* render_frame_host) override;
+      content::RenderFrameHost* old_host,
+      content::RenderFrameHost* new_host) override;
   void DocumentOnLoadCompletedInMainFrame() override;
   void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
@@ -287,11 +288,12 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
 }
 
 void DevToolsUIBindings::FrontendWebContentsObserver::
-    AboutToNavigateRenderFrame(content::RenderFrameHost* render_frame_host) {
-  if (render_frame_host->GetParent())
+    AboutToNavigateRenderFrame(content::RenderFrameHost* old_host,
+                               content::RenderFrameHost* new_host) {
+  if (new_host->GetParent())
     return;
   devtools_bindings_->frontend_host_.reset(
-      content::DevToolsFrontendHost::Create(render_frame_host,
+      content::DevToolsFrontendHost::Create(new_host,
                                             devtools_bindings_));
 }
 
@@ -621,15 +623,15 @@ void DevToolsUIBindings::SetWhitelistedShortcuts(
 }
 
 void DevToolsUIBindings::ZoomIn() {
-  chrome_page_zoom::Zoom(web_contents(), content::PAGE_ZOOM_IN);
+  ui_zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_IN);
 }
 
 void DevToolsUIBindings::ZoomOut() {
-  chrome_page_zoom::Zoom(web_contents(), content::PAGE_ZOOM_OUT);
+  ui_zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_OUT);
 }
 
 void DevToolsUIBindings::ResetZoom() {
-  chrome_page_zoom::Zoom(web_contents(), content::PAGE_ZOOM_RESET);
+  ui_zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_RESET);
 }
 
 static void InspectTarget(Profile* profile, DevToolsTargetImpl* target) {
@@ -866,24 +868,23 @@ void DevToolsUIBindings::CallClientFunction(const std::string& function_name,
                                             const base::Value* arg1,
                                             const base::Value* arg2,
                                             const base::Value* arg3) {
-  std::string params;
+  std::string javascript = function_name + "(";
   if (arg1) {
     std::string json;
     base::JSONWriter::Write(arg1, &json);
-    params.append(json);
+    javascript.append(json);
     if (arg2) {
       base::JSONWriter::Write(arg2, &json);
-      params.append(", " + json);
+      javascript.append(", ").append(json);
       if (arg3) {
         base::JSONWriter::Write(arg3, &json);
-        params.append(", " + json);
+        javascript.append(", ").append(json);
       }
     }
   }
-
-  base::string16 javascript = base::UTF8ToUTF16(
-      function_name + "(" + params + ");");
-  web_contents_->GetMainFrame()->ExecuteJavaScript(javascript);
+  javascript.append(");");
+  web_contents_->GetMainFrame()->ExecuteJavaScript(
+      base::UTF8ToUTF16(javascript));
 }
 
 void DevToolsUIBindings::DocumentOnLoadCompletedInMainFrame() {

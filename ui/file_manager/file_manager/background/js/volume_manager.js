@@ -46,6 +46,8 @@ function VolumeInfo(
   this.displayRoot_ = null;
   this.fakeEntries_ = {};
   this.displayRoot_ = null;
+
+  /** @type {Promise.<DirectoryEntry>} */
   this.displayRootPromise_ = null;
 
   if (volumeType === VolumeManagerCommon.VolumeType.DRIVE) {
@@ -168,7 +170,7 @@ VolumeInfo.prototype = /** @struct */ {
  * @param {function(DirectoryEntry)=} opt_onSuccess Success callback with the
  *     display root directory as an argument.
  * @param {function(*)=} opt_onFailure Failure callback.
- * @return {Promise}
+ * @return {Promise.<DirectoryEntry>}
  */
 VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
                                                    opt_onFailure) {
@@ -177,9 +179,11 @@ VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
     // remove this if logic. Call opt_onSuccess() always, instead.
     if (this.volumeType !== VolumeManagerCommon.VolumeType.DRIVE) {
       if (this.fileSystem_)
-        this.displayRootPromise_ = Promise.resolve(this.fileSystem_.root);
+        this.displayRootPromise_ = /** @type {Promise.<DirectoryEntry>} */ (
+            Promise.resolve(this.fileSystem_.root));
       else
-        this.displayRootPromise_ = Promise.reject(this.error);
+        this.displayRootPromise_ = /** @type {Promise.<DirectoryEntry>} */ (
+            Promise.reject(this.error));
     } else {
       // For Drive, we need to resolve.
       var displayRootURL = this.fileSystem_.root.toURL() + '/root';
@@ -414,7 +418,7 @@ VolumeInfoList.prototype.findIndex = function(volumeId) {
 
 /**
  * Searches the information of the volume that contains the passed entry.
- * @param {Entry|Object} entry Entry on the volume to be found.
+ * @param {!Entry|!Object} entry Entry on the volume to be found.
  * @return {VolumeInfo} The volume's information, or null if not found.
  */
 VolumeInfoList.prototype.findByEntry = function(entry) {
@@ -448,6 +452,42 @@ VolumeInfoList.prototype.findByDevicePath = function(devicePath) {
     }
   }
   return null;
+};
+
+/**
+ * Returns a VolumInfo for the volume ID, or null if not found.
+ *
+ * @param {string} volumeId
+ * @return {VolumeInfo} The volume's information, or null if not found.
+ * @private
+ */
+VolumeInfoList.prototype.findByVolumeId_ = function(volumeId) {
+  var index = this.findIndex(volumeId);
+  return (index !== -1) ?
+      /** @type {VolumeInfo} */ (this.model_.item(index)) :
+      null;
+};
+
+/**
+ * Returns a promise that will be resolved when volume info, identified
+ * by {@code volumeId} is created.
+ *
+ * @param {string} volumeId
+ * @return {!Promise.<!VolumeInfo>} The VolumeInfo. Will not resolve
+ *     if the volume is never mounted.
+ */
+VolumeInfoList.prototype.whenVolumeInfoReady = function(volumeId) {
+  return new Promise(function(fulfill) {
+    var handler = function() {
+      var info = this.findByVolumeId_(volumeId);
+      if (info) {
+        fulfill(info);
+        this.model_.removeEventListener('splice', handler);
+      }
+    }.bind(this);
+    this.model_.addEventListener('splice', handler);
+    handler();
+  }.bind(this));
 };
 
 /**
@@ -647,7 +687,7 @@ VolumeManager.prototype.onMountCompleted_ = function(event) {
       case 'mount':
         var requestKey = this.makeRequestKey_(
             'mount',
-            event.volumeMetadata.sourcePath);
+            event.volumeMetadata.sourcePath || '');
 
         if (event.status === 'success' ||
             event.status ===
@@ -774,7 +814,7 @@ VolumeManager.prototype.getCurrentProfileVolumeInfo = function(volumeType) {
 /**
  * Obtains location information from an entry.
  *
- * @param {(Entry|Object)} entry File or directory entry. It can be a fake
+ * @param {(!Entry|!Object)} entry File or directory entry. It can be a fake
  *     entry.
  * @return {EntryLocation} Location information.
  */

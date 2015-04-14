@@ -85,7 +85,7 @@ void MaximizeModeWindowManager::OnOverviewModeStarting() {
   backdrops_hidden_ = true;
 }
 
-void MaximizeModeWindowManager::OnOverviewModeEnding() {
+void MaximizeModeWindowManager::OnOverviewModeEnded() {
   if (!backdrops_hidden_)
     return;
 
@@ -182,7 +182,8 @@ MaximizeModeWindowManager::MaximizeModeWindowManager()
 }
 
 void MaximizeModeWindowManager::MaximizeAllWindows() {
-  MruWindowTracker::WindowList windows = MruWindowTracker::BuildWindowList();
+  MruWindowTracker::WindowList windows = ash::Shell::GetInstance()->
+      mru_window_tracker()->BuildWindowListIgnoreModal();
   // Add all existing Mru windows.
   for (MruWindowTracker::WindowList::iterator window = windows.begin();
       window != windows.end(); ++window) {

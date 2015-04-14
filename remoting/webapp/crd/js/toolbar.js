@@ -26,7 +26,8 @@ remoting.Toolbar = function(toolbar) {
    * @type {HTMLElement}
    * @private
    */
-  this.stub_ = /** @type {HTMLElement} */toolbar.querySelector('.toolbar-stub');
+  this.stub_ =
+      /** @type {HTMLElement} */(toolbar.querySelector('.toolbar-stub'));
   /**
    * @type {number?} The id of the preview timer, if any.
    * @private
@@ -128,13 +129,14 @@ remoting.Toolbar.prototype.toggle = function() {
 };
 
 /**
- * @param {remoting.ClientSession} clientSession The active session, or null if
- *     there is no connection.
+ * @param {remoting.DesktopConnectedView} desktopConnectedView The view for
+ *     the active session, or null if there is no connection.
  */
-remoting.Toolbar.prototype.setClientSession = function(clientSession) {
+remoting.Toolbar.prototype.setDesktopConnectedView = function(
+    desktopConnectedView) {
   var connectedTo = document.getElementById('connected-to');
   connectedTo.innerText =
-      clientSession ? clientSession.getHostDisplayName() : "";
+      desktopConnectedView ? desktopConnectedView.getHostDisplayName() : "";
 };
 
 /**

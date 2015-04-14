@@ -17,11 +17,33 @@
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using testing::Eq;
+using testing::Field;
+using testing::_;
 
 namespace {
 
 const char kDisplayDispositionMetric[] = "PasswordBubble.DisplayDisposition";
+
+// A helper class that will create FakeURLFetcher and record the requested URLs.
+class TestURLFetcherCallback {
+ public:
+  scoped_ptr<net::FakeURLFetcher> CreateURLFetcher(
+      const GURL& url,
+      net::URLFetcherDelegate* d,
+      const std::string& response_data,
+      net::HttpStatusCode response_code,
+      net::URLRequestStatus::Status status) {
+    OnRequestDone(url);
+    return scoped_ptr<net::FakeURLFetcher>(new net::FakeURLFetcher(
+        url, d, response_data, response_code, status));
+  }
+
+  MOCK_METHOD1(OnRequestDone, void(const GURL&));
+};
 
 }  // namespace
 
@@ -94,7 +116,9 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, CommandControlsBubble) {
 IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
                        CommandExecutionInManagingState) {
   SetupManagingPasswords();
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
   ExecuteManagePasswordsCommand();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
 
   scoped_ptr<base::HistogramSamples> samples(
       GetSamples(kDisplayDispositionMetric));
@@ -114,6 +138,7 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
                        CommandExecutionInAutomaticState) {
   // Open with pending password: automagical!
   SetupPendingPassword();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
 
   // Bubble should not be focused by default.
   EXPECT_FALSE(ManagePasswordsBubbleView::manage_password_bubble()->
@@ -140,9 +165,11 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
                        CommandExecutionInPendingState) {
   // Open once with pending password: automagical!
   SetupPendingPassword();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
   ManagePasswordsBubbleView::CloseBubble();
   // This opening should be measured as manual.
   ExecuteManagePasswordsCommand();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
 
   scoped_ptr<base::HistogramSamples> samples(
       GetSamples(kDisplayDispositionMetric));
@@ -161,9 +188,11 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
 IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
                        CommandExecutionInAutomaticSaveState) {
   SetupAutomaticPassword();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
   ManagePasswordsBubbleView::CloseBubble();
   // Re-opening should count as manual.
   ExecuteManagePasswordsCommand();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
 
  scoped_ptr<base::HistogramSamples> samples(
       GetSamples(kDisplayDispositionMetric));
@@ -228,4 +257,38 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, TwoTabsWithBubble) {
   // Back to the first tab.
   tab_model->ActivateTabAt(1, true);
   EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, ChooseCredential) {
+  GURL origin("https://example.com");
+  ScopedVector<autofill::PasswordForm> local_credentials;
+  test_form()->origin = origin;
+  test_form()->display_name = base::ASCIIToUTF16("Peter");
+  test_form()->username_value = base::ASCIIToUTF16("pet12@gmail.com");
+  test_form()->avatar_url = GURL("broken url");
+  local_credentials.push_back(new autofill::PasswordForm(*test_form()));
+  ScopedVector<autofill::PasswordForm> federated_credentials;
+  GURL avatar_url("https://google.com/avatar.png");
+  test_form()->avatar_url = avatar_url;
+  test_form()->display_name = base::ASCIIToUTF16("Peter Pen");
+  test_form()->federation_url = GURL("https://google.com/federation");
+  federated_credentials.push_back(new autofill::PasswordForm(*test_form()));
+
+  // Prepare to capture the network request.
+  TestURLFetcherCallback url_callback;
+  net::FakeURLFetcherFactory factory(
+      NULL,
+      base::Bind(&TestURLFetcherCallback::CreateURLFetcher,
+                 base::Unretained(&url_callback)));
+  factory.SetFakeResponse(avatar_url, std::string(), net::HTTP_OK,
+                          net::URLRequestStatus::FAILED);
+  EXPECT_CALL(url_callback, OnRequestDone(avatar_url));
+
+  SetupChooseCredentials(local_credentials.Pass(), federated_credentials.Pass(),
+                         origin);
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+  EXPECT_CALL(*this, OnChooseCredential(
+      Field(&password_manager::CredentialInfo::type,
+            password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY)));
+  ManagePasswordsBubbleView::CloseBubble();
 }

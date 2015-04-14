@@ -101,8 +101,8 @@ void ContentAutofillDriver::SendAutofillTypePredictionsToRenderer(
   if (!RendererIsAvailable())
     return;
 
-  std::vector<FormDataPredictions> type_predictions;
-  FormStructure::GetFieldTypePredictions(forms, &type_predictions);
+  std::vector<FormDataPredictions> type_predictions =
+      FormStructure::GetFieldTypePredictions(forms);
   render_frame_host_->Send(new AutofillMsg_FieldTypePredictionsAvailable(
       render_frame_host_->GetRoutingID(), type_predictions));
 }
@@ -143,6 +143,13 @@ void ContentAutofillDriver::RendererShouldPreviewFieldWithValue(
     return;
   render_frame_host_->Send(new AutofillMsg_PreviewFieldWithValue(
       render_frame_host_->GetRoutingID(), value));
+}
+
+void ContentAutofillDriver::PopupHidden() {
+  // If the unmask prompt is showing, keep showing the preview. The preview
+  // will be cleared when the prompt closes.
+  if (!autofill_manager_->IsShowingUnmaskPrompt())
+    RendererShouldClearPreviewedForm();
 }
 
 bool ContentAutofillDriver::HandleMessage(const IPC::Message& message) {

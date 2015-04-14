@@ -47,8 +47,8 @@ bool HotwordServiceFactory::IsHotwordAllowed(BrowserContext* context) {
 
 // static
 bool HotwordServiceFactory::IsHotwordHardwareAvailable() {
-// Temporarily disabling hotword hardware check for M41. Will be
-// re-enabled for M42.
+// Temporarily disabling hotword hardware check for M42. Will be
+// re-enabled for M43.
 #if 0
 #if defined(OS_CHROMEOS)
   if (chromeos::CrasAudioHandler::IsInitialized()) {

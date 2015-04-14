@@ -18,6 +18,7 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
+#include "chrome/browser/sync/glue/autofill_wallet_data_type_controller.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_data_type_controller.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
@@ -45,7 +46,10 @@
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
+#include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/search_engines/template_url_service.h"
@@ -103,6 +107,7 @@
 #include "components/wifi_sync/wifi_credential_syncable_service_factory.h"
 #endif
 
+using bookmarks::BookmarkModel;
 using browser_sync::AutofillDataTypeController;
 using browser_sync::AutofillProfileDataTypeController;
 using browser_sync::BookmarkChangeProcessor;
@@ -163,7 +168,7 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
       command_line_(command_line),
       web_data_service_(WebDataServiceFactory::GetAutofillWebDataForProfile(
           profile_,
-          Profile::EXPLICIT_ACCESS)),
+          ServiceAccessType::EXPLICIT_ACCESS)),
       sync_service_url_(sync_service_url),
       token_service_(token_service),
       url_request_context_getter_(url_request_context_getter),
@@ -210,6 +215,15 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
   if (!disabled_types.Has(syncer::AUTOFILL_PROFILE)) {
     pss->RegisterDataTypeController(
         new AutofillProfileDataTypeController(this, profile_));
+  }
+
+  if (profile_->GetPrefs()->GetBoolean(
+           autofill::prefs::kAutofillWalletSyncExperimentEnabled) &&
+      !disabled_types.Has(syncer::AUTOFILL_WALLET_DATA)) {
+    // The feature can be enabled by sync experiment *or* command line flag,
+    // and additionally the sync type must be enabled.
+    pss->RegisterDataTypeController(
+        new browser_sync::AutofillWalletDataTypeController(this, profile_));
   }
 
   // Bookmark sync is enabled by default.  Register unless explicitly
@@ -469,16 +483,19 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return PrefServiceSyncable::FromProfile(profile_)->GetSyncableService(
           syncer::PRIORITY_PREFERENCES)->AsWeakPtr();
     case syncer::AUTOFILL:
-    case syncer::AUTOFILL_PROFILE: {
+    case syncer::AUTOFILL_PROFILE:
+    case syncer::AUTOFILL_WALLET_DATA: {
       if (!web_data_service_.get())
         return base::WeakPtr<syncer::SyncableService>();
       if (type == syncer::AUTOFILL) {
         return autofill::AutocompleteSyncableService::FromWebDataService(
             web_data_service_.get())->AsWeakPtr();
-      } else {
+      } else if (type == syncer::AUTOFILL_PROFILE) {
         return autofill::AutofillProfileSyncableService::FromWebDataService(
             web_data_service_.get())->AsWeakPtr();
       }
+      return autofill::AutofillWalletSyncableService::FromWebDataService(
+          web_data_service_.get())->AsWeakPtr();
     }
     case syncer::SEARCH_ENGINES:
       return TemplateURLServiceFactory::GetForProfile(profile_)->AsWeakPtr();
@@ -502,9 +519,8 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
           GetThemeSyncableService()->AsWeakPtr();
 #endif
     case syncer::HISTORY_DELETE_DIRECTIVES: {
-      HistoryService* history =
-          HistoryServiceFactory::GetForProfile(
-              profile_, Profile::EXPLICIT_ACCESS);
+      HistoryService* history = HistoryServiceFactory::GetForProfile(
+          profile_, ServiceAccessType::EXPLICIT_ACCESS);
       return history ? history->AsWeakPtr() : base::WeakPtr<HistoryService>();
     }
 #if defined(ENABLE_SPELLCHECK)
@@ -550,8 +566,8 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::PASSWORDS: {
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
       scoped_refptr<password_manager::PasswordStore> password_store =
-          PasswordStoreFactory::GetForProfile(profile_,
-                                              Profile::EXPLICIT_ACCESS);
+          PasswordStoreFactory::GetForProfile(
+              profile_, ServiceAccessType::EXPLICIT_ACCESS);
       return password_store.get() ? password_store->GetPasswordSyncableService()
                                   : base::WeakPtr<syncer::SyncableService>();
 #else

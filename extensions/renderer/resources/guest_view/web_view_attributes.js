@@ -35,7 +35,7 @@ WebViewAttribute.prototype.setValue = function(value) {
 // Changes the attribute's value without triggering its mutation handler.
 WebViewAttribute.prototype.setValueIgnoreMutation = function(value) {
   this.ignoreMutation = true;
-  this.webViewImpl.element.setAttribute(this.name, value || '');
+  this.setValue(value);
   this.ignoreMutation = false;
 }
 
@@ -53,7 +53,19 @@ WebViewAttribute.prototype.defineProperty = function() {
 };
 
 // Called when the attribute's value changes.
+WebViewAttribute.prototype.maybeHandleMutation = function(oldValue, newValue) {
+  if (this.ignoreMutation) {
+    return;
+  }
+
+  this.handleMutation(oldValue, newValue);
+};
+
+// Called when a change that isn't ignored occurs to the attribute's value.
 WebViewAttribute.prototype.handleMutation = function(oldValue, newValue) {};
+
+// Called when the <webview> element is detached from the DOM tree.
+WebViewAttribute.prototype.reset = function() {};
 
 // An attribute that is treated as a Boolean.
 function BooleanAttribute(name, webViewImpl) {
@@ -92,6 +104,24 @@ AllowTransparencyAttribute.prototype.handleMutation = function(oldValue,
                                        this.getValue());
 };
 
+// Attribute that specifies whether transparency is allowed in the webview.
+function AllowScalingAttribute(webViewImpl) {
+  BooleanAttribute.call(
+      this, WebViewConstants.ATTRIBUTE_ALLOWSCALING, webViewImpl);
+}
+
+AllowScalingAttribute.prototype.__proto__ = BooleanAttribute.prototype;
+
+AllowScalingAttribute.prototype.handleMutation = function(oldValue,
+                                                          newValue) {
+  if (!this.webViewImpl.guest.getId()) {
+    return;
+  }
+
+  WebViewInternal.setAllowScaling(this.webViewImpl.guest.getId(),
+                                  this.getValue());
+};
+
 // Attribute used to define the demension limits of autosizing.
 function AutosizeDimensionAttribute(name, webViewImpl) {
   WebViewAttribute.call(this, name, webViewImpl);
@@ -108,7 +138,7 @@ AutosizeDimensionAttribute.prototype.handleMutation = function(
   if (!this.webViewImpl.guest.getId()) {
     return;
   }
-  this.webViewImpl.guest.setAutoSize({
+  this.webViewImpl.guest.setSize({
     'enableAutoSize': this.webViewImpl.attributes[
       WebViewConstants.ATTRIBUTE_AUTOSIZE].getValue(),
     'min': {
@@ -167,7 +197,8 @@ PartitionAttribute.prototype.handleMutation = function(oldValue, newValue) {
   newValue = newValue || '';
 
   // The partition cannot change if the webview has already navigated.
-  if (!this.webViewImpl.beforeFirstNavigation) {
+  if (!this.webViewImpl.attributes[
+        WebViewConstants.ATTRIBUTE_SRC].beforeFirstNavigation) {
     window.console.error(WebViewConstants.ERROR_MSG_ALREADY_NAVIGATED);
     this.setValueIgnoreMutation(oldValue);
     return;
@@ -179,10 +210,15 @@ PartitionAttribute.prototype.handleMutation = function(oldValue, newValue) {
   }
 };
 
+PartitionAttribute.prototype.reset = function() {
+  this.validPartitionId = true;
+};
+
 // Attribute that handles the location and navigation of the webview.
 function SrcAttribute(webViewImpl) {
   WebViewAttribute.call(this, WebViewConstants.ATTRIBUTE_SRC, webViewImpl);
   this.setupMutationObserver();
+  this.beforeFirstNavigation = true;
 }
 
 SrcAttribute.prototype.__proto__ = WebViewAttribute.prototype;
@@ -193,9 +229,7 @@ SrcAttribute.prototype.setValueIgnoreMutation = function(value) {
   // observer |observer|, and then get handled even though we do not want to
   // handle this mutation.
   this.observer.takeRecords();
-  this.ignoreMutation = true;
-  this.webViewImpl.element.setAttribute(this.name, value || '');
-  this.ignoreMutation = false;
+  WebViewAttribute.prototype.setValueIgnoreMutation.call(this, value);
 }
 
 SrcAttribute.prototype.handleMutation = function(oldValue, newValue) {
@@ -210,6 +244,10 @@ SrcAttribute.prototype.handleMutation = function(oldValue, newValue) {
     return;
   }
   this.parse();
+};
+
+SrcAttribute.prototype.reset = function() {
+  this.beforeFirstNavigation = true;
 };
 
 // The purpose of this mutation observer is to catch assignment to the src
@@ -245,8 +283,8 @@ SrcAttribute.prototype.parse = function() {
   }
 
   if (!this.webViewImpl.guest.getId()) {
-    if (this.webViewImpl.beforeFirstNavigation) {
-      this.webViewImpl.beforeFirstNavigation = false;
+    if (this.beforeFirstNavigation) {
+      this.beforeFirstNavigation = false;
       this.webViewImpl.createGuest();
     }
     return;
@@ -264,6 +302,8 @@ WebViewImpl.prototype.setupWebViewAttributes = function() {
 
   this.attributes[WebViewConstants.ATTRIBUTE_ALLOWTRANSPARENCY] =
       new AllowTransparencyAttribute(this);
+  this.attributes[WebViewConstants.ATTRIBUTE_ALLOWSCALING] =
+      new AllowScalingAttribute(this);
   this.attributes[WebViewConstants.ATTRIBUTE_AUTOSIZE] =
       new AutosizeAttribute(this);
   this.attributes[WebViewConstants.ATTRIBUTE_NAME] =

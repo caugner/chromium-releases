@@ -20,9 +20,13 @@
 #include "chrome/browser/ui/app_list/speech_recognizer_delegate.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "ui/app_list/speech_ui_model_observer.h"
 
 namespace content {
+struct FrameNavigateParams;
+struct LoadCommittedDetails;
 struct SpeechRecognitionSessionPreamble;
 }
 
@@ -30,11 +34,14 @@ namespace extensions {
 class Extension;
 }
 
+namespace net {
+class URLFetcher;
+}
+
 class Profile;
 
 namespace app_list {
 
-class RecommendedApps;
 class SpeechAuthHelper;
 class SpeechRecognizer;
 class StartPageObserver;
@@ -42,6 +49,8 @@ class StartPageObserver;
 // StartPageService collects data to be displayed in app list's start page
 // and hosts the start page contents.
 class StartPageService : public KeyedService,
+                         public content::WebContentsObserver,
+                         public net::URLFetcherDelegate,
                          public SpeechRecognizerDelegate {
  public:
   typedef std::vector<scoped_refptr<const extensions::Extension> >
@@ -51,6 +60,11 @@ class StartPageService : public KeyedService,
 
   void AddObserver(StartPageObserver* observer);
   void RemoveObserver(StartPageObserver* observer);
+
+  void Init();
+
+  // Loads the start page WebContents if it hasn't already been loaded.
+  void LoadContentsIfNeeded();
 
   void AppListShown();
   void AppListHidden();
@@ -68,7 +82,9 @@ class StartPageService : public KeyedService,
   content::WebContents* GetStartPageContents();
   content::WebContents* GetSpeechRecognitionContents();
 
-  RecommendedApps* recommended_apps() { return recommended_apps_.get(); }
+  void set_search_engine_is_google(bool search_engine_is_google) {
+    search_engine_is_google_ = search_engine_is_google;
+  }
   Profile* profile() { return profile_; }
   SpeechRecognitionState state() { return state_; }
 
@@ -110,8 +126,22 @@ class StartPageService : public KeyedService,
   void LoadContents();
   void UnloadContents();
 
+  // Loads the start page URL for |contents_|.
+  void LoadStartPageURL();
+
+  // Fetch the Google Doodle JSON data and update the app list start page.
+  void FetchDoodleJson();
+
+  // net::URLFetcherDelegate overrides:
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
+
   // KeyedService overrides:
   void Shutdown() override;
+
+  // contents::WebContentsObserver overrides;
+  void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) override;
 
   // Change the known microphone availability. |available| should be true if
   // the microphone exists and is available for use.
@@ -126,7 +156,6 @@ class StartPageService : public KeyedService,
   scoped_ptr<content::WebContents> contents_;
   scoped_ptr<StartPageWebContentsDelegate> contents_delegate_;
   scoped_ptr<ProfileDestroyObserver> profile_destroy_observer_;
-  scoped_ptr<RecommendedApps> recommended_apps_;
   SpeechRecognitionState state_;
   ObserverList<StartPageObserver> observers_;
   bool speech_button_toggled_manually_;
@@ -145,6 +174,9 @@ class StartPageService : public KeyedService,
   scoped_ptr<AudioStatus> audio_status_;
 #endif
   scoped_ptr<NetworkChangeObserver> network_change_observer_;
+
+  bool search_engine_is_google_;
+  scoped_ptr<net::URLFetcher> doodle_fetcher_;
 
   base::WeakPtrFactory<StartPageService> weak_factory_;
 

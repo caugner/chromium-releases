@@ -7,11 +7,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
+#include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "content/public/browser/push_messaging_service.h"
 #include "content/public/common/push_messaging_status.h"
-#include "third_party/WebKit/public/platform/WebPushPermissionStatus.h"
+#include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
 class Profile;
 
@@ -22,10 +23,11 @@ class PrefRegistrySyncable;
 namespace gcm {
 
 class GCMProfileService;
-struct PushMessagingApplicationId;
+class PushMessagingApplicationId;
 
 class PushMessagingServiceImpl : public content::PushMessagingService,
-                                 public GCMAppHandler {
+                                 public GCMAppHandler,
+                                 public content_settings::Observer {
  public:
   // Register profile-specific prefs for GCM.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -67,18 +69,31 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   void Unregister(
       const GURL& requesting_origin,
       int64 service_worker_registration_id,
+      const std::string& sender_id,
+      bool retry_on_failure,
       const content::PushMessagingService::UnregisterCallback&) override;
   blink::WebPushPermissionStatus GetPermissionStatus(
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
 
+  // content_settings::Observer implementation.
+  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
+                               const ContentSettingsPattern& secondary_pattern,
+                               ContentSettingsType content_type,
+                               std::string resource_identifier) override;
+
   void SetProfileForTesting(Profile* profile);
 
  private:
-  void IncreasePushRegistrationCount(int add);
-  void DecreasePushRegistrationCount(int subtract);
+  // A registration is pending until it has succeeded or failed.
+  void IncreasePushRegistrationCount(int add, bool is_pending);
+  void DecreasePushRegistrationCount(int subtract, bool was_pending);
 
-  void DeliverMessageCallback(const PushMessagingApplicationId& application_id,
+  // OnMessage methods ---------------------------------------------------------
+
+  void DeliverMessageCallback(const std::string& app_id_guid,
+                              const GURL& requesting_origin,
+                              int64 service_worker_registration_id,
                               const GCMClient::IncomingMessage& message,
                               content::PushDeliveryStatus status);
 
@@ -86,7 +101,18 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   // incoming push message in order to clarify to the user that something has
   // happened in the background. When they forget to do so, display a default
   // notification on their behalf.
-  void RequireUserVisibleUX(const PushMessagingApplicationId& application_id);
+  void RequireUserVisibleUX(const GURL& requesting_origin,
+                            int64 service_worker_registration_id);
+  void DidGetNotificationsShown(
+      const GURL& requesting_origin,
+      int64 service_worker_registration_id,
+      bool notification_shown,
+      bool notification_needed,
+      const std::string& data,
+      bool success,
+      bool not_found);
+
+  // Register methods ----------------------------------------------------------
 
   void RegisterEnd(
       const content::PushMessagingService::RegisterCallback& callback,
@@ -94,6 +120,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
       content::PushRegistrationStatus status);
 
   void DidRegister(
+      const PushMessagingApplicationId& application_id,
       const content::PushMessagingService::RegisterCallback& callback,
       const std::string& registration_id,
       GCMClient::Result result);
@@ -104,24 +131,35 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
       const content::PushMessagingService::RegisterCallback& callback,
       bool allow);
 
-  void Unregister(const PushMessagingApplicationId& application_id,
+  // Unregister methods --------------------------------------------------------
+
+  void Unregister(const std::string& app_id_guid,
+                  const std::string& sender_id,
+                  bool retry_on_failure,
                   const content::PushMessagingService::UnregisterCallback&);
 
-  void DidUnregister(const content::PushMessagingService::UnregisterCallback&,
+  void DidUnregister(const std::string& app_id_guid,
+                     bool retry_on_failure,
+                     const content::PushMessagingService::UnregisterCallback&,
                      GCMClient::Result result);
 
-  // Helper method that checks if a given origin is allowed to use Push.
-  bool HasPermission(const GURL& origin);
+  // OnContentSettingChanged methods -------------------------------------------
 
-  // Adds this service as an app handler to the GCMDriver if it has not been
-  // added yet.
-  void AddAppHandlerIfNecessary();
+  void UnregisterBecausePermissionRevoked(const PushMessagingApplicationId& id,
+                                          const std::string& sender_id,
+                                          bool success, bool not_found);
+
+  // Helper methods ------------------------------------------------------------
+
+  // Checks if a given origin is allowed to use Push.
+  bool HasPermission(const GURL& origin);
 
   GCMProfileService* gcm_profile_service_;  // It owns us.
 
   Profile* profile_;  // It owns our owner.
 
   int push_registration_count_;
+  int pending_push_registration_count_;
 
   base::WeakPtrFactory<PushMessagingServiceImpl> weak_factory_;
 

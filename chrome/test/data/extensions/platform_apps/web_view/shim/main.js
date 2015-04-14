@@ -178,8 +178,9 @@ function testAutosizeBeforeNavigation() {
   webview.setAttribute('maxheight', 110);
 
   webview.addEventListener('sizechanged', function(e) {
-    embedder.test.assertEq(0, e.oldWidth);
-    embedder.test.assertEq(0, e.oldHeight);
+    // The old size should be the default size of the webview, which at the time
+    // of writing this comment is 300 x 300, but is not important to this test
+    // and could change in the future, so it is not checked here.
     embedder.test.assertTrue(e.newWidth >= 200 && e.newWidth <= 210);
     embedder.test.assertTrue(e.newHeight >= 100 && e.newHeight <= 110);
     embedder.test.succeed();
@@ -198,6 +199,8 @@ function testAutosizeAfterNavigation() {
   var webview = document.createElement('webview');
 
   var step = 1;
+  var autosizeWidth = -1;
+  var autosizeHeight = -1;
   var sizeChangeHandler = function(e) {
     switch (step) {
       case 1:
@@ -207,14 +210,15 @@ function testAutosizeAfterNavigation() {
         embedder.test.assertTrue(e.newWidth >= 60 && e.newWidth <= 70);
         embedder.test.assertTrue(e.newHeight >= 110 && e.newHeight <= 120);
 
-        // Remove autosize attribute and expect webview to return to its
-        // original size.
+        // Remove autosize attribute and expect webview to retain the same size.
+        autosizeWidth = e.newWidth;
+        autosizeHeight = e.newHeight;
         webview.removeAttribute('autosize');
         break;
       case 2:
-        // Expect 50x100.
-        embedder.test.assertEq(50, e.newWidth);
-        embedder.test.assertEq(100, e.newHeight);
+        // Expect the autosized size.
+        embedder.test.assertEq(autosizeWidth, e.newWidth);
+        embedder.test.assertEq(autosizeHeight, e.newHeight);
 
         embedder.test.succeed();
         break;
@@ -808,35 +812,42 @@ function testExecuteScript() {
   document.body.appendChild(webview);
 }
 
-// This test verifies that the call of executeScript will fail and return null
-// if the webview has been navigated to another source.
+// This test verifies that the call to executeScript will fail and return null
+// if the webview has been navigated between the time the call was made and the
+// time it arrives in the guest process.
 function testExecuteScriptIsAbortedWhenWebViewSourceIsChanged() {
   var webview = document.createElement('webview');
-  var initial = true;
-  var navigationOccur = false;
-  var newSrc = 'data:text/html,trigger navigation';
-  webview.addEventListener('loadstart', function() {
-    if (initial) {
-      webview.setAttribute('src', newSrc);
-      navigationOccur = true;
-    }
-    initial = false;
-  });
-  webview.addEventListener('loadstop', function() {
-    webview.executeScript(
-      {code:'document.body.style.backgroundColor = "red";'},
-      function(results) {
-        if (navigationOccur) {
-          // Expect a null results because the executeScript failed;
-          // return "red", otherwise.
+  webview.addEventListener('loadstop', function onLoadStop(e) {
+    window.console.log('2. Inject script to trigger a guest-initiated ' +
+        'navigation.');
+    var navUrl = 'data:text/html,trigger nav';
+    webview.executeScript({
+      code: 'window.location.href = "' + navUrl + '";'
+    });
+
+    window.console.log('3. Listening for the load that will be started as a ' +
+        'result of 2.');
+    webview.addEventListener('loadstart', function onLoadStart(e) {
+      embedder.test.assertEq('about:blank', webview.src);
+      window.console.log('4. Attempting to inject script into about:blank. ' +
+          'This is expected to fail.');
+      webview.executeScript(
+        { code: 'document.body.style.backgroundColor = "red";' },
+        function(results) {
+          window.console.log(
+              '5. Verify that executeScript has, indeed, failed.');
           embedder.test.assertEq(null, results);
+          embedder.test.assertEq(navUrl, webview.src);
           embedder.test.succeed();
         }
-        navigationOccur = false;
-      }
-    );
+      );
+      webview.removeEventListener('loadstart', onLoadStart);
+    });
+    webview.removeEventListener('loadstop', onLoadStop);
   });
-  webview.setAttribute('src', "about:blank");
+
+  window.console.log('1. Performing initial navigation.');
+  webview.setAttribute('src', 'about:blank');
   document.body.appendChild(webview);
 }
 
@@ -1127,6 +1138,18 @@ function testContentLoadEvent() {
   document.body.appendChild(webview);
 }
 
+// This test verifies that the load event fires when the a new page is
+// loaded even if the <webview> is set to display:none.
+function testContentLoadEventWithDisplayNone() {
+  var webview = document.createElement('webview');
+  webview.style.display = 'none';
+  webview.addEventListener('contentload', function(e) {
+    embedder.test.succeed();
+  });
+  webview.setAttribute('src', 'data:text/html,trigger navigation');
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the WebRequest API onBeforeRequest event fires on
 // webview.
 function testWebRequestAPI() {
@@ -1398,16 +1421,14 @@ function testLoadAbortEmptyResponse() {
 // chrome URL is provided.
 function testLoadAbortIllegalChromeURL() {
   var webview = document.createElement('webview');
-  var onFirstLoadStop = function(e) {
-    webview.removeEventListener('loadstop', onFirstLoadStop);
-    webview.setAttribute('src', 'chrome://newtab');
-  };
-  webview.addEventListener('loadstop', onFirstLoadStop);
   webview.addEventListener('loadabort', function(e) {
     embedder.test.assertEq('ERR_ABORTED', e.reason);
+  });
+  webview.addEventListener('loadstop', function(e)  {
+    embedder.test.assertEq('about:blank', webview.src);
     embedder.test.succeed();
   });
-  webview.setAttribute('src', 'about:blank');
+  webview.src = 'chrome://newtab';
   document.body.appendChild(webview);
 }
 
@@ -1415,9 +1436,12 @@ function testLoadAbortIllegalFileURL() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
     embedder.test.assertEq('ERR_ABORTED', e.reason);
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.assertEq('about:blank', webview.src);
     embedder.test.succeed();
   });
-  webview.setAttribute('src', 'file://foo');
+  webview.src = 'file://foo';
   document.body.appendChild(webview);
 }
 
@@ -1425,6 +1449,9 @@ function testLoadAbortIllegalJavaScriptURL() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
     embedder.test.assertEq('ERR_ABORTED', e.reason);
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.assertEq('about:blank', webview.src);
     embedder.test.succeed();
   });
   webview.setAttribute('src', 'javascript:void(document.bgColor="#0000FF")');
@@ -1434,17 +1461,19 @@ function testLoadAbortIllegalJavaScriptURL() {
 // Verifies that navigating to invalid URL (e.g. 'http:') doesn't cause a crash.
 function testLoadAbortInvalidNavigation() {
   var webview = document.createElement('webview');
-  var validSchemeWithEmptyURL = 'http:';
   webview.addEventListener('loadabort', function(e) {
     embedder.test.assertEq('ERR_ABORTED', e.reason);
     embedder.test.assertEq('', e.url);
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.assertEq('about:blank', webview.src);
     embedder.test.succeed();
   });
   webview.addEventListener('exit', function(e) {
     // We should not crash.
     embedder.test.fail();
   });
-  webview.setAttribute('src', validSchemeWithEmptyURL);
+  webview.src = 'http:';
   document.body.appendChild(webview);
 }
 
@@ -1452,17 +1481,20 @@ function testLoadAbortInvalidNavigation() {
 // pseudo-scheme fires loadabort and doesn't cause a crash.
 function testLoadAbortNonWebSafeScheme() {
   var webview = document.createElement('webview');
-  var chromeGuestURL = 'chrome-guest://abc123';
+  var chromeGuestURL = 'chrome-guest://abc123/';
   webview.addEventListener('loadabort', function(e) {
     embedder.test.assertEq('ERR_ABORTED', e.reason);
-    embedder.test.assertEq('chrome-guest://abc123/', e.url);
+    embedder.test.assertEq(chromeGuestURL, e.url);
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.assertEq('about:blank', webview.src);
     embedder.test.succeed();
   });
   webview.addEventListener('exit', function(e) {
     // We should not crash.
     embedder.test.fail();
   });
-  webview.setAttribute('src', chromeGuestURL);
+  webview.src = chromeGuestURL;
   document.body.appendChild(webview);
 };
 
@@ -1718,8 +1750,8 @@ function testResizeWebviewWithDisplayNoneResizesContent() {
         webview.style.width = '400px';
         window.setTimeout(function() {
           webview.style.display = 'block';
-        }, 0);
-      }, 0);
+        }, 10);
+      }, 10);
       return;
     }
     if (data[0] == 'resize') {
@@ -2075,6 +2107,7 @@ embedder.test.testList = {
   'testNewWindowNoPreventDefault': testNewWindowNoPreventDefault,
   'testNewWindowNoReferrerLink': testNewWindowNoReferrerLink,
   'testContentLoadEvent': testContentLoadEvent,
+  'testContentLoadEventWithDisplayNone': testContentLoadEventWithDisplayNone,
   'testDeclarativeWebRequestAPI': testDeclarativeWebRequestAPI,
   'testDeclarativeWebRequestAPISendMessage':
       testDeclarativeWebRequestAPISendMessage,

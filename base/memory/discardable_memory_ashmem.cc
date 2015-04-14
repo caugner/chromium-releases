@@ -73,9 +73,5 @@ void DiscardableMemoryAshmem::Purge() {
   ashmem_chunk_.reset();
 }
 
-bool DiscardableMemoryAshmem::IsMemoryResident() const {
-  return true;
-}
-
 }  // namespace internal
 }  // namespace base

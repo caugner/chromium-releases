@@ -55,11 +55,15 @@ class WebglRobustnessPage(page.Page):
     self.script_to_evaluate_on_commit = robustness_harness_script
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(WebglRobustnessPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition('webglTestHarness._finished')
 
 class WebglRobustness(benchmark.Benchmark):
   test = WebglConformanceValidator
+
+  @classmethod
+  def Name(cls):
+    return 'webgl_robustness'
 
   def CreatePageSet(self, options):
     ps = page_set.PageSet(

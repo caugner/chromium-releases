@@ -12,11 +12,12 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/leak_tracker.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/user_metrics.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -26,6 +27,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/async_dns_field_trial.h"
@@ -35,17 +37,11 @@
 #include "chrome/browser/net/dns_probe_service.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_delegate.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/variations/variations_associated_data.h"
@@ -178,20 +174,6 @@ scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
 
   net::HostResolver::Options options;
 
-  // Use the concurrency override from the command-line, if any.
-  if (command_line.HasSwitch(switches::kHostResolverParallelism)) {
-    std::string s =
-        command_line.GetSwitchValueASCII(switches::kHostResolverParallelism);
-
-    // Parse the switch (it should be a positive integer formatted as decimal).
-    int n;
-    if (base::StringToInt(s, &n) && n > 0) {
-      options.max_concurrent_resolves = static_cast<size_t>(n);
-    } else {
-      LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
-    }
-  }
-
   // Use the retry attempts override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverRetryAttempts)) {
     std::string s =
@@ -273,6 +255,10 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
 net::URLRequestContext*
 ConstructSystemRequestContext(IOThread::Globals* globals,
                               net::NetLog* net_log) {
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 ConstructSystemRequestContext"));
   net::URLRequestContext* context = new SystemURLRequestContext;
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
@@ -505,6 +491,8 @@ IOThread::IOThread(
       chrome_browser_net::ConfigureAsyncDnsFieldTrial());
   local_state->SetDefaultPrefValue(prefs::kBuiltInDnsClientEnabled,
                                    dns_client_enabled_default);
+  chrome_browser_net::LogAsyncDnsPrefSource(
+      local_state->FindPreference(prefs::kBuiltInDnsClientEnabled));
 
   dns_client_enabled_.Init(prefs::kBuiltInDnsClientEnabled,
                            local_state,
@@ -613,19 +601,7 @@ void IOThread::InitAsync() {
     chrome_network_delegate->NeverThrottleRequests();
 #endif
 
-  SetupDataReductionProxy();
-
-  // This is the same as in ProfileImplIOData except that it does not collect
-  // usage stats.
-  data_reduction_proxy::DataReductionProxyNetworkDelegate* network_delegate =
-      new data_reduction_proxy::DataReductionProxyNetworkDelegate(
-          chrome_network_delegate.Pass(),
-          globals_->data_reduction_proxy_params.get(),
-          globals_->data_reduction_proxy_auth_request_handler.get(),
-          data_reduction_proxy::DataReductionProxyNetworkDelegate::
-              ProxyConfigGetter());
-
-  globals_->system_network_delegate.reset(network_delegate);
+  globals_->system_network_delegate = chrome_network_delegate.Pass();
   globals_->host_resolver = CreateGlobalHostResolver(net_log_);
   UpdateDnsClientEnabled();
 #if defined(OS_CHROMEOS)
@@ -940,6 +916,7 @@ void IOThread::EnableSpdy(const std::string& mode) {
       globals_->use_alternate_protocols.set(false);
     } else if (option == kForceAltProtocols) {
       net::AlternateProtocolInfo pair(443, net::NPN_SPDY_3, 1);
+      base::RecordAction(base::UserMetricsAction("Net.ForceAlternateProtocol"));
       net::HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
     } else if (option == kSingleDomain) {
       DVLOG(1) << "FORCING SINGLE DOMAIN";
@@ -1011,6 +988,10 @@ void IOThread::ClearHostCache() {
 
 void IOThread::InitializeNetworkSessionParams(
     net::HttpNetworkSession::Params* params) {
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 IOThread::InitializeNetworkSessionParams"));
   InitializeNetworkSessionParamsFromGlobals(*globals_, params);
 }
 
@@ -1059,18 +1040,21 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->alternate_protocol_probability_threshold);
 
   globals.enable_quic.CopyToIfSet(&params->enable_quic);
+  globals.enable_quic_for_proxies.CopyToIfSet(&params->enable_quic_for_proxies);
   globals.quic_always_require_handshake_confirmation.CopyToIfSet(
       &params->quic_always_require_handshake_confirmation);
   globals.quic_disable_connection_pooling.CopyToIfSet(
       &params->quic_disable_connection_pooling);
   globals.quic_load_server_info_timeout_ms.CopyToIfSet(
       &params->quic_load_server_info_timeout_ms);
-  globals.quic_disable_loading_server_info_for_new_servers.CopyToIfSet(
-      &params->quic_disable_loading_server_info_for_new_servers);
   globals.quic_load_server_info_timeout_srtt_multiplier.CopyToIfSet(
       &params->quic_load_server_info_timeout_srtt_multiplier);
   globals.quic_enable_truncated_connection_ids.CopyToIfSet(
       &params->quic_enable_truncated_connection_ids);
+  globals.quic_enable_connection_racing.CopyToIfSet(
+      &params->quic_enable_connection_racing);
+  globals.quic_disable_disk_cache.CopyToIfSet(
+      &params->quic_disable_disk_cache);
   globals.enable_quic_port_selection.CopyToIfSet(
       &params->enable_quic_port_selection);
   globals.quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
@@ -1083,7 +1067,6 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->origin_to_force_quic_on);
   params->enable_user_alternate_protocol_ports =
       globals.enable_user_alternate_protocol_ports;
-  params->proxy_delegate = globals.data_reduction_proxy_delegate.get();
 }
 
 base::TimeTicks IOThread::creation_time() const {
@@ -1137,16 +1120,22 @@ void IOThread::InitSystemRequestContextOnIOThread() {
           system_proxy_config_service_.release(),
           command_line,
           quick_check_enabled_.GetValue()));
-  DCHECK(globals_->data_reduction_proxy_params);
 
   net::HttpNetworkSession::Params system_params;
   InitializeNetworkSessionParams(&system_params);
   system_params.net_log = net_log_;
   system_params.proxy_service = globals_->system_proxy_service.get();
 
-  globals_->system_http_transaction_factory.reset(
-      new net::HttpNetworkLayer(
-          new net::HttpNetworkSession(system_params)));
+  {
+    // TODO(michaeln): Remove after crbug.com/454983 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "454983 IOThread::InitSystemRequestContextOnIOThread"
+            ".HttpNetworkSession"));
+    globals_->system_http_transaction_factory.reset(
+        new net::HttpNetworkLayer(
+            new net::HttpNetworkSession(system_params)));
+  }
   globals_->system_url_request_job_factory.reset(
       new net::URLRequestJobFactoryImpl());
   globals_->system_request_context.reset(
@@ -1175,41 +1164,6 @@ void IOThread::ConfigureQuic(const base::CommandLine& command_line) {
   ConfigureQuicGlobals(command_line, group, params, globals_);
 }
 
-void IOThread::SetupDataReductionProxy() {
-  // TODO(kundaji): Move flags initialization to DataReductionProxyParams and
-  // merge with flag initialization in
-  // data_reduction_proxy_chrome_settings_factory.cc.
-  int flags = data_reduction_proxy::DataReductionProxyParams::kAllowed |
-      data_reduction_proxy::DataReductionProxyParams::kFallbackAllowed |
-      data_reduction_proxy::DataReductionProxyParams::kAlternativeAllowed;
-  if (data_reduction_proxy::DataReductionProxyParams::
-      IsIncludedInPromoFieldTrial()) {
-    flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
-  }
-  if (data_reduction_proxy::DataReductionProxyParams::
-      IsIncludedInHoldbackFieldTrial()) {
-    flags |= data_reduction_proxy::DataReductionProxyParams::kHoldback;
-  }
-#if defined(OS_ANDROID)
-  if (data_reduction_proxy::DataReductionProxyParams::
-          IsIncludedInAndroidOnePromoFieldTrial(
-              base::android::BuildInfo::GetInstance()->android_build_fp())) {
-    flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
-  }
-#endif
-  globals_->data_reduction_proxy_params.reset(
-      new data_reduction_proxy::DataReductionProxyParams(flags));
-  globals_->data_reduction_proxy_auth_request_handler.reset(
-      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          DataReductionProxyChromeSettings::GetClient(),
-          globals_->data_reduction_proxy_params.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-  globals_->data_reduction_proxy_delegate.reset(
-      new data_reduction_proxy::DataReductionProxyDelegate(
-          globals_->data_reduction_proxy_auth_request_handler.get(),
-          globals_->data_reduction_proxy_params.get()));
-}
-
 // static
 void IOThread::ConfigureQuicGlobals(
     const base::CommandLine& command_line,
@@ -1218,6 +1172,9 @@ void IOThread::ConfigureQuicGlobals(
     IOThread::Globals* globals) {
   bool enable_quic = ShouldEnableQuic(command_line, quic_trial_group);
   globals->enable_quic.set(enable_quic);
+  bool enable_quic_for_proxies = ShouldEnableQuicForProxies(command_line,
+                                                            quic_trial_group);
+  globals->enable_quic_for_proxies.set(enable_quic_for_proxies);
   if (enable_quic) {
     globals->quic_always_require_handshake_confirmation.set(
         ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params));
@@ -1229,28 +1186,28 @@ void IOThread::ConfigureQuicGlobals(
       globals->quic_load_server_info_timeout_ms.set(
           load_server_info_timeout_ms);
     }
-    globals->quic_disable_loading_server_info_for_new_servers.set(
-        ShouldDisableLoadingServerInfoForNewServers(quic_trial_params));
     float load_server_info_timeout_srtt_multiplier =
         GetQuicLoadServerInfoTimeoutSrttMultiplier(quic_trial_params);
-    globals->quic_enable_truncated_connection_ids.set(
-        ShouldQuicEnableTruncatedConnectionIds(quic_trial_params));
     if (load_server_info_timeout_srtt_multiplier != 0) {
       globals->quic_load_server_info_timeout_srtt_multiplier.set(
           load_server_info_timeout_srtt_multiplier);
     }
+    globals->quic_enable_truncated_connection_ids.set(
+        ShouldQuicEnableTruncatedConnectionIds(quic_trial_params));
+    globals->quic_enable_connection_racing.set(
+        ShouldQuicEnableConnectionRacing(quic_trial_params));
+    globals->quic_disable_disk_cache.set(
+        ShouldQuicDisableDiskCache(quic_trial_params));
     globals->enable_quic_port_selection.set(
         ShouldEnableQuicPortSelection(command_line));
     globals->quic_connection_options =
         GetQuicConnectionOptions(command_line, quic_trial_params);
-    if (ShouldEnableQuicPacing(command_line, quic_trial_group,
-                               quic_trial_params)) {
+    if (ShouldEnableQuicPacing(command_line, quic_trial_params)) {
       globals->quic_connection_options.push_back(net::kPACE);
     }
   }
 
   size_t max_packet_length = GetQuicMaxPacketLength(command_line,
-                                                    quic_trial_group,
                                                     quic_trial_params);
   if (max_packet_length != 0) {
     globals->quic_max_packet_length.set(max_packet_length);
@@ -1301,6 +1258,25 @@ bool IOThread::ShouldEnableQuic(const base::CommandLine& command_line,
       quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName);
 }
 
+// static
+bool IOThread::ShouldEnableQuicForProxies(const base::CommandLine& command_line,
+                                          base::StringPiece quic_trial_group) {
+  return ShouldEnableQuic(command_line, quic_trial_group) ||
+      ShouldEnableQuicForDataReductionProxy();
+}
+
+// static
+bool IOThread::ShouldEnableQuicForDataReductionProxy() {
+  const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
+
+  if (command_line.HasSwitch(switches::kDisableQuic))
+    return false;
+
+  return data_reduction_proxy::DataReductionProxyParams::
+      IsIncludedInQuicFieldTrial();
+}
+
 bool IOThread::ShouldEnableQuicPortSelection(
     const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kDisableQuicPortSelection))
@@ -1314,7 +1290,6 @@ bool IOThread::ShouldEnableQuicPortSelection(
 
 bool IOThread::ShouldEnableQuicPacing(
     const base::CommandLine& command_line,
-    base::StringPiece quic_trial_group,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kEnableQuicPacing))
     return true;
@@ -1338,10 +1313,7 @@ net::QuicTagVector IOThread::GetQuicConnectionOptions(
   VariationParameters::const_iterator it =
       quic_trial_params.find("connection_options");
   if (it == quic_trial_params.end()) {
-    // TODO(rch): remove support for deprecated congestion_options.
-    it = quic_trial_params.find("congestion_options");
-    if (it == quic_trial_params.end())
-      return net::QuicTagVector();
+    return net::QuicTagVector();
   }
 
   return net::QuicUtils::ParseQuicConnectionOptions(it->second);
@@ -1403,15 +1375,6 @@ int IOThread::GetQuicLoadServerInfoTimeout(
 }
 
 // static
-bool IOThread::ShouldDisableLoadingServerInfoForNewServers(
-    const VariationParameters& quic_trial_params) {
-  return LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params,
-                        "disable_loading_server_info_for_new_servers"),
-      "true");
-}
-
-// static
 float IOThread::GetQuicLoadServerInfoTimeoutSrttMultiplier(
     const VariationParameters& quic_trial_params) {
   double value;
@@ -1432,9 +1395,23 @@ bool IOThread::ShouldQuicEnableTruncatedConnectionIds(
 }
 
 // static
+bool IOThread::ShouldQuicEnableConnectionRacing(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_connection_racing"),
+      "true");
+}
+
+// static
+bool IOThread::ShouldQuicDisableDiskCache(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "disable_disk_cache"), "true");
+}
+
+// static
 size_t IOThread::GetQuicMaxPacketLength(
     const base::CommandLine& command_line,
-    base::StringPiece quic_trial_group,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicMaxPacketLength)) {
     unsigned value;

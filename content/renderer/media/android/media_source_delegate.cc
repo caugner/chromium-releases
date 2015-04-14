@@ -65,8 +65,8 @@ MediaSourceDelegate::MediaSourceDelegate(
       main_task_runner_(base::MessageLoopProxy::current()),
       media_task_runner_(media_task_runner),
       main_weak_factory_(this),
-      media_weak_factory_(this),
-      main_weak_this_(main_weak_factory_.GetWeakPtr()) {
+      media_weak_factory_(this) {
+  main_weak_this_ = main_weak_factory_.GetWeakPtr();
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 }
 
@@ -157,7 +157,7 @@ void MediaSourceDelegate::InitializeMediaSource(
   DCHECK(!media_source_opened_cb.is_null());
   media_source_opened_cb_ = media_source_opened_cb;
   encrypted_media_init_data_cb_ = encrypted_media_init_data_cb;
-  set_decryptor_ready_cb_ = set_decryptor_ready_cb;
+  set_decryptor_ready_cb_ = media::BindToCurrentLoop(set_decryptor_ready_cb);
   update_network_state_cb_ = media::BindToCurrentLoop(update_network_state_cb);
   duration_change_cb_ = duration_change_cb;
   access_unit_size_ = kAccessUnitSizeForMediaSource;
@@ -413,10 +413,11 @@ void MediaSourceDelegate::OnBufferReady(
     case DemuxerStream::kOk:
       data->access_units[index].status = status;
       if (buffer->end_of_stream()) {
-        data->access_units[index].end_of_stream = true;
+        data->access_units[index].is_end_of_stream = true;
         data->access_units.resize(index + 1);
         break;
       }
+      data->access_units[index].is_key_frame = buffer->is_key_frame();
       // TODO(ycheo): We assume that the inputed stream will be decoded
       // right away.
       // Need to implement this properly using MediaPlayer.OnInfoListener.
@@ -736,6 +737,13 @@ bool MediaSourceDelegate::GetDemuxerConfigFromStream(
     configs->is_audio_encrypted = config.is_encrypted();
     configs->audio_extra_data = std::vector<uint8>(
         config.extra_data(), config.extra_data() + config.extra_data_size());
+    configs->audio_codec_delay_ns = static_cast<int64_t>(
+        config.codec_delay()  *
+        (static_cast<double>(base::Time::kNanosecondsPerSecond) /
+         config.samples_per_second()));
+    configs->audio_seek_preroll_ns =
+        config.seek_preroll().InMicroseconds() *
+        base::Time::kNanosecondsPerMicrosecond;
     return true;
   }
   if (!is_audio && video_stream_) {

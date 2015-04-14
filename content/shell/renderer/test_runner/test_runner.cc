@@ -37,6 +37,7 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFindOptions.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebGraphicsContext.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebMIDIClientMock.h"
@@ -49,6 +50,10 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/skia_util.h"
 
 #if defined(__linux__) || defined(ANDROID)
 #include "third_party/WebKit/public/web/linux/WebFontRendering.h"
@@ -204,6 +209,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                               double dischargingTime,
                               double level);
   void ResetBatteryStatus();
+  void SetMockScreenAvailability(bool available);
   void DidAcquirePointerLock();
   void DidNotAcquirePointerLock();
   void DidLosePointerLock();
@@ -255,6 +261,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void DumpResourceRequestPriorities();
   void SetUseMockTheme(bool use);
   void WaitUntilExternalURLLoad();
+  void DumpDragImage();
   void ShowWebInspector(gin::Arguments* args);
   void CloseWebInspector();
   bool IsChooserShown();
@@ -410,6 +417,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("didChangeBatteryStatus",
                  &TestRunnerBindings::DidChangeBatteryStatus)
       .SetMethod("resetBatteryStatus", &TestRunnerBindings::ResetBatteryStatus)
+      .SetMethod("setMockScreenAvailability",
+                 &TestRunnerBindings::SetMockScreenAvailability)
       .SetMethod("didAcquirePointerLock",
                  &TestRunnerBindings::DidAcquirePointerLock)
       .SetMethod("didNotAcquirePointerLock",
@@ -493,6 +502,7 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("setUseMockTheme", &TestRunnerBindings::SetUseMockTheme)
       .SetMethod("waitUntilExternalURLLoad",
                  &TestRunnerBindings::WaitUntilExternalURLLoad)
+      .SetMethod("dumpDragImage", &TestRunnerBindings::DumpDragImage)
       .SetMethod("showWebInspector", &TestRunnerBindings::ShowWebInspector)
       .SetMethod("closeWebInspector", &TestRunnerBindings::CloseWebInspector)
       .SetMethod("isChooserShown", &TestRunnerBindings::IsChooserShown)
@@ -964,6 +974,11 @@ void TestRunnerBindings::ResetBatteryStatus() {
     runner_->ResetBatteryStatus();
 }
 
+void TestRunnerBindings::SetMockScreenAvailability(bool available) {
+  if (runner_)
+    runner_->SetMockScreenAvailability(available);
+}
+
 void TestRunnerBindings::DidAcquirePointerLock() {
   if (runner_)
     runner_->DidAcquirePointerLock();
@@ -1225,6 +1240,11 @@ void TestRunnerBindings::WaitUntilExternalURLLoad() {
     runner_->WaitUntilExternalURLLoad();
 }
 
+void TestRunnerBindings::DumpDragImage() {
+  if (runner_)
+    runner_->DumpDragImage();
+}
+
 void TestRunnerBindings::ShowWebInspector(gin::Arguments* args) {
   if (runner_) {
     std::string settings;
@@ -1482,22 +1502,19 @@ void TestRunnerBindings::NotImplemented(const gin::Arguments& args) {
 
 class TestPageOverlay : public WebPageOverlay {
  public:
-  explicit TestPageOverlay(WebView* web_view)
-      : web_view_(web_view) {
-  }
+  TestPageOverlay() {}
   virtual ~TestPageOverlay() {}
 
-  virtual void paintPageOverlay(WebCanvas* canvas) override  {
-    SkRect rect = SkRect::MakeWH(web_view_->size().width,
-                                 web_view_->size().height);
+  virtual void paintPageOverlay(WebGraphicsContext* context,
+                                const WebSize& webViewSize) {
+    gfx::Rect rect(webViewSize);
+    SkCanvas* canvas = context->beginDrawing(gfx::RectF(rect));
     SkPaint paint;
     paint.setColor(SK_ColorCYAN);
     paint.setStyle(SkPaint::kFill_Style);
-    canvas->drawRect(rect, paint);
+    canvas->drawRect(gfx::RectToSkRect(rect), paint);
+    context->endDrawing();
   }
-
- private:
-  WebView* web_view_;
 };
 
 TestRunner::WorkQueue::WorkQueue(TestRunner* controller)
@@ -1632,6 +1649,7 @@ void TestRunner::Reset() {
     delegate_->ResetScreenOrientation();
     delegate_->SetBluetoothMockDataSet("");
     delegate_->ClearGeofencingMockProvider();
+    delegate_->ResetPresentationService();
     ResetBatteryStatus();
     ResetDeviceLight();
   }
@@ -1659,6 +1677,7 @@ void TestRunner::Reset() {
   dump_spell_check_callbacks_ = false;
   dump_back_forward_list_ = false;
   dump_selection_rect_ = false;
+  dump_drag_image_ = false;
   test_repaint_ = false;
   sweep_horizontally_ = false;
   is_printing_ = false;
@@ -1927,6 +1946,10 @@ bool TestRunner::isPointerLocked() {
 
 void TestRunner::setToolTipText(const WebString& text) {
   tooltip_text_ = text.utf8();
+}
+
+bool TestRunner::shouldDumpDragImage() {
+  return dump_drag_image_;
 }
 
 bool TestRunner::midiAccessorResult() {
@@ -2447,6 +2470,10 @@ void TestRunner::ResetBatteryStatus() {
   delegate_->DidChangeBatteryStatus(status);
 }
 
+void TestRunner::SetMockScreenAvailability(bool available) {
+  delegate_->SetScreenAvailability(available);
+}
+
 void TestRunner::DidAcquirePointerLock() {
   DidAcquirePointerLockInternal();
 }
@@ -2532,8 +2559,12 @@ void TestRunner::OverridePreference(const std::string key,
     prefs->allow_display_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitAllowRunningInsecureContent") {
     prefs->allow_running_of_insecure_content = value->BooleanValue();
+  } else if (key == "WebKitDisableReadingFromCanvas") {
+    prefs->disable_reading_from_canvas = value->BooleanValue();
   } else if (key == "WebKitStrictMixedContentChecking") {
     prefs->strict_mixed_content_checking = value->BooleanValue();
+  } else if (key == "WebKitStrictPowerfulFeatureRestrictions") {
+    prefs->strict_powerful_feature_restrictions = value->BooleanValue();
   } else if (key == "WebKitShouldRespectImageOrientation") {
     prefs->should_respect_image_orientation = value->BooleanValue();
   } else if (key == "WebKitWebAudioEnabled") {
@@ -2721,6 +2752,11 @@ void TestRunner::WaitUntilExternalURLLoad() {
   wait_until_external_url_load_ = true;
 }
 
+void TestRunner::DumpDragImage() {
+  DumpAsTextWithPixelResults();
+  dump_drag_image_ = true;
+}
+
 void TestRunner::CloseWebInspector() {
   delegate_->CloseDevTools();
 }
@@ -2837,7 +2873,7 @@ void TestRunner::AddMockCredentialManagerResponse(const std::string& id,
 
 void TestRunner::AddWebPageOverlay() {
   if (web_view_ && !page_overlay_) {
-    page_overlay_ = new TestPageOverlay(web_view_);
+    page_overlay_ = new TestPageOverlay;
     web_view_->addPageOverlay(page_overlay_, 0);
   }
 }

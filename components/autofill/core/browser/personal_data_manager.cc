@@ -217,6 +217,18 @@ static bool CompareVotes(const std::pair<std::string, int>& a,
   return a.second < b.second;
 }
 
+// Ranks two data models according to their recency of use. Currently this will
+// place all server (Wallet) cards and addresses below all locally saved ones,
+// which is probably not what we want. TODO(estade): figure out relative ranking
+// of server data.
+bool RankByMfu(const AutofillDataModel* a, const AutofillDataModel* b) {
+  if (a->use_count() != b->use_count())
+    return a->use_count() > b->use_count();
+
+  // Ties are broken by MRU.
+  return a->use_date() > b->use_date();
+}
+
 }  // namespace
 
 PersonalDataManager::PersonalDataManager(const std::string& app_locale)
@@ -464,6 +476,26 @@ bool PersonalDataManager::ImportFormData(
   return false;
 }
 
+void PersonalDataManager::RecordUseOf(const AutofillDataModel& data_model) {
+  if (!database_.get())
+    return;
+
+  CreditCard* credit_card = GetCreditCardByGUID(data_model.guid());
+  if (credit_card && credit_card->record_type() == CreditCard::LOCAL_CARD) {
+    credit_card->RecordUse();
+    database_->UpdateCreditCard(*credit_card);
+    Refresh();
+    return;
+  }
+
+  AutofillProfile* profile = GetProfileByGUID(data_model.guid());
+  if (profile) {
+    profile->RecordUse();
+    database_->UpdateAutofillProfile(*profile);
+    Refresh();
+  }
+}
+
 void PersonalDataManager::AddProfile(const AutofillProfile& profile) {
   if (is_off_the_record_)
     return;
@@ -606,6 +638,17 @@ void PersonalDataManager::UpdateServerCreditCard(
   Refresh();
 }
 
+void PersonalDataManager::ResetFullServerCards() {
+  for (const CreditCard* card : server_credit_cards_) {
+    CreditCard card_copy = *card;
+    if (card_copy.record_type() == CreditCard::FULL_SERVER_CARD) {
+      card_copy.set_record_type(CreditCard::MASKED_SERVER_CARD);
+      card_copy.SetNumber(card->LastFourDigits());
+      UpdateServerCreditCard(card_copy);
+    }
+  }
+}
+
 void PersonalDataManager::RemoveByGUID(const std::string& guid) {
   if (is_off_the_record_)
     return;
@@ -655,12 +698,17 @@ const std::vector<AutofillProfile*>& PersonalDataManager::web_profiles() const {
   return web_profiles_.get();
 }
 
+const std::vector<CreditCard*>& PersonalDataManager::GetLocalCreditCards()
+    const {
+  return local_credit_cards_.get();
+}
+
 const std::vector<CreditCard*>& PersonalDataManager::GetCreditCards() const {
   credit_cards_.clear();
   credit_cards_.insert(credit_cards_.end(), local_credit_cards_.begin(),
                        local_credit_cards_.end());
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWalletCardImport)) {
+  if (IsExperimentalWalletIntegrationEnabled() &&
+      pref_service_->GetBoolean(prefs::kAutofillWalletImportEnabled)) {
     credit_cards_.insert(credit_cards_.end(), server_credit_cards_.begin(),
                          server_credit_cards_.end());
   }
@@ -681,13 +729,16 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
   base::string16 field_contents_canon =
       AutofillProfile::CanonicalizeProfileString(field_contents);
 
+  std::vector<AutofillProfile*> profiles = GetProfiles(true);
+  std::sort(profiles.begin(), profiles.end(), RankByMfu);
+
   if (field_is_autofilled) {
     // This field was previously autofilled. In this case, suggesting results
     // based on prefix is useless since it will be the same thing. Instead,
     // check for a field that may have multiple possible values (for example,
     // multiple names for the same address) and suggest the alternates. This
     // allows for easy correction of the data.
-    for (AutofillProfile* profile : GetProfiles(true)) {
+    for (AutofillProfile* profile : profiles) {
       std::vector<base::string16> values =
           GetMultiInfoInOneLine(profile, type, app_locale_);
 
@@ -714,7 +765,7 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
   } else {
     // Match based on a prefix search.
     std::vector<AutofillProfile*> matched_profiles;
-    for (AutofillProfile* profile : GetProfiles(true)) {
+    for (AutofillProfile* profile : profiles) {
       std::vector<base::string16> values =
           GetMultiInfoInOneLine(profile, type, app_locale_);
       for (size_t i = 0; i < values.size(); i++) {
@@ -789,6 +840,8 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
         cards_to_suggest.erase(inner_it_copy);
     }
   }
+
+  cards_to_suggest.sort(RankByMfu);
 
   std::vector<Suggestion> suggestions;
   for (const CreditCard* credit_card : cards_to_suggest) {
@@ -941,6 +994,10 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
     default_country_code_ = AutofillCountry::CountryCodeForLocale(app_locale());
 
   return default_country_code_;
+}
+
+bool PersonalDataManager::IsExperimentalWalletIntegrationEnabled() const {
+  return pref_service_->GetBoolean(prefs::kAutofillWalletSyncExperimentEnabled);
 }
 
 void PersonalDataManager::SetProfiles(std::vector<AutofillProfile>* profiles) {
@@ -1180,23 +1237,27 @@ void PersonalDataManager::EnabledPrefChanged() {
 const std::vector<AutofillProfile*>& PersonalDataManager::GetProfiles(
     bool record_metrics) const {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-  if (!pref_service_->GetBoolean(prefs::kAutofillUseMacAddressBook))
-    return web_profiles();
+  bool use_auxiliary_profiles =
+      pref_service_->GetBoolean(prefs::kAutofillUseMacAddressBook);
 #else
-  if (!pref_service_->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled))
-    return web_profiles();
+  bool use_auxiliary_profiles =
+      pref_service_->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
   profiles_.clear();
-
-  // Populates |auxiliary_profiles_|.
-  LoadAuxiliaryProfiles(record_metrics);
-
-  profiles_.insert(profiles_.end(), web_profiles_.begin(), web_profiles_.end());
-  profiles_.insert(
-      profiles_.end(), auxiliary_profiles_.begin(), auxiliary_profiles_.end());
-  profiles_.insert(
-      profiles_.end(), server_profiles_.begin(), server_profiles_.end());
+  profiles_.insert(profiles_.end(), web_profiles().begin(),
+                   web_profiles().end());
+  if (use_auxiliary_profiles) {
+    LoadAuxiliaryProfiles(record_metrics);
+    profiles_.insert(
+        profiles_.end(), auxiliary_profiles_.begin(),
+        auxiliary_profiles_.end());
+  }
+  if (IsExperimentalWalletIntegrationEnabled() &&
+      pref_service_->GetBoolean(prefs::kAutofillWalletImportEnabled)) {
+    profiles_.insert(
+        profiles_.end(), server_profiles_.begin(), server_profiles_.end());
+  }
   return profiles_;
 }
 

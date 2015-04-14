@@ -19,8 +19,7 @@
 
 namespace chromeos {
 class ChromeUserManagerImpl;
-class FakeLoginUtils;
-class FakeUserManager;
+class FakeChromeUserManager;
 class MockUserManager;
 class SupervisedUserManagerImpl;
 class UserAddingScreenTest;
@@ -31,6 +30,7 @@ class UserSessionManager;
 namespace user_manager {
 
 class UserManagerBase;
+class FakeUserManager;
 
 // A class representing information about a previously logged in user.
 // Each user has a canonical email (username), returned by |email()| and
@@ -169,9 +169,9 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   friend class chromeos::UserSessionManager;
 
   // For testing:
+  friend class FakeUserManager;
+  friend class chromeos::FakeChromeUserManager;
   friend class chromeos::MockUserManager;
-  friend class chromeos::FakeLoginUtils;
-  friend class chromeos::FakeUserManager;
   friend class chromeos::UserAddingScreenTest;
 
   // Do not allow anyone else to create new User instances.

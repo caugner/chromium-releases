@@ -134,6 +134,9 @@ const CGFloat kBrowserActionBubbleYOffset = 3.0;
 // Updates the container's grippy cursor based on the number of hidden buttons.
 - (void)updateGrippyCursors;
 
+// Returns the associated ToolbarController.
+- (ToolbarController*)toolbarController;
+
 @end
 
 namespace {
@@ -237,9 +240,8 @@ bool ToolbarActionsBarBridge::IsPopupRunning() const {
 
 void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
     bool overflowed_action_wants_to_run) {
-  [[[BrowserWindowController browserWindowControllerForWindow:
-      [controller_ browser]->window()->GetNativeWindow()] toolbarController]
-          setOverflowedToolbarActionWantsToRun:overflowed_action_wants_to_run];
+  [[controller_ toolbarController]
+      setOverflowedToolbarActionWantsToRun:overflowed_action_wants_to_run];
 }
 
 }  // namespace
@@ -354,15 +356,8 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
   NSRect bounds;
   NSView* referenceButton = button;
   if ([button superview] != containerView_ || isOverflow_) {
-    if (toolbarActionsBar_->platform_settings().chevron_enabled) {
-      referenceButton = chevronMenuButton_.get();
-    } else {
-      referenceButton =
-          [[[BrowserWindowController
-              browserWindowControllerForWindow:browser_->
-                  window()->GetNativeWindow()]
-                  toolbarController] wrenchButton];
-    }
+    referenceButton = toolbarActionsBar_->platform_settings().chevron_enabled ?
+         chevronMenuButton_.get() : [[self toolbarController] wrenchButton];
     bounds = [referenceButton bounds];
   } else {
     bounds = [button convertRect:[button frameAfterAnimation]
@@ -407,6 +402,12 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
 
 - (content::WebContents*)currentWebContents {
   return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+- (BrowserActionButton*)mainButtonForId:(const std::string&)id {
+  BrowserActionsController* mainController = isOverflow_ ?
+      [[self toolbarController] browserActionsController] : self;
+  return [mainController buttonForId:id];
 }
 
 #pragma mark -
@@ -460,7 +461,7 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
              name:kBrowserActionButtonDraggingNotification
            object:newButton];
 
-  [containerView_ setMaxWidth:toolbarActionsBar_->GetMaximumWidth()];
+  [containerView_ setMaxDesiredWidth:toolbarActionsBar_->GetMaximumWidth()];
 }
 
 - (void)redraw {
@@ -515,7 +516,7 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
   [button onRemoved];
   [buttons_ removeObject:button];
 
-  [containerView_ setMaxWidth:toolbarActionsBar_->GetMaximumWidth()];
+  [containerView_ setMaxDesiredWidth:toolbarActionsBar_->GetMaximumWidth()];
 }
 
 - (void)removeAllViews {
@@ -549,6 +550,7 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
                       object:self];
   }
   [self redraw];
+  [self updateGrippyCursors];
 }
 
 - (BOOL)updateContainerVisibility {
@@ -628,10 +630,10 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
 
     CGFloat intersectionWidth =
         NSWidth(NSIntersectionRect([containerView_ bounds], buttonFrame));
-    // Pad the threshold by 5 pixels in order to have the buttons hide more
-    // easily.
+    // Hide the button if it's not "mostly" visible. "Mostly" here equates to
+    // having three or fewer pixels hidden.
     if (([containerView_ grippyPinned] && intersectionWidth > 0) ||
-        (intersectionWidth <= (NSWidth(buttonFrame) / 2) + 5.0)) {
+        (intersectionWidth <= NSWidth(buttonFrame) - 3.0)) {
       [button setAlphaValue:0.0];
       [button removeFromSuperview];
     }
@@ -745,7 +747,8 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
 }
 
 - (void)updateChevronPositionInFrame:(NSRect)frame {
-  CGFloat xPos = NSWidth(frame) - kChevronWidth;
+  CGFloat xPos = NSWidth(frame) - kChevronWidth -
+      toolbarActionsBar_->platform_settings().right_padding;
   NSRect buttonFrame = NSMakeRect(xPos,
                                   0,
                                   kChevronWidth,
@@ -817,6 +820,12 @@ void ToolbarActionsBarBridge::OnOverflowedActionWantsToRunChanged(
   [containerView_ setCanDragRight:[self visibleButtonCount] > 0];
   [[containerView_ window] invalidateCursorRectsForView:containerView_];
 }
+
+- (ToolbarController*)toolbarController {
+  return [[BrowserWindowController browserWindowControllerForWindow:
+             browser_->window()->GetNativeWindow()] toolbarController];
+}
+
 
 #pragma mark -
 #pragma mark Testing Methods

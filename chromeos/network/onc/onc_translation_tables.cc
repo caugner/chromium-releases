@@ -115,10 +115,9 @@ const FieldTranslationEntry wifi_fields[] = {
     // { ::onc::wifi::kEAP, shill::kEap*},
     { ::onc::wifi::kFrequency, shill::kWifiFrequency},
     { ::onc::wifi::kFrequencyList, shill::kWifiFrequencyListProperty},
+    { ::onc::wifi::kHexSSID, shill::kWifiHexSsid},
     { ::onc::wifi::kHiddenSSID, shill::kWifiHiddenSsid},
     { ::onc::wifi::kPassphrase, shill::kPassphraseProperty},
-    // This field is converted during translation, see onc_translator_*.
-    // { ::onc::wifi::kSSID, shill::kWifiHexSsid},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::wifi::kSecurity, shill::kSecurityClassProperty },
     { ::onc::wifi::kSignalStrength, shill::kSignalStrengthProperty},
@@ -170,6 +169,7 @@ const FieldTranslationEntry cellular_fields[] = {
     { ::onc::cellular::kNetworkTechnology, shill::kNetworkTechnologyProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kRoamingState, shill::kRoamingStateProperty},
+    { ::onc::cellular::kSignalStrength, shill::kSignalStrengthProperty},
     {NULL}};
 
 const FieldTranslationEntry network_fields[] = {

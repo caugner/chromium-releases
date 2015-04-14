@@ -194,6 +194,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserContext* browser_context,
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
+  void ResetPermission(
+      content::PermissionType permission,
+      content::BrowserContext* browser_context,
+      const GURL& requesting_origin,
+      const GURL& embedding_origin) override;
   void CancelPermissionRequest(content::PermissionType permission,
                                content::WebContents* web_contents,
                                int bridge_id,
@@ -223,7 +228,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   content::AccessTokenStore* CreateAccessTokenStore() override;
   bool IsFastShutdownPossible() override;
   void OverrideWebkitPrefs(content::RenderViewHost* rvh,
-                           const GURL& url,
                            content::WebPreferences* prefs) override;
   void BrowserURLHandlerCreated(content::BrowserURLHandler* handler) override;
   void ClearCache(content::RenderViewHost* rvh) override;
@@ -249,6 +253,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::FilePath& storage_partition_path,
       ScopedVector<storage::FileSystemBackend>* additional_backends) override;
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
+  content::TracingDelegate* GetTracingDelegate() override;
   bool IsPluginAllowedToCallRequestOSFileHandle(
       content::BrowserContext* browser_context,
       const GURL& url) override;
@@ -257,6 +262,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url) override;
   net::CookieStore* OverrideCookieStoreForRenderProcess(
       int render_process_id) override;
+  void OverridePageVisibilityState(
+      content::RenderFrameHost* render_frame_host,
+      blink::WebPageVisibilityState* visibility_state) override;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
@@ -272,6 +280,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool CheckMediaAccessPermission(content::BrowserContext* browser_context,
                                   const GURL& security_origin,
                                   content::MediaStreamType type) override;
+
+  void OpenURL(content::BrowserContext* browser_context,
+               const content::OpenURLParams& params,
+               const base::Callback<void(content::WebContents*)>& callback)
+      override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;
@@ -322,6 +335,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   // It is initialized on the UI thread when the ResoureDispatcherHost is
   // created. It is used only the IO thread.
   prerender::PrerenderTracker* prerender_tracker_;
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  base::ScopedFD v8_natives_fd_;
+  base::ScopedFD v8_snapshot_fd_;
+#endif  // OS_POSIX && !OS_MACOSX
 
   // Vector of additional ChromeContentBrowserClientParts.
   // Parts are deleted in the reverse order they are added.

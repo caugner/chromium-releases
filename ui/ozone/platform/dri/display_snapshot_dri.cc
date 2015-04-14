@@ -67,7 +67,7 @@ bool IsAspectPreserving(DriWrapper* drm, drmModeConnector* connector) {
 
 }  // namespace
 
-DisplaySnapshotDri::DisplaySnapshotDri(DriWrapper* drm,
+DisplaySnapshotDri::DisplaySnapshotDri(const scoped_refptr<DriWrapper>& drm,
                                        drmModeConnector* connector,
                                        drmModeCrtc* crtc,
                                        uint32_t index)
@@ -75,12 +75,13 @@ DisplaySnapshotDri::DisplaySnapshotDri(DriWrapper* drm,
                       gfx::Point(crtc->x, crtc->y),
                       gfx::Size(connector->mmWidth, connector->mmHeight),
                       GetDisplayType(connector),
-                      IsAspectPreserving(drm, connector),
+                      IsAspectPreserving(drm.get(), connector),
                       false,
                       std::string(),
                       std::vector<const DisplayMode*>(),
-                      NULL,
-                      NULL),
+                      nullptr,
+                      nullptr),
+      drm_(drm),
       connector_(connector->connector_id),
       crtc_(crtc->crtc_id),
       dpms_property_(drm->GetProperty(connector, "DPMS")) {
@@ -98,7 +99,7 @@ DisplaySnapshotDri::DisplaySnapshotDri(DriWrapper* drm,
     if (!GetDisplayIdFromEDID(edid, index, &display_id_))
       display_id_ = index;
 
-    ParseOutputDeviceData(edid, NULL, &display_name_);
+    ParseOutputDeviceData(edid, nullptr, &display_name_, nullptr, nullptr);
     ParseOutputOverscanFlag(edid, &overscan_flag_);
   } else {
     VLOG(1) << "Failed to get EDID blob for connector "

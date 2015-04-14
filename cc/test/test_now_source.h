@@ -8,9 +8,9 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 
 namespace cc {
 
@@ -33,8 +33,8 @@ class TestNowSource : public base::RefCounted<TestNowSource> {
   static const base::TimeTicks kAbsoluteMaxNow;
 
   // Tracing functions
-  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::debug::TracedValue* state) const;
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  void AsValueInto(base::trace_event::TracedValue* state) const;
   std::string ToString() const;
 
  protected:

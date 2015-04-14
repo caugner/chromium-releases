@@ -34,7 +34,15 @@
 #include "ui/views/window/native_frame_view.h"
 
 #if defined(OS_WIN)
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
+#include "ui/base/view_prop.h"
+#include "ui/base/win/window_event_target.h"
 #include "ui/views/win/hwnd_util.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
 #endif
 
 namespace views {
@@ -49,6 +57,15 @@ gfx::Point ConvertPointFromWidgetToView(View* view, const gfx::Point& p) {
   gfx::Point tmp(p);
   View::ConvertPointToTarget(view->GetWidget()->GetRootView(), view, &tmp);
   return tmp;
+}
+
+// Helper function for Snow Leopard special cases to avoid #ifdef litter.
+bool IsTestingSnowLeopard() {
+#if defined(OS_MACOSX)
+  return base::mac::IsOSSnowLeopard();
+#else
+  return false;
+#endif
 }
 
 }  // namespace
@@ -218,16 +235,6 @@ class CloseWidgetView : public View {
 
   DISALLOW_COPY_AND_ASSIGN(CloseWidgetView);
 };
-
-ui::WindowShowState GetWidgetShowState(const Widget* widget) {
-  // Use IsMaximized/IsMinimized/IsFullScreen instead of GetWindowPlacement
-  // because the former is implemented on all platforms but the latter is not.
-  return widget->IsFullscreen() ? ui::SHOW_STATE_FULLSCREEN :
-      widget->IsMaximized() ? ui::SHOW_STATE_MAXIMIZED :
-      widget->IsMinimized() ? ui::SHOW_STATE_MINIMIZED :
-      widget->IsActive() ? ui::SHOW_STATE_NORMAL :
-                           ui::SHOW_STATE_INACTIVE;
-}
 
 TEST_F(WidgetTest, WidgetInitParams) {
   // Widgets are not transparent by default.
@@ -1151,57 +1158,19 @@ TEST_F(WidgetTest, GetRestoredBounds) {
 
   toplevel->SetFullscreen(true);
   RunPendingMessages();
-  EXPECT_NE(toplevel->GetWindowBoundsInScreen().ToString(),
-            toplevel->GetRestoredBounds().ToString());
+
+  if (IsTestingSnowLeopard()) {
+    // Fullscreen not implemented for Snow Leopard.
+    EXPECT_EQ(toplevel->GetWindowBoundsInScreen().ToString(),
+              toplevel->GetRestoredBounds().ToString());
+  } else {
+    EXPECT_NE(toplevel->GetWindowBoundsInScreen().ToString(),
+              toplevel->GetRestoredBounds().ToString());
+  }
   EXPECT_GT(toplevel->GetRestoredBounds().width(), 0);
   EXPECT_GT(toplevel->GetRestoredBounds().height(), 0);
 }
 #endif
-
-// ExitFullscreenRestoreState doesn't use DesktopAura widgets. On Mac, there are
-// currently only Desktop widgets and fullscreen changes need to occur in an
-// interactive test to avoid flakes. Maximize on mac is also (intentionally) a
-// no-op.
-#if defined(OS_MACOSX) && !defined(USE_AURA)
-#define MAYBE_ExitFullscreenRestoreState DISABLED_ExitFullscreenRestoreState
-#else
-#define MAYBE_ExitFullscreenRestoreState ExitFullscreenRestoreState
-#endif
-
-// Test that window state is not changed after getting out of full screen.
-TEST_F(WidgetTest, MAYBE_ExitFullscreenRestoreState) {
-  Widget* toplevel = CreateTopLevelPlatformWidget();
-
-  toplevel->Show();
-  RunPendingMessages();
-
-  // This should be a normal state window.
-  EXPECT_EQ(ui::SHOW_STATE_NORMAL, GetWidgetShowState(toplevel));
-
-  toplevel->SetFullscreen(true);
-  EXPECT_EQ(ui::SHOW_STATE_FULLSCREEN, GetWidgetShowState(toplevel));
-  toplevel->SetFullscreen(false);
-  EXPECT_NE(ui::SHOW_STATE_FULLSCREEN, GetWidgetShowState(toplevel));
-
-  // And it should still be in normal state after getting out of full screen.
-  EXPECT_EQ(ui::SHOW_STATE_NORMAL, GetWidgetShowState(toplevel));
-
-  // Now, make it maximized.
-  toplevel->Maximize();
-  EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, GetWidgetShowState(toplevel));
-
-  toplevel->SetFullscreen(true);
-  EXPECT_EQ(ui::SHOW_STATE_FULLSCREEN, GetWidgetShowState(toplevel));
-  toplevel->SetFullscreen(false);
-  EXPECT_NE(ui::SHOW_STATE_FULLSCREEN, GetWidgetShowState(toplevel));
-
-  // And it stays maximized after getting out of full screen.
-  EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, GetWidgetShowState(toplevel));
-
-  // Clean up.
-  toplevel->Close();
-  RunPendingMessages();
-}
 
 // The key-event propagation from Widget happens differently on aura and
 // non-aura systems because of the difference in IME. So this test works only on
@@ -1454,7 +1423,8 @@ TEST_F(WidgetTest, TestWindowVisibilityAfterHide) {
 void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
   const gfx::Rect screen_bounds(widget->GetWindowBoundsInScreen());
   ui::MouseEvent move_event(ui::ET_MOUSE_MOVED, screen_bounds.CenterPoint(),
-                            screen_bounds.CenterPoint(), 0, 0);
+                            screen_bounds.CenterPoint(), ui::EventTimeForNow(),
+                            0, 0);
   ui::EventProcessor* dispatcher = WidgetTest::GetEventProcessor(widget);
   ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move_event);
   if (last_event_type == ui::ET_MOUSE_ENTERED || details.dispatcher_destroyed)
@@ -1464,20 +1434,22 @@ void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
     return;
 
   ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, screen_bounds.CenterPoint(),
-                             screen_bounds.CenterPoint(), 0, 0);
+                             screen_bounds.CenterPoint(), ui::EventTimeForNow(),
+                             0, 0);
   details = dispatcher->OnEventFromSource(&press_event);
   if (last_event_type == ui::ET_MOUSE_PRESSED || details.dispatcher_destroyed)
     return;
 
   gfx::Point end_point(screen_bounds.CenterPoint());
   end_point.Offset(1, 1);
-  ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, end_point, end_point, 0, 0);
+  ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, end_point, end_point,
+                            ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&drag_event);
   if (last_event_type == ui::ET_MOUSE_DRAGGED || details.dispatcher_destroyed)
     return;
 
-  ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, end_point, end_point, 0,
-                               0);
+  ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, end_point, end_point,
+                               ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&release_event);
   if (details.dispatcher_destroyed)
     return;
@@ -1753,7 +1725,7 @@ TEST_F(WidgetTest, SynthesizeMouseMoveEvent) {
 
   gfx::Point cursor_location(5, 5);
   ui::MouseEvent move(ui::ET_MOUSE_MOVED, cursor_location, cursor_location,
-                      ui::EF_NONE, ui::EF_NONE);
+                      ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   widget->OnMouseEvent(&move);
 
   EXPECT_EQ(1, v1->GetEventCount(ui::ET_MOUSE_ENTERED));
@@ -2173,7 +2145,8 @@ TEST_F(WidgetTest, MAYBE_DisableTestRootViewHandlersWhenHidden) {
   EXPECT_EQ(NULL, GetMousePressedHandler(root_view));
   gfx::Point click_location(45, 15);
   ui::MouseEvent press(ui::ET_MOUSE_PRESSED, click_location, click_location,
-                       ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
+                       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
+                       ui::EF_LEFT_MOUSE_BUTTON);
   widget->OnMouseEvent(&press);
   EXPECT_EQ(view, GetMousePressedHandler(root_view));
   widget->Hide();
@@ -2183,7 +2156,8 @@ TEST_F(WidgetTest, MAYBE_DisableTestRootViewHandlersWhenHidden) {
   widget->Show();
   EXPECT_EQ(NULL, GetMouseMoveHandler(root_view));
   gfx::Point move_location(45, 15);
-  ui::MouseEvent move(ui::ET_MOUSE_MOVED, move_location, move_location, 0, 0);
+  ui::MouseEvent move(ui::ET_MOUSE_MOVED, move_location, move_location,
+                      ui::EventTimeForNow(), 0, 0);
   widget->OnMouseEvent(&move);
   EXPECT_EQ(view, GetMouseMoveHandler(root_view));
   widget->Hide();
@@ -3044,11 +3018,9 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   top_level_widget.GetRootView()->AddChildView(widget_view);
 
   gfx::Point cursor_location_main(5, 5);
-  ui::MouseEvent move_main(ui::ET_MOUSE_MOVED,
-                           cursor_location_main,
-                           cursor_location_main,
-                           ui::EF_NONE,
-                           ui::EF_NONE);
+  ui::MouseEvent move_main(ui::ET_MOUSE_MOVED, cursor_location_main,
+                           cursor_location_main, ui::EventTimeForNow(),
+                           ui::EF_NONE, ui::EF_NONE);
   ui::EventDispatchDetails details =
       GetEventProcessor(&top_level_widget)->OnEventFromSource(&move_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -3072,11 +3044,9 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   EXPECT_TRUE(modal_dialog_widget->IsVisible());
 
   gfx::Point cursor_location_dialog(100, 100);
-  ui::MouseEvent mouse_down_dialog(ui::ET_MOUSE_PRESSED,
-                                   cursor_location_dialog,
-                                   cursor_location_dialog,
-                                   ui::EF_NONE,
-                                   ui::EF_NONE);
+  ui::MouseEvent mouse_down_dialog(
+      ui::ET_MOUSE_PRESSED, cursor_location_dialog, cursor_location_dialog,
+      ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
       &mouse_down_dialog);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -3085,11 +3055,9 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   // Send a mouse move message to the main window. It should not be received by
   // the main window as the modal dialog is still active.
   gfx::Point cursor_location_main2(6, 6);
-  ui::MouseEvent mouse_down_main(ui::ET_MOUSE_MOVED,
-                                 cursor_location_main2,
-                                 cursor_location_main2,
-                                 ui::EF_NONE,
-                                 ui::EF_NONE);
+  ui::MouseEvent mouse_down_main(ui::ET_MOUSE_MOVED, cursor_location_main2,
+                                 cursor_location_main2, ui::EventTimeForNow(),
+                                 ui::EF_NONE, ui::EF_NONE);
   details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
       &mouse_down_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -3223,99 +3191,6 @@ TEST_F(WidgetTest, WindowModalityActivationTest) {
 #endif  // defined(OS_WIN)
 #endif  // !defined(OS_CHROMEOS)
 
-TEST_F(WidgetTest, ShowCreatesActiveWindow) {
-  Widget* widget = CreateTopLevelPlatformWidget();
-
-  widget->Show();
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_NORMAL);
-
-  widget->CloseNow();
-}
-
-// OSX does not have a per-application "active" window such as provided by
-// ::GetActiveWindow() on Windows. There is only a system-wide "keyWindow" which
-// is updated asynchronously.
-#if defined(OS_MACOSX)
-#define MAYBE_ShowInactive DISABLED_ShowInactive
-#else
-#define MAYBE_ShowInactive ShowInactive
-#endif
-TEST_F(WidgetTest, MAYBE_ShowInactive) {
-  Widget* widget = CreateTopLevelPlatformWidget();
-
-  widget->ShowInactive();
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_INACTIVE);
-
-  widget->CloseNow();
-}
-
-TEST_F(WidgetTest, InactiveBeforeShow) {
-  Widget* widget = CreateTopLevelPlatformWidget();
-
-  EXPECT_FALSE(widget->IsActive());
-  EXPECT_FALSE(widget->IsVisible());
-
-  widget->Show();
-
-  EXPECT_TRUE(widget->IsActive());
-  EXPECT_TRUE(widget->IsVisible());
-
-  widget->CloseNow();
-}
-
-TEST_F(WidgetTest, ShowInactiveAfterShow) {
-  // Create 2 widgets to ensure window layering does not change.
-  Widget* widget = CreateTopLevelPlatformWidget();
-  Widget* widget2 = CreateTopLevelPlatformWidget();
-
-  widget2->Show();
-  EXPECT_FALSE(widget->IsActive());
-  EXPECT_TRUE(widget2->IsVisible());
-  EXPECT_TRUE(widget2->IsActive());
-
-  widget->Show();
-  EXPECT_TRUE(widget->IsActive());
-  EXPECT_FALSE(widget2->IsActive());
-  widget->ShowInactive();
-  EXPECT_TRUE(widget->IsActive());
-  EXPECT_FALSE(widget2->IsActive());
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_NORMAL);
-
-  widget2->CloseNow();
-  widget->CloseNow();
-}
-
-TEST_F(WidgetTest, ShowAfterShowInactive) {
-  Widget* widget = CreateTopLevelPlatformWidget();
-
-  widget->ShowInactive();
-  widget->Show();
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_NORMAL);
-
-  widget->CloseNow();
-}
-
-#if !defined(OS_CHROMEOS)
-TEST_F(WidgetTest, InactiveWidgetDoesNotGrabActivation) {
-  Widget* widget = CreateTopLevelPlatformWidget();
-  widget->Show();
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_NORMAL);
-
-  Widget widget2;
-  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
-  params.native_widget = new PlatformDesktopNativeWidget(&widget2);
-  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  widget2.Init(params);
-  widget2.Show();
-
-  EXPECT_EQ(GetWidgetShowState(&widget2), ui::SHOW_STATE_INACTIVE);
-  EXPECT_EQ(GetWidgetShowState(widget), ui::SHOW_STATE_NORMAL);
-
-  widget->CloseNow();
-  widget2.CloseNow();
-}
-#endif  // !defined(OS_CHROMEOS)
-
 namespace {
 
 class FullscreenAwareFrame : public views::NonClientFrameView {
@@ -3368,7 +3243,13 @@ TEST_F(WidgetTest, FullscreenFrameLayout) {
   widget->SetFullscreen(true);
   widget->Show();
   RunPendingMessages();
-  EXPECT_TRUE(frame->fullscreen_layout_called());
+
+  if (IsTestingSnowLeopard()) {
+    // Fullscreen is currently ignored on Snow Leopard.
+    EXPECT_FALSE(frame->fullscreen_layout_called());
+  } else {
+    EXPECT_TRUE(frame->fullscreen_layout_called());
+  }
 
   widget->CloseNow();
 }
@@ -3505,6 +3386,33 @@ TEST_F(WidgetTest, NonClientWindowValidAfterInit) {
 
   widget->CloseNow();
 }
+
+#if defined(OS_WIN)
+// This test validates that sending WM_CHAR/WM_SYSCHAR/WM_SYSDEADCHAR
+// messages via the WindowEventTarget interface implemented by the
+// HWNDMessageHandler class does not cause a crash due to an unprocessed
+// event
+TEST_F(WidgetTest, CharMessagesAsKeyboardMessagesDoesNotCrash) {
+  Widget widget;
+  Widget::InitParams params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.native_widget = new PlatformDesktopNativeWidget(&widget);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget.Init(params);
+  widget.Show();
+
+  ui::WindowEventTarget* target =
+      reinterpret_cast<ui::WindowEventTarget*>(ui::ViewProp::GetValue(
+          widget.GetNativeWindow()->GetHost()->GetAcceleratedWidget(),
+          ui::WindowEventTarget::kWin32InputEventTarget));
+  EXPECT_NE(nullptr, target);
+  bool handled = false;
+  target->HandleKeyboardMessage(WM_CHAR, 0, 0, &handled);
+  target->HandleKeyboardMessage(WM_SYSCHAR, 0, 0, &handled);
+  target->HandleKeyboardMessage(WM_SYSDEADCHAR, 0, 0, &handled);
+  widget.CloseNow();
+}
+#endif
 
 }  // namespace test
 }  // namespace views

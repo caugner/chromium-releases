@@ -12,9 +12,7 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
-#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/url_constants.h"
-#include "components/favicon_base/favicon_types.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "extensions/common/constants.h"
@@ -22,6 +20,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_skia.h"
+#include "url/gurl.h"
 
 using base::Bind;
 
@@ -78,9 +77,9 @@ std::vector<int> GetPixelSizesForFaviconScales(int size_in_dip) {
 }  // namespace
 
 FaviconService::FaviconService(Profile* profile, FaviconClient* favicon_client)
-    : history_service_(
-          HistoryServiceFactory::GetForProfile(profile,
-                                               Profile::EXPLICIT_ACCESS)),
+    : history_service_(HistoryServiceFactory::GetForProfile(
+          profile,
+          ServiceAccessType::EXPLICIT_ACCESS)),
       profile_(profile),
       favicon_client_(favicon_client) {
 }
@@ -284,7 +283,7 @@ void FaviconService::CloneFavicon(const GURL& old_page_url,
 }
 
 void FaviconService::SetImportedFavicons(
-    const std::vector<ImportedFaviconUsage>& favicon_usage) {
+    const favicon_base::FaviconUsageDataList& favicon_usage) {
   if (history_service_)
     history_service_->SetImportedFavicons(favicon_usage);
 }

@@ -11,6 +11,7 @@
 
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
+#include "storage/browser/fileapi/file_system_url.h"
 
 class GURL;
 
@@ -30,6 +31,13 @@ typedef std::vector<EntryDefinition> EntryDefinitionList;
 }  // namespace util
 }  // namespace file_manager
 
+namespace drive {
+namespace util {
+class FileStreamMd5Digester;
+}  // namespace util
+struct HashAndFilePath;
+}  // namespace drive
+
 namespace extensions {
 
 // Implements the chrome.fileManagerPrivate.requestFileSystem method.
@@ -40,10 +48,10 @@ class FileManagerPrivateRequestFileSystemFunction
                              FILEMANAGERPRIVATE_REQUESTFILESYSTEM)
 
  protected:
-  virtual ~FileManagerPrivateRequestFileSystemFunction() {}
+  ~FileManagerPrivateRequestFileSystemFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
  private:
   void RespondSuccessOnUIThread(const std::string& name,
@@ -77,7 +85,7 @@ class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
   void Respond(bool success);
 
  protected:
-  virtual ~FileWatchFunctionBase() {}
+  ~FileWatchFunctionBase() override {}
 
   // Performs a file watch operation (ex. adds or removes a file watch).
   virtual void PerformFileWatchOperation(
@@ -86,7 +94,7 @@ class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
       const std::string& extension_id) = 0;
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.addFileWatch method.
@@ -97,10 +105,10 @@ class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
                              FILEMANAGERPRIVATE_ADDFILEWATCH)
 
  protected:
-  virtual ~FileManagerPrivateAddFileWatchFunction() {}
+  ~FileManagerPrivateAddFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
-  virtual void PerformFileWatchOperation(
+  void PerformFileWatchOperation(
       scoped_refptr<storage::FileSystemContext> file_system_context,
       const storage::FileSystemURL& file_system_url,
       const std::string& extension_id) override;
@@ -115,10 +123,10 @@ class FileManagerPrivateRemoveFileWatchFunction : public FileWatchFunctionBase {
                              FILEMANAGERPRIVATE_REMOVEFILEWATCH)
 
  protected:
-  virtual ~FileManagerPrivateRemoveFileWatchFunction() {}
+  ~FileManagerPrivateRemoveFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
-  virtual void PerformFileWatchOperation(
+  void PerformFileWatchOperation(
       scoped_refptr<storage::FileSystemContext> file_system_context,
       const storage::FileSystemURL& file_system_url,
       const std::string& extension_id) override;
@@ -132,10 +140,10 @@ class FileManagerPrivateGetSizeStatsFunction
                              FILEMANAGERPRIVATE_GETSIZESTATS)
 
  protected:
-  virtual ~FileManagerPrivateGetSizeStatsFunction() {}
+  ~FileManagerPrivateGetSizeStatsFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
  private:
   void GetDriveAvailableSpaceCallback(drive::FileError error,
@@ -154,12 +162,12 @@ class FileManagerPrivateValidatePathNameLengthFunction
                              FILEMANAGERPRIVATE_VALIDATEPATHNAMELENGTH)
 
  protected:
-  virtual ~FileManagerPrivateValidatePathNameLengthFunction() {}
+  ~FileManagerPrivateValidatePathNameLengthFunction() override {}
 
   void OnFilePathLimitRetrieved(size_t current_length, size_t max_length);
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.formatVolume method.
@@ -171,10 +179,10 @@ class FileManagerPrivateFormatVolumeFunction
                              FILEMANAGERPRIVATE_FORMATVOLUME)
 
  protected:
-  virtual ~FileManagerPrivateFormatVolumeFunction() {}
+  ~FileManagerPrivateFormatVolumeFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.startCopy method.
@@ -185,14 +193,24 @@ class FileManagerPrivateStartCopyFunction
                              FILEMANAGERPRIVATE_STARTCOPY)
 
  protected:
-  virtual ~FileManagerPrivateStartCopyFunction() {}
+  ~FileManagerPrivateStartCopyFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
  private:
+  void RunAfterGetFileMetadata(base::File::Error result,
+                               const base::File::Info& file_info);
+
+  // Part of RunAsync(). Called after FreeDiskSpaceIfNeededFor() is completed on
+  // IO thread.
+  void RunAfterFreeDiskSpace(bool available);
+
   // Part of RunAsync(). Called after Copy() is started on IO thread.
   void RunAfterStartCopy(int operation_id);
+
+  storage::FileSystemURL source_url_;
+  storage::FileSystemURL destination_url_;
 };
 
 // Implements the chrome.fileManagerPrivate.cancelCopy method.
@@ -203,10 +221,10 @@ class FileManagerPrivateCancelCopyFunction
                              FILEMANAGERPRIVATE_CANCELCOPY)
 
  protected:
-  virtual ~FileManagerPrivateCancelCopyFunction() {}
+  ~FileManagerPrivateCancelCopyFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivateInternal.resolveIsolatedEntries
@@ -219,10 +237,10 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
       FILEMANAGERPRIVATE_RESOLVEISOLATEDENTRIES)
 
  protected:
-  virtual ~FileManagerPrivateInternalResolveIsolatedEntriesFunction() {}
+  ~FileManagerPrivateInternalResolveIsolatedEntriesFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
  private:
   void RunAsyncAfterConvertFileDefinitionListToEntryDefinitionList(scoped_ptr<
@@ -232,17 +250,56 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
 class FileManagerPrivateComputeChecksumFunction
     : public LoggedAsyncExtensionFunction {
  public:
+  FileManagerPrivateComputeChecksumFunction();
+
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.computeChecksum",
                              FILEMANAGERPRIVATE_COMPUTECHECKSUM)
 
  protected:
-  virtual ~FileManagerPrivateComputeChecksumFunction() {}
+  ~FileManagerPrivateComputeChecksumFunction() override;
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
  private:
+  scoped_ptr<drive::util::FileStreamMd5Digester> digester_;
+
   void Respond(const std::string& hash);
+};
+
+// Implements the chrome.fileManagerPrivate.searchFilesByHashes method.
+class FileManagerPrivateSearchFilesByHashesFunction
+    : public LoggedAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.searchFilesByHashes",
+                             FILEMANAGERPRIVATE_SEARCHFILESBYHASHES)
+
+ protected:
+  ~FileManagerPrivateSearchFilesByHashesFunction() override {}
+
+ private:
+  // AsyncExtensionFunction overrides.
+  bool RunAsync() override;
+
+  // Sends a response with |results| to the extension.
+  void OnSearchByHashes(const std::set<std::string>& hashes,
+                        drive::FileError error,
+                        const std::vector<drive::HashAndFilePath>& results);
+};
+
+// Implements the chrome.fileManagerPrivate.isUMAEnabled method.
+class FileManagerPrivateIsUMAEnabledFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateIsUMAEnabledFunction() {}
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.isUMAEnabled",
+                             FILEMANAGERPRIVATE_ISUMAENABLED)
+ protected:
+  ~FileManagerPrivateIsUMAEnabledFunction() override {}
+
+ private:
+  ExtensionFunction::ResponseAction Run() override;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateIsUMAEnabledFunction);
 };
 
 }  // namespace extensions

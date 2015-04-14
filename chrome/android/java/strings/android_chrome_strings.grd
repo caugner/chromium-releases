@@ -115,10 +115,22 @@
       <message name="IDS_LEARN_MORE" desc="Generic label for menu item to learn more about a feature. [CHAR-LIMIT=32]">
         Learn more
       </message>
+      <message name="IDS_MORE" desc="Generic label for a button to show more items or options. [CHAR-LIMIT=20]">
+        More
+      </message>
+      <message name="IDS_CLOSE" desc="Content description for a button to close a dialog or popup" >
+        Close
+      </message>
+      <message name="IDS_NO_THANKS" desc="Generic label to say no thanks for a feature. [CHAR-LIMIT=32]">
+        No Thanks
+      </message>
 
       <!-- Main Preferences -->
       <message name="IDS_PREFERENCES" desc="Title for Chrome's Settings.">
         Settings
+      </message>
+      <message name="IDS_MENU_HELP" desc="Menu item for opening the help page. [CHAR-LIMIT=27]">
+        Help &amp; feedback
       </message>
       <message name="IDS_HELP" desc="Title for the help view.">
         Help
@@ -131,6 +143,17 @@
       </message>
       <message name="IDS_MANAGED_BY_YOUR_PARENT" desc="Popup message when the user clicks a UI element that has been disabled by his/her parent.">
         Managed by your parent
+      </message>
+
+      <!-- Sign-in preference -->
+      <message name="IDS_SIGN_IN_TO_CHROME" desc="Title for the button to sign in to Chrome using one's Google account. [CHAR-LIMIT=27]">
+        Sign in to Chrome
+      </message>
+      <message name="IDS_SIGN_IN_TO_CHROME_SUMMARY" desc="Summary for the button to sign in to Chrome, explaining benefits of signing in.">
+        Sign in to get your tabs, bookmarks, history, and other settings on all your devices
+      </message>
+      <message name="IDS_NUMBER_OF_SIGNED_IN_ACCOUNTS" desc="Summary indicating the number of accounts (always greater than 1) the user is signed in to the content area.">
+        <ph name="NUMBER_OF_ACCOUNTS">%1$d<ex>3</ex></ph> accounts
       </message>
 
       <!-- Search engine preferences -->
@@ -163,6 +186,9 @@
       <message name="IDS_AUTOFILL_EDIT_CREDIT_CARD" desc="Button that allows the user to edit a credit card that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
         Edit credit card
       </message>
+     <message name="IDS_AUTOFILL_PROFILE_EDITOR_COUNTRY" desc="Label for a spinner input field containg a list of countries or regions [CHAR-LIMIT=32]">
+        Country/Region
+      </message>
       <message name="IDS_AUTOFILL_PROFILE_EDITOR_EMAIL_ADDRESS" desc="Label for text input field containing an e-mail address. [CHAR-LIMIT=32]">
         Email
       </message>
@@ -178,17 +204,25 @@
       <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_EXPIRATION_DATE" desc="Label for text input field containing a credit card expiration date. [CHAR-LIMIT=32]">
         Expiration date
       </message>
-      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_NAME_TEXTBOX" desc="Content description for text input field containing the name on a credit card.">
-        Name on card
+
+      <!-- Autofill/Wallet integration preferences -->
+      <message name="IDS_AUTOFILL_WALLET_TITLE" desc="Title for Autofill Wallet settings, which controls import of Wallet cards.">
+        Import Wallet data
       </message>
-      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_NUMBER_TEXTBOX" desc="Content description for text input field containing a credit card number.">
-        Card number
+      <message name="IDS_AUTOFILL_WALLET_DESCRIPTION" desc="Description of the Wallet import feature.">
+        With this feature is turned on, Chrome will offer to fill forms using addresses and credit cards from your Wallet.
       </message>
-      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_MONTH" desc="Content description for text input field containing a credit card expiration month.">
-        Card expiration month
+      <message name="IDS_AUTOFILL_WALLET_MANAGEMENT_LINK_TEXT" desc="Text for hyperlink to manage wallet address and credit cards.">
+        Manage Wallet data
       </message>
-      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_YEAR" desc="Content description for text input field containing a credit card expiration year.">
-        Card expiration year
+      <message name="IDS_AUTOFILL_WALLET_CACHE_EXPLANATION" desc="Explanation of how Chrome caches imported Wallet cards.">
+        After you authenticate a card, Chrome will cache it locally.
+      </message>
+      <message name="IDS_AUTOFILL_WALLET_CLEAR_UNMASKED_CARDS" desc="Text for button that allows user to clear Wallet card cache.">
+        Clear cache
+      </message>
+      <message name="IDS_AUTOFILL_MANAGE_WALLET_CARDS_URL" desc="URL for managing wallet credit cards" translateable="false">
+        https://wallet.google.com/manage/w/0/paymentMethods
       </message>
 
       <!-- Save passwords preferences -->
@@ -211,6 +245,119 @@
         Edit saved name/password or exception
       </message>
 
+      <!-- Homepage preferences -->
+      <message name="IDS_HOMEPAGE_DEFAULT_TITLE" desc="Label for checkbox to use the default homepage">
+        Default
+      </message>
+
+      <!-- Privacy preferences -->
+      <message name="IDS_PREFS_PRIVACY" desc="Title for the Privacy preferences. [CHAR-LIMIT=32]">
+        Privacy
+      </message>
+      <message name="IDS_NAVIGATION_ERROR_TITLE" desc="Title for checkbox to enable or disable navigation error suggestions.">
+        Navigation error suggestions
+      </message>
+      <message name="IDS_NAVIGATION_ERROR_SUMMARY" desc="Summary for navigation error suggestions.">
+        Show suggestions when a web address does not resolve or a connection cannot be made
+      </message>
+      <message name="IDS_SEARCH_SUGGESTIONS_TITLE" desc="Title for search and url suggestions.">
+        Search and URL suggestions
+      </message>
+      <message name="IDS_SEARCH_SUGGESTIONS_SUMMARY" desc="Summary for search and url suggestions.">
+        Use a prediction service to show related queries and popular websites as you type in the address bar
+      </message>
+      <message name="IDS_NETWORK_PREDICTIONS_TITLE" desc="Title for Prefetch page resources.">
+        Prefetch page resources
+      </message>
+      <message name="IDS_NETWORK_PREDICTIONS_SUMMARY" desc="Summary for Prefetch page resources.">
+        Improve page load performance
+      </message>
+      <message name="IDS_NETWORK_PREDICTION_ALWAYS_VALUE" desc="Internal value for prefetch page resources preference" translateable="false">
+        network_prediction_always
+      </message>
+      <message name="IDS_NETWORK_PREDICTION_WIFI_ONLY_VALUE" desc="Internal value for prefetch page resources preference" translateable="false">
+        network_prediction_wifi_only
+      </message>
+      <message name="IDS_NETWORK_PREDICTION_NEVER_VALUE" desc="Internal value for prefetch page resources preference" translateable="false">
+        network_prediction_never
+      </message>
+      <message name="IDS_CONTEXTUAL_SEARCH_TITLE" desc="Name for the Contextual Search feature, which allows users to search for a term in a web page by tapping on it.">
+        Touch to Search
+      </message>
+      <message name="IDS_CONTEXTUAL_SEARCH_DESCRIPTION" desc="Description for Contextual Search preference">
+        Learn about topics on websites without leaving the page. Touch to Search sends a word and its surrounding context to Google Search, returning definitions, pictures, search results, and other details.
+
+To adjust your search term, long press to select. To refine your search, slide the panel all the way up and touch the search box.
+      </message>
+      <message name="IDS_CONTEXTUAL_SEARCH_LEARN_MORE_URL" desc="URL for learning more about Contextual Search preference" translateable="false">
+        https://support.google.com/chrome/answer/95440#android
+      </message>
+      <message name="IDS_CRASH_DUMP_UPLOAD_TITLE" desc="Title for crash upload upload preference">
+        Usage and crash reports
+      </message>
+      <message name="IDS_CRASH_DUMP_NEVER_UPLOAD" desc="Settings option never to upload crash reports [CHAR-LIMIT=32]">
+        Never send
+      </message>
+      <message name="IDS_CRASH_DUMP_ALWAYS_UPLOAD" desc="Settings option to upload crash reports only anytime (when on Wi-Fi or mobile data) [CHAR-LIMIT=32]">
+        Always send
+      </message>
+      <message name="IDS_CRASH_DUMP_ONLY_WITH_WIFI" desc="Settings option to upload crash reports only over Wi-Fi [CHAR-LIMIT=32]">
+        Only send on Wi-Fi
+      </message>
+      <message name="IDS_CRASH_DUMP_NEVER_UPLOAD_VALUE" desc="Internal value for crash uploading preference." translateable="false">
+        crash_dump_never_upload
+      </message>
+      <message name="IDS_CRASH_DUMP_ALWAYS_UPLOAD_VALUE" desc="Internal value for crash uploading preference." translateable="false">
+        crash_dump_always_upload
+      </message>
+      <message name="IDS_CRASH_DUMP_ONLY_WITH_WIFI_VALUE" desc="Internal value for crash uploading preference." translateable="false">
+        crash_dump_only_with_wifi
+      </message>
+      <message name="IDS_DO_NOT_TRACK_TITLE" desc="Title for 'Do Not Track' preference">
+        ‘Do Not Track’
+      </message>
+      <message name="IDS_DO_NOT_TRACK_DESCRIPTION" desc="Description for 'Do Not Track' preference">
+        Enabling ‘Do Not Track’ means that a request will be included with your browsing traffic. Any effect depends on whether a website responds to the request, and how the request is interpreted.
+
+For example, some websites may respond to this request by showing you ads that aren’t based on other websites you’ve visited. Many websites will still collect and use your browsing data - for example to improve security, to provide content, ads and recommendations on their websites, and to generate reporting statistics.
+      </message>
+      <message name="IDS_DO_NOT_TRACK_LEARN_MORE_URL" desc="URL for learning more about 'Do Not Track' preference" translateable="false">
+      https://support.google.com/chrome/?p=settings_do_not_track
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_TITLE" desc="Button to Clear Browsing Data [CHAR-LIMIT=24]">
+        Clear browsing data
+      </message>
+      <message name="IDS_CLEAR_CACHE_TITLE" desc="Title for Clear Cache in Clear Browsing Data dialog">
+        Clear the cache
+      </message>
+      <message name="IDS_CLEAR_HISTORY_TITLE" desc="Title for Clear History in Clear Browsing Data dialog">
+        Clear browsing history
+      </message>
+      <message name="IDS_CLEAR_COOKIES_AND_SITE_DATA_TITLE" desc="Title for Clear Cookies and site data in Clear Browsing Data dialog">
+        Clear cookies, site data
+      </message>
+      <message name="IDS_CLEAR_COOKIES_NO_SIGN_OUT_SUMMARY" desc="Text at the bottom of the Clear Browsing Data dialog informing that clearing cookies wouldn't sign the user out of Google Accounts. Dialog also contains a link which opens the Account Management screen.">
+        You won't be signed out of your <ph name="BEGIN_LINK">&lt;link&gt;</ph>Google Accounts<ph name="END_LINK">&lt;/link&gt;</ph>
+      </message>
+      <message name="IDS_CLEAR_PASSWORDS_TITLE" desc="Title for Clear Passwords in Clear Browsing Data preference">
+        Clear saved passwords
+      </message>
+      <message name="IDS_CLEAR_FORMDATA_TITLE" desc="Title for Clear Form Data in Clear Browsing Data preference">
+        Clear autofill data
+      </message>
+      <message name="IDS_CLEAR_BOOKMARKS_TITLE" desc="Title for Clear Bookmarks data in Clear Synced Data dialog">
+        Clear bookmarks
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_PROGRESS_TITLE" desc='Title for the progress dialog used when waiting for "clear browsing data" to complete.'>
+        Clearing browsing data
+      </message>
+      <message name="IDS_CLEAR_DATA_DELETE" desc="Button that allows the user to clear their browsing data. [CHAR-LIMIT=20]">
+        Clear
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_PROGRESS_MESSAGE" desc='Message on the progress dialog used when waiting for "clear browsing data" to complete.'>
+        Please wait…
+      </message>
+
       <!-- Accessibility preferences -->
       <message name="IDS_PREFS_ACCESSIBILITY" desc="Title of Accessibility settings, which allows the user to change webpage font sizes. [CHAR-LIMIT=32]">
         Accessibility
@@ -226,6 +373,146 @@
       </message>
       <message name="IDS_FORCE_ENABLE_ZOOM_SUMMARY" desc="Summary of preference that allows the user to zoom in on any webpage, even if the page tries to disable zooming.">
         Override a website’s request to prevent zooming in
+      </message>
+
+      <!-- Site settings -->
+      <message name="IDS_PREFS_CONTENT_SETTINGS" desc="Title of the Website Settings screen. [CHAR-LIMIT=32]">
+        Site settings
+      </message>
+      <message name="IDS_ALL_SITES" desc='Title of the "All sites" settings screen that allows the user to see permissions for all websites. [CHAR-LIMIT=32]'>
+        All sites
+      </message>
+      <message name="IDS_COOKIES_TITLE" desc="Title for the Cookies settings screen [CHAR-LIMIT=32]">
+        Cookies
+      </message>
+      <message name="IDS_ALLOW_THIRD_PARTY_COOKIES_TITLE" desc="Title for Allow Third Party Cookies preference">
+        Allow third-party cookies
+      </message>
+      <message name="IDS_ALLOW_THIRD_PARTY_COOKIES_SUMMARY" desc="Summary text for Allow Third Party Cookies preference">
+        Third-party websites can save and read cookie data
+      </message>
+      <message name="IDS_ENABLE_JAVASCRIPT_TITLE" desc="Title for Enable javascript preference [CHAR-LIMIT=32]">
+        JavaScript
+      </message>
+      <message name="IDS_ENABLE_JAVASCRIPT_SUMMARY" desc="Summary text for Enable Javascript preference">
+        Allow sites to run JavaScript
+      </message>
+      <message name="IDS_POPUP_PERMISSION_TITLE" desc="Title of the permission to display pop-up windows [CHAR-LIMIT=32]">
+        Pop-ups
+      </message>
+      <message name="IDS_PUSH_NOTIFICATIONS_PERMISSION_TITLE" desc="Title for the permission for showing push notifications [CHAR-LIMIT=32]">
+        Notifications
+      </message>
+      <message name="IDS_MIDI_SYSEX_PERMISSION_TITLE" desc="Title of the permission that allows a website to get full control of MIDI devices [CHAR-LIMIT=32]">
+        Allow full control of MIDI devices
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_SITE_CATEGORY" desc="The headline above the website name on the website details page.">
+        Site
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_USAGE_CATEGORY" desc="The headline above the usage stats (how much storage the site is using) on the website details page.">
+        Usage
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_PERMISSIONS_CATEGORY" desc="The headline above all the permissions on the website details page.">
+        Permissions
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ALLOWED" desc="Summary text explaining that a permission is allowed, e.g. JavaScript: allowed.">
+        Allowed
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCKED" desc="Summary text explaining that a permission is blocked, e.g. JavaScript: blocked.">
+        Blocked
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ALLOWED_EXCEPT_THIRD_PARTY" desc="Summary text for when only third-party cookies are blocked.">
+        Allowed, except third-party
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK" desc="Summary text explaining that Chrome will ask the user before allowing a site to use a certain permission, e.g. JavaScript: ask first.">
+        Ask first
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_BLOCKED_GROUP_HEADING" desc="The heading for a list of websites that have been blocked from using a particular permission, e.g. blocked from accessing the user's location.">
+        Blocked
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_ALLOWED_GROUP_HEADING" desc="The heading for a list of websites that have been allowed to use a particular permission, e.g. allowed to access a user's location.">
+        Allowed
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_EXCEPTIONS_GROUP_HEADING" desc="The heading for a list of websites that have been granted an exception to access a particular permission, e.g. to access the user's location.">
+        Exceptions
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCK_ALL" desc="Summary text explaining that a permission is blocked for all sites.">
+        Block all sites
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCK_RECOMMENDED" desc="Summary text explaining that a permission is blocked, which is the recommended setting.">
+        Block (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_SENDING" desc="Summary text explaining that permission will be requested before sending things, e.g. notifications.">
+        Ask before sending (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_ACCESSING" desc="Summary text explaining that permission will be requested before accessing something, like location.">
+        Ask before accessing (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_ACCESSING_CAMERA_MIC" desc="Summary text explaining that permission will be requested before accessing the camera and microphone.">
+        Ask before accessing camera and microphone (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_COOKIE_ALLOWED" desc="Summary text explaining that sites are allowed to use cookies and that it is the recommended setting.">
+        Allow sites to save and read cookie data (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_PERMISSIONS_ALLOW" desc="Summary text explaining that the user will allow a website to access some permission, e.g. JavaScript: allow.">
+        Allow
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_PERMISSIONS_BLOCK" desc="Summary text explaining that the user will block a website from accessing some permission, e.g. JavaScript: block.">
+        Block
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_SEARCH" desc="The label for the search button on the content settings page.">
+        Search
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CHANGE" desc="The label for the text allowing users to change the Location/Protected content default setting.">
+        Change
+      </message>
+      <message name="IDS_WEBSITE_RESET" desc="The label for the button allowing users to clear all data and reset the permissions for a website.">
+        Clear &amp; reset
+      </message>
+      <message name="IDS_WEBSITE_RESET_CONFIRMATION" desc="The confirmation text asking if the user is sure about clearing all data and reset the permissions for a site.">
+        Are you sure you want to clear all local data, including cookies, and reset all permissions for this website?
+      </message>
+      <message name="IDS_WEBSTORAGE_CLEAR_DATA_DIALOG_TITLE" desc="Title of the confirmation dialog when the user ask to clear all data for an origin">
+        Clear stored data
+      </message>
+      <message name="IDS_WEBSTORAGE_CLEAR_DATA_DIALOG_MESSAGE" desc="Text of the confirmation dialog when the user ask to clear all data for an origin">
+        All local data stored by this website, including cookies, will be deleted.
+      </message>
+      <message name="IDS_WEBSTORAGE_CLEAR_DATA_DIALOG_OK_BUTTON" desc="Button confirming site data cleanup [CHAR-LIMIT=20]">
+        Clear all
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_EMBEDDED_IN" desc="String used to indicate the embedder origin of a site">
+        Embedded in <ph name="WEBSITE_URL">%1$s<ex>google.com</ex></ph>
+      </message>
+
+      <!-- Single site settings -->
+      <message name="IDS_NO_SAVED_WEBSITE_SETTINGS" desc="Text to display when there are no saved webiste settings.">
+        You have no saved website settings.
+      </message>
+
+      <!-- Location preferences -->
+      <message name="IDS_WEBSITE_SETTINGS_DEVICE_LOCATION" desc="Title for Location settings, which control which websites can access your location.">
+        Location
+      </message>
+      <message name="IDS_GEOLOCATION_PERMISSION_TITLE" desc="Title for the permission of accessing the current location of a device [CHAR-LIMIT=32]">
+        Location access
+      </message>
+      <message name="IDS_ANDROID_LOCATION_OFF" desc="Text at the top of the Website list, explaining to the user that the location service in Android is turned off. Contains a link to the settings menu to change it.">
+        Turn on location in <ph name="BEGIN_LINK">&lt;link&gt;</ph>Android Settings<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+
+      <!-- Camera and microphone preferences -->
+      <message name="IDS_WEBSITE_SETTINGS_USE_CAMERA_OR_MIC" desc="The category filter 'Camera/Mic' for content settings.">
+        Camera or microphone
+      </message>
+      <message name="IDS_VIDEO_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied video access for the website [CHAR-LIMIT=32]">
+        Access your camera
+      </message>
+      <message name="IDS_VOICE_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied voice access for the website [CHAR-LIMIT=32]">
+        Access your microphone
+      </message>
+      <message name="IDS_VOICE_AND_VIDEO_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied voice and video access for the website [CHAR-LIMIT=32]">
+        Access your mic and camera
       </message>
 
       <!-- Protected content preferences -->
@@ -255,6 +542,83 @@ To obtain new licenses, connect to the internet and play your downloaded content
         https://support.google.com/chrome/?p=mobile_protected_content
       </message>
 
+      <!-- Google translate preferences -->
+      <message name="IDS_GOOGLE_TRANSLATE" desc='Title for the Google Translate settings screen. [CHAR-LIMIT=32]'>
+        Google Translate
+      </message>
+      <message name="IDS_TRANSLATE_PREFS_DESCRIPTION" desc="Translate preference description">
+        When this feature is turned on, Chrome will offer to translate pages written in other languages using Google Translate.
+      </message>
+      <message name="IDS_TRANSLATE_PREFS_TOAST_DESCRIPTION" desc="Translate settings reset toast when resetting defaults">
+        Your translate settings have been reset.
+      </message>
+      <message name="IDS_RESET_TRANSLATE_DEFAULTS" desc="Title for translate reset menu preference">
+        Reset translate settings
+      </message>
+
+      <!-- Storage preferences -->
+      <message name="IDS_WEBSITE_SETTINGS_STORAGE" desc="Title for Storage settings which show how much data websites are storing on the user's device. [CHAR-LIMIT=32]">
+        Storage
+      </message>
+      <message name="IDS_ORIGIN_SETTINGS_STORAGE_USAGE_BRIEF" desc="Explanation of how much local storage a website is using">
+        <ph name="STORAGE_AMOUNT">%1$s<ex>2 MB</ex></ph> stored data
+      </message>
+
+      <!-- Data Saver -->
+      <message name="IDS_REDUCE_DATA_USAGE_TITLE" desc="Menu item for reducing data usage.">
+        Data Saver
+      </message>
+      <message name="IDS_REDUCE_DATA_USAGE_DESCRIPTION" desc="Description text for reducing data usage">
+        When this feature is turned on, Chrome will use Google servers to compress pages you visit before downloading them. SSL and incognito pages will not be included.
+      </message>
+      <message name="IDS_DATA_REDUCTION_MENU_ITEM_SUMMARY" desc="Summary text for data reduction menu item.">
+        <ph name="PERCENT">%1$s<ex>49%</ex></ph> data savings
+      </message>
+      <message name="IDS_DATA_REDUCTION_STATISTICS_TITLE" desc="Data reduction statistics title.">
+        Data savings
+      </message>
+      <message name="IDS_DATA_REDUCTION_ORIGINAL_SIZE_LABEL" desc="Data Reduction statistics original size label">
+        Original size
+      </message>
+      <message name="IDS_DATA_REDUCTION_COMPRESSED_SIZE_LABEL" desc="Data Reduction statistics compressed size label">
+        After compression
+      </message>
+      <message name="IDS_DATA_REDUCTION_PROXY_UNREACHABLE_WARN" desc="Warning message shown when Google data reduction proxy servers are not reachable.">
+        Chrome is unable to reach Google servers for data compression. Your data savings may be limited.
+      </message>
+      <message name="IDS_REDUCE_DATA_USAGE_LEARN_URL" desc="URL for learn more about reducing_data_usage" translateable="false">
+        https://support.google.com/chrome/?p=mobile_bandwidth
+      </message>
+      <message name="IDS_SAFE_BROWSING_DESCRIPTION" desc="Description text for safe browsing">
+        Chrome’s Safe Browsing system will also be used to detect malicious pages and protect you from phishing, malware, and harmful downloads.
+      </message>
+      <message name="IDS_DATA_REDUCTION_CAVEATS_DESCRIPTION" desc="Description text for usage caveats">
+        This feature may interfere with access to premium data services provided by your carrier.
+      </message>
+      <message name="IDS_DATA_REDUCTION_EXPERIMENT_DESCRIPTION" desc="Text to be displayed in settings when an experiment is running">
+        If you enable this feature, you will be part of an experiment that proxies HTTPS pages through Google servers.
+      </message>
+      <message name="IDS_DATA_REDUCTION_EXPERIMENT_LINK_URL" desc="A link provided in settings when an experiment is running" translateable="false">
+        <!-- Intentionally empty. This is overridden downstream. -->
+      </message>
+      <message name="IDS_DATA_REDUCTION_INFOBAR_TEXT" desc="Text to be displayed in the data reduction proxy infobar">
+        We are testing the proxying of HTTPS pages through Google servers as part of an experiment.
+      </message>
+
+      <!-- Data Saver Promo -->
+      <message name="IDS_DATA_REDUCTION_TITLE_1" desc="First part of the headline for the promo inviting users to enable Data Saver" >
+        You’re invited
+      </message>
+      <message name="IDS_DATA_REDUCTION_TITLE_2" desc="Second part of the headline for the promo inviting users to enable Data Saver" >
+        Try out a new feature from Chrome
+      </message>
+      <message name="IDS_DATA_REDUCTION_TITLE_3" desc="Third part of the headline for the promo inviting users to enable Data Saver" >
+        Save bandwidth and browse more securely
+      </message>
+      <message name="IDS_DATA_REDUCTION_ENABLE_BUTTON" desc="Button the user presses if they want to enable Data Saver" >
+        Enable
+      </message>
+
       <!-- About Chrome preferences -->
       <message name="IDS_PREFS_ABOUT_CHROME" desc="Title for the About Chrome page. [CHAR-LIMIT=32]">
         About Chrome
@@ -264,6 +628,9 @@ To obtain new licenses, connect to the internet and play your downloaded content
       </message>
       <message name="IDS_APPLICATION_VERSION_TITLE" desc="Title for application version">
         Application version
+      </message>
+      <message name="IDS_VERSION_WITH_UPDATE_TIME" desc="Message showing Chrome's version and the time it was last updated">
+        <ph name="VERSION">%1$s<ex>Chrome 40.0.2214.67</ex></ph> (Updated <ph name="TIME_SINCE_UPDATE">%2$s<ex>5 minutes ago</ex></ph>)
       </message>
       <message name="IDS_OS_VERSION_TITLE" desc="Title for operating system version">
         Operating system
@@ -279,6 +646,72 @@ To obtain new licenses, connect to the internet and play your downloaded content
       </message>
       <message name="IDS_PROFILE_PATH_TITLE" desc="Title for the path where Chrome stores profile data">
         Profile path
+      </message>
+      <message name="IDS_DEPRECATION_WARNING" desc="Warning about Chrome updates no longer being supported">
+        Chrome updates are no longer supported for this version of Android.
+      </message>
+
+      <!-- Account management UI strings. -->
+      <message name="IDS_ACCOUNT_MANAGEMENT_ADD_ACCOUNT_TITLE" desc="Button text for opening the add account dialog to add a new account to a user's profile. [CHAR-LIMIT=20]">
+        Add account for <ph name="ADD_ACCOUNT_USER_NAME">%1$s<ex>Pablo Picasso</ex></ph>
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_TITLE" desc="Header title for the account management screen. [CHAR-LIMIT=32]">
+        Accounts
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_GO_INCOGNITO_TEXT" desc="Summary text for going incognito.">
+        Go incognito to browse privately or sign in temporarily
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_NOT_YOU_TEXT" desc="Title text for the section with the incognito button.">
+        Not <ph name="NOT_YOU_USER_NAME">%1$s<ex>Pablo Picasso</ex></ph>?
+      </message>
+
+      <!-- Child accounts -->
+      <message name="IDS_KIDS_ACCOUNT" desc="Identifies an account as a child account.">
+        This is a kid's account
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_PARENTAL_SETTINGS" desc="Title of parental settings section of account page for child account.">
+        Parental Settings
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_NO_PARENTAL_DATA" desc="String saying that we are waiting for family information.">
+        Waiting for details of parents.
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_ONE_PARENT_NAME" desc="String for name of single parent for child account.">
+        This account is managed by <ph name="PARENT_NAME">%1$s<ex>parent1@gmail.com</ex></ph>.
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_TWO_PARENT_NAMES" desc="String for names of two parents for child account.">
+        This account is managed by <ph name="PARENT_NAME_1">%1$s<ex>parent1@gmail.com</ex></ph> and <ph name="PARENT_NAME_2">%2$s<ex>parent2@gmail.com</ex></ph>.
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_CONTENT_TITLE" desc="Title of the Content setting, which controls which websites a child is allowed to visit.">
+        Content
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_CONTENT_APPROVED" desc="Setting that permits child accounts to visit only sites approved by their parents.">
+        Only approved sites
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_CONTENT_ALL" desc="Setting that permits child accounts to visit any websites.">
+        Uncontrolled
+      </message>
+      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_SAFE_SEARCH_TITLE" desc="Title of Google SafeSearch, which blocks inappropriate or explicit search results.">
+        SafeSearch
+      </message>
+
+      <!-- Sync strings in account management dialog -->
+      <message name="IDS_SYNC_ANDROID_MASTER_SYNC_DISABLED" desc="Message to show when Android master sync flag is disabled">
+        Android system sync disabled. Please re-enable and try again.
+      </message>
+      <message name="IDS_SYNC_IS_ENABLED" desc="Message to show when Chrome sync is enabled">
+        Sync is on
+      </message>
+      <message name="IDS_SYNC_IS_DISABLED" desc="Message to show when Chrome sync is disabled">
+        Sync is off
+      </message>
+      <message name="IDS_SYNC_NEED_PASSPHRASE" desc="Error message when a passphrase is needed for decrypting sync data.">
+        Passphrase required
+      </message>
+      <message name="IDS_SYNC_NEED_PASSWORD" desc="Error message when a password is needed for decrypting sync data.">
+        Password required
+      </message>
+      <message name="IDS_SYNC_SETUP_PROGRESS" desc="Message indicating that sync setup is in progress">
+        Setup in progress…
       </message>
 
       <!-- Legal information preferences -->
@@ -342,6 +775,12 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_ADD_ACCOUNT_CONTINUE" desc="Continue button for add Google account dialog [CHAR-LIMIT=20]">
         Continue
       </message>
+      <message name="IDS_SIGN_IN_ACCOUNTS_MESSAGE" desc="Description of the signed-in section shown below the header">
+        You’re signed in to the following Google Accounts. Add or remove accounts in Android settings.
+      </message>
+      <message name="IDS_SIGN_IN_ACCOUNTS_MESSAGE_CHILD" desc="Description of the signed-in section shown below the header for child accounts">
+        You’re signed in to the following Google Account.
+      </message>
       <message name="IDS_SIGNOUT_TITLE" desc="Title for sign out of Chrome dialog [CHAR-LIMIT=40]">
         Sign out of Chrome
       </message>
@@ -361,15 +800,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <!-- Sync strings -->
       <message name="IDS_SIGN_IN_SYNC" desc="Sync preference title in signed-in prefs and prefix for notification related to sync [CHAR-LIMIT=32]">
         Sync
-      </message>
-      <message name="IDS_SYNC_ANDROID_MASTER_SYNC_DISABLED" desc="Message to show when Android master sync flag is disabled">
-        Android system sync disabled. Please re-enable and try again.
-      </message>
-      <message name="IDS_SYNC_NEED_PASSPHRASE" desc="Error message when a passphrase is needed for decrypting sync data.">
-        Passphrase required
-      </message>
-      <message name="IDS_SYNC_NEED_PASSWORD" desc="Error message when a password is needed for decrypting sync data.">
-        Password required
       </message>
 
       <!-- Sync error strings -->
@@ -438,6 +868,11 @@ You are signing in with a managed account and giving its administrator control o
         Close
       </message>
 
+      <!-- Account chooser infobar strings. -->
+      <message name="IDS_ACCOUNT_CHOOSER_INFOBAR_TITLE" desc="The title text for Account chooser infobar.">
+        Choose an account from your Google Smart Lock.
+      </message>
+
       <!-- TranslateInfoBar -->
       <message name="IDS_TRANSLATE_INFOBAR_TEXT" desc="Text to display on the translate infobar to offer a translate. [CHAR-LIMIT=64]" meaning="Android">
         This page is in <ph name="SOURCE_LANGUAGE">^1<ex>English</ex></ph>. Translate it to <ph name="TARGET_LANGUAGE">^2<ex>FRENCH</ex></ph>?
@@ -447,9 +882,6 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_TRANSLATE_INFOBAR_TRANSLATION_DONE">
         Translated to <ph name="TARGET_LANGUAGE">%1$s<ex>FRENCH</ex></ph>.
-      </message>
-      <message name="IDS_TRANSLATE_INFOBAR_TRANSLATION_MORE_OPTIONS" desc="Text link that will provide more options after a translate [CHAR-LIMIT=24]">
-        More
       </message>
       <message name="IDS_TRANSLATE_INFOBAR_TRANSLATING">
         Translating page to <ph name="SOURCE_LANGUAGE">%1$s<ex>English</ex></ph>...
@@ -590,11 +1022,15 @@ You are signing in with a managed account and giving its administrator control o
       </message>
 
       <!-- App banner accessibility strings, used for touch exploration -->
-      <message name="IDS_APP_BANNER_VIEW_ACCESSIBILITY" desc="Accessibililty text: Describes the banner content, including the app name and rating.">
-        Prompt to get app from the Google Play Store.  App name: <ph name="APP_NAME">%1$s<ex>Gmail</ex></ph>.  App average rating: <ph name="APP_RATING">%2$.1f<ex>4.2</ex></ph>.
+      <message name="IDS_APP_BANNER_VIEW_NATIVE_APP_ACCESSIBILITY" desc="Accessibililty text: Describes a prompt promoting the installation of an app related to the current page, including the app's name and its rating.">
+        View app <ph name="APP_NAME">%1$s<ex>Gmail</ex></ph> on the Play Store.  Rating: <ph name="APP_RATING">%2$.1f<ex>4.2</ex></ph>.
       </message>
-      <message name="IDS_APP_BANNER_INSTALL_ACCESSIBILITY" desc="Accessibility text: Indicates that clicking on the button will purchase the app or install it.">
-        Get app from the Google Play Store: <ph name="APP_ACTION">%s<ex>Install</ex></ph>
+      <message name="IDS_APP_BANNER_VIEW_NATIVE_APP_INSTALL_ACCESSIBILITY" desc="Accessibility text: Indicates that clicking on the button will either purchase the app or install it.">
+        Get the app from the Google Play Store: <ph name="APP_ACTION">%s<ex>Install</ex></ph>
+      </message>
+
+      <message name="IDS_APP_BANNER_VIEW_WEB_APP_ACCESSIBILITY" desc="Accessibililty text: Details the web app being promoted by the current page, including the app name and its URL.">
+        <ph name="APP_NAME">%1$s<ex>Gmail</ex></ph>, web app. <ph name="APP_URL">%2$s<ex>google.com</ex></ph>
       </message>
 
       <!-- DOM Distiller strings -->
@@ -658,6 +1094,9 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_MENU_ADD_TO_HOMESCREEN" desc="Menu item for adding a shortcut to the homescreen. [CHAR-LIMIT=27]">
         Add to homescreen
       </message>
+      <message name="IDS_ADDED_TO_HOMESCREEN" desc="Indicates that the current domain was added to the user's homescreen.">
+        <ph name="DOMAIN_NAME">%1$s<ex>google.com</ex></ph> was added to your homescreen
+      </message>
 
       <!-- WebsiteSettingsPopup (PageInfo dialog) -->
       <message name="IDS_PAGE_INFO_COPY_URL_BUTTON" desc="Text in the button that copies the URL to the clipboard.">
@@ -680,6 +1119,9 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_PAGE_INFO_CONNECTION_MIXED" desc="Message to display in the page info bubble when the main connection is private, but there is content on the page that is not private.">
         Your connection to this site is private, but someone on the network might be able to change the look of the page.
+      </message>
+      <message name="IDS_PAGE_INFO_CONNECTION_SHA1" desc="Message to display in the page info bubble when the page is not considered private (because the connection used SHA-1 for certificate signatures, which are not considered secure anymore).">
+        This site uses a weak security configuration (SHA-1 signatures), so your connection may not be private.
       </message>
       <message name="IDS_PAGE_INFO_CONNECTION_BROKEN_LEADING_TEXT" desc="Message to display highlighted red in the page info bubble when the connection is insecure because the HTTPS certificate is invalid.">
         Your connection to this site is not private.
@@ -714,12 +1156,95 @@ Drag from top to exit.
       </message>
 
       <!-- Download UI -->
+      <message name="IDS_DOWNLOAD_NO_SDCARD_DLG_TITLE_product_nosdcard" desc="Dialog title [CHAR LIMIT=25]">
+        USB storage unavailable
+      </message>
+      <message name="IDS_DOWNLOAD_NO_SDCARD_DLG_TITLE_product_default" desc="Dialog title [CHAR LIMIT=25]">
+        No SD card
+      </message>
+      <message name="IDS_DOWNLOAD_SDCARD_BUSY_DLG_TITLE_product_nosdcard" desc="Title for a dialog informing the user that the SD card used for external storage is busy so they cannot download anything [CHAR LIMIT=30]">
+        USB storage unavailable
+      </message>
+      <message name="IDS_DOWNLOAD_SDCARD_BUSY_DLG_TITLE_product_default" desc="Title for a dialog informing the user that the SD card used for external storage is busy so they cannot download anything [CHAR-LIMIT=30]">
+        SD card unavailable
+      </message>
       <message name="IDS_DOWNLOAD_NOTIFICATION_FAILED" desc="Download notification to be displayed when a download fails.">
         Download failed.
       </message>
       <message name="IDS_CANNOT_ADD_DOWNLOADED_ITEM_TO_MANAGER" desc="Toast for a download which has completed but cannot be added to the download manager">
         Failed to add downloaded item to the download manager.
       </message>
+      <message name="IDS_CANNOT_CREATE_DOWNLOAD_DIRECTORY_TITLE_product_nosdcard" desc="Message for a dialog informing the user that download directory cannot be created on external storage [CHAR LIMIT=75]">
+        Cannot create download directory on USB storage.
+      </message>
+      <message name="IDS_CANNOT_CREATE_DOWNLOAD_DIRECTORY_TITLE_product_default" desc="Message for a dialog informing the user that download directory cannot be created on external storage [CHAR LIMIT=75]">
+        Cannot create download directory on SD card.
+      </message>
+      <message name="IDS_CANNOT_DOWNLOAD_HTTP_OR_HTTPS" desc="Toast for a download which cannot begin because the URL is not http or https">
+        Can only download http or https URLs
+      </message>
+      <message name="IDS_CANNOT_DOWNLOAD_GENERIC" desc="Toast for a generic download failure">
+        Failed to start download
+      </message>
+      <message name="IDS_DOWNLOAD_PENDING" desc="Message in the list of items which have received download requests telling their status. This message states that the download has not yet begun [CHAR LIMIT=30]">
+        Downloading…
+      </message>
+      <message name="IDS_PROCEED_OMA_DOWNLOAD_MESSAGE" desc="A message within a modal dialog that confirms the user want to download an OMA DRM file.">
+        Proceed to download the content?
+      </message>
+      <message name="IDS_OPEN_URL_POST_OMA_DOWNLOAD" desc="A message within a modal dialog to confirm that the user want to open the url specified in the OMA download descriptor.">
+        Open the suggested URL specified in the downloaded content?
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_INSUFFICIENT_MEMORY" desc="Error message displayed when there are not enough memory to download the OMA DRM content.">
+        Insufficient memory to download the selected content.
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_NON_ACCEPTABLE_CONTENT" desc="Error message displayed when the device cannot open the OMA DRM content.">
+        Device cannot open the content to be downloaded.
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_FAILED" desc="Error message displayed when the device cannot download the OMA request.">
+        An error occured while downloading the content.
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_NAME_LABEL" desc="A text label to display the name of the OMA download.">
+        Name:
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_VENDOR_LABEL" desc="A text label to display the vendor of the OMA download.">
+        Vendor:
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_SIZE_LABEL" desc="A text label to display the size of the OMA download.">
+        Size:
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_TYPE_LABEL" desc="A text label to display the MIME tyoe of the OMA download.">
+        Type:
+      </message>
+      <message name="IDS_OMA_DOWNLOAD_DESCRIPTION_LABEL" desc="A text label to display the description of the OMA download.">
+        Description:
+      </message>
+
+      <!-- Document mode strings -->
+      <message name="IDS_CLOSE_ALL_INCOGNITO_NOTIFICATION" desc="Message on the notification that closes all incognito tabs in document mode">
+        Close all incognito tabs
+      </message>
+
+      <!-- Autofill/Wallet integration prompt -->
+      <message name="IDS_CARD_UNMASK_CONFIRM_BUTTON" desc="Text for button that confirms the credit card CVC entry dialog.">
+        Verify
+      </message>
+      <message name="IDS_CARD_UNMASK_INPUT_HINT" desc="Hint text for an input field containing the user's credit card CVC (card verification code).">
+        CVC
+      </message>
+      <message name="IDS_CARD_UNMASK_MONTH_HINT" desc="Hint text for an input field containing a credit card expiration month in two digit format.">
+        MM
+      </message>
+      <message name="IDS_CARD_UNMASK_YEAR_HINT" desc="Hint text for an input field containing a credit card expiration year in two digit format.">
+        YY
+      </message>
+      <message name="IDS_CARD_UNMASK_EXPIRATION_DATE_SEPARATOR" desc="Separator for a credit card expiration date, e.g. the slash in 05/16.">
+        /
+      </message>
+      <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_STORE_LOCALLY" desc="Checkbox text that permits a user to skip past this dialog next time this credit card is used on this device.">
+        Don't ask again for this card
+      </message>
+
     </messages>
   </release>
 </grit>

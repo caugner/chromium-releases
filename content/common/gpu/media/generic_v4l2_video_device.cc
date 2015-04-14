@@ -11,9 +11,9 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
-#include "base/debug/trace_event.h"
 #include "base/files/scoped_file.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/media/generic_v4l2_video_device.h"
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_bindings.h"
@@ -39,7 +39,7 @@ namespace content {
 namespace {
 const char kDecoderDevice[] = "/dev/video-dec";
 const char kEncoderDevice[] = "/dev/video-enc";
-const char kImageProcessorDevice[] = "/dev/gsc1";
+const char kImageProcessorDevice[] = "/dev/gsc0";
 }
 
 GenericV4L2Device::GenericV4L2Device(Type type)

@@ -28,6 +28,10 @@ class MetricsServiceClient {
   // when metrics recording gets enabled.
   virtual void SetMetricsClientId(const std::string& client_id) = 0;
 
+  // Notifies the client that recording is disabled, so that other services
+  // (such as crash reporting) can clear any association with metrics.
+  virtual void OnRecordingDisabled() = 0;
+
   // Whether there's an "off the record" (aka "Incognito") session active.
   virtual bool IsOffTheRecordSessionActive() = 0;
 
@@ -64,8 +68,6 @@ class MetricsServiceClient {
   // Creates a MetricsLogUploader with the specified parameters (see comments on
   // MetricsLogUploader for details).
   virtual scoped_ptr<MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) = 0;
 
   // Returns the name of a key under HKEY_CURRENT_USER that can be used to store

@@ -143,6 +143,11 @@
                   "experimental": {
                     "type": "boolean",
                     "description": "True if experimental features are enabled."
+                  },
+                  "features": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "List of experimental feature flags."
                   }
                 }
               }

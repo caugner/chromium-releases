@@ -289,6 +289,37 @@ int OmniboxFieldTrial::HQPBookmarkValue() {
   return bookmark_value;
 }
 
+bool OmniboxFieldTrial::HQPExperimentalScoringEnabled() {
+  return variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kHQPExperimentalScoringEnabledParam) == "true";
+}
+
+std::string OmniboxFieldTrial::HQPExperimentalScoringBuckets() {
+  if (!HQPExperimentalScoringEnabled())
+    return "";
+
+  return variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kHQPExperimentalScoringBucketsParam);
+}
+
+float OmniboxFieldTrial::HQPExperimentalTopicalityThreshold() {
+  if (!HQPExperimentalScoringEnabled())
+    return -1;
+
+  std::string topicality_threhold_str =
+    variations::GetVariationParamValue(
+        kBundledExperimentFieldTrialName,
+        kHQPExperimentalScoringTopicalityThresholdParam);
+
+  double topicality_threshold;
+  if (!base::StringToDouble(topicality_threhold_str, &topicality_threshold))
+    return -1;
+
+  return static_cast<float>(topicality_threshold);
+}
+
 bool OmniboxFieldTrial::HQPAllowMatchInTLDValue() {
   return variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName,
@@ -301,12 +332,6 @@ bool OmniboxFieldTrial::HQPAllowMatchInSchemeValue() {
       kHQPAllowMatchInSchemeRule) == "true";
 }
 
-bool OmniboxFieldTrial::DisableInlining() {
-  return variations::GetVariationParamValue(
-      kBundledExperimentFieldTrialName,
-      kDisableInliningRule) == "true";
-}
-
 bool OmniboxFieldTrial::EnableAnswersInSuggest() {
   const base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kDisableAnswersInSuggest))
@@ -317,12 +342,6 @@ bool OmniboxFieldTrial::EnableAnswersInSuggest() {
   return variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName,
       kAnswersInSuggestRule) == "true";
-}
-
-bool OmniboxFieldTrial::AddUWYTMatchEvenIfPromotedURLs() {
-  return variations::GetVariationParamValue(
-      kBundledExperimentFieldTrialName,
-      kAddUWYTMatchEvenIfPromotedURLsRule) == "true";
 }
 
 bool OmniboxFieldTrial::DisplayHintTextWhenPossible() {
@@ -367,10 +386,7 @@ const char OmniboxFieldTrial::kHQPAllowMatchInSchemeRule[] =
     "HQPAllowMatchInScheme";
 const char OmniboxFieldTrial::kZeroSuggestRule[] = "ZeroSuggest";
 const char OmniboxFieldTrial::kZeroSuggestVariantRule[] = "ZeroSuggestVariant";
-const char OmniboxFieldTrial::kDisableInliningRule[] = "DisableInlining";
 const char OmniboxFieldTrial::kAnswersInSuggestRule[] = "AnswersInSuggest";
-const char OmniboxFieldTrial::kAddUWYTMatchEvenIfPromotedURLsRule[] =
-    "AddUWYTMatchEvenIfPromotedURLs";
 const char OmniboxFieldTrial::kDisplayHintTextWhenPossibleRule[] =
     "DisplayHintTextWhenPossible";
 const char OmniboxFieldTrial::kDisableResultsCachingRule[] =
@@ -395,6 +411,14 @@ const char OmniboxFieldTrial::kHUPNewScoringVisitedCountHalfLifeTimeParam[] =
     "VisitedCountHalfLifeTime";
 const char OmniboxFieldTrial::kHUPNewScoringVisitedCountScoreBucketsParam[] =
     "VisitedCountScoreBuckets";
+
+const char OmniboxFieldTrial::kHQPExperimentalScoringEnabledParam[] =
+    "HQPExperimentalScoringEnabled";
+const char OmniboxFieldTrial::kHQPExperimentalScoringBucketsParam[] =
+    "HQPExperimentalScoringBuckets";
+const char
+    OmniboxFieldTrial::kHQPExperimentalScoringTopicalityThresholdParam[] =
+      "HQPExperimentalScoringTopicalityThreshold";
 
 // static
 int OmniboxFieldTrial::kDefaultMinimumTimeBetweenSuggestQueriesMs = 100;

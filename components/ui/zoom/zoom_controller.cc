@@ -20,6 +20,18 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(ui_zoom::ZoomController);
 
 namespace ui_zoom {
 
+double ZoomController::GetZoomLevelForWebContents(
+    const content::WebContents* web_contents) {
+  if (!web_contents)
+    return 0.0;
+
+  auto zoom_controller = FromWebContents(web_contents);
+  if (zoom_controller)
+    return zoom_controller->GetZoomLevel();
+
+  return content::HostZoomMap::GetZoomLevel(web_contents);
+}
+
 ZoomController::ZoomController(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       can_show_bubble_(true),
@@ -95,6 +107,10 @@ bool ZoomController::SetZoomLevelByClient(
 
   // Do not actually rescale the page in manual mode.
   if (zoom_mode_ == ZOOM_MODE_MANUAL) {
+    // If the zoom level hasn't changed, early out to avoid sending an event.
+    if (zoom_level_ == zoom_level)
+      return true;
+
     double old_zoom_level = zoom_level_;
     zoom_level_ = zoom_level;
 
@@ -236,13 +252,14 @@ void ZoomController::SetZoomMode(ZoomMode new_mode) {
 }
 
 void ZoomController::ResetZoomModeOnNavigationIfNeeded(const GURL& url) {
-  if (zoom_mode_ != ZOOM_MODE_ISOLATED)
+  if (zoom_mode_ != ZOOM_MODE_ISOLATED && zoom_mode_ != ZOOM_MODE_MANUAL)
     return;
 
   int render_process_id = web_contents()->GetRenderProcessHost()->GetID();
   int render_view_id = web_contents()->GetRenderViewHost()->GetRoutingID();
   content::HostZoomMap* zoom_map =
     content::HostZoomMap::GetForWebContents(web_contents());
+  zoom_level_ = zoom_map->GetDefaultZoomLevel();
   double old_zoom_level = zoom_map->GetZoomLevel(web_contents());
   double new_zoom_level = zoom_map->GetZoomLevelForHostAndScheme(
       url.scheme(), net::GetHostOrSpecFromURL(url));

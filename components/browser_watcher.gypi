@@ -12,6 +12,8 @@
             'target_name': 'browser_watcher',
             'type': 'static_library',
             'sources': [
+              'browser_watcher/endsession_watcher_window_win.cc',
+              'browser_watcher/endsession_watcher_window_win.h',
               'browser_watcher/exit_code_watcher_win.cc',
               'browser_watcher/exit_code_watcher_win.h',
               'browser_watcher/exit_funnel_win.cc',
@@ -28,13 +30,10 @@
             'sources': [
               'browser_watcher/watcher_client_win.cc',
               'browser_watcher/watcher_client_win.h',
-              'browser_watcher/watcher_main_api_win.cc',
-              'browser_watcher/watcher_main_api_win.h',
               'browser_watcher/watcher_metrics_provider_win.cc',
               'browser_watcher/watcher_metrics_provider_win.h',
             ],
             'dependencies': [
-              'browser_watcher',
               '../base/base.gyp:base',
             ],
           },

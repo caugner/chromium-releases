@@ -19,7 +19,7 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/metrics/jumplist_metrics_win.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -34,6 +34,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/sessions/session_types.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
@@ -185,16 +186,14 @@ bool UpdateJumpList(const wchar_t* app_id,
   // This update request is applied into the JumpList when we commit this
   // transaction.
   if (!use_profiles_category && !jumplist_updater.AddCustomCategory(
-          base::UTF16ToWide(
-              l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED)),
+          l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED),
           most_visited_pages, profiles_or_most_visited_items)) {
     return false;
   }
 
   // Update the "Recently Closed" category of the JumpList.
   if (!jumplist_updater.AddCustomCategory(
-          base::UTF16ToWide(
-              l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED)),
+          l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED),
           recently_closed_pages, recently_closed_items)) {
     return false;
   }
@@ -249,17 +248,17 @@ JumpList::JumpList(Profile* profile)
   icon_dir_ = profile_->GetPath().Append(chrome::kJumpListIconDirname);
   use_profiles_category_ = HasProfilesJumplistExperiment();
 
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (top_sites) {
     // TopSites updates itself after a delay. This is especially noticable when
     // your profile is empty. Ask TopSites to update itself when jumplist is
     // initialized.
     top_sites->SyncWithHistory();
     registrar_.reset(new content::NotificationRegistrar);
-    // Register for notification when TopSites changes so that we can update
-    // ourself.
-    registrar_->Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                    content::Source<history::TopSites>(top_sites));
+    // Register as TopSitesObserver so that we can update ourselves when the
+    // TopSites changes.
+    top_sites->AddObserver(this);
     // Register for notification when profile is destroyed to ensure that all
     // observers are detatched at that time.
     registrar_->Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
@@ -293,25 +292,9 @@ bool JumpList::Enabled() {
 void JumpList::Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_TOP_SITES_CHANGED: {
-      // Most visited urls changed, query again.
-      history::TopSites* top_sites = profile_->GetTopSites();
-      if (top_sites) {
-        top_sites->GetMostVisitedURLs(
-            base::Bind(&JumpList::OnMostVisitedURLsAvailable,
-                       weak_ptr_factory_.GetWeakPtr()), false);
-      }
-      break;
-    }
-    case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      // Profile was destroyed, do clean-up.
-      Terminate();
-      break;
-    }
-    default:
-      NOTREACHED() << "Unexpected notification type.";
-  }
+  DCHECK_EQ(type, chrome::NOTIFICATION_PROFILE_DESTROYED);
+  // Profile was destroyed, do clean-up.
+  Terminate();
 }
 
 void JumpList::CancelPendingUpdate() {
@@ -328,6 +311,10 @@ void JumpList::Terminate() {
         TabRestoreServiceFactory::GetForProfile(profile_);
     if (tab_restore_service)
       tab_restore_service->RemoveObserver(this);
+    scoped_refptr<history::TopSites> top_sites =
+        TopSitesFactory::GetForProfile(profile_);
+    if (top_sites)
+      top_sites->RemoveObserver(this);
     registrar_.reset();
     pref_change_registrar_.reset();
   }
@@ -468,8 +455,8 @@ void JumpList::StartLoadingFavicon() {
     return;
   }
 
-  FaviconService* favicon_service =
-      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
   task_id_ = favicon_service->GetFaviconImageForPageURL(
       url,
       base::Bind(&JumpList::OnFaviconDataAvailable, base::Unretained(this)),
@@ -614,4 +601,14 @@ void JumpList::UpdateProfileSwitcher() {
     base::AutoLock auto_lock(list_lock_);
     new_profile_switcher.swap(profile_switcher_);
   }
+}
+
+void JumpList::TopSitesLoaded(history::TopSites* top_sites) {
+}
+
+void JumpList::TopSitesChanged(history::TopSites* top_sites) {
+  top_sites->GetMostVisitedURLs(
+      base::Bind(&JumpList::OnMostVisitedURLsAvailable,
+                 weak_ptr_factory_.GetWeakPtr()),
+      false);
 }

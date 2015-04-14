@@ -7,6 +7,7 @@ import heapq
 import logging
 import os
 import os.path
+import re
 import shutil
 import subprocess as subprocess
 import sys
@@ -101,8 +102,13 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     if os_name != 'win':
       return None
     arch_name = self.browser.platform.GetArchName()
+    command = support_binaries.FindPath('crash_service', arch_name, os_name)
+    if not command:
+      logging.warning('crash_service.exe not found for %s %s',
+                      arch_name, os_name)
+      return None
     return subprocess.Popen([
-        support_binaries.FindPath('crash_service', arch_name, os_name),
+        command,
         '--no-window',
         '--dumps-dir=%s' % self._tmp_minidump_dir,
         '--pipe-name=%s' % self._GetCrashServicePipeName()])
@@ -166,7 +172,6 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     logging.info('Requested remote debugging port: %d' % self._port)
     args.append('--remote-debugging-port=%i' % self._port)
     args.append('--enable-crash-reporter-for-testing')
-    args.append('--use-mock-keychain')
     if not self._is_content_shell:
       args.append('--window-size=1280,1024')
       if self._flash_path:
@@ -197,6 +202,9 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     try:
       self._WaitForBrowserToComeUp()
+      self._InitDevtoolsClientBackend()
+      if self._supports_extensions:
+        self._WaitForExtensionsToLoad()
     except:
       self.Close()
       raise
@@ -262,7 +270,13 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         return None
       output = subprocess.check_output([cdb, '-y', self._browser_directory,
                                         '-c', '.ecxr;k30;q', '-z', minidump])
-      stack_start = output.find('ChildEBP')
+      # cdb output can start the stack with "ChildEBP", "Child-SP", and possibly
+      # other things we haven't seen yet. If we can't find the start of the
+      # stack, include output from the beginning.
+      stack_start = 0
+      stack_start_match = re.search("^Child(?:EBP|-SP)", output, re.MULTILINE)
+      if stack_start_match:
+        stack_start = stack_start_match.start()
       stack_end = output.find('quit:')
       return output[stack_start:stack_end]
 

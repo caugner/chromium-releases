@@ -57,26 +57,27 @@ remoting.HostTableEntry = function(
  */
 remoting.HostTableEntry.prototype.createDom = function() {
   // Create the top-level <div>
-  var tableRow = /** @type {HTMLElement} */ document.createElement('div');
+  var tableRow = /** @type {HTMLElement} */ (document.createElement('div'));
   tableRow.classList.add('section-row');
   // Create the host icon cell.
-  var hostIconDiv = /** @type {HTMLElement} */ document.createElement('div');
+  var hostIconDiv = /** @type {HTMLElement} */ (document.createElement('div'));
   hostIconDiv.classList.add('host-list-main-icon');
   var warningOverlay =
-      /** @type {HTMLElement} */ document.createElement('span');
+      /** @type {HTMLElement} */ (document.createElement('span'));
   hostIconDiv.appendChild(warningOverlay);
-  var hostIcon = /** @type {HTMLElement} */ document.createElement('img');
+  var hostIcon = /** @type {HTMLElement} */ (document.createElement('img'));
   hostIcon.src = 'icon_host.webp';
   hostIconDiv.appendChild(hostIcon);
   tableRow.appendChild(hostIconDiv);
   // Create the host name cell.
-  var hostNameCell = /** @type {HTMLElement} */ document.createElement('div');
+  var hostNameCell = /** @type {HTMLElement} */ (document.createElement('div'));
   hostNameCell.classList.add('box-spacer');
   hostNameCell.id = 'host_' + this.host.hostId;
   tableRow.appendChild(hostNameCell);
   // Create the host rename cell.
-  var editButton = /** @type {HTMLElement} */ document.createElement('span');
-  var editButtonImg = /** @type {HTMLElement} */ document.createElement('img');
+  var editButton = /** @type {HTMLElement} */ (document.createElement('span'));
+  var editButtonImg =
+      /** @type {HTMLElement} */ (document.createElement('img'));
   editButtonImg.title = chrome.i18n.getMessage(
       /*i18n-content*/'TOOLTIP_RENAME');
   editButtonImg.src = 'icon_pencil.webp';
@@ -87,9 +88,10 @@ remoting.HostTableEntry.prototype.createDom = function() {
   editButton.appendChild(editButtonImg);
   tableRow.appendChild(editButton);
   // Create the host delete cell.
-  var deleteButton = /** @type {HTMLElement} */ document.createElement('span');
+  var deleteButton =
+      /** @type {HTMLElement} */ (document.createElement('span'));
   var deleteButtonImg =
-      /** @type {HTMLElement} */ document.createElement('img');
+      /** @type {HTMLElement} */ (document.createElement('img'));
   deleteButtonImg.title =
       chrome.i18n.getMessage(/*i18n-content*/'TOOLTIP_DELETE');
   deleteButtonImg.src = 'icon_cross.webp';
@@ -201,8 +203,10 @@ remoting.HostTableEntry.prototype.updateStatus = function(opt_forEdit) {
     this.tableRow.classList.add('host-online');
     this.tableRow.classList.remove('host-offline');
   }
-  this.warningOverlay_.hidden = !remoting.Host.needsUpdate(
+  var hostReportedError = this.host.hostOfflineReason != '';
+  var hostNeedsUpdate = remoting.Host.needsUpdate(
       this.host, this.webappMajorVersion_);
+  this.warningOverlay_.hidden = !hostNeedsUpdate && !hostReportedError;
 };
 
 /**
@@ -211,7 +215,8 @@ remoting.HostTableEntry.prototype.updateStatus = function(opt_forEdit) {
  * @private
  */
 remoting.HostTableEntry.prototype.beginRename_ = function() {
-  var editBox = /** @type {HTMLInputElement} */ document.createElement('input');
+  var editBox =
+      /** @type {HTMLInputElement} */ (document.createElement('input'));
   editBox.type = 'text';
   editBox.value = this.host.hostName;
   this.hostNameCell_.innerText = '';
@@ -311,12 +316,57 @@ remoting.HostTableEntry.prototype.removeEditBox_ = function() {
 };
 
 /**
+ * Formats host's updateTime value relative to current time (i.e. only
+ * displaying hours and minutes if updateTime is less than a day in the past).
+ * @param {string} updateTime RFC 3339 formatted date-time value.
+ * @return {string} Formatted value (i.e. 11/11/2014)
+ */
+function formatUpdateTime(updateTime) {
+  var lastOnline = new Date(updateTime);
+  var now = new Date();
+  var displayString = '';
+  if (now.getFullYear() == lastOnline.getFullYear() &&
+      now.getMonth() == lastOnline.getMonth() &&
+      now.getDate() == lastOnline.getDate()) {
+    return lastOnline.toLocaleTimeString();
+  } else {
+    return lastOnline.toLocaleDateString();
+  }
+}
+
+/**
+ * Formats host's host-offline-reason value (i.e. 'INVALID_HOST_CONFIGURATION')
+ * to a human-readable description of the error.
+ * @param {string} hostOfflineReason
+ * @return {string}
+ */
+function formatHostOfflineReason(hostOfflineReason) {
+  var knownReasonTags = [
+    /*i18n-content*/ 'OFFLINE_REASON_INITIALIZATION_FAILED',
+    /*i18n-content*/ 'OFFLINE_REASON_INVALID_HOST_CONFIGURATION',
+    /*i18n-content*/ 'OFFLINE_REASON_INVALID_HOST_ID',
+    /*i18n-content*/ 'OFFLINE_REASON_INVALID_OAUTH_CREDENTIALS',
+    /*i18n-content*/ 'OFFLINE_REASON_INVALID_HOST_DOMAIN',
+    /*i18n-content*/ 'OFFLINE_REASON_LOGIN_SCREEN_NOT_SUPPORTED',
+    /*i18n-content*/ 'OFFLINE_REASON_USERNAME_MISMATCH'
+  ];
+  var offlineReasonTag = 'OFFLINE_REASON_' + hostOfflineReason;
+  if (knownReasonTags.indexOf(offlineReasonTag) != (-1)) {
+    return chrome.i18n.getMessage(offlineReasonTag);
+  } else {
+    return chrome.i18n.getMessage(
+        /*i18n-content*/ 'OFFLINE_REASON_UNKNOWN',
+        hostOfflineReason);
+  }
+}
+
+/**
  * Create the DOM nodes and event handlers for the hostname cell.
  * @return {void} Nothing.
  * @private
  */
 remoting.HostTableEntry.prototype.setHostName_ = function() {
-  var hostNameNode = /** @type {HTMLElement} */ document.createElement('a');
+  var hostNameNode = /** @type {HTMLElement} */ (document.createElement('a'));
   if (this.host.status == 'ONLINE') {
     if (remoting.Host.needsUpdate(this.host, this.webappMajorVersion_)) {
       hostNameNode.innerText = chrome.i18n.getMessage(
@@ -338,18 +388,15 @@ remoting.HostTableEntry.prototype.setHostName_ = function() {
     hostNameNode.addEventListener('keydown', onKeyDown, false);
   } else {
     if (this.host.updatedTime) {
-      var lastOnline = new Date(this.host.updatedTime);
-      var now = new Date();
-      var displayString = '';
-      if (now.getFullYear() == lastOnline.getFullYear() &&
-          now.getMonth() == lastOnline.getMonth() &&
-          now.getDate() == lastOnline.getDate()) {
-        displayString = lastOnline.toLocaleTimeString();
-      } else {
-        displayString = lastOnline.toLocaleDateString();
-      }
+      var formattedTime = formatUpdateTime(this.host.updatedTime);
       hostNameNode.innerText = chrome.i18n.getMessage(
-          /*i18n-content*/'LAST_ONLINE', [this.host.hostName, displayString]);
+          /*i18n-content*/'LAST_ONLINE', [this.host.hostName, formattedTime]);
+      if (this.host.hostOfflineReason) {
+        var detailsText = formatHostOfflineReason(this.host.hostOfflineReason);
+        // TODO(lukasza): Put detailsText into a hideable div (title/tooltip
+        // is not as discoverable + doesn't work well for touchscreens).
+        hostNameNode.title = detailsText;
+      }
     } else {
       hostNameNode.innerText = chrome.i18n.getMessage(
           /*i18n-content*/'OFFLINE', this.host.hostName);

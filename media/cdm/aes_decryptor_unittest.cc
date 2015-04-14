@@ -238,10 +238,10 @@ class AesDecryptorTest : public testing::Test {
 
  protected:
   void OnResolveWithSession(PromiseResult expected_result,
-                            const std::string& web_session_id) {
+                            const std::string& session_id) {
     EXPECT_EQ(expected_result, RESOLVED) << "Unexpectedly resolved.";
-    EXPECT_GT(web_session_id.length(), 0ul);
-    web_session_id_ = web_session_id;
+    EXPECT_GT(session_id.length(), 0ul);
+    session_id_ = session_id;
   }
 
   void OnResolve(PromiseResult expected_result) {
@@ -285,11 +285,11 @@ class AesDecryptorTest : public testing::Test {
     EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary(),
                                         GURL::EmptyGURL()));
     decryptor_.CreateSessionAndGenerateRequest(
-        MediaKeys::TEMPORARY_SESSION, std::string(), &key_id[0], key_id.size(),
+        MediaKeys::TEMPORARY_SESSION, "webm", &key_id[0], key_id.size(),
         CreateSessionPromise(RESOLVED));
     // This expects the promise to be called synchronously, which is the case
     // for AesDecryptor.
-    return web_session_id_;
+    return session_id_;
   }
 
   // Closes the session specified by |session_id|.
@@ -308,14 +308,14 @@ class AesDecryptorTest : public testing::Test {
   }
 
   MOCK_METHOD2(OnSessionKeysChangeCalled,
-               void(const std::string& web_session_id,
+               void(const std::string& session_id,
                     bool has_additional_usable_key));
 
-  void OnSessionKeysChange(const std::string& web_session_id,
+  void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info) {
     keys_info_.swap(keys_info);
-    OnSessionKeysChangeCalled(web_session_id, has_additional_usable_key);
+    OnSessionKeysChangeCalled(session_id, has_additional_usable_key);
   }
 
   // Updates the session specified by |session_id| with |key|. |result|
@@ -405,15 +405,15 @@ class AesDecryptorTest : public testing::Test {
   }
 
   MOCK_METHOD4(OnSessionMessage,
-               void(const std::string& web_session_id,
+               void(const std::string& session_id,
                     MediaKeys::MessageType message_type,
                     const std::vector<uint8>& message,
                     const GURL& legacy_destination_url));
-  MOCK_METHOD1(OnSessionClosed, void(const std::string& web_session_id));
+  MOCK_METHOD1(OnSessionClosed, void(const std::string& session_id));
 
   AesDecryptor decryptor_;
   AesDecryptor::DecryptCB decrypt_cb_;
-  std::string web_session_id_;
+  std::string session_id_;
   CdmKeysInfo keys_info_;
 
   // Constants for testing.
@@ -430,7 +430,7 @@ TEST_F(AesDecryptorTest, CreateSessionWithNullInitData) {
   EXPECT_CALL(*this,
               OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
   decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
-                                             std::string(), NULL, 0,
+                                             "webm", NULL, 0,
                                              CreateSessionPromise(RESOLVED));
 }
 
@@ -438,19 +438,19 @@ TEST_F(AesDecryptorTest, MultipleCreateSession) {
   EXPECT_CALL(*this,
               OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
   decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
-                                             std::string(), NULL, 0,
+                                             "webm", NULL, 0,
                                              CreateSessionPromise(RESOLVED));
 
   EXPECT_CALL(*this,
               OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
   decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
-                                             std::string(), NULL, 0,
+                                             "webm", NULL, 0,
                                              CreateSessionPromise(RESOLVED));
 
   EXPECT_CALL(*this,
               OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
   decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
-                                             std::string(), NULL, 0,
+                                             "webm", NULL, 0,
                                              CreateSessionPromise(RESOLVED));
 }
 
@@ -747,7 +747,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "      \"kty\": \"oct\","
       "      \"alg\": \"A128KW\","
       "      \"kid\": \"JCUmJygpKissLS4vMA\","
-      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4/QA\""
+      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4_QA\""
       "    }"
       "  ]"
       "}";

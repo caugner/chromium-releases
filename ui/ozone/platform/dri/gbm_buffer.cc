@@ -10,7 +10,8 @@
 #include <xf86drm.h>
 
 #include "base/logging.h"
-#include "ui/ozone/platform/dri/dri_wrapper.h"
+#include "base/trace_event/trace_event.h"
+#include "ui/ozone/platform/dri/gbm_wrapper.h"
 
 namespace ui {
 
@@ -30,8 +31,10 @@ int GetGbmFormatFromBufferFormat(SurfaceFactoryOzone::BufferFormat fmt) {
 
 }  // namespace
 
-GbmBuffer::GbmBuffer(DriWrapper* dri, gbm_bo* bo, bool scanout)
-    : GbmBufferBase(dri, bo, scanout) {
+GbmBuffer::GbmBuffer(const scoped_refptr<GbmWrapper>& gbm,
+                     gbm_bo* bo,
+                     bool scanout)
+    : GbmBufferBase(gbm, bo, scanout) {
 }
 
 GbmBuffer::~GbmBuffer() {
@@ -41,34 +44,32 @@ GbmBuffer::~GbmBuffer() {
 
 // static
 scoped_refptr<GbmBuffer> GbmBuffer::CreateBuffer(
-    DriWrapper* dri,
-    gbm_device* device,
+    const scoped_refptr<GbmWrapper>& gbm,
     SurfaceFactoryOzone::BufferFormat format,
     const gfx::Size& size,
     bool scanout) {
+  TRACE_EVENT2("dri", "GbmBuffer::CreateBuffer", "device",
+               gbm->device_path().value(), "size", size.ToString());
   unsigned flags = GBM_BO_USE_RENDERING;
   if (scanout)
     flags |= GBM_BO_USE_SCANOUT;
-  gbm_bo* bo = gbm_bo_create(device,
-                             size.width(),
-                             size.height(),
-                             GetGbmFormatFromBufferFormat(format),
-                             flags);
+  gbm_bo* bo = gbm_bo_create(gbm->device(), size.width(), size.height(),
+                             GetGbmFormatFromBufferFormat(format), flags);
   if (!bo)
     return NULL;
 
-  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(dri, bo, scanout));
+  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(gbm, bo, scanout));
   if (scanout && !buffer->GetFramebufferId())
     return NULL;
 
   return buffer;
 }
 
-GbmPixmap::GbmPixmap(scoped_refptr<GbmBuffer> buffer)
+GbmPixmap::GbmPixmap(const scoped_refptr<GbmBuffer>& buffer)
     : buffer_(buffer), dma_buf_(-1) {
 }
 
-bool GbmPixmap::Initialize(DriWrapper* dri) {
+bool GbmPixmap::Initialize() {
   // We want to use the GBM API because it's going to call into libdrm
   // which might do some optimizations on buffer allocation,
   // especially when sharing buffers via DMABUF.
@@ -86,8 +87,7 @@ GbmPixmap::~GbmPixmap() {
 }
 
 void* GbmPixmap::GetEGLClientBuffer() {
-  // TODO(achaulk): change back to null when dma_buf bug is fixed.
-  return buffer_->bo();
+  return nullptr;
 }
 
 int GbmPixmap::GetDmaBufFd() {

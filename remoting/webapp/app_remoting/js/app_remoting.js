@@ -38,6 +38,12 @@ remoting.AppRemoting = function(app) {
    * @private
    */
   this.windowActivationMenu_ = null;
+
+   /**
+    * @type {number}
+    * @private
+    */
+   this.pingTimerId_ = 0;
 };
 
 /**
@@ -86,7 +92,9 @@ remoting.AppRemoting.prototype.init = function(connector) {
   remoting.initGlobalObjects();
   remoting.initIdentity(remoting.onUserInfoAvailable);
 
-  remoting.initGlobalEventHandlers();
+  // TODO(jamiewalch): Remove ClientSession's dependency on remoting.fullscreen
+  // so that this is no longer required.
+  remoting.fullscreen = new remoting.FullscreenAppsV2();
 
   var restoreHostWindows = function() {
     if (remoting.clientSession) {
@@ -167,7 +175,7 @@ remoting.AppRemoting.prototype.init = function(connector) {
       } else if (xhr.status == 401) {
         that.handleError(remoting.Error.AUTHENTICATION_FAILED);
       } else if (xhr.status == 403) {
-        that.handleError(remoting.Error.NOT_AUTHORIZED);
+        that.handleError(remoting.Error.APP_NOT_AUTHORIZED);
       } else if (xhr.status == 502 || xhr.status == 503) {
         that.handleError(remoting.Error.SERVICE_UNAVAILABLE);
       } else {
@@ -194,6 +202,20 @@ remoting.AppRemoting.prototype.init = function(connector) {
 }
 
 /**
+ * @return {string} Application product name to be used in UI.
+ */
+remoting.AppRemoting.prototype.getApplicationName = function() {
+  var manifest = chrome.runtime.getManifest();
+  return manifest.name;
+};
+
+/** @return {string} */
+remoting.AppRemoting.prototype.runApplicationUrl = function() {
+  return remoting.settings.APP_REMOTING_API_BASE_URL + '/applications/' +
+      remoting.settings.getAppRemotingApplicationId() + '/run';
+};
+
+/**
  * @return {string} The default remap keys for the current platform.
  */
 remoting.AppRemoting.prototype.getDefaultRemapKeys = function() {
@@ -203,19 +225,6 @@ remoting.AppRemoting.prototype.getDefaultRemapKeys = function() {
     return '0x0700e3>0x0700e0,0x0700e7>0x0700e4';
   }
   return '';
-};
-
-/**
- * @return {Array.<string>} A list of |ClientSession.Capability|s required
- *     by this application.
- */
-remoting.AppRemoting.prototype.getRequiredCapabilities = function() {
-  return [
-    remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION,
-    remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS,
-    remoting.ClientSession.Capability.VIDEO_RECORDER,
-    remoting.ClientSession.Capability.GOOGLE_DRIVE
-  ];
 };
 
 /**
@@ -235,18 +244,7 @@ remoting.AppRemoting.prototype.handleConnected = function(clientSession) {
     clientSession.sendClientMessage('pingRequest', JSON.stringify(message));
   };
   ping();
-  var timerId = window.setInterval(ping, 10 * 1000);
-
-  // Cancel the ping when the connection closes.
-  clientSession.addEventListener(
-      remoting.ClientSession.Events.stateChanged,
-      /** @param {remoting.ClientSession.StateEvent} state */
-      function(state) {
-        if (state.current === remoting.ClientSession.State.CLOSED ||
-            state.current === remoting.ClientSession.State.FAILED) {
-          window.clearInterval(timerId);
-        }
-      });
+  this.pingTimerId_ = window.setInterval(ping, 10 * 1000);
 };
 
 /**
@@ -255,6 +253,9 @@ remoting.AppRemoting.prototype.handleConnected = function(clientSession) {
  * @return {void} Nothing.
  */
 remoting.AppRemoting.prototype.handleDisconnected = function() {
+  // Cancel the ping when the connection closes.
+  window.clearInterval(this.pingTimerId_);
+
   chrome.app.window.current().close();
 };
 
@@ -345,12 +346,6 @@ remoting.AppRemoting.prototype.handleError = function(errorTag) {
   console.error('Connection failed: ' + errorTag);
   remoting.LoadingWindow.close();
   remoting.MessageWindow.showErrorMessage(
-      chrome.i18n.getMessage(/**i18n-content*/'CONNECTION_FAILED'),
+      chrome.i18n.getMessage(/*i18n-content*/'CONNECTION_FAILED'),
       chrome.i18n.getMessage(/** @type {string} */ (errorTag)));
-};
-
-/** @return {string} */
-remoting.AppRemoting.prototype.runApplicationUrl = function() {
-  return remoting.settings.APP_REMOTING_API_BASE_URL + '/applications/' +
-      remoting.settings.getAppRemotingApplicationId() + '/run';
 };

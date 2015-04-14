@@ -5989,10 +5989,8 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
     TestDelegate d;
 
     GURL::Replacements replacements;
-    std::string username("user2");
-    std::string password("secret");
-    replacements.SetUsernameStr(username);
-    replacements.SetPasswordStr(password);
+    replacements.SetUsernameStr("user2");
+    replacements.SetPasswordStr("secret");
     GURL url_with_identity = url_requiring_auth.ReplaceComponents(replacements);
 
     scoped_ptr<URLRequest> r(context.CreateRequest(
@@ -7267,6 +7265,26 @@ TEST_F(HTTPSRequestTest, HSTSCrossOriginAddHeaders) {
   EXPECT_TRUE(headers->EnumerateHeader(NULL, "Access-Control-Allow-Origin",
                                        &received_cors_header));
   EXPECT_EQ(kOriginHeaderValue, received_cors_header);
+}
+
+// This just tests the behaviour of GetHSTSRedirect(). End-to-end tests of HSTS
+// are performed in net/websockets/websocket_end_to_end_test.cc.
+TEST(WebSocketURLRequestTest, HSTSApplied) {
+  TestNetworkDelegate network_delegate;
+  TransportSecurityState transport_security_state;
+  base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1);
+  bool include_subdomains = false;
+  transport_security_state.AddHSTS("example.net", expiry, include_subdomains);
+  TestURLRequestContext context(true);
+  context.set_transport_security_state(&transport_security_state);
+  context.set_network_delegate(&network_delegate);
+  context.Init();
+  GURL ws_url("ws://example.net/echo");
+  TestDelegate delegate;
+  scoped_ptr<URLRequest> request(
+      context.CreateRequest(ws_url, DEFAULT_PRIORITY, &delegate, NULL));
+  EXPECT_TRUE(request->GetHSTSRedirect(&ws_url));
+  EXPECT_TRUE(ws_url.SchemeIs("wss"));
 }
 
 namespace {

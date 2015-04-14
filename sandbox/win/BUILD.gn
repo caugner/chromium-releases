@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
+
 source_set("sandbox") {
   sources = [
     "src/acl.cc",
@@ -133,7 +135,7 @@ source_set("sandbox") {
     "src/window.h",
   ]
 
-  if (cpu_arch == "x64") {
+  if (current_cpu == "x64") {
     sources += [
       "src/interceptors_64.cc",
       "src/interceptors_64.h",
@@ -141,7 +143,7 @@ source_set("sandbox") {
       "src/service_resolver_64.cc",
       "src/Wow64_64.cc",
     ]
-  } else if (cpu_arch == "x86") {
+  } else if (current_cpu == "x86") {
     sources += [
       "src/resolver_32.cc",
       "src/service_resolver_32.cc",
@@ -160,12 +162,14 @@ source_set("sandbox") {
   }
 
   deps = [
-    ":copy_wow_helper",
     "//base",
   ]
+  if (current_cpu == "x86") {
+    deps += [ ":copy_wow_helper" ]
+  }
 }
 
-if (cpu_arch == "x86") {
+if (current_cpu == "x86") {
   # Make a target that copies the wow_helper files to the out dir.
   #
   # TODO(brettw) we can probably just build this now that we have proper
@@ -183,6 +187,7 @@ if (cpu_arch == "x86") {
 
 test("sbox_integration_tests") {
   sources = [
+    "src/address_sanitizer_test.cc",
     "src/app_container_test.cc",
     "src/file_policy_test.cc",
     "src/handle_inheritance_test.cc",

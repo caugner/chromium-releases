@@ -17,6 +17,7 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/events/event.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
@@ -340,7 +341,7 @@ TEST_F(ViewTest, MouseEvent) {
   v2->Reset();
 
   gfx::Point p1(110, 120);
-  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1,
+  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1, ui::EventTimeForNow(),
                          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(pressed);
   EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_PRESSED);
@@ -353,7 +354,7 @@ TEST_F(ViewTest, MouseEvent) {
   v1->Reset();
   v2->Reset();
   gfx::Point p2(50, 40);
-  ui::MouseEvent dragged(ui::ET_MOUSE_DRAGGED, p2, p2,
+  ui::MouseEvent dragged(ui::ET_MOUSE_DRAGGED, p2, p2, ui::EventTimeForNow(),
                          ui::EF_LEFT_MOUSE_BUTTON, 0);
   root->OnMouseDragged(dragged);
   EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_DRAGGED);
@@ -365,8 +366,8 @@ TEST_F(ViewTest, MouseEvent) {
   // Releasted event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  ui::MouseEvent released(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(), 0,
-                          0);
+  ui::MouseEvent released(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                          ui::EventTimeForNow(), 0, 0);
   root->OnMouseDragged(released);
   EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_RELEASED);
   EXPECT_EQ(v2->location_.x(), -100);
@@ -401,7 +402,8 @@ TEST_F(ViewTest, DeleteOnPressed) {
   v2->delete_on_pressed_ = true;
   gfx::Point point(110, 120);
   ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, point, point,
-                         ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
+                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
+                         ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(pressed);
   EXPECT_EQ(0, v1->child_count());
 
@@ -1056,7 +1058,7 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Move the mouse in v111.
   gfx::Point p1(6, 6);
-  ui::MouseEvent move1(ui::ET_MOUSE_MOVED, p1, p1, 0, 0);
+  ui::MouseEvent move1(ui::ET_MOUSE_MOVED, p1, p1, ui::EventTimeForNow(), 0, 0);
   root_view->OnMouseMoved(move1);
   EXPECT_TRUE(v111->received_mouse_enter_);
   EXPECT_FALSE(v11->last_mouse_event_type_);
@@ -1067,7 +1069,7 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Now, move into v121.
   gfx::Point p2(65, 21);
-  ui::MouseEvent move2(ui::ET_MOUSE_MOVED, p2, p2, 0, 0);
+  ui::MouseEvent move2(ui::ET_MOUSE_MOVED, p2, p2, ui::EventTimeForNow(), 0, 0);
   root_view->OnMouseMoved(move2);
   EXPECT_TRUE(v111->received_mouse_exit_);
   EXPECT_TRUE(v121->received_mouse_enter_);
@@ -1078,7 +1080,7 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Now, move into v11.
   gfx::Point p3(1, 1);
-  ui::MouseEvent move3(ui::ET_MOUSE_MOVED, p3, p3, 0, 0);
+  ui::MouseEvent move3(ui::ET_MOUSE_MOVED, p3, p3, ui::EventTimeForNow(), 0, 0);
   root_view->OnMouseMoved(move3);
   EXPECT_TRUE(v121->received_mouse_exit_);
   EXPECT_TRUE(v11->received_mouse_enter_);
@@ -1089,7 +1091,7 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Move to v21.
   gfx::Point p4(121, 15);
-  ui::MouseEvent move4(ui::ET_MOUSE_MOVED, p4, p4, 0, 0);
+  ui::MouseEvent move4(ui::ET_MOUSE_MOVED, p4, p4, ui::EventTimeForNow(), 0, 0);
   root_view->OnMouseMoved(move4);
   EXPECT_TRUE(v21->received_mouse_enter_);
   EXPECT_FALSE(v2->last_mouse_event_type_);
@@ -1102,7 +1104,7 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Move to v1.
   gfx::Point p5(21, 0);
-  ui::MouseEvent move5(ui::ET_MOUSE_MOVED, p5, p5, 0, 0);
+  ui::MouseEvent move5(ui::ET_MOUSE_MOVED, p5, p5, ui::EventTimeForNow(), 0, 0);
   root_view->OnMouseMoved(move5);
   EXPECT_TRUE(v21->received_mouse_exit_);
   EXPECT_TRUE(v1->received_mouse_enter_);
@@ -1112,7 +1114,8 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
 
   // Now, move into v11.
   gfx::Point p6(15, 15);
-  ui::MouseEvent mouse6(ui::ET_MOUSE_MOVED, p6, p6, 0, 0);
+  ui::MouseEvent mouse6(ui::ET_MOUSE_MOVED, p6, p6, ui::EventTimeForNow(), 0,
+                        0);
   root_view->OnMouseMoved(mouse6);
   EXPECT_TRUE(v11->received_mouse_enter_);
   EXPECT_FALSE(v1->last_mouse_event_type_);
@@ -1124,7 +1127,8 @@ TEST_F(ViewTest, NotifyEnterExitOnChild) {
   // and the mouse remains inside |v1| the whole time, it receives another ENTER
   // when the mouse leaves v11.
   gfx::Point p7(21, 0);
-  ui::MouseEvent mouse7(ui::ET_MOUSE_MOVED, p7, p7, 0, 0);
+  ui::MouseEvent mouse7(ui::ET_MOUSE_MOVED, p7, p7, ui::EventTimeForNow(), 0,
+                        0);
   root_view->OnMouseMoved(mouse7);
   EXPECT_TRUE(v11->received_mouse_exit_);
   EXPECT_FALSE(v1->received_mouse_enter_);
@@ -1646,7 +1650,7 @@ TEST_F(ViewTest, TransformEvent) {
   v2->Reset();
 
   gfx::Point p1(110, 210);
-  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1,
+  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1, ui::EventTimeForNow(),
                          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(pressed);
   EXPECT_EQ(0, v1->last_mouse_event_type_);
@@ -1654,8 +1658,8 @@ TEST_F(ViewTest, TransformEvent) {
   EXPECT_EQ(190, v2->location_.x());
   EXPECT_EQ(10, v2->location_.y());
 
-  ui::MouseEvent released(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(), 0,
-                          0);
+  ui::MouseEvent released(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                          ui::EventTimeForNow(), 0, 0);
   root->OnMouseReleased(released);
 
   // Now rotate |v2| inside |v1| clockwise.
@@ -1671,7 +1675,7 @@ TEST_F(ViewTest, TransformEvent) {
   v2->Reset();
 
   gfx::Point point2(110, 320);
-  ui::MouseEvent p2(ui::ET_MOUSE_PRESSED, point2, point2,
+  ui::MouseEvent p2(ui::ET_MOUSE_PRESSED, point2, point2, ui::EventTimeForNow(),
                     ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p2);
   EXPECT_EQ(0, v1->last_mouse_event_type_);
@@ -1707,7 +1711,7 @@ TEST_F(ViewTest, TransformEvent) {
   v3->Reset();
 
   gfx::Point point(112, 110);
-  ui::MouseEvent p3(ui::ET_MOUSE_PRESSED, point, point,
+  ui::MouseEvent p3(ui::ET_MOUSE_PRESSED, point, point, ui::EventTimeForNow(),
                     ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p3);
 
@@ -1746,7 +1750,7 @@ TEST_F(ViewTest, TransformEvent) {
   // |v3| now occupies (120, 120) to (144, 130) in |root|.
 
   gfx::Point point3(124, 125);
-  ui::MouseEvent p4(ui::ET_MOUSE_PRESSED, point3, point3,
+  ui::MouseEvent p4(ui::ET_MOUSE_PRESSED, point3, point3, ui::EventTimeForNow(),
                     ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p4);
 
@@ -2955,6 +2959,69 @@ TEST_F(ViewLayerTest, BoundInRTL) {
   base::i18n::SetICUDefaultLocale(locale);
 }
 
+// Make sure that resizing a parent in RTL correctly repositions its children.
+TEST_F(ViewLayerTest, ResizeParentInRTL) {
+  std::string locale = l10n_util::GetApplicationLocale(std::string());
+  base::i18n::SetICUDefaultLocale("he");
+
+  View* view = new View;
+  widget()->SetContentsView(view);
+
+  int content_width = view->width();
+
+  // Create a paints-to-layer view |v1|.
+  View* v1 = new View;
+  v1->SetPaintToLayer(true);
+  v1->SetBounds(10, 10, 20, 10);
+  view->AddChildView(v1);
+  EXPECT_EQ(gfx::Rect(content_width - 30, 10, 20, 10),
+            v1->layer()->bounds());
+
+  // Attach a paints-to-layer child view to |v1|.
+  View* v2 = new View;
+  v2->SetPaintToLayer(true);
+  v2->SetBounds(3, 5, 6, 4);
+  EXPECT_EQ(gfx::Rect(3, 5, 6, 4),
+            v2->layer()->bounds());
+  v1->AddChildView(v2);
+  // Check that |v2| now has RTL-appropriate bounds.
+  EXPECT_EQ(gfx::Rect(11, 5, 6, 4),
+            v2->layer()->bounds());
+
+  // Attach a non-layer child view to |v1|, and give it a paints-to-layer child.
+  View* v3 = new View;
+  v3->SetBounds(1, 1, 18, 8);
+  View* v4 = new View;
+  v4->SetPaintToLayer(true);
+  v4->SetBounds(2, 4, 6, 4);
+  EXPECT_EQ(gfx::Rect(2, 4, 6, 4),
+            v4->layer()->bounds());
+  v3->AddChildView(v4);
+  EXPECT_EQ(gfx::Rect(10, 4, 6, 4),
+            v4->layer()->bounds());
+  v1->AddChildView(v3);
+  // Check that |v4| now has RTL-appropriate bounds.
+  EXPECT_EQ(gfx::Rect(11, 5, 6, 4),
+            v4->layer()->bounds());
+
+  // Resize |v1|. Make sure that |v2| and |v4|'s layers have been moved
+  // correctly to RTL-appropriate bounds.
+  v1->SetSize(gfx::Size(30, 10));
+  EXPECT_EQ(gfx::Rect(21, 5, 6, 4),
+            v2->layer()->bounds());
+  EXPECT_EQ(gfx::Rect(21, 5, 6, 4),
+            v4->layer()->bounds());
+
+  // Move and resize |v3|. Make sure that |v4|'s layer has been moved correctly
+  // to RTL-appropriate bounds.
+  v3->SetBounds(2, 1, 12, 8);
+  EXPECT_EQ(gfx::Rect(20, 5, 6, 4),
+            v4->layer()->bounds());
+
+  // Reset locale.
+  base::i18n::SetICUDefaultLocale(locale);
+}
+
 // Makes sure a transform persists after toggling the visibility.
 TEST_F(ViewLayerTest, ToggleVisibilityWithTransform) {
   View* view = new View;
@@ -3078,20 +3145,23 @@ TEST_F(ViewLayerTest, DontPaintChildrenWithLayers) {
   widget()->SetContentsView(content_view);
   content_view->SetPaintToLayer(true);
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   GetRootLayer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
   content_view->set_painted(false);
   // content_view no longer has a dirty rect. Paint from the root and make sure
   // PaintTrackingView isn't painted.
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_FALSE(content_view->painted());
 
   // Make content_view have a dirty rect, paint the layers and make sure
   // PaintTrackingView is painted.
   content_view->layer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_TRUE(content_view->painted());
 }
 
@@ -3330,13 +3400,15 @@ TEST_F(ViewLayerTest, BoundsTreePaintUpdatesCullSet) {
   // Schedule a full-view paint to get everyone's rectangles updated.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Now we have test_view - v1 - v2. Damage to only test_view should only
   // return root_view and test_view.
   test_view->SchedulePaintInRect(gfx::Rect(0, 0, 1, 1));
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(2U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3344,7 +3416,8 @@ TEST_F(ViewLayerTest, BoundsTreePaintUpdatesCullSet) {
   // Damage to v1 only should only return root_view, test_view, and v1.
   test_view->SchedulePaintInRect(gfx::Rect(11, 16, 1, 1));
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(3U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3354,7 +3427,8 @@ TEST_F(ViewLayerTest, BoundsTreePaintUpdatesCullSet) {
   // on call to TestView::Paint(), along with the widget root view.
   test_view->SchedulePaintInRect(gfx::Rect(31, 49, 1, 1));
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(4U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3381,13 +3455,15 @@ TEST_F(ViewLayerTest, BoundsTreeWithRTL) {
   // Schedule a full-view paint to get everyone's rectangles updated.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Damage to the right side of the parent view should touch both child views.
   gfx::Rect rtl_damage(test_view->bounds().width() - 16, 18, 1, 1);
   test_view->SchedulePaintInRect(rtl_damage);
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(4U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3399,7 +3475,8 @@ TEST_F(ViewLayerTest, BoundsTreeWithRTL) {
   gfx::Rect ltr_damage(16, 18, 1, 1);
   test_view->SchedulePaintInRect(ltr_damage);
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(2U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3423,18 +3500,21 @@ TEST_F(ViewLayerTest, BoundsTreeSetBoundsChangesCullSet) {
   // Schedule a full-view paint to get everyone's rectangles updated.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Move v1 to a new origin out of the way of our next query.
   v1->SetBoundsRect(gfx::Rect(50, 60, 100, 101));
   // The move will force a repaint.
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Schedule a paint with damage rect where v1 used to be.
   test_view->SchedulePaintInRect(gfx::Rect(5, 6, 10, 11));
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Should only have picked up root_view and test_view.
   EXPECT_EQ(2U, test_view->last_cull_set_.size());
@@ -3457,7 +3537,8 @@ TEST_F(ViewLayerTest, BoundsTreeLayerChangeMakesNewTree) {
   // Schedule a full-view paint to get everyone's rectangles updated.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Set v1 to paint to its own layer, it should remove itself from the
   // test_view heiarchy and no longer intersect with damage rects in that cull
@@ -3467,7 +3548,8 @@ TEST_F(ViewLayerTest, BoundsTreeLayerChangeMakesNewTree) {
   // Schedule another full-view paint.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   // v1 and v2 should no longer be present in the test_view cull_set.
   EXPECT_EQ(2U, test_view->last_cull_set_.size());
   EXPECT_EQ(0U, test_view->last_cull_set_.count(v1));
@@ -3478,7 +3560,8 @@ TEST_F(ViewLayerTest, BoundsTreeLayerChangeMakesNewTree) {
   // Schedule another full-view paint.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   // We should be back to the full cull set including v1 and v2.
   EXPECT_EQ(4U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
@@ -3502,7 +3585,8 @@ TEST_F(ViewLayerTest, BoundsTreeRemoveChildRemovesBounds) {
   // Schedule a full-view paint to get everyone's rectangles updated.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Now remove v1 from the root view.
   test_view->RemoveChildView(v1);
@@ -3510,7 +3594,8 @@ TEST_F(ViewLayerTest, BoundsTreeRemoveChildRemovesBounds) {
   // Schedule another full-view paint.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   // v1 and v2 should no longer be present in the test_view cull_set.
   EXPECT_EQ(2U, test_view->last_cull_set_.size());
   EXPECT_EQ(0U, test_view->last_cull_set_.count(v1));
@@ -3541,7 +3626,8 @@ TEST_F(ViewLayerTest, BoundsTreeMoveViewMovesBounds) {
   // Schedule a full-view paint and ensure all views are present in the cull.
   test_view->SchedulePaintInRect(test_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
   EXPECT_EQ(5U, test_view->last_cull_set_.size());
   EXPECT_EQ(1U, test_view->last_cull_set_.count(widget()->GetRootView()));
   EXPECT_EQ(1U, test_view->last_cull_set_.count(test_view));
@@ -3564,7 +3650,8 @@ TEST_F(ViewLayerTest, BoundsTreeMoveViewMovesBounds) {
   test_view->SchedulePaintInRect(test_view->bounds());
   widget_view->SchedulePaintInRect(widget_view->bounds());
   GetRootLayer()->GetCompositor()->ScheduleDraw();
-  ui::DrawWaiterForTest::Wait(GetRootLayer()->GetCompositor());
+  ui::DrawWaiterForTest::WaitForCompositingEnded(
+      GetRootLayer()->GetCompositor());
 
   // Only v1 should be present in the first cull set.
   EXPECT_EQ(3U, test_view->last_cull_set_.size());

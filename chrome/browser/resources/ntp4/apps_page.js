@@ -49,12 +49,10 @@ cr.define('ntp', function() {
       this.launch_.addEventListener('activate', this.onLaunch_.bind(this));
 
       menu.appendChild(cr.ui.MenuItem.createSeparator());
-      if (loadTimeData.getBoolean('enableStreamlinedHostedApps'))
-        this.launchRegularTab_ = this.appendMenuItem_('applaunchtypetab');
-      else
-        this.launchRegularTab_ = this.appendMenuItem_('applaunchtyperegular');
+      this.launchRegularTab_ = this.appendMenuItem_('applaunchtyperegular');
       this.launchPinnedTab_ = this.appendMenuItem_('applaunchtypepinned');
-      this.launchNewWindow_ = this.appendMenuItem_('applaunchtypewindow');
+      if (loadTimeData.getBoolean('enableNewBookmarkApps') || !cr.isMac)
+        this.launchNewWindow_ = this.appendMenuItem_('applaunchtypewindow');
       this.launchFullscreen_ = this.appendMenuItem_('applaunchtypefullscreen');
 
       var self = this;
@@ -130,14 +128,14 @@ cr.define('ntp', function() {
 
       this.launch_.textContent = app.appData.title;
 
-      var launchTypeRegularTab = this.launchRegularTab_;
+      var launchTypeWindow = this.launchNewWindow_;
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         launchTypeButton.disabled = false;
         launchTypeButton.checked = app.appData.launch_type == id;
-        // Streamlined hosted apps should only show the "Open as tab" button.
+        // If bookmark apps are enabled, only show the "Open as window" button.
         launchTypeButton.hidden = app.appData.packagedApp ||
-            (loadTimeData.getBoolean('enableStreamlinedHostedApps') &&
-             launchTypeButton != launchTypeRegularTab);
+            (loadTimeData.getBoolean('enableNewBookmarkApps') &&
+             launchTypeButton != launchTypeWindow);
       });
 
       this.launchTypeMenuSeparator_.hidden = app.appData.packagedApp;
@@ -167,11 +165,11 @@ cr.define('ntp', function() {
       var pressed = e.currentTarget;
       var app = this.app_;
       var targetLaunchType = pressed;
-      // Streamlined hosted apps can only toggle between open as window and open
-      // as tab.
-      if (loadTimeData.getBoolean('enableStreamlinedHostedApps')) {
-        targetLaunchType = this.launchRegularTab_.checked ?
-            this.launchNewWindow_ : this.launchRegularTab_;
+      // When bookmark apps are enabled, hosted apps can only toggle between
+      // open as window and open as tab.
+      if (loadTimeData.getBoolean('enableNewBookmarkApps')) {
+        targetLaunchType = this.launchNewWindow_.checked ?
+            this.launchRegularTab_ : this.launchNewWindow_;
       }
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         if (launchTypeButton == targetLaunchType) {

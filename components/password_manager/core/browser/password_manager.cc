@@ -59,10 +59,9 @@ void ReportMetrics(bool password_manager_enabled,
   PasswordStore* store = client->GetPasswordStore();
   // May be NULL in tests.
   if (store) {
-    store->ReportMetrics(
-        client->GetSyncUsername(),
-        client->IsPasswordSyncEnabled(
-            password_manager::ONLY_CUSTOM_PASSPHRASE));
+    store->ReportMetrics(client->GetSyncUsername(),
+                         client->IsPasswordSyncEnabled(
+                             password_manager::ONLY_CUSTOM_PASSPHRASE));
   }
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.Enabled", password_manager_enabled);
 }
@@ -108,6 +107,10 @@ void RecordWhetherTargetDomainDiffers(const GURL& src, const GURL& target) {
                         target_domain_differs);
 }
 
+bool IsSignupForm(const PasswordForm& form) {
+  return !form.new_password_element.empty() && form.password_element.empty();
+}
+
 }  // namespace
 
 const char PasswordManager::kOtherPossibleUsernamesExperiment[] =
@@ -121,8 +124,10 @@ void PasswordManager::RegisterProfilePrefs(
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kPasswordManagerAllowShowPasswords,
-      true,
+      prefs::kPasswordManagerAutoSignin, true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kPasswordManagerAllowShowPasswords, true,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(prefs::kPasswordManagerGroupsForDomains,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -156,8 +161,7 @@ void PasswordManager::SetFormHasGeneratedPassword(
 
   for (ScopedVector<PasswordFormManager>::iterator iter =
            pending_login_managers_.begin();
-       iter != pending_login_managers_.end();
-       ++iter) {
+       iter != pending_login_managers_.end(); ++iter) {
     if ((*iter)->DoesManage(form) ==
         PasswordFormManager::RESULT_COMPLETE_MATCH) {
       (*iter)->SetHasGeneratedPassword();
@@ -224,20 +228,21 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   scoped_ptr<PasswordFormManager> manager;
   ScopedVector<PasswordFormManager>::iterator matched_manager_it =
       pending_login_managers_.end();
+  PasswordFormManager::MatchResultMask current_match_result =
+      PasswordFormManager::RESULT_NO_MATCH;
   // Below, "matching" is in DoesManage-sense and "not ready" in
   // !HasCompletedMatching sense. We keep track of such PasswordFormManager
   // instances for UMA.
   bool has_found_matching_managers_which_were_not_ready = false;
   for (ScopedVector<PasswordFormManager>::iterator iter =
            pending_login_managers_.begin();
-       iter != pending_login_managers_.end();
-       ++iter) {
+       iter != pending_login_managers_.end(); ++iter) {
     PasswordFormManager::MatchResultMask result = (*iter)->DoesManage(form);
 
     if (result == PasswordFormManager::RESULT_NO_MATCH)
       continue;
 
-    if ((*iter)->IsIgnorableChangePasswordForm()) {
+    if ((*iter)->IsIgnorableChangePasswordForm(form)) {
       if (logger)
         logger->LogMessage(Logger::STRING_CHANGE_PASSWORD_FORM);
       continue;
@@ -256,7 +261,8 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
       matched_manager_it = iter;
       break;
     } else if (result == (PasswordFormManager::RESULT_COMPLETE_MATCH &
-                          ~PasswordFormManager::RESULT_ACTION_MATCH)) {
+                          ~PasswordFormManager::RESULT_ACTION_MATCH) &&
+               result > current_match_result) {
       // If the current manager matches the submitted form excluding the action
       // URL, remember it as a candidate and continue searching for an exact
       // match. See http://crbug.com/27246 for an example where actions can
@@ -264,6 +270,20 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
       if (logger)
         logger->LogMessage(Logger::STRING_MATCH_WITHOUT_ACTION);
       matched_manager_it = iter;
+      current_match_result = result;
+    } else if (IsSignupForm(form) && result > current_match_result) {
+      // Signup forms don't require HTML attributes to match because we don't
+      // need to fill these saved passwords on the same form in the future.
+      // Prefer the best possible match (e.g. action and origins match instead
+      // or just origin matching). Don't break in case there exists a better
+      // match.
+      // TODO(gcasto): Matching in this way is very imprecise. Having some
+      // better way to match the same form when the HTML elements change (e.g.
+      // text element changed to password element) would be useful.
+      if (logger)
+        logger->LogMessage(Logger::STRING_ORIGINS_MATCH);
+      matched_manager_it = iter;
+      current_match_result = result;
     }
   }
   // If we didn't find a manager, this means a form was submitted without
@@ -302,8 +322,8 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   // Don't save credentials for the syncing account. See crbug.com/365832 for
   // background.
   if (ShouldDropSyncCredential() &&
-      client_->IsSyncAccountCredential(
-          base::UTF16ToUTF8(form.username_value), form.signon_realm)) {
+      client_->IsSyncAccountCredential(base::UTF16ToUTF8(form.username_value),
+                                       form.signon_realm)) {
     RecordFailure(SYNC_CREDENTIAL, form.origin, logger.get());
     return;
   }
@@ -442,8 +462,7 @@ void PasswordManager::CreatePendingLoginManagers(
   std::vector<PasswordFormManager*> old_login_managers(
       pending_login_managers_.get());
   for (std::vector<PasswordForm>::const_iterator iter = forms.begin();
-       iter != forms.end();
-       ++iter) {
+       iter != forms.end(); ++iter) {
     // Don't involve the password manager if this form corresponds to
     // SpdyProxy authentication, as indicated by the realm.
     if (EndsWith(iter->signon_realm, kSpdyProxyRealm, true))
@@ -528,8 +547,8 @@ void PasswordManager::OnPasswordFormsRendered(
 
   // If we see the login form again, then the login failed.
   if (did_stop_loading) {
-    if (provisional_save_manager_->pending_credentials().scheme
-        == PasswordForm::SCHEME_HTML) {
+    if (provisional_save_manager_->pending_credentials().scheme ==
+        PasswordForm::SCHEME_HTML) {
       for (size_t i = 0; i < all_visible_forms_.size(); ++i) {
         // TODO(vabr): The similarity check is just action equality up to
         // HTTP<->HTTPS substitution for now. If it becomes more complex, it may
@@ -598,9 +617,15 @@ void PasswordManager::AskUserOrSavePassword() {
   RecordWhetherTargetDomainDiffers(main_frame_url_, client_->GetMainFrameURL());
 
   if (ShouldPromptUserToSavePassword()) {
+    bool empty_password =
+        provisional_save_manager_->pending_credentials().username_value.empty();
+    UMA_HISTOGRAM_BOOLEAN("PasswordManager.EmptyUsernames.OfferedToSave",
+                          empty_password);
     if (logger)
       logger->LogMessage(Logger::STRING_DECISION_ASK);
-    if (client_->PromptUserToSavePassword(provisional_save_manager_.Pass())) {
+    if (client_->PromptUserToSavePassword(
+            provisional_save_manager_.Pass(),
+            CredentialSourceType::CREDENTIAL_SOURCE_PASSWORD_MANAGER)) {
       if (logger)
         logger->LogMessage(Logger::STRING_SHOW_PASSWORD_PROMPT);
     }
@@ -624,8 +649,7 @@ void PasswordManager::PossiblyInitializeUsernamesExperiment(
 
   bool other_possible_usernames_exist = false;
   for (autofill::PasswordFormMap::const_iterator it = best_matches.begin();
-       it != best_matches.end();
-       ++it) {
+       it != best_matches.end(); ++it) {
     if (!it->second->other_possible_usernames.empty()) {
       other_possible_usernames_exist = true;
       break;

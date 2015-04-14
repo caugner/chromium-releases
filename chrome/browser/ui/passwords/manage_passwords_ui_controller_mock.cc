@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
 
+#include "components/password_manager/content/common/credential_manager_types.h"
 #include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -43,6 +44,11 @@ void ManagePasswordsUIControllerMock::UpdateBubbleAndIconVisibility() {
   OnBubbleShown();
 }
 
+void ManagePasswordsUIControllerMock::
+    UpdateAndroidAccountChooserInfoBarVisibility() {
+  OnBubbleShown();
+}
+
 base::TimeDelta ManagePasswordsUIControllerMock::Elapsed() const {
   return elapsed_;
 }
@@ -60,8 +66,8 @@ void ManagePasswordsUIControllerMock::NeverSavePasswordInternal() {
 }
 
 void ManagePasswordsUIControllerMock::ChooseCredential(
-    bool was_chosen,
-    const autofill::PasswordForm& form) {
+    const autofill::PasswordForm& form,
+    password_manager::CredentialType form_type) {
   EXPECT_FALSE(choose_credential_);
   choose_credential_ = true;
 }

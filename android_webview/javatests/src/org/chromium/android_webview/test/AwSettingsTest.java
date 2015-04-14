@@ -15,15 +15,14 @@ import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebSettings;
+import android.webkit.WebSettings.LayoutAlgorithm;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
 import org.chromium.android_webview.AwContents;
-import org.chromium.android_webview.AwContentsClient.ShouldInterceptRequestParams;
 import org.chromium.android_webview.AwSettings;
-import org.chromium.android_webview.AwSettings.LayoutAlgorithm;
 import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
@@ -31,6 +30,7 @@ import org.chromium.android_webview.test.util.VideoTestUtil;
 import org.chromium.android_webview.test.util.VideoTestWebServer;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
@@ -50,6 +50,7 @@ import java.util.regex.Pattern;
  * settings applies either to each individual view or to all views of the
  * application
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwSettingsTest extends AwTestBase {
     private static final boolean ENABLED = true;
     private static final boolean DISABLED = false;
@@ -1613,7 +1614,7 @@ public class AwSettingsTest extends AwTestBase {
     // defined in Android CTS tests:
     //
     // Mozilla/5.0 (Linux;[ U;] Android <version>;[ <language>-<country>;]
-    // [<devicemodel>;] Build/<buildID>) AppleWebKit/<major>.<minor> (KHTML, like Gecko)
+    // [<devicemodel>;] Build/<buildID>; wv) AppleWebKit/<major>.<minor> (KHTML, like Gecko)
     // Version/<major>.<minor>[ Mobile] Safari/<major>.<minor>
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
@@ -1627,7 +1628,8 @@ public class AwSettingsTest extends AwTestBase {
         assertEquals(actualUserAgentString, AwSettings.getDefaultUserAgent());
         final String patternString =
                 "Mozilla/5\\.0 \\(Linux;( U;)? Android ([^;]+);( (\\w+)-(\\w+);)?"
-                + "\\s?(.*)\\sBuild/(.+)\\) AppleWebKit/(\\d+)\\.(\\d+) \\(KHTML, like Gecko\\) "
+                + "\\s?(.*)\\sBuild/(.+); wv\\) "
+                + "AppleWebKit/(\\d+)\\.(\\d+) \\(KHTML, like Gecko\\) "
                 + "Version/\\d+\\.\\d Chrome/\\d+\\.\\d+\\.\\d+\\.\\d+"
                 + "( Mobile)? Safari/(\\d+)\\.(\\d+)";
         final Pattern userAgentExpr = Pattern.compile(patternString);
@@ -2737,9 +2739,8 @@ public class AwSettingsTest extends AwTestBase {
         final String defaultVideoPosterUrl = "http://default_video_poster/";
         TestAwContentsClient client = new TestAwContentsClient() {
             @Override
-            public AwWebResourceResponse shouldInterceptRequest(
-                    ShouldInterceptRequestParams params) {
-                if (params.url.equals(defaultVideoPosterUrl)) {
+            public AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request) {
+                if (request.url.equals(defaultVideoPosterUrl)) {
                     videoPosterAccessedCallbackHelper.notifyCalled();
                 }
                 return null;

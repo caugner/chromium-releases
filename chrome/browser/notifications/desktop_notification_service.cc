@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -127,6 +128,12 @@ void DesktopNotificationService::RequestNotificationPermission(
   }
 #endif
 
+  // Track whether the requesting and embedding origins are different when
+  // permission to display Web Notifications is being requested.
+  UMA_HISTOGRAM_BOOLEAN("Notifications.DifferentRequestingEmbeddingOrigins",
+                        requesting_origin.GetOrigin() !=
+                            web_contents->GetLastCommittedURL().GetOrigin());
+
   RequestPermission(web_contents,
                     request_id,
                     requesting_origin,
@@ -135,7 +142,7 @@ void DesktopNotificationService::RequestNotificationPermission(
 }
 
 bool DesktopNotificationService::IsNotifierEnabled(
-    const NotifierId& notifier_id) {
+    const NotifierId& notifier_id) const {
   switch (notifier_id.type) {
     case NotifierId::APPLICATION:
       return disabled_extension_ids_.find(notifier_id.id) ==

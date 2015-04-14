@@ -45,6 +45,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/views/bubble/bubble_window_targeter.h"
+#include "ui/wm/core/masked_window_targeter.h"
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
 #endif
@@ -82,6 +83,25 @@ bool SupportsShadow() {
   return true;
 }
 
+// This view forwards the focus to the search box widget by providing it as a
+// FocusTraversable when a focus search is provided.
+class SearchBoxFocusHost : public views::View {
+ public:
+  explicit SearchBoxFocusHost(views::Widget* search_box_widget)
+      : search_box_widget_(search_box_widget) {}
+
+  ~SearchBoxFocusHost() override {}
+
+  views::FocusTraversable* GetFocusTraversable() override {
+    return search_box_widget_;
+  }
+
+ private:
+  views::Widget* search_box_widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(SearchBoxFocusHost);
+};
+
 // The view for the App List overlay, which appears as a white rounded
 // rectangle with the given radius.
 class AppListOverlayView : public views::View {
@@ -108,6 +128,29 @@ class AppListOverlayView : public views::View {
 
   DISALLOW_COPY_AND_ASSIGN(AppListOverlayView);
 };
+
+#if defined(USE_AURA)
+// An event targeter for the search box widget which will ignore events that
+// are on the search box's shadow.
+class SearchBoxWindowTargeter : public wm::MaskedWindowTargeter {
+ public:
+  explicit SearchBoxWindowTargeter(views::View* search_box)
+      : wm::MaskedWindowTargeter(search_box->GetWidget()->GetNativeWindow()),
+        search_box_(search_box) {}
+  ~SearchBoxWindowTargeter() override {}
+
+ private:
+  // wm::MaskedWindowTargeter:
+  bool GetHitTestMask(aura::Window* window, gfx::Path* mask) const override {
+    mask->addRect(gfx::RectToSkRect(search_box_->GetContentsBounds()));
+    return true;
+  }
+
+  views::View* search_box_;
+
+  DISALLOW_COPY_AND_ASSIGN(SearchBoxWindowTargeter);
+};
+#endif
 
 }  // namespace
 
@@ -158,6 +201,7 @@ AppListView::AppListView(AppListViewDelegate* delegate)
     : delegate_(delegate),
       app_list_main_view_(nullptr),
       speech_view_(nullptr),
+      search_box_focus_host_(nullptr),
       search_box_widget_(nullptr),
       search_box_view_(nullptr),
       overlay_view_(nullptr),
@@ -218,7 +262,7 @@ void AppListView::InitAsFramelessWindow(gfx::NativeView parent,
   // its own background at OnNativeThemeChanged(), which is called in
   // View::AddChildView() which is called at Widget::SetContentsView() to build
   // the views hierarchy in the widget.
-  set_background(new AppListBackground(0, app_list_main_view_));
+  set_background(new AppListBackground(0));
 
   InitChildWidgets();
 }
@@ -312,6 +356,19 @@ void AppListView::OnThemeChanged() {
 
 bool AppListView::ShouldHandleSystemCommands() const {
   return true;
+}
+
+bool AppListView::ShouldDescendIntoChildForEventHandling(
+    gfx::NativeView child,
+    const gfx::Point& location) {
+  // While on the start page, don't descend into the custom launcher page. Since
+  // the only valid action is to open it.
+  ContentsView* contents_view = app_list_main_view_->contents_view();
+  if (contents_view->GetActiveState() == AppListModel::STATE_START)
+    return !contents_view->GetCustomPageCollapsedBounds().Contains(location);
+
+  return views::BubbleDelegateView::ShouldDescendIntoChildForEventHandling(
+      child, location);
 }
 
 void AppListView::Prerender() {
@@ -410,8 +467,6 @@ void AppListView::InitContents(gfx::NativeView parent, int initial_apps_page) {
 void AppListView::InitChildWidgets() {
   DCHECK(search_box_view_);
 
-  app_list_main_view_->InitWidgets();
-
   // Create the search box widget.
   views::Widget::InitParams search_box_widget_params(
       views::Widget::InitParams::TYPE_CONTROL);
@@ -425,6 +480,22 @@ void AppListView::InitChildWidgets() {
   search_box_widget_ = new views::Widget;
   search_box_widget_->Init(search_box_widget_params);
   search_box_widget_->SetContentsView(search_box_view_);
+
+  // The search box will not naturally receive focus by itself (because it is in
+  // a separate widget). Create this SearchBoxFocusHost in the main widget to
+  // forward the focus search into to the search box.
+  search_box_focus_host_ = new SearchBoxFocusHost(search_box_widget_);
+  AddChildView(search_box_focus_host_);
+  search_box_widget_->SetFocusTraversableParentView(search_box_focus_host_);
+  search_box_widget_->SetFocusTraversableParent(
+      GetWidget()->GetFocusTraversable());
+
+#if defined(USE_AURA)
+  // Mouse events on the search box shadow should not be captured.
+  aura::Window* window = search_box_widget_->GetNativeWindow();
+  window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
+      new SearchBoxWindowTargeter(search_box_view_)));
+#endif
 
   app_list_main_view_->contents_view()->Layout();
 }
@@ -494,15 +565,13 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
   aura::Window* window = GetWidget()->GetNativeWindow();
   window->layer()->SetMasksToBounds(true);
   GetBubbleFrameView()->set_background(new AppListBackground(
-      GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius(),
-      app_list_main_view_));
+      GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius()));
   set_background(NULL);
   window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
       new views::BubbleWindowTargeter(this)));
 #else
   set_background(new AppListBackground(
-      GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius(),
-      app_list_main_view_));
+      GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius()));
 
   // On non-aura the bubble has two widgets, and it's possible for the border
   // to be shown independently in odd situations. Explicitly hide the bubble

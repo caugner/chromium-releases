@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
@@ -21,13 +22,6 @@
 namespace sandbox {
 
 namespace {
-
-bool DirectoryExists(const char* path) {
-  struct stat dir;
-  errno = 0;
-  int ret = stat(path, &dir);
-  return -1 != ret || ENOENT != errno;
-}
 
 bool WorkingDirectoryIsRoot() {
   char current_dir[PATH_MAX];
@@ -77,9 +71,9 @@ SANDBOX_TEST(Credentials, MoveToNewUserNS) {
   CHECK(!Credentials::HasAnyCapability());
 }
 
-SANDBOX_TEST(Credentials, SupportsUserNS) {
+SANDBOX_TEST(Credentials, CanCreateProcessInNewUserNS) {
   CHECK(Credentials::DropAllCapabilities());
-  bool user_ns_supported = Credentials::SupportsNewUserNS();
+  bool user_ns_supported = Credentials::CanCreateProcessInNewUserNS();
   bool moved_to_new_ns = Credentials::MoveToNewUserNS();
   CHECK_EQ(user_ns_supported, moved_to_new_ns);
 }
@@ -129,20 +123,22 @@ SANDBOX_TEST(Credentials, NestedUserNS) {
 }
 
 // Test the WorkingDirectoryIsRoot() helper.
-TEST(Credentials, CanDetectRoot) {
-  ASSERT_EQ(0, chdir("/proc/"));
-  ASSERT_FALSE(WorkingDirectoryIsRoot());
-  ASSERT_EQ(0, chdir("/"));
-  ASSERT_TRUE(WorkingDirectoryIsRoot());
+SANDBOX_TEST(Credentials, CanDetectRoot) {
+  PCHECK(0 == chdir("/proc/"));
+  CHECK(!WorkingDirectoryIsRoot());
+  PCHECK(0 == chdir("/"));
+  CHECK(WorkingDirectoryIsRoot());
 }
 
-SANDBOX_TEST(Credentials, DISABLE_ON_LSAN(DropFileSystemAccessIsSafe)) {
+// Disabled on ASAN because of crbug.com/451603.
+SANDBOX_TEST(Credentials, DISABLE_ON_ASAN(DropFileSystemAccessIsSafe)) {
   CHECK(Credentials::DropAllCapabilities());
   // Probably missing kernel support.
   if (!Credentials::MoveToNewUserNS()) return;
   CHECK(Credentials::DropFileSystemAccess());
-  CHECK(!DirectoryExists("/proc"));
+  CHECK(!base::DirectoryExists(base::FilePath("/proc")));
   CHECK(WorkingDirectoryIsRoot());
+  CHECK(base::IsDirectoryEmpty(base::FilePath("/")));
   // We want the chroot to never have a subdirectory. A subdirectory
   // could allow a chroot escape.
   CHECK_NE(0, mkdir("/test", 0700));
@@ -150,7 +146,7 @@ SANDBOX_TEST(Credentials, DISABLE_ON_LSAN(DropFileSystemAccessIsSafe)) {
 
 // Check that after dropping filesystem access and dropping privileges
 // it is not possible to regain capabilities.
-SANDBOX_TEST(Credentials, DISABLE_ON_LSAN(CannotRegainPrivileges)) {
+SANDBOX_TEST(Credentials, DISABLE_ON_ASAN(CannotRegainPrivileges)) {
   CHECK(Credentials::DropAllCapabilities());
   // Probably missing kernel support.
   if (!Credentials::MoveToNewUserNS()) return;
@@ -159,7 +155,7 @@ SANDBOX_TEST(Credentials, DISABLE_ON_LSAN(CannotRegainPrivileges)) {
 
   // The kernel should now prevent us from regaining capabilities because we
   // are in a chroot.
-  CHECK(!Credentials::SupportsNewUserNS());
+  CHECK(!Credentials::CanCreateProcessInNewUserNS());
   CHECK(!Credentials::MoveToNewUserNS());
 }
 

@@ -57,7 +57,7 @@ AbortCallback ThrottledFileSystem::OpenFile(const base::FilePath& file_path,
                                             OpenFileMode mode,
                                             const OpenFileCallback& callback) {
   const size_t task_token = open_queue_->NewToken();
-  return open_queue_->Enqueue(
+  open_queue_->Enqueue(
       task_token,
       base::Bind(
           &ProvidedFileSystemInterface::OpenFile,
@@ -65,6 +65,8 @@ AbortCallback ThrottledFileSystem::OpenFile(const base::FilePath& file_path,
           file_path, mode,
           base::Bind(&ThrottledFileSystem::OnOpenFileCompleted,
                      weak_ptr_factory_.GetWeakPtr(), task_token, callback)));
+  return base::Bind(&ThrottledFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(),
+                    task_token);
 }
 
 AbortCallback ThrottledFileSystem::CloseFile(
@@ -158,6 +160,10 @@ Watchers* ThrottledFileSystem::GetWatchers() {
   return file_system_->GetWatchers();
 }
 
+const OpenedFiles& ThrottledFileSystem::GetOpenedFiles() const {
+  return file_system_->GetOpenedFiles();
+}
+
 void ThrottledFileSystem::AddObserver(ProvidedFileSystemObserver* observer) {
   file_system_->AddObserver(observer);
 }
@@ -181,11 +187,19 @@ base::WeakPtr<ProvidedFileSystemInterface> ThrottledFileSystem::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
+void ThrottledFileSystem::Abort(int queue_token) {
+  open_queue_->Abort(queue_token);
+}
+
 void ThrottledFileSystem::OnOpenFileCompleted(int queue_token,
                                               const OpenFileCallback& callback,
                                               int file_handle,
                                               base::File::Error result) {
-  if (result != base::File::FILE_ERROR_ABORT)
+  // The task may be aborted either via the callback, or by the operation, eg.
+  // because of destroying the request manager or unmounting the file system
+  // during the operation. Mark the task as completed only if it hasn't been
+  // aborted before.
+  if (!open_queue_->IsAborted(queue_token))
     open_queue_->Complete(queue_token);
 
   // If the file is opened successfully then hold the queue token until the file

@@ -55,12 +55,34 @@ using extensions::HotwordPrivateEventService;
 
 namespace {
 
-// Allowed languages for hotwording.
+// Allowed locales for hotwording. Note that Chrome does not support all of
+// these locales, condensing them to their 2-letter equivalent, but the full
+// list is here for completeness and testing.
 static const char* kSupportedLocales[] = {
   "en",
+  "en_au",
+  "en_ca",
+  "en_gb",
+  "en_nz",
+  "en_us",
+  "en_za",
   "de",
+  "de_at",
+  "de_de",
+  "es",
+  "es_419",
+  "es_es",
   "fr",
-  "ru"
+  "fr_fr",
+  "it",
+  "it_it",
+  "ja",
+  "ja_jp",
+  "ko",
+  "ko_kr",
+  "pt_br",
+  "ru",
+  "ru_ru"
 };
 
 // Maximum number of retries for installing the hotword shared module from the
@@ -266,7 +288,7 @@ bool HotwordService::DoesHotwordSupportLanguage(Profile* profile) {
   base::StringToLowerASCII(&normalized_locale);
 
   for (size_t i = 0; i < arraysize(kSupportedLocales); i++) {
-    if (normalized_locale.compare(0, 2, kSupportedLocales[i]) == 0)
+    if (normalized_locale == kSupportedLocales[i])
       return true;
   }
   return false;
@@ -424,7 +446,6 @@ void HotwordService::ShowHotwordNotification() {
       l10n_util::GetStringUTF16(IDS_HOTWORD_NOTIFICATION_DESCRIPTION),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_HOTWORD_NOTIFICATION_ICON),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(
           message_center::NotifierId::SYSTEM_COMPONENT,
           hotword_internal::kHotwordNotifierId),

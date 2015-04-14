@@ -5,7 +5,7 @@
 """Top-level presubmit script for Chromium.
 
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
-for more details about the presubmit API built into gcl.
+for more details about the presubmit API built into depot_tools.
 """
 
 
@@ -174,6 +174,7 @@ _BANNED_CPP_FUNCTIONS = (
             r"simple_platform_shared_buffer_posix\.cc$",
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
         r"^net[\\\/]url_request[\\\/]test_url_fetcher_factory\.cc$",
+        r"^ui[\\\/]ozone[\\\/]platform[\\\/]dri[\\\/]native_display_delegate_proxy\.cc$",
       ),
     ),
     (
@@ -356,6 +357,69 @@ def _CheckNoUNIT_TESTInSourceFiles(input_api, output_api):
     return []
   return [output_api.PresubmitPromptWarning('UNIT_TEST is only for headers.\n' +
       '\n'.join(problems))]
+
+
+def _FindHistogramNameInLine(histogram_name, line):
+  """Tries to find a histogram name or prefix in a line."""
+  if not "affected-histogram" in line:
+    return histogram_name in line
+  # A histogram_suffixes tag type has an affected-histogram name as a prefix of
+  # the histogram_name.
+  if not '"' in line:
+    return False
+  histogram_prefix = line.split('\"')[1]
+  return histogram_prefix in histogram_name
+
+
+def _CheckUmaHistogramChanges(input_api, output_api):
+  """Check that UMA histogram names in touched lines can still be found in other
+  lines of the patch or in histograms.xml. Note that this check would not catch
+  the reverse: changes in histograms.xml not matched in the code itself."""
+  touched_histograms = []
+  histograms_xml_modifications = []
+  pattern = input_api.re.compile('UMA_HISTOGRAM.*\("(.*)"')
+  for f in input_api.AffectedFiles():
+    # If histograms.xml itself is modified, keep the modified lines for later.
+    if f.LocalPath().endswith(('histograms.xml')):
+      histograms_xml_modifications = f.ChangedContents()
+      continue
+    if not f.LocalPath().endswith(('cc', 'mm', 'cpp')):
+      continue
+    for line_num, line in f.ChangedContents():
+      found = pattern.search(line)
+      if found:
+        touched_histograms.append([found.group(1), f, line_num])
+
+  # Search for the touched histogram names in the local modifications to
+  # histograms.xml, and, if not found, on the base histograms.xml file.
+  unmatched_histograms = []
+  for histogram_info in touched_histograms:
+    histogram_name_found = False
+    for line_num, line in histograms_xml_modifications:
+      histogram_name_found = _FindHistogramNameInLine(histogram_info[0], line)
+      if histogram_name_found:
+        break
+    if not histogram_name_found:
+      unmatched_histograms.append(histogram_info)
+
+  problems = []
+  if unmatched_histograms:
+    with open('tools/metrics/histograms/histograms.xml') as histograms_xml:
+      for histogram_name, f, line_num in unmatched_histograms:
+        histogram_name_found = False
+        for line in histograms_xml:
+          histogram_name_found = _FindHistogramNameInLine(histogram_name, line)
+          if histogram_name_found:
+            break
+        if not histogram_name_found:
+          problems.append(' [%s:%d] %s' %
+                          (f.LocalPath(), line_num, histogram_name))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning('Some UMA_HISTOGRAM lines have '
+    'been modified and the associated histogram name has no match in either '
+    'metrics/histograms.xml or the modifications of it:',  problems)]
 
 
 def _CheckNoNewWStrings(input_api, output_api):
@@ -967,7 +1031,7 @@ def _CheckSpamLogging(input_api, output_api):
                  r"^sandbox[\\\/]linux[\\\/].*",
                  r"^tools[\\\/]",
                  r"^ui[\\\/]aura[\\\/]bench[\\\/]bench_main\.cc$",
-                 r"^webkit[\\\/]browser[\\\/]fileapi[\\\/]" +
+                 r"^storage[\\\/]browser[\\\/]fileapi[\\\/]" +
                      r"dump_file_system.cc$",))
   source_file_filter = lambda x: input_api.FilterSourceFile(
       x, white_list=(file_inclusion_pattern,), black_list=black_list)
@@ -1217,7 +1281,8 @@ def _CheckJavaStyle(input_api, output_api):
     sys.path = original_sys_path
 
   return checkstyle.RunCheckstyle(
-      input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml')
+      input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml',
+      black_list=_EXCLUDED_PATHS + input_api.DEFAULT_BLACK_LIST)
 
 
 def _CheckForCopyrightedCode(input_api, output_api):
@@ -1238,6 +1303,36 @@ def _CheckForCopyrightedCode(input_api, output_api):
     sys.path = original_sys_path
 
   return copyright_scanner.ScanAtPresubmit(input_api, output_api)
+
+
+def _CheckSingletonInHeaders(input_api, output_api):
+  """Checks to make sure no header files have |Singleton<|."""
+  def FileFilter(affected_file):
+    # It's ok for base/memory/singleton.h to have |Singleton<|.
+    black_list = (_EXCLUDED_PATHS +
+                  input_api.DEFAULT_BLACK_LIST +
+                  (r"^base[\\\/]memory[\\\/]singleton\.h$",))
+    return input_api.FilterSourceFile(affected_file, black_list=black_list)
+
+  pattern = input_api.re.compile(r'(?<!class\s)Singleton\s*<')
+  files = []
+  for f in input_api.AffectedSourceFiles(FileFilter):
+    if (f.LocalPath().endswith('.h') or f.LocalPath().endswith('.hxx') or
+        f.LocalPath().endswith('.hpp') or f.LocalPath().endswith('.inl')):
+      contents = input_api.ReadFile(f)
+      for line in contents.splitlines(False):
+        if (not input_api.re.match(r'//', line) and # Strip C++ comment.
+            pattern.search(line)):
+          files.append(f)
+          break
+
+  if files:
+    return [ output_api.PresubmitError(
+        'Found Singleton<T> in the following header files.\n' +
+        'Please move them to an appropriate source file so that the ' +
+        'template gets instantiated in a single compilation unit.',
+        files) ]
+  return []
 
 
 _DEPRECATED_CSS = [
@@ -1357,6 +1452,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForIPCRules(input_api, output_api))
   results.extend(_CheckForCopyrightedCode(input_api, output_api))
   results.extend(_CheckForWindowsLineEndings(input_api, output_api))
+  results.extend(_CheckSingletonInHeaders(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1583,6 +1679,7 @@ def CheckChangeOnUpload(input_api, output_api):
   results.extend(_CheckJavaStyle(input_api, output_api))
   results.extend(
       input_api.canned_checks.CheckGNFormatted(input_api, output_api))
+  results.extend(_CheckUmaHistogramChanges(input_api, output_api))
   return results
 
 
@@ -1594,8 +1691,6 @@ def GetTryServerMasterForBot(bot):
   """
   # Potentially ambiguous bot names are listed explicitly.
   master_map = {
-      'linux_gpu': 'tryserver.chromium.gpu',
-      'win_gpu': 'tryserver.chromium.gpu',
       'chromium_presubmit': 'tryserver.chromium.linux',
       'blink_presubmit': 'tryserver.chromium.linux',
       'tools_build_presubmit': 'tryserver.chromium.linux',
@@ -1667,7 +1762,7 @@ def GetPreferredTryMasters(project, change):
          not re.search(r'(^|[\\\/_])devtools[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'android_aosp',
-        'android_dbg_tests_recipe',
+        'android_rel_tests_recipe',
     ])
   if all(re.search(r'[\\\/_]ios[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
@@ -1682,6 +1777,15 @@ def GetPreferredTryMasters(project, change):
     for master, master_config in cq_trybots.get('triggered', {}).iteritems():
       for triggered_bot in master_config:
         builders.get(master, {}).pop(triggered_bot, None)
+
+    # Explicitly iterate over copies of dicts since we mutate them.
+    for master in builders.keys():
+      for builder in builders[master].keys():
+        # Do not trigger presubmit builders, since they're likely to fail
+        # (e.g. OWNERS checks before finished code review), and we're
+        # running local presubmit anyway.
+        if 'presubmit' in builder:
+          builders[master].pop(builder)
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
   # Same for chromeos.

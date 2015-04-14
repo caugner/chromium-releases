@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/permission_request_id.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,6 +55,15 @@ ContentSetting PermissionContextBase::GetPermissionStatus(
       requesting_origin, embedding_origin, permission_type_, std::string());
 }
 
+void PermissionContextBase::ResetPermission(
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) {
+  profile_->GetHostContentSettingsMap()->SetContentSetting(
+      ContentSettingsPattern::FromURLNoWildcard(requesting_origin),
+      ContentSettingsPattern::FromURLNoWildcard(embedding_origin),
+      permission_type_, std::string(), CONTENT_SETTING_DEFAULT);
+}
+
 void PermissionContextBase::CancelPermissionRequest(
     content::WebContents* web_contents,
     const PermissionRequestID& id) {
@@ -82,11 +92,24 @@ void PermissionContextBase::DecidePermission(
     const BrowserPermissionCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
+  if (!requesting_origin.is_valid() || !embedding_origin.is_valid()) {
+    DVLOG(1)
+        << "Attempt to use " << content_settings::GetTypeName(permission_type_)
+        << " from an invalid URL: " << requesting_origin
+        << "," << embedding_origin
+        << " (" << content_settings::GetTypeName(permission_type_)
+        << " is not supported in popups)";
+    NotifyPermissionSet(id, requesting_origin, embedding_origin,
+                        callback, false /* persist */, false /* granted */);
+    return;
+  }
+
   ContentSetting content_setting =
       profile_->GetHostContentSettingsMap()
           ->GetContentSettingAndMaybeUpdateLastUsage(
               requesting_origin, embedding_origin, permission_type_,
               std::string());
+
   switch (content_setting) {
     case CONTENT_SETTING_BLOCK:
       NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
@@ -104,9 +127,14 @@ void PermissionContextBase::DecidePermission(
       permission_type_, requesting_origin);
 
   if (PermissionBubbleManager::Enabled()) {
+    if (pending_bubbles_.get(id.ToString()) != NULL)
+      return;
     PermissionBubbleManager* bubble_manager =
         PermissionBubbleManager::FromWebContents(web_contents);
-    DCHECK(bubble_manager);
+    // TODO(mlamouri): sometimes |bubble_manager| is null. This check is meant
+    // to prevent crashes. See bug 457091.
+    if (!bubble_manager)
+      return;
     scoped_ptr<PermissionBubbleRequest> request_ptr(
         new PermissionBubbleRequestImpl(
             requesting_origin, user_gesture, permission_type_,

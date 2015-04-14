@@ -36,6 +36,38 @@ var CLIENT_PORT_NAME = 'chwcpn';
 var COMMAND_FIELD_NAME = 'cmd';
 
 /**
+ * The speaker model file name.
+ * @const {string}
+ */
+var SPEAKER_MODEL_FILE_NAME = 'speaker_model.data';
+
+/**
+ * The training utterance file name prefix.
+ * @const {string}
+ */
+var UTTERANCE_FILE_PREFIX = 'utterance-';
+
+/**
+ * The training utterance file extension.
+ * @const {string}
+ */
+var UTTERANCE_FILE_EXTENSION = '.raw';
+
+/**
+ * The number of training utterances required to train the speaker model.
+ * @const {number}
+ */
+var NUM_TRAINING_UTTERANCES = 3;
+
+/**
+ * The size of the file system requested for reading the speaker model and
+ * utterances. This number should always be larger than the combined file size,
+ * currently 576338 bytes as of February 2015.
+ * @const {number}
+ */
+var FILE_SYSTEM_SIZE_BYTES = 1048576;
+
+/**
  * Time to wait for expected messages, in milliseconds.
  * @enum {number}
  */
@@ -234,9 +266,14 @@ return {
   AUDIO_LOG_SECONDS: AUDIO_LOG_SECONDS,
   CLIENT_PORT_NAME: CLIENT_PORT_NAME,
   COMMAND_FIELD_NAME: COMMAND_FIELD_NAME,
+  FILE_SYSTEM_SIZE_BYTES: FILE_SYSTEM_SIZE_BYTES,
+  NUM_TRAINING_UTTERANCES: NUM_TRAINING_UTTERANCES,
   SHARED_MODULE_ID: SHARED_MODULE_ID,
   SHARED_MODULE_ROOT: SHARED_MODULE_ROOT,
+  SPEAKER_MODEL_FILE_NAME: SPEAKER_MODEL_FILE_NAME,
   UI_LANGUAGE: UI_LANGUAGE,
+  UTTERANCE_FILE_EXTENSION: UTTERANCE_FILE_EXTENSION,
+  UTTERANCE_FILE_PREFIX: UTTERANCE_FILE_PREFIX,
   CommandToPage: CommandToPage,
   CommandFromPage: CommandFromPage,
   Error: Error,

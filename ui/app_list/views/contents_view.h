@@ -34,7 +34,6 @@ class AppsContainerView;
 class ContentsAnimator;
 class PaginationModel;
 class SearchBoxView;
-class SearchResultListView;
 class SearchResultPageView;
 class StartPageView;
 
@@ -100,9 +99,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   }
   StartPageView* start_page_view() const { return start_page_view_; }
   views::View* custom_page_view() const { return custom_page_view_; }
-  SearchResultListView* search_results_list_view() const {
-    return search_results_list_view_;
-  }
   SearchResultPageView* search_results_page_view() {
     return search_results_page_view_;
   }
@@ -117,6 +113,14 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   // Returns the pagination model for the ContentsView.
   const PaginationModel& pagination_model() { return pagination_model_; }
+
+  // Gets the on-screen page bounds for a given launcher page with index
+  // |page_index|.
+  gfx::Rect GetOnscreenPageBounds(int page_index) const;
+
+  // Gets the the off-screen resting place for a given launcher page with index
+  // |page_index|.
+  gfx::Rect GetOffscreenPageBounds(int page_index) const;
 
   // Returns search box bounds to use for content views that do not specify
   // their own custom layout.
@@ -143,9 +147,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
                                                      bool* reverse) const {
     return GetAnimatorForTransition(from_page, to_page, reverse);
   }
-
-  // Determines whether the custom page clickzone widget should be displayed.
-  bool ShouldShowCustomPageClickzone() const;
 
   // Performs the 'back' action for the active page. Returns whether the action
   // was handled.
@@ -216,11 +217,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // Special sub views of the ContentsView. All owned by the views hierarchy.
   AppsContainerView* apps_container_view_;
 
-  // Only used in the normal app list.
-  SearchResultListView* search_results_list_view_;
+  SearchResultPageView* search_results_page_view_;
 
   // Only used in the experimental app list.
-  SearchResultPageView* search_results_page_view_;
   StartPageView* start_page_view_;
   views::View* custom_page_view_;
 

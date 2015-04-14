@@ -41,6 +41,10 @@ class VaapiDrmPicture : public VaapiPicture {
 
   bool DownloadFromSurface(const scoped_refptr<VASurface>& va_surface) override;
 
+  scoped_refptr<gfx::GLImage> GetImageToBind() override;
+
+  bool AllowOverlay() const override;
+
  private:
   VaapiWrapper* vaapi_wrapper_;  // Not owned.
   base::Callback<bool(void)> make_context_current_;

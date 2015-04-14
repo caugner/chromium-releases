@@ -21,6 +21,7 @@
 #include "content/browser/compositor/browser_compositor_view_mac.h"
 #include "content/browser/compositor/delegated_frame_host.h"
 #include "content/browser/renderer_host/display_link_mac.h"
+#include "content/browser/renderer_host/input/mouse_wheel_rails_filter_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/common/cursors/webcursor.h"
@@ -35,6 +36,7 @@
 #include "ui/gfx/display_observer.h"
 
 namespace content {
+class RenderWidgetHostImpl;
 class RenderWidgetHostViewMac;
 class RenderWidgetHostViewMacEditCommandHelper;
 class WebContents;
@@ -68,6 +70,7 @@ class Layer;
       responderDelegate_;
   BOOL canBeKeyView_;
   BOOL closeOnDeactivate_;
+  BOOL opaque_;
   scoped_ptr<content::RenderWidgetHostViewMacEditCommandHelper>
       editCommand_helper_;
 
@@ -148,6 +151,18 @@ class Layer;
   // Event monitor for scroll wheel end event.
   id endWheelMonitor_;
 
+  // When a gesture starts, the system does not inform the view of which type
+  // of gesture is happening (magnify, rotate, etc), rather, it just informs
+  // the view that some as-yet-undefined gesture is starting. Capture the
+  // information about the gesture's beginning event here. It will be used to
+  // create a specific gesture begin event later.
+  scoped_ptr<blink::WebGestureEvent> gestureBeginEvent_;
+
+  // This is set if a GesturePinchBegin event has been sent in the lifetime of
+  // |gestureBeginEvent_|. If set, a GesturePinchEnd will be sent when the
+  // gesture ends.
+  BOOL gestureBeginPinchSent_;
+
   // If true then escape key down events are suppressed until the first escape
   // key up event. (The up event is suppressed as well). This is used by the
   // flash fullscreen code to avoid sending a key up event without a matching
@@ -158,6 +173,10 @@ class Layer;
   // key up events yet.
   // Used for filtering out non-matching NSKeyUp events.
   std::set<unsigned short> keyDownCodes_;
+
+  // The filter used to guide touch events towards a horizontal or vertical
+  // orientation.
+  content::MouseWheelRailsFilterMac mouseWheelFilter_;
 }
 
 @property(nonatomic, readonly) NSRange selectedRange;
@@ -165,6 +184,7 @@ class Layer;
 
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setCloseOnDeactivate:(BOOL)b;
+- (void)setOpaque:(BOOL)opaque;
 - (void)setToolTipAtMousePoint:(NSString *)string;
 // True for always-on-top special windows (e.g. Balloons and Panels).
 - (BOOL)acceptsMouseEventsWhenInactive;
@@ -185,7 +205,6 @@ class Layer;
 @end
 
 namespace content {
-class RenderWidgetHostImpl;
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewMac
@@ -245,6 +264,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void Show() override;
   void Hide() override;
   bool IsShowing() override;
+  void WasUnOccluded() override;
+  void WasOccluded() override;
   gfx::Rect GetViewBounds() const override;
   void SetShowingContextMenu(bool showing) override;
   void SetActive(bool active) override;
@@ -261,8 +282,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& pos) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
-  void WasShown() override;
-  void WasHidden() override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Focus() override;
   void Blur() override;
@@ -450,15 +469,23 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void PauseForPendingResizeOrRepaintsAndDraw();
 
   // DelegatedFrameHostClient implementation.
-  ui::Compositor* GetCompositor() const override;
-  ui::Layer* GetLayer() override;
-  RenderWidgetHostImpl* GetHost() override;
-  bool IsVisible() override;
-  scoped_ptr<ResizeLock> CreateResizeLock(bool defer_compositor_lock) override;
-  gfx::Size DesiredFrameSize() override;
-  float CurrentDeviceScaleFactor() override;
-  gfx::Size ConvertViewSizeToPixel(const gfx::Size& size) override;
-  DelegatedFrameHost* GetDelegatedFrameHost() const override;
+  ui::Layer* DelegatedFrameHostGetLayer() const override;
+  bool DelegatedFrameHostIsVisible() const override;
+  gfx::Size DelegatedFrameHostDesiredSizeInDIP() const override;
+  bool DelegatedFrameCanCreateResizeLock() const override;
+  scoped_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
+      bool defer_compositor_lock) override;
+  void DelegatedFrameHostResizeLockWasReleased() override;
+  void DelegatedFrameHostSendCompositorSwapAck(
+      int output_surface_id,
+      const cc::CompositorFrameAck& ack) override;
+  void DelegatedFrameHostSendReclaimCompositorResources(
+      int output_surface_id,
+      const cc::CompositorFrameAck& ack) override;
+  void DelegatedFrameHostOnLostCompositorResources() override;
+  void DelegatedFrameHostUpdateVSyncParameters(
+      const base::TimeTicks& timebase,
+      const base::TimeDelta& interval) override;
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;

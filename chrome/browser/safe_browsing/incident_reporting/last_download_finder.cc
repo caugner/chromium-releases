@@ -19,7 +19,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
-#include "content/public/browser/download_item.h"
+#include "components/history/core/browser/download_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -85,7 +85,7 @@ const history::DownloadRow* FindMostInteresting(
   for (size_t i = 0; i < downloads.size(); ++i) {
     const history::DownloadRow& row = downloads[i];
     // Ignore incomplete downloads.
-    if (row.state != content::DownloadItem::COMPLETE)
+    if (row.state != history::DownloadState::COMPLETE)
       continue;
     if (!most_recent_row || IsMoreInterestingThan(row, *most_recent_row))
       most_recent_row = &row;
@@ -227,8 +227,8 @@ void LastDownloadFinder::OnMetadataQuery(
   } else {
     // Search history since no metadata was found.
     iter->second = WAITING_FOR_HISTORY;
-    HistoryService* history_service =
-        HistoryServiceFactory::GetForProfile(profile, Profile::IMPLICIT_ACCESS);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        profile, ServiceAccessType::IMPLICIT_ACCESS);
     // No history service is returned for profiles that do not save history.
     if (!history_service) {
       RemoveProfileAndReportIfDone(iter);
@@ -324,7 +324,7 @@ void LastDownloadFinder::OnHistoryServiceLoaded(
     HistoryService* history_service) {
   for (const auto& pair : profile_states_) {
     HistoryService* hs = HistoryServiceFactory::GetForProfileIfExists(
-        pair.first, Profile::EXPLICIT_ACCESS);
+        pair.first, ServiceAccessType::EXPLICIT_ACCESS);
     if (hs == history_service) {
       // Start the query in the history service if the finder was waiting for
       // the service to load.

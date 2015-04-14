@@ -9,6 +9,7 @@
 #include "ash/display/display_info.h"
 #include "ash/display/display_layout_store.h"
 #include "ash/display/display_util.h"
+#include "ash/display/mirror_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -1342,6 +1343,27 @@ TEST_F(DisplayManagerTest, SoftwareMirroring) {
   Shell::GetScreen()->RemoveObserver(&display_observer);
 }
 
+TEST_F(DisplayManagerTest, SingleDisplayToSoftwareMirroring) {
+  if (!SupportsMultipleDisplays())
+    return;
+  UpdateDisplay("600x400");
+
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+  display_manager->SetSecondDisplayMode(DisplayManager::MIRRORING);
+  UpdateDisplay("600x400,600x400");
+
+  EXPECT_TRUE(display_manager->IsMirrored());
+  EXPECT_EQ(1U, display_manager->GetNumDisplays());
+  DisplayController* display_controller =
+      ash::Shell::GetInstance()->display_controller();
+  EXPECT_TRUE(display_controller->mirror_window_controller()->GetWindow());
+
+  UpdateDisplay("600x400");
+  EXPECT_FALSE(display_manager->IsMirrored());
+  EXPECT_EQ(1U, display_manager->GetNumDisplays());
+  EXPECT_FALSE(display_controller->mirror_window_controller()->GetWindow());
+}
+
 #if defined(OS_CHROMEOS)
 // Make sure this does not cause any crashes. See http://crbug.com/412910
 // This test is limited to OS_CHROMEOS because CursorCompositingEnabled is only
@@ -1576,14 +1598,10 @@ class FontTestHelper : public test::AshTestBase {
     SetUp();
   }
 
-  virtual ~FontTestHelper() {
-    TearDown();
-  }
+  ~FontTestHelper() override { TearDown(); }
 
   // test::AshTestBase:
-  virtual void TestBody() override {
-    NOTREACHED();
-  }
+  void TestBody() override { NOTREACHED(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FontTestHelper);

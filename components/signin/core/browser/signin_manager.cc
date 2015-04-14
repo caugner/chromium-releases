@@ -74,14 +74,23 @@ SigninManager::SigninManager(SigninClient* client,
 
 void SigninManager::AddMergeSessionObserver(
     MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->AddObserver(observer);
+  merge_session_observer_list_.AddObserver(observer);
 }
 
 void SigninManager::RemoveMergeSessionObserver(
     MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->RemoveObserver(observer);
+  merge_session_observer_list_.RemoveObserver(observer);
+}
+
+void SigninManager::MergeSessionCompleted(const std::string& account_id,
+                                          const GoogleServiceAuthError& error) {
+  FOR_EACH_OBSERVER(MergeSessionHelper::Observer, merge_session_observer_list_,
+                    MergeSessionCompleted(account_id, error));
+}
+
+void SigninManager::GetCheckConnectionInfoCompleted(bool succeeded) {
+  FOR_EACH_OBSERVER(MergeSessionHelper::Observer, merge_session_observer_list_,
+                    GetCheckConnectionInfoCompleted(succeeded));
 }
 
 SigninManager::~SigninManager() {}
@@ -275,8 +284,10 @@ void SigninManager::Initialize(PrefService* local_state) {
 
 void SigninManager::Shutdown() {
   account_tracker_service_->RemoveObserver(this);
-  if (merge_session_helper_)
+  if (merge_session_helper_) {
     merge_session_helper_->CancelAll();
+    merge_session_helper_->RemoveObserver(this);
+  }
 
   local_state_pref_registrar_.RemoveAll();
   account_id_helper_.reset();
@@ -356,24 +367,38 @@ void SigninManager::DisableOneClickSignIn(PrefService* prefs) {
   prefs->SetBoolean(prefs::kReverseAutologinEnabled, false);
 }
 
+void SigninManager::MergeSigninCredentialIntoCookieJar() {
+  if (!client_->ShouldMergeSigninCredentialsIntoCookieJar())
+    return;
+
+  if (!IsAuthenticated())
+    return;
+
+  // Don't execute two MergeSessionHelpers. New account takes priority.
+  if (merge_session_helper_) {
+    if (merge_session_helper_->is_running())
+      merge_session_helper_->CancelAll();
+    merge_session_helper_->RemoveObserver(this);
+  }
+
+  merge_session_helper_.reset(new MergeSessionHelper(
+      token_service_, GaiaConstants::kChromeSource,
+      client_->GetURLRequestContext(), this));
+
+  merge_session_helper_->LogIn(GetAuthenticatedAccountId());
+}
+
 void SigninManager::CompletePendingSignin() {
   DCHECK(!possibly_invalid_username_.empty());
   OnSignedIn(possibly_invalid_username_);
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar()) {
-    merge_session_helper_.reset(new MergeSessionHelper(
-        token_service_, GaiaConstants::kChromeSource,
-        client_->GetURLRequestContext(), NULL));
-  }
-
   DCHECK(!temp_refresh_token_.empty());
   DCHECK(IsAuthenticated());
-  std::string account_id = GetAuthenticatedAccountId();
-  token_service_->UpdateCredentials(account_id, temp_refresh_token_);
+  token_service_->UpdateCredentials(GetAuthenticatedAccountId(),
+                                    temp_refresh_token_);
   temp_refresh_token_.clear();
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar())
-    merge_session_helper_->LogIn(account_id);
+  MergeSigninCredentialIntoCookieJar();
 }
 
 void SigninManager::OnExternalSigninCompleted(const std::string& username) {

@@ -11,6 +11,7 @@
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/aw_dev_tools_manager_delegate.h"
+#include "android_webview/browser/aw_printing_message_filter.h"
 #include "android_webview/browser/aw_quota_permission_context.h"
 #include "android_webview/browser/aw_web_preferences_populater.h"
 #include "android_webview/browser/jni_dependency_factory.h"
@@ -53,11 +54,9 @@ public:
   explicit AwContentsMessageFilter(int process_id);
 
   // BrowserMessageFilter methods.
-  virtual void OverrideThreadForMessage(
-      const IPC::Message& message,
-      BrowserThread::ID* thread) override;
-  virtual bool OnMessageReceived(
-      const IPC::Message& message) override;
+  void OverrideThreadForMessage(const IPC::Message& message,
+                                BrowserThread::ID* thread) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   void OnShouldOverrideUrlLoading(int routing_id,
                                   const base::string16& url,
@@ -65,7 +64,7 @@ public:
   void OnSubFrameCreated(int parent_render_frame_id, int child_render_frame_id);
 
 private:
-  virtual ~AwContentsMessageFilter();
+ ~AwContentsMessageFilter() override;
 
   int process_id_;
 
@@ -125,18 +124,17 @@ class AwAccessTokenStore : public content::AccessTokenStore {
   AwAccessTokenStore() { }
 
   // content::AccessTokenStore implementation
-  virtual void LoadAccessTokens(
-      const LoadAccessTokensCallbackType& request) override {
+  void LoadAccessTokens(const LoadAccessTokensCallbackType& request) override {
     AccessTokenStore::AccessTokenSet access_token_set;
     // AccessTokenSet and net::URLRequestContextGetter not used on Android,
     // but Run needs to be called to finish the geolocation setup.
     request.Run(access_token_set, NULL);
   }
-  virtual void SaveAccessToken(const GURL& server_url,
-                               const base::string16& access_token) override { }
+  void SaveAccessToken(const GURL& server_url,
+                       const base::string16& access_token) override {}
 
  private:
-  virtual ~AwAccessTokenStore() { }
+  ~AwAccessTokenStore() override {}
 
   DISALLOW_COPY_AND_ASSIGN(AwAccessTokenStore);
 };
@@ -211,6 +209,7 @@ void AwContentBrowserClient::RenderProcessWillLaunch(
 
   host->AddFilter(new AwContentsMessageFilter(host->GetID()));
   host->AddFilter(new cdm::CdmMessageFilterAndroid());
+  host->AddFilter(new AwPrintingMessageFilter(host->GetID()));
 }
 
 net::URLRequestContextGetter* AwContentBrowserClient::CreateRequestContext(
@@ -397,7 +396,7 @@ void AwContentBrowserClient::RequestPermission(
       }
       delegate->RequestGeolocationPermission(origin, result_callback);
       break;
-    case content::PERMISSION_PROTECTED_MEDIA:
+    case content::PERMISSION_PROTECTED_MEDIA_IDENTIFIER:
       if (!delegate) {
         DVLOG(0) << "Dropping ProtectedMediaIdentifierPermission request";
         result_callback.Run(false);
@@ -434,7 +433,7 @@ void AwContentBrowserClient::CancelPermissionRequest(
     case content::PERMISSION_GEOLOCATION:
       delegate->CancelGeolocationPermissionRequests(origin);
       break;
-    case content::PERMISSION_PROTECTED_MEDIA:
+    case content::PERMISSION_PROTECTED_MEDIA_IDENTIFIER:
       delegate->CancelProtectedMediaIdentifierPermissionRequests(origin);
       break;
     case content::PERMISSION_MIDI_SYSEX:
@@ -534,7 +533,6 @@ bool AwContentBrowserClient::AllowPepperSocketAPI(
 
 void AwContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* rvh,
-    const GURL& url,
     content::WebPreferences* web_prefs) {
   if (!preferences_populater_.get()) {
     preferences_populater_ = make_scoped_ptr(native_factory_->

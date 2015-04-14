@@ -75,39 +75,41 @@ namespace attestation {
 class DefaultDelegate : public PlatformVerificationFlow::Delegate {
  public:
   DefaultDelegate() {}
-  virtual ~DefaultDelegate() {}
+  ~DefaultDelegate() override {}
 
-  virtual void ShowConsentPrompt(
+  void ShowConsentPrompt(
       content::WebContents* web_contents,
+      const GURL& requesting_origin,
       const PlatformVerificationFlow::Delegate::ConsentCallback& callback)
       override {
-    PlatformVerificationDialog::ShowDialog(web_contents, callback);
+    PlatformVerificationDialog::ShowDialog(web_contents, requesting_origin,
+                                           callback);
   }
 
-  virtual PrefService* GetPrefs(content::WebContents* web_contents) override {
+  PrefService* GetPrefs(content::WebContents* web_contents) override {
     return user_prefs::UserPrefs::Get(web_contents->GetBrowserContext());
   }
 
-  virtual const GURL& GetURL(content::WebContents* web_contents) override {
+  const GURL& GetURL(content::WebContents* web_contents) override {
     const GURL& url = web_contents->GetLastCommittedURL();
     if (!url.is_valid())
       return web_contents->GetVisibleURL();
     return url;
   }
 
-  virtual user_manager::User* GetUser(
+  const user_manager::User* GetUser(
       content::WebContents* web_contents) override {
     return ProfileHelper::Get()->GetUserByProfile(
         Profile::FromBrowserContext(web_contents->GetBrowserContext()));
   }
 
-  virtual HostContentSettingsMap* GetContentSettings(
+  HostContentSettingsMap* GetContentSettings(
       content::WebContents* web_contents) override {
     return Profile::FromBrowserContext(web_contents->GetBrowserContext())->
         GetHostContentSettingsMap();
   }
 
-  virtual bool IsGuestOrIncognito(content::WebContents* web_contents) override {
+  bool IsGuestOrIncognito(content::WebContents* web_contents) override {
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     return (profile->IsOffTheRecord() || profile->IsGuestSession());
@@ -236,10 +238,16 @@ void PlatformVerificationFlow::CheckConsent(const ChallengeContext& context,
       this,
       context,
       consent_required);
-  if (consent_required)
-    delegate_->ShowConsentPrompt(context.web_contents, consent_callback);
-  else
+  if (consent_required) {
+    // TODO(xhwang): Using delegate_->GetURL() here is not right. The consent
+    // may be requested by a frame from a different origin. This will be solved
+    // when http://crbug.com/454847 is fixed.
+    delegate_->ShowConsentPrompt(
+        context.web_contents,
+        delegate_->GetURL(context.web_contents).GetOrigin(), consent_callback);
+  } else {
     consent_callback.Run(CONSENT_RESPONSE_NONE);
+  }
 }
 
 void PlatformVerificationFlow::RegisterProfilePrefs(
@@ -279,7 +287,7 @@ void PlatformVerificationFlow::OnConsentResponse(
 
   // At this point all user interaction is complete and we can proceed with the
   // certificate request.
-  user_manager::User* user = delegate_->GetUser(context.web_contents);
+  const user_manager::User* user = delegate_->GetUser(context.web_contents);
   if (!user) {
     ReportError(context.callback, INTERNAL_ERROR);
     LOG(ERROR) << "Profile does not map to a valid user.";

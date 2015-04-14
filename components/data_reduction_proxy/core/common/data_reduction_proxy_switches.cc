@@ -20,6 +20,11 @@ const char kDataReductionProxyAltFallback[] =
 // The origin of the data reduction proxy dev.
 const char kDataReductionProxyDev[]      = "spdy-proxy-dev-auth-origin";
 
+// The name of a Data Reduction Proxy experiment to run. These experiments are
+// defined by the proxy server. Use --force-fieldtrials for Data Reduction
+// Proxy field trials.
+const char kDataReductionProxyExperiment[] = "data-reduction-proxy-experiment";
+
 // The origin of the data reduction proxy fallback.
 const char kDataReductionProxyFallback[] = "spdy-proxy-auth-fallback";
 
@@ -50,6 +55,14 @@ const char kEnableDataReductionProxy[] = "enable-spdy-proxy-auth";
 
 // Enable the alternative data reduction proxy.
 const char kEnableDataReductionProxyAlt[] = "enable-data-reduction-proxy-alt";
+
+// Enable Data Reduction Proxy Lo-Fi mode.
+const char kEnableDataReductionProxyLoFi[] =
+    "enable-data-reduction-proxy-lo-fi";
+
+// Enable the data reduction proxy bypass warning.
+const char kEnableDataReductionProxyBypassWarning[] =
+    "enable-data-reduction-proxy-bypass-warning";
 
 }  // namespace switches
 }  // namespace data_reduction_proxy

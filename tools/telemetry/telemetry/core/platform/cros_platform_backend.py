@@ -4,6 +4,7 @@
 
 from telemetry.core import platform
 from telemetry.core import util
+from telemetry.core.forwarders import cros_forwarder
 from telemetry.core.platform import cros_device
 from telemetry.core.platform import cros_interface
 from telemetry.core.platform import linux_based_platform_backend
@@ -17,7 +18,7 @@ class CrosPlatformBackend(
     super(CrosPlatformBackend, self).__init__(device)
     if device:
       self._cri = cros_interface.CrOSInterface(
-          device.host_name, device.ssh_identity)
+          device.host_name, device.ssh_port, device.ssh_identity)
       self._cri.TryLogin()
     else:
       self._cri = cros_interface.CrOSInterface()
@@ -32,13 +33,24 @@ class CrosPlatformBackend(
     return isinstance(device, cros_device.CrOSDevice)
 
   @classmethod
-  def CreatePlatformForDevice(cls, device):
+  def CreatePlatformForDevice(cls, device, finder_options):
     assert cls.SupportsDevice(device)
     return platform.Platform(CrosPlatformBackend(device))
 
   @property
   def cri(self):
     return self._cri
+
+  @property
+  def forwarder_factory(self):
+    if not self._forwarder_factory:
+      self._forwarder_factory = cros_forwarder.CrOsForwarderFactory(self._cri)
+    return self._forwarder_factory
+
+  def GetRemotePort(self, port):
+    if self._cri.local:
+      return port
+    return self._cri.GetRemotePort()
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()

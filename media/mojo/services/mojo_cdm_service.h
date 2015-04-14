@@ -11,7 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_keys.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 
 namespace media {
 
@@ -68,8 +68,10 @@ class MojoCdmService
 
   scoped_ptr<MediaKeys> cdm_;
 
-  base::WeakPtrFactory<MojoCdmService> weak_factory_;
+  mojo::ContentDecryptionModuleClientPtr client_;
+
   base::WeakPtr<MojoCdmService> weak_this_;
+  base::WeakPtrFactory<MojoCdmService> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoCdmService);
 };

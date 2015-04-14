@@ -97,6 +97,7 @@
         'autofill_regexes',
         'components_resources.gyp:components_resources',
         'components_strings.gyp:components_strings',
+        'infobars_core',
         'keyed_service_core',
         'os_crypt',
         'pref_registry',
@@ -112,6 +113,9 @@
         'autofill/core/browser/autocomplete_history_manager.cc',
         'autofill/core/browser/autocomplete_history_manager.h',
         'autofill/core/browser/autofill-inl.h',
+        'autofill/core/browser/autofill_cc_infobar_delegate.cc',
+        'autofill/core/browser/autofill_cc_infobar_delegate.h',
+        'autofill/core/browser/autofill_client.h',
         'autofill/core/browser/autofill_country.cc',
         'autofill/core/browser/autofill_country.h',
         'autofill/core/browser/autofill_data_model.cc',
@@ -127,7 +131,6 @@
         'autofill/core/browser/autofill_ie_toolbar_import_win.h',
         'autofill/core/browser/autofill_manager.cc',
         'autofill/core/browser/autofill_manager.h',
-        'autofill/core/browser/autofill_client.h',
         'autofill/core/browser/autofill_manager_test_delegate.h',
         'autofill/core/browser/autofill_metrics.cc',
         'autofill/core/browser/autofill_metrics.h',
@@ -147,6 +150,7 @@
         'autofill/core/browser/autofill_type.h',
         'autofill/core/browser/autofill_xml_parser.cc',
         'autofill/core/browser/autofill_xml_parser.h',
+        'autofill/core/browser/card_unmask_delegate.cc',
         'autofill/core/browser/card_unmask_delegate.h',
         'autofill/core/browser/contact_info.cc',
         'autofill/core/browser/contact_info.h',
@@ -184,6 +188,8 @@
         'autofill/core/browser/suggestion.h',
         'autofill/core/browser/validation.cc',
         'autofill/core/browser/validation.h',
+        'autofill/core/browser/wallet/real_pan_wallet_client.cc',
+        'autofill/core/browser/wallet/real_pan_wallet_client.h',
         'autofill/core/browser/webdata/autocomplete_syncable_service.cc',
         'autofill/core/browser/webdata/autocomplete_syncable_service.h',
         'autofill/core/browser/webdata/autofill_change.cc',
@@ -194,6 +200,8 @@
         'autofill/core/browser/webdata/autofill_profile_syncable_service.h',
         'autofill/core/browser/webdata/autofill_table.cc',
         'autofill/core/browser/webdata/autofill_table.h',
+        'autofill/core/browser/webdata/autofill_wallet_syncable_service.cc',
+        'autofill/core/browser/webdata/autofill_wallet_syncable_service.h',
         'autofill/core/browser/webdata/autofill_webdata.h',
         'autofill/core/browser/webdata/autofill_webdata_backend.h',
         'autofill/core/browser/webdata/autofill_webdata_backend_impl.cc',
@@ -234,6 +242,8 @@
             'autofill/core/browser/webdata/autocomplete_syncable_service.h',
             'autofill/core/browser/webdata/autofill_profile_syncable_service.cc',
             'autofill/core/browser/webdata/autofill_profile_syncable_service.h',
+            'autofill/core/browser/webdata/autofill_wallet_syncable_service.cc',
+            'autofill/core/browser/webdata/autofill_wallet_syncable_service.h',
           ],
         }],
       ],
@@ -402,15 +412,6 @@
 
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [4267, ],
-
-          'conditions': [
-            [ 'OS == "android"', {
-              'sources!': [
-                'autofill/content/browser/risk/fingerprint.cc',
-                'autofill/content/browser/risk/fingerprint.h',
-              ],
-            }],
-          ],
         },
 
         {

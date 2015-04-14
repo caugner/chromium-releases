@@ -25,12 +25,12 @@
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/search_box_view.h"
-#include "ui/app_list/views/search_result_list_view.h"
 #include "ui/app_list/views/search_result_page_view.h"
 #include "ui/app_list/views/search_result_tile_item_view.h"
 #include "ui/app_list/views/start_page_view.h"
 #include "ui/app_list/views/test/apps_grid_view_test_api.h"
 #include "ui/app_list/views/tile_item_view.h"
+#include "ui/events/event_utils.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/views_delegate.h"
@@ -61,16 +61,12 @@ size_t GetVisibleViews(const std::vector<T*>& tiles) {
 
 void SimulateClick(views::View* view) {
   gfx::Point center = view->GetLocalBounds().CenterPoint();
-  view->OnMousePressed(ui::MouseEvent(ui::ET_MOUSE_PRESSED,
-                                      center,
-                                      center,
-                                      ui::EF_LEFT_MOUSE_BUTTON,
-                                      ui::EF_LEFT_MOUSE_BUTTON));
-  view->OnMouseReleased(ui::MouseEvent(ui::ET_MOUSE_RELEASED,
-                                       center,
-                                       center,
-                                       ui::EF_LEFT_MOUSE_BUTTON,
-                                       ui::EF_LEFT_MOUSE_BUTTON));
+  view->OnMousePressed(ui::MouseEvent(
+      ui::ET_MOUSE_PRESSED, center, center, ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
+  view->OnMouseReleased(ui::MouseEvent(
+      ui::ET_MOUSE_RELEASED, center, center, ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
 }
 
 // Choose a set that is 3 regular app list pages and 2 landscape app list pages.
@@ -247,7 +243,7 @@ bool AppListViewTestContext::IsStateShown(AppListModel::State state) {
   bool success = true;
   for (int i = 0; i < contents_view->NumLauncherPages(); ++i) {
     success = success &&
-              (i == index) == (contents_view->GetDefaultContentsBounds() ==
+              (i == index) == (contents_view->GetOnscreenPageBounds(i) ==
                                contents_view->GetPageView(i)->bounds());
   }
   return success && state == delegate_->GetTestModel()->state();
@@ -273,10 +269,15 @@ void AppListViewTestContext::Close() {
 
 bool AppListViewTestContext::CheckSearchBoxWidget(const gfx::Rect& expected) {
   ContentsView* contents_view = view_->app_list_main_view()->contents_view();
-  gfx::Point point = expected.origin();
+  // Adjust for the search box view's shadow.
+  gfx::Rect expected_with_shadow =
+      view_->app_list_main_view()
+          ->search_box_view()
+          ->GetViewBoundsForSearchBoxContentsBounds(expected);
+  gfx::Point point = expected_with_shadow.origin();
   views::View::ConvertPointToScreen(contents_view, &point);
 
-  return gfx::Rect(point, expected.size()) ==
+  return gfx::Rect(point, expected_with_shadow.size()) ==
          view_->search_box_widget()->GetWindowBoundsInScreen();
 }
 
@@ -305,8 +306,7 @@ void AppListViewTestContext::RunDisplayTest() {
       EXPECT_EQ("576x402", view_->bounds().size().ToString());
       break;
     case EXPERIMENTAL:
-      // TODO(calamity): This should be 768x560, to match the most recent mocks.
-      EXPECT_EQ("768x577", view_->bounds().size().ToString());
+      EXPECT_EQ("768x570", view_->bounds().size().ToString());
       break;
     default:
       NOTREACHED();
@@ -473,12 +473,22 @@ void AppListViewTestContext::RunStartPageTest() {
     EXPECT_EQ(view_size.ToString(), view_->GetPreferredSize().ToString());
 
     // Check tiles hide and show on deletion and addition.
+    EXPECT_TRUE(SetAppListState(AppListModel::STATE_START));
     model->results()->Add(new TestStartPageSearchResult());
     start_page_view->UpdateForTesting();
     EXPECT_EQ(1u, GetVisibleViews(start_page_view->tile_views()));
     model->results()->DeleteAll();
     start_page_view->UpdateForTesting();
     EXPECT_EQ(0u, GetVisibleViews(start_page_view->tile_views()));
+
+    // Tiles should not update when the start page is not active but should be
+    // correct once the start page is shown.
+    EXPECT_TRUE(SetAppListState(AppListModel::STATE_APPS));
+    model->results()->Add(new TestStartPageSearchResult());
+    start_page_view->UpdateForTesting();
+    EXPECT_EQ(0u, GetVisibleViews(start_page_view->tile_views()));
+    EXPECT_TRUE(SetAppListState(AppListModel::STATE_START));
+    EXPECT_EQ(1u, GetVisibleViews(start_page_view->tile_views()));
   } else {
     EXPECT_EQ(NULL, start_page_view);
   }
@@ -503,30 +513,40 @@ void AppListViewTestContext::RunPageSwitchingAnimationTest() {
     contents_view->SetActivePage(0);
     contents_view->Layout();
 
-    const gfx::Rect expected_bounds = contents_view->GetDefaultContentsBounds();
-
-    EXPECT_EQ(expected_bounds, contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(2)->bounds());
+    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
+              contents_view->GetPageView(0)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
+              contents_view->GetPageView(1)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
+              contents_view->GetPageView(2)->bounds());
 
     // Change pages. View should not have moved without Layout().
     contents_view->SetActivePage(1);
-    EXPECT_EQ(expected_bounds, contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(2)->bounds());
+    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
+              contents_view->GetPageView(0)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
+              contents_view->GetPageView(1)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
+              contents_view->GetPageView(2)->bounds());
 
     // Change to a third page. This queues up the second animation behind the
     // first.
     contents_view->SetActivePage(2);
-    EXPECT_EQ(expected_bounds, contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(2)->bounds());
+    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
+              contents_view->GetPageView(0)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
+              contents_view->GetPageView(1)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
+              contents_view->GetPageView(2)->bounds());
 
     // Call Layout(). Should jump to the third page.
     contents_view->Layout();
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(expected_bounds, contents_view->GetPageView(1)->bounds());
-    EXPECT_EQ(expected_bounds, contents_view->GetPageView(2)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(0),
+              contents_view->GetPageView(0)->bounds());
+    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
+              contents_view->GetPageView(1)->bounds());
+    EXPECT_EQ(contents_view->GetOnscreenPageBounds(2),
+              contents_view->GetPageView(2)->bounds());
   }
 
   Close();
@@ -596,36 +616,20 @@ void AppListViewTestContext::RunSearchResultsTest() {
   contents_view->Layout();
   EXPECT_TRUE(contents_view->IsStateActive(AppListModel::STATE_SEARCH_RESULTS));
 
-  const gfx::Rect default_contents_bounds =
-      contents_view->GetDefaultContentsBounds();
-  EXPECT_EQ(AppListModel::STATE_SEARCH_RESULTS,
-            delegate_->GetTestModel()->state());
-  if (test_type_ == EXPERIMENTAL) {
-    EXPECT_EQ(default_contents_bounds,
-              contents_view->search_results_page_view()->bounds());
-  } else {
-    EXPECT_EQ(default_contents_bounds,
-              contents_view->search_results_list_view()->bounds());
-  }
+  EXPECT_TRUE(IsStateShown(AppListModel::STATE_SEARCH_RESULTS));
 
   // Hide the search results.
   contents_view->ShowSearchResults(false);
   contents_view->Layout();
 
   // Check that we return to the page that we were on before the search.
-  EXPECT_TRUE(contents_view->IsStateActive(AppListModel::STATE_APPS));
-  EXPECT_EQ(AppListModel::STATE_APPS, delegate_->GetTestModel()->state());
-  EXPECT_EQ(default_contents_bounds,
-            contents_view->apps_container_view()->bounds());
+  EXPECT_TRUE(IsStateShown(AppListModel::STATE_APPS));
 
   if (test_type_ == EXPERIMENTAL) {
     // Check that typing into the search box triggers the search page.
     EXPECT_TRUE(SetAppListState(AppListModel::STATE_START));
     view_->Layout();
-    EXPECT_EQ(default_contents_bounds,
-              contents_view->start_page_view()->bounds());
-    EXPECT_TRUE(CheckSearchBoxWidget(
-        contents_view->GetSearchBoxBoundsForState(AppListModel::STATE_START)));
+    EXPECT_TRUE(IsStateShown(AppListModel::STATE_START));
 
     base::string16 search_text = base::UTF8ToUTF16("test");
     main_view->search_box_view()->search_box()->SetText(base::string16());
@@ -642,8 +646,7 @@ void AppListViewTestContext::RunSearchResultsTest() {
     // Check that typing into the search box triggers the search page.
     EXPECT_TRUE(SetAppListState(AppListModel::STATE_APPS));
     contents_view->Layout();
-    EXPECT_EQ(default_contents_bounds,
-              contents_view->apps_container_view()->bounds());
+    EXPECT_TRUE(IsStateShown(AppListModel::STATE_APPS));
     EXPECT_TRUE(
         CheckSearchBoxWidget(contents_view->GetDefaultSearchBoxBounds()));
 
@@ -655,8 +658,7 @@ void AppListViewTestContext::RunSearchResultsTest() {
     EXPECT_EQ(new_search_text,
               main_view->search_box_view()->search_box()->text());
     contents_view->Layout();
-    EXPECT_TRUE(
-        contents_view->IsStateActive(AppListModel::STATE_SEARCH_RESULTS));
+    EXPECT_TRUE(IsStateShown(AppListModel::STATE_SEARCH_RESULTS));
     EXPECT_TRUE(
         CheckSearchBoxWidget(contents_view->GetDefaultSearchBoxBounds()));
   }

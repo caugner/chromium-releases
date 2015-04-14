@@ -35,6 +35,7 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
       has_keyboard_(devinfo.HasKeyboard()),
       has_mouse_(devinfo.HasMouse()),
       has_touchpad_(devinfo.HasTouchpad()),
+      has_caps_lock_led_(devinfo.HasLedEvent(LED_CAPSL)),
       delegate_(delegate.Pass()) {
   memset(&evdev_, 0, sizeof(evdev_));
   evdev_.log = OnLogMessage;
@@ -82,11 +83,33 @@ bool EventReaderLibevdevCros::HasTouchpad() const {
   return has_touchpad_;
 }
 
+bool EventReaderLibevdevCros::HasCapsLockLed() const {
+  return has_caps_lock_led_;
+}
+
+void EventReaderLibevdevCros::SetAllowedKeys(
+    scoped_ptr<std::set<DomCode>> allowed_keys) {
+  DCHECK(HasKeyboard());
+  delegate_->SetAllowedKeys(allowed_keys.Pass());
+}
+
+void EventReaderLibevdevCros::AllowAllKeys() {
+  DCHECK(HasKeyboard());
+  delegate_->AllowAllKeys();
+}
+
+void EventReaderLibevdevCros::OnStopped() {
+  delegate_->OnLibEvdevCrosStopped(&evdev_, &evstate_);
+}
+
 // static
 void EventReaderLibevdevCros::OnSynReport(void* data,
                                           EventStateRec* evstate,
                                           struct timeval* tv) {
   EventReaderLibevdevCros* reader = static_cast<EventReaderLibevdevCros*>(data);
+  if (reader->ignore_events_)
+    return;
+
   reader->delegate_->OnLibEvdevCrosEvent(&reader->evdev_, evstate, *tv);
 }
 

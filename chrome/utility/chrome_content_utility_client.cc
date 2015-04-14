@@ -29,6 +29,10 @@
 #include "chrome/utility/profile_import_handler.h"
 #endif
 
+#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
+#include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
+#endif
+
 #if defined(OS_WIN)
 #include "chrome/utility/font_cache_handler_win.h"
 #include "chrome/utility/shell_handler_win.h"
@@ -109,7 +113,7 @@ ChromeContentUtilityClient::~ChromeContentUtilityClient() {
 
 void ChromeContentUtilityClient::UtilityThreadStarted() {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionsHandler::UtilityThreadStarted();
+  extensions::UtilityHandler::UtilityThreadStarted();
 #endif
 
   if (kMessageWhitelistSize > 0) {
@@ -149,6 +153,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
 #endif
+#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DetectSeccompSupport,
+                        OnDetectSeccompSupport)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -164,10 +172,6 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 void ChromeContentUtilityClient::PreSandboxStartup() {
 #if defined(ENABLE_EXTENSIONS)
   extensions::ExtensionsHandler::PreSandboxStartup();
-#endif
-
-#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
-  PrintingHandler::PreSandboxStartup();
 #endif
 
 #if defined(ENABLE_MDNS)
@@ -259,6 +263,22 @@ void ChromeContentUtilityClient::OnCreateZipFile(
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
+void ChromeContentUtilityClient::OnDetectSeccompSupport() {
+  bool supports_prctl = sandbox::SandboxBPF::SupportsSeccompSandbox(
+      sandbox::SandboxBPF::SeccompLevel::SINGLE_THREADED);
+  Send(new ChromeUtilityHostMsg_DetectSeccompSupport_ResultPrctl(
+      supports_prctl));
+
+  bool supports_syscall = sandbox::SandboxBPF::SupportsSeccompSandbox(
+      sandbox::SandboxBPF::SeccompLevel::MULTI_THREADED);
+  Send(new ChromeUtilityHostMsg_DetectSeccompSupport_ResultSyscall(
+      supports_syscall));
+
+  ReleaseProcessIfNeeded();
+}
+#endif  // defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
 
 void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
     const std::vector<unsigned char>& encoded_data) {

@@ -11,11 +11,11 @@ class _PageCycler(benchmark.Benchmark):
   options = {'pageset_repeat': 6}
 
   @classmethod
-  def AddBenchmarkCommandLineArgs(cls, parser):
-    parser.add_option('--v8-object-stats',
-        action='store_true',
-        help='Enable detailed V8 object statistics.')
+  def Name(cls):
+    return 'page_cycler'
 
+  @classmethod
+  def AddBenchmarkCommandLineArgs(cls, parser):
     parser.add_option('--report-speed-index',
         action='store_true',
         help='Enable the speed index metric.')
@@ -28,7 +28,6 @@ class _PageCycler(benchmark.Benchmark):
         page_repeat = options.page_repeat,
         pageset_repeat = options.pageset_repeat,
         cold_load_percent = options.cold_load_percent,
-        record_v8_object_stats = options.v8_object_stats,
         report_speed_index = options.report_speed_index)
 
 
@@ -39,6 +38,10 @@ class PageCyclerDhtml(_PageCycler):
   """Benchmarks for various DHTML operations like simple animations."""
   page_set = page_sets.DhtmlPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.dhtml'
+
 
 class PageCyclerIntlArFaHe(_PageCycler):
   """Page load time for a variety of pages in Arabic, Farsi and Hebrew.
@@ -47,14 +50,22 @@ class PageCyclerIntlArFaHe(_PageCycler):
   """
   page_set = page_sets.IntlArFaHePageSet
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.intl_ar_fa_he'
 
-@benchmark.Disabled('win')  # crbug.com/388337
+
+@benchmark.Disabled('win')  # crbug.com/366715
 class PageCyclerIntlEsFrPtBr(_PageCycler):
   """Page load time for a pages in Spanish, French and Brazilian Portuguese.
 
   Runs against pages recorded in April, 2013.
   """
   page_set = page_sets.IntlEsFrPtBrPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.intl_es_fr_pt-BR'
 
 
 class PageCyclerIntlHiRu(_PageCycler):
@@ -64,14 +75,22 @@ class PageCyclerIntlHiRu(_PageCycler):
   """
   page_set = page_sets.IntlHiRuPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.intl_hi_ru'
 
-@benchmark.Disabled('android', 'win')  # crbug.com/379564, crbug.com/330909
+
+@benchmark.Disabled('android', 'win')  # crbug.com/379564, crbug.com/434366
 class PageCyclerIntlJaZh(_PageCycler):
   """Page load time benchmark for a variety of pages in Japanese and Chinese.
 
   Runs against pages recorded in April, 2013.
   """
   page_set = page_sets.IntlJaZhPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.intl_ja_zh'
 
 
 @benchmark.Disabled('xp')  # crbug.com/434366
@@ -82,10 +101,18 @@ class PageCyclerIntlKoThVi(_PageCycler):
   """
   page_set = page_sets.IntlKoThViPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.intl_ko_th_vi'
+
 
 class PageCyclerMorejs(_PageCycler):
   """Page load for a variety of pages that were JavaScript heavy in 2009."""
   page_set = page_sets.MorejsPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.morejs'
 
 
 # This is an old page set, we intend to remove it after more modern benchmarks
@@ -94,6 +121,10 @@ class PageCyclerMorejs(_PageCycler):
 class PageCyclerMoz(_PageCycler):
   """Page load for mozilla's original page set. Recorded in December 2000."""
   page_set = page_sets.MozPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.moz'
 
 
 @benchmark.Disabled('linux', 'win', 'mac')  # crbug.com/353260
@@ -113,12 +144,15 @@ class PageCyclerNetsimTop10(_PageCycler):
       'pageset_repeat': 6,
   }
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.netsim.top_10'
+
   def CreatePageTest(self, options):
     return page_cycler.PageCycler(
         page_repeat = options.page_repeat,
         pageset_repeat = options.pageset_repeat,
         cold_load_percent = options.cold_load_percent,
-        record_v8_object_stats = options.v8_object_stats,
         report_speed_index = options.report_speed_index,
         clear_cache_before_each_run = True)
 
@@ -129,13 +163,23 @@ class PageCyclerTop10Mobile(_PageCycler):
 
   Runs against pages recorded in November, 2013.
   """
-  page_set = page_sets.Top10MobilePageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.top_10_mobile'
+
+  def CreatePageSet(self, options):
+    return page_sets.Top10MobilePageSet(run_no_page_interactions=True)
 
 
 @benchmark.Disabled
 class PageCyclerKeyMobileSites(_PageCycler):
   """Page load time benchmark for key mobile sites."""
-  page_set = page_sets.KeyMobileSitesSmoothPageSet
+  page_set = page_sets.KeyMobileSitesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.key_mobile_sites_smooth'
 
 
 @benchmark.Disabled('android')  # crbug.com/357326
@@ -146,6 +190,10 @@ class PageCyclerToughLayoutCases(_PageCycler):
   """
   page_set = page_sets.ToughLayoutCasesPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.tough_layout_cases'
+
 
 # crbug.com/273986: This test is really flakey on xp.
 @benchmark.Disabled('win')
@@ -155,9 +203,19 @@ class PageCyclerTypical25(_PageCycler):
   Designed to represent typical, not highly optimized or highly popular web
   sites. Runs against pages recorded in June, 2014.
   """
-  page_set = page_sets.Typical25PageSet
+
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.typical_25'
+
+  def CreatePageSet(self, options):
+    return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
 
 @benchmark.Disabled # crbug.com/443730
 class PageCyclerBigJs(_PageCycler):
   page_set = page_sets.BigJsPageSet
+  @classmethod
+  def Name(cls):
+    return 'page_cycler.big_js'
+

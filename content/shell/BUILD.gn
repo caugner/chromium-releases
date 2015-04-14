@@ -85,10 +85,10 @@ static_library("content_shell_lib") {
     "browser/shell_browser_main_parts_mac.mm",
     "browser/shell_content_browser_client.cc",
     "browser/shell_content_browser_client.h",
-    "browser/shell_devtools_manager_delegate.cc",
-    "browser/shell_devtools_manager_delegate.h",
     "browser/shell_devtools_frontend.cc",
     "browser/shell_devtools_frontend.h",
+    "browser/shell_devtools_manager_delegate.cc",
+    "browser/shell_devtools_manager_delegate.h",
     "browser/shell_download_manager_delegate.cc",
     "browser/shell_download_manager_delegate.h",
     "browser/shell_javascript_dialog.h",
@@ -96,12 +96,12 @@ static_library("content_shell_lib") {
     "browser/shell_javascript_dialog_manager.cc",
     "browser/shell_javascript_dialog_manager.h",
     "browser/shell_javascript_dialog_win.cc",
-    "browser/shell_mojo_test_utils_android.cc",
-    "browser/shell_mojo_test_utils_android.h",
     "browser/shell_login_dialog.cc",
     "browser/shell_login_dialog.h",
     "browser/shell_login_dialog_mac.mm",
     "browser/shell_mac.mm",
+    "browser/shell_mojo_test_utils_android.cc",
+    "browser/shell_mojo_test_utils_android.h",
     "browser/shell_net_log.cc",
     "browser/shell_net_log.h",
     "browser/shell_network_delegate.cc",
@@ -118,9 +118,9 @@ static_library("content_shell_lib") {
     "browser/shell_speech_recognition_manager_delegate.h",
     "browser/shell_url_request_context_getter.cc",
     "browser/shell_url_request_context_getter.h",
+    "browser/shell_web_contents_view_delegate.h",
     "browser/shell_web_contents_view_delegate_android.cc",
     "browser/shell_web_contents_view_delegate_creator.h",
-    "browser/shell_web_contents_view_delegate.h",
     "browser/shell_web_contents_view_delegate_mac.mm",
     "browser/shell_web_contents_view_delegate_win.cc",
     "browser/webkit_test_controller.cc",
@@ -172,6 +172,10 @@ static_library("content_shell_lib") {
     "renderer/test_runner/mock_credential_manager_client.h",
     "renderer/test_runner/mock_grammar_check.cc",
     "renderer/test_runner/mock_grammar_check.h",
+    "renderer/test_runner/mock_presentation_client.cc",
+    "renderer/test_runner/mock_presentation_client.h",
+    "renderer/test_runner/mock_presentation_service.cc",
+    "renderer/test_runner/mock_presentation_service.h",
     "renderer/test_runner/mock_screen_orientation_client.cc",
     "renderer/test_runner/mock_screen_orientation_client.h",
     "renderer/test_runner/mock_spell_check.cc",
@@ -221,6 +225,9 @@ static_library("content_shell_lib") {
     "renderer/test_runner/web_test_runner.h",
   ]
 
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
 
   public_deps = [
@@ -259,6 +266,7 @@ static_library("content_shell_lib") {
     "//third_party/WebKit/public:test_support",
     "//third_party/icu",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -275,9 +283,10 @@ static_library("content_shell_lib") {
 
   if (is_win) {
     #'LinkIncremental': '<(msvs_large_module_debug_link_mode)',  TODO(GYP)
-
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
+    sources += [
+      "common/v8_breakpad_support_win.cc",
+      "common/v8_breakpad_support_win.h",
+    ]
   }
 
   if (is_linux) {
@@ -477,7 +486,7 @@ repack("pak") {
 
 # TODO(GYP): Figure out what this should be on android
 # and make linking this work on the Mac.
-if (!is_android && !is_mac) {
+if (!is_android && !is_mac && (!is_win || link_chrome_on_windows)) {
   executable("content_shell") {
     testonly = true
 
@@ -487,7 +496,6 @@ if (!is_android && !is_mac) {
     #  - RC file.
     #  - 'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
     sources = [
-      "../app/startup_helper_win.cc",
       "app/shell_main.cc",
     ]
 
@@ -516,5 +524,8 @@ if (!is_android && !is_mac) {
         "//tools/imagediff($host_toolchain)",
       ]
     }
+  }
+} else {
+  group("content_shell") {
   }
 }

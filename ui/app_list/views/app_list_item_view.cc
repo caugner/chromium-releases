@@ -18,6 +18,7 @@
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/throb_animation.h"
@@ -38,8 +39,8 @@ namespace app_list {
 
 namespace {
 
-const int kTopPadding = 20;
-const int kIconTitleSpacing = 7;
+const int kTopPadding = 18;
+const int kIconTitleSpacing = 6;
 const int kProgressBarHorizontalPadding = 12;
 
 // Radius of the folder dropping preview circle.
@@ -100,6 +101,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetBackgroundColor(0);
   title_->SetAutoColorReadabilityEnabled(false);
   title_->SetEnabledColor(kGridTitleColor);
+  title_->SetHandlesTooltips(false);
 
   static const gfx::FontList font_list = GetFontList();
   title_->SetFontList(font_list);
@@ -194,6 +196,7 @@ void AppListItemView::SetTouchDragging(bool touch_dragging) {
     return;
 
   touch_dragging_ = touch_dragging;
+  SetState(STATE_NORMAL);
   SetUIState(touch_dragging_ ? UI_STATE_DRAGGING : UI_STATE_NORMAL);
 }
 
@@ -262,8 +265,7 @@ void AppListItemView::SetItemName(const base::string16& display_name,
   title_->SetText(display_name);
   title_->Invalidate();
 
-  title_->SetTooltipText(display_name == full_name ? base::string16()
-                                                   : full_name);
+  tooltip_text_ = display_name == full_name ? base::string16() : full_name;
 
   // Use full name for accessibility.
   SetAccessibleName(
@@ -348,12 +350,12 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
     return;
 
   gfx::Rect rect(GetContentsBounds());
-  if (is_highlighted_ && !is_installing_) {
+  if (apps_grid_view_->IsSelectedView(this)) {
+    canvas->FillRect(rect, kSelectedColor);
+  } else if (is_highlighted_ && !is_installing_) {
     canvas->FillRect(rect, kHighlightedColor);
     return;
   }
-  if (apps_grid_view_->IsSelectedView(this))
-    canvas->FillRect(rect, kSelectedColor);
 
   if (ui_state_ == UI_STATE_DROPPING_IN_FOLDER) {
     DCHECK(apps_grid_view_->model()->folders_enabled());
@@ -377,6 +379,8 @@ void AppListItemView::ShowContextMenuForView(views::View* source,
   if (!menu_model)
     return;
 
+  if (!apps_grid_view_->IsSelectedView(this))
+    apps_grid_view_->ClearAnySelectedView();
   context_menu_runner_.reset(
       new views::MenuRunner(menu_model, views::MenuRunner::HAS_MNEMONICS));
   if (context_menu_runner_->RunMenuAt(GetWidget(),
@@ -390,17 +394,13 @@ void AppListItemView::ShowContextMenuForView(views::View* source,
 }
 
 void AppListItemView::StateChanged() {
-  const bool is_folder_ui_enabled = apps_grid_view_->model()->folders_enabled();
-  if (is_folder_ui_enabled)
-    apps_grid_view_->ClearAnySelectedView();
-
   if (state() == STATE_HOVERED || state() == STATE_PRESSED) {
-    if (!is_folder_ui_enabled)
-      apps_grid_view_->SetSelectedView(this);
+    // Show the hover/tap highlight: for tap, lighter highlight replaces darker
+    // keyboard selection; for mouse hover, keyboard selection takes precedence.
+    if (!apps_grid_view_->IsSelectedView(this) || state() == STATE_PRESSED)
+      SetItemIsHighlighted(true);
     title_->SetEnabledColor(kGridTitleHoverColor);
   } else {
-    if (!is_folder_ui_enabled)
-      apps_grid_view_->ClearSelectedView(this);
     SetItemIsHighlighted(false);
     if (item_weak_)
       item_weak_->set_highlighted(false);
@@ -471,6 +471,9 @@ bool AppListItemView::OnMouseDragged(const ui::MouseEvent& event) {
       return true;
   }
 
+  if (!apps_grid_view_->IsSelectedView(this))
+    apps_grid_view_->ClearAnySelectedView();
+
   // Shows dragging UI when it's confirmed without waiting for the timer.
   if (ui_state_ != UI_STATE_DRAGGING &&
       apps_grid_view_->dragging() &&
@@ -503,6 +506,17 @@ void AppListItemView::OnGestureEvent(ui::GestureEvent* event) {
         event->SetHandled();
       }
       break;
+    case ui::ET_GESTURE_TAP_DOWN:
+      if (switches::IsTouchFeedbackEnabled() && state_ != STATE_DISABLED) {
+        SetState(STATE_PRESSED);
+        event->SetHandled();
+      }
+      break;
+    case ui::ET_GESTURE_TAP:
+    case ui::ET_GESTURE_TAP_CANCEL:
+      if (switches::IsTouchFeedbackEnabled() && state_ != STATE_DISABLED)
+        SetState(STATE_NORMAL);
+      break;
     case ui::ET_GESTURE_LONG_PRESS:
       if (!apps_grid_view_->has_dragged_view())
         SetTouchDragging(true);
@@ -518,6 +532,19 @@ void AppListItemView::OnGestureEvent(ui::GestureEvent* event) {
   }
   if (!event->handled())
     CustomButton::OnGestureEvent(event);
+}
+
+bool AppListItemView::GetTooltipText(const gfx::Point& p,
+                                     base::string16* tooltip) const {
+  // Use the label to generate a tooltip, so that it will consider its text
+  // truncation in making the tooltip. We do not want the label itself to have a
+  // tooltip, so we only temporarily enable it to get the tooltip text from the
+  // label, then disable it again.
+  title_->SetHandlesTooltips(true);
+  title_->SetTooltipText(tooltip_text_);
+  bool handled = title_->GetTooltipText(p, tooltip);
+  title_->SetHandlesTooltips(false);
+  return handled;
 }
 
 void AppListItemView::OnSyncDragEnd() {

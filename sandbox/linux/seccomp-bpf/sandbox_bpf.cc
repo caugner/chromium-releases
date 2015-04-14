@@ -23,20 +23,22 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/third_party/valgrind/valgrind.h"
+#include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/dump_bpf.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
-#include "sandbox/linux/seccomp-bpf/codegen.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
+#include "sandbox/linux/bpf_dsl/syscall_set.h"
 #include "sandbox/linux/seccomp-bpf/die.h"
 #include "sandbox/linux/seccomp-bpf/errorcode.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
-#include "sandbox/linux/seccomp-bpf/syscall_iterator.h"
 #include "sandbox/linux/seccomp-bpf/trap.h"
 #include "sandbox/linux/seccomp-bpf/verifier.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/services/proc_util.h"
 #include "sandbox/linux/services/syscall_wrappers.h"
 #include "sandbox/linux/services/thread_helpers.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 namespace sandbox {
 
@@ -116,13 +118,16 @@ bool SandboxBPF::StartSandbox(SeccompLevel seccomp_level) {
     return false;
   }
 
+  if (!proc_task_fd_.is_valid()) {
+    SetProcTaskFd(ProcUtil::OpenProcSelfTask());
+  }
+
   const bool supports_tsync = KernelSupportsSeccompTsync();
 
   if (seccomp_level == SeccompLevel::SINGLE_THREADED) {
-    if (!IsSingleThreaded(proc_task_fd_.get())) {
-      SANDBOX_DIE("Cannot start sandbox; process is already multi-threaded");
-      return false;
-    }
+    // Wait for /proc/self/task/ to update if needed and assert the
+    // process is single threaded.
+    ThreadHelpers::AssertSingleThreaded(proc_task_fd_.get());
   } else if (seccomp_level == SeccompLevel::MULTI_THREADED) {
     if (IsSingleThreaded(proc_task_fd_.get())) {
       SANDBOX_DIE("Cannot start sandbox; "

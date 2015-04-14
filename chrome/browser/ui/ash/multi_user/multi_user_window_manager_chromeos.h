@@ -70,7 +70,7 @@ class MultiUserWindowManagerChromeOS
 
   // Create the manager and use |active_user_id| as the active user.
   explicit MultiUserWindowManagerChromeOS(const std::string& active_user_id);
-  virtual ~MultiUserWindowManagerChromeOS();
+  ~MultiUserWindowManagerChromeOS() override;
 
   // Initializes the manager after its creation. Should only be called once.
   void Init();

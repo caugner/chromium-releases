@@ -8,6 +8,7 @@
 <translation id="7904094684485781019">Администратор этого аккаунта запретил множественный вход</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">Bluetooth включен</translation>
+<translation id="5895138241574237353">Перезапустить</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/>: положение изменено на <ph name="ROTATION"/></translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="2268130516524549846">Bluetooth отключен</translation>
@@ -58,6 +59,7 @@
 <translation id="8676770494376880701">Подключено маломощное зарядное устройство</translation>
 <translation id="5238774010593222950">Не удается войти в другой аккаунт</translation>
 <translation id="1723752762323179280">Завершение сеанса</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Да</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Выйти</translation>
@@ -77,7 +79,6 @@
 <translation id="5825747213122829519">Способ ввода изменен на <ph name="INPUT_METHOD_ID"/>.
 Для переключения нажмите Shift + Alt.</translation>
 <translation id="2562916301614567480">Частная сеть</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/> (HDMI)</translation>
 <translation id="4250680216510889253">Нет</translation>
 <translation id="4379753398862151997">Не удалось выполнить операцию.</translation>
 <translation id="6426039856985689743">Отключить мобильную передачу данных</translation>
@@ -129,6 +130,7 @@
 <translation id="2761704814324807722">Строка состояния, время <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Заблокировать</translation>
 <translation id="2805756323405976993">Сервисы</translation>
+<translation id="2313845391432982560">Расширение &quot;<ph name="EXTENSION_NAME"/>&quot; может изменять конфигурацию сети</translation>
 <translation id="2872961005593481000">Завершить работу</translation>
 <translation id="3433830597744061105">Настроить аккаунты</translation>
 <translation id="742594950370306541">Камера используется.</translation>
@@ -159,6 +161,7 @@
 <translation id="9201131092683066720">Батарея заряжена на <ph name="PERCENTAGE"/>%.</translation>
 <translation id="2983818520079887040">Настройки...</translation>
 <translation id="6452181791372256707">Отклонить</translation>
+<translation id="1330145147221172764">Включить экранную клавиатуру</translation>
 <translation id="1195412055398077112">Каемка экрана</translation>
 <translation id="607652042414456612">Расположенные поблизости устройства Bluetooth видят ваш компьютер под именем <ph name="NAME"/> с адресом <ph name="ADDRESS"/>.</translation>
 <translation id="112308213915226829">Автоматически скрывать панель запуска</translation>
@@ -189,15 +192,18 @@
 <translation id="8103386449138765447">SMS: <ph name="MESSAGE_COUNT"/></translation>
 <translation id="7097613348211027502">Голосовое сопровождение ChromeVox включено. Чтобы отключить его, нажмите CTRL+ALT+Z.</translation>
 <translation id="5045002648206642691">Настройки Диска Google…</translation>
+<translation id="1510238584712386396">Панель запуска</translation>
 <translation id="7209101170223508707">Включен режим CAPS LOCK.
 Чтобы отключить его, нажмите Alt + Search или Shift.</translation>
 <translation id="8940956008527784070">Низкий заряд батареи (<ph name="PERCENTAGE"/>%)</translation>
 <translation id="4918086044614829423">Принять</translation>
 <translation id="5102001756192215136">Осталось <ph name="HOUR"/>:<ph name="MINUTE"/></translation>
 <translation id="3009178788565917040">Выход</translation>
+<translation id="3147142846278915599">Панель запуска (синхронизация приложений...)</translation>
 <translation id="6911468394164995108">Подключиться к другой сети...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">До полной зарядки: <ph name="HOUR"/> ч <ph name="MINUTE"/> мин</translation>
 <translation id="3077734595579995578">shift</translation>
 <translation id="6359806961507272919">SMS от <ph name="PHONE_NUMBER"/></translation>
+<translation id="4053612967614057854">Отключить экранную клавиатуру</translation>
 </translationbundle>

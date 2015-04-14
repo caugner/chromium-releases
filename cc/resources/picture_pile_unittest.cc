@@ -17,7 +17,10 @@ namespace {
 
 class PicturePileTestBase {
  public:
-  PicturePileTestBase() : min_scale_(0.125), frame_number_(0) {}
+  PicturePileTestBase()
+      : min_scale_(0.125),
+        pile_(min_scale_, gfx::Size(1000, 1000)),
+        frame_number_(0) {}
 
   void InitializeData() {
     pile_.SetTileGridSize(gfx::Size(1000, 1000));
@@ -39,9 +42,9 @@ class PicturePileTestBase {
                                    const gfx::Size& layer_size,
                                    const gfx::Rect& visible_layer_rect) {
     frame_number_++;
-    return pile_.UpdateAndExpandInvalidation(
-        &client_, invalidation, false, layer_size, visible_layer_rect,
-        frame_number_, Picture::RECORD_NORMALLY);
+    return pile_.UpdateAndExpandInvalidation(&client_, invalidation, layer_size,
+                                             visible_layer_rect, frame_number_,
+                                             RecordingSource::RECORD_NORMALLY);
   }
 
   bool UpdateWholePile() {
@@ -53,8 +56,8 @@ class PicturePileTestBase {
   }
 
   FakeContentLayerClient client_;
-  FakePicturePile pile_;
   float min_scale_;
+  FakePicturePile pile_;
   int frame_number_;
 };
 

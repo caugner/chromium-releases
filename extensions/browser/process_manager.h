@@ -75,7 +75,8 @@ class ProcessManager : public KeyedService,
   // Returns the SiteInstance that the given URL belongs to.
   // TODO(aa): This only returns correct results for extensions and packaged
   // apps, not hosted apps.
-  virtual content::SiteInstance* GetSiteInstanceForURL(const GURL& url);
+  virtual scoped_refptr<content::SiteInstance> GetSiteInstanceForURL(
+      const GURL& url);
 
   // If the view isn't keeping the lazy background page alive, increments the
   // keepalive count to do so.
@@ -131,8 +132,10 @@ class ProcessManager : public KeyedService,
 
   // Tracks network requests for a given RenderFrameHost, used to know
   // when network activity is idle for lazy background pages.
-  void OnNetworkRequestStarted(content::RenderFrameHost* render_frame_host);
-  void OnNetworkRequestDone(content::RenderFrameHost* render_frame_host);
+  void OnNetworkRequestStarted(content::RenderFrameHost* render_frame_host,
+                               uint64 request_id);
+  void OnNetworkRequestDone(content::RenderFrameHost* render_frame_host,
+                            uint64 request_id);
 
   // Prevents |extension|'s background page from being closed and sends the
   // onSuspendCanceled() event to it.

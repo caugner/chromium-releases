@@ -24,7 +24,6 @@ namespace net {
 namespace tools {
 
 using base::StringPiece;
-using std::make_pair;
 
 class DeleteSessionsAlarm : public EpollAlarm {
  public:
@@ -100,11 +99,6 @@ class QuicDispatcher::QuicFramerVisitor : public QuicFramerVisitorInterface {
     return false;
   }
   bool OnAckFrame(const QuicAckFrame& /*frame*/) override {
-    DCHECK(false);
-    return false;
-  }
-  bool OnCongestionFeedbackFrame(
-      const QuicCongestionFeedbackFrame& /*frame*/) override {
     DCHECK(false);
     return false;
   }
@@ -214,6 +208,13 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
     const QuicPacketPublicHeader& header) {
   QuicSession* session = nullptr;
 
+  // Port zero is only allowed for unidirectional UDP, so is disallowed by QUIC.
+  // Given that we can't even send a reply rejecting the packet, just black hole
+  // it.
+  if (current_client_address_.port() == 0) {
+    return false;
+  }
+
   QuicConnectionId connection_id = header.connection_id;
   SessionMap::iterator it = session_map_.find(connection_id);
   if (it == session_map_.end()) {
@@ -252,7 +253,7 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
       return HandlePacketForTimeWait(header);
     }
     DVLOG(1) << "Created new session for " << connection_id;
-    session_map_.insert(make_pair(connection_id, session));
+    session_map_.insert(std::make_pair(connection_id, session));
   } else {
     session = it->second;
   }
@@ -350,7 +351,7 @@ void QuicDispatcher::OnWriteBlocked(
     // infinite loops in OnCanWrite.
     return;
   }
-  write_blocked_list_.insert(make_pair(blocked_writer, true));
+  write_blocked_list_.insert(std::make_pair(blocked_writer, true));
 }
 
 void QuicDispatcher::OnConnectionAddedToTimeWaitList(

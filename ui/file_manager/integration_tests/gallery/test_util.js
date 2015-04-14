@@ -5,6 +5,101 @@
 'use strict';
 
 /**
+ * Gets file entries just under the volume.
+ *
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
+ * @param {Array.<string>} names File name list.
+ * @return {Promise} Promise to be fulflled with Array.<FileEntry>.
+ */
+function getFilesUnderVolume(volumeType, names) {
+  var displayRootPromise =
+      VolumeManager.getInstance().then(function(volumeManager) {
+    var volumeInfo = volumeManager.getCurrentProfileVolumeInfo(volumeType);
+    return volumeInfo.resolveDisplayRoot();
+  });
+
+  return displayRootPromise.then(function(displayRoot) {
+    var filesPromise = names.map(function(name) {
+      return new Promise(
+          displayRoot.getFile.bind(displayRoot, name, {}));
+    });
+    return Promise.all(filesPromise);
+  });
+}
+
+/**
+ * Waits until an element appears and returns it.
+ *
+ * @param {AppWindow} appWindow Application window.
+ * @param {string} query Query for the element.
+ * @return {Promise} Promise to be fulfilled with the element.
+ */
+function waitForElement(appWindow, query) {
+  return repeatUntil(function() {
+    var element = appWindow.contentWindow.document.querySelector(query);
+    if (element)
+      return element;
+    else
+      return pending('The element %s is not found.', query);
+  });
+}
+
+/**
+ * Waits until an element disappears.
+ *
+ * @param {AppWindow} appWindow Application window.
+ * @param {string} query Query for the element.
+ * @return {Promise} Promise to be fulfilled with the element.
+ */
+function waitForElementLost(appWindow, query) {
+  return repeatUntil(function() {
+    var element = appWindow.contentWindow.document.querySelector(query);
+    if (element)
+      return pending('The element %s does not disappear.', query);
+    else
+      return true;
+  });
+}
+
+/**
+ * Shorthand for clicking an element.
+ * @param {AppWindow} appWindow Application window.
+ * @param {string} query Query for the element.
+ * @param {Promise} Promise to be fulfilled with the clicked element.
+ */
+function waitAndClickElement(appWindow, query) {
+  return waitForElement(appWindow, query).then(function(element) {
+    element.click();
+    return element;
+  });
+}
+
+/**
+ * Sends a fake key down event.
+ *
+ * @param {AppWindow} appWindow Application window.
+ * @param {string} query Query for the element to be dispatched an event to.
+ * @param {string} keyIdentifier Key identifier.
+ * @return {boolean} True on success.
+ */
+function sendKeyDown(appWindow, query, keyIdentifier) {
+  return appWindow.contentWindow.document.querySelector(query).dispatchEvent(
+      new KeyboardEvent(
+          'keydown',
+          {bubbles: true, keyIdentifier: keyIdentifier}));
+}
+
+/**
+ * Observes window errors that should fail the browser tests.
+ * @param {DOMWindow} window Windows to be obserbed.
+ */
+function observeWindowError(window) {
+  window.onerror = function(error) {
+    chrome.test.fail('window.onerror: ' + error);
+  };
+}
+
+/**
  * Launches the Gallery app with the test entries.
  *
  * @param {string} testVolumeName Test volume name passed to the addEntries
@@ -24,10 +119,13 @@ function launchWithTestEntries(
         selectedEntries.map(function(entry) { return entry.nameText; }));
   });
 
-  return launch(entriesPromise).then(function() {
-    var launchedPromise = Promise.all([appWindowPromise, entriesPromise]);
-    return launchedPromise.then(function(results) {
-      return {appWindow: results[0], entries: results[1]};
+  return entriesPromise.then(function(entries) {
+    return window.initializePromise.then(function() {
+      var urls = util.entriesToURLs(entries);
+      var launchedPromise = openGalleryWindow(urls, false);
+      return launchedPromise.then(function(appWindow) {
+        return {appWindow: appWindow, entries: entries};
+      });
     });
   });
 }

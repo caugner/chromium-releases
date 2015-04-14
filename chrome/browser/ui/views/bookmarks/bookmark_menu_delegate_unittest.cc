@@ -17,6 +17,8 @@
 #include "ui/views/controls/menu/submenu_view.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 class BookmarkMenuDelegateTest : public BrowserWithTestWindowTest {
  public:

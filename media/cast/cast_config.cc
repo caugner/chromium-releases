@@ -29,8 +29,6 @@ VideoSenderConfig::VideoSenderConfig()
           base::TimeDelta::FromMilliseconds(kDefaultRtpMaxDelayMs)),
       rtp_payload_type(0),
       use_external_encoder(false),
-      width(0),
-      height(0),
       congestion_control_back_off(kDefaultCongestionControlBackOff),
       max_bitrate(5000000),
       min_bitrate(1000000),
@@ -65,7 +63,7 @@ FrameReceiverConfig::FrameReceiverConfig()
       rtcp_interval(kDefaultRtcpIntervalMs),
       rtp_max_delay_ms(kDefaultRtpMaxDelayMs),
       rtp_payload_type(0),
-      frequency(0),
+      rtp_timebase(0),
       channels(0),
       target_frame_rate(0),
       codec(CODEC_UNKNOWN) {}

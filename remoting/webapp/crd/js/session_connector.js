@@ -32,7 +32,7 @@ remoting.SessionConnector.prototype.reset = function() {};
  * @param {function(string, string, string,
  *                  function(string, string): void): void}
  *     fetchThirdPartyToken Function to obtain a token from a third party
- *     authenticaiton server.
+ *     authentication server.
  * @param {string} clientPairingId The client id issued by the host when
  *     this device was paired, if it is already paired.
  * @param {string} clientPairedSecret The shared secret issued by the host when
@@ -97,7 +97,7 @@ remoting.SessionConnector.prototype.cancel = function() {};
 /**
  * Get the connection mode (Me2Me or IT2Me)
  *
- * @return {remoting.ClientSession.Mode}
+ * @return {remoting.DesktopConnectedView.Mode}
  */
 remoting.SessionConnector.prototype.getConnectionMode = function() {};
 
@@ -122,9 +122,9 @@ remoting.SessionConnectorFactory = function() {};
  * @param {function(string, string):boolean} onExtensionMessage The handler for
  *     protocol extension messages. Returns true if a message is recognized;
  *     false otherwise.
- * @param {function(string):void} onConnectionFailed Callback for when the
- *     connection fails.
- * @param {Array.<string>} requiredCapabilities Connector capabilities
+ * @param {function(remoting.Error):void} onConnectionFailed Callback for when
+ *     the connection fails.
+ * @param {Array<string>} requiredCapabilities Connector capabilities
  *     required by this application.
  * @param {string} defaultRemapKeys The default set of key mappings to use
  *     in the client session.

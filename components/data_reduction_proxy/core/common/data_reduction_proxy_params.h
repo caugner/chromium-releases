@@ -13,6 +13,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_retry_info.h"
+#include "net/proxy/proxy_server.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -33,7 +34,7 @@ namespace data_reduction_proxy {
 struct DataReductionProxyTypeInfo {
   DataReductionProxyTypeInfo();
   ~DataReductionProxyTypeInfo();
-  std::pair<GURL, GURL> proxy_servers;
+  std::pair<net::ProxyServer, net::ProxyServer> proxy_servers;
   bool is_fallback;
   bool is_alternative;
   bool is_ssl;
@@ -58,7 +59,7 @@ class DataReductionProxyParams {
   static const unsigned int kPromoAllowed = (1 << 4);
   static const unsigned int kHoldback = (1 << 5);
 
-  typedef std::vector<GURL> DataReductionProxyList;
+  typedef std::vector<net::ProxyServer> DataReductionProxyList;
 
   // Returns true if this client is part of field trial to use an alternative
   // configuration for the data reduction proxy.
@@ -97,6 +98,27 @@ class DataReductionProxyParams {
   // a promotion for the data reduction proxy on Android One devices.
   static bool IsIncludedInAndroidOnePromoFieldTrial(
       const char* build_fingerprint);
+
+  // Returns true if this client has the command line switch to enable Lo-Fi
+  // mode.
+  static bool IsLoFiEnabled();
+
+  // Returns true if this client has the command line switch to show
+  // interstitials for data reduction proxy bypasses.
+  static bool WarnIfNoDataReductionProxy();
+
+  // Returns true if the Data Reduction Proxy supports the scheme of the
+  // provided |url|.
+  static bool CanProxyURLScheme(const GURL& url);
+
+  // Returns true if this client is part of a field trial that sets the origin
+  // proxy server as quic://proxy.googlezip.net.
+  static bool IsIncludedInQuicFieldTrial();
+
+  static std::string GetQuicFieldTrialName();
+
+  // If true, uses QUIC instead of SPDY to connect to proxies that use TLS.
+  void EnableQuic(bool enable);
 
   // Constructs configuration parameters. If |kAllowed|, then the standard
   // data reduction proxy configuration is allowed to be used. If
@@ -143,8 +165,8 @@ class DataReductionProxyParams {
 
   // Returns true if this request would be bypassed by the data request proxy
   // based on applying the |data_reduction_proxy_config| param rules to the
-  // request URL.
-  bool IsBypassedByDataReductionProxyLocalRules(
+  // request URL. Virutal for testing.
+  virtual bool IsBypassedByDataReductionProxyLocalRules(
       const net::URLRequest& request,
       const net::ProxyConfig& data_reduction_proxy_config) const;
 
@@ -154,8 +176,8 @@ class DataReductionProxyParams {
   // proxies are bypassed, returns the minimum retry delay of the bypassed data
   // reduction proxies in min_retry_delay (if not NULL). If there are no
   // bypassed data reduction proxies for the request scheme, returns false and
-  // does not assign min_retry_delay.
-  bool AreDataReductionProxiesBypassed(
+  // does not assign min_retry_delay. Virtual for testing.
+  virtual bool AreDataReductionProxiesBypassed(
       const net::URLRequest& request,
       const net::ProxyConfig& data_reduction_proxy_config,
       base::TimeDelta* min_retry_delay) const;
@@ -180,28 +202,28 @@ class DataReductionProxyParams {
                        base::TimeDelta* retry_delay) const;
 
   // Returns the data reduction proxy primary origin.
-  const GURL& origin() const {
+  const net::ProxyServer& origin() const {
     return origin_;
   }
 
   // Returns the data reduction proxy fallback origin.
-  const GURL& fallback_origin() const {
+  const net::ProxyServer& fallback_origin() const {
     return fallback_origin_;
   }
 
   // Returns the data reduction proxy ssl origin that is used with the
   // alternative proxy configuration.
-  const GURL& ssl_origin() const {
+  const net::ProxyServer& ssl_origin() const {
     return ssl_origin_;
   }
 
   // Returns the alternative data reduction proxy primary origin.
-  const GURL& alt_origin() const {
+  const net::ProxyServer& alt_origin() const {
     return alt_origin_;
   }
 
   // Returns the alternative data reduction proxy fallback origin.
-  const GURL& alt_fallback_origin() const {
+  const net::ProxyServer& alt_fallback_origin() const {
     return alt_fallback_origin_;
   }
 
@@ -291,8 +313,8 @@ class DataReductionProxyParams {
   virtual std::string GetDefaultWarmupURL() const;
 
  protected:
-  GURL origin_;
-  GURL fallback_origin_;
+  net::ProxyServer origin_;
+  net::ProxyServer fallback_origin_;
 
  private:
   // Checks if the primary and fallback data reduction proxies are in the retry
@@ -301,15 +323,16 @@ class DataReductionProxyParams {
   // NULL). If the fallback proxy is not valid, returns true if primary proxy
   // was bypassed and returns its bypass delay.
   bool ArePrimaryAndFallbackBypassed(const net::ProxyRetryInfoMap& retry_map,
-                                     const GURL& primary,
-                                     const GURL& fallback,
+                                     const net::ProxyServer& primary,
+                                     const net::ProxyServer& fallback,
                                      base::TimeDelta* min_retry_delay) const;
+
 
   DataReductionProxyParams& operator=(const DataReductionProxyParams& params);
 
-  GURL ssl_origin_;
-  GURL alt_origin_;
-  GURL alt_fallback_origin_;
+  net::ProxyServer ssl_origin_;
+  net::ProxyServer alt_origin_;
+  net::ProxyServer alt_fallback_origin_;
   GURL probe_url_;
   GURL warmup_url_;
 
@@ -319,6 +342,8 @@ class DataReductionProxyParams {
   bool alt_fallback_allowed_;
   bool promo_allowed_;
   bool holdback_;
+  bool quic_enabled_;
+  std::string override_quic_origin_;
 
   bool configured_on_command_line_;
 };

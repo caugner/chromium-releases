@@ -24,6 +24,7 @@
       'dependencies': [
         'chrome.gyp:browser',
         'chrome.gyp:browser_ui',
+        'chrome.gyp:child',
         'chrome.gyp:plugin',
         'chrome.gyp:renderer',
         'chrome.gyp:utility',
@@ -40,6 +41,7 @@
       'sources': [
         'app/android/chrome_android_initializer.cc',
         'app/android/chrome_android_initializer.h',
+        'app/android/chrome_jni_onload.cc',
         'app/android/chrome_main_delegate_android.cc',
         'app/android/chrome_main_delegate_android.h',
         'app/chrome_main_delegate.cc',

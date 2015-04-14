@@ -1000,10 +1000,8 @@ class LayerTreeHostContextTestDontUseLostResources
 
     ResourceProvider::ResourceId resource =
         child_resource_provider_->CreateResource(
-            gfx::Size(4, 4),
-            GL_CLAMP_TO_EDGE,
-            ResourceProvider::TextureHintImmutable,
-            RGBA_8888);
+            gfx::Size(4, 4), GL_CLAMP_TO_EDGE,
+            ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
     ResourceProvider::ScopedWriteLockGL lock(child_resource_provider_.get(),
                                              resource);
 
@@ -1077,24 +1075,16 @@ class LayerTreeHostContextTestDontUseLostResources
 
     color_video_frame_ = VideoFrame::CreateColorFrame(
         gfx::Size(4, 4), 0x80, 0x80, 0x80, base::TimeDelta());
-    hw_video_frame_ =
-        VideoFrame::WrapNativeTexture(make_scoped_ptr(new gpu::MailboxHolder(
-                                          mailbox, GL_TEXTURE_2D, sync_point)),
-                                      media::VideoFrame::ReleaseMailboxCB(),
-                                      gfx::Size(4, 4),
-                                      gfx::Rect(0, 0, 4, 4),
-                                      gfx::Size(4, 4),
-                                      base::TimeDelta(),
-                                      VideoFrame::ReadPixelsCB());
-    scaled_hw_video_frame_ =
-        VideoFrame::WrapNativeTexture(make_scoped_ptr(new gpu::MailboxHolder(
-                                          mailbox, GL_TEXTURE_2D, sync_point)),
-                                      media::VideoFrame::ReleaseMailboxCB(),
-                                      gfx::Size(4, 4),
-                                      gfx::Rect(0, 0, 3, 2),
-                                      gfx::Size(4, 4),
-                                      base::TimeDelta(),
-                                      VideoFrame::ReadPixelsCB());
+    hw_video_frame_ = VideoFrame::WrapNativeTexture(
+        make_scoped_ptr(
+            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
+        gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta(), false);
+    scaled_hw_video_frame_ = VideoFrame::WrapNativeTexture(
+        make_scoped_ptr(
+            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
+        gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta(), false);
 
     color_frame_provider_.set_frame(color_video_frame_);
     hw_frame_provider_.set_frame(hw_video_frame_);
@@ -1776,12 +1766,7 @@ class LayerTreeHostContextTestLoseAfterSendingBeginMainFrame
     deferred_ = true;
 
     // Defer commits before the BeginFrame arrives, causing it to be delayed.
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
-                       DeferCommitsOnMainThread,
-                   base::Unretained(this),
-                   true));
+    PostSetDeferCommitsToMainThread(true);
     // Meanwhile, lose the context while we are in defer commits.
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE,
@@ -1794,16 +1779,7 @@ class LayerTreeHostContextTestLoseAfterSendingBeginMainFrame
     LoseContext();
 
     // After losing the context, stop deferring commits.
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
-                       DeferCommitsOnMainThread,
-                   base::Unretained(this),
-                   false));
-  }
-
-  void DeferCommitsOnMainThread(bool defer_commits) {
-    layer_tree_host()->SetDeferCommits(defer_commits);
+    PostSetDeferCommitsToMainThread(false);
   }
 
   void WillBeginMainFrame() override {

@@ -22,7 +22,7 @@
 namespace content {
 
 class ServiceWorkerCacheStorageManagerTest : public testing::Test {
- protected:
+ public:
   ServiceWorkerCacheStorageManagerTest()
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
         callback_bool_(false),
@@ -387,15 +387,6 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, StorageMatchNoCache) {
   EXPECT_EQ(ServiceWorkerCache::ErrorTypeNotFound, callback_cache_error_);
 }
 
-// Flaky. See crbug.com/444503
-TEST_P(ServiceWorkerCacheStorageManagerTestP,
-       DISABLED_StorageMatchCacheNotReferenced) {
-  EXPECT_TRUE(Open(origin1_, "foo"));
-  EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
-  callback_cache_ = nullptr;
-  EXPECT_TRUE(StorageMatch(origin1_, "foo", GURL("http://example.com/foo")));
-}
-
 TEST_P(ServiceWorkerCacheStorageManagerTestP, StorageMatchAllEntryExists) {
   EXPECT_TRUE(Open(origin1_, "foo"));
   EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
@@ -412,14 +403,6 @@ TEST_P(ServiceWorkerCacheStorageManagerTestP, StorageMatchAllNoEntry) {
 TEST_P(ServiceWorkerCacheStorageManagerTestP, StorageMatchAllNoCaches) {
   EXPECT_FALSE(StorageMatchAll(origin1_, GURL("http://example.com/foo")));
   EXPECT_EQ(ServiceWorkerCache::ErrorTypeNotFound, callback_cache_error_);
-}
-
-TEST_P(ServiceWorkerCacheStorageManagerTestP,
-       StorageMatchAllCacheNotReferenced) {
-  EXPECT_TRUE(Open(origin1_, "foo"));
-  EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
-  callback_cache_ = nullptr;
-  EXPECT_TRUE(StorageMatchAll(origin1_, GURL("http://example.com/foo")));
 }
 
 TEST_P(ServiceWorkerCacheStorageManagerTestP, StorageMatchAllEntryExistsTwice) {
@@ -533,19 +516,29 @@ TEST_F(ServiceWorkerCacheStorageManagerMemoryOnlyTest,
   EXPECT_FALSE(cache);
 }
 
-TEST_P(ServiceWorkerCacheStorageManagerTestP, RecreateCacheOnDemand) {
-  EXPECT_TRUE(Open(origin1_, "foo"));
-  EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
-  callback_cache_ = NULL;
-  EXPECT_TRUE(Open(origin1_, "foo"));
-  EXPECT_TRUE(
-      CacheMatch(callback_cache_, GURL("http://example.com/foo")));
-}
-
 TEST_P(ServiceWorkerCacheStorageManagerTestP, DeleteBeforeRelease) {
   EXPECT_TRUE(Open(origin1_, "foo"));
   EXPECT_TRUE(Delete(origin1_, "foo"));
   EXPECT_TRUE(callback_cache_->AsWeakPtr());
+}
+
+TEST_P(ServiceWorkerCacheStorageManagerTestP, OpenRunsSerially) {
+  EXPECT_FALSE(Delete(origin1_, "tmp"));  // Init storage.
+  ServiceWorkerCacheStorage* cache_storage = CacheStorageForOrigin(origin1_);
+  cache_storage->StartAsyncOperationForTesting();
+
+  scoped_ptr<base::RunLoop> open_loop(new base::RunLoop());
+  cache_manager_->OpenCache(
+      origin1_, "foo",
+      base::Bind(&ServiceWorkerCacheStorageManagerTest::CacheAndErrorCallback,
+                 base::Unretained(this), base::Unretained(open_loop.get())));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(callback_cache_);
+
+  cache_storage->CompleteAsyncOperationForTesting();
+  open_loop->Run();
+  EXPECT_TRUE(callback_cache_);
 }
 
 TEST_F(ServiceWorkerCacheStorageManagerMemoryOnlyTest, MemoryBackedSize) {

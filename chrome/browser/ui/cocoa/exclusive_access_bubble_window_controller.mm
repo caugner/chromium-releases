@@ -44,8 +44,9 @@ const float kHideDuration = 0.7;
 
 @interface ExclusiveAccessBubbleWindowController (PrivateMethods)
 // Sets |exitLabel_| based on |exitLabelPlaceholder_|,
-// sets |exitLabelPlaceholder_| to nil.
-- (void)initializeLabel;
+// sets |exitLabelPlaceholder_| to nil,
+// sets |denyButton_| text based on |bubbleType_|.
+- (void)initializeLabelAndButton;
 
 - (NSString*)getLabelText;
 
@@ -96,12 +97,12 @@ const float kHideDuration = 0.7;
     [[self window] setIgnoresMouseEvents:YES];
 
   DCHECK(exclusive_access_bubble::ShowButtonsForType(bubbleType_));
-  browser_->fullscreen_controller()->OnAcceptFullscreenPermission();
+  browser_->exclusive_access_manager()->OnAcceptExclusiveAccessPermission();
 }
 
 - (void)deny:(id)sender {
   DCHECK(exclusive_access_bubble::ShowButtonsForType(bubbleType_));
-  browser_->fullscreen_controller()->OnDenyFullscreenPermission();
+  browser_->exclusive_access_manager()->OnDenyExclusiveAccessPermission();
 }
 
 - (void)showButtons:(BOOL)show {
@@ -121,7 +122,6 @@ const float kHideDuration = 0.7;
   InfoBubbleWindow* info_bubble = static_cast<InfoBubbleWindow*>([self window]);
   [info_bubble setCanBecomeKeyWindow:NO];
   if (!exclusive_access_bubble::ShowButtonsForType(bubbleType_)) {
-    [self showButtons:NO];
     [self hideSoon];
   }
   [tweaker_ tweakUI:info_bubble];
@@ -134,7 +134,7 @@ const float kHideDuration = 0.7;
 - (void)awakeFromNib {
   DCHECK([[self window] isKindOfClass:[InfoBubbleWindow class]]);
   [messageLabel_ setStringValue:[self getLabelText]];
-  [self initializeLabel];
+  [self initializeLabelAndButton];
 }
 
 - (void)positionInWindowAtTop:(CGFloat)maxY width:(CGFloat)maxWidth {
@@ -151,8 +151,9 @@ const float kHideDuration = 0.7;
 - (BOOL)textView:(NSTextView*)textView
     clickedOnLink:(id)link
           atIndex:(NSUInteger)charIndex {
-  browser_->fullscreen_controller()
-      ->ExitTabOrBrowserFullscreenToPreviousState();
+  browser_->exclusive_access_manager()
+      ->fullscreen_controller()
+      ->ExitExclusiveAccessToPreviousState();
   return YES;
 }
 
@@ -197,7 +198,7 @@ const float kHideDuration = 0.7;
 
 @implementation ExclusiveAccessBubbleWindowController (PrivateMethods)
 
-- (void)initializeLabel {
+- (void)initializeLabelAndButton {
   // Replace the label placeholder NSTextField with the real label NSTextView.
   // The former doesn't show links in a nice way, but the latter can't be added
   // in IB without a containing scroll view, so create the NSTextView
@@ -213,34 +214,36 @@ const float kHideDuration = 0.7;
   [exitLabel_.get() setDelegate:self];
 
   NSString* exitLinkText;
-  NSString* exitUnlinkedText;
+  NSString* exitLinkedText;
   if (bubbleType_ ==
           EXCLUSIVE_ACCESS_BUBBLE_TYPE_FULLSCREEN_MOUSELOCK_EXIT_INSTRUCTION ||
       bubbleType_ == EXCLUSIVE_ACCESS_BUBBLE_TYPE_MOUSELOCK_EXIT_INSTRUCTION) {
     exitLinkText = @"";
-    exitUnlinkedText =
+    exitLinkedText =
         [@" " stringByAppendingString:l10n_util::GetNSStringF(
                                           IDS_FULLSCREEN_PRESS_ESC_TO_EXIT,
                                           l10n_util::GetStringUTF16(
                                               IDS_APP_ESC_KEY))];
   } else {
     exitLinkText = l10n_util::GetNSString(IDS_EXIT_FULLSCREEN_MODE);
-    exitUnlinkedText =
-        [@" " stringByAppendingString:l10n_util::GetNSStringF(
-                                          IDS_EXIT_FULLSCREEN_MODE_ACCELERATOR,
-                                          l10n_util::GetStringUTF16(
-                                              IDS_APP_ESC_KEY))];
+    NSString* messageText = l10n_util::GetNSStringF(
+                                   IDS_EXIT_FULLSCREEN_MODE_ACCELERATOR,
+                                   l10n_util::GetStringUTF16(IDS_APP_ESC_KEY));
+    exitLinkedText =
+        [NSString stringWithFormat:@"%@ %@", exitLinkText, messageText];
   }
 
   NSFont* font = [NSFont
       systemFontOfSize:[NSFont
                            systemFontSizeForControlSize:NSRegularControlSize]];
-  [(HyperlinkTextView*)exitLabel_.get() setMessageAndLink:exitUnlinkedText
-                                                 withLink:exitLinkText
-                                                 atOffset:0
-                                                     font:font
-                                             messageColor:[NSColor blackColor]
-                                                linkColor:[NSColor blueColor]];
+  [exitLabel_.get() setMessage:exitLinkedText
+                      withFont:font
+                  messageColor:[NSColor blackColor]];
+  if ([exitLinkText length] != 0) {
+    [exitLabel_.get() addLinkRange:NSMakeRange(0, [exitLinkText length])
+                          withName:@""
+                         linkColor:[NSColor blueColor]];
+  }
   [exitLabel_.get() setAlignment:NSRightTextAlignment];
 
   NSRect labelFrame = [exitLabel_ frame];
@@ -258,6 +261,20 @@ const float kHideDuration = 0.7;
   labelFrame.origin.x += NSWidth(labelFrame) - NSWidth(textFrame);
   labelFrame.size = textFrame.size;
   [exitLabel_ setFrame:labelFrame];
+
+  // Update the title of |allowButton_| and |denyButton_| according to the
+  // current |bubbleType_|, or show no button at all.
+  if (exclusive_access_bubble::ShowButtonsForType(bubbleType_)) {
+    NSString* denyButtonText =
+      SysUTF16ToNSString(
+        exclusive_access_bubble::GetDenyButtonTextForType(bubbleType_));
+    [denyButton_ setTitle:denyButtonText];
+    NSString* allowButtonText = SysUTF16ToNSString(
+        exclusive_access_bubble::GetAllowButtonTextForType(bubbleType_, url_));
+    [allowButton_ setTitle:allowButtonText];
+  } else {
+    [self showButtons:NO];
+  }
 }
 
 - (NSString*)getLabelText {

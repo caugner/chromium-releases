@@ -15,18 +15,16 @@ var remoting = remoting || {};
  * because TLS support in chrome.sockets.tcp is currently broken, see
  * crbug.com/403076 .
  *
- * @param {function(remoting.SignalStrategy.State):void} onStateChangedCallback
- *   Callback to call on state change.
  * @constructor
  * @implements {remoting.SignalStrategy}
  */
-remoting.XmppConnection = function(onStateChangedCallback) {
+remoting.XmppConnection = function() {
   /** @private */
   this.server_ = '';
   /** @private */
   this.port_ = 0;
-  /** @private */
-  this.onStateChangedCallback_ = onStateChangedCallback;
+  /** @type {?function(remoting.SignalStrategy.State):void} @private */
+  this.onStateChangedCallback_ = null;
   /** @type {?function(Element):void} @private */
   this.onIncomingStanzaCallback_ = null;
   /** @private */
@@ -39,7 +37,7 @@ remoting.XmppConnection = function(onStateChangedCallback) {
   this.sendPending_ = false;
   /** @private */
   this.startTlsPending_ = false;
-  /** @type {Array.<ArrayBuffer>} @private */
+  /** @type {Array<ArrayBuffer>} @private */
   this.sendQueue_ = [];
   /** @type {remoting.XmppLoginHandler} @private*/
   this.loginHandler_ = null;
@@ -97,6 +95,14 @@ remoting.XmppConnection.FAKE_SSL_RESPONSE_ = [
 ];
 
 /**
+ * @param {function(remoting.SignalStrategy.State):void} onStateChangedCallback
+ */
+remoting.XmppConnection.prototype.setStateChangedCallback = function(
+    onStateChangedCallback) {
+  this.onStateChangedCallback_ = onStateChangedCallback;
+};
+
+/**
  * @param {?function(Element):void} onIncomingStanzaCallback Callback to call on
  *     incoming messages.
  */
@@ -113,6 +119,7 @@ remoting.XmppConnection.prototype.setIncomingStanzaCallback =
 remoting.XmppConnection.prototype.connect =
     function(server, username, authToken) {
   base.debug.assert(this.state_ == remoting.SignalStrategy.State.NOT_CONNECTED);
+  base.debug.assert(this.onStateChangedCallback_ != null);
 
   this.error_ = remoting.Error.NONE;
   var hostnameAndPort = server.split(':', 2);
@@ -150,6 +157,14 @@ remoting.XmppConnection.prototype.sendMessage = function(message) {
   this.sendString_(message);
 };
 
+/**
+ * @param {remoting.LogToServer} logToServer The LogToServer instance for the
+ *     connection.
+ */
+remoting.XmppConnection.prototype.sendConnectionSetupResults =
+    function(logToServer) {
+};
+
 /** @return {remoting.SignalStrategy.State} Current state */
 remoting.XmppConnection.prototype.getState = function() {
   return this.state_;
@@ -163,6 +178,11 @@ remoting.XmppConnection.prototype.getError = function() {
 /** @return {string} Current JID when in CONNECTED state. */
 remoting.XmppConnection.prototype.getJid = function() {
   return this.jid_;
+};
+
+/** @return {remoting.SignalStrategy.Type} The signal strategy type. */
+remoting.XmppConnection.prototype.getType = function() {
+  return remoting.SignalStrategy.Type.XMPP;
 };
 
 remoting.XmppConnection.prototype.dispose = function() {
@@ -286,7 +306,7 @@ remoting.XmppConnection.prototype.onRead_ = function(readInfo) {
         if (!responseMatches) {
           var formatted = "";
           for (var i = 0; i < this.fakeSslHandshakeResponse_.length; ++i) {
-            var x = /** @type {number} */ this.fakeSslHandshakeResponse_[i];
+            var x = /** @type {number} */ (this.fakeSslHandshakeResponse_[i]);
             formatted += " 0x" + x.toString(16);
           };
           console.error(
@@ -305,7 +325,8 @@ remoting.XmppConnection.prototype.onRead_ = function(readInfo) {
     this.streamParser_.appendData(readInfo.data);
   }
 
-  if (!this.startTlsPending_) {
+  if (!this.startTlsPending_ &&
+      this.state_ != remoting.SignalStrategy.State.CLOSED) {
     this.tryRead_();
   }
 };

@@ -332,13 +332,15 @@ void AutofillOptionsHandler::GetLocalizedValues(
                 IDS_AUTOFILL_OPTIONS_TITLE);
 
   localized_strings->SetString("helpUrl", autofill::kHelpURL);
+
+  personal_data_ = autofill::PersonalDataManagerFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()));
+
   SetAddressOverlayStrings(localized_strings);
   SetCreditCardOverlayStrings(localized_strings);
 
   localized_strings->SetBoolean(
-      "enableAutofillWalletIntegration",
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          autofill::switches::kEnableWalletCardImport));
+      "enableAutofillWalletIntegration", false);
   localized_strings->SetString(
       "manageWalletAddressesUrl",
       autofill::wallet::GetManageAddressesUrl(0).spec());
@@ -359,9 +361,6 @@ void AutofillOptionsHandler::InitializePage() {
 }
 
 void AutofillOptionsHandler::RegisterMessages() {
-  personal_data_ = autofill::PersonalDataManagerFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
-
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   web_ui()->RegisterMessageCallback(
       "accessAddressBook",
@@ -460,13 +459,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
   web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList", addresses);
 
   base::ListValue credit_cards;
-  const std::vector<CreditCard*>& cards = personal_data_->GetCreditCards();
-  for (std::vector<CreditCard*>::const_iterator iter = cards.begin();
-       iter != cards.end(); ++iter) {
-    const CreditCard* card = *iter;
-    if (card->record_type() != CreditCard::LOCAL_CARD)
-      continue;
-
+  const std::vector<CreditCard*>& cards = personal_data_->GetLocalCreditCards();
+  for (const CreditCard* card : cards) {
     // TODO(estade): this should be a dictionary.
     base::ListValue* entry = new base::ListValue();
     entry->Append(new base::StringValue(card->guid()));
@@ -697,15 +691,7 @@ void AutofillOptionsHandler::ValidatePhoneNumbers(const base::ListValue* args) {
 }
 
 void AutofillOptionsHandler::RemaskServerCards(const base::ListValue* args) {
-  const std::vector<CreditCard*>& cards = personal_data_->GetCreditCards();
-  for (const auto card : cards) {
-    CreditCard card_copy = *card;
-    if (card_copy.record_type() == CreditCard::FULL_SERVER_CARD) {
-      card_copy.set_record_type(CreditCard::MASKED_SERVER_CARD);
-      card_copy.SetNumber(card->LastFourDigits());
-      personal_data_->UpdateServerCreditCard(card_copy);
-    }
-  }
+  personal_data_->ResetFullServerCards();
 }
 
 bool AutofillOptionsHandler::IsPersonalDataLoaded() const {

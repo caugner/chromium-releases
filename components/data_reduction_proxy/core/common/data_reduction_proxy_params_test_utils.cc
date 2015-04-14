@@ -6,20 +6,20 @@
 
 namespace {
 // Test values to replace the values specified in preprocessor defines.
-static const char kDefaultDevOrigin[] = "https://dev.net:443/";
-static const char kDefaultDevFallbackOrigin[] = "http://dev.net:80/";
-static const char kDefaultOrigin[] = "http://origin.net:80/";
-static const char kDefaultFallbackOrigin[] = "http://fallback.net:80/";
-static const char kDefaultSSLOrigin[] = "http://ssl.net:1080/";
-static const char kDefaultAltOrigin[] = "https://alt.net:443/";
-static const char kDefaultAltFallbackOrigin[] = "http://altfallback.net:80/";
+static const char kDefaultDevOrigin[] = "https://dev.net:443";
+static const char kDefaultDevFallbackOrigin[] = "dev.net:80";
+static const char kDefaultOrigin[] = "origin.net:80";
+static const char kDefaultFallbackOrigin[] = "fallback.net:80";
+static const char kDefaultSSLOrigin[] = "ssl.net:1080";
+static const char kDefaultAltOrigin[] = "https://alt.net:443";
+static const char kDefaultAltFallbackOrigin[] = "altfallback.net:80";
 static const char kDefaultProbeURL[] = "http://probe.net/";
 
-static const char kFlagOrigin[] = "https://origin.org:443/";
-static const char kFlagFallbackOrigin[] = "http://fallback.org:80/";
-static const char kFlagSSLOrigin[] = "http://ssl.org:1080/";
-static const char kFlagAltOrigin[] = "https://alt.org:443/";
-static const char kFlagAltFallbackOrigin[] = "http://altfallback.org:80/";
+static const char kFlagOrigin[] = "https://origin.org:443";
+static const char kFlagFallbackOrigin[] = "fallback.org:80";
+static const char kFlagSSLOrigin[] = "ssl.org:1080";
+static const char kFlagAltOrigin[] = "https://alt.org:443";
+static const char kFlagAltFallbackOrigin[] = "altfallback.org:80";
 static const char kFlagProbeURL[] = "http://probe.org/";
 }
 
@@ -27,7 +27,11 @@ namespace data_reduction_proxy {
 TestDataReductionProxyParams::TestDataReductionProxyParams(
     int flags, unsigned int has_definitions)
     : DataReductionProxyParams(flags, false),
-      has_definitions_(has_definitions) {
+      has_definitions_(has_definitions),
+      mock_is_bypassed_by_data_reduction_proxy_local_rules_(false),
+      mock_are_data_reduction_proxies_bypassed_(false),
+      is_bypassed_by_data_reduction_proxy_local_rules_return_value_(false),
+      are_data_reduction_proxies_bypassed_return_value_(false) {
     init_result_ = Init(
         flags & DataReductionProxyParams::kAllowed,
         flags & DataReductionProxyParams::kFallbackAllowed,
@@ -37,6 +41,38 @@ TestDataReductionProxyParams::TestDataReductionProxyParams(
 
 bool TestDataReductionProxyParams::init_result() const {
   return init_result_;
+}
+
+bool TestDataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
+    const net::URLRequest& request,
+    const net::ProxyConfig& data_reduction_proxy_config) const {
+  if (mock_is_bypassed_by_data_reduction_proxy_local_rules_)
+    return is_bypassed_by_data_reduction_proxy_local_rules_return_value_;
+  return DataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
+      request, data_reduction_proxy_config);
+}
+
+bool TestDataReductionProxyParams::AreDataReductionProxiesBypassed(
+    const net::URLRequest& request,
+    const net::ProxyConfig& data_reduction_proxy_config,
+    base::TimeDelta* min_retry_delay) const {
+  if (mock_are_data_reduction_proxies_bypassed_)
+    return are_data_reduction_proxies_bypassed_return_value_;
+  return DataReductionProxyParams::AreDataReductionProxiesBypassed(
+      request, data_reduction_proxy_config, min_retry_delay);
+}
+
+void TestDataReductionProxyParams::MockAreDataReductionProxiesBypassed(
+    bool return_value) {
+  mock_are_data_reduction_proxies_bypassed_ = true;
+  are_data_reduction_proxies_bypassed_return_value_ = return_value;
+}
+
+void
+TestDataReductionProxyParams::MockIsBypassedByDataReductionProxyLocalRules(
+    bool return_value) {
+  mock_is_bypassed_by_data_reduction_proxy_local_rules_ = true;
+  is_bypassed_by_data_reduction_proxy_local_rules_return_value_ = return_value;
 }
 
 // Test values to replace the values specified in preprocessor defines.
@@ -96,12 +132,12 @@ std::string TestDataReductionProxyParams::FlagProbeURL() {
   return kFlagProbeURL;
 }
 
-void TestDataReductionProxyParams::set_origin(const GURL& origin) {
+void TestDataReductionProxyParams::set_origin(const net::ProxyServer& origin) {
   origin_ = origin;
 }
 
 void TestDataReductionProxyParams::set_fallback_origin(
-    const GURL& fallback_origin) {
+    const net::ProxyServer& fallback_origin) {
  fallback_origin_ = fallback_origin;
 }
 

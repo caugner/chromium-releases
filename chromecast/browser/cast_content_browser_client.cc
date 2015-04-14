@@ -15,6 +15,7 @@
 #include "chromecast/browser/cast_browser_main_parts.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_network_delegate.h"
+#include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
 #include "chromecast/browser/devtools/cast_dev_tools_delegate.h"
 #include "chromecast/browser/geolocation/cast_access_token_store.h"
 #include "chromecast/browser/media/cma_message_filter_host.h"
@@ -24,10 +25,11 @@
 #include "chromecast/common/global_descriptors.h"
 #include "components/crash/app/breakpad_linux.h"
 #include "components/crash/browser/crash_handler_host_linux.h"
-#include "components/dns_prefetch/browser/net_message_filter.h"
+#include "components/network_hints/browser/network_hints_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -64,15 +66,20 @@ content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
 
 void CastContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
-  scoped_refptr<content::BrowserMessageFilter> net_message_filter(
-      new dns_prefetch::NetMessageFilter(
+  scoped_refptr<content::BrowserMessageFilter> network_hints_message_filter(
+      new network_hints::NetworkHintsMessageFilter(
           url_request_context_factory_->host_resolver()));
-  host->AddFilter(net_message_filter.get());
+  host->AddFilter(network_hints_message_filter.get());
 #if !defined(OS_ANDROID)
   scoped_refptr<media::CmaMessageFilterHost> cma_message_filter(
       new media::CmaMessageFilterHost(host->GetID()));
   host->AddFilter(cma_message_filter.get());
 #endif  // !defined(OS_ANDROID)
+
+  auto extra_filters = PlatformGetBrowserMessageFilters();
+  for (auto const& filter : extra_filters) {
+    host->AddFilter(filter.get());
+  }
 }
 
 net::URLRequestContextGetter* CastContentBrowserClient::CreateRequestContext(
@@ -135,6 +142,8 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
     if (browser_command_line->HasSwitch(switches::kEnableCmaMediaPipeline))
       command_line->AppendSwitch(switches::kEnableCmaMediaPipeline);
   }
+
+  PlatformAppendExtraCommandLineSwitches(command_line);
 }
 
 content::AccessTokenStore* CastContentBrowserClient::CreateAccessTokenStore() {
@@ -144,7 +153,6 @@ content::AccessTokenStore* CastContentBrowserClient::CreateAccessTokenStore() {
 
 void CastContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* render_view_host,
-    const GURL& url,
     content::WebPreferences* prefs) {
   prefs->allow_scripts_to_close_windows = true;
   // TODO(lcwu): http://crbug.com/391089. This pref is set to true by default
@@ -152,10 +160,13 @@ void CastContentBrowserClient::OverrideWebkitPrefs(
   // to retrieve media data chunks while running in a https page. This pref
   // should be disabled once all the content providers are no longer doing that.
   prefs->allow_running_insecure_content = true;
-#if defined(DISABLE_DISPLAY)
-  prefs->images_enabled = false;
-  prefs->loads_images_automatically = false;
-#endif  // defined(DISABLE_DISPLAY)
+}
+
+void CastContentBrowserClient::ResourceDispatcherHostCreated() {
+  CastBrowserProcess::GetInstance()->SetResourceDispatcherHostDelegate(
+      make_scoped_ptr(new CastResourceDispatcherHostDelegate));
+  content::ResourceDispatcherHost::Get()->SetDelegate(
+      CastBrowserProcess::GetInstance()->resource_dispatcher_host_delegate());
 }
 
 std::string CastContentBrowserClient::GetApplicationLocale() {

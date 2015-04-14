@@ -11,6 +11,7 @@
 #include "chrome/browser/password_manager/password_manager_util.h"
 #include "chrome/browser/password_manager/sync_metrics.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
@@ -38,6 +39,10 @@
 #if defined(USE_GNOME_KEYRING)
 #include "chrome/browser/password_manager/native_backend_gnome_x.h"
 #endif
+#if defined(USE_LIBSECRET)
+#include "base/metrics/field_trial.h"
+#include "chrome/browser/password_manager/native_backend_libsecret.h"
+#endif
 #include "chrome/browser/password_manager/native_backend_kwallet_x.h"
 #include "chrome/browser/password_manager/password_store_x.h"
 #endif
@@ -49,6 +54,11 @@ namespace {
 #if !defined(OS_CHROMEOS) && defined(USE_X11)
 const LocalProfileId kInvalidLocalProfileId =
     static_cast<LocalProfileId>(0);
+#endif
+
+#if defined(USE_LIBSECRET)
+const char kLibsecretFieldTrialName[] = "Libsecret";
+const char kLibsecretFieldTrialDisabledGroupName[] = "Disabled";
 #endif
 
 void ReportOsPassword(password_manager_util::OsPasswordStatus status) {
@@ -89,8 +99,8 @@ void PasswordStoreService::Shutdown() {
 // static
 scoped_refptr<PasswordStore> PasswordStoreFactory::GetForProfile(
     Profile* profile,
-    Profile::ServiceAccessType sat) {
-  if (sat == Profile::IMPLICIT_ACCESS && profile->IsOffTheRecord()) {
+    ServiceAccessType sat) {
+  if (sat == ServiceAccessType::IMPLICIT_ACCESS && profile->IsOffTheRecord()) {
     NOTREACHED() << "This profile is OffTheRecord";
     return NULL;
   }
@@ -145,19 +155,12 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
   DelayReportOsPassword();
   Profile* profile = static_cast<Profile*>(context);
 
+  // Given that LoginDatabase::Init() takes ~100ms on average; it will be called
+  // by PasswordStore::Init() on the background thread to avoid UI jank.
   base::FilePath login_db_file_path = profile->GetPath();
   login_db_file_path = login_db_file_path.Append(chrome::kLoginDataFileName);
   scoped_ptr<password_manager::LoginDatabase> login_db(
-      new password_manager::LoginDatabase());
-  {
-    // TODO(paivanof@gmail.com): execution of login_db->Init() should go
-    // to DB thread. http://crbug.com/138903
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    if (!login_db->Init(login_db_file_path)) {
-      LOG(ERROR) << "Could not initialize login database.";
-      return NULL;
-    }
-  }
+      new password_manager::LoginDatabase(login_db_file_path));
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner(
       base::MessageLoopProxy::current());
@@ -167,42 +170,42 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
 
   scoped_refptr<PasswordStore> ps;
 #if defined(OS_WIN)
-  ps = new PasswordStoreWin(main_thread_runner,
-                            db_thread_runner,
-                            login_db.release(),
+  ps = new PasswordStoreWin(main_thread_runner, db_thread_runner,
+                            login_db.Pass(),
                             WebDataServiceFactory::GetPasswordWebDataForProfile(
-                                profile, Profile::EXPLICIT_ACCESS));
+                                profile, ServiceAccessType::EXPLICIT_ACCESS));
 #elif defined(OS_MACOSX)
-  crypto::AppleKeychain* keychain =
+  scoped_ptr<crypto::AppleKeychain> keychain(
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           os_crypt::switches::kUseMockKeychain)
           ? new crypto::MockAppleKeychain()
-          : new crypto::AppleKeychain();
-  ps = new PasswordStoreMac(
-      main_thread_runner, db_thread_runner, keychain, login_db.release());
+          : new crypto::AppleKeychain());
+  ps = new PasswordStoreMac(main_thread_runner, db_thread_runner,
+                            keychain.Pass(), login_db.Pass());
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
   // For now, we use PasswordStoreDefault. We might want to make a native
   // backend for PasswordStoreX (see below) in the future though.
   ps = new password_manager::PasswordStoreDefault(
-      main_thread_runner, db_thread_runner, login_db.release());
+      main_thread_runner, db_thread_runner, login_db.Pass());
 #elif defined(USE_X11)
   // On POSIX systems, we try to use the "native" password management system of
   // the desktop environment currently running, allowing GNOME Keyring in XFCE.
   // (In all cases we fall back on the basic store in case of failure.)
-  base::nix::DesktopEnvironment desktop_env;
+  base::nix::DesktopEnvironment desktop_env = GetDesktopEnvironment();
+  base::nix::DesktopEnvironment used_desktop_env;
   std::string store_type =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kPasswordStore);
+  LinuxBackendUsed used_backend = PLAINTEXT;
   if (store_type == "kwallet") {
-    desktop_env = base::nix::DESKTOP_ENVIRONMENT_KDE4;
+    used_desktop_env = base::nix::DESKTOP_ENVIRONMENT_KDE4;
   } else if (store_type == "gnome") {
-    desktop_env = base::nix::DESKTOP_ENVIRONMENT_GNOME;
+    used_desktop_env = base::nix::DESKTOP_ENVIRONMENT_GNOME;
   } else if (store_type == "basic") {
-    desktop_env = base::nix::DESKTOP_ENVIRONMENT_OTHER;
+    used_desktop_env = base::nix::DESKTOP_ENVIRONMENT_OTHER;
   } else {
     // Detect the store to use automatically.
-    scoped_ptr<base::Environment> env(base::Environment::Create());
-    desktop_env = base::nix::GetDesktopEnvironment(env.get());
+    used_desktop_env = desktop_env;
     const char* name = base::nix::GetDesktopEnvironmentName(desktop_env);
     VLOG(1) << "Password storage detected desktop environment: "
             << (name ? name : "(unknown)");
@@ -212,25 +215,41 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
   LocalProfileId id = GetLocalProfileId(prefs);
 
   scoped_ptr<PasswordStoreX::NativeBackend> backend;
-  if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE4) {
+  if (used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE4) {
     // KDE3 didn't use DBus, which our KWallet store uses.
     VLOG(1) << "Trying KWallet for password storage.";
     backend.reset(new NativeBackendKWallet(id));
-    if (backend->Init())
+    if (backend->Init()) {
       VLOG(1) << "Using KWallet for password storage.";
-    else
+      used_backend = KWALLET;
+    } else
       backend.reset();
-  } else if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
-             desktop_env == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
-             desktop_env == base::nix::DESKTOP_ENVIRONMENT_XFCE) {
+  } else if (used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
+             used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
+             used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_XFCE) {
+#if defined(USE_LIBSECRET)
+    if (base::FieldTrialList::FindFullName(kLibsecretFieldTrialName) !=
+        kLibsecretFieldTrialDisabledGroupName) {
+      VLOG(1) << "Trying libsecret for password storage.";
+      backend.reset(new NativeBackendLibsecret(id));
+      if (backend->Init()) {
+        VLOG(1) << "Using libsecret keyring for password storage.";
+        used_backend = LIBSECRET;
+      } else
+        backend.reset();
+    }
+#endif  // defined(USE_LIBSECRET)
+    if (!backend.get()) {
 #if defined(USE_GNOME_KEYRING)
-    VLOG(1) << "Trying GNOME keyring for password storage.";
-    backend.reset(new NativeBackendGnome(id));
-    if (backend->Init())
-      VLOG(1) << "Using GNOME keyring for password storage.";
-    else
-      backend.reset();
+      VLOG(1) << "Trying GNOME keyring for password storage.";
+      backend.reset(new NativeBackendGnome(id));
+      if (backend->Init()) {
+        VLOG(1) << "Using GNOME keyring for password storage.";
+        used_backend = GNOME_KEYRING;
+      } else
+        backend.reset();
 #endif  // defined(USE_GNOME_KEYRING)
+    }
   }
 
   if (!backend.get()) {
@@ -239,13 +258,12 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
         "more information about password storage options.";
   }
 
-  ps = new PasswordStoreX(main_thread_runner,
-                          db_thread_runner,
-                          login_db.release(),
+  ps = new PasswordStoreX(main_thread_runner, db_thread_runner, login_db.Pass(),
                           backend.release());
+  RecordBackendStatistics(desktop_env, store_type, used_backend);
 #elif defined(USE_OZONE)
   ps = new password_manager::PasswordStoreDefault(
-      main_thread_runner, db_thread_runner, login_db.release());
+      main_thread_runner, db_thread_runner, login_db.Pass());
 #else
   NOTIMPLEMENTED();
 #endif
@@ -279,3 +297,70 @@ content::BrowserContext* PasswordStoreFactory::GetBrowserContextToUse(
 bool PasswordStoreFactory::ServiceIsNULLWhileTesting() const {
   return true;
 }
+
+#if defined(USE_X11)
+base::nix::DesktopEnvironment PasswordStoreFactory::GetDesktopEnvironment() {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  return base::nix::GetDesktopEnvironment(env.get());
+}
+
+void PasswordStoreFactory::RecordBackendStatistics(
+    base::nix::DesktopEnvironment desktop_env,
+    const std::string& command_line_flag,
+    LinuxBackendUsed used_backend) {
+  LinuxBackendUsage usage = OTHER_PLAINTEXT;
+  if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE4) {
+    if (command_line_flag == "kwallet") {
+      usage = used_backend == KWALLET ? KDE_KWALLETFLAG_KWALLET
+                                      : KDE_KWALLETFLAG_PLAINTEXT;
+    } else if (command_line_flag == "gnome") {
+      usage = used_backend == PLAINTEXT
+                  ? KDE_GNOMEFLAG_PLAINTEXT
+                  : (used_backend == GNOME_KEYRING ? KDE_GNOMEFLAG_KEYRING
+                                                   : KDE_GNOMEFLAG_LIBSECRET);
+    } else if (command_line_flag == "basic") {
+      usage = KDE_BASICFLAG_PLAINTEXT;
+    } else {
+      usage =
+          used_backend == KWALLET ? KDE_NOFLAG_KWALLET : KDE_NOFLAG_PLAINTEXT;
+    }
+  } else if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
+             desktop_env == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
+             desktop_env == base::nix::DESKTOP_ENVIRONMENT_XFCE) {
+    if (command_line_flag == "kwallet") {
+      usage = used_backend == KWALLET ? GNOME_KWALLETFLAG_KWALLET
+                                      : GNOME_KWALLETFLAG_PLAINTEXT;
+    } else if (command_line_flag == "gnome") {
+      usage = used_backend == PLAINTEXT
+                  ? GNOME_GNOMEFLAG_PLAINTEXT
+                  : (used_backend == GNOME_KEYRING ? GNOME_GNOMEFLAG_KEYRING
+                                                   : GNOME_GNOMEFLAG_LIBSECRET);
+    } else if (command_line_flag == "basic") {
+      usage = GNOME_BASICFLAG_PLAINTEXT;
+    } else {
+      usage = used_backend == PLAINTEXT
+                  ? GNOME_NOFLAG_PLAINTEXT
+                  : (used_backend == GNOME_KEYRING ? GNOME_NOFLAG_KEYRING
+                                                   : GNOME_NOFLAG_LIBSECRET);
+    }
+  } else {
+    // It is neither Gnome nor KDE environment.
+    switch (used_backend) {
+      case PLAINTEXT:
+        usage = OTHER_PLAINTEXT;
+        break;
+      case KWALLET:
+        usage = OTHER_KWALLET;
+        break;
+      case GNOME_KEYRING:
+        usage = OTHER_KEYRING;
+        break;
+      case LIBSECRET:
+        usage = OTHER_LIBSECRET;
+        break;
+    }
+  }
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.LinuxBackendStatistics", usage,
+                            MAX_BACKEND_USAGE_VALUE);
+}
+#endif

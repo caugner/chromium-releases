@@ -41,12 +41,6 @@ namespace base {
 class SequencedTaskRunner;
 }
 
-namespace data_reduction_proxy {
-class DataReductionProxyParams;
-}
-
-class DataReductionProxyChromeSettings;
-
 namespace domain_reliability {
 class DomainReliabilityMonitor;
 }
@@ -99,7 +93,7 @@ class ProfileImpl : public Profile {
   scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
   // Note that this implementation returns the Google-services username, if any,
   // not the Chrome user's display name.
-  std::string GetProfileName() override;
+  std::string GetProfileUserName() const override;
   ProfileType GetProfileType() const override;
   bool IsOffTheRecord() const override;
   Profile* GetOffTheRecordProfile() override;
@@ -109,10 +103,9 @@ class ProfileImpl : public Profile {
   bool IsSupervised() override;
   bool IsChild() override;
   bool IsLegacySupervised() override;
-  history::TopSites* GetTopSites() override;
-  history::TopSites* GetTopSitesWithoutCreating() override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
+  const PrefService* GetPrefs() const override;
   chrome::ChromeZoomLevelPrefs* GetZoomLevelPrefs() override;
   PrefService* GetOffTheRecordPrefs() override;
   net::URLRequestContextGetter* GetRequestContextForExtensions() override;
@@ -140,10 +133,9 @@ class ProfileImpl : public Profile {
   ExitType GetLastSessionExitType() override;
 
 #if defined(OS_CHROMEOS)
-  virtual void ChangeAppLocale(const std::string& locale,
-                               AppLocaleChangedVia) override;
-  virtual void OnLogin() override;
-  virtual void InitChromeOSPreferences() override;
+  void ChangeAppLocale(const std::string& locale, AppLocaleChangedVia) override;
+  void OnLogin() override;
+  void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
 
   PrefProxyConfigTracker* GetProxyConfigTracker() override;
@@ -255,8 +247,6 @@ class ProfileImpl : public Profile {
 
   // See GetStartTime for details.
   base::Time start_time_;
-
-  scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<chromeos::Preferences> chromeos_preferences_;

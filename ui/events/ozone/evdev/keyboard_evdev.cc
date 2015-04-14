@@ -6,8 +6,10 @@
 
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
+#include "ui/events/ozone/evdev/keyboard_util_evdev.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 #include "ui/events/ozone/layout/layout_util.h"
@@ -15,8 +17,6 @@
 namespace ui {
 
 namespace {
-
-const int kXkbKeycodeOffset = 8;
 
 const int kRepeatDelayMs = 500;
 const int kRepeatIntervalMs = 50;
@@ -39,15 +39,15 @@ int EventFlagToEvdevModifier(int flag) {
       return EVDEV_MODIFIER_MIDDLE_MOUSE_BUTTON;
     case EF_RIGHT_MOUSE_BUTTON:
       return EVDEV_MODIFIER_RIGHT_MOUSE_BUTTON;
+    case EF_BACK_MOUSE_BUTTON:
+      return EVDEV_MODIFIER_BACK_MOUSE_BUTTON;
+    case EF_FORWARD_MOUSE_BUTTON:
+      return EVDEV_MODIFIER_FORWARD_MOUSE_BUTTON;
     case EF_COMMAND_DOWN:
       return EVDEV_MODIFIER_COMMAND;
     default:
       return EVDEV_MODIFIER_NONE;
   }
-}
-
-bool IsModifierLock(int evdev_modifier) {
-  return evdev_modifier == EVDEV_MODIFIER_CAPS_LOCK;
 }
 
 }  // namespace
@@ -67,7 +67,9 @@ KeyboardEvdev::KeyboardEvdev(EventModifiersEvdev* modifiers,
 KeyboardEvdev::~KeyboardEvdev() {
 }
 
-void KeyboardEvdev::OnKeyChange(unsigned int key, bool down) {
+void KeyboardEvdev::OnKeyChange(unsigned int key,
+                                bool down,
+                                base::TimeDelta timestamp) {
   if (key > KEY_MAX)
     return;
 
@@ -81,7 +83,7 @@ void KeyboardEvdev::OnKeyChange(unsigned int key, bool down) {
     key_state_.reset(key);
 
   UpdateKeyRepeat(key, down);
-  DispatchKey(key, down, false /* repeat */);
+  DispatchKey(key, down, false /* repeat */, timestamp);
 }
 
 void KeyboardEvdev::SetCapsLockEnabled(bool enabled) {
@@ -120,8 +122,15 @@ void KeyboardEvdev::UpdateModifier(int modifier_flag, bool down) {
   if (modifier == EVDEV_MODIFIER_NONE)
     return;
 
-  if (IsModifierLock(modifier))
-    modifiers_->UpdateModifierLock(modifier, down);
+  // TODO post-X11: Revise remapping to not use EF_MOD3_DOWN.
+  // Currently EF_MOD3_DOWN means that the CapsLock key is currently down,
+  // and EF_CAPS_LOCK_DOWN means the caps lock state is enabled (and the
+  // key may or may not be down, but usually isn't). There does need to
+  // to be two different flags, since the physical CapsLock key is subject
+  // to remapping, but the caps lock state (which can be triggered in a
+  // variety of ways) is not.
+  if (modifier == EVDEV_MODIFIER_CAPS_LOCK)
+    modifiers_->UpdateModifier(EVDEV_MODIFIER_MOD3, down);
   else
     modifiers_->UpdateModifier(modifier, down);
 }
@@ -150,7 +159,8 @@ void KeyboardEvdev::StopKeyRepeat() {
 }
 
 void KeyboardEvdev::OnRepeatDelayTimeout() {
-  DispatchKey(repeat_key_, true /* down */, true /* repeat */);
+  DispatchKey(repeat_key_, true /* down */, true /* repeat */,
+              EventTimeForNow());
 
   repeat_interval_timer_.Start(
       FROM_HERE, repeat_interval_,
@@ -159,12 +169,16 @@ void KeyboardEvdev::OnRepeatDelayTimeout() {
 }
 
 void KeyboardEvdev::OnRepeatIntervalTimeout() {
-  DispatchKey(repeat_key_, true /* down */, true /* repeat */);
+  DispatchKey(repeat_key_, true /* down */, true /* repeat */,
+              EventTimeForNow());
 }
 
-void KeyboardEvdev::DispatchKey(unsigned int key, bool down, bool repeat) {
+void KeyboardEvdev::DispatchKey(unsigned int key,
+                                bool down,
+                                bool repeat,
+                                base::TimeDelta timestamp) {
   DomCode dom_code =
-      KeycodeConverter::NativeKeycodeToDomCode(key + kXkbKeycodeOffset);
+      KeycodeConverter::NativeKeycodeToDomCode(EvdevCodeToNativeCode(key));
   // DomCode constants are not included here because of conflicts with
   // evdev preprocessor macros.
   if (!static_cast<int>(dom_code))
@@ -181,20 +195,11 @@ void KeyboardEvdev::DispatchKey(unsigned int key, bool down, bool repeat) {
   if (!repeat)
     UpdateModifier(ModifierDomKeyToEventFlag(dom_key), down);
 
-  KeyEvent* event =
-      new KeyEvent(down ? ET_KEY_PRESSED : ET_KEY_RELEASED, key_code, dom_code,
-                   modifiers_->GetModifierFlags(), dom_key, character);
+  KeyEvent event(down ? ET_KEY_PRESSED : ET_KEY_RELEASED, key_code, dom_code,
+                 modifiers_->GetModifierFlags(), dom_key, character, timestamp);
   if (platform_keycode)
-    event->set_platform_keycode(platform_keycode);
-  callback_.Run(make_scoped_ptr(event));
-}
-
-// static
-int KeyboardEvdev::NativeCodeToEvdevCode(int native_code) {
-  if (native_code == KeycodeConverter::InvalidNativeKeycode()) {
-    return KEY_RESERVED;
-  }
-  return native_code - kXkbKeycodeOffset;
+    event.set_platform_keycode(platform_keycode);
+  callback_.Run(&event);
 }
 
 }  // namespace ui

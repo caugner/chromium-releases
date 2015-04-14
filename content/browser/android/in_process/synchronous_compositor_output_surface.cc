@@ -38,11 +38,10 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
   SoftwareDevice(SynchronousCompositorOutputSurface* surface)
     : surface_(surface) {
   }
-  virtual void Resize(const gfx::Size& pixel_size,
-                      float scale_factor) override {
+  void Resize(const gfx::Size& pixel_size, float scale_factor) override {
     // Intentional no-op: canvas size is controlled by the embedder.
   }
-  virtual SkCanvas* BeginPaint(const gfx::Rect& damage_rect) override {
+  SkCanvas* BeginPaint(const gfx::Rect& damage_rect) override {
     if (!surface_->current_sw_canvas_) {
       NOTREACHED() << "BeginPaint with no canvas set";
       return &null_canvas_;
@@ -51,9 +50,8 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
         << "Mutliple calls to BeginPaint per frame";
     return surface_->current_sw_canvas_;
   }
-  virtual void EndPaint(cc::SoftwareFrameData* frame_data) override {
-  }
-  virtual void CopyToPixels(const gfx::Rect& rect, void* pixels) override {
+  void EndPaint(cc::SoftwareFrameData* frame_data) override {}
+  void CopyToPixels(const gfx::Rect& rect, void* pixels) override {
     NOTIMPLEMENTED();
   }
 
@@ -138,12 +136,14 @@ void AdjustTransform(gfx::Transform* transform, gfx::Rect viewport) {
 } // namespace
 
 bool SynchronousCompositorOutputSurface::InitializeHwDraw(
-    scoped_refptr<cc::ContextProvider> onscreen_context_provider) {
+    scoped_refptr<cc::ContextProvider> onscreen_context_provider,
+    scoped_refptr<cc::ContextProvider> worker_context_provider) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
   DCHECK(!context_provider_.get());
 
-  return InitializeAndSetContext3d(onscreen_context_provider);
+  return InitializeAndSetContext3d(onscreen_context_provider,
+                                   worker_context_provider);
 }
 
 void SynchronousCompositorOutputSurface::ReleaseHwDraw() {

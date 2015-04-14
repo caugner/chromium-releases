@@ -21,11 +21,12 @@ class Point;
 namespace ui {
 
 class ChannelObserver;
+class DriCursor;
 
 class DriGpuPlatformSupportHost : public GpuPlatformSupportHost,
                                   public IPC::Sender {
  public:
-  DriGpuPlatformSupportHost();
+  DriGpuPlatformSupportHost(DriCursor* cursor);
   ~DriGpuPlatformSupportHost() override;
 
   void RegisterHandler(GpuPlatformSupportHost* handler);
@@ -49,21 +50,14 @@ class DriGpuPlatformSupportHost : public GpuPlatformSupportHost,
   // IPC::Sender:
   bool Send(IPC::Message* message) override;
 
-  // Cursor-related methods.
-  void SetHardwareCursor(gfx::AcceleratedWidget widget,
-                         const std::vector<SkBitmap>& bitmaps,
-                         const gfx::Point& location,
-                         int frame_delay_ms);
-  void MoveHardwareCursor(gfx::AcceleratedWidget widget,
-                          const gfx::Point& location);
-
  private:
   int host_id_;
 
   scoped_refptr<base::SingleThreadTaskRunner> send_runner_;
   base::Callback<void(IPC::Message*)> send_callback_;
 
-  std::vector<GpuPlatformSupportHost*> handlers_;
+  std::vector<GpuPlatformSupportHost*> handlers_;  // Not owned.
+  DriCursor* cursor_;                              // Not owned.
   ObserverList<ChannelObserver> channel_observers_;
 };
 

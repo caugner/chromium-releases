@@ -18,17 +18,19 @@ import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory
 import org.chromium.chrome.browser.identity.UuidBasedUniqueIdentificationGenerator;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellTestBase;
-import org.chromium.chrome.shell.sync.SyncController;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
-import org.chromium.sync.notifier.SyncStatusHelper;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.sync.AndroidSyncSettings;
+import org.chromium.sync.internal_api.pub.base.ModelType;
 import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.sync.test.util.MockAccountManager;
 import org.chromium.sync.test.util.MockSyncContentResolverDelegate;
+import org.chromium.ui.base.PageTransition;
 
 import java.util.concurrent.TimeoutException;
 
@@ -44,6 +46,7 @@ public class SyncTest extends ChromeShellTestBase {
     private SyncTestUtil.SyncTestContext mContext;
     private MockAccountManager mAccountManager;
     private SyncController mSyncController;
+    private FakeServerHelper mFakeServerHelper;
 
     @Override
     protected void setUp() throws Exception {
@@ -58,7 +61,8 @@ public class SyncTest extends ChromeShellTestBase {
         MockSyncContentResolverDelegate syncContentResolverDelegate =
                 new MockSyncContentResolverDelegate();
         syncContentResolverDelegate.setMasterSyncAutomatically(true);
-        SyncStatusHelper.overrideSyncStatusHelperForTests(mContext, syncContentResolverDelegate);
+        AndroidSyncSettings.overrideAndroidSyncSettingsForTests(
+                mContext, syncContentResolverDelegate);
         // This call initializes the ChromeSigninController to use our test context.
         ChromeSigninController.get(mContext);
         startChromeBrowserProcessSync(getInstrumentation().getTargetContext());
@@ -66,6 +70,7 @@ public class SyncTest extends ChromeShellTestBase {
             @Override
             public void run() {
                 mSyncController = SyncController.get(mContext);
+                mFakeServerHelper = FakeServerHelper.get();
             }
         });
         FakeServerHelper.useFakeServer(getInstrumentation().getTargetContext());
@@ -172,13 +177,46 @@ public class SyncTest extends ChromeShellTestBase {
                 AccountManagerHelper.createAccountFromName(SyncTestUtil.DEFAULT_TEST_ACCOUNT);
 
         // Disabling Android sync should turn Chrome sync engine off.
-        SyncStatusHelper.get(mContext).disableAndroidSync(account);
+        AndroidSyncSettings.get(mContext).disableChromeSync(account);
         SyncTestUtil.verifySyncIsDisabled(mContext, account);
 
         // Enabling Android sync should turn Chrome sync engine on.
-        SyncStatusHelper.get(mContext).enableAndroidSync(account);
+        AndroidSyncSettings.get(mContext).enableChromeSync(account);
         SyncTestUtil.ensureSyncInitialized(mContext);
         SyncTestUtil.verifySignedInWithAccount(mContext, account);
+    }
+
+    @LargeTest
+    @Feature({"Sync"})
+    public void testUploadTypedUrl() throws Exception {
+        setupTestAccountAndSignInToSync(FOREIGN_SESSION_TEST_MACHINE_ID);
+
+        // TestHttpServerClient is preferred here but it can't be used. The test server
+        // serves pages on localhost and Chrome doesn't sync localhost URLs as typed URLs.
+        // This type of URL requires no external data connection or resources.
+        final String urlToLoad = "data:text,testTypedUrl";
+        assertTrue("A typed URL entity for " + urlToLoad + " already exists on the fake server.",
+                mFakeServerHelper.verifyEntityCountByTypeAndName(0, ModelType.TYPED_URL,
+                        urlToLoad));
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                LoadUrlParams params = new LoadUrlParams(urlToLoad, PageTransition.TYPED);
+                getActivity().getActiveTab().loadUrl(params);
+            }
+        });
+
+        boolean synced = CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mFakeServerHelper.verifyEntityCountByTypeAndName(1, ModelType.TYPED_URL,
+                        urlToLoad);
+            }
+        }, SyncTestUtil.UI_TIMEOUT_MS, SyncTestUtil.CHECK_INTERVAL_MS);
+
+        assertTrue("The typed URL entity for " + urlToLoad + " was not found on the fake server.",
+                synced);
     }
 
     private void setupTestAccountAndSignInToSync(

@@ -171,7 +171,7 @@ class ContentViewCoreImpl::ContentViewUserData
       : content_view_core_(content_view_core) {
   }
 
-  virtual ~ContentViewUserData() {
+  ~ContentViewUserData() override {
     // TODO(joth): When chrome has finished removing the TabContents class (see
     // crbug.com/107201) consider inverting relationship, so ContentViewCore
     // would own WebContents. That effectively implies making the WebContents
@@ -256,6 +256,8 @@ ContentViewCoreImpl::ContentViewCoreImpl(
 }
 
 ContentViewCoreImpl::~ContentViewCoreImpl() {
+  root_layer_->RemoveFromParent();
+
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   java_ref_.reset();
@@ -379,7 +381,8 @@ void ContentViewCoreImpl::UpdateFrameInfo(
     const gfx::SizeF& content_size,
     const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
-    const gfx::Vector2dF& content_offset) {
+    const gfx::Vector2dF& content_offset,
+    bool is_mobile_optimized_hint) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -400,7 +403,8 @@ void ContentViewCoreImpl::UpdateFrameInfo(
       viewport_size.width(),
       viewport_size.height(),
       controls_offset.y(),
-      content_offset.y());
+      content_offset.y(),
+      is_mobile_optimized_hint);
 }
 
 void ContentViewCoreImpl::SetTitle(const base::string16& title) {
@@ -1303,6 +1307,12 @@ void ContentViewCoreImpl::SetBackgroundOpaque(JNIEnv* env, jobject jobj,
   }
 }
 
+void ContentViewCoreImpl::SetDrawsContent(JNIEnv* env,
+                                          jobject jobj,
+                                          jboolean draws) {
+  GetLayer()->SetHideLayerAndSubtree(!draws);
+}
+
 void ContentViewCoreImpl::RequestTextSurroundingSelection(
     int max_length,
     const base::Callback<
@@ -1355,17 +1365,32 @@ void ContentViewCoreImpl::WebContentsDestroyed() {
 // This is called for each ContentView.
 jlong Init(JNIEnv* env,
            jobject obj,
-           jlong native_web_contents,
+           jobject web_contents,
            jlong view_android,
            jlong window_android,
            jobject retained_objects_set) {
   ContentViewCoreImpl* view = new ContentViewCoreImpl(
       env, obj,
-      reinterpret_cast<WebContents*>(native_web_contents),
+      WebContents::FromJavaWebContents(web_contents),
       reinterpret_cast<ui::ViewAndroid*>(view_android),
       reinterpret_cast<ui::WindowAndroid*>(window_android),
       retained_objects_set);
   return reinterpret_cast<intptr_t>(view);
+}
+
+static jobject FromWebContentsAndroid(
+    JNIEnv* env,
+    jclass clazz,
+    jobject jweb_contents) {
+  WebContents* web_contents = WebContents::FromJavaWebContents(jweb_contents);
+  if (!web_contents)
+    return NULL;
+
+  ContentViewCore* view = ContentViewCore::FromWebContents(web_contents);
+  if (!view)
+    return NULL;
+
+  return view->GetJavaObject().Release();
 }
 
 bool RegisterContentViewCore(JNIEnv* env) {

@@ -61,7 +61,6 @@ static_library("ui") {
     "//skia",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
-    "//third_party/libusb",
     "//third_party/libxml",
     "//third_party/zlib",
     "//ui/accessibility",
@@ -98,9 +97,9 @@ static_library("ui") {
       "//chrome/installer/util",
       "//components/autofill/content/browser:risk_proto",
       "//components/power",
+      "//components/suggestions/proto",
       "//device/nfc",
       "//media",
-      "//mojo/edk/system",
       "//net:net_with_v8",
       "//storage/browser",
       "//storage/common",
@@ -109,24 +108,16 @@ static_library("ui") {
       "//third_party/expat",
       "//third_party/hunspell",
       "//third_party/leveldatabase",
+      "//third_party/mojo/src/mojo/edk/system",
       "//third_party/npapi",
       "//third_party/libjingle",
       "//third_party/re2",
+      "//ui/base/ime",
       "//ui/compositor",
       "//ui/surface",
       "//ui/web_dialogs",
       "//v8",
     ]
-
-    # TODO(GYP)
-    #'defines': [
-    #  '<@(nacl_defines)',
-    #],
-    #'direct_dependent_settings': {
-    #  'defines': [
-    #    '<@(nacl_defines)',
-    #  ],
-    #  },
   } else {
     # iOS.
     sources +=
@@ -143,8 +134,9 @@ static_library("ui") {
                     ".",
                     "//chrome")
     deps += [
-      "//device/bluetooth",
       "//components/copresence",
+      "//device/bluetooth",
+      "//third_party/libusb",
     ]
   }
 
@@ -183,7 +175,7 @@ static_library("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_plugin_sources,
                            ".",
                            "//chrome")
-    deps += [ "//ppapi:ppapi_ipc" ]
+    deps += [ "//ppapi/proxy:ipc" ]
   }
   if (safe_browsing_mode == 1) {
     defines += [ "FULL_SAFE_BROWSING" ]
@@ -224,24 +216,6 @@ static_library("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_non_ash_sources,
                            ".",
                            "//chrome")
-  }
-  if (use_athena) {
-    sources += rebase_path(gypi_values.chrome_browser_ui_athena_sources,
-                           ".",
-                           "//chrome")
-  } else {  # Not athena.
-    if (!is_android) {
-      sources += rebase_path(
-              gypi_values.chrome_browser_ui_non_athena_non_mobile_sources,
-              ".",
-              "//chrome")
-    }
-    if (use_ash) {
-      sources +=
-          rebase_path(gypi_values.chrome_browser_ui_ash_non_athena_sources,
-                      ".",
-                      "//chrome")
-    }
   }
   if (toolkit_views) {
     sources += rebase_path(gypi_values.chrome_browser_ui_views_sources,
@@ -343,7 +317,6 @@ static_library("ui") {
     deps -= [
       "//chrome/browser/ui/views",
       "//components/feedback/proto",
-      "//third_party/libusb",
       "//ui/events",
     ]
     sources += rebase_path(gypi_values.chrome_browser_ui_android_sources,
@@ -377,19 +350,19 @@ static_library("ui") {
   if (is_win) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_win_sources, ".", "//chrome")
+    sources -= [ "views/frame/taskbar_decorator.cc" ]
     public_deps += [
       "//ui/views",
       "//ui/views/controls/webview",
     ]
     deps += [
+      "//chrome/browser/metro_utils",
       "//chrome/installer/util:strings",
+      "//google_update",
       "//third_party/wtl",
       "//third_party/iaccessible2",
       "//third_party/isimpledom",
       "//ui/app_list",
-
-      #'metro_utils',  TODO(GYP)
-      #'../google_update/google_update.gyp:google_update',  TODO(GYP)
     ]
   } else {  # 'OS!="win"
     if (toolkit_views) {
@@ -526,6 +499,8 @@ source_set("test_support") {
     "pdf/pdf_browsertest_base.h",
     "test/test_confirm_bubble_model.cc",
     "test/test_confirm_bubble_model.h",
+    "toolbar/test_toolbar_action_view_controller.cc",
+    "toolbar/test_toolbar_action_view_controller.h",
     "website_settings/mock_permission_bubble_request.cc",
     "website_settings/mock_permission_bubble_request.h",
   ]

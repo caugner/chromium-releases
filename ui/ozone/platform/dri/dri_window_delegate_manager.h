@@ -7,12 +7,13 @@
 
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/ozone_export.h"
 
 namespace ui {
 
 class DriWindowDelegate;
 
-class DriWindowDelegateManager {
+class OZONE_EXPORT DriWindowDelegateManager {
  public:
   DriWindowDelegateManager();
   ~DriWindowDelegateManager();
@@ -30,9 +31,6 @@ class DriWindowDelegateManager {
   // Returns the delegate associated with |widget|. Note: This function should
   // be called only if a valid delegate has been associated with |widget|.
   DriWindowDelegate* GetWindowDelegate(gfx::AcceleratedWidget widget);
-
-  // Check if |widget| has a valid delegate associated with it.
-  bool HasWindowDelegate(gfx::AcceleratedWidget widget);
 
  private:
   typedef base::ScopedPtrHashMap<gfx::AcceleratedWidget, DriWindowDelegate>

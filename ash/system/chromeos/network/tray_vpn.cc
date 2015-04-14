@@ -13,7 +13,6 @@
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_popup_label_button.h"
-#include "chromeos/device_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "grit/ash_strings.h"
@@ -78,7 +77,7 @@ class VpnDefaultView : public TrayItemMore,
         NetworkHandler::Get()->network_state_handler();
     const NetworkState* vpn =
         handler->FirstNetworkByType(NetworkTypePattern::VPN());
-    if (!vpn || (vpn->connection_state() == shill::kStateIdle)) {
+    if (!vpn || (!vpn->IsConnectedState() && !vpn->IsConnectingState())) {
       *image = ui::network_icon::GetImageForDisconnectedNetwork(
           ui::network_icon::ICON_TYPE_DEFAULT_VIEW, shill::kTypeVPN);
       if (label) {

@@ -71,7 +71,7 @@ class _DomPerfMeasurement(page_test.PageTest):
                            total))
 
 
-@benchmark.Disabled('android', 'linux')
+@benchmark.Disabled('android', 'linux')  # http://crbug.com/458540
 class DomPerf(benchmark.Benchmark):
   """A suite of JavaScript benchmarks for exercising the browser's DOM.
 
@@ -79,6 +79,10 @@ class DomPerf(benchmark.Benchmark):
   Scores are not comparable across benchmark suite versions and higher scores
   means better performance: Bigger is better!"""
   test = _DomPerfMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'dom_perf'
 
   def CreatePageSet(self, options):
     dom_perf_dir = os.path.join(util.GetChromiumSrcDir(), 'data', 'dom_perf')

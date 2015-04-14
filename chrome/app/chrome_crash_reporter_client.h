@@ -17,8 +17,10 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
   ~ChromeCrashReporterClient() override;
 
   // crash_reporter::CrashReporterClient implementation.
+#if !defined(OS_MACOSX)
   void SetCrashReporterClientIdFromGUID(
       const std::string& client_guid) override;
+#endif
 #if defined(OS_WIN)
   virtual bool GetAlternativeCrashDumpLocation(base::FilePath* crash_dir)
       override;
@@ -58,11 +60,7 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
 #endif
 
 #if defined(OS_ANDROID)
-  virtual int GetAndroidMinidumpDescriptor() override;
-#endif
-
-#if defined(OS_MACOSX)
-  void InstallAdditionalFilters(BreakpadRef breakpad) override;
+  int GetAndroidMinidumpDescriptor() override;
 #endif
 
   bool EnableBreakpadForProcess(const std::string& process_type) override;
