@@ -340,15 +340,15 @@ function renderTheme() {
   var isThemeDark = getIsThemeDark(info);
   ntpContents.classList.toggle(CLASSES.DARK, isThemeDark);
   if (!info) {
-    titleColor = NTP_DESIGN.titleColor;
+    titleColor = convertToRRGGBBAAColor(NTP_DESIGN.titleColor);
     return;
   }
 
   if (!info.usingDefaultTheme && info.textColorRgba) {
     titleColor = convertToRRGGBBAAColor(info.textColorRgba);
   } else {
-    titleColor = isThemeDark ?
-        NTP_DESIGN.titleColorAgainstDark : NTP_DESIGN.titleColor;
+    titleColor = convertToRRGGBBAAColor(isThemeDark ?
+        NTP_DESIGN.titleColorAgainstDark : NTP_DESIGN.titleColor);
   }
 
   var background = [convertToRGBAColor(info.backgroundColorRgba),
@@ -512,8 +512,12 @@ function renderAllTiles() {
 /**
  * Handles the end of the blacklist animation by showing the notification and
  * re-rendering the new set of tiles.
+ * @param {Event} e The associated event.
  */
-function blacklistAnimationDone() {
+function blacklistAnimationDone(e) {
+  if (e.propertyName != 'width') {
+    return;
+  }
   showNotification();
   isBlacklisting = false;
   tilesContainer.classList.remove(CLASSES.HIDE_BLACKLIST_BUTTON);
@@ -633,6 +637,8 @@ function getMostVisitedTitleIframeUrl(rid, position) {
     params.push('ta=' + encodeURIComponent(NTP_DESIGN.titleTextAlign));
   if (NTP_DESIGN.titleTextFade)
     params.push('tf=' + encodeURIComponent(NTP_DESIGN.titleTextFade));
+  if (NTP_DESIGN.numTitleLines > 1)
+    params.push('ntl=' + NTP_DESIGN.numTitleLines);
   return url + '?' + params.join('&');
 }
 
@@ -646,14 +652,17 @@ function getMostVisitedTitleIframeUrl(rid, position) {
 function getMostVisitedThumbnailIframeUrl(rid, position) {
   var url = 'chrome-search://most-visited/' +
       encodeURIComponent(MOST_VISITED_THUMBNAIL_IFRAME);
+  var colorString = convertToRRGGBBAAColor(NTP_DESIGN.thumbnailTextColor);
   var params = [
       'rid=' + encodeURIComponent(rid),
       'f=' + encodeURIComponent(NTP_DESIGN.fontFamily),
       'fs=' + encodeURIComponent(NTP_DESIGN.fontSize),
-      'c=' + encodeURIComponent(NTP_DESIGN.thumbnailTextColor),
+      'c=' + encodeURIComponent(colorString),
       'pos=' + encodeURIComponent(position)];
   if (NTP_DESIGN.thumbnailFallback)
     params.push('etfb=1');
+  if (configData.useIcons)
+    params.push('icons=1');
   return url + '?' + params.join('&');
 }
 
@@ -755,11 +764,21 @@ function createTile(page, position) {
       innerElem, 'div', CLASSES.THUMBNAIL_MASK);
 
   // The page favicon, or a fallback.
-  var favicon = createAndAppendElement(innerElem, 'div', CLASSES.FAVICON);
-  if (page.faviconUrl) {
-    favicon.style.backgroundImage = 'url(' + page.faviconUrl + ')';
-  } else {
-    favicon.classList.add(CLASSES.FAVICON_FALLBACK);
+  if (NTP_DESIGN.showFavicon) {
+    var favicon = createAndAppendElement(innerElem, 'div', CLASSES.FAVICON);
+    if (page.faviconUrl) {
+      var fi = document.createElement('img');
+      fi.src = page.faviconUrl;
+      // Set the title to empty so screen readers won't say the image name.
+      fi.title = '';
+      fi.addEventListener('error', function(ev) {
+        favicon.removeChild(fi);
+        favicon.classList.add(CLASSES.FAVICON_FALLBACK);
+      });
+      favicon.appendChild(fi);
+    } else {
+      favicon.classList.add(CLASSES.FAVICON_FALLBACK);
+    }
   }
   return new Tile(tileElem, innerElem, titleElem, thumbnailElem, rid);
 }
@@ -844,7 +863,7 @@ function updateContentWidth() {
   var innerWidth = window.innerWidth || maxSnapSize;
   // Each tile has left and right margins that sum to NTP_DESIGN.tileMargin.
   var availableWidth = innerWidth + NTP_DESIGN.tileMargin -
-      MIN_TOTAL_HORIZONTAL_PADDING;
+      NTP_DESIGN.fakeboxWingSize * 2 - MIN_TOTAL_HORIZONTAL_PADDING;
   var newNumColumns = Math.floor(availableWidth / tileRequiredWidth);
   if (newNumColumns < MIN_NUM_COLUMNS)
     newNumColumns = MIN_NUM_COLUMNS;
@@ -860,6 +879,7 @@ function updateContentWidth() {
   if (fakebox) {
     // -2 to account for border.
     var fakeboxWidth = (tilesContainerWidth - NTP_DESIGN.tileMargin - 2);
+    fakeboxWidth += NTP_DESIGN.fakeboxWingSize * 2;
     fakebox.style.width = fakeboxWidth + 'px';
   }
   return true;
@@ -1099,6 +1119,11 @@ function init() {
     document.body.classList.add(CLASSES.NON_GOOGLE_PAGE);
   }
 
+  // Modify design for experimental icon NTP, if specified.
+  if (configData.useIcons)
+    modifyNtpDesignForIcons();
+  document.querySelector('#ntp-contents').classList.add(NTP_DESIGN.mainClass);
+
   // Hide notifications after fade out, so we can't focus on links via keyboard.
   notification.addEventListener('webkitTransitionEnd', hideNotification);
 
@@ -1171,6 +1196,7 @@ function init() {
         if (text) {
           searchboxApiHandle.paste(text);
         }
+        setFakeboxDragFocus(false);
       };
       inputbox.ondragenter = function() {
         setFakeboxDragFocus(true);

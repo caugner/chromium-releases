@@ -11,28 +11,29 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
+import android.text.TextPaint;
+import android.text.method.LinkMovementMethod;
+import android.text.style.ClickableSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromiumApplication;
-import org.chromium.chrome.browser.UmaBridge;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
+import org.chromium.ui.text.SpanApplier;
+import org.chromium.ui.text.SpanApplier.SpanInfo;
 
 /**
  * The promo screen encouraging users to enable Data Saver.
  */
 public class DataReductionPromoScreen extends Dialog implements View.OnClickListener,
         DialogInterface.OnDismissListener {
-    // Represent the possible user actions at the promotion screen. This must remain in sync with
-    // DataReductionProxyPromoAction in tools/metrics/histograms/histograms.xml.
-    private static final int ACTION_DISMISSED_FIRST_SCREEN = 0;
-    private static final int ACTION_ENABLED_FIRST_SCREEN = 2;
-    public static final int ACTION_INDEX_BOUNDARY = 4;
     public static final String FROM_PROMO = "FromPromo";
     private static final String SHARED_PREF_DISPLAYED_PROMO = "displayed_data_reduction_promo";
 
@@ -87,9 +88,9 @@ public class DataReductionPromoScreen extends Dialog implements View.OnClickList
         getWindow().setLayout(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
 
         addListenerOnButton();
+        addClickableSpan();
 
-        mState = ACTION_DISMISSED_FIRST_SCREEN;
-        UmaBridge.dataReductionProxyPromoDisplayed();
+        mState = DataReductionProxyUma.ACTION_DISMISSED;
     }
 
     private void addListenerOnButton() {
@@ -104,6 +105,36 @@ public class DataReductionPromoScreen extends Dialog implements View.OnClickList
         }
     }
 
+    private void addClickableSpan() {
+        TextView settings_link = (TextView) findViewById(R.id.data_reduction_title_2_link);
+        ClickableSpan clickableSettingsSpan = new ClickableSpan() {
+            @Override
+            public void onClick(View view) {
+                Context context = getContext();
+                if (context == null) return;
+                Intent intent = PreferencesLauncher.createIntentForSettingsPage(
+                        context, BandwidthReductionPreferences.class.getName());
+                intent.putExtra(FROM_PROMO, true);
+                context.startActivity(intent);
+                // Don't report an action. One will be reported in the settings
+                // menu saying if the user proceeded to enable the proxy or not
+                // after viewing the promo.
+                mState = DataReductionProxyUma.ACTION_INDEX_BOUNDARY;
+                dismiss();
+            }
+
+            @Override
+            public void updateDrawState(TextPaint textPaint) {
+                textPaint.setColor(textPaint.linkColor);
+                textPaint.setUnderlineText(false);
+            }
+        };
+        settings_link.setMovementMethod(LinkMovementMethod.getInstance());
+        settings_link.setText(SpanApplier.applySpans(
+                getContext().getString(R.string.data_reduction_title_2),
+                new SpanInfo("<link>", "</link>", clickableSettingsSpan)));
+    }
+
     @Override
     public void onClick(View v) {
         int id = v.getId();
@@ -111,7 +142,7 @@ public class DataReductionPromoScreen extends Dialog implements View.OnClickList
         if (id == R.id.no_thanks_button) {
             handleCloseButtonPressed();
         } else if (id == R.id.enable_button_front) {
-            mState = ACTION_ENABLED_FIRST_SCREEN;
+            mState = DataReductionProxyUma.ACTION_ENABLED;
             handleEnableButtonPressed();
         } else if (id == R.id.close_button_front) {
             handleCloseButtonPressed();
@@ -126,13 +157,11 @@ public class DataReductionPromoScreen extends Dialog implements View.OnClickList
     }
 
     private void handleEnableButtonPressed() {
-        Context context = getContext();
-        if (context == null) return;
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(context,
-                BandwidthReductionPreferences.class.getName());
-        intent.putExtra(FROM_PROMO, true);
-        context.startActivity(intent);
+        DataReductionProxySettings.getInstance().setDataReductionProxyEnabled(
+                getContext(), true);
         dismiss();
+        Toast.makeText(getContext(), getContext().getString(R.string.data_reduction_enabled_toast),
+                Toast.LENGTH_LONG).show();
     }
 
     private void handleCloseButtonPressed() {
@@ -141,9 +170,9 @@ public class DataReductionPromoScreen extends Dialog implements View.OnClickList
 
     @Override
     public void dismiss() {
-        if (mState < ACTION_INDEX_BOUNDARY) {
-            UmaBridge.dataReductionProxyPromoAction(mState);
-            mState = ACTION_INDEX_BOUNDARY;
+        if (mState < DataReductionProxyUma.ACTION_INDEX_BOUNDARY) {
+            DataReductionProxyUma.dataReductionProxyUIAction(mState);
+            mState = DataReductionProxyUma.ACTION_INDEX_BOUNDARY;
         }
         super.dismiss();
     }

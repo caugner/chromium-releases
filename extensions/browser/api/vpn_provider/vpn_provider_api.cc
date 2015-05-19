@@ -150,6 +150,19 @@ void VpnThreadExtensionFunction::SignalCallCompletionSuccess() {
   Respond(NoArguments());
 }
 
+void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithId(
+    const std::string& configuration_id) {
+  Respond(OneArgument(new base::StringValue(configuration_id)));
+}
+
+void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithWarning(
+    const std::string& warning) {
+  if (!warning.empty()) {
+    WriteToConsole(content::CONSOLE_MESSAGE_LEVEL_WARNING, warning);
+  }
+  Respond(NoArguments());
+}
+
 void VpnThreadExtensionFunction::SignalCallCompletionFailure(
     const std::string& error_name,
     const std::string& error_message) {
@@ -178,10 +191,13 @@ ExtensionFunction::ResponseAction VpnProviderCreateConfigFunction::Run() {
     return RespondNow(Error("Invalid profile."));
   }
 
+  // Use the configuration name as ID. In the future, a different ID scheme may
+  // be used, requiring a mapping between the two.
   service->CreateConfiguration(
       extension_id(), extension()->name(), params->name,
-      base::Bind(&VpnProviderCreateConfigFunction::SignalCallCompletionSuccess,
-                 this),
+      base::Bind(
+          &VpnProviderCreateConfigFunction::SignalCallCompletionSuccessWithId,
+          this, params->name),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
                      SignalCallCompletionFailure,
                  this));
@@ -206,7 +222,7 @@ ExtensionFunction::ResponseAction VpnProviderDestroyConfigFunction::Run() {
   }
 
   service->DestroyConfiguration(
-      extension_id(), params->name,
+      extension_id(), params->id,
       base::Bind(&VpnProviderDestroyConfigFunction::SignalCallCompletionSuccess,
                  this),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
@@ -241,7 +257,8 @@ ExtensionFunction::ResponseAction VpnProviderSetParametersFunction::Run() {
 
   service->SetParameters(
       extension_id(), parameter_value,
-      base::Bind(&VpnProviderSetParametersFunction::SignalCallCompletionSuccess,
+      base::Bind(&VpnProviderSetParametersFunction::
+                     SignalCallCompletionSuccessWithWarning,
                  this),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
                      SignalCallCompletionFailure,

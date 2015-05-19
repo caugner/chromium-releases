@@ -120,6 +120,19 @@
         '<@(chrome_utility_sources)',
       ],
       'conditions': [
+        ['OS=="win"', {
+          'link_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'DelayLoadDLLs': [
+                  # Prevent wininet from loading in the renderer.
+                  # http://crbug.com/460679
+                  'wininet.dll',
+                ],
+              },
+            },
+          },
+        }],
         ['OS!="win" and OS!="mac" and use_openssl==1', {
           'sources!': [
             'utility/importer/nss_decryptor.cc',
@@ -135,15 +148,12 @@
           ],
         }],
         ['OS!="android"', {
+          'dependencies': [
+            '../net/net.gyp:net_utility_services',
+          ],
           'sources': [
             '<@(chrome_utility_importer_sources)',
           ],
-        }],
-        ['OS=="android" and use_seccomp_bpf==1', {
-          'dependencies': [
-            '../sandbox/sandbox.gyp:seccomp_bpf',
-          ],
-          'defines': ['USE_SECCOMP_BPF'],
         }],
         ['enable_extensions==1', {
           'dependencies': [

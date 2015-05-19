@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Aggiungi al dizionario personale"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Avanzata"
@@ -2616,7 +2627,7 @@
     "message": "Spiacenti, non puoi utilizzare la scrittura a mano libera perch\u00e9 la rete non \u00e8 disponibile."
   },
   "handwriting_privacy_info": {
-    "message": "Il testo inserito verr\u00e0 inviato a un server di Google per poterlo riconoscere"
+    "message": "Il tuo input verr\u00e0 inviato ai server di Google per il riconoscimento del testo."
   },
   "hide_keyboard": {
     "message": "nascondi tastiera"
@@ -2634,7 +2645,7 @@
     "message": "Ignora correzione di:"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Ignora correzione"
   },
   "il_heb_settings_page": {
     "message": "Pagina Impostazioni tastiera Ebraico"
@@ -3000,10 +3011,10 @@
     "message": "Layout tastiera Coreano"
   },
   "korean_settings_page": {
-    "message": "Pagina Impostazioni Coreano"
+    "message": "Pagina Impostazioni del metodo di immissione coreano"
   },
   "korean_syllable_input": {
-    "message": "Immissione di sillabe hangul una alla volta"
+    "message": "Inserisci una sillaba per volta"
   },
   "latam_spa_settings_page": {
     "message": "Pagina Impostazioni tastiera Latinoamericano (spagnolo)"
@@ -3105,7 +3116,7 @@
     "message": "Mostra menu suggerimenti tramite Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Mostra suggerimenti in hangul"
+    "message": "Mostra candidati in modalit\u00e0 hangul"
   },
   "shrink_candidates": {
     "message": "comprimi elenco candidati"
@@ -3147,7 +3158,7 @@
     "message": "tab"
   },
   "touch_keyboard": {
-    "message": "Tastiera virtuale"
+    "message": "Tastiera sullo schermo"
   },
   "tr_tur_settings_page": {
     "message": "Pagina Impostazioni tastiera Turco"
@@ -3300,7 +3311,7 @@
     "message": "Voce"
   },
   "voice_privacy_info": {
-    "message": "Il tuo input vocale verr\u00e0 inviato a un server di Google per il riconoscimento del testo"
+    "message": "Il tuo input vocale verr\u00e0 inviato ai server di Google per il riconoscimento del testo."
   },
   "voice_turn_off": {
     "message": "disattiva strumento di input vocale"

@@ -6,8 +6,11 @@
   'variables': {
     'verbose_libraries_build%': 0,
     'instrumented_libraries_jobs%': 1,
+    'instrumented_libraries_cc%': '<!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang',
+    'instrumented_libraries_cxx%': '<!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang++',
   },
 
+  'libdir': 'lib',
   'ubuntu_release': '<!(lsb_release -cs)',
 
   'conditions': [
@@ -21,11 +24,11 @@
       'sanitizer_type': 'tsan',
     }],
     ['use_goma==1', {
-      'cc': '<(gomadir)/gomacc <!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang',
-      'cxx': '<(gomadir)/gomacc <!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang++',
+      'cc': '<(gomadir)/gomacc <(instrumented_libraries_cc)',
+      'cxx': '<(gomadir)/gomacc <(instrumented_libraries_cxx)',
     }, {
-      'cc': '<!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang',
-      'cxx': '<!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang++',
+      'cc': '<(instrumented_libraries_cc)',
+      'cxx': '<(instrumented_libraries_cxx)',
     }],
   ],
 
@@ -55,7 +58,7 @@
       '-Wl,-R,XORIGIN/.'
     ],
     'patch': '',
-    'run_before_build': '',
+    'pre_build': '',
     'asan_blacklist': '',
     'msan_blacklist': '',
     'tsan_blacklist': '',
@@ -80,6 +83,62 @@
   },
 
   'targets': [
+    {
+      'target_name': 'prebuilt_instrumented_libraries',
+      'type': 'none',
+      'variables': {
+        'prune_self_dependency': 1,
+        # Don't add this target to the dependencies of targets with type=none.
+        'link_dependency': 1,
+        'conditions': [
+          ['msan==1', {
+            'conditions': [
+              ['msan_track_origins==2', {
+                'archive_name': 'msan-chained-origins-<(_ubuntu_release)',
+              }, {
+                'conditions': [
+                  ['msan_track_origins==0', {
+                    'archive_name': 'msan-no-origins-<(_ubuntu_release)',
+                  }, {
+                    'archive_name': 'UNSUPPORTED_CONFIGURATION'
+                  }],
+              ]}],
+          ]}, {
+              'archive_name': 'UNSUPPORTED_CONFIGURATION'
+          }],
+        ],
+      },
+      'actions': [
+        {
+          'action_name': 'unpack_<(archive_name).tgz',
+          'inputs': [
+            'binaries/<(archive_name).tgz',
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/instrumented_libraries_prebuilt/<(archive_name).txt',
+          ],
+          'action': [
+            'scripts/unpack_binaries.sh',
+            'binaries/<(archive_name).tgz',
+            '<(PRODUCT_DIR)/instrumented_libraries_prebuilt/',
+            '<(PRODUCT_DIR)/instrumented_libraries_prebuilt/<(archive_name).txt',
+          ],
+        },
+      ],
+      'direct_dependent_settings': {
+        'target_conditions': [
+          ['_toolset=="target"', {
+            'ldflags': [
+              # Add a relative RPATH entry to Chromium binaries. This puts
+              # instrumented DSOs before system-installed versions in library
+              # search path.
+              '-Wl,-R,\$$ORIGIN/instrumented_libraries_prebuilt/<(_sanitizer_type)/<(_libdir)/',
+              '-Wl,-z,origin',
+            ],
+          }],
+        ],
+      },
+    },
     {
       'target_name': 'instrumented_libraries',
       'type': 'none',
@@ -138,6 +197,8 @@
         '<(_sanitizer_type)-libunity9',
         '<(_sanitizer_type)-dee',
         '<(_sanitizer_type)-libpixman-1-0',
+        '<(_sanitizer_type)-brltty',
+        '<(_sanitizer_type)-libva1',
       ],
       'conditions': [
         ['"<(_ubuntu_release)"=="precise"', {
@@ -162,19 +223,15 @@
             '<(_sanitizer_type)-libpng12-0',
           ],
         }],
-        ['chromeos==1', {
-          'dependencies': [
-            '<(_sanitizer_type)-brltty',
-            '<(_sanitizer_type)-libva1',
-          ],
-        }]
       ],
       'direct_dependent_settings': {
         'target_conditions': [
           ['_toolset=="target"', {
             'ldflags': [
-              # Add RPATH to result binary to make it linking instrumented libraries ($ORIGIN means relative RPATH)
-              '-Wl,-R,\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/lib/',
+              # Add a relative RPATH entry to Chromium binaries. This puts
+              # instrumented DSOs before system-installed versions in library
+              # search path.
+              '-Wl,-R,\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/<(_libdir)/',
               '-Wl,-z,origin',
             ],
           }],
@@ -185,7 +242,7 @@
       'package_name': 'freetype',
       'dependencies=': [],
       'extra_configure_flags': ['--disable-static'],
-      'run_before_build': 'scripts/freetype.sh',
+      'pre_build': 'scripts/pre-build/freetype.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -200,7 +257,20 @@
     {
       'package_name': 'libdbus-1-3',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-static'],
+      'extra_configure_flags': [
+        '--disable-static',
+        # From debian/rules.
+        '--disable-libaudit',
+        '--enable-apparmor',
+        '--enable-systemd',
+        '--libexecdir=/lib/dbus-1.0',
+        '--with-systemdsystemunitdir=/lib/systemd/system',
+        '--disable-tests',
+        '--exec-prefix=/',
+        # From dh_auto_configure.
+        '--prefix=/usr',
+        '--localstatedir=/var',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -270,7 +340,7 @@
       ],
       'asan_blacklist': 'blacklists/asan/libglib2.0-0.txt',
       'msan_blacklist': 'blacklists/msan/libglib2.0-0.txt',
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -288,7 +358,7 @@
         # TSan reports data races on debug variables.
         '--disable-debug',
       ],
-      'run_before_build': 'scripts/libnspr4.sh',
+      'pre_build': 'scripts/pre-build/libnspr4.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -296,7 +366,7 @@
       'dependencies=': [],
       'extra_configure_flags': ['--disable-static'],
       # Required on Trusty due to autoconf version mismatch.
-      'run_before_build': 'scripts/autoreconf.sh',
+      'pre_build': 'scripts/pre-build/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -338,7 +408,7 @@
       ],
       'msan_blacklist': 'blacklists/msan/libx11-6.txt',
       # Required on Trusty due to autoconf version mismatch.
-      'run_before_build': 'scripts/autoreconf.sh',
+      'pre_build': 'scripts/pre-build/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -361,7 +431,7 @@
         }],
       ],
       # Required on Trusty due to autoconf version mismatch.
-      'run_before_build': 'scripts/autoreconf.sh',
+      'pre_build': 'scripts/pre-build/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -487,14 +557,14 @@
           # this even impacts x86-64 builds.
           '--disable-neon-opt'
       ],
-      'run_before_build': 'scripts/pulseaudio.sh',
+      'pre_build': 'scripts/pre-build/pulseaudio.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libasound2',
       'dependencies=': [],
       'extra_configure_flags': ['--disable-static'],
-      'run_before_build': 'scripts/libasound2.sh',
+      'pre_build': 'scripts/pre-build/libasound2.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -561,7 +631,7 @@
           # TODO(earthdok): find a better fix.
           '--disable-gudev'
       ],
-      'run_before_build': 'scripts/udev.sh',
+      'pre_build': 'scripts/pre-build/udev.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -616,7 +686,7 @@
           'patch': 'patches/libgtk2.0-0.trusty.diff',
         }],
       ],
-      'run_before_build': 'scripts/libgtk2.0-0.sh',
+      'pre_build': 'scripts/pre-build/libgtk2.0-0.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -634,7 +704,7 @@
           '--disable-modules',
       ],
       'dependencies=': [],
-      'run_before_build': 'scripts/libgdk-pixbuf2.0-0.sh',
+      'pre_build': 'scripts/pre-build/libgdk-pixbuf2.0-0.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -659,7 +729,7 @@
           '--disable-vala',
       ],
       'dependencies=': [],
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -684,7 +754,7 @@
       ],
       'dependencies=': [],
       'jobs': 1,
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -699,7 +769,7 @@
           '--disable-vala',
       ],
       'dependencies=': [],
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -716,7 +786,7 @@
       'package_name': 'libunity9',
       'dependencies=': [],
       'extra_configure_flags': ['--disable-static'],
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -727,7 +797,7 @@
           '--disable-introspection',
       ],
       'dependencies=': [],
-      'run_before_build': 'scripts/autogen.sh',
+      'pre_build': 'scripts/pre-build/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -772,7 +842,7 @@
       # Backport a use-after-free fix:
       # http://cgit.freedesktop.org/libva/diff/va/va.c?h=staging&id=d4988142a3f2256e38c5c5cdcdfc1b4f5f3c1ea9
       'patch': 'patches/libva1.diff',
-      'run_before_build': 'scripts/libva1.sh',
+      'pre_build': 'scripts/pre-build/libva1.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -783,7 +853,7 @@
           # See above.
           '--disable-introspection',
       ],
-      'run_before_build': 'scripts/autoreconf.sh',
+      'pre_build': 'scripts/pre-build/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
   ],

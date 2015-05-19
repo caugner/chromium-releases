@@ -13,19 +13,19 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/in_memory_url_index.h"
+#include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/favicon/chrome_fallback_icon_client_factory.h"
 #include "chrome/browser/favicon/chrome_favicon_client_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/favicon/fallback_icon_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/content_visit_delegate.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/history/top_sites_impl.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -55,15 +56,21 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/favicon/core/fallback_icon_service.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/content/browser/history_database_helper.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/ui/zoom/zoom_event_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/webdata_services/web_data_service_wrapper.h"
 #include "content/public/browser/browser_thread.h"
@@ -71,6 +78,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/zoom_level_delegate.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
@@ -208,18 +216,33 @@ KeyedService* CreateTestDesktopNotificationService(
 }
 #endif
 
-KeyedService* BuildFaviconService(content::BrowserContext* profile) {
-  FaviconClient* favicon_client =
-      ChromeFaviconClientFactory::GetForProfile(static_cast<Profile*>(profile));
-  return new FaviconService(static_cast<Profile*>(profile), favicon_client);
+KeyedService* BuildFaviconService(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  return new favicon::FaviconService(
+      ChromeFaviconClientFactory::GetForProfile(profile),
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS));
 }
 
 KeyedService* BuildHistoryService(content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-  HistoryService* history_service = new HistoryService(
+  history::HistoryService* history_service = new history::HistoryService(
       ChromeHistoryClientFactory::GetForProfile(profile),
-      scoped_ptr<history::VisitDelegate>(new ContentVisitDelegate(profile)));
+      scoped_ptr<history::VisitDelegate>(
+          new history::ContentVisitDelegate(profile)));
   return history_service;
+}
+
+KeyedService* BuildInMemoryURLIndex(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  InMemoryURLIndex* in_memory_url_index = new InMemoryURLIndex(
+      BookmarkModelFactory::GetForProfile(profile),
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::IMPLICIT_ACCESS),
+      profile->GetPath(),
+      profile->GetPrefs()->GetString(prefs::kAcceptLanguages));
+  in_memory_url_index->Init();
+  return in_memory_url_index;
 }
 
 KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
@@ -359,7 +382,6 @@ TestingProfile::TestingProfile(
       force_incognito_(false),
       original_profile_(parent),
       guest_session_(guest_session),
-      supervised_user_id_(supervised_user_id),
       last_session_exited_cleanly_(true),
 #if defined(ENABLE_EXTENSIONS)
       extension_special_storage_policy_(extension_policy),
@@ -397,6 +419,8 @@ TestingProfile::TestingProfile(
   } else {
     FinishInit();
   }
+
+  SetSupervisedUserId(supervised_user_id);
 }
 
 void TestingProfile::CreateTempProfileDir() {
@@ -566,22 +590,27 @@ bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
       return false;
   }
   // This will create and init the history service.
-  HistoryService* history_service = static_cast<HistoryService*>(
-      HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          this, BuildHistoryService));
+  history::HistoryService* history_service =
+      static_cast<history::HistoryService*>(
+          HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+              this, BuildHistoryService));
   if (!history_service->Init(
           no_db, GetPrefs()->GetString(prefs::kAcceptLanguages),
           history::HistoryDatabaseParamsForPath(GetPath()))) {
     HistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
     return false;
   }
+  // Some tests expect that CreateHistoryService() will also make the
+  // InMemoryURLIndex available.
+  InMemoryURLIndexFactory::GetInstance()->SetTestingFactory(
+      this, BuildInMemoryURLIndex);
   // Disable WebHistoryService by default, since it makes network requests.
   WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
   return true;
 }
 
 void TestingProfile::DestroyHistoryService() {
-  HistoryService* history_service =
+  history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfileWithoutCreating(this);
   if (!history_service)
     return;
@@ -642,10 +671,10 @@ void TestingProfile::CreateWebDataService() {
 void TestingProfile::BlockUntilHistoryIndexIsRefreshed() {
   // Only get the history service if it actually exists since the caller of the
   // test should explicitly call CreateHistoryService to build it.
-  HistoryService* history_service =
+  history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfileWithoutCreating(this);
   DCHECK(history_service);
-  history::InMemoryURLIndex* index = history_service->InMemoryIndex();
+  InMemoryURLIndex* index = InMemoryURLIndexFactory::GetForProfile(this);
   if (!index || index->restored())
     return;
   base::RunLoop run_loop;
@@ -679,7 +708,9 @@ base::FilePath TestingProfile::GetPath() const {
 
 scoped_ptr<content::ZoomLevelDelegate> TestingProfile::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
-  return nullptr;
+  return make_scoped_ptr(new chrome::ChromeZoomLevelPrefs(
+      GetPrefs(), GetPath(), partition_path,
+      ui_zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr()));
 }
 
 scoped_refptr<base::SequencedTaskRunner> TestingProfile::GetIOTaskRunner() {
@@ -734,6 +765,14 @@ Profile* TestingProfile::GetOriginalProfile() {
   if (original_profile_)
     return original_profile_;
   return this;
+}
+
+void TestingProfile::SetSupervisedUserId(const std::string& id) {
+  supervised_user_id_ = id;
+  if (!id.empty())
+    GetPrefs()->SetString(prefs::kSupervisedUserId, id);
+  else
+    GetPrefs()->ClearPref(prefs::kSupervisedUserId);
 }
 
 bool TestingProfile::IsSupervised() {
@@ -827,6 +866,11 @@ PrefService* TestingProfile::GetPrefs() {
 const PrefService* TestingProfile::GetPrefs() const {
   DCHECK(prefs_);
   return prefs_.get();
+}
+
+chrome::ChromeZoomLevelPrefs* TestingProfile::GetZoomLevelPrefs() {
+  return static_cast<chrome::ChromeZoomLevelPrefs*>(
+      GetDefaultStoragePartition(this)->GetZoomLevelDelegate());
 }
 
 DownloadManagerDelegate* TestingProfile::GetDownloadManagerDelegate() {
@@ -952,8 +996,9 @@ PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      this, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(this,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   DCHECK(base::MessageLoop::current());
 
@@ -998,6 +1043,10 @@ storage::SpecialStoragePolicy* TestingProfile::GetSpecialStoragePolicy() {
 }
 
 content::SSLHostStateDelegate* TestingProfile::GetSSLHostStateDelegate() {
+  return NULL;
+}
+
+content::PermissionManager* TestingProfile::GetPermissionManager() {
   return NULL;
 }
 

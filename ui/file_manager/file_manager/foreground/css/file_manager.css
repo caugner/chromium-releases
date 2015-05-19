@@ -65,6 +65,7 @@ a:focus {
 .scrollbar-vertical {
   bottom: 0;
   flex: none;
+  pointer-events: none;
   position: absolute;
   right: 0;
   top: 0;
@@ -74,12 +75,13 @@ a:focus {
 
 .scrollbar-button {
   background-color: black;
-  border: 1px solid #ccc;
   border-radius: 3px;
+  border: 1px solid #ccc;
   box-sizing: border-box;
   height: 50%;
   margin-right: 2px;
   opacity: 0;
+  pointer-events: auto;
   position: absolute;
   transition: opacity 100ms;
   width: 8px;
@@ -120,7 +122,7 @@ a:focus {
 
 /* Directory tree at the left. */
 .dialog-navigation-list {
-  -webkit-border-end: 1px solid rgb(210, 210, 210);
+  -webkit-border-end: 1px solid rgba(0, 0, 0, 0.15);
   background-color: rgb(250, 250, 250);
   display: flex;
   flex: none;
@@ -187,7 +189,7 @@ div.splitter {
   width: 36px;
 }
 
-#directory-tree .tree-row > .volume-icon {
+#directory-tree .tree-row > .item-icon {
   flex: none;
   height: 16px;
   width: 16px;
@@ -202,7 +204,7 @@ div.splitter {
 }
 
 #directory-tree .tree-row > paper-ripple {
-  color: rgb(27, 168, 243);
+  color: rgb(19, 120, 185);
 }
 
 #directory-tree .tree-item.accepts > .tree-row,
@@ -210,7 +212,7 @@ div.splitter {
 #directory-tree .tree-row[lead],
 #directory-tree .tree-row[selected],
 #directory-tree .tree-row[anchor] {
-  color: rgb(27, 168, 243);
+  color: rgb(19, 120, 185);
 }
 
 #directory-tree .tree-row > .root-eject {
@@ -219,9 +221,9 @@ div.splitter {
       url(../images/files/ui/2x/eject.png) 2x) no-repeat center;
   cursor: pointer;
   flex: none;
-  height: 20px;
-  margin-right: 6px;
-  width: 20px;
+  height: 40px;
+  position: relative;
+  width: 40px;
   z-index: 1;  /* Make sure .root-eject is on upper layer than paper-ripple. */
 }
 
@@ -239,7 +241,7 @@ div.splitter {
 /* Breadcrumbs and things under the title but above the list view. */
 .dialog-header {
   align-items: center;
-  background: rgba(27, 168, 243, 1.0);
+  background: rgba(33, 150, 243, 1.0);
   border-bottom: 1px solid rgb(56, 179, 244);
   color: white;
   display: flex;
@@ -292,25 +294,17 @@ body.check-select button:hover {
   width: 32px;
 }
 
-.dialog-header .icon-button paper-ripple {
-  color: black;
+body.check-select .dialog-header button paper-ripple {
+  color: rgb(90, 90, 90);
 }
 
-body.check-select .dialog-header .icon-button paper-ripple {
-  rgb(90, 90, 90);
-}
-
-.dialog-header .icon-button:hover,
-.dialog-header .icon-button:focus:not(.using-mouse),
-.dialog-header .combobutton:hover,
-.dialog-header .combobutton:focus {
+.dialog-header
+    button:focus:not(.using-mouse):not([tabindex='-1']):not(:active) {
   background-color: rgba(90, 90, 90, 0.15);
 }
 
-body.check-select .dialog-header .icon-button:hover,
-body.check-select .dialog-header .icon-button:focus:not(.using-mouse),
-body.check-select .dialog-header .combobutton:hover,
-body.check-select .dialog-header .combobutton:focus {
+body.check-select .dialog-header
+    button:focus:not(.using-mouse):not([tabindex='-1']):not(:active) {
   background-color: rgba(153, 153, 153, 0.20);
 }
 
@@ -415,20 +409,26 @@ body.check-select #gear-button {
 }
 
 #cloud-import-details-button {
-  margin-left: -15px;
+  -webkit-margin-start: -15px;
 }
 
 #cloud-import-details {
   background-color: white;
-  border-radius: 4px;
-  box-shadow: 2px 2px 6px #555555;
+  border-radius: 2px;
   line-height: 1.5em;
   position: absolute;
-  right: 75px;  /* Positioned in relation to the cloud-import toolbar button */
   top: 38px;  /* Positioned just overlapping the top of the toolbar */
   transition: all 0.2s ease;
-  width: 250px;
+  width: 270px;
   z-index: 5;
+}
+
+html[dir='ltr'] #cloud-import-details {
+  right: 13px;  /* Positioned in relation to the cloud-import toolbar button */
+}
+
+html[dir='rtl'] #cloud-import-details {
+  left: 13px;  /* Positioned in relation to the cloud-import toolbar button */
 }
 
 #cloud-import-details.hidden {
@@ -438,7 +438,7 @@ body.check-select #gear-button {
 
 #cloud-import-details .banner {
   background-color: #37474F;
-  border-radius: 4px 4px 0px 0px;
+  border-radius: 2px 2px 0px 0px;
   color: white;
   padding: 20px;
 }
@@ -469,9 +469,9 @@ body.check-select #gear-button {
 }
 
 #cloud-import-details .status .content {
+  -webkit-padding-start: 10px;
   flex: 1;
   color: #646464;
-  padding-left: 10px;
 }
 
 #cloud-import-details .status .content::first-line {
@@ -484,11 +484,18 @@ body.check-select #gear-button {
   cursor: pointer;
 }
 
-#cloud-import-details paper-button.import {
+#cloud-import-details paper-button {
   align-self: flex-end;
-  background-color: #1BA8F3;
   color: white;
   margin-top: 20px;
+}
+
+#cloud-import-details paper-button.import {
+  background-color: #1BA8F3;
+}
+
+#cloud-import-details paper-button.cancel {
+  background-color: #DB4437;
 }
 
 #files-selected-label {
@@ -538,6 +545,7 @@ body.check-select #search-button {
 #search-box {
   display: flex;
   flex: none;
+  font-size: 14px;
 }
 
 body.check-select #search-box {
@@ -583,22 +591,24 @@ body.check-select #search-box {
 }
 
 #search-box .clear {
-  -webkit-margin-end: 30px;
-  align-self: center;
   background: -webkit-image-set(
       url(../images/files/ui/search_clear.png) 1x,
       url(../images/files/ui/2x/search_clear.png) 2x)
       no-repeat center;
-  border: none;
+  cursor: pointer;
   display: none;
-  flex: none;
-  height: 12px;
-  min-height: 0;
-  min-width: 0;
-  outline: none;
-  padding: 0;
+  height: 16px;
+  margin: 0;
+  position: absolute;
+  right: 0;
+  top: 7px;
   visibility: hidden;
-  width: 12px;
+  width: 16px;
+}
+
+html[dir='rtl'] #search-box .clear {
+  left: 0;
+  right: auto;
 }
 
 #search-box.has-cursor .clear,
@@ -608,18 +618,6 @@ body.check-select #search-box {
 
 #search-box.has-text .clear {
   visibility: visible;
-}
-
-#search-box .clear:hover {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/search_clear_hover.png) 1x,
-      url(../images/files/ui/2x/search_clear_hover.png) 2x);
-}
-
-#search-box .clear:active {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/search_clear_pressed.png) 1x,
-      url(../images/files/ui/2x/search_clear_pressed.png) 2x);
 }
 
 /* Container for the detail and thumbnail list views. */
@@ -701,13 +699,16 @@ body.check-select #search-box {
 
 .dialog-footer .primary,
 .dialog-footer .primary:hover {
-  background-color: rgb(27, 168, 243);
+  background-color: rgb(33, 150, 243);
   color: white;
 }
 
-.dialog-footer .secondary,
+.dialog-footer .secondary {
+  color: rgb(100, 100, 100);
+}
+
 .dialog-footer .secondary:hover {
-  color: rgb(27, 168, 243);
+  color: rgb(33, 150, 243);
 }
 
 .dialog-footer input {
@@ -726,7 +727,7 @@ body.check-select #search-box {
 }
 
 .dialog-footer paper-input-decorator /deep/ .focused-underline {
-  background-color: rgb(27, 168, 243);
+  background-color: rgb(33, 150, 243);
 }
 
 .dialog-footer select {
@@ -753,7 +754,7 @@ body.check-select #search-box {
 .dialog-footer .primary:focus,
 .dialog-footer .secondary:focus,
 .dialog-footer select:focus {
-  box-shadow: 0 0 0 2px rgba(27, 168, 243, 0.5);
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.5);
 }
 
 .progressable:not([progress]) .progress-bar,
@@ -794,20 +795,33 @@ body.check-select .breadcrumbs {
 }
 
 .breadcrumbs > [collapsed] {
+  box-sizing: content-box !important;
   width: 1em;
 }
 
 /* A single directory name in the list of path breadcrumbs. */
-.breadcrumb-path {
+.breadcrumbs .breadcrumb-path {
+  box-sizing: border-box;
   cursor: pointer;
   flex: none;
-  overflow: hidden;
+  font-size: 14px;
+  font-weight: bold;
+  margin-left: 0;
+  margin-right: 0;
+  min-width: 0;
+  padding-left: 5px;
+  padding-right: 5px;
   text-overflow: ellipsis;
+  text-transform: none;
   white-space: nowrap;
 }
 
+.breadcrumbs .breadcrumb-path:active {
+  color: inherit;
+}
+
 /* The final breadcrumb, representing the current directory. */
-.breadcrumb-path.breadcrumb-last {
+.breadcrumbs .breadcrumb-path.breadcrumb-last {
   cursor: default;
 }
 
@@ -818,7 +832,7 @@ body.check-select .breadcrumbs {
       url(../images/files/ui/2x/arrow_right_white.png) 2x) center no-repeat;
   flex: none;
   height: 16px;
-  width: 26px;
+  width: 16px;
 }
 
 html[dir='rtl'] .breadcrumbs .separator {
@@ -884,6 +898,26 @@ html[dir='rtl'] .breadcrumbs .separator {
   right: 0;
   top: 0;
   z-index: 525;
+}
+
+.loading-indicator {
+  height: 3px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  width: 100%;
+}
+
+.list-view .loading-indicator {
+  top: 40px;
+}
+
+.thumbnail-view .loading-indicator {
+  top: 0;
+}
+
+.loading-indicator::shadow #activeProgress {
+  background-color: rgb(26, 194, 34);
 }
 
 .downloads-warning {
@@ -961,11 +995,11 @@ html[dir='rtl'] .breadcrumbs .separator {
   /* On the right side, we have less margin to pack items as long as they are
      fully visible. */
   -webkit-padding-end: 2px;
-  -webkit-padding-start: 7px;
+  -webkit-padding-start: 11px;
   box-sizing: border-box;
   overflow-y: auto;
-  padding-bottom: 7px;
-  padding-top: 7px;
+  padding-bottom: 16px;
+  padding-top: 12px;
   width: 100%;
 }
 
@@ -985,7 +1019,7 @@ body[type='full-page'] .detail-name .detail-icon {
   display: flex;
   flex-direction: row;
   left: 0;
-  padding: 0 10px;
+  padding: 0 6px;
   position: absolute;
   right: 0;
 }
@@ -997,27 +1031,26 @@ body[type='full-page'] .detail-name .detail-icon {
 }
 
 .thumbnail-bottom .filename-label {
+  -webkit-padding-end: 6px;
   flex: auto;
-  padding: 0 12px;
 }
 
 /* Styles specific for the grid view. */
 
 .thumbnail-grid .thumbnail-item {
-  -webkit-margin-start: 12px;
+  -webkit-margin-start: 4px;
   background-color: rgb(245, 245, 245);
-  border-radius: 2px;
-  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.37);
   height: 180px;
-  margin-top: 8px;
+  margin-top: 4px;
   overflow: hidden;
   position: relative;
-  transition: box-shadow 220ms ease;
+  vertical-align: top;  /* Prevent vertical spacing for wrapped inline box. */
   width: 180px;
 }
 
-.thumbnail-grid .thumbnail-item .thumbnail {
-  border-radius: 2px;
+.thumbnail-grid .thumbnail-item.directory {
+  box-shadow: 0 1px rgba(0, 0, 0, 0.15);
+  height: 40px;
 }
 
 .thumbnail-grid .thumbnail-frame {
@@ -1028,37 +1061,47 @@ body[type='full-page'] .detail-name .detail-icon {
 .thumbnail-grid .thumbnail-item[selected],
 .thumbnail-grid .thumbnail-item.accepts {
   background-color: rgb(221, 242, 253);
-  box-shadow: 0 6px 10px 0 rgba(0, 0, 0, 0.3);
 }
 
 .thumbnail-grid .checkmark {
-  height: 34px;
-  left: 9px;
+  -webkit-margin-start: 2px;
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 36px;
   opacity: 0;
   position: absolute;
-  top: 9px;
+  top: 2px;
   transition: opacity 220ms ease;
-  width: 34px;
+  width: 36px;
 }
 
-body.selecting .thumbnail-grid .checkmark {
+.thumbnail-grid .checkmark.inactive {
   background-image: -webkit-image-set(
-      url(../images/files/ui/thumbnail_unchecked.png) 1x,
-      url(../images/files/ui/2x/thumbnail_unchecked.png) 2x);
+      url(../images/files/ui/grid_image_check.png) 1x,
+      url(../images/files/ui/2x/grid_image_check.png) 2x);
+}
+
+.thumbnail-grid .checkmark.active {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/grid_image_check_active.png) 1x,
+      url(../images/files/ui/2x/grid_image_check_active.png) 2x);
+}
+
+body.selecting .thumbnail-grid .checkmark.inactive,
+.thumbnail-grid .thumbnail-item:hover .checkmark.inactive {
   opacity: 0.6;
 }
 
-body.check-select .thumbnail-grid .thumbnail-item .checkmark {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/thumbnail_unchecked.png) 1x,
-      url(../images/files/ui/2x/thumbnail_unchecked.png) 2x);
+body.check-select .thumbnail-grid .thumbnail-item .checkmark.inactive {
   opacity: 1;
 }
 
-body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/thumbnail_checked.png) 1x,
-      url(../images/files/ui/2x/thumbnail_checked.png) 2x);
+body.check-select .thumbnail-grid .thumbnail-item[selected]
+    .checkmark.inactive {
+  opacity: 0;
+}
+
+body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark.active {
   opacity: 1;
 }
 
@@ -1072,7 +1115,7 @@ body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark {
   -webkit-user-drag: none;
   background-color: rgb(230, 230, 230);
   background-position: center;
-  background-size: cover;
+  background-repeat: no-repeat;
   height: 100%;
   opacity: 1;
   position: absolute;
@@ -1083,45 +1126,78 @@ body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark {
   -webkit-animation: fadeIn 250ms linear;
 }
 
+.thumbnail-grid .shield {
+  background-color: rgba(27, 168, 243, 0.5);
+  bottom: 0;
+  display: none;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.thumbnail-grid .thumbnail-item[selected] .shield {
+  display: block;
+}
+
 .thumbnail-grid .thumbnail-bottom {
-  background-color: white;
-  border-radius: 0 0 2px 2px;
+  background-color: rgba(255, 255, 255, 0.85);
   color: rgb(51, 51, 51);
   height: 40px;
 }
 
-.thumbnail-grid .thumbnail-item[selected] .thumbnail-bottom {
-  background-color: rgb(221, 242, 253);
+.thumbnail-grid .thumbnail-item.directory .thumbnail-bottom {
+  background-color: rgb(255, 255, 255);
+}
+
+.thumbnail-grid .thumbnail-item[selected].directory .thumbnail-bottom {
+  background-color: rgb(232, 246, 253);
+}
+
+.thumbnail-grid > .spacer.folder-spacer {
+  height: 5px;
+}
+
+body:not(.check-select) .thumbnail-grid.image-dominant
+    .thumbnail-loaded:not([selected]) .thumbnail-bottom {
+  display: none;
 }
 
 .badge {
-  height: 16px;
+  background-color: white;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 2px;
+  display: none;
+  height: 20px;
   position: absolute;
-  right: 7px;
-  top: 12px;
-  width: 16px;
+  right: 10px;
+  top: 10px;
+  width: 20px;
+}
+
+html[dir='rtl'] .badge {
+  left: 10px;
+  right: auto;
 }
 
 .copied .badge {
   background-image: -webkit-image-set(
       url(../images/files/ui/cloud_import_syncing.png) 1x,
       url(../images/files/ui/2x/cloud_import_syncing.png) 2x);
+  display: block;
 }
 
 .imported .badge {
   background-image: -webkit-image-set(
       url(../images/files/ui/service_drive.png) 1x,
       url(../images/files/ui/2x/service_drive.png) 2x);
-  height: 16px;
-  position: absolute;
-  right: 7px;
-  top: 12px;
-  width: 16px;
+  display: block;
 }
 
 .imported .filename-label,
 .copied .filename-label {
-  margin-right: 14px;
+  -webkit-margin-end: 14px;
 }
 
 /* Padding counterweights negative margins of items, thus eliminating scroll
@@ -1215,7 +1291,6 @@ li[renaming=''] .badge {
 
 /* Text box used for renaming in the thumbnail list. */
 .thumbnail-grid input.rename {
-  -webkit-margin-start: 10px;
   box-sizing: border-box;
   width: 100%;
 }
@@ -1244,6 +1319,15 @@ li[renaming=''] .badge {
   }
   to {
     opacity: 1;
+  }
+}
+
+@-webkit-keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -1348,46 +1432,65 @@ li[renaming=''] .badge {
   width: 24px;
 }
 
-#list-container list li .detail-icon {
-  -webkit-margin-end: 10px;
+#list-container li .detail-icon {
+  -webkit-margin-end: 6px;
   height: 28px;
+  width: 28px;
+}
+
+#list-container li .detail-checkmark {
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 28px;
+  opacity: 0;
+  position: absolute;
+  transition: opacity 220ms ease;
   width: 28px;
 }
 
 #list-container list li .detail-checkmark {
   background-image: -webkit-image-set(
-      url(../images/files/ui/list_checked.png) 1x,
-      url(../images/files/ui/2x/list_checked.png) 2x);
-  height: 28px;
-  opacity: 0;
-  position: absolute;
-  transition: opacity 220ms ease;
-  width: 28px;
+      url(../images/files/ui/list_check.png) 1x,
+      url(../images/files/ui/2x/list_check.png) 2x);
 }
 
-body.check-select #list-container list li[selected] .detail-checkmark {
+#list-container grid li .detail-checkmark {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/grid_folder_check.png) 1x,
+      url(../images/files/ui/2x/grid_folder_check.png) 2x);
+}
+
+body.check-select #list-container li[selected] .detail-checkmark {
   opacity: 1;
 }
 
 #list-container list li .detail-thumbnail {
+  height: 28px;
+  overflow: hidden;
+  position: absolute;
+  width: 28px;
+}
+
+#list-container list li .detail-thumbnail > .thumbnail {
   -webkit-user-drag: none;
   background-color: rgb(245, 245, 245);
   background-position: center;
   background-size: cover;
   border-radius: 14px;
-  height: 28px;
-  opacity: 0;
-  overflow: hidden;
-  position: absolute;
-  transition: opacity 220ms ease;
-  width: 28px;
-}
-
-#list-container list li .detail-thumbnail.loaded {
+  height: 100%;
   opacity: 1;
+  position: absolute;
+  width: 100%;
 }
 
-body.check-select #list-container list li[selected] .detail-thumbnail.loaded {
+#list-container list li .detail-thumbnail > .thumbnail.animate {
+  -webkit-animation: fadeIn 220ms ease;
+}
+
+body.check-select #list-container list li[selected] .detail-thumbnail
+> .thumbnail {
+  /* Fade out after checkmark fades in. */
+  -webkit-animation: fadeOut 0ms 220ms ease backwards;
   opacity: 0;
 }
 
@@ -1581,6 +1684,33 @@ body[drive='error'] #unmounted-panel > .error,
   display: block;
 }
 
+#empty-folder {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: center;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+#empty-folder > .image {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/empty_folder.png) 1x,
+      url(../images/files/ui/2x/empty_folder.png) 2x);
+  height: 145px;
+  margin: 50px auto 32px auto;
+  width: 120px;
+}
+
+#empty-folder > .label {
+  color: rgb(180, 180, 180);
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+}
+
 #volume-space-info-contents {
   align-items: center;
   display: flex;
@@ -1729,18 +1859,29 @@ list.autocomplete-suggestions > [lead] {
 
 #suggest-app-dialog #buttons > #webstore-button {
   -webkit-padding-end: 10px;
-  -webkit-padding-start: 36px;
-  background-image: -webkit-image-set(
-    url(chrome://theme/IDR_WEBSTORE_ICON_16) 1x,
-    url(chrome://theme/IDR_WEBSTORE_ICON_16@2x) 2x);
-  background-position: 12px center;
-  background-repeat: no-repeat;
+  -webkit-padding-start: 12px;
   color: #00f;
   cursor: pointer;
-  display: inline-block;
+  display: flex;
   height: 16px;
   padding-bottom: 10px;
   padding-top: 10px;
+}
+
+#suggest-app-dialog #buttons > #webstore-button > #webstore-button-icon {
+  -webkit-margin-end: 8px;
+  background-image: -webkit-image-set(
+    url(chrome://theme/IDR_WEBSTORE_ICON_16) 1x,
+    url(chrome://theme/IDR_WEBSTORE_ICON_16@2x) 2x);
+  background-repeat: no-repeat;
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+}
+
+#suggest-app-dialog #buttons > #webstore-button > #webstore-button-label {
+  flex: 1;
+  line-height: 16px;
 }
 
 .cr-dialog-frame.error-dialog-frame {
@@ -1899,7 +2040,7 @@ list.autocomplete-suggestions > [lead] {
 }
 
 #progress-center li.error .progress-bar,
-#progress-center li.quiet .progress-bar {
+#progress-center-close-view.quiet .progress-bar {
   display: none;
 }
 
@@ -1938,8 +2079,8 @@ list.autocomplete-suggestions > [lead] {
   -webkit-margin-end: 12px;
   -webkit-margin-start: auto;
   background: -webkit-image-set(
-      url(../images/files/ui/expand_less_active.png) 1x,
-      url(../images/files/ui/2x/expand_less_active.png) 2x)
+      url(../images/files/ui/expand_more_active.png) 1x,
+      url(../images/files/ui/2x/expand_more_active.png) 2x)
       no-repeat;
   display: block;
   margin-bottom: 20px;
@@ -1947,8 +2088,8 @@ list.autocomplete-suggestions > [lead] {
 
 #progress-center button.open {
   background: -webkit-image-set(
-      url(../images/files/ui/expand_more.png) 1x,
-      url(../images/files/ui/2x/expand_more.png) 2x)
+      url(../images/files/ui/expand_less.png) 1x,
+      url(../images/files/ui/2x/expand_less.png) 2x)
       no-repeat;
   /* If progress bar exists, show open button at slighly higher position. */
   margin-bottom: 14px;
@@ -1970,10 +2111,11 @@ list.autocomplete-suggestions > [lead] {
   display: none;
 }
 
-#progress-center-close-view.single button.open {
+#progress-center-close-view.single:not(.quiet) button.open {
   display: none;
 }
 
+#progress-center-close-view.quiet button.cancel,
 #progress-center li:not(.cancelable) button.cancel {
   visibility: hidden;
 }

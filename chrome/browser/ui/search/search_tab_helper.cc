@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
+#include "chrome/browser/ui/search/instant_tab.h"
 #include "chrome/browser/ui/search/search_ipc_router_policy_impl.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -401,6 +402,9 @@ void SearchTabHelper::ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) {
 
 void SearchTabHelper::MostVisitedItemsChanged(
     const std::vector<InstantMostVisitedItem>& items) {
+  // When most visited change, the NTP usually reloads the tiles. This means
+  // our metrics get inconsistent. So we'd rather emit stats now.
+  InstantTab::EmitNtpStatistics(web_contents_);
   ipc_router_.SendMostVisitedItems(items);
 }
 
@@ -478,11 +482,12 @@ void SearchTabHelper::OnUndoAllMostVisitedDeletions() {
     instant_service_->UndoAllMostVisitedDeletions();
 }
 
-void SearchTabHelper::OnLogEvent(NTPLoggingEventType event) {
+void SearchTabHelper::OnLogEvent(NTPLoggingEventType event,
+                                 base::TimeDelta time) {
 // TODO(kmadhusu): Move platform specific code from here and get rid of #ifdef.
 #if !defined(OS_ANDROID)
-  NTPUserDataLogger::GetOrCreateFromWebContents(
-      web_contents())->LogEvent(event);
+  NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
+      ->LogEvent(event, time);
 #endif
 }
 

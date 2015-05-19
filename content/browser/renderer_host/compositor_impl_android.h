@@ -20,7 +20,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/android/resources/resource_manager_impl.h"
 #include "ui/android/resources/ui_resource_provider.h"
-#include "ui/base/android/window_android_compositor.h"
+#include "ui/android/window_android_compositor.h"
 
 class SkBitmap;
 struct ANativeWindow;
@@ -30,6 +30,7 @@ class Layer;
 class LayerTreeHost;
 class OnscreenDisplayClient;
 class SurfaceIdAllocator;
+class SurfaceManager;
 }
 
 namespace content {
@@ -49,13 +50,15 @@ class CONTENT_EXPORT CompositorImpl
 
   static bool IsInitialized();
 
+  static cc::SurfaceManager* GetSurfaceManager();
+  static scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator();
+
   void PopulateGpuCapabilities(gpu::Capabilities gpu_capabilities);
 
  private:
   // Compositor implementation.
   void SetRootLayer(scoped_refptr<cc::Layer> root) override;
   void SetSurface(jobject surface) override;
-  void SetVisible(bool visible) override;
   void setDeviceScaleFactor(float factor) override;
   void SetWindowBounds(const gfx::Size& size) override;
   void SetHasTransparentBackground(bool flag) override;
@@ -101,6 +104,7 @@ class CONTENT_EXPORT CompositorImpl
   void SetNeedsAnimate() override;
 
   void SetWindowSurface(ANativeWindow* window);
+  void SetVisible(bool visible);
 
   enum CompositingTrigger {
     DO_NOT_COMPOSITE,

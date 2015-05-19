@@ -4,7 +4,6 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/files/scoped_file.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "tools/gn/commands.h"
@@ -27,14 +26,14 @@ std::string ExtractGNBuildCommands(const base::FilePath& build_ninja_file) {
   }
 
   std::vector<std::string> lines;
-  base::SplitString(file_contents, '\n', &lines);
+  base::SplitStringDontTrim(file_contents, '\n', &lines);
 
   std::string result;
   int num_blank_lines = 0;
-  for (size_t i = 0; i < lines.size(); ++i) {
-    result += lines[i];
+  for (const auto& line : lines) {
+    result += line;
     result += "\n";
-    if (lines[i].empty()) {
+    if (line.empty()) {
       ++num_blank_lines;
     }
     if (num_blank_lines == 2)

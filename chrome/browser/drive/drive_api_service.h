@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
@@ -26,13 +27,54 @@ class SequencedTaskRunner;
 
 namespace google_apis {
 class RequestSender;
-}
+namespace drive {
+class BatchUploadRequest;
+}  // namespace drive
+}  // namespace google_apis
 
 namespace net {
 class URLRequestContextGetter;
 }  // namespace net
 
 namespace drive {
+
+// Builder for batch request returned by |DriveAPIService|.
+class BatchRequestConfigurator : public BatchRequestConfiguratorInterface,
+                                 public base::NonThreadSafe {
+ public:
+  BatchRequestConfigurator(
+      const base::WeakPtr<google_apis::drive::BatchUploadRequest>&
+          batch_request,
+      const google_apis::CancelCallback& cancel_callback);
+  ~BatchRequestConfigurator() override;
+
+  // BatchRequestConfiguratorInterface overrides.
+  google_apis::CancelCallback MultipartUploadNewFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const base::FilePath& local_file_path,
+      const UploadNewFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback MultipartUploadExistingFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const base::FilePath& local_file_path,
+      const UploadExistingFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
+  void Commit() override;
+
+ private:
+  // Reference to batch request. It turns to null after committing.
+  base::WeakPtr<google_apis::drive::BatchUploadRequest> batch_request_;
+  google_apis::CancelCallback cancel_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(BatchRequestConfigurator);
+};
 
 // This class provides Drive request calls using Drive V2 API.
 // Details of API call are abstracted in each request class and this class
@@ -173,7 +215,7 @@ class DriveAPIService : public DriveServiceInterface,
       const std::string& parent_resource_id,
       const std::string& title,
       const base::FilePath& local_file_path,
-      const UploadNewFileOptions& options,
+      const drive::UploadNewFileOptions& options,
       const google_apis::FileResourceCallback& callback,
       const google_apis::ProgressCallback& progress_callback) override;
   google_apis::CancelCallback MultipartUploadExistingFile(
@@ -181,7 +223,7 @@ class DriveAPIService : public DriveServiceInterface,
       int64 content_length,
       const std::string& resource_id,
       const base::FilePath& local_file_path,
-      const UploadExistingFileOptions& options,
+      const drive::UploadExistingFileOptions& options,
       const google_apis::FileResourceCallback& callback,
       const google_apis::ProgressCallback& progress_callback) override;
   google_apis::CancelCallback AuthorizeApp(
@@ -196,6 +238,7 @@ class DriveAPIService : public DriveServiceInterface,
       const std::string& email,
       google_apis::drive::PermissionRole role,
       const google_apis::EntryActionCallback& callback) override;
+  scoped_ptr<BatchRequestConfiguratorInterface> StartBatchRequest() override;
 
  private:
   // AuthServiceObserver override.

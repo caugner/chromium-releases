@@ -35,7 +35,6 @@
 #include "content/shell/renderer/layout_test/gc_controller.h"
 #include "content/shell/renderer/layout_test/layout_test_render_process_observer.h"
 #include "content/shell/renderer/layout_test/leak_detector.h"
-#include "content/shell/renderer/test_runner/mock_presentation_service.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/renderer/test_runner/web_task.h"
 #include "content/shell/renderer/test_runner/web_test_interfaces.h"
@@ -249,14 +248,6 @@ void WebKitTestRunner::ResetScreenOrientation() {
 void WebKitTestRunner::DidChangeBatteryStatus(
     const blink::WebBatteryStatus& status) {
   MockBatteryStatusChanged(status);
-}
-
-void WebKitTestRunner::SetScreenAvailability(bool available) {
-  proxy()->GetPresentationServiceMock()->SetScreenAvailability(available);
-}
-
-void WebKitTestRunner::ResetPresentationService() {
-  proxy()->GetPresentationServiceMock()->Reset();
 }
 
 void WebKitTestRunner::PrintMessage(const std::string& message) {
@@ -668,8 +659,6 @@ void WebKitTestRunner::Reset() {
   render_view()->ClearEditCommands();
   render_view()->GetWebView()->mainFrame()->setName(WebString());
   render_view()->GetWebView()->mainFrame()->clearOpener();
-  render_view()->GetWebView()->setDefaultPageScaleLimits(1, 4);
-  render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
 
   // Resetting the internals object also overrides the WebPreferences, so we
   // have to sync them to WebKit again.

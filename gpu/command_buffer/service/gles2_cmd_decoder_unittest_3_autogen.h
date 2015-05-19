@@ -12,6 +12,15 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_3_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_3_AUTOGEN_H_
 
+TEST_P(GLES2DecoderTest3, VertexAttrib2fValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttrib2f(1, 2, 3));
+  SpecializedSetup<cmds::VertexAttrib2f, 0>(true);
+  cmds::VertexAttrib2f cmd;
+  cmd.Init(1, 2, 3);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
 TEST_P(GLES2DecoderTest3, VertexAttrib2fvImmediateValidArgs) {
   cmds::VertexAttrib2fvImmediate& cmd =
       *GetImmediateAs<cmds::VertexAttrib2fvImmediate>();
@@ -209,6 +218,10 @@ TEST_P(GLES2DecoderTest3, PopGroupMarkerEXTValidArgs) {
 // TODO(gman): GetMaxValueInBufferCHROMIUM
 // TODO(gman): EnableFeatureCHROMIUM
 
+// TODO(gman): MapBufferRange
+
+// TODO(gman): UnmapBuffer
+
 // TODO(gman): ResizeCHROMIUM
 // TODO(gman): GetRequestableExtensionsCHROMIUM
 
@@ -226,6 +239,7 @@ TEST_P(GLES2DecoderTest3, PopGroupMarkerEXTValidArgs) {
 // TODO(gman): PostSubBufferCHROMIUM
 // TODO(gman): TexImageIOSurface2DCHROMIUM
 // TODO(gman): CopyTextureCHROMIUM
+// TODO(gman): CopySubTextureCHROMIUM
 // TODO(gman): DrawArraysInstancedANGLE
 // TODO(gman): DrawElementsInstancedANGLE
 // TODO(gman): VertexAttribDivisorANGLE

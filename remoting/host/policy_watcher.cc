@@ -21,6 +21,8 @@
 #include "components/policy/core/common/schema_registry.h"
 #include "policy/policy_constants.h"
 #include "remoting/host/dns_blackhole_checker.h"
+#include "remoting/host/third_party_auth_config.h"
+#include "remoting/protocol/port_range.h"
 
 #if !defined(NDEBUG)
 #include "base/json/json_reader.h"
@@ -42,35 +44,29 @@ namespace key = ::policy::key;
 namespace {
 
 // Copies all policy values from one dictionary to another, using values from
-// |default| if they are not set in |from|, or values from |bad_type_values| if
-// the value in |from| has the wrong type.
-scoped_ptr<base::DictionaryValue> CopyGoodValuesAndAddDefaults(
-    const base::DictionaryValue* from,
-    const base::DictionaryValue* default_values,
-    const base::DictionaryValue* bad_type_values) {
-  scoped_ptr<base::DictionaryValue> to(default_values->DeepCopy());
-  for (base::DictionaryValue::Iterator i(*default_values); !i.IsAtEnd();
+// |default_values| if they are not set in |from|.
+scoped_ptr<base::DictionaryValue> CopyValuesAndAddDefaults(
+    const base::DictionaryValue& from,
+    const base::DictionaryValue& default_values) {
+  scoped_ptr<base::DictionaryValue> to(default_values.DeepCopy());
+  for (base::DictionaryValue::Iterator i(default_values); !i.IsAtEnd();
        i.Advance()) {
     const base::Value* value = nullptr;
 
     // If the policy isn't in |from|, use the default.
-    if (!from->Get(i.key(), &value)) {
+    if (!from.Get(i.key(), &value)) {
       continue;
     }
 
-    // If the policy is the wrong type, use the value from |bad_type_values|.
-    if (!value->IsType(i.value().GetType())) {
-      CHECK(bad_type_values->Get(i.key(), &value));
-    }
-
+    CHECK(value->IsType(i.value().GetType()));
     to->Set(i.key(), value->DeepCopy());
   }
 
 #if !defined(NDEBUG)
   // Replace values with those specified in DebugOverridePolicies, if present.
   std::string policy_overrides;
-  if (from->GetString(key::kRemoteAccessHostDebugOverridePolicies,
-                      &policy_overrides)) {
+  if (from.GetString(key::kRemoteAccessHostDebugOverridePolicies,
+                     &policy_overrides)) {
     scoped_ptr<base::Value> value(base::JSONReader::Read(policy_overrides));
     const base::DictionaryValue* override_values;
     if (value && value->GetAsDictionary(&override_values)) {
@@ -84,6 +80,68 @@ scoped_ptr<base::DictionaryValue> CopyGoodValuesAndAddDefaults(
 
 policy::PolicyNamespace GetPolicyNamespace() {
   return policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string());
+}
+
+scoped_ptr<policy::SchemaRegistry> CreateSchemaRegistry() {
+  // TODO(lukasza): Schema below should ideally only cover Chromoting-specific
+  // policies (expecting perf and maintanability improvement, but no functional
+  // impact).
+  policy::Schema schema = policy::Schema::Wrap(policy::GetChromeSchemaData());
+
+  scoped_ptr<policy::SchemaRegistry> schema_registry(
+      new policy::SchemaRegistry());
+  schema_registry->RegisterComponent(GetPolicyNamespace(), schema);
+  return schema_registry.Pass();
+}
+
+scoped_ptr<base::DictionaryValue> CopyChromotingPoliciesIntoDictionary(
+    const policy::PolicyMap& current) {
+  const char kPolicyNameSubstring[] = "RemoteAccessHost";
+  scoped_ptr<base::DictionaryValue> policy_dict(new base::DictionaryValue());
+  for (auto it = current.begin(); it != current.end(); ++it) {
+    const std::string& key = it->first;
+    const base::Value* value = it->second.value;
+
+    // Copying only Chromoting-specific policies helps avoid false alarms
+    // raised by NormalizePolicies below (such alarms shutdown the host).
+    // TODO(lukasza): Removing this somewhat brittle filtering will be possible
+    //                after having separate, Chromoting-specific schema.
+    if (key.find(kPolicyNameSubstring) != std::string::npos) {
+      policy_dict->Set(key, value->DeepCopy());
+    }
+  }
+
+  return policy_dict.Pass();
+}
+
+// Takes a dictionary containing only 1) recognized policy names and 2)
+// well-typed policy values and further verifies policy contents.
+bool VerifyWellformedness(const base::DictionaryValue& changed_policies) {
+  // Verify ThirdPartyAuthConfig policy.
+  ThirdPartyAuthConfig not_used;
+  switch (ThirdPartyAuthConfig::Parse(changed_policies, &not_used)) {
+    case ThirdPartyAuthConfig::NoPolicy:
+    case ThirdPartyAuthConfig::ParsingSuccess:
+      break;  // Well-formed.
+    case ThirdPartyAuthConfig::InvalidPolicy:
+      return false;  // Malformed.
+    default:
+      NOTREACHED();
+      return false;
+  }
+
+  // Verify UdpPortRange policy.
+  std::string udp_port_range_string;
+  PortRange udp_port_range;
+  if (changed_policies.GetString(policy::key::kRemoteAccessHostUdpPortRange,
+                                 &udp_port_range_string)) {
+    if (!PortRange::Parse(udp_port_range_string, &udp_port_range)) {
+      return false;
+    }
+  }
+
+  // Report that all the policies were well-formed.
+  return true;
 }
 
 }  // namespace
@@ -108,49 +166,9 @@ void PolicyWatcher::StartWatching(
   }
 }
 
-void PolicyWatcher::UpdatePolicies(
-    const base::DictionaryValue* new_policies_raw) {
-  DCHECK(CalledOnValidThread());
-
-  transient_policy_error_retry_counter_ = 0;
-
-  // Use default values for any missing policies.
-  scoped_ptr<base::DictionaryValue> new_policies = CopyGoodValuesAndAddDefaults(
-      new_policies_raw, default_values_.get(), bad_type_values_.get());
-
-  // Find the changed policies.
-  scoped_ptr<base::DictionaryValue> changed_policies(
-      new base::DictionaryValue());
-  base::DictionaryValue::Iterator iter(*new_policies);
-  while (!iter.IsAtEnd()) {
-    base::Value* old_policy;
-    if (!(old_policies_->Get(iter.key(), &old_policy) &&
-          old_policy->Equals(&iter.value()))) {
-      changed_policies->Set(iter.key(), iter.value().DeepCopy());
-    }
-    iter.Advance();
-  }
-
-  // Save the new policies.
-  old_policies_.swap(new_policies);
-
-  // Notify our client of the changed policies.
-  if (!changed_policies->empty()) {
-    policy_updated_callback_.Run(changed_policies.Pass());
-  }
-}
-
 void PolicyWatcher::SignalPolicyError() {
-  transient_policy_error_retry_counter_ = 0;
+  old_policies_->Clear();
   policy_error_callback_.Run();
-}
-
-void PolicyWatcher::SignalTransientPolicyError() {
-  const int kMaxRetryCount = 5;
-  transient_policy_error_retry_counter_ += 1;
-  if (transient_policy_error_retry_counter_ >= kMaxRetryCount) {
-    SignalPolicyError();
-  }
 }
 
 PolicyWatcher::PolicyWatcher(
@@ -158,13 +176,15 @@ PolicyWatcher::PolicyWatcher(
     scoped_ptr<policy::PolicyService> owned_policy_service,
     scoped_ptr<policy::ConfigurationPolicyProvider> owned_policy_provider,
     scoped_ptr<policy::SchemaRegistry> owned_schema_registry)
-    : transient_policy_error_retry_counter_(0),
-      old_policies_(new base::DictionaryValue()),
+    : old_policies_(new base::DictionaryValue()),
       default_values_(new base::DictionaryValue()),
       policy_service_(policy_service),
       owned_schema_registry_(owned_schema_registry.Pass()),
       owned_policy_provider_(owned_policy_provider.Pass()),
       owned_policy_service_(owned_policy_service.Pass()) {
+  DCHECK(policy_service_);
+  DCHECK(owned_schema_registry_);
+
   // Initialize the default values for each policy.
   default_values_->SetBoolean(key::kRemoteAccessHostFirewallTraversal, true);
   default_values_->SetBoolean(key::kRemoteAccessHostRequireCurtain, false);
@@ -186,13 +206,6 @@ PolicyWatcher::PolicyWatcher(
   default_values_->SetString(key::kRemoteAccessHostDebugOverridePolicies,
                              std::string());
 #endif
-
-  // Initialize the fall-back values to use for unreadable policies.
-  // For most policies these match the defaults.
-  bad_type_values_.reset(default_values_->DeepCopy());
-  bad_type_values_->SetBoolean(key::kRemoteAccessHostFirewallTraversal, false);
-  bad_type_values_->SetBoolean(key::kRemoteAccessHostAllowRelayedConnection,
-                               false);
 }
 
 PolicyWatcher::~PolicyWatcher() {
@@ -206,15 +219,112 @@ PolicyWatcher::~PolicyWatcher() {
   }
 }
 
+const policy::Schema* PolicyWatcher::GetPolicySchema() const {
+  return owned_schema_registry_->schema_map()->GetSchema(GetPolicyNamespace());
+}
+
+bool PolicyWatcher::NormalizePolicies(base::DictionaryValue* policy_dict) {
+  // Allowing unrecognized policy names allows presence of
+  // 1) comments (i.e. JSON of the form: { "_comment": "blah", ... }),
+  // 2) policies intended for future/newer versions of the host,
+  // 3) policies not supported on all OS-s (i.e. RemoteAccessHostMatchUsername
+  //    is not supported on Windows and therefore policy_templates.json omits
+  //    schema for this policy on this particular platform).
+  auto strategy = policy::SCHEMA_ALLOW_UNKNOWN_TOPLEVEL;
+
+  std::string path;
+  std::string error;
+  bool changed = false;
+  const policy::Schema* schema = GetPolicySchema();
+  if (schema->Normalize(policy_dict, strategy, &path, &error, &changed)) {
+    if (changed) {
+      LOG(WARNING) << "Unknown (unrecognized or unsupported) policy: " << path
+                   << ": " << error;
+    }
+    return true;
+  } else {
+    LOG(ERROR) << "Invalid policy contents: " << path << ": " << error;
+    return false;
+  }
+}
+
+namespace {
+void CopyDictionaryValue(const base::DictionaryValue& from,
+                         base::DictionaryValue& to,
+                         std::string key) {
+  const base::Value* value;
+  if (from.Get(key, &value)) {
+    to.Set(key, value->DeepCopy());
+  }
+}
+}  // namespace
+
+scoped_ptr<base::DictionaryValue>
+PolicyWatcher::StoreNewAndReturnChangedPolicies(
+    scoped_ptr<base::DictionaryValue> new_policies) {
+  // Find the changed policies.
+  scoped_ptr<base::DictionaryValue> changed_policies(
+      new base::DictionaryValue());
+  base::DictionaryValue::Iterator iter(*new_policies);
+  while (!iter.IsAtEnd()) {
+    base::Value* old_policy;
+    if (!(old_policies_->Get(iter.key(), &old_policy) &&
+          old_policy->Equals(&iter.value()))) {
+      changed_policies->Set(iter.key(), iter.value().DeepCopy());
+    }
+    iter.Advance();
+  }
+
+  // If one of ThirdPartyAuthConfig policies changed, we need to include all.
+  if (changed_policies->HasKey(key::kRemoteAccessHostTokenUrl) ||
+      changed_policies->HasKey(key::kRemoteAccessHostTokenValidationUrl) ||
+      changed_policies->HasKey(
+          key::kRemoteAccessHostTokenValidationCertificateIssuer)) {
+    CopyDictionaryValue(*new_policies, *changed_policies,
+                        key::kRemoteAccessHostTokenUrl);
+    CopyDictionaryValue(*new_policies, *changed_policies,
+                        key::kRemoteAccessHostTokenValidationUrl);
+    CopyDictionaryValue(*new_policies, *changed_policies,
+                        key::kRemoteAccessHostTokenValidationCertificateIssuer);
+  }
+
+  // Save the new policies.
+  old_policies_.swap(new_policies);
+
+  return changed_policies.Pass();
+}
+
 void PolicyWatcher::OnPolicyUpdated(const policy::PolicyNamespace& ns,
                                     const policy::PolicyMap& previous,
                                     const policy::PolicyMap& current) {
-  scoped_ptr<base::DictionaryValue> policy_dict(new base::DictionaryValue());
-  for (auto it = current.begin(); it != current.end(); ++it) {
-    // TODO(lukasza): Use policy::Schema::Normalize() for schema verification.
-    policy_dict->Set(it->first, it->second.value->DeepCopy());
+  scoped_ptr<base::DictionaryValue> new_policies =
+      CopyChromotingPoliciesIntoDictionary(current);
+
+  // Check for mistyped values and get rid of unknown policies.
+  if (!NormalizePolicies(new_policies.get())) {
+    SignalPolicyError();
+    return;
   }
-  UpdatePolicies(policy_dict.get());
+
+  // Use default values for any missing policies.
+  scoped_ptr<base::DictionaryValue> filled_policies =
+      CopyValuesAndAddDefaults(*new_policies, *default_values_);
+
+  // Limit reporting to only the policies that were changed.
+  scoped_ptr<base::DictionaryValue> changed_policies =
+      StoreNewAndReturnChangedPolicies(filled_policies.Pass());
+  if (changed_policies->empty()) {
+    return;
+  }
+
+  // Verify that we are calling the callback with valid policies.
+  if (!VerifyWellformedness(*changed_policies)) {
+    SignalPolicyError();
+    return;
+  }
+
+  // Notify our client of the changed policies.
+  policy_updated_callback_.Run(changed_policies.Pass());
 }
 
 void PolicyWatcher::OnPolicyServiceInitialized(policy::PolicyDomain domain) {
@@ -225,15 +335,7 @@ void PolicyWatcher::OnPolicyServiceInitialized(policy::PolicyDomain domain) {
 
 scoped_ptr<PolicyWatcher> PolicyWatcher::CreateFromPolicyLoader(
     scoped_ptr<policy::AsyncPolicyLoader> async_policy_loader) {
-  // TODO(lukasza): Schema below should ideally only cover Chromoting-specific
-  // policies (expecting perf and maintanability improvement, but no functional
-  // impact).
-  policy::Schema schema = policy::Schema::Wrap(policy::GetChromeSchemaData());
-
-  scoped_ptr<policy::SchemaRegistry> schema_registry(
-      new policy::SchemaRegistry());
-  schema_registry->RegisterComponent(GetPolicyNamespace(), schema);
-
+  scoped_ptr<policy::SchemaRegistry> schema_registry = CreateSchemaRegistry();
   scoped_ptr<policy::AsyncPolicyProvider> policy_provider(
       new policy::AsyncPolicyProvider(schema_registry.get(),
                                       async_policy_loader.Pass()));
@@ -256,8 +358,8 @@ scoped_ptr<PolicyWatcher> PolicyWatcher::Create(
 #if defined(OS_CHROMEOS)
   // On Chrome OS the PolicyService is owned by the browser.
   DCHECK(policy_service);
-  return make_scoped_ptr(
-      new PolicyWatcher(policy_service, nullptr, nullptr, nullptr));
+  return make_scoped_ptr(new PolicyWatcher(policy_service, nullptr, nullptr,
+                                           CreateSchemaRegistry()));
 #else  // !defined(OS_CHROMEOS)
   DCHECK(!policy_service);
 

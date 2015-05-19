@@ -292,6 +292,23 @@ class OmniboxFieldTrial {
   static float HQPExperimentalTopicalityThreshold();
 
   // ---------------------------------------------------------
+  // For the HQPFixFrequencyScoring experiment that's part of the
+  // bundled omnibox field trial.
+
+  // Returns true if HQP should apply the bug fixes to the GetFrequency()
+  // function.
+  static bool HQPFixFrequencyScoringBugs();
+
+  // ---------------------------------------------------------
+  // For the HQPNumTitleWords experiment that's part of the
+  // bundled omnibox field trial.
+
+  // Returns the number of title words that are allowed to contribute
+  // to the topicality score.  Words later in the title are ignored.
+  // Returns 10 as a default if the experiment isn't active.
+  static size_t HQPNumTitleWordsToAllow();
+
+  // ---------------------------------------------------------
   // Exposed publicly for the sake of unittests.
   static const char kBundledExperimentFieldTrialName[];
   // Rule names used by the bundled experiment.
@@ -310,6 +327,8 @@ class OmniboxFieldTrial {
   static const char kDisableResultsCachingRule[];
   static const char kMeasureSuggestPollingDelayFromLastKeystrokeRule[];
   static const char kSuggestPollingDelayMsRule[];
+  static const char kHQPFixFrequencyScoringBugsRule[];
+  static const char kHQPNumTitleWordsRule[];
 
   // Parameter names used by the HUP new scoring experiments.
   static const char kHUPNewScoringEnabledParam[];

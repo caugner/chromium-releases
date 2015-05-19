@@ -19,7 +19,6 @@
 #include "base/stl_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_handle.h"
@@ -33,6 +32,7 @@
 #include "chrome/common/prefetch_messages.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -586,8 +586,9 @@ void PrerenderLocalPredictor::Shutdown() {
   history_service_observer_.RemoveAll();
 }
 
-void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
-                                         const history::BriefVisitInfo& info) {
+void PrerenderLocalPredictor::OnAddVisit(
+    history::HistoryService* history_service,
+    const history::BriefVisitInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_ADD_VISIT);
   if (!visit_history_.get())
@@ -679,7 +680,7 @@ void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
   }
 
   RecordEvent(EVENT_START_URL_LOOKUP);
-  HistoryService* history = GetHistoryIfExists();
+  history::HistoryService* history = GetHistoryIfExists();
   if (history) {
     RecordEvent(EVENT_GOT_HISTORY_ISSUING_LOOKUP);
     CandidatePrerenderInfo* lookup_info_ptr = lookup_info.get();
@@ -1116,7 +1117,7 @@ void PrerenderLocalPredictor::OnGetInitialVisitHistory(
       visit_history->rbegin(), visit_history->rend()));
 }
 
-HistoryService* PrerenderLocalPredictor::GetHistoryIfExists() const {
+history::HistoryService* PrerenderLocalPredictor::GetHistoryIfExists() const {
   Profile* profile = prerender_manager_->profile();
   if (!profile)
     return NULL;
@@ -1132,7 +1133,7 @@ void PrerenderLocalPredictor::Init() {
     RecordEvent(EVENT_INIT_FAILED_UNENCRYPTED_SYNC_NOT_ENABLED);
     return;
   }
-  HistoryService* history = GetHistoryIfExists();
+  history::HistoryService* history = GetHistoryIfExists();
   if (history) {
     CHECK(!history_service_observer_.IsObserving(history));
     history->ScheduleDBTask(

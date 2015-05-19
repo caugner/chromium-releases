@@ -92,16 +92,19 @@ class PermissionMessage {
     kCopresence,
     kTopSites,
     kU2fDevices,
-    kVpnProvider,
     kDocumentScan,
+    kNetworkingConfig,
+    kPlatformKeys,
+    kMDns,
+    kVpnProvider,
     kHosts1ReadOnly,
     kHosts2ReadOnly,
     kHosts3ReadOnly,
     kHosts4OrMoreReadOnly,
     kHostsAllReadOnly,
     kInterceptAllKeys,
-    kNetworkingConfig,
-    kPlatformKeys,
+    kSettingsPrivate,
+    kPrinterProvider,
     // Last entry: Add new entries above and ensure to update the
     // "ExtensionPermission2" enum in tools/metrics/histograms/histograms.xml.
     kEnumBoundary,
@@ -145,6 +148,7 @@ class PermissionMessage {
 };
 
 typedef std::vector<PermissionMessage> PermissionMessages;
+typedef std::vector<PermissionMessage::ID> PermissionMessageIDs;
 
 }  // namespace extensions
 

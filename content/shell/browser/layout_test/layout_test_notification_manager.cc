@@ -30,8 +30,9 @@ LayoutTestNotificationManager::PersistentNotification::PersistentNotification()
 
 LayoutTestNotificationManager::~LayoutTestNotificationManager() {}
 
-bool LayoutTestNotificationManager::RequestPermission(const GURL& origin) {
-  return CheckPermission(origin) == blink::WebNotificationPermissionAllowed;
+PermissionStatus LayoutTestNotificationManager::RequestPermission(
+    const GURL& origin) {
+  return GetPermissionStatus(origin);
 }
 
 blink::WebNotificationPermission
@@ -140,6 +141,21 @@ void LayoutTestNotificationManager::SimulateClick(const std::string& title) {
           base::Bind(&OnEventDispatchComplete));
 }
 
+PermissionStatus LayoutTestNotificationManager::GetPermissionStatus(
+    const GURL& origin) {
+  switch (CheckPermission(origin)) {
+    case blink::WebNotificationPermissionAllowed:
+      return PERMISSION_STATUS_GRANTED;
+    case blink::WebNotificationPermissionDenied:
+      return PERMISSION_STATUS_DENIED;
+    case blink::WebNotificationPermissionDefault:
+      return PERMISSION_STATUS_ASK;
+  }
+
+  NOTREACHED();
+  return PERMISSION_STATUS_DENIED;
+}
+
 blink::WebNotificationPermission
 LayoutTestNotificationManager::CheckPermissionOnUIThread(
     BrowserContext* browser_context,
@@ -164,7 +180,7 @@ void LayoutTestNotificationManager::Close(const std::string& title) {
   if (iterator == page_notifications_.end())
     return;
 
-  iterator->second->NotificationClosed(false);
+  iterator->second->NotificationClosed();
 }
 
 void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
@@ -172,8 +188,8 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
   if (!notification_data.tag.length())
     return;
 
-  std::string replace_id = base::UTF16ToUTF8(notification_data.tag);
-  const auto& replace_iter = replacements_.find(replace_id);
+  std::string tag = notification_data.tag;
+  const auto& replace_iter = replacements_.find(tag);
   if (replace_iter != replacements_.end()) {
     const std::string& previous_title = replace_iter->second;
 
@@ -183,7 +199,7 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
       DesktopNotificationDelegate* previous_delegate =
           page_notification_iter->second;
 
-      previous_delegate->NotificationClosed(false);
+      previous_delegate->NotificationClosed();
 
       page_notifications_.erase(page_notification_iter);
       delete previous_delegate;
@@ -195,7 +211,7 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
       persistent_notifications_.erase(persistent_notification_iter);
   }
 
-  replacements_[replace_id] = base::UTF16ToUTF8(notification_data.title);
+  replacements_[tag] = base::UTF16ToUTF8(notification_data.title);
 }
 
 }  // namespace content

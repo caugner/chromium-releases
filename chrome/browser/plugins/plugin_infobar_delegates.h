@@ -21,7 +21,7 @@ namespace content {
 class WebContents;
 }
 
-// Base class for blocked plug-in infobars.
+// Base class for blocked plugin infobars.
 class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
  protected:
   explicit PluginInfoBarDelegate(const std::string& identifier);
@@ -45,7 +45,7 @@ class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
 };
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-// Infobar that's shown when a plug-in is out of date.
+// Infobar that's shown when a plugin is out of date.
 class OutdatedPluginInfoBarDelegate : public PluginInfoBarDelegate,
                                       public WeakPluginInstallerObserver {
  public:
@@ -69,11 +69,11 @@ class OutdatedPluginInfoBarDelegate : public PluginInfoBarDelegate,
   ~OutdatedPluginInfoBarDelegate() override;
 
   // PluginInfoBarDelegate:
+  void InfoBarDismissed() override;
   base::string16 GetMessageText() const override;
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
   bool Cancel() override;
-  void InfoBarDismissed() override;
   bool LinkClicked(WindowOpenDisposition disposition) override;
   std::string GetLearnMoreURL() const override;
 

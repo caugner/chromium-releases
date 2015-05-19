@@ -250,6 +250,9 @@ const char kBackgroundPermissionNeeded[] =
     "permission.";
 const char kBackgroundRequiredForPlatformApps[] =
     "Packaged apps must have a background page or background scripts.";
+const char kCannotAccessAboutUrl[] =
+    "Cannot access \"*\" at origin \"*\". Extension must have permission to "
+    "access the frame's origin, and matchAboutBlank must be true.";
 const char kCannotAccessChromeUrl[] = "Cannot access a chrome:// URL";
 const char kCannotAccessExtensionUrl[] =
     "Cannot access a chrome-extension:// URL of different extension";
@@ -361,6 +364,9 @@ const char kInvalidFileAccessValue[] =
     "Invalid value for 'file_access[*]'.";
 const char kInvalidFileBrowserHandler[] =
     "Invalid value for 'file_browser_handlers'.";
+const char kInvalidFileBrowserHandlerMissingPermission[] =
+    "Declaring file browser handlers requires the fileBrowserHandler manifest "
+    "permission.";
 const char kInvalidFileFiltersList[] =
     "Invalid value for 'file_filters'.";
 const char kInvalidFileFilterValue[] =

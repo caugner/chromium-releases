@@ -30,13 +30,11 @@ class ExtensionOptionsGuest
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
   void DidInitialize(const base::DictionaryValue& create_params) override;
-  void DidStopLoading() override;
+  void GuestViewDidStopLoading() override;
   const char* GetAPINamespace() const override;
   int GetTaskPrefix() const override;
-  void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
-                                     const gfx::Size& new_size) override;
-  bool IsAutoSizeSupported() const override;
   bool IsPreferredSizeModeEnabled() const override;
+  bool IsDragAndDropEnabled() const override;
   void OnPreferredSizeChanged(const gfx::Size& pref_size) override;
 
   // ExtensionFunctionDispatcher::Delegate implementation.

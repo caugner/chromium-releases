@@ -84,25 +84,31 @@ void AwMessagePortServiceImpl::OnConvertedWebToAppMessage(
   if (jobj.is_null())
     return;
 
-  if (message.GetSize() != 1) {
-    NOTREACHED();
-    return;
-  }
-
   base::string16 value;
   if (!message.GetString(0, &value)) {
     LOG(WARNING) << "Converting post message to a string failed for port "
         << message_port_id;
     return;
   }
+
+  if (message.GetSize() != 1) {
+    NOTREACHED();
+    return;
+  }
+
+  // Add the ports to AwMessagePortService.
+  for (const auto& iter : sent_message_port_ids) {
+    AddPort(iter, ports_[message_port_id]);
+  }
+
   ScopedJavaLocalRef<jstring> jmsg = ConvertUTF16ToJavaString(env, value);
   ScopedJavaLocalRef<jintArray> jports =
       ToJavaIntArray(env, sent_message_port_ids);
-  Java_AwMessagePortService_onPostMessage(env,
-                                          jobj.obj(),
-                                          message_port_id,
-                                          jmsg.obj(),
-                                          jports.obj());
+  Java_AwMessagePortService_onReceivedMessage(env,
+                                              jobj.obj(),
+                                              message_port_id,
+                                              jmsg.obj(),
+                                              jports.obj());
 }
 
 void AwMessagePortServiceImpl::OnMessagePortMessageFilterClosing(
@@ -135,6 +141,30 @@ void AwMessagePortServiceImpl::PostAppToWebMessage(JNIEnv* env, jobject obj,
                  base::Owned(j_sent_ports)));
 }
 
+// The message port service cannot immediately close the port, because
+// it is possible that messages are still queued in the renderer process
+// waiting for a conversion. Instead, it sends a special message with
+// a flag which indicates that this message port should be closed.
+void AwMessagePortServiceImpl::ClosePort(JNIEnv* env, jobject obj,
+    int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&AwMessagePortServiceImpl::PostClosePortMessage,
+                 base::Unretained(this),
+                 message_port_id));
+}
+
+void AwMessagePortServiceImpl::ReleaseMessages(JNIEnv* env, jobject obj,
+    int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&MessagePortProvider::ReleaseMessages, message_port_id));
+}
+
 void AwMessagePortServiceImpl::RemoveSentPorts(
     const std::vector<int>& sent_ports) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -151,12 +181,23 @@ void AwMessagePortServiceImpl::PostAppToWebMessageOnIOThread(
   ports_[sender_id]->SendAppToWebMessage(sender_id, *message, *sent_ports);
 }
 
+void AwMessagePortServiceImpl::PostClosePortMessage(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  ports_[message_port_id]->SendClosePortMessage(message_port_id);
+}
+
+void AwMessagePortServiceImpl::CleanupPort(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  ports_.erase(message_port_id);
+}
 
 void AwMessagePortServiceImpl::CreateMessageChannelOnIOThread(
     scoped_refptr<AwMessagePortMessageFilter> filter,
     int* portId1,
     int* portId2) {
   MessagePortProvider::CreateMessageChannel(filter.get(), portId1, portId2);
+  MessagePortProvider::HoldMessages(*portId1);
+  MessagePortProvider::HoldMessages(*portId2);
   AddPort(*portId1, filter.get());
   AddPort(*portId2, filter.get());
 }
@@ -174,6 +215,7 @@ void AwMessagePortServiceImpl::OnMessageChannelCreated(
       *port2, ports->obj());
 }
 
+// Adds a new port to the message port service.
 void AwMessagePortServiceImpl::AddPort(int message_port_id,
                                        AwMessagePortMessageFilter* filter) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);

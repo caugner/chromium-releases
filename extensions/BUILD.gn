@@ -70,6 +70,7 @@ source_set("test_support") {
   sources = rebase_path(extensions_gypi_values.extensions_test_support_sources,
                         ".",
                         "//extensions")
+
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
@@ -97,6 +98,8 @@ source_set("test_support") {
 # GYP version: //extensions/extensions.gyp:extensions_shell_and_test_pak
 repack("shell_and_test_pak") {
   sources = [
+    "$root_gen_dir/blink/devtools_resources.pak",
+    "$root_gen_dir/blink/public/resources/blink_image_resources_100_percent.pak",
     "$root_gen_dir/blink/public/resources/blink_resources.pak",
     "$root_gen_dir/content/app/strings/content_strings_en-US.pak",
     "$root_gen_dir/content/content_resources.pak",
@@ -109,7 +112,6 @@ repack("shell_and_test_pak") {
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
     "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
-    "$root_gen_dir/blink/devtools_resources.pak",
   ]
 
   output = "$root_out_dir/extensions_shell_and_test.pak"
@@ -121,6 +123,7 @@ repack("shell_and_test_pak") {
     "//content/shell:resources",
     "//extensions/shell:resources",
     "//extensions/strings",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//ui/resources",
     "//ui/strings",
@@ -137,9 +140,6 @@ test("extensions_unittests") {
     # TODO(rockot): DisplayInfoProvider::Create() is only implemented in Chrome
     # and app_shell. This is wrong.
     "shell/browser/shell_display_info_provider.cc",
-
-    # TODO(rockot): See above, but the header is in //components.
-    "shell/browser/shell_web_contents_modal_dialog_manager.cc",
   ]
 
   deps = [
@@ -211,13 +211,6 @@ test("extensions_browsertests") {
     "//third_party/mojo/src/mojo/edk/system",
     "//third_party/mojo/src/mojo/public/cpp/bindings",
   ]
-
-  if (is_chromeos) {
-    sources += rebase_path(
-            extensions_tests_gypi_values.extensions_browsertests_sources_chromeos,
-            ".",
-            "//extensions")
-  }
 
   if (is_win) {
     deps += [ "//base/allocator" ]

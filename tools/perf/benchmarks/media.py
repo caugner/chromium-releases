@@ -2,18 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from measurements import media
-import page_sets
 from telemetry import benchmark
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 
+from measurements import media
+import page_sets
+
 
 class _MSEMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_MSEMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_MSEMeasurement, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     media_metric = tab.EvaluateJavaScript('window.__testMetrics')
@@ -63,7 +63,7 @@ class MediaAndroid(benchmark.Benchmark):
   tag = 'android'
   page_set = page_sets.ToughVideoCasesPageSet
   # Exclude is_4k and 50 fps media files (garden* & crowd*).
-  options = {'page_label_filter_exclude': 'is_4k,is_50fps'}
+  options = {'story_label_filter_exclude': 'is_4k,is_50fps'}
 
   @classmethod
   def Name(cls):
@@ -78,9 +78,9 @@ class MediaChromeOS4kOnly(benchmark.Benchmark):
   tag = 'chromeOS4kOnly'
   page_set = page_sets.ToughVideoCasesPageSet
   options = {
-      'page_label_filter': 'is_4k',
+      'story_label_filter': 'is_4k',
       # Exclude is_50fps test files: crbug/331816
-      'page_label_filter_exclude': 'is_50fps'
+      'story_label_filter_exclude': 'is_50fps'
   }
 
   @classmethod
@@ -99,7 +99,7 @@ class MediaChromeOS(benchmark.Benchmark):
   tag = 'chromeOS'
   page_set = page_sets.ToughVideoCasesPageSet
   # Exclude is_50fps test files: crbug/331816
-  options = {'page_label_filter_exclude': 'is_4k,is_50fps'}
+  options = {'story_label_filter_exclude': 'is_4k,is_50fps'}
 
   @classmethod
   def Name(cls):

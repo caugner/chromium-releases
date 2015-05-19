@@ -11,7 +11,9 @@
 
 'use strict';
 
-var base = {};
+/** @suppress {duplicate} */
+var base = base || {};
+
 base.debug = function() {};
 
 /**
@@ -19,7 +21,7 @@ base.debug = function() {};
  * Set it to true for debugging.
  * @type {boolean}
  */
-base.debug.breakOnAssert = false;
+base.debug.throwOnAssert = false;
 
 /**
  * Assert that |expr| is true else print the |opt_msg|.
@@ -28,14 +30,12 @@ base.debug.breakOnAssert = false;
  */
 base.debug.assert = function(expr, opt_msg) {
   if (!expr) {
-    var msg = 'Assertion Failed.';
-    if (opt_msg) {
-      msg += ' ' + opt_msg;
+    if (!opt_msg) {
+      opt_msg = 'Assertion Failed.';
     }
-    console.error(msg);
-    if (base.debug.breakOnAssert) {
-      alert(msg);
-      debugger;
+    console.error(opt_msg);
+    if (base.debug.throwOnAssert) {
+      throw new Error(opt_msg);
     }
   }
 };
@@ -74,6 +74,35 @@ base.Disposables = function(var_args) {
   this.disposables_ = Array.prototype.slice.call(arguments, 0);
 };
 
+/**
+ * @param {...base.Disposable} var_args
+ */
+base.Disposables.prototype.add = function(var_args) {
+  var disposables = Array.prototype.slice.call(arguments, 0);
+  for (var i = 0; i < disposables.length; i++) {
+    var current = /** @type {base.Disposable} */ (disposables[i]);
+    if (this.disposables_.indexOf(current) === -1) {
+      this.disposables_.push(current);
+    }
+  }
+};
+
+/**
+ * @param {...base.Disposable} var_args  Dispose |var_args| and remove
+ *    them from the current object.
+ */
+base.Disposables.prototype.remove = function(var_args) {
+  var disposables = Array.prototype.slice.call(arguments, 0);
+  for (var i = 0; i < disposables.length; i++) {
+    var disposable = /** @type {base.Disposable} */ (disposables[i]);
+    var index = this.disposables_.indexOf(disposable);
+    if(index !== -1) {
+      this.disposables_.splice(index, 1);
+      disposable.dispose();
+    }
+  }
+};
+
 base.Disposables.prototype.dispose = function() {
   for (var i = 0; i < this.disposables_.length; i++) {
     this.disposables_[i].dispose();
@@ -99,8 +128,7 @@ base.dispose = function(obj) {
  */
 base.mix = function(dest, src) {
   for (var prop in src) {
-    if (src.hasOwnProperty(prop)) {
-      base.debug.assert(!dest.hasOwnProperty(prop),"Don't override properties");
+    if (src.hasOwnProperty(prop) && !(prop in dest)) {
       dest[prop] = src[prop];
     }
   }
@@ -114,6 +142,49 @@ base.mix = function(dest, src) {
  */
 base.extend = function(dest, src) {
   base.mix(dest.prototype, src.prototype || src);
+};
+
+/**
+ * Inherits properties and methods from |parentCtor| at object construction time
+ * using prototypical inheritance. e.g.
+ *
+ * var ParentClass = function(parentArg) {
+ *   this.parentProperty = parentArg;
+ * }
+ *
+ * var ChildClass = function() {
+ *   base.inherits(this, ParentClass, 'parentArg'); // must be the first line.
+ * }
+ *
+ * var child = new ChildClass();
+ * child instanceof ParentClass // true
+ *
+ * See base_inherits_unittest.js for the guaranteed behavior of base.inherits().
+ * This lazy approach is chosen so that it is not necessary to maintain proper
+ * script loading order between the parent class and the child class.
+ *
+ * @param {*} childObject
+ * @param {*} parentCtor
+ * @param {...} parentCtorArgs
+ * @suppress {checkTypes|reportUnknownTypes}
+ */
+base.inherits = function(childObject, parentCtor, parentCtorArgs) {
+  base.debug.assert(parentCtor && parentCtor.prototype,
+                    'Invalid parent constructor.');
+  var parentArgs = Array.prototype.slice.call(arguments, 2);
+
+  // Mix in the parent's prototypes so that they're available during the parent
+  // ctor.
+  base.mix(childObject, parentCtor.prototype);
+  parentCtor.apply(childObject, parentArgs);
+
+  // Note that __proto__ is deprecated.
+  //   https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/
+  //   Global_Objects/Object/proto.
+  // It is used so that childObject instanceof parentCtor will
+  // return true.
+  childObject.__proto__.__proto__ = parentCtor.prototype;
+  base.debug.assert(childObject instanceof parentCtor);
 };
 
 base.doNothing = function() {};
@@ -237,17 +308,16 @@ base.escapeHTML = function(str) {
  *  };
  *
  * @constructor
+ * @template T
  */
 base.Deferred = function() {
   /**
-   * @type {?function(?):void}
-   * @private
+   * @private {?function(?):void}
    */
   this.resolve_ = null;
 
   /**
-   * @type {?function(?):void}
-   * @private
+   * @private {?function(?):void}
    */
   this.reject_ = null;
 
@@ -262,8 +332,7 @@ base.Deferred = function() {
   };
 
   /**
-   * @type {Promise}
-   * @private
+   * @private {!Promise<T>}
    */
   this.promise_ = new Promise(initPromise.bind(this));
 };
@@ -278,7 +347,7 @@ base.Deferred.prototype.resolve = function(opt_value) {
   this.resolve_(opt_value);
 };
 
-/** @return {Promise} */
+/** @return {!Promise<T>} */
 base.Deferred.prototype.promise = function() {
   return this.promise_;
 };
@@ -343,9 +412,9 @@ base.Promise.as = function(method, params, opt_context, opt_hasErrorHandler) {
  *
  * For example, to create an alarm event for SmokeDetector:
  * functionSmokeDetector() {
+ *    base.inherits(this, base.EventSourceImpl);
  *    this.defineEvents(['alarm']);
  * };
- * base.extend(SmokeDetector, base.EventSourceImpl);
  *
  * To fire an event:
  * SmokeDetector.prototype.onCarbonMonoxideDetected = function() {
@@ -507,7 +576,7 @@ base.EventSourceImpl.prototype = {
   *
   * @param {base.EventSource} src
   * @param {string} eventName
-  * @param {function(...?)} listener
+  * @param {Function} listener
   *
   * @constructor
   * @implements {base.Disposable}
@@ -526,9 +595,9 @@ base.EventHook.prototype.dispose = function() {
 /**
   * An event hook implementation for DOM Events.
   *
-  * @param {HTMLElement} src
+  * @param {HTMLElement|Element|Window|HTMLDocument} src
   * @param {string} eventName
-  * @param {function(...?)} listener
+  * @param {Function} listener
   * @param {boolean} capture
   *
   * @constructor
@@ -551,7 +620,7 @@ base.DomEventHook.prototype.dispose = function() {
   * An event hook implementation for Chrome Events.
   *
   * @param {chrome.Event} src
-  * @param {function(...?)} listener
+  * @param {Function} listener
   *
   * @constructor
   * @implements {base.Disposable}
@@ -566,6 +635,21 @@ base.ChromeEventHook.prototype.dispose = function() {
   this.src_.removeListener(this.listener_);
 };
 
+/**
+ * A disposable repeating timer.
+ *
+ * @constructor
+ * @implements {base.Disposable}
+ */
+base.RepeatingTimer = function(/** Function */callback, /** number */interval) {
+  /** @private */
+  this.intervalId_ = window.setInterval(callback, interval);
+};
+
+base.RepeatingTimer.prototype.dispose = function() {
+  window.clearInterval(this.intervalId_);
+  this.intervalId_ = null;
+};
 
 /**
   * Converts UTF-8 string to ArrayBuffer.

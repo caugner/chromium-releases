@@ -17,6 +17,9 @@ namespace {
 // Share the application command-line arguments with multiple application tests.
 Array<String> g_args;
 
+// Share the application URL with multiple application tests.
+String g_url;
+
 // Application request handle passed from the shell in MojoMain, stored in
 // between SetUp()/TearDown() so we can (re-)intialize new ApplicationImpls.
 InterfaceRequest<Application> g_application_request;
@@ -47,15 +50,19 @@ class ShellAndArgumentGrabber : public Application {
 
  private:
   // Application implementation.
-  void Initialize(ShellPtr shell, Array<String> args) override {
+  void Initialize(ShellPtr shell,
+                  Array<String> args,
+                  const mojo::String& url) override {
     *args_ = args.Pass();
+    g_url = url;
     g_application_request = binding_.Unbind();
     g_shell = shell.Pass();
   }
 
   void AcceptConnection(const String& requestor_url,
                         InterfaceRequest<ServiceProvider> services,
-                        ServiceProviderPtr exposed_services) override {
+                        ServiceProviderPtr exposed_services,
+                        const String& url) override {
     MOJO_CHECK(false);
   }
 
@@ -137,7 +144,7 @@ void ApplicationTestBase::SetUp() {
                                           g_application_request.Pass());
 
   // Fake application initialization with the given command line arguments.
-  application_impl_->Initialize(g_shell.Pass(), g_args.Clone());
+  application_impl_->Initialize(g_shell.Pass(), g_args.Clone(), g_url);
 }
 
 void ApplicationTestBase::TearDown() {

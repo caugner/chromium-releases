@@ -13,6 +13,7 @@ Usage:
 import argparse
 import logging
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from pylib.device import device_blacklist
 from pylib.device import device_errors
 from pylib.device import device_utils
 from pylib.utils import run_tests_helper
+from pylib.utils import timeout_retry
 
 sys.path.append(os.path.join(constants.DIR_SOURCE_ROOT,
                              'third_party', 'android_testrunner'))
@@ -84,8 +86,9 @@ def PushAndLaunchAdbReboot(device, target):
   device.PushChangedFiles([(adb_reboot, '/data/local/tmp/')])
   # Launch adb_reboot
   logging.info('  Launching adb_reboot ...')
-  device.old_interface.GetAndroidToolStatusAndOutput(
-      '/data/local/tmp/adb_reboot')
+  device.RunShellCommand([
+      device.GetDevicePieWrapper(),
+      '/data/local/tmp/adb_reboot'])
 
 
 def _ConfigureLocalProperties(device, java_debug=True):
@@ -113,8 +116,16 @@ def _ConfigureLocalProperties(device, java_debug=True):
 
   # LOCAL_PROPERTIES_PATH = '/data/local.prop'
 
+def WriteAdbKeysFile(device, adb_keys_string):
+  dir_path = posixpath.dirname(constants.ADB_KEYS_FILE)
+  device.RunShellCommand('mkdir -p %s' % dir_path, as_root=True)
+  device.RunShellCommand('restorecon %s' % dir_path, as_root=True)
+  device.WriteFile(constants.ADB_KEYS_FILE, adb_keys_string, as_root=True)
+  device.RunShellCommand('restorecon %s' % constants.ADB_KEYS_FILE,
+                         as_root=True)
 
-def WipeDeviceData(device):
+
+def WipeDeviceData(device, options):
   """Wipes data from device, keeping only the adb_keys for authorization.
 
   After wiping data on a device that has been authorized, adb can still
@@ -128,25 +139,42 @@ def WipeDeviceData(device):
   """
   device_authorized = device.FileExists(constants.ADB_KEYS_FILE)
   if device_authorized:
-    adb_keys = device.ReadFile(constants.ADB_KEYS_FILE, as_root=True)
+    adb_keys = device.ReadFile(constants.ADB_KEYS_FILE,
+                               as_root=True).splitlines()
   device.RunShellCommand('wipe data', as_root=True)
   if device_authorized:
-    path_list = constants.ADB_KEYS_FILE.split('/')
-    dir_path = '/'.join(path_list[:len(path_list)-1])
-    device.RunShellCommand('mkdir -p %s' % dir_path, as_root=True)
-    device.RunShellCommand('restorecon %s' % dir_path, as_root=True)
-    device.WriteFile(constants.ADB_KEYS_FILE, adb_keys, as_root=True)
-    device.RunShellCommand('restorecon %s' % constants.ADB_KEYS_FILE,
-                           as_root=True)
+    adb_keys_set = set(adb_keys)
+    for adb_key_file in options.adb_key_files or []:
+      try:
+        with open(adb_key_file, 'r') as f:
+          adb_public_keys = f.readlines()
+        adb_keys_set.update(adb_public_keys)
+      except IOError:
+        logging.warning('Unable to find adb keys file %s.' % adb_key_file)
+    WriteAdbKeysFile(device, '\n'.join(adb_keys_set))
 
 
-def WipeDeviceIfPossible(device, timeout):
+def WipeDeviceIfPossible(device, timeout, options):
   try:
     device.EnableRoot()
-    WipeDeviceData(device)
+    WipeDeviceData(device, options)
     device.Reboot(True, timeout=timeout, retries=0)
   except (errors.DeviceUnresponsiveError, device_errors.CommandFailedError):
     pass
+
+
+def ChargeDeviceToLevel(device, level):
+  def device_charged():
+    battery_level = device.GetBatteryInfo().get('level')
+    if battery_level is None:
+      logging.warning('Unable to find current battery level.')
+      battery_level = 100
+    else:
+      logging.info('current battery level: %d', battery_level)
+      battery_level = int(battery_level)
+    return battery_level >= level
+
+  timeout_retry.WaitFor(device_charged, wait_period=60)
 
 
 def ProvisionDevice(device, options):
@@ -160,7 +188,7 @@ def ProvisionDevice(device, options):
 
   try:
     if not options.skip_wipe:
-      WipeDeviceIfPossible(device, reboot_timeout)
+      WipeDeviceIfPossible(device, reboot_timeout, options)
     try:
       device.EnableRoot()
     except device_errors.CommandFailedError as e:
@@ -180,23 +208,11 @@ def ProvisionDevice(device, options):
           device, device_settings.NETWORK_DISABLED_SETTINGS)
     if options.min_battery_level is not None:
       try:
-        battery_info = device.old_interface.GetBatteryInfo()
-      except Exception as e:
-        battery_info = {}
-        logging.error('Unable to obtain battery info for %s, %s',
-                      str(device), e)
+        device.SetCharging(True)
+        ChargeDeviceToLevel(device, options.min_battery_level)
+      except device_errors.CommandFailedError as e:
+        logging.exception('Unable to charge device to specified level.')
 
-      while int(battery_info.get('level', 100)) < options.min_battery_level:
-        if not device.old_interface.IsDeviceCharging():
-          if device.old_interface.CanControlUsbCharging():
-            device.old_interface.EnableUsbCharging()
-          else:
-            logging.error('Device is not charging')
-            break
-        logging.info('Waiting for device to charge. Current level=%s',
-                     battery_info.get('level', 0))
-        time.sleep(60)
-        battery_info = device.old_interface.GetBatteryInfo()
     if not options.skip_wipe:
       device.Reboot(True, timeout=reboot_timeout, retries=0)
     device.RunShellCommand('date -s %s' % time.strftime('%Y%m%d.%H%M%S',
@@ -276,6 +292,8 @@ def main():
   parser.add_argument('-r', '--auto-reconnect', action='store_true',
                       help='push binary which will reboot the device on adb'
                       ' disconnections')
+  parser.add_argument('--adb-key-files', type=str, nargs='+',
+                      help='list of adb keys to push to device')
   args = parser.parse_args()
   constants.SetBuildType(args.target)
 

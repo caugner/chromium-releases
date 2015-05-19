@@ -4,17 +4,19 @@
 import sys
 import time
 
-from telemetry.core import util
 from telemetry.image_processing import image_util
 
 
 class InspectorPage(object):
+  """Class that controls a page connected by an inspector_websocket.
+
+  This class provides utility methods for controlling a page connected by an
+  inspector_websocket. It does not perform any exception handling. All
+  inspector_websocket exceptions must be handled by the caller.
+  """
   def __init__(self, inspector_websocket, timeout=60):
     self._inspector_websocket = inspector_websocket
-    self._inspector_websocket.RegisterDomain(
-        'Page',
-        self._OnNotification,
-        self._OnClose)
+    self._inspector_websocket.RegisterDomain('Page', self._OnNotification)
 
     self._navigation_pending = False
     self._navigation_url = ''  # Support for legacy backends.
@@ -44,9 +46,6 @@ class InspectorPage(object):
         # Marks the navigation as complete and unblocks the
         # WaitForNavigate call.
         self._navigation_pending = False
-
-  def _OnClose(self):
-    pass
 
   def _SetScriptToEvaluateOnCommit(self, source):
     existing_source = (self._script_to_evaluate_on_commit and
@@ -91,15 +90,9 @@ class InspectorPage(object):
     start_time = time.time()
     remaining_time = timeout
     self._navigation_pending = True
-    try:
-      while self._navigation_pending and remaining_time > 0:
-        remaining_time = max(timeout - (time.time() - start_time), 0.0)
-        self._inspector_websocket.DispatchNotifications(remaining_time)
-    except util.TimeoutException:
-      # Since we pass remaining_time to DispatchNotifications, we need to
-      # list the full timeout time in this message.
-      raise util.TimeoutException('Timed out while waiting %ds for navigation. '
-                                  'Error=%s' % (timeout, sys.exc_info()[1]))
+    while self._navigation_pending and remaining_time > 0:
+      remaining_time = max(timeout - (time.time() - start_time), 0.0)
+      self._inspector_websocket.DispatchNotifications(remaining_time)
 
   def Navigate(self, url, script_to_evaluate_on_commit=None, timeout=60):
     """Navigates to |url|.
@@ -148,9 +141,12 @@ class InspectorPage(object):
     request = {
         'method': 'Page.captureScreenshot'
         }
-    res = self._inspector_websocket.SyncRequest(request, timeout)
-    if res and ('result' in res) and ('data' in res['result']):
-      return image_util.FromBase64Png(res['result']['data'])
+    # "Google API are missing..." infobar might cause a viewport resize
+    # which invalidates screenshot request. See crbug.com/459820.
+    for _ in range(2):
+      res = self._inspector_websocket.SyncRequest(request, timeout)
+      if res and ('result' in res) and ('data' in res['result']):
+        return image_util.FromBase64Png(res['result']['data'])
     return None
 
   def CollectGarbage(self, timeout=60):

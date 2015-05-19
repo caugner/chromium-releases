@@ -448,7 +448,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 #endif
 
   params->profile = profile;
-  params->prerender_tracker = g_browser_process->prerender_tracker();
   profile_params_.reset(params.release());
 
   ChromeNetworkDelegate::InitializePrefsOnUIThread(
@@ -473,22 +472,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
     google_services_user_account_id_.Init(
         prefs::kGoogleServicesUserAccountId, pref_service);
     google_services_user_account_id_.MoveToThread(io_message_loop_proxy);
-
-    google_services_username_.Init(
-        prefs::kGoogleServicesUsername, pref_service);
-    google_services_username_.MoveToThread(io_message_loop_proxy);
-
-    google_services_username_pattern_.Init(
-        prefs::kGoogleServicesUsernamePattern, local_state_pref_service);
-    google_services_username_pattern_.MoveToThread(io_message_loop_proxy);
-
-    reverse_autologin_enabled_.Init(
-        prefs::kReverseAutologinEnabled, pref_service);
-    reverse_autologin_enabled_.MoveToThread(io_message_loop_proxy);
-
-    one_click_signin_rejected_email_list_.Init(
-        prefs::kReverseAutologinRejectedEmailList, pref_service);
-    one_click_signin_rejected_email_list_.MoveToThread(io_message_loop_proxy);
 
     sync_disabled_.Init(sync_driver::prefs::kSyncManaged, pref_service);
     sync_disabled_.MoveToThread(io_message_loop_proxy);
@@ -887,7 +870,8 @@ bool ProfileIOData::GetMetricsEnabledStateOnIOThread() const {
 }
 
 bool ProfileIOData::IsDataReductionProxyEnabled() const {
-  return data_reduction_proxy_io_data()->IsEnabled();
+  return data_reduction_proxy_io_data() &&
+      data_reduction_proxy_io_data()->IsEnabled();
 }
 
 void ProfileIOData::set_data_reduction_proxy_io_data(
@@ -1044,8 +1028,6 @@ void ProfileIOData::Init(
           NULL,
 #endif
           &enable_referrers_));
-  if (command_line.HasSwitch(switches::kEnableClientHints))
-    network_delegate->SetEnableClientHints();
 #if defined(ENABLE_EXTENSIONS)
   network_delegate->set_extension_info_map(
       profile_params_->extension_info_map.get());
@@ -1060,7 +1042,6 @@ void ProfileIOData::Init(
   network_delegate->set_force_safe_search(&force_safesearch_);
   network_delegate->set_force_google_safe_search(&force_google_safesearch_);
   network_delegate->set_force_youtube_safety_mode(&force_youtube_safety_mode_);
-  network_delegate->set_prerender_tracker(profile_params_->prerender_tracker);
   fraudulent_certificate_reporter_.reset(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
           main_request_context_.get()));
@@ -1250,10 +1231,6 @@ void ProfileIOData::ShutdownOnUIThread(
     signin_names_->ReleaseResourcesOnUIThread();
 
   google_services_user_account_id_.Destroy();
-  google_services_username_.Destroy();
-  google_services_username_pattern_.Destroy();
-  reverse_autologin_enabled_.Destroy();
-  one_click_signin_rejected_email_list_.Destroy();
   enable_referrers_.Destroy();
   enable_do_not_track_.Destroy();
   force_safesearch_.Destroy();

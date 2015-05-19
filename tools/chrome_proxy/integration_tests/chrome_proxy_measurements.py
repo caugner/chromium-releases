@@ -17,6 +17,10 @@ class ChromeProxyLatency(page_test.PageTest):
 
   def __init__(self, *args, **kwargs):
     super(ChromeProxyLatency, self).__init__(*args, **kwargs)
+    self._metrics = metrics.ChromeProxyMetric()
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs('--enable-spdy-proxy-auth')
 
   def WillNavigateToPage(self, page, tab):
     tab.ClearCache(force=True)
@@ -24,14 +28,17 @@ class ChromeProxyLatency(page_test.PageTest):
   def ValidateAndMeasurePage(self, page, tab, results):
     # Wait for the load event.
     tab.WaitForJavaScriptExpression('performance.timing.loadEventStart', 300)
-    loading.LoadingMetric().AddResults(tab, results)
+    self._metrics.AddResultsForLatency(tab, results)
 
 
 class ChromeProxyDataSaving(page_test.PageTest):
-  """Chrome proxy data daving measurement."""
+  """Chrome proxy data saving measurement."""
   def __init__(self, *args, **kwargs):
     super(ChromeProxyDataSaving, self).__init__(*args, **kwargs)
     self._metrics = metrics.ChromeProxyMetric()
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs('--enable-spdy-proxy-auth')
 
   def WillNavigateToPage(self, page, tab):
     tab.ClearCache(force=True)
@@ -87,7 +94,7 @@ class ChromeProxyValidation(page_test.PageTest):
       if self._expect_timeout:
         raise metrics.ChromeProxyMetricException, (
             'Timeout was expected, but did not occur')
-    except exceptions.DevtoolsTargetCrashException, e:
+    except exceptions.TimeoutException as e:
       if self._expect_timeout:
         logging.warning('Navigation timeout on page %s',
                         page.name if page.name else page.url)
@@ -205,17 +212,20 @@ class ChromeProxyHTTPFallbackProbeURL(ChromeProxyValidation):
   """
 
   def __init__(self):
-    super(ChromeProxyHTTPFallbackProbeURL, self).__init__()
+    super(ChromeProxyHTTPFallbackProbeURL, self).__init__(
+        restart_after_each_page=True)
 
   def CustomizeBrowserOptions(self, options):
     super(ChromeProxyHTTPFallbackProbeURL,
           self).CustomizeBrowserOptions(options)
-    # Use the test server probe URL which returns the response
-    # body as specified by respBody.
-    probe_url = GetResponseOverrideURL(
-        respBody='not OK')
+    # Set the secure proxy check URL to the google.com favicon, which will be
+    # interpreted as a secure proxy check failure since the response body is not
+    # "OK". The google.com favicon is used because it will load reliably fast,
+    # and there have been problems with chromeproxy-test.appspot.com being slow
+    # and causing tests to flake.
     options.AppendExtraBrowserArgs(
-        '--data-reduction-proxy-probe-url=%s' % probe_url)
+        '--data-reduction-proxy-secure-proxy-check-url='
+        'http://www.google.com/favicon.ico')
 
   def AddResults(self, tab, results):
     self._metrics.AddResultsForHTTPFallback(tab, results)
@@ -285,6 +295,20 @@ class ChromeProxyClientType(ChromeProxyValidation):
                                           results,
                                           self._chrome_proxy_client_type,
                                           self._page.bypass_for_client_type)
+
+
+class ChromeProxyLoFi(ChromeProxyValidation):
+  """Correctness measurement for Lo-Fi in Chrome-Proxy header."""
+
+  def __init__(self):
+    super(ChromeProxyLoFi, self).__init__(restart_after_each_page=True)
+
+  def CustomizeBrowserOptions(self, options):
+    super(ChromeProxyLoFi, self).CustomizeBrowserOptions(options)
+    options.AppendExtraBrowserArgs('--enable-data-reduction-proxy-lo-fi')
+
+  def AddResults(self, tab, results):
+    self._metrics.AddResultsForLoFi(tab, results)
 
 
 class ChromeProxyHTTPToDirectFallback(ChromeProxyValidation):

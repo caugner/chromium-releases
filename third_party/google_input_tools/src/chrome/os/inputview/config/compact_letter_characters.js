@@ -89,8 +89,10 @@ i18n.input.chrome.inputview.content.compact.letter.keyQwertyCharacters =
         { 'email' : { 'text' : '@' }}},
     /* 36 */ NonLetterKeys.SPACE,
     /* 37 */ { 'text': ',', 'isGrey': true, 'onContext':
-        { 'email' : {'text' : '.com', 'textCssClass' : Css.FONT_SMALL },
-          'url' : {'text' : '.com', 'textCssClass' : Css.FONT_SMALL }}},
+        { 'email' : {'text' : '.com', 'textCssClass' : Css.FONT_SMALL,
+              'moreKeys': {'characters': ['.net', '.org']}},
+          'url' : {'text' : '.com', 'textCssClass' : Css.FONT_SMALL,
+              'moreKeys': {'characters': ['.net', '.org']}}}},
     /* 38 */ { 'text': '.', 'isGrey': true,
       'moreKeys': {
         'characters': [',', '\'', '#', ')', '(', '/', ';', '@', ':',
@@ -559,10 +561,10 @@ i18n.input.chrome.inputview.content.compact.letter.keyPinyinCharacters =
     /* 28 */ { 'text': 'm', 'hintText': '.',
       'moreKeys': {
         'characters': ['\u004d', '\u006d']}},
-    /* 29 */ { 'text': '\uff01',
+    /* 29 */ { 'text': '\uff01', 'hintText': '%',
       'moreKeys': {
         'characters': ['\u00A1']}},
-    /* 30 */ { 'text': '\uff1f',
+    /* 30 */ { 'text': '\uff1f', 'hintText': '&',
       'moreKeys': {
         'characters': ['\u00BF']}},
     /* 31 */ NonLetterKeys.RIGHT_SHIFT,

@@ -75,11 +75,6 @@
                   ],
                 }]
               ],
-              'link_settings': {
-                'libraries': [
-                  '-lpam',
-                ],
-              },
             }],
             ['chromeos==1', {
               'dependencies' : [
@@ -102,7 +97,6 @@
                 'host/linux/x_server_clipboard.cc',
                 'host/linux/x_server_clipboard.h',
                 'host/local_input_monitor_x11.cc',
-                'host/remoting_me2me_host.cc',
               ],
               'conditions': [
                 ['use_ash==1', {
@@ -126,25 +120,9 @@
               'dependencies': [
                 '../third_party/google_toolbox_for_mac/google_toolbox_for_mac.gyp:google_toolbox_for_mac',
               ],
-              'variables': {
-                # Include internal_mac-inl.h only if it exists.
-                'use_remoting_macosx_internal%':
-                  '<!(python -c "import os; print 1 if os.path.exists(\'tools/internal/internal_mac-inl.h\') else 0")'
-              },
-              'conditions': [
-                ['use_remoting_macosx_internal==1', {
-                  'sources': [
-                    'internal/internal_mac-inl.h'
-                  ],
-                  'defines': [
-                    'USE_REMOTING_MACOSX_INTERNAL'
-                  ]
-                }]
-              ],
               'link_settings': {
                 'libraries': [
                   '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
-                  'libpam.a',
                ],
               },
             }],
@@ -211,6 +189,7 @@
         },  # end of target 'remoting_host'
 
         {
+          # GN version: //remoting/host/native_messaging
           'target_name': 'remoting_native_messaging_base',
           'type': 'static_library',
           'variables': { 'enable_wexit_time_destructors': 1, },
@@ -218,18 +197,12 @@
             '../base/base.gyp:base',
           ],
           'sources': [
-            'host/native_messaging/native_messaging_pipe.cc',
-            'host/native_messaging/native_messaging_pipe.h',
-            'host/native_messaging/native_messaging_reader.cc',
-            'host/native_messaging/native_messaging_reader.h',
-            'host/native_messaging/native_messaging_writer.cc',
-            'host/native_messaging/native_messaging_writer.h',
-            'host/native_messaging/pipe_messaging_channel.cc',
-            'host/native_messaging/pipe_messaging_channel.h',
+            '<@(remoting_host_native_messaging_sources)',
           ],
         },  # end of target 'remoting_native_messaging_base'
 
         {
+          # GN version: //remoting/host/setup
           'target_name': 'remoting_host_setup_base',
           'type': 'static_library',
           'variables': { 'enable_wexit_time_destructors': 1, },
@@ -242,28 +215,7 @@
             'VERSION=<(version_full)',
           ],
           'sources': [
-            'host/setup/daemon_controller.cc',
-            'host/setup/daemon_controller.h',
-            'host/setup/daemon_controller_delegate_linux.cc',
-            'host/setup/daemon_controller_delegate_linux.h',
-            'host/setup/daemon_controller_delegate_mac.h',
-            'host/setup/daemon_controller_delegate_mac.mm',
-            'host/setup/daemon_controller_delegate_win.cc',
-            'host/setup/daemon_controller_delegate_win.h',
-            'host/setup/me2me_native_messaging_host.cc',
-            'host/setup/me2me_native_messaging_host.h',
-            'host/setup/oauth_client.cc',
-            'host/setup/oauth_client.h',
-            'host/setup/oauth_helper.cc',
-            'host/setup/oauth_helper.h',
-            'host/setup/pin_validator.cc',
-            'host/setup/pin_validator.h',
-            'host/setup/service_client.cc',
-            'host/setup/service_client.h',
-            'host/setup/test_util.cc',
-            'host/setup/test_util.h',
-            'host/setup/win/auth_code_getter.cc',
-            'host/setup/win/auth_code_getter.h',
+            '<@(remoting_host_setup_sources)',
           ],
           'conditions': [
             ['OS=="win"', {
@@ -334,6 +286,7 @@
           }],
         },  # end of target 'remoting_native_messaging_manifests'
         {
+          # GN target: //remoting/host:remoting_start_host
           'target_name': 'remoting_start_host',
           'type': 'executable',
           'dependencies': [
@@ -420,6 +373,8 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
+            '../components/components.gyp:policy',
+            '../components/components.gyp:policy_component_common',
             '../net/net.gyp:net',
             '../third_party/webrtc/modules/modules.gyp:desktop_capture',
             'remoting_base',
@@ -435,13 +390,33 @@
             'host/curtain_mode_linux.cc',
             'host/curtain_mode_mac.cc',
             'host/curtain_mode_win.cc',
+            'host/pam_authorization_factory_posix.cc',
+            'host/pam_authorization_factory_posix.h',
             'host/posix/signal_handler.cc',
             'host/posix/signal_handler.h',
+            'host/remoting_me2me_host.cc',
           ],
           'conditions': [
-            ['os_posix != 1', {
-              'sources/': [
-                ['exclude', '^host/posix/'],
+            ['OS=="linux"', {
+              'link_settings': {
+                'libraries': [
+                  '-lpam',
+                ],
+              },
+            }],
+            ['OS=="mac"', {
+              'link_settings': {
+                'libraries': [
+                  'libpam.a',
+               ],
+              },
+            }],
+            ['OS=="mac" and buildtype=="Official"', {
+              'sources': [
+                'internal/internal_mac-inl.h'
+              ],
+              'defines': [
+                'USE_REMOTING_MACOSX_INTERNAL'
               ],
             }],
           ],  # end of 'conditions'

@@ -18,7 +18,7 @@
 #include "ipc/ipc_message.h"
 
 namespace cc {
-class BeginFrameSource;
+struct BeginFrameArgs;
 class InputHandler;
 }
 
@@ -52,11 +52,18 @@ class SynchronousCompositorImpl
   // Called by SynchronousCompositorRegistry.
   void DidInitializeRendererObjects(
       SynchronousCompositorOutputSurface* output_surface,
-      SynchronousCompositorExternalBeginFrameSource* begin_frame_source);
+      SynchronousCompositorExternalBeginFrameSource* begin_frame_source,
+      cc::InputHandler* input_handler);
   void DidDestroyRendererObjects();
 
   // Called by SynchronousCompositorExternalBeginFrameSource.
-  void NeedsBeginFramesChanged() const;
+  void OnNeedsBeginFramesChange(bool needs_begin_frames);
+
+  // Called by SynchronousCompositorOutputSurface.
+  void PostInvalidate();
+
+  // Called by RenderWidgetHostViewAndroid.
+  void BeginFrame(const cc::BeginFrameArgs& args);
 
   // SynchronousCompositor
   bool InitializeHwDraw() override;
@@ -72,6 +79,7 @@ class SynchronousCompositorImpl
   void ReturnResources(const cc::CompositorFrameAck& frame_ack) override;
   void SetMemoryPolicy(size_t bytes_limit) override;
   void DidChangeRootLayerScrollOffset() override;
+  void SetIsActive(bool is_active) override;
 
   // LayerScrollOffsetDelegate
   gfx::ScrollOffset GetTotalScrollOffset() override;
@@ -83,7 +91,6 @@ class SynchronousCompositorImpl
                             float max_page_scale_factor) override;
   bool IsExternalFlingActive() const override;
 
-  void SetInputHandler(cc::InputHandler* input_handler);
   void DidOverscroll(const DidOverscrollParams& params);
   void DidStopFlinging();
 
@@ -99,6 +106,8 @@ class SynchronousCompositorImpl
   void DidActivatePendingTree();
   void DeliverMessages();
   bool CalledOnValidThread() const;
+  void UpdateNeedsBeginFrames();
+  void SetInputHandler(cc::InputHandler* input_handler);
 
   SynchronousCompositorClient* compositor_client_;
   SynchronousCompositorOutputSurface* output_surface_;
@@ -106,7 +115,8 @@ class SynchronousCompositorImpl
   WebContents* contents_;
   const int routing_id_;
   cc::InputHandler* input_handler_;
-  bool invoking_composite_;
+  bool is_active_;
+  bool renderer_needs_begin_frames_;
 
   base::WeakPtrFactory<SynchronousCompositorImpl> weak_ptr_factory_;
 

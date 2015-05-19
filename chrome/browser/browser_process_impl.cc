@@ -51,7 +51,6 @@
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
@@ -246,7 +245,6 @@ void BrowserProcessImpl::StartTearDown() {
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
 #endif
-  promo_resource_service_.reset();
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   plugins_resource_service_.reset();
 #endif
@@ -271,6 +269,10 @@ void BrowserProcessImpl::StartTearDown() {
     profile_manager_.reset();
   }
 
+  // PromoResourceService must be destroyed after the keyed services and before
+  // the IO thread.
+  promo_resource_service_.reset();
+
 #if !defined(OS_ANDROID)
   // Debugger must be cleaned up before IO thread and NotificationService.
   remote_debugging_server_.reset();
@@ -291,7 +293,9 @@ void BrowserProcessImpl::StartTearDown() {
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
-  // down while the IO and FILE threads are still alive.
+  // down while the IO and FILE threads are still alive. The monitoring
+  // framework owned by |browser_policy_connector_| relies on |gcm_driver_|, so
+  // this must be shutdown before |gcm_driver_| below.
   if (browser_policy_connector_)
     browser_policy_connector_->Shutdown();
 #endif
@@ -465,8 +469,10 @@ void BrowserProcessImpl::EndSession() {
   for (size_t i = 0; i < profiles.size(); ++i) {
     Profile* profile = profiles[i];
     profile->SetExitType(Profile::EXIT_SESSION_ENDED);
-
-    rundown_counter->Post(profile->GetIOTaskRunner().get());
+    if (profile->GetPrefs()) {
+      profile->GetPrefs()->CommitPendingWrite();
+      rundown_counter->Post(profile->GetIOTaskRunner().get());
+    }
   }
 
   // Tell the metrics service it was cleanly shutdown.
@@ -566,6 +572,11 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
 chrome_variations::VariationsService* BrowserProcessImpl::variations_service() {
   DCHECK(CalledOnValidThread());
   return GetMetricsServicesManager()->GetVariationsService();
+}
+
+PromoResourceService* BrowserProcessImpl::promo_resource_service() {
+  DCHECK(CalledOnValidThread());
+  return promo_resource_service_.get();
 }
 
 BrowserProcessPlatformPart* BrowserProcessImpl::platform_part() {
@@ -860,13 +871,6 @@ ChromeNetLog* BrowserProcessImpl::net_log() {
   return net_log_.get();
 }
 
-prerender::PrerenderTracker* BrowserProcessImpl::prerender_tracker() {
-  if (!prerender_tracker_.get())
-    prerender_tracker_.reset(new prerender::PrerenderTracker);
-
-  return prerender_tracker_.get();
-}
-
 component_updater::ComponentUpdateService*
 BrowserProcessImpl::component_updater() {
   if (!component_updater_.get()) {
@@ -916,7 +920,7 @@ BrowserProcessImpl::supervised_user_whitelist_installer() {
 
 void BrowserProcessImpl::ResourceDispatcherHostCreated() {
   resource_dispatcher_host_delegate_.reset(
-      new ChromeResourceDispatcherHostDelegate(prerender_tracker()));
+      new ChromeResourceDispatcherHostDelegate);
   ResourceDispatcherHost::Get()->SetDelegate(
       resource_dispatcher_host_delegate_.get());
 

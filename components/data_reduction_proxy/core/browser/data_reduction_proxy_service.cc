@@ -5,7 +5,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 
 #include "base/sequenced_task_runner.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
@@ -13,14 +13,14 @@
 namespace data_reduction_proxy {
 
 DataReductionProxyService::DataReductionProxyService(
-    scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs,
+    scoped_ptr<DataReductionProxyCompressionStats> compression_stats,
     DataReductionProxySettings* settings,
     net::URLRequestContextGetter* request_context_getter)
     : url_request_context_getter_(request_context_getter),
       settings_(settings),
       weak_factory_(this) {
   DCHECK(settings);
-  statistics_prefs_ = statistics_prefs.Pass();
+  compression_stats_ = compression_stats.Pass();
 }
 
 DataReductionProxyService::~DataReductionProxyService() {
@@ -35,8 +35,8 @@ void DataReductionProxyService::EnableCompressionStatisticsLogging(
     PrefService* prefs,
     scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
     const base::TimeDelta& commit_delay) {
-  DCHECK(!statistics_prefs_);
-  statistics_prefs_.reset(new DataReductionProxyStatisticsPrefs(
+  DCHECK(!compression_stats_);
+  compression_stats_.reset(new DataReductionProxyCompressionStats(
       prefs, ui_task_runner, commit_delay));
 }
 
@@ -57,10 +57,10 @@ void DataReductionProxyService::OnURLFetchComplete(
   fetcher_callback_.Run(response, status);
 }
 
-net::URLFetcher* DataReductionProxyService::GetURLFetcherForProbe(
-    const GURL& probe_url) {
-  net::URLFetcher* fetcher =
-      net::URLFetcher::Create(probe_url, net::URLFetcher::GET, this);
+net::URLFetcher* DataReductionProxyService::GetURLFetcherForSecureProxyCheck(
+    const GURL& secure_proxy_check_url) {
+  net::URLFetcher* fetcher = net::URLFetcher::Create(
+      secure_proxy_check_url, net::URLFetcher::GET, this);
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_PROXY);
   DCHECK(url_request_context_getter_);
   fetcher->SetRequestContext(url_request_context_getter_);
@@ -68,13 +68,20 @@ net::URLFetcher* DataReductionProxyService::GetURLFetcherForProbe(
   static const int kMaxRetries = 5;
   fetcher->SetMaxRetriesOn5xx(kMaxRetries);
   fetcher->SetAutomaticallyRetryOnNetworkChanges(kMaxRetries);
+  // The secure proxy check should not be redirected. Since the secure proxy
+  // check will inevitably fail if it gets redirected somewhere else (e.g. by a
+  // captive portal), short circuit that by giving up on the secure proxy check
+  // if it gets redirected.
+  fetcher->SetStopOnRedirect(true);
   return fetcher;
 }
 
-void DataReductionProxyService::CheckProbeURL(
-    const GURL& probe_url, FetcherResponseCallback fetcher_callback) {
+void DataReductionProxyService::SecureProxyCheck(
+    const GURL& secure_proxy_check_url,
+    FetcherResponseCallback fetcher_callback) {
   DCHECK(CalledOnValidThread());
-  net::URLFetcher* fetcher = GetURLFetcherForProbe(probe_url);
+  net::URLFetcher* fetcher =
+      GetURLFetcherForSecureProxyCheck(secure_proxy_check_url);
   if (!fetcher)
     return;
   fetcher_.reset(fetcher);

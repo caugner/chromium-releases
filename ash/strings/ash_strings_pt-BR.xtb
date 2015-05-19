@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Adicionar uma conta para <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Teclado na tela desativado</translation>
 <translation id="1057289296854808272">Rotação ativada (toque aqui para alterar)</translation>
+<translation id="5548285847212963613">A extensão &quot;<ph name="EXTENSION_NAME"/>&quot; pode ajudar na conexão com esta rede.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> e <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Botão de estouro</translation>
 <translation id="7904094684485781019">O administrador desta conta bloqueou o login múltiplo.</translation>
@@ -61,6 +62,7 @@ Pressione Shift + Alt para alternar.</translation>
 <translation id="1723752762323179280">Saindo da sessão</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Sim</translation>
+<translation id="4804818685124855865">Desconectar</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Sair</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@ Pressione Shift + Alt para alternar.</translation>
 <translation id="2761704814324807722">Bandeja de status, tempo <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Bloquear</translation>
 <translation id="2805756323405976993">Apps</translation>
-<translation id="2313845391432982560">A extensão &quot;<ph name="EXTENSION_NAME"/>&quot; pode configurar esta rede.</translation>
 <translation id="2872961005593481000">Encerrar</translation>
 <translation id="3433830597744061105">Gerenciar contas</translation>
 <translation id="742594950370306541">A câmera está em uso.</translation>

@@ -28,6 +28,10 @@ class PrefRegistrySimple;
 class PrefService;
 class Profile;
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 namespace user_manager {
 class User;
 }  // namespace user_manager
@@ -220,8 +224,13 @@ class UserSessionManager
   // Update Easy unlock cryptohome keys for given user context.
   void UpdateEasyUnlockKeys(const UserContext& user_context);
 
+  // Returns the auth request context associated with auth data.
+  net::URLRequestContextGetter* GetAuthRequestContext() const;
+
   // Removes a profile from the per-user input methods states map.
   void RemoveProfileForTesting(Profile* profile);
+
+  bool has_auth_cookies() const { return has_auth_cookies_; }
 
  private:
   friend class test::UserSessionManagerTestApi;
@@ -245,9 +254,19 @@ class UserSessionManager
   // Used when restoring user sessions after crash.
   void OnProfilePrepared(Profile* profile, bool browser_launched) override;
 
+  void ChildAccountStatusReceivedCallback(Profile* profile);
+
+  void StopChildStatusObserving(Profile* profile);
+
   void CreateUserSession(const UserContext& user_context,
                          bool has_auth_cookies);
   void PreStartSession();
+
+  // Store any useful UserContext data early on when profile has not been
+  // created yet and user services were not yet initialized. Can store
+  // information in Local State like GAIA ID.
+  void StoreUserContextDataBeforeProfileIsCreated();
+
   void StartCrosSession();
   void NotifyUserLoggedIn();
   void PrepareProfile();
@@ -389,9 +408,6 @@ class UserSessionManager
   // Sesion restore strategy.
   OAuth2LoginManager::SessionRestoreStrategy session_restore_strategy_;
 
-  // OAuth2 refresh token for session restore.
-  std::string oauth2_refresh_token_;
-
   // Set of user_id for those users that we should restore authentication
   // session when notified about online state change.
   SigninSessionRestoreStateSet pending_signin_restore_sessions_;
@@ -412,6 +428,11 @@ class UserSessionManager
 
   // Whether should launch browser, tests may override this value.
   bool should_launch_browser_;
+
+  // Child account status is necessary for InitializeStartUrls call.
+  bool waiting_for_child_account_status_;
+
+  base::WeakPtrFactory<UserSessionManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(UserSessionManager);
 };

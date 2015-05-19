@@ -11,6 +11,7 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -31,6 +32,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/manifest_constants.h"
 #include "extensions/common/one_shot_event.h"
 
 namespace extensions {
@@ -115,8 +117,8 @@ void ExtensionToolbarModel::MoveExtensionIcon(const std::string& id,
     last_known_positions_.push_back(id);
   }
 
-  FOR_EACH_OBSERVER(
-      Observer, observers_, ToolbarExtensionMoved(extension.get(), index));
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnToolbarExtensionMoved(extension.get(), index));
   MaybeUpdateVisibilityPref(extension.get(), index);
   UpdatePrefs();
 }
@@ -140,7 +142,7 @@ void ExtensionToolbarModel::SetVisibleIconCount(size_t count) {
     prefs_->SetInteger(pref_names::kToolbarSize, visible_icon_count_);
   }
 
-  FOR_EACH_OBSERVER(Observer, observers_, ToolbarVisibleCountChanged());
+  FOR_EACH_OBSERVER(Observer, observers_, OnToolbarVisibleCountChanged());
 }
 
 void ExtensionToolbarModel::OnExtensionActionUpdated(
@@ -153,8 +155,8 @@ void ExtensionToolbarModel::OnExtensionActionUpdated(
   // Notify observers if the extension exists and is in the model.
   if (std::find(toolbar_items_.begin(), toolbar_items_.end(), extension) !=
           toolbar_items_.end()) {
-    FOR_EACH_OBSERVER(
-        Observer, observers_, ToolbarExtensionUpdated(extension));
+    FOR_EACH_OBSERVER(Observer, observers_,
+                      OnToolbarExtensionUpdated(extension));
   }
 }
 
@@ -317,7 +319,8 @@ void ExtensionToolbarModel::AddExtension(const Extension* extension) {
   // extensions go at their previous position.
   size_t new_index = 0;
   if (is_new_extension) {
-    new_index = visible_icon_count();
+    new_index = Manifest::IsComponentLocation(extension->location()) ?
+        0 : visible_icon_count();
     // For the last-known position, we use the index of the extension that is
     // just before this extension, plus one. (Note that this isn't the same
     // as new_index + 1, because last_known_positions_ can include disabled
@@ -347,8 +350,8 @@ void ExtensionToolbarModel::AddExtension(const Extension* extension) {
   // to the full list (|toolbar_items_|, there won't be another *visible*
   // browser action, which was what the observers care about.
   if (!is_highlighting_) {
-    FOR_EACH_OBSERVER(
-        Observer, observers_, ToolbarExtensionAdded(extension, new_index));
+    FOR_EACH_OBSERVER(Observer, observers_,
+                      OnToolbarExtensionAdded(extension, new_index));
 
     int visible_count_delta = 0;
     if (is_new_extension && !all_icons_visible()) {
@@ -402,14 +405,15 @@ void ExtensionToolbarModel::RemoveExtension(const Extension* extension) {
                     extension);
     if (pos != highlighted_items_.end()) {
       highlighted_items_.erase(pos);
-      FOR_EACH_OBSERVER(
-          Observer, observers_, ToolbarExtensionRemoved(extension));
+      FOR_EACH_OBSERVER(Observer, observers_,
+                        OnToolbarExtensionRemoved(extension));
       // If the highlighted list is now empty, we stop highlighting.
       if (highlighted_items_.empty())
         StopHighlighting();
     }
   } else {
-    FOR_EACH_OBSERVER(Observer, observers_, ToolbarExtensionRemoved(extension));
+    FOR_EACH_OBSERVER(Observer, observers_,
+                      OnToolbarExtensionRemoved(extension));
   }
 
   UpdatePrefs();
@@ -425,14 +429,37 @@ void ExtensionToolbarModel::RemoveExtension(const Extension* extension) {
 void ExtensionToolbarModel::InitializeExtensionList() {
   DCHECK(toolbar_items_.empty());  // We shouldn't have any items yet.
 
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "463337 ExtensionToolbarModel::InitializeExtensionList1"));
   last_known_positions_ = extension_prefs_->GetToolbarOrder();
-  if (profile_->IsOffTheRecord())
+  if (profile_->IsOffTheRecord()) {
+    // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "463337 ExtensionToolbarModel::InitializeExtensionList2"));
     IncognitoPopulate();
-  else
+  } else {
+    // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "463337 ExtensionToolbarModel::InitializeExtensionList3"));
     Populate(&last_known_positions_);
+  }
 
   extensions_initialized_ = true;
+
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "463337 ExtensionToolbarModel::InitializeExtensionList4"));
   MaybeUpdateVisibilityPrefs();
+
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "463337 ExtensionToolbarModel::InitializeExtensionList5"));
   FOR_EACH_OBSERVER(Observer, observers_, OnToolbarModelInitialized());
 }
 
@@ -590,23 +617,23 @@ void ExtensionToolbarModel::OnExtensionToolbarPrefChange() {
   }
   last_known_positions_.swap(pref_positions);
 
-  // Clear out the old...
-  while (!toolbar_items_.empty()) {
-    scoped_refptr<const Extension> extension = toolbar_items_.back();
-    toolbar_items_.pop_back();
-    FOR_EACH_OBSERVER(
-        Observer, observers_, ToolbarExtensionRemoved(extension.get()));
-  }
-  DCHECK(toolbar_items_.empty());
-
-  // ...Add the new...
-  Populate(&last_known_positions_);
-
-  // ...And notify.
-  for (size_t i = 0; i < toolbar_items().size(); ++i) {
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      ToolbarExtensionAdded(toolbar_items()[i].get(), i));
+  int desired_index = 0;
+  // Loop over the updated list of last known positions, moving any extensions
+  // that are in the wrong place.
+  for (const std::string& id : last_known_positions_) {
+    int current_index = GetIndexForId(id);
+    if (current_index == -1)
+      continue;
+    if (current_index != desired_index) {
+      scoped_refptr<const Extension> extension = toolbar_items_[current_index];
+      toolbar_items_.erase(toolbar_items_.begin() + current_index);
+      toolbar_items_.insert(toolbar_items_.begin() + desired_index, extension);
+      // Notify the observers to keep them up-to-date.
+      FOR_EACH_OBSERVER(
+          Observer, observers_,
+          OnToolbarExtensionMoved(extension.get(), desired_index));
+    }
+    ++desired_index;
   }
 
   if (last_known_positions_.size() > pref_position_size) {
@@ -631,7 +658,7 @@ bool ExtensionToolbarModel::ShowExtensionActionPopup(
     const Extension* extension,
     Browser* browser,
     bool grant_active_tab) {
-  ObserverListBase<Observer>::Iterator it(observers_);
+  ObserverListBase<Observer>::Iterator it(&observers_);
   Observer* obs = NULL;
   // Look for the Observer associated with the browser.
   // This would be cleaner if we had an abstract class for the Toolbar UI
@@ -694,7 +721,8 @@ bool ExtensionToolbarModel::HighlightExtensions(
     if (visible_icon_count() < extension_ids.size())
       SetVisibleIconCount(extension_ids.size());
 
-    FOR_EACH_OBSERVER(Observer, observers_, ToolbarHighlightModeChanged(true));
+    FOR_EACH_OBSERVER(Observer, observers_,
+                      OnToolbarHighlightModeChanged(true));
     return true;
   }
 
@@ -711,8 +739,20 @@ void ExtensionToolbarModel::StopHighlighting() {
     is_highlighting_ = false;
     if (old_visible_icon_count_ != visible_icon_count_)
       SetVisibleIconCount(old_visible_icon_count_);
-    FOR_EACH_OBSERVER(Observer, observers_, ToolbarHighlightModeChanged(false));
+    FOR_EACH_OBSERVER(Observer, observers_,
+                      OnToolbarHighlightModeChanged(false));
   }
+}
+
+bool ExtensionToolbarModel::RedesignIsShowingNewIcons() const {
+  for (const scoped_refptr<const Extension>& extension : toolbar_items_) {
+    // Without the redesign, we only show extensions with browser actions.
+    // Any extension without a browser action is an indication that we're
+    // showing something new.
+    if (!extension->manifest()->HasKey(manifest_keys::kBrowserAction))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace extensions

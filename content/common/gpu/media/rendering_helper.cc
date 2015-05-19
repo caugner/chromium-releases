@@ -40,6 +40,7 @@
 #if defined(USE_OZONE)
 #if defined(OS_CHROMEOS)
 #include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/types/native_display_delegate.h"
 #endif  // defined(OS_CHROMEOS)
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/platform_window/platform_window.h"
@@ -85,6 +86,7 @@ class DisplayConfiguratorObserver : public ui::DisplayConfigurator::Observer {
     loop_ = nullptr;
   }
   void OnDisplayModeChangeFailed(
+      const ui::DisplayConfigurator::DisplayStateList& outputs,
       ui::MultipleDisplayState failed_new_state) override {
     LOG(FATAL) << "Could not configure display";
   }
@@ -179,7 +181,7 @@ void RenderingHelper::InitializeOneOff(base::WaitableEvent* done) {
   done->Signal();
 }
 
-RenderingHelper::RenderingHelper() {
+RenderingHelper::RenderingHelper() : ignore_vsync_(false) {
   window_ = gfx::kNullAcceleratedWidget;
   Clear();
 }
@@ -238,6 +240,10 @@ void RenderingHelper::Setup() {
 
   platform_window_delegate_.reset(new RenderingHelper::StubOzoneDelegate());
   window_ = platform_window_delegate_->accelerated_widget();
+  gfx::Size window_size(800, 600);
+  // Ignore the vsync provider by default. On ChromeOS this will be set
+  // accordingly based on the display configuration.
+  ignore_vsync_ = true;
 #if defined(OS_CHROMEOS)
   // We hold onto the main loop here to wait for the DisplayController
   // to give us the size of the display so we can create a window of
@@ -245,6 +251,7 @@ void RenderingHelper::Setup() {
   base::RunLoop wait_display_setup;
   DisplayConfiguratorObserver display_setup_observer(&wait_display_setup);
   display_configurator_.reset(new ui::DisplayConfigurator());
+  display_configurator_->SetDelegateForTesting(0);
   display_configurator_->AddObserver(&display_setup_observer);
   display_configurator_->Init(true);
   display_configurator_->ForceInitialConfigure(0);
@@ -252,11 +259,17 @@ void RenderingHelper::Setup() {
   wait_display_setup.Run();
   display_configurator_->RemoveObserver(&display_setup_observer);
 
-  platform_window_delegate_->platform_window()->SetBounds(
-      gfx::Rect(display_configurator_->framebuffer_size()));
-#else
-  platform_window_delegate_->platform_window()->SetBounds(gfx::Rect(800, 600));
+  gfx::Size framebuffer_size = display_configurator_->framebuffer_size();
+  if (!framebuffer_size.IsEmpty()) {
+    window_size = framebuffer_size;
+    ignore_vsync_ = false;
+  }
 #endif
+  if (ignore_vsync_)
+    DVLOG(1) << "Ignoring vsync provider";
+
+  platform_window_delegate_->platform_window()->SetBounds(
+      gfx::Rect(window_size));
 
   // On Ozone/DRI, platform windows are associated with the physical
   // outputs. Association is achieved by matching the bounds of the
@@ -466,7 +479,11 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
   // in VideoDecodeAcceleratorTest.TearDown(), while the |rendering_helper_| is
   // a member of that class. (See video_decode_accelerator_unittest.cc.)
   gfx::VSyncProvider* vsync_provider = gl_surface_->GetVSyncProvider();
-  if (vsync_provider && frame_duration_ != base::TimeDelta())
+
+  // VSync providers rely on the underlying CRTC to get the timing. In headless
+  // mode the surface isn't associated with a CRTC so the vsync provider can not
+  // get the timing, meaning it will not call UpdateVsyncParameters() ever.
+  if (!ignore_vsync_ && vsync_provider && frame_duration_ != base::TimeDelta())
     vsync_provider->GetVSyncParameters(base::Bind(
         &RenderingHelper::UpdateVSyncParameters, base::Unretained(this), done));
   else
@@ -698,7 +715,7 @@ void RenderingHelper::RenderContent() {
   // in VideoDecodeAcceleratorTest.TearDown(), while the |rendering_helper_| is
   // a member of that class. (See video_decode_accelerator_unittest.cc.)
   gfx::VSyncProvider* vsync_provider = gl_surface_->GetVSyncProvider();
-  if (vsync_provider) {
+  if (vsync_provider && !ignore_vsync_) {
     vsync_provider->GetVSyncParameters(base::Bind(
         &RenderingHelper::UpdateVSyncParameters, base::Unretained(this),
         static_cast<base::WaitableEvent*>(NULL)));

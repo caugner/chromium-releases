@@ -18,7 +18,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "cc/base/switches.h"
-#include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/flags_storage.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
@@ -64,6 +63,10 @@
 
 #if defined(ENABLE_EXTENSIONS)
 #include "extensions/common/switches.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_switches.h"
 #endif
 
 namespace about_flags {
@@ -210,6 +213,16 @@ const Experiment::Choice kMaxTilesForInterestAreaChoices[] = {
     cc::switches::kMaxTilesForInterestArea, "512"}
 };
 
+const Experiment::Choice kShowSavedCopyChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_FLAGS_ENABLE_SHOW_SAVED_COPY_PRIMARY,
+    switches::kShowSavedCopy, switches::kEnableShowSavedCopyPrimary },
+  { IDS_FLAGS_ENABLE_SHOW_SAVED_COPY_SECONDARY,
+    switches::kShowSavedCopy, switches::kEnableShowSavedCopySecondary },
+  { IDS_FLAGS_DISABLE_SHOW_SAVED_COPY,
+    switches::kShowSavedCopy, switches::kDisableShowSavedCopy }
+};
+
 const Experiment::Choice kDefaultTileWidthChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
   { IDS_FLAGS_DEFAULT_TILE_WIDTH_SHORT,
@@ -264,18 +277,6 @@ const Experiment::Choice kTabCaptureDownscaleQualityChoices[] = {
 };
 #endif
 
-#if defined(TOOLKIT_VIEWS)
-const Experiment::Choice kTabCloseButtonsHiddenWithTouchChoices[] = {
-  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_FLAGS_TAB_CLOSE_BUTTONS_HIDDEN_WITH_TOUCH_ALWAYS,
-    switches::kTabCloseButtonsHiddenWithTouch, "always" },
-  { IDS_FLAGS_TAB_CLOSE_BUTTONS_HIDDEN_WITH_TOUCH_NARROW,
-    switches::kTabCloseButtonsHiddenWithTouch, "narrow" },
-  { IDS_FLAGS_TAB_CLOSE_BUTTONS_HIDDEN_WITH_TOUCH_STACKED,
-    switches::kTabCloseButtonsHiddenWithTouch, "stacked" },
-};
-#endif
-
 #if defined(OS_ANDROID)
 const Experiment::Choice kZeroSuggestExperimentsChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
@@ -294,6 +295,22 @@ const Experiment::Choice kNumRasterThreadsChoices[] = {
   { IDS_FLAGS_NUM_RASTER_THREADS_TWO, switches::kNumRasterThreads, "2" },
   { IDS_FLAGS_NUM_RASTER_THREADS_THREE, switches::kNumRasterThreads, "3" },
   { IDS_FLAGS_NUM_RASTER_THREADS_FOUR, switches::kNumRasterThreads, "4" }
+};
+
+const Experiment::Choice kGpuRasterizationMSAASampleCountChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT,
+    "",
+    "" },
+  { IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_ZERO,
+    switches::kGpuRasterizationMSAASampleCount, "0" },
+  { IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_TWO,
+    switches::kGpuRasterizationMSAASampleCount, "2" },
+  { IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_FOUR,
+    switches::kGpuRasterizationMSAASampleCount, "4" },
+  { IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_EIGHT,
+    switches::kGpuRasterizationMSAASampleCount, "8" },
+  { IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_SIXTEEN,
+    switches::kGpuRasterizationMSAASampleCount, "16" },
 };
 
 const Experiment::Choice kEnableGpuRasterizationChoices[] = {
@@ -392,6 +409,21 @@ const Experiment::Choice kFillOnAccountSelectChoices[] = {
   { IDS_FLAGS_FILL_ON_ACCOUNT_SELECT_ENABLE_NO_HIGHLIGHTING,
     autofill::switches::kEnableFillOnAccountSelectNoHighlighting, "" },
 };
+
+#if defined(USE_ASH)
+const Experiment::Choice kAshScreenRotationAnimationChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    ash::switches::kAshEnableScreenRotationAnimation,
+    "none" },
+  { IDS_ASH_SCREEN_ROTATION_ANIMATION_PARTIAL_ROTATION,
+    ash::switches::kAshEnableScreenRotationAnimation,
+    "partial-rotation" },
+  { IDS_ASH_SCREEN_ROTATION_ANIMATION_FULL_ROTATION,
+    ash::switches::kAshEnableScreenRotationAnimation,
+    "full-rotation" }
+};
+#endif
 
 // RECORDING USER METRICS FOR FLAGS:
 // -----------------------------------------------------------------------------
@@ -535,6 +567,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_DISABLE_WEBRTC_HW_ENCODING_DESCRIPTION,
     kOsAndroid | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kDisableWebRtcHWEncoding)
+  },
+  {
+    "enable-webrtc-stun-origin",
+    IDS_FLAGS_ENABLE_WEBRTC_STUN_ORIGIN_NAME,
+    IDS_FLAGS_ENABLE_WEBRTC_STUN_ORIGIN_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableWebRtcStunOrigin)
   },
 #endif
 #if defined(OS_ANDROID)
@@ -706,13 +745,6 @@ const Experiment kExperiments[] = {
     kOsAndroid,
     SINGLE_VALUE_TYPE(switches::kDisableInfobarForProtectedMediaIdentifier)
   },
-  {
-    "mediadrm-enable-non-compositing",
-    IDS_FLAGS_MEDIADRM_ENABLE_NON_COMPOSITING_NAME,
-    IDS_FLAGS_MEDIADRM_ENABLE_NON_COMPOSITING_DESCRIPTION,
-    kOsAndroid,
-    SINGLE_VALUE_TYPE(switches::kMediaDrmEnableNonCompositing)
-  },
 #endif  // defined(OS_ANDROID)
   {
     "disable-javascript-harmony-shipping",
@@ -747,13 +779,18 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kEnableGpuRasterizationChoices)
   },
   {
-    "enable-threaded-gpu-rasterization",
-    IDS_FLAGS_ENABLE_THREADED_GPU_RASTERIZATION_NAME,
-    IDS_FLAGS_ENABLE_THREADED_GPU_RASTERIZATION_DESCRIPTION,
+    "gpu-rasterization-msaa-sample-count",
+    IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_NAME,
+    IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_DESCRIPTION,
     kOsAll,
-    ENABLE_DISABLE_VALUE_TYPE(
-        switches::kEnableThreadedGpuRasterization,
-        switches::kDisableThreadedGpuRasterization)
+    MULTI_VALUE_TYPE(kGpuRasterizationMSAASampleCountChoices)
+  },
+  {
+    "enable-slimming-paint",
+    IDS_FLAGS_ENABLE_SLIMMING_PAINT_NAME,
+    IDS_FLAGS_ENABLE_SLIMMING_PAINT_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSlimmingPaint)
   },
   {
     "enable-experimental-web-platform-features",
@@ -830,6 +867,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_DOWNLOAD_RESUMPTION_DESCRIPTION,
     kOsDesktop,
     SINGLE_VALUE_TYPE(switches::kEnableDownloadResumption)
+  },
+  {
+    "enable-download-notification",
+    IDS_FLAGS_ENABLE_DOWNLOAD_NOTIFICATION_NAME,
+    IDS_FLAGS_ENABLE_DOWNLOAD_NOTIFICATION_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableDownloadNotification)
   },
 #if defined(ENABLE_PLUGINS)
   {
@@ -954,12 +998,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAshDebugShortcuts),
   },
   {
-    "ash-enable-swipe-to-close-in-overview-mode",
-    IDS_FLAGS_ASH_ENABLE_SWIPE_TO_CLOSE_IN_OVERVIEW_MODE_NAME,
-    IDS_FLAGS_ASH_ENABLE_SWIPE_TO_CLOSE_IN_OVERVIEW_MODE_DESCRIPTION,
-    // TODO(bruthig): Add kOsWin when http://crbug.com/333758 is resolved.
+    "ash-disable-maximize-mode-window-backdrop",
+    IDS_FLAGS_ASH_DISABLE_MAXIMIZE_MODE_WINDOW_BACKDROP_NAME,
+    IDS_FLAGS_ASH_DISABLE_MAXIMIZE_MODE_WINDOW_BACKDROP_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshEnableSwipeToCloseInOverviewMode),
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableMaximizeModeWindowBackdrop),
   },
   { "ash-enable-touch-view-testing",
     IDS_FLAGS_ASH_ENABLE_TOUCH_VIEW_TESTING_NAME,
@@ -979,6 +1022,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ASH_ENABLE_MIRRORED_SCREEN_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE(ash::switches::kAshEnableMirroredScreen),
+  },
+  {
+    "ash-enable-screen-rotation-animations",
+    IDS_FLAGS_ASH_ENABLE_SCREEN_ROTATION_ANIMATION_NAME,
+    IDS_FLAGS_ASH_ENABLE_SCREEN_ROTATION_ANIMATION_DESCRIPTION,
+    kOsCrOS,
+    MULTI_VALUE_TYPE(kAshScreenRotationAnimationChoices)
   },
 #endif  // defined(USE_ASH)
 #if defined(OS_CHROMEOS)
@@ -1095,6 +1145,14 @@ const Experiment kExperiments[] = {
         switches::kScrollEndEffect, "0")
   },
   {
+    "enable-icon-ntp",
+    IDS_FLAGS_ENABLE_ICON_NTP_NAME,
+    IDS_FLAGS_ENABLE_ICON_NTP_DESCRIPTION,
+    kOsAndroid | kOsMac | kOsWin | kOsLinux | kOsCrOS,
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableIconNtp,
+                              switches::kDisableIconNtp)
+  },
+  {
     "enable-touch-drag-drop",
     IDS_FLAGS_ENABLE_TOUCH_DRAG_DROP_NAME,
     IDS_FLAGS_ENABLE_TOUCH_DRAG_DROP_DESCRIPTION,
@@ -1194,6 +1252,15 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kMaxTilesForInterestAreaChoices)
   },
   {
+    "enable-offer-store-unmasked-wallet-cards",
+    IDS_FLAGS_ENABLE_OFFER_STORE_UNMASKED_WALLET_CARDS,
+    IDS_FLAGS_ENABLE_OFFER_STORE_UNMASKED_WALLET_CARDS_DESCRIPTION,
+    kOsAll,
+    ENABLE_DISABLE_VALUE_TYPE(
+        autofill::switches::kEnableOfferStoreUnmaskedWalletCards,
+        autofill::switches::kDisableOfferStoreUnmaskedWalletCards)
+  },
+  {
     "enable-offline-auto-reload",
     IDS_FLAGS_ENABLE_OFFLINE_AUTO_RELOAD_NAME,
     IDS_FLAGS_ENABLE_OFFLINE_AUTO_RELOAD_DESCRIPTION,
@@ -1210,12 +1277,11 @@ const Experiment kExperiments[] = {
                               switches::kDisableOfflineAutoReloadVisibleOnly)
   },
   {
-    "enable-offline-load-stale-cache",
-    IDS_FLAGS_ENABLE_OFFLINE_LOAD_STALE_NAME,
-    IDS_FLAGS_ENABLE_OFFLINE_LOAD_STALE_DESCRIPTION,
+    "show-saved-copy",
+    IDS_FLAGS_SHOW_SAVED_COPY_NAME,
+    IDS_FLAGS_SHOW_SAVED_COPY_DESCRIPTION,
     kOsAll,
-    ENABLE_DISABLE_VALUE_TYPE(switches::kEnableOfflineLoadStaleCache,
-                              switches::kDisableOfflineLoadStaleCache)
+    MULTI_VALUE_TYPE(kShowSavedCopyChoices)
   },
   {
     "default-tile-width",
@@ -1280,11 +1346,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(chromeos::switches::kEnableNewKoreanIme)
   },
   {
-    "enable-new-md-input-view",
-    IDS_FLAGS_ENABLE_NEW_MD_INPUT_VIEW_NAME,
-    IDS_FLAGS_ENABLE_NEW_MD_INPUT_VIEW_DESCRIPTION,
+    "disable-new-md-input-view",
+    IDS_FLAGS_DISABLE_NEW_MD_INPUT_VIEW_NAME,
+    IDS_FLAGS_DISABLE_NEW_MD_INPUT_VIEW_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(chromeos::switches::kEnableNewMDInputView)
+    SINGLE_VALUE_TYPE(chromeos::switches::kDisableNewMDInputView)
   },
   {
     "enable-physical-keyboard-autocorrect",
@@ -1315,6 +1381,20 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_GESTURE_TYPING_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE(keyboard::switches::kEnableGestureTyping)
+  },
+  {
+    "enable-gesture-deletion",
+    IDS_FLAGS_ENABLE_GESTURE_DELETION_NAME,
+    IDS_FLAGS_ENABLE_GESTURE_DELETION_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(keyboard::switches::kEnableGestureDeletion)
+  },
+  {
+    "enable-gesture-selection",
+    IDS_FLAGS_ENABLE_GESTURE_SELECTION_NAME,
+    IDS_FLAGS_ENABLE_GESTURE_SELECTION_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(keyboard::switches::kEnableGestureSelection)
   },
   {
     "disable-smart-virtual-keyboard",
@@ -1382,11 +1462,20 @@ const Experiment kExperiments[] = {
 #endif
 #if defined(TOOLKIT_VIEWS)
   {
-    "tab-close-buttons-hidden-with-touch",
-    IDS_FLAGS_TAB_CLOSE_BUTTONS_HIDDEN_WITH_TOUCH_NAME,
-    IDS_FLAGS_TAB_CLOSE_BUTTONS_HIDDEN_WITH_TOUCH_DESCRIPTION,
+    "disable-hide-inactive-stacked-tab-close-buttons",
+    IDS_FLAGS_DISABLE_HIDE_INACTIVE_STACKED_TAB_CLOSE_BUTTONS_NAME,
+    IDS_FLAGS_DISABLE_HIDE_INACTIVE_STACKED_TAB_CLOSE_BUTTONS_DESCRIPTION,
     kOsCrOS | kOsWin | kOsLinux,
-    MULTI_VALUE_TYPE(kTabCloseButtonsHiddenWithTouchChoices)
+    SINGLE_VALUE_TYPE(switches::kDisableHideInactiveStackedTabCloseButtons)
+  },
+#endif
+#if defined(ENABLE_SPELLCHECK)
+  {
+    "enable-spelling-feedback-field-trial",
+    IDS_FLAGS_ENABLE_SPELLING_FEEDBACK_FIELD_TRIAL_NAME,
+    IDS_FLAGS_ENABLE_SPELLING_FEEDBACK_FIELD_TRIAL_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSpellingFeedbackFieldTrial)
   },
 #endif
   {
@@ -1395,13 +1484,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_WEBGL_DRAFT_EXTENSIONS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableWebGLDraftExtensions)
-  },
-  {
-    "enable-web-midi",
-    IDS_FLAGS_ENABLE_WEB_MIDI_NAME,
-    IDS_FLAGS_ENABLE_WEB_MIDI_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux | kOsCrOS | kOsAndroid,
-    SINGLE_VALUE_TYPE(switches::kEnableWebMIDI)
   },
   {
     "enable-new-profile-management",
@@ -1433,13 +1515,6 @@ const Experiment kExperiments[] = {
     kOsMac | kOsWin | kOsLinux,
     ENABLE_DISABLE_VALUE_TYPE(switches::kEnableNewAvatarMenu,
                               switches::kDisableNewAvatarMenu)
-  },
-  {
-    "enable-web-based-signin",
-    IDS_FLAGS_ENABLE_WEB_BASED_SIGNIN_NAME,
-    IDS_FLAGS_ENABLE_WEB_BASED_SIGNIN_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux,
-    SINGLE_VALUE_TYPE(switches::kEnableWebBasedSignin)
   },
   {
     "enable-iframe-based-signin",
@@ -1640,20 +1715,6 @@ const Experiment kExperiments[] = {
         switches::kEnhancedBookmarksExperiment, "1",
         switches::kEnhancedBookmarksExperiment, "0")
   },
-  {
-    "manual-enhanced-bookmarks",
-    IDS_FLAGS_ENABLE_ENHANCED_BOOKMARKS_NAME,
-    IDS_FLAGS_ENABLE_ENHANCED_BOOKMARKS_DESCRIPTION,
-    kOsDesktop | kOsAndroid,
-    SINGLE_VALUE_TYPE(switches::kManualEnhancedBookmarks)
-  },
-  {
-    "manual-enhanced-bookmarks-optout",
-    IDS_FLAGS_ENABLE_ENHANCED_BOOKMARKS_NAME,
-    IDS_FLAGS_ENABLE_ENHANCED_BOOKMARKS_DESCRIPTION,
-    kOsDesktop | kOsAndroid,
-    SINGLE_VALUE_TYPE(switches::kManualEnhancedBookmarksOptout)
-  },
 #if defined(OS_ANDROID)
   {
     "enable-zero-suggest-experiment",
@@ -1668,6 +1729,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_READER_MODE_EXPERIMENT_DESCRIPTION,
     kOsAndroid,
     SINGLE_VALUE_TYPE(switches::kEnableReaderModeToolbarIcon)
+  },
+  {
+    "enable-dom-distiller-button-animation",
+    IDS_FLAGS_READER_MODE_BUTTON_ANIMATION,
+    IDS_FLAGS_READER_MODE_BUTTON_ANIMATION_DESCRIPTION,
+    kOsAndroid,
+    SINGLE_VALUE_TYPE(switches::kEnableDomDistillerButtonAnimation)
   },
 #endif
   {
@@ -1771,7 +1839,7 @@ const Experiment kExperiments[] = {
     "disable-threaded-scrolling",
     IDS_FLAGS_DISABLE_THREADED_SCROLLING_NAME,
     IDS_FLAGS_DISABLE_THREADED_SCROLLING_DESCRIPTION,
-    kOsWin | kOsLinux | kOsCrOS | kOsAndroid,
+    kOsWin | kOsLinux | kOsCrOS | kOsAndroid | kOsMac,
     SINGLE_VALUE_TYPE(switches::kDisableThreadedScrolling)
   },
   {
@@ -1805,15 +1873,6 @@ const Experiment kExperiments[] = {
     kOsWin | kOsLinux | kOsCrOS | kOsMac,
     ENABLE_DISABLE_VALUE_TYPE(switches::kEnableSavePasswordBubble,
                               switches::kDisableSavePasswordBubble)
-  },
-  // TODO(tyoshino): Remove this temporary flag and command line switch. See
-  // crbug.com/366483 for the target milestone.
-  {
-    "allow-insecure-websocket-from-https-origin",
-    IDS_FLAGS_ALLOW_INSECURE_WEBSOCKET_FROM_HTTPS_ORIGIN_NAME,
-    IDS_FLAGS_ALLOW_INSECURE_WEBSOCKET_FROM_HTTPS_ORIGIN_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kAllowInsecureWebSocketFromHttpsOrigin)
   },
   {
     "enable-apps-file-associations",
@@ -1899,13 +1958,6 @@ const Experiment kExperiments[] = {
         data_reduction_proxy::switches::kEnableDataReductionProxyAlt)
   },
 #endif
-  {
-    "disable-experimental-hotwording",
-    IDS_FLAGS_DISABLE_EXPERIMENTAL_HOTWORDING_NAME,
-    IDS_FLAGS_DISABLE_EXPERIMENTAL_HOTWORDING_DESCRIPTION,
-    kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kDisableExperimentalHotwording)
-  },
   {
     "enable-hotword-hardware",
     IDS_FLAGS_ENABLE_EXPERIMENTAL_HOTWORD_HARDWARE_NAME,
@@ -2038,7 +2090,8 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_PLUGIN_POWER_SAVER_NAME,
     IDS_FLAGS_ENABLE_PLUGIN_POWER_SAVER_DESCRIPTION,
     kOsDesktop,
-    SINGLE_VALUE_TYPE(switches::kEnablePluginPowerSaver)
+    ENABLE_DISABLE_VALUE_TYPE(switches::kEnablePluginPowerSaver,
+                              switches::kDisablePluginPowerSaver)
   },
 #endif
 #if defined(OS_CHROMEOS)
@@ -2067,11 +2120,11 @@ const Experiment kExperiments[] = {
   },
 #if defined(OS_CHROMEOS)
   {
-    "enable-captive-portal-bypass-proxy",
-    IDS_FLAGS_ENABLE_CAPTIVE_PORTAL_BYPASS_PROXY_NAME,
-    IDS_FLAGS_ENABLE_CAPTIVE_PORTAL_BYPASS_PROXY_DESCRIPTION,
+    "disable-captive-portal-bypass-proxy",
+    IDS_FLAGS_DISABLE_CAPTIVE_PORTAL_BYPASS_PROXY_NAME,
+    IDS_FLAGS_DISABLE_CAPTIVE_PORTAL_BYPASS_PROXY_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(chromeos::switches::kEnableCaptivePortalBypassProxy)
+    SINGLE_VALUE_TYPE(chromeos::switches::kDisableCaptivePortalBypassProxy)
   },
   {
     "disable-roboto-font-ui",
@@ -2158,6 +2211,13 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(chromeos::switches::kDisableTimeZoneTrackingOption)
   },
+  {
+    "disable-webview-signin-flow",
+    IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_NAME,
+    IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(chromeos::switches::kDisableWebviewSigninFlow)
+  },
 #endif  // defined(OS_CHROMEOS)
   {
     "enable-data-reduction-proxy-lo-fi",
@@ -2166,6 +2226,14 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(data_reduction_proxy::switches::
                       kEnableDataReductionProxyLoFi)
+  },
+  {
+    "clear-data-reduction-proxy-data-savings",
+    IDS_FLAGS_DATA_REDUCTION_PROXY_RESET_SAVINGS_NAME,
+    IDS_FLAGS_DATA_REDUCTION_PROXY_RESET_SAVINGS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(data_reduction_proxy::switches::
+                      kClearDataReductionProxyDataSavings)
   },
 #if defined(ENABLE_DATA_REDUCTION_PROXY_DEBUGGING)
   {
@@ -2208,6 +2276,65 @@ const Experiment kExperiments[] = {
     ENABLE_DISABLE_VALUE_TYPE(switches::kEnableChildAccountDetection,
                               switches::kDisableChildAccountDetection)
   },
+#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+  {
+    "ozone-test-single-overlay-support",
+    IDS_FLAGS_OZONE_TEST_SINGLE_HARDWARE_OVERLAY,
+    IDS_FLAGS_OZONE_TEST_SINGLE_HARDWARE_OVERLAY_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kOzoneTestSingleOverlaySupport)
+  },
+#endif  // defined(OS_CHROMEOS) && defined(USE_OZONE)
+  {
+    "v8-pac-mojo-out-of-process",
+    IDS_FLAGS_V8_PAC_MOJO_OUT_OF_PROCESS_NAME,
+    IDS_FLAGS_V8_PAC_MOJO_OUT_OF_PROCESS_DESCRIPTION,
+    kOsDesktop,
+    SINGLE_VALUE_TYPE(switches::kV8PacMojoOutOfProcess),
+  },
+#if defined(OS_CHROMEOS)
+  {
+    "enable-firewall-hole-punching",
+    IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_NAME,
+    IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(chromeos::switches::kEnableFirewallHolePunching)
+  },
+#endif  // defined(OS_CHROMEOS)
+  {
+    "enable-media-router",
+    IDS_FLAGS_ENABLE_MEDIA_ROUTER_NAME,
+    IDS_FLAGS_ENABLE_MEDIA_ROUTER_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableMediaRouter)
+  },
+  {
+    "enable-cert-collection",
+    IDS_ENABLE_INVALID_CERT_COLLECTION,
+    IDS_ENABLE_INVALID_CERT_COLLECTION_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableInvalidCertCollection)
+  },
+// Since kEnableLauncherSearchProviderApi is not available when app list is
+// disabled, flag guard enable-launcher-search-provider-api.
+#if defined(ENABLE_APP_LIST)
+  {
+    "enable-launcher-search-provider-api",
+    IDS_FLAGS_ENABLE_LAUNCHER_SEARCH_PROVIDER_API,
+    IDS_FLAGS_ENABLE_LAUNCHER_SEARCH_PROVIDER_API_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(app_list::switches::kEnableLauncherSearchProviderApi)
+  },
+#endif  // defined(ENABLE_APP_LIST)
+#if defined(OS_CHROMEOS)
+  {
+    "enable-mtp-write-support",
+    IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_NAME,
+    IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(chromeos::switches::kEnableMtpWriteSupport)
+  },
+#endif  // defined(OS_CHROMEOS)
 
   // NOTE: Adding new command-line switches requires adding corresponding
   // entries to enum "LoginCustomFlags" in histograms.xml. See note in
@@ -2314,12 +2441,6 @@ void GetSanitizedEnabledFlags(
 
 bool SkipConditionalExperiment(const Experiment& experiment,
                                FlagsStorage* flags_storage) {
-  if ((experiment.internal_name == std::string("manual-enhanced-bookmarks")) ||
-      (experiment.internal_name ==
-           std::string("manual-enhanced-bookmarks-optout"))) {
-    return true;
-  }
-
 #if defined(OS_ANDROID) || defined(ENABLE_DATA_REDUCTION_PROXY_DEBUGGING)
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
 #endif
@@ -2671,14 +2792,6 @@ void FlagsState::ConvertFlagsToSwitches(FlagsStorage* flags_storage,
       NOTREACHED();
       continue;
     }
-
-#if defined(OS_CHROMEOS)
-    // On Chrome OS setting command line flag may make browser to restart on
-    // user login. As this flag eventually will be set to a significant number
-    // of users skip manual-enhanced-bookmarks to avoid restart.
-    if (experiment_name == "manual-enhanced-bookmarks")
-      continue;
-#endif
 
     const std::pair<std::string, std::string>&
         switch_and_value_pair = name_to_switch_it->second;

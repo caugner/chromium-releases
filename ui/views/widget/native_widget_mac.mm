@@ -9,6 +9,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
+#import "ui/base/cocoa/window_size_constants.h"
 #include "ui/gfx/font_list.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
 #include "ui/native_theme/native_theme.h"
@@ -31,19 +32,6 @@ NSInteger StyleMaskForParams(const Widget::InitParams& params) {
            NSMiniaturizableWindowMask | NSResizableWindowMask;
   }
   return NSBorderlessWindowMask;
-}
-
-NSRect ValidateContentRect(NSRect content_rect) {
-  // A contentRect with zero width or height is a banned practice in Chrome, due
-  // to unpredictable OSX treatment. For now, silently give a minimum dimension.
-  // TODO(tapted): Add a DCHECK, or add emulation logic (e.g. to auto-hide).
-  if (NSWidth(content_rect) == 0)
-    content_rect.size.width = 1;
-
-  if (NSHeight(content_rect) == 0)
-    content_rect.size.height = 1;
-
-  return content_rect;
 }
 
 gfx::Size WindowSizeForClientAreaSize(NSWindow* window, const gfx::Size& size) {
@@ -97,21 +85,13 @@ void NativeWidgetMac::OnWindowWillClose() {
 
 void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   ownership_ = params.ownership;
-
-  NSInteger style_mask = StyleMaskForParams(params);
-  NSRect content_rect = ValidateContentRect(
-      [NSWindow contentRectForFrameRect:gfx::ScreenRectToNSRect(params.bounds)
-                              styleMask:style_mask]);
-
-  base::scoped_nsobject<NSWindow> window([[NativeWidgetMacNSWindow alloc]
-      initWithContentRect:content_rect
-                styleMask:style_mask
-                  backing:NSBackingStoreBuffered
-                    defer:YES]);
+  base::scoped_nsobject<NSWindow> window([CreateNSWindow(params) retain]);
   [window setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
   bridge_->Init(window, params);
 
   delegate_->OnNativeWidgetCreated(true);
+
+  OnSizeConstraintsChanged();
 
   bridge_->SetFocusManager(GetWidget()->GetFocusManager());
 
@@ -121,19 +101,7 @@ void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   // "Infer" must be handled by ViewsDelegate::OnBeforeWidgetInit().
   DCHECK_NE(Widget::InitParams::INFER_OPACITY, params.opacity);
   bool translucent = params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW;
-  switch (params.layer_type) {
-    case aura::WINDOW_LAYER_NONE:
-      break;
-    case aura::WINDOW_LAYER_TEXTURED:
-      bridge_->CreateLayer(ui::LAYER_TEXTURED, translucent);
-      break;
-    case aura::WINDOW_LAYER_NOT_DRAWN:
-      bridge_->CreateLayer(ui::LAYER_NOT_DRAWN, translucent);
-      break;
-    case aura::WINDOW_LAYER_SOLID_COLOR:
-      bridge_->CreateLayer(ui::LAYER_SOLID_COLOR, translucent);
-      break;
-  }
+  bridge_->CreateLayer(params.layer_type, translucent);
 }
 
 NonClientFrameView* NativeWidgetMac::CreateNonClientFrameView() {
@@ -145,9 +113,9 @@ bool NativeWidgetMac::ShouldUseNativeFrame() const {
 }
 
 bool NativeWidgetMac::ShouldWindowContentsBeTransparent() const {
-  // On Windows, this returns false when DWM is unavailable (e.g. XP, RDP or
-  // classic mode). OSX always has a compositing window manager.
-  return true;
+  // On Windows, this returns true when Aero is enabled which draws the titlebar
+  // with translucency.
+  return false;
 }
 
 void NativeWidgetMac::FrameTypeChanged() {
@@ -267,7 +235,13 @@ void NativeWidgetMac::SetWindowIcons(const gfx::ImageSkia& window_icon,
 }
 
 void NativeWidgetMac::InitModalType(ui::ModalType modal_type) {
-  NOTIMPLEMENTED();
+  if (modal_type == ui::MODAL_TYPE_NONE)
+    return;
+
+  // System modal windows not implemented (or used) on Mac.
+  DCHECK_NE(ui::MODAL_TYPE_SYSTEM, modal_type);
+  DCHECK(bridge_->parent());
+  // Everyhing happens upon show.
 }
 
 gfx::Rect NativeWidgetMac::GetWindowBoundsInScreen() const {
@@ -314,6 +288,17 @@ void NativeWidgetMac::SetShape(gfx::NativeRegion shape) {
 void NativeWidgetMac::Close() {
   if (!bridge_)
     return;
+
+  if (delegate_->IsModal()) {
+    // Sheets can't be closed normally. This starts the sheet closing. Once the
+    // sheet has finished animating, it will call sheetDidEnd: on the parent
+    // window's delegate. Note it still needs to be asynchronous, since code
+    // calling Widget::Close() doesn't expect things to be deleted upon return.
+    [NSApp performSelector:@selector(endSheet:)
+                withObject:GetNativeWindow()
+                afterDelay:0];
+    return;
+  }
 
   // Clear the view early to suppress repaints.
   bridge_->SetRootView(NULL);
@@ -531,11 +516,22 @@ bool NativeWidgetMac::IsTranslucentWindowOpacitySupported() const {
 }
 
 void NativeWidgetMac::OnSizeConstraintsChanged() {
-  NOTIMPLEMENTED();
+  bridge_->OnSizeConstraintsChanged();
 }
 
 void NativeWidgetMac::RepostNativeEvent(gfx::NativeEvent native_event) {
   NOTIMPLEMENTED();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NativeWidgetMac, protected:
+
+NSWindow* NativeWidgetMac::CreateNSWindow(const Widget::InitParams& params) {
+  return [[[NativeWidgetMacNSWindow alloc]
+      initWithContentRect:ui::kWindowSizeDeterminedLater
+                styleMask:StyleMaskForParams(params)
+                  backing:NSBackingStoreBuffered
+                    defer:YES] autorelease];
 }
 
 ////////////////////////////////////////////////////////////////////////////////

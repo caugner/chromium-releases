@@ -1,6 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="nl">
 <translation id="337167041784729019">Statistieken weergeven</translation>
-<translation id="3233367171080043075">Je kunt op elk gewenst moment stoppen.</translation>
 <translation id="7606912958770842224">Externe verbindingen inschakelen</translation>
 <translation id="3785447812627779171">Chromoting-
 host</translation>
@@ -31,7 +30,6 @@ host</translation>
 <translation id="4368630973089289038">Wil je ons helpen Chromoting te verbeteren? <ph name="LINK_BEGIN"/>Vul de enquête in.<ph name="LINK_END"/></translation>
 <translation id="332624996707057614">Computernaam bewerken</translation>
 <translation id="1996161829609978754">Chrome downloadt het installatieprogramma voor de Chromoting-host. Zodra het downloaden is voltooid, voer je het installatieprogramma uit voordat je doorgaat.</translation>
-<translation id="222632161986885959">Een deelnemer aan deze Hangout heeft je hulp aangeboden door het beheer van de computer over te nemen. Als je dit accepteert:</translation>
 <translation id="2046651113449445291">De volgende clients zijn gekoppeld met deze computer en kunnen verbinding maken zonder een pincode op te geven. Je kunt deze toestemming op elk gewenst moment intrekken, voor afzonderlijke clients of voor alle clients.</translation>
 <translation id="7658239707568436148">Annuleren</translation>
 <translation id="7836926030608666805">Er ontbreken enkele vereiste componenten. Controleer of je de nieuwste versie van Chrome gebruikt en probeer het opnieuw.</translation>
@@ -51,7 +49,9 @@ host</translation>
 <translation id="8355326866731426344">Deze toegangscode verloopt over <ph name="TIMEOUT"/></translation>
 <translation id="985602178874221306">De auteurs van Chromium</translation>
 <translation id="2498359688066513246">Help en feedback</translation>
+<translation id="3606997049964069799">Je bent niet ingelogd bij Chromium. Log in en probeer het opnieuw.</translation>
 <translation id="6198252989419008588">Pincode wijzigen</translation>
+<translation id="7970576581263377361">Verificatie mislukt. Log opnieuw in bij Chromium.</translation>
 <translation id="6167788864044230298">Streaming via Chrome-app</translation>
 <translation id="170207782578677537">Kan deze computer niet registreren.</translation>
 <translation id="4804818685124855865">Verbinding verbreken</translation>
@@ -72,12 +72,15 @@ host</translation>
 <translation id="9188433529406846933">Autoriseren</translation>
 <translation id="228809120910082333">Bevestig je account en pincode hieronder om toegang door Chromoting toe te staan.</translation>
 <translation id="7605995381616883502">Nieuwe verbinding</translation>
+<translation id="2038229918502634450">Host wordt opnieuw gestart om een beleidswijziging toe te passen.</translation>
 <translation id="2851674870054673688">Zodra deze persoon de code opgeeft, wordt je deelsessie gestart.</translation>
 <translation id="5593560073513909978">De service is tijdelijk niet beschikbaar. Probeer het later opnieuw.</translation>
 <translation id="3908017899227008678">Aanpassen aan venster</translation>
 <translation id="8073845705237259513">Als je Chrome Remote Desktop wilt gebruiken, moet je een Google-account aan je apparaat toevoegen.</translation>
+<translation id="2894654864775534701">Deze computer wordt momenteel via een ander account gedeeld.</translation>
 <translation id="1199593201721843963">Externe verbindingen uitschakelen</translation>
 <translation id="5379087427956679853">Met Chrome Remote Desktop kun je je computer veilig delen via internet. Beide gebruikers moeten hiervoor de app Chrome Remote Desktop uitvoeren, die beschikbaar is op <ph name="URL"/>.</translation>
+<translation id="3150823315463303127">Host kan het beleid niet lezen.</translation>
 <translation id="2220529011494928058">Een probleem melden</translation>
 <translation id="174018511426417793">Je hebt geen geregistreerde computers. Als je externe verbindingen met een computer mogelijk wilt maken, installeer je Chrome Remote Desktop op die computer en klik je op '<ph name="BUTTON_NAME"/>'.</translation>
 <translation id="9126115402994542723">Niet meer vragen naar een pincode bij het aansluiten van dit apparaat op deze host.</translation>
@@ -124,15 +127,12 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="2599300881200251572">Met deze service worden inkomende verbindingen van Chrome Remote Desktop-clients ingeschakeld.</translation>
 <translation id="6091564239975589852">Toetsen verzenden</translation>
 <translation id="4572065712096155137">Verbinding maken</translation>
-<translation id="5908809458024685848">Je bent niet ingelogd bij Chromoting. Log in en probeer het opnieuw.</translation>
 <translation id="7401733114166276557">Chrome Remote Desktop</translation>
 <translation id="5510035215749041527">Nu verbinding verbreken</translation>
 <translation id="3362124771485993931">Pincode nogmaals opgeven</translation>
 <translation id="8196755618196986400">Je e-mailadres wordt opgenomen in alle feedback die je verzendt zodat we contact met je kunnen opnemen voor meer informatie.</translation>
-<translation id="5231421057630485350">De persoon die jou helpt, kan je muis en toetsenbord bedienen.</translation>
 <translation id="154040539590487450">Kan de service voor externe toegang niet starten.</translation>
 <translation id="7948001860594368197">Schermopties</translation>
-<translation id="8172070902751707422">Authenticatie mislukt. Log opnieuw in bij Chrome Remote Desktop.</translation>
 <translation id="5254120496627797685">Als je deze pagina verlaat, wordt je Chrome Remote Desktop-sessie beëindigd.</translation>
 <translation id="7019153418965365059">Onbekende hostfout: <ph name="HOST_OFFLINE_REASON"/>.</translation>
 <translation id="712467900648340229">Kan geen verbinding met het Cast-apparaat maken.</translation>
@@ -171,6 +171,7 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="2939145106548231838">Verifiëren naar host</translation>
 <translation id="2366718077645204424">Kan de host niet bereiken. Dit komt waarschijnlijk door de configuratie van het netwerk dat je gebruikt.</translation>
 <translation id="3776024066357219166">Je Chrome Remote Desktop-sessie is beëindigd.</translation>
+<translation id="1450760146488584666">Het gevraagde object bestaat niet.</translation>
 <translation id="5625493749705183369">Toegang krijgen tot andere computers of andere gebruikers toestemming geven veilig toegang te krijgen tot je computer via internet.</translation>
 <translation id="2512228156274966424">Opmerking: als je er zeker van wilt zijn dat alle sneltoetsen beschikbaar zijn, kun je Chrome Remote Desktop configureren om de modus 'Openen als venster' te gebruiken.</translation>
 <translation id="2699970397166997657">Chromoting</translation>
@@ -200,13 +201,14 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="6527303717912515753">Delen</translation>
 <translation id="2926340305933667314">Kan externe toegang tot deze computer niet uitschakelen. Probeer het later opnieuw.</translation>
 <translation id="6865175692670882333">Weergeven/bewerken</translation>
+<translation id="544077782045763683">Host is afgesloten.</translation>
 <translation id="5859141382851488196">Nieuw venster…</translation>
 <translation id="2089514346391228378">Externe verbindingen voor deze computer zijn ingeschakeld.</translation>
 <translation id="7693372326588366043">Lijst met hosts vernieuwen</translation>
 <translation id="8445362773033888690">Bekijken in de Google Play Store</translation>
-<translation id="8246880134154544773">Authenticatie mislukt. Log opnieuw in bij Chromoting.</translation>
 <translation id="1654128982815600832">Externe verbindingen voor deze computer inschakelen…</translation>
 <translation id="8187079423890319756">Copyright 2013 De auteurs van Chromium. Alle rechten voorbehouden.</translation>
+<translation id="6221358653751391898">Je bent niet ingelogd bij Chrome. Log in en probeer het opnieuw.</translation>
 <translation id="7038683108611689168">Help ons Chromoting te verbeteren door ons toestemming te geven gebruiksstatistieken en crashrapporten te verzamelen.</translation>
 <translation id="6040143037577758943">Sluiten</translation>
 <translation id="4405930547258349619">Basisbibliotheek</translation>
@@ -237,7 +239,6 @@ Desktop-host</translation>
 <translation id="6550675742724504774">Opties</translation>
 <translation id="3339299787263251426">Krijg veilig toegang tot je computer via internet</translation>
 <translation id="979100198331752041">Chrome Remote Desktop op <ph name="HOSTNAME"/> is verouderd en moet worden bijgewerkt.</translation>
-<translation id="7729639150174291243">Je bent niet ingelogd bij Chrome Remote Desktop. Log in en probeer het opnieuw.</translation>
 <translation id="2841013758207633010">Tijd</translation>
 <translation id="6011539954251327702">Met Chromoting kun je je computer veilig delen via internet. Beide gebruikers moeten de app Chromoting uitvoeren, die beschikbaar is op <ph name="URL"/>.</translation>
 <translation id="2919669478609886916">Je deelt deze computer momenteel met een andere gebruiker. Wil je doorgaan met delen?</translation>
@@ -248,6 +249,7 @@ Desktop-host</translation>
 <translation id="3596628256176442606">Met deze service worden inkomende verbindingen van Chromoting-clients ingeschakeld.</translation>
 <translation id="1978866438647250517">• Verbeteringen in de gebruikersinterface.
 • Beperkt netwerkgebruik, indien uitgevoerd op de achtergrond.</translation>
+<translation id="4741792197137897469">Verificatie mislukt. Log opnieuw in bij Chrome.</translation>
 <translation id="4277463233460010382">Deze computer is geconfigureerd om een of meer clients toestemming te geven verbinding te maken zonder een pincode op te geven.</translation>
 <translation id="837021510621780684">Vanaf deze computer</translation>
 <translation id="518094545883702183">Deze informatie wordt alleen gebruikt voor een diagnose van het probleem dat je meldt, is alleen beschikbaar voor iemand die je melding onderzoekt en wordt maximaal 30 dagen bewaard.</translation>

@@ -8,12 +8,12 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/metrics/rappor/sampling.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/rappor/rappor_service.h"
+#include "components/rappor/rappor_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
@@ -38,9 +38,10 @@ SecurityInterstitialMetricsHelper::SecurityInterstitialMetricsHelper(
   DCHECK(!uma_prefix_.empty());
   DCHECK(!rappor_prefix_.empty());
   DCHECK(!sampling_event_name_.empty());
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      Profile::FromBrowserContext(web_contents->GetBrowserContext()),
-      ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()),
+          ServiceAccessType::EXPLICIT_ACCESS);
   if (history_service) {
     history_service->GetVisibleVisitCountToHost(
         request_url_,
@@ -150,6 +151,9 @@ void SecurityInterstitialMetricsHelper::RecordUserInteraction(
     case RELOAD:
     case OPEN_TIME_SETTINGS:
     case TOTAL_VISITS:
+    case SET_EXTENDED_REPORTING_ENABLED:
+    case SET_EXTENDED_REPORTING_DISABLED:
+    case EXTENDED_REPORTING_IS_ENABLED:
     case MAX_INTERACTION:
       break;
   }

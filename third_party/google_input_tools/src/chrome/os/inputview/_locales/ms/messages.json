@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Tambahkan pada kamus peribadi"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Terperinci"
@@ -2616,7 +2627,7 @@
     "message": "Maaf, anda tidak boleh menggunakan tulisan tangan kerana rangkaian tidak tersedia."
   },
   "handwriting_privacy_info": {
-    "message": "Input anda akan dihantar ke pelayan Google untuk mengenal pasti teks"
+    "message": "Input anda akan dihantar ke pelayan Google untuk mengecam teks."
   },
   "hide_keyboard": {
     "message": "sembunyikan papan kekunci"
@@ -2634,7 +2645,7 @@
     "message": "Abaikan pembetulan untuk"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Abaikan pembetulan"
   },
   "il_heb_settings_page": {
     "message": "Halaman Tetapan Papan Kekunci Ibrani"
@@ -3000,10 +3011,10 @@
     "message": "Reka Letak Papan Kekunci Korea"
   },
   "korean_settings_page": {
-    "message": "Halaman Tetapan Korea"
+    "message": "Halaman Tetapan Kaedah Input Korea"
   },
   "korean_syllable_input": {
-    "message": "Input hangul satu persatu"
+    "message": "Masukkan satu suku kata pada satu-satu masa"
   },
   "latam_spa_settings_page": {
     "message": "Halaman Tetapan (Sepanyol) Papan Kekunci Amerika Latin"
@@ -3048,7 +3059,7 @@
     "message": "Auto-huruf besar"
   },
   "physical_keyboard": {
-    "message": "Papan Kekunci Fizikal"
+    "message": "Papan kekunci fizikal"
   },
   "pinyin_settings_page": {
     "message": "Halaman Tetapan Pinyin"
@@ -3105,7 +3116,7 @@
     "message": "Tunjukkan menu lungsur cadangan dengan Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Tunjukkan cadangan Hangul"
+    "message": "Tunjukkan calon dalam mod Hangul"
   },
   "shrink_candidates": {
     "message": "kecilkan senarai calon"
@@ -3147,7 +3158,7 @@
     "message": "tab"
   },
   "touch_keyboard": {
-    "message": "Papan Kekunci Sentuh"
+    "message": "Papan kekunci pada skrin"
   },
   "tr_tur_settings_page": {
     "message": "Halaman Tetapan Papan Kekunci Turki"
@@ -3300,7 +3311,7 @@
     "message": "Suara"
   },
   "voice_privacy_info": {
-    "message": "Suara anda akan dihantar ke pelayan Google untuk mengecam teks"
+    "message": "Input suara anda akan dihantar ke pelayan Google untuk mengecam teks."
   },
   "voice_turn_off": {
     "message": "matikan alat input suara"

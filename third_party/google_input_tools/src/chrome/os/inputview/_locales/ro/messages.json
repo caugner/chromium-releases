@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Adaug\u0103 \u00een dic\u021bionarul personal"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Set\u0103ri avansate"
@@ -2616,7 +2627,7 @@
     "message": "Nu po\u021bi s\u0103 folose\u0219ti scrierea de m\u00e2n\u0103, deoarece re\u021beaua nu este disponibil\u0103."
   },
   "handwriting_privacy_info": {
-    "message": "Datele introduse vor fi trimise la un server Google pentru recunoa\u0219terea textului"
+    "message": "Scrisul va fi trimis c\u0103tre serverele Google pentru recunoa\u0219terea textului."
   },
   "hide_keyboard": {
     "message": "ascunde tastatura"
@@ -2634,7 +2645,7 @@
     "message": "Ignor\u0103 corectura pentru"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Ignor\u0103 corectura"
   },
   "il_heb_settings_page": {
     "message": "Pagina de set\u0103ri pentru tastatura ebraic\u0103"
@@ -3000,10 +3011,10 @@
     "message": "Aspect tastatur\u0103 coreean\u0103"
   },
   "korean_settings_page": {
-    "message": "Pagina de set\u0103ri pentru coreean\u0103"
+    "message": "Pagina de set\u0103ri pentru Metoda de introducere a textului \u00een coreean\u0103"
   },
   "korean_syllable_input": {
-    "message": "Introduci caractere hangul unul c\u00e2te unul"
+    "message": "Introdu c\u00e2te o silab\u0103 odat\u0103"
   },
   "latam_spa_settings_page": {
     "message": "Pagina de set\u0103ri pentru tastatur\u0103 America Latin\u0103 (spaniol\u0103)"
@@ -3105,7 +3116,7 @@
     "message": "Arat\u0103 lista drop-down cu sugestii la ap\u0103sarea pe tasta Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Afi\u0219eaz\u0103 sugestii \u00een Hangul"
+    "message": "Arat\u0103 sugestii \u00een modul Hangul"
   },
   "shrink_candidates": {
     "message": "restr\u00e2nge lista de sugestii"
@@ -3147,7 +3158,7 @@
     "message": "tab"
   },
   "touch_keyboard": {
-    "message": "Tastatur\u0103 tactil\u0103"
+    "message": "Tastatur\u0103 pe ecran"
   },
   "tr_tur_settings_page": {
     "message": "Pagina de set\u0103ri pentru tastatura turc\u0103"
@@ -3300,7 +3311,7 @@
     "message": "Intrare vocal\u0103"
   },
   "voice_privacy_info": {
-    "message": "Pentru recunoa\u0219terea textului, \u00eenregistrarea vocii va fi trimis\u0103 la un server Google"
+    "message": "\u00cenregistrarea vocii va fi trimis\u0103 c\u0103tre serverele Google pentru recunoa\u0219terea textului."
   },
   "voice_turn_off": {
     "message": "dezactiveaz\u0103 instrumentul de intrare vocal\u0103"

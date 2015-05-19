@@ -22,6 +22,7 @@
 
 class Browser;
 class DownloadShelf;
+class ExclusiveAccessContext;
 class FindBar;
 class GlobalErrorBubbleViewBase;
 class GURL;
@@ -131,7 +132,7 @@ class BrowserWindow : public ui::BaseWindow {
                                ExclusiveAccessBubbleType bubble_type,
                                bool with_toolbar) = 0;
   virtual void ExitFullscreen() = 0;
-  virtual void UpdateFullscreenExitBubbleContent(
+  virtual void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type) = 0;
 
@@ -297,12 +298,6 @@ class BrowserWindow : public ui::BaseWindow {
   // indicating that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
 
-  // Get extra vertical height that the render view should add to its requests
-  // to webkit. This can help prevent sending extraneous layout/repaint requests
-  // when the delegate is in the process of resizing the tab contents view (e.g.
-  // during infobar animations).
-  virtual int GetExtraRenderViewHeight() const = 0;
-
   // Notification that |contents| got the focus through user action (click
   // on the page).
   virtual void WebContentsFocused(content::WebContents* contents) = 0;
@@ -394,6 +389,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Executes |command| registered by |extension|.
   virtual void ExecuteExtensionCommand(const extensions::Extension* extension,
                                        const extensions::Command& command) = 0;
+
+  // Returns object implementing ExclusiveAccessContext interface.
+  virtual ExclusiveAccessContext* GetExclusiveAccessContext() = 0;
 
  protected:
   friend class BrowserCloseManager;

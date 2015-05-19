@@ -18,6 +18,9 @@ var driveVolume;
 var cameraFileEntry;
 
 /** @type {!MockFileEntry} */
+var rawFileEntry;
+
+/** @type {!MockFileEntry} */
 var sdFileEntry;
 
 /** @type {!MockFileEntry} */
@@ -33,11 +36,8 @@ loadTimeData.data = {
 function setUp() {
 
   new MockChromeStorageAPI();
+  importer.setupTestLogger();
 
-  var cameraFileSystem = new MockFileSystem(
-      'camera-fs', 'filesystem:camera-123');
-  var sdFileSystem = new MockFileSystem(
-      'sd-fs', 'filesystem:sd-123');
   cameraVolume = MockVolumeManager.createMockVolumeInfo(
           VolumeManagerCommon.VolumeType.MTP,
           'camera-fs',
@@ -52,13 +52,17 @@ function setUp() {
   driveVolume = volumeManager.getCurrentProfileVolumeInfo(
       VolumeManagerCommon.VolumeType.DRIVE);
   cameraFileEntry = createFileEntry(cameraVolume, '/DCIM/poodles.jpg');
+  rawFileEntry = createFileEntry(cameraVolume, '/DCIM/poodles.nef');
   sdFileEntry = createFileEntry(sdVolume, '/dcim/a-z/IMG1234.jpg');
   driveFileEntry = createFileEntry(driveVolume, '/someotherfile.jpg');
 }
 
-function testIsMediaEntry() {
-  assertTrue(importer.isMediaEntry(cameraFileEntry));
-  assertFalse(importer.isMediaEntry(driveFileEntry));
+function testIsEligibleType() {
+  assertTrue(importer.isEligibleType(cameraFileEntry));
+  assertTrue(importer.isEligibleType(rawFileEntry));
+
+  // Agnostic to the location of the entry.
+  assertTrue(importer.isEligibleType(driveFileEntry));
 }
 
 function testIsEligibleVolume() {
@@ -70,11 +74,12 @@ function testIsEligibleVolume() {
 function testIsEligibleEntry() {
   assertTrue(importer.isEligibleEntry(volumeManager, cameraFileEntry));
   assertTrue(importer.isEligibleEntry(volumeManager, sdFileEntry));
+  assertTrue(importer.isEligibleEntry(volumeManager, rawFileEntry));
   assertFalse(importer.isEligibleEntry(volumeManager, driveFileEntry));
 }
 
 function testIsMediaDirectory() {
-  ['/DCIM', '/DCIM/', '/dcim', '/dcim/' ].forEach(
+  ['/DCIM', '/DCIM/', '/dcim', '/dcim/', '/MP_ROOT/' ].forEach(
       assertIsMediaDir);
   ['/blabbity/DCIM', '/blabbity/dcim', '/blabbity-blab'].forEach(
       assertIsNotMediaDir);
@@ -252,6 +257,14 @@ function testCreateMetadataHashcode(callback) {
             assertEquals(0, hashcode.search(/[0-9]{9,}_[0-9]{4,}/),
                 'Hashcode (' + hashcode + ') does not match next pattern.');
           });
+
+  reportPromise(promise, callback);
+}
+
+function testHasMediaDirectory(callback) {
+  var dir = createDirectoryEntry(sdVolume, '/DCIM');
+  var promise = importer.hasMediaDirectory(sdVolume.fileSystem.root)
+      .then(assertTrue.bind(null));
 
   reportPromise(promise, callback);
 }

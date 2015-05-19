@@ -556,6 +556,7 @@ TEST_F(GLES2ImplementationTest, DrawArrays) {
   gl_->DrawArrays(GL_POINTS, 2, 3);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
+// TODO(zmo): Implement unit test for DrawRangeElements
 
 TEST_F(GLES2ImplementationTest, EnableVertexAttribArray) {
   struct Cmds {
@@ -953,6 +954,24 @@ TEST_F(GLES2ImplementationTest, GetShaderiv) {
 }
 // TODO(zmo): Implement unit test for GetShaderInfoLog
 // TODO(zmo): Implement unit test for GetShaderPrecisionFormat
+
+TEST_F(GLES2ImplementationTest, GetSynciv) {
+  struct Cmds {
+    cmds::GetSynciv cmd;
+  };
+  typedef cmds::GetSynciv::Result Result;
+  Result::Type result = 0;
+  Cmds expected;
+  ExpectedMemoryInfo result1 = GetExpectedResultMemory(4);
+  expected.cmd.Init(123, GL_SYNC_STATUS, result1.id, result1.offset);
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .WillOnce(SetMemory(result1.ptr, SizedResultHelper<Result::Type>(1)))
+      .RetiresOnSaturation();
+  gl_->GetSynciv(reinterpret_cast<GLsync>(123), GL_SYNC_STATUS, 3, nullptr,
+                 &result);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_EQ(static_cast<Result::Type>(1), result);
+}
 
 TEST_F(GLES2ImplementationTest, GetTexParameterfv) {
   struct Cmds {
@@ -2700,6 +2719,8 @@ TEST_F(GLES2ImplementationTest, IsVertexArrayOES) {
   EXPECT_TRUE(result);
 }
 // TODO(zmo): Implement unit test for EnableFeatureCHROMIUM
+// TODO(zmo): Implement unit test for MapBufferRange
+// TODO(zmo): Implement unit test for UnmapBuffer
 
 TEST_F(GLES2ImplementationTest, ResizeCHROMIUM) {
   struct Cmds {
@@ -2731,9 +2752,20 @@ TEST_F(GLES2ImplementationTest, CopyTextureCHROMIUM) {
     cmds::CopyTextureCHROMIUM cmd;
   };
   Cmds expected;
-  expected.cmd.Init(1, 2, 3, 4, GL_ALPHA, GL_UNSIGNED_BYTE);
+  expected.cmd.Init(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE);
 
-  gl_->CopyTextureCHROMIUM(1, 2, 3, 4, GL_ALPHA, GL_UNSIGNED_BYTE);
+  gl_->CopyTextureCHROMIUM(1, 2, 3, GL_ALPHA, GL_UNSIGNED_BYTE);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CopySubTextureCHROMIUM) {
+  struct Cmds {
+    cmds::CopySubTextureCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3, 4, 5);
+
+  gl_->CopySubTextureCHROMIUM(1, 2, 3, 4, 5);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 

@@ -7,6 +7,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/command_line.h"
 #include "content/browser/android/content_view_core_impl.h"
+#include "content/browser/android/media_players_observer.h"
 #include "content/browser/media/android/browser_demuxer_android.h"
 #include "content/browser/media/android/media_resource_getter_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -46,7 +47,12 @@ static media::MediaUrlInterceptor* media_url_interceptor_ = NULL;
 
 // static
 void BrowserMediaPlayerManager::RegisterFactory(Factory factory) {
-  g_factory = factory;
+  // TODO(aberent) nullptr test is a temporary fix to simplify upstreaming Cast.
+  // Until Cast is fully upstreamed we want the downstream factory to take
+  // priority over the upstream factory. The downstream call happens first,
+  // so this will ensure that it does.
+  if (g_factory == nullptr)
+    g_factory = factory;
 }
 
 // static
@@ -57,13 +63,14 @@ void BrowserMediaPlayerManager::RegisterMediaUrlInterceptor(
 
 // static
 BrowserMediaPlayerManager* BrowserMediaPlayerManager::Create(
-    RenderFrameHost* rfh) {
+    RenderFrameHost* rfh,
+    MediaPlayersObserver* audio_monitor) {
   if (g_factory)
-    return g_factory(rfh);
-  return new BrowserMediaPlayerManager(rfh);
+    return g_factory(rfh, audio_monitor);
+  return new BrowserMediaPlayerManager(rfh, audio_monitor);
 }
 
-ContentViewCoreImpl* BrowserMediaPlayerManager::GetContentViewCore() const {
+ContentViewCore* BrowserMediaPlayerManager::GetContentViewCore() const {
   return ContentViewCoreImpl::FromWebContents(web_contents());
 }
 
@@ -121,8 +128,10 @@ MediaPlayerAndroid* BrowserMediaPlayerManager::CreateMediaPlayer(
 }
 
 BrowserMediaPlayerManager::BrowserMediaPlayerManager(
-    RenderFrameHost* render_frame_host)
+    RenderFrameHost* render_frame_host,
+    MediaPlayersObserver* audio_monitor)
     : render_frame_host_(render_frame_host),
+      audio_monitor_(audio_monitor),
       fullscreen_player_id_(kInvalidMediaPlayerId),
       fullscreen_player_is_released_(false),
       web_contents_(WebContents::FromRenderFrameHost(render_frame_host)),
@@ -254,6 +263,16 @@ void BrowserMediaPlayerManager::OnVideoSizeChanged(
     video_view_->OnVideoSizeChanged(width, height);
 }
 
+void BrowserMediaPlayerManager::OnAudibleStateChanged(
+    int player_id, bool is_audible) {
+  audio_monitor_->OnAudibleStateChanged(
+      render_frame_host_, player_id, is_audible);
+}
+
+void BrowserMediaPlayerManager::OnWaitingForDecryptionKey(int player_id) {
+  Send(new MediaPlayerMsg_WaitingForDecryptionKey(RoutingID(), player_id));
+}
+
 media::MediaResourceGetter*
 BrowserMediaPlayerManager::GetMediaResourceGetter() {
   if (!media_resource_getter_.get()) {
@@ -305,12 +324,6 @@ void BrowserMediaPlayerManager::RequestFullScreen(int player_id) {
 }
 
 #if defined(VIDEO_HOLE)
-bool
-BrowserMediaPlayerManager::ShouldUseVideoOverlayForEmbeddedEncryptedVideo() {
-  RendererPreferences* prefs = web_contents_->GetMutableRendererPrefs();
-  return prefs->use_video_overlay_for_embedded_encrypted_video;
-}
-
 void BrowserMediaPlayerManager::AttachExternalVideoSurface(int player_id,
                                                            jobject surface) {
   MediaPlayerAndroid* player = GetPlayer(player_id);
@@ -518,6 +531,7 @@ void BrowserMediaPlayerManager::RemovePlayer(int player_id) {
     if ((*it)->player_id() == player_id) {
       ReleaseMediaResources(player_id);
       players_.erase(it);
+      audio_monitor_->RemovePlayer(render_frame_host_, player_id);
       break;
     }
   }

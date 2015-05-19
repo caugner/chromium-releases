@@ -25,6 +25,7 @@ UNCONDITIONALLY_BOUND_EXTENSIONS = set([
   'WGL_ARB_extensions_string',
   'WGL_EXT_extensions_string',
   'GL_CHROMIUM_gles_depth_binding_hack', # crbug.com/448206
+  'GL_CHROMIUM_glgetstringi_hack', # crbug.com/470396
 ])
 
 """Function binding conditions can be specified manually by supplying a versions
@@ -46,10 +47,8 @@ GL_FUNCTIONS = [
   'names': ['glAttachShader'],
   'arguments': 'GLuint program, GLuint shader', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glBeginQuery' }],
-  'arguments': 'GLenum target, GLuint id', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glBeginQueryARB' },
+  'versions': [{ 'name': 'glBeginQuery' },
+               { 'name': 'glBeginQueryARB' },
                { 'name': 'glBeginQueryEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLenum target, GLuint id', },
@@ -264,10 +263,8 @@ GL_FUNCTIONS = [
   'names': ['glDeleteProgram'],
   'arguments': 'GLuint program', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glDeleteQueries' }],
-  'arguments': 'GLsizei n, const GLuint* ids', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glDeleteQueriesARB'},
+  'versions': [{ 'name': 'glDeleteQueries' },
+               { 'name': 'glDeleteQueriesARB'},
                { 'name': 'glDeleteQueriesEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLsizei n, const GLuint* ids', },
@@ -367,10 +364,8 @@ GL_FUNCTIONS = [
   'names': ['glEnableVertexAttribArray'],
   'arguments': 'GLuint index', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glEndQuery' }],
-  'arguments': 'GLenum target', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glEndQueryARB' },
+  'versions': [{ 'name': 'glEndQuery' },
+               { 'name': 'glEndQueryARB' },
                { 'name': 'glEndQueryEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLenum target', },
@@ -444,10 +439,8 @@ GL_FUNCTIONS = [
   'names': ['glGenFramebuffersEXT', 'glGenFramebuffers'],
   'arguments': 'GLsizei n, GLuint* framebuffers', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glGenQueries' }],
-  'arguments': 'GLsizei n, GLuint* ids', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glGenQueriesARB', },
+  'versions': [{ 'name': 'glGenQueries' },
+               { 'name': 'glGenQueriesARB', },
                { 'name' : 'glGenQueriesEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLsizei n, GLuint* ids', },
@@ -566,10 +559,8 @@ GL_FUNCTIONS = [
   'names': ['glGetProgramResourceLocation'],
   'arguments': 'GLuint program, GLenum programInterface, const char* name', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glGetQueryiv' }],
-  'arguments': 'GLenum target, GLenum pname, GLint* params', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glGetQueryivARB' },
+  'versions': [{ 'name': 'glGetQueryiv' },
+               { 'name': 'glGetQueryivARB' },
                { 'name': 'glGetQueryivEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLenum target, GLenum pname, GLint* params', },
@@ -579,10 +570,9 @@ GL_FUNCTIONS = [
                { 'name': 'glGetQueryObjecti64vEXT' }],
   'arguments': 'GLuint id, GLenum pname, GLint64* params', },
 { 'return_type': 'void',
-  'names': ['glGetQueryObjectiv'],
-  'arguments': 'GLuint id, GLenum pname, GLint* params', },
-{ 'return_type': 'void',
-  'names': ['glGetQueryObjectivARB', 'glGetQueryObjectivEXT'],
+  'versions': [{ 'name': 'glGetQueryObjectiv' },
+               { 'name': 'glGetQueryObjectivARB' },
+               { 'name': 'glGetQueryObjectivEXT' }],
   'arguments': 'GLuint id, GLenum pname, GLint* params', },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glGetQueryObjectui64v',
@@ -590,10 +580,8 @@ GL_FUNCTIONS = [
                { 'name': 'glGetQueryObjectui64vEXT' }],
   'arguments': 'GLuint id, GLenum pname, GLuint64* params', },
 { 'return_type': 'void',
-  'versions': [{ 'name': 'glGetQueryObjectuiv' }],
-  'arguments': 'GLuint id, GLenum pname, GLuint* params', },
-{ 'return_type': 'void',
-  'versions': [{ 'name': 'glGetQueryObjectuivARB' },
+  'versions': [{ 'name': 'glGetQueryObjectuiv' },
+               { 'name': 'glGetQueryObjectuivARB' },
                { 'name': 'glGetQueryObjectuivEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLuint id, GLenum pname, GLuint* params', },
@@ -625,7 +613,10 @@ GL_FUNCTIONS = [
   'names': ['glGetString'],
   'arguments': 'GLenum name', },
 { 'return_type': 'const GLubyte*',
-  'names': ['glGetStringi'],
+  # This is needed for bootstrapping on the desktop GL core profile.
+  # It won't be called unless the expected GL version is used.
+  'versions': [{ 'name': 'glGetStringi',
+                 'extensions': ['GL_CHROMIUM_glgetstringi_hack'] }],
   'arguments': 'GLenum name, GLuint index', },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glGetSynciv',
@@ -714,10 +705,8 @@ GL_FUNCTIONS = [
   'names': ['glIsProgram'],
   'arguments': 'GLuint program', },
 { 'return_type': 'GLboolean',
-  'versions': [{ 'name': 'glIsQuery' }],
-  'arguments': 'GLuint query', },
-{ 'return_type': 'GLboolean',
-  'versions': [{ 'name': 'glIsQueryARB' },
+  'versions': [{ 'name': 'glIsQuery' },
+               { 'name': 'glIsQueryARB' },
                { 'name': 'glIsQueryEXT',
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLuint query', },
@@ -1790,7 +1779,7 @@ def GenerateMockHeader(file, functions, set_name):
   file.write('\n')
 
 
-def GenerateSource(file, functions, set_name, used_extensions):
+def GenerateSource(file, functions, set_name, used_extensions, options):
   """Generates gl_bindings_autogen_x.cc"""
 
   set_header_name = "ui/gl/gl_" + set_name.lower() + "_api_implementation.h"
@@ -1986,6 +1975,11 @@ namespace gfx {
           (set_name.lower(), function_name, argument_names))
       if 'logging_code' in func:
         file.write("%s\n" % func['logging_code'])
+      if options.generate_dchecks and set_name == 'gl':
+        file.write('  {\n')
+        file.write('    GLenum error = g_driver_gl.debug_fn.glGetErrorFn();\n')
+        file.write('    DCHECK(error == 0);\n')
+        file.write('  }\n')
     else:
       file.write('  GL_SERVICE_LOG("%s" << "(" %s << ")");\n' %
           (function_name, log_argument_names))
@@ -1995,6 +1989,11 @@ namespace gfx {
         file.write("%s\n" % func['logging_code'])
       else:
         file.write('  GL_SERVICE_LOG("GL_RESULT: " << result);\n')
+      if options.generate_dchecks and set_name == 'gl':
+        file.write('  {\n')
+        file.write('    GLenum _error = g_driver_gl.debug_fn.glGetErrorFn();\n')
+        file.write('    DCHECK(_error == 0);\n')
+        file.write('  }\n')
       file.write('  return result;\n')
     file.write('}\n')
   file.write('}  // extern "C"\n')
@@ -2463,6 +2462,9 @@ def main(argv):
   parser = optparse.OptionParser()
   parser.add_option('--inputs', action='store_true')
   parser.add_option('--verify-order', action='store_true')
+  parser.add_option('--generate-dchecks', action='store_true',
+                    help='Generates DCHECKs into the logging functions '
+                        'asserting no GL errors (useful for debugging)')
 
   options, args = parser.parse_args(argv)
 
@@ -2527,7 +2529,7 @@ def main(argv):
 
     source_file = open(
         os.path.join(directory, 'gl_bindings_autogen_%s.cc' % set_name), 'wb')
-    GenerateSource(source_file, functions, set_name, used_extensions)
+    GenerateSource(source_file, functions, set_name, used_extensions, options)
     source_file.close()
     ClangFormat(source_file.name)
 

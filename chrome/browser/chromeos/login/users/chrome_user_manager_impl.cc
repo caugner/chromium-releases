@@ -90,6 +90,7 @@ void ChromeUserManagerImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(kPublicAccountPendingDataRemoval, std::string());
   SupervisedUserManager::RegisterPrefs(registry);
   SessionLengthLimiter::RegisterPrefs(registry);
+  BootstrapManager::RegisterPrefs(registry);
 }
 
 // static
@@ -103,11 +104,12 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
       cros_settings_(CrosSettings::Get()),
       device_local_account_policy_service_(NULL),
       supervised_user_manager_(new SupervisedUserManagerImpl(this)),
+      bootstrap_manager_(new BootstrapManager(this)),
       weak_factory_(this) {
   UpdateNumberOfUsers();
 
   // UserManager instance should be used only on UI thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   registrar_.Add(this,
                  chrome::NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
                  content::NotificationService::AllSources());
@@ -154,7 +156,7 @@ ChromeUserManagerImpl::~ChromeUserManagerImpl() {
 }
 
 void ChromeUserManagerImpl::Shutdown() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::Shutdown();
 
   local_accounts_subscription_.reset();
@@ -175,6 +177,10 @@ void ChromeUserManagerImpl::Shutdown() {
   avatar_policy_observer_.reset();
   wallpaper_policy_observer_.reset();
   registrar_.RemoveAll();
+}
+
+BootstrapManager* ChromeUserManagerImpl::GetBootstrapManager() {
+  return bootstrap_manager_.get();
 }
 
 MultiProfileUserController*
@@ -283,7 +289,7 @@ user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
 }
 
 void ChromeUserManagerImpl::SessionStarted() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::SessionStarted();
 
   content::NotificationService::current()->Notify(
@@ -322,7 +328,7 @@ void ChromeUserManagerImpl::RemoveUserInternal(
 void ChromeUserManagerImpl::SaveUserOAuthStatus(
     const std::string& user_id,
     user_manager::User::OAuthTokenStatus oauth_token_status) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::SaveUserOAuthStatus(user_id, oauth_token_status);
 
   GetUserFlow(user_id)->HandleOAuthTokenStatusChange(oauth_token_status);
@@ -331,7 +337,7 @@ void ChromeUserManagerImpl::SaveUserOAuthStatus(
 void ChromeUserManagerImpl::SaveUserDisplayName(
     const std::string& user_id,
     const base::string16& display_name) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::SaveUserDisplayName(user_id, display_name);
 
   // Do not update local state if data stored or cached outside the user's
@@ -523,6 +529,9 @@ void ChromeUserManagerImpl::PerformPreUserListLoadingActions() {
   // This process also should not trigger EnsureUsersLoaded again.
   if (supervised_user_manager_->HasFailedUserCreationTransaction())
     supervised_user_manager_->RollbackUserCreationTransaction();
+
+  // Abandon all unfinished bootstraps.
+  bootstrap_manager_->RemoveAllPendingBootstrap();
 }
 
 void ChromeUserManagerImpl::PerformPostUserListLoadingActions() {
@@ -615,7 +624,7 @@ void ChromeUserManagerImpl::RetrieveTrustedDevicePolicies() {
 }
 
 void ChromeUserManagerImpl::GuestUserLoggedIn() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::GuestUserLoggedIn();
 
   // TODO(nkostylev): Add support for passing guest session cryptohome
@@ -648,7 +657,7 @@ void ChromeUserManagerImpl::RegularUserLoggedIn(const std::string& user_id) {
 
 void ChromeUserManagerImpl::RegularUserLoggedInAsEphemeral(
     const std::string& user_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::RegularUserLoggedInAsEphemeral(user_id);
 
   GetUserImageManager(user_id)->UserLoggedIn(IsCurrentUserNew(), false);
@@ -694,6 +703,11 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(const std::string& user_id) {
   GetLocalState()->CommitPendingWrite();
 }
 
+bool ChromeUserManagerImpl::HasPendingBootstrap(
+    const std::string& user_id) const {
+  return bootstrap_manager_->HasPendingBootstrap(user_id);
+}
+
 void ChromeUserManagerImpl::PublicAccountUserLoggedIn(
     user_manager::User* user) {
   SetIsCurrentUserNew(true);
@@ -707,7 +721,7 @@ void ChromeUserManagerImpl::PublicAccountUserLoggedIn(
 }
 
 void ChromeUserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   policy::DeviceLocalAccount::Type device_local_account_type;
   DCHECK(policy::IsDeviceLocalAccountUser(app_id, &device_local_account_type));
   DCHECK_EQ(policy::DeviceLocalAccount::TYPE_KIOSK_APP,
@@ -756,7 +770,7 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
 }
 
 void ChromeUserManagerImpl::DemoAccountLoggedIn() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   active_user_ =
       user_manager::User::CreateKioskAppUser(DemoAppLauncher::kDemoUserName);
   active_user_->SetStubImage(
@@ -779,7 +793,7 @@ void ChromeUserManagerImpl::DemoAccountLoggedIn() {
 }
 
 void ChromeUserManagerImpl::NotifyOnLogin() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   UserSessionManager::OverrideHomedir();
   UpdateNumberOfUsers();
@@ -967,14 +981,14 @@ void ChromeUserManagerImpl::UpdatePublicAccountDisplayName(
 }
 
 UserFlow* ChromeUserManagerImpl::GetCurrentUserFlow() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!IsUserLoggedIn())
     return GetDefaultUserFlow();
   return GetUserFlow(GetLoggedInUser()->email());
 }
 
 UserFlow* ChromeUserManagerImpl::GetUserFlow(const std::string& user_id) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FlowMap::const_iterator it = specific_flows_.find(user_id);
   if (it != specific_flows_.end())
     return it->second;
@@ -983,13 +997,13 @@ UserFlow* ChromeUserManagerImpl::GetUserFlow(const std::string& user_id) const {
 
 void ChromeUserManagerImpl::SetUserFlow(const std::string& user_id,
                                         UserFlow* flow) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ResetUserFlow(user_id);
   specific_flows_[user_id] = flow;
 }
 
 void ChromeUserManagerImpl::ResetUserFlow(const std::string& user_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FlowMap::iterator it = specific_flows_.find(user_id);
   if (it != specific_flows_.end()) {
     delete it->second;
@@ -1005,7 +1019,7 @@ bool ChromeUserManagerImpl::AreSupervisedUsersAllowed() const {
 }
 
 UserFlow* ChromeUserManagerImpl::GetDefaultUserFlow() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!default_flow_.get())
     default_flow_.reset(new DefaultUserFlow());
   return default_flow_.get();
@@ -1038,6 +1052,12 @@ void ChromeUserManagerImpl::OnUserNotAllowed(const std::string& user_email) {
   LOG(ERROR) << "Shutdown session because a user is not allowed to be in the "
                 "current session";
   chromeos::ShowMultiprofilesSessionAbortedDialog(user_email);
+}
+
+void ChromeUserManagerImpl::RemovePendingBootstrapUser(
+    const std::string& user_id) {
+  DCHECK(HasPendingBootstrap(user_id));
+  RemoveNonOwnerUserInternal(user_id, NULL);
 }
 
 void ChromeUserManagerImpl::UpdateNumberOfUsers() {

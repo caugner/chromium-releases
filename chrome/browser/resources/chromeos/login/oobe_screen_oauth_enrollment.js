@@ -33,12 +33,6 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     currentStep_: null,
 
     /**
-     * Opaque token used to correlate request and response while retrieving the
-     * authenticated user's e-mail address from GAIA.
-     */
-    attemptToken_: null,
-
-    /**
      * The help topic to show when the user clicks the learn more link.
      */
     learnMoreHelpTopicID_: null,
@@ -130,12 +124,6 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
             this.isCancelDisabled = true;
             chrome.send('oauthEnrollClose', ['cancel']);
           }.bind(this));
-
-      makeButton(
-          'oauth-enroll-retry-button',
-          ['oauth-enroll-focus-on-error'],
-          loadTimeData.getString('oauthEnrollRetry'),
-          this.doRetry_.bind(this));
 
       makeButton(
           'oauth-enroll-done-button',
@@ -257,7 +245,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
 
       if (msg.method == 'completeLogin') {
         // A user has successfully authenticated via regular GAIA or SAML.
-        chrome.send('oauthEnrollCompleteLogin', [msg.email]);
+        chrome.send('oauthEnrollCompleteLogin', [msg.email,
+                                                 '' /* auth_code */]);
       }
 
       if (msg.method == 'authPageLoaded' && this.currentStep_ == STEP_SIGNIN) {

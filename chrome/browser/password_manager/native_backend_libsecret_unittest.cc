@@ -79,14 +79,8 @@ bool IsStringAttribute(const SecretSchema* schema, const std::string& name) {
 }
 
 // The list of all libsecret items we have stored.
-std::vector<MockSecretItem*> global_mock_libsecret_items;
+ScopedVector<MockSecretItem>* global_mock_libsecret_items;
 bool global_mock_libsecret_reject_local_ids = false;
-
-void ClearMockObjects() {
-  for (size_t i = 0; i < global_mock_libsecret_items.size(); ++i)
-    delete global_mock_libsecret_items[i];
-  global_mock_libsecret_items.clear();
-}
 
 gboolean mock_secret_password_store_sync(const SecretSchema* schema,
                                          const gchar* collection,
@@ -116,7 +110,7 @@ gboolean mock_secret_password_store_sync(const SecretSchema* schema,
   va_end(ap);
   MockSecretValue* secret_value = new MockSecretValue(g_strdup(password));
   MockSecretItem* item = new MockSecretItem(secret_value, attributes);
-  global_mock_libsecret_items.push_back(item);
+  global_mock_libsecret_items->push_back(item);
   return true;
 }
 
@@ -127,9 +121,9 @@ GList* mock_secret_service_search_sync(SecretService* service,
                                        GCancellable* cancellable,
                                        GError** error) {
   GList* result = nullptr;
-  for (uint32_t i = 0; i < global_mock_libsecret_items.size(); ++i) {
-    if (Matches(global_mock_libsecret_items[i], attributes))
-      result = g_list_append(result, global_mock_libsecret_items[i]);
+  for (MockSecretItem* item : *global_mock_libsecret_items) {
+    if (Matches(item, attributes))
+      result = g_list_append(result, item);
   }
   return result;
 }
@@ -157,14 +151,17 @@ gboolean mock_secret_password_clear_sync(const SecretSchema* schema,
     g_hash_table_insert(attributes, g_strdup(name), value);
   }
   va_end(ap);
-  for (uint32_t i = 0; i < global_mock_libsecret_items.size();)
-    if (Matches(global_mock_libsecret_items[i], attributes)) {
-      delete global_mock_libsecret_items[i];
-      global_mock_libsecret_items.erase(global_mock_libsecret_items.begin() +
-                                        i);
-    } else {
-      ++i;
+
+  ScopedVector<MockSecretItem> kept_mock_libsecret_items;
+  kept_mock_libsecret_items.reserve(global_mock_libsecret_items->size());
+  for (auto& item : *global_mock_libsecret_items) {
+    if (!Matches(item, attributes)) {
+      kept_mock_libsecret_items.push_back(item);
+      item = nullptr;
     }
+  }
+  global_mock_libsecret_items->swap(kept_mock_libsecret_items);
+
   g_hash_table_unref(attributes);
   return true;
 }
@@ -212,7 +209,7 @@ class MockLibsecretLoader : public LibsecretLoader {
         (decltype(&::secret_value_unref)) & mock_secret_value_unref;
     libsecret_loaded = true;
     // Reset the state of the mock library.
-    ClearMockObjects();
+    global_mock_libsecret_items->clear();
     global_mock_libsecret_reject_local_ids = false;
     return true;
   }
@@ -251,13 +248,6 @@ void CheckPasswordChanges(const PasswordStoreChangeList& expected_list,
   }
 }
 
-void CheckPasswordChangesWithResult(const PasswordStoreChangeList* expected,
-                                    const PasswordStoreChangeList* actual,
-                                    bool result) {
-  EXPECT_TRUE(result);
-  CheckPasswordChanges(*expected, *actual);
-}
-
 }  // anonymous namespace
 
 class NativeBackendLibsecretTest : public testing::Test {
@@ -274,6 +264,9 @@ class NativeBackendLibsecretTest : public testing::Test {
   NativeBackendLibsecretTest() {}
 
   void SetUp() override {
+    ASSERT_FALSE(global_mock_libsecret_items);
+    global_mock_libsecret_items = &mock_libsecret_items_;
+
     ASSERT_TRUE(MockLibsecretLoader::LoadMockLibsecret());
 
     form_google_.origin = GURL("http://www.google.com/");
@@ -292,6 +285,8 @@ class NativeBackendLibsecretTest : public testing::Test {
     form_google_.federation_url = GURL("http://www.google.com/federation_url");
     form_google_.skip_zero_click = true;
     form_google_.generation_upload_status = PasswordForm::POSITIVE_SIGNAL_SENT;
+    form_google_.form_data.name = UTF8ToUTF16("form_name");
+    form_google_.form_data.user_submitted = true;
 
     form_facebook_.origin = GURL("http://www.facebook.com/");
     form_facebook_.action = GURL("http://www.facebook.com/login");
@@ -332,7 +327,8 @@ class NativeBackendLibsecretTest : public testing::Test {
     base::MessageLoop::current()->PostTask(FROM_HERE,
                                            base::MessageLoop::QuitClosure());
     base::MessageLoop::current()->Run();
-    ClearMockObjects();
+    ASSERT_TRUE(global_mock_libsecret_items);
+    global_mock_libsecret_items = nullptr;
   }
 
   void RunUIThread() { base::MessageLoop::current()->Run(); }
@@ -366,7 +362,7 @@ class NativeBackendLibsecretTest : public testing::Test {
                            const PasswordForm& form,
                            const std::string& app_string) {
     EXPECT_EQ(UTF16ToUTF8(form.password_value), item->value->password);
-    EXPECT_EQ(21u, g_hash_table_size(item->attributes));
+    EXPECT_EQ(22u, g_hash_table_size(item->attributes));
     CheckStringAttribute(item, "origin_url", form.origin.spec());
     CheckStringAttribute(item, "action_url", form.action.spec());
     CheckStringAttribute(item, "username_element",
@@ -395,6 +391,11 @@ class NativeBackendLibsecretTest : public testing::Test {
     CheckUint32Attribute(item, "generation_upload_status",
                          form.generation_upload_status);
     CheckStringAttribute(item, "application", app_string);
+    autofill::FormData actual;
+    DeserializeFormDataFromBase64String(
+        static_cast<char*>(g_hash_table_lookup(item->attributes, "form_data")),
+        &actual);
+    EXPECT_TRUE(form.form_data.SameFormAs(actual));
   }
 
   // Saves |credentials| and then gets logins matching |url| and |scheme|.
@@ -422,11 +423,11 @@ class NativeBackendLibsecretTest : public testing::Test {
     ScopedVector<autofill::PasswordForm> form_list;
     backend.GetLogins(target_form, &form_list);
 
-    EXPECT_EQ(1u, global_mock_libsecret_items.size());
-    if (global_mock_libsecret_items.size() > 0)
-      CheckMockSecretItem(global_mock_libsecret_items[0], credentials,
+    EXPECT_EQ(1u, global_mock_libsecret_items->size());
+    if (!global_mock_libsecret_items->empty())
+      CheckMockSecretItem((*global_mock_libsecret_items)[0], credentials,
                           "chrome-321");
-    ClearMockObjects();
+    global_mock_libsecret_items->clear();
 
     if (form_list.empty())
       return false;
@@ -454,7 +455,7 @@ class NativeBackendLibsecretTest : public testing::Test {
     ScopedVector<autofill::PasswordForm> form_list;
     backend.GetLogins(m_facebook_lookup, &form_list);
 
-    EXPECT_EQ(1u, global_mock_libsecret_items.size());
+    EXPECT_EQ(1u, global_mock_libsecret_items->size());
     EXPECT_EQ(1u, form_list.size());
     PasswordForm m_facebook = *form_list[0];
     form_list.clear();
@@ -463,7 +464,7 @@ class NativeBackendLibsecretTest : public testing::Test {
 
     // Add the PSL-matched copy to saved logins.
     backend.AddLogin(m_facebook);
-    EXPECT_EQ(2u, global_mock_libsecret_items.size());
+    EXPECT_EQ(2u, global_mock_libsecret_items->size());
 
     // Update www.facebook.com login.
     PasswordForm new_facebook(form_facebook_);
@@ -481,7 +482,7 @@ class NativeBackendLibsecretTest : public testing::Test {
         break;
     }
 
-    EXPECT_EQ(2u, global_mock_libsecret_items.size());
+    EXPECT_EQ(2u, global_mock_libsecret_items->size());
 
     // Check that m.facebook.com login was not modified by the update.
     backend.GetLogins(m_facebook_lookup, &form_list);
@@ -560,13 +561,13 @@ class NativeBackendLibsecretTest : public testing::Test {
             ? &NativeBackendLibsecret::RemoveLoginsCreatedBetween
             : &NativeBackendLibsecret::RemoveLoginsSyncedBetween;
 
-    bool result = base::Bind(method, base::Unretained(&backend), base::Time(),
-                             next_day, &changes).Run();
-    CheckPasswordChangesWithResult(&expected_changes, &changes, result);
+    EXPECT_TRUE(base::Bind(method, base::Unretained(&backend), base::Time(),
+                           next_day, &changes).Run());
+    CheckPasswordChanges(expected_changes, changes);
 
-    EXPECT_EQ(1u, global_mock_libsecret_items.size());
-    if (global_mock_libsecret_items.size() > 0)
-      CheckMockSecretItem(global_mock_libsecret_items[0], form_isc_,
+    EXPECT_EQ(1u, global_mock_libsecret_items->size());
+    if (!global_mock_libsecret_items->empty() > 0)
+      CheckMockSecretItem((*global_mock_libsecret_items)[0], form_isc_,
                           "chrome-42");
 
     // Remove form_isc_.
@@ -574,11 +575,11 @@ class NativeBackendLibsecretTest : public testing::Test {
     expected_changes.push_back(
         PasswordStoreChange(PasswordStoreChange::REMOVE, form_isc_));
 
-    result = base::Bind(method, base::Unretained(&backend), next_day,
-                        base::Time(), &changes).Run();
-    CheckPasswordChangesWithResult(&expected_changes, &changes, result);
+    EXPECT_TRUE(base::Bind(method, base::Unretained(&backend), next_day,
+                           base::Time(), &changes).Run());
+    CheckPasswordChanges(expected_changes, changes);
 
-    EXPECT_EQ(0u, global_mock_libsecret_items.size());
+    EXPECT_TRUE(global_mock_libsecret_items->empty());
   }
 
   base::MessageLoopForUI message_loop_;
@@ -588,6 +589,8 @@ class NativeBackendLibsecretTest : public testing::Test {
   PasswordForm form_facebook_;
   PasswordForm form_isc_;
   PasswordForm other_auth_;
+
+  ScopedVector<MockSecretItem> mock_libsecret_items_;
 };
 
 TEST_F(NativeBackendLibsecretTest, BasicAddLogin) {
@@ -595,9 +598,9 @@ TEST_F(NativeBackendLibsecretTest, BasicAddLogin) {
 
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 }
 
@@ -613,9 +616,9 @@ TEST_F(NativeBackendLibsecretTest, BasicListLogins) {
   EXPECT_EQ(1u, form_list.size());
   form_list.clear();
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 }
 
@@ -670,9 +673,9 @@ TEST_F(NativeBackendLibsecretTest, BasicUpdateLogin) {
   new_form_google.times_used = 1;
   new_form_google.action = GURL("http://www.google.com/different/login");
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 
   // Update login
@@ -682,9 +685,9 @@ TEST_F(NativeBackendLibsecretTest, BasicUpdateLogin) {
   ASSERT_EQ(1u, changes.size());
   EXPECT_EQ(PasswordStoreChange::UPDATE, changes.front().type());
   EXPECT_EQ(new_form_google, changes.front().form());
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], new_form_google,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], new_form_google,
                         "chrome-42");
 }
 
@@ -693,14 +696,14 @@ TEST_F(NativeBackendLibsecretTest, BasicRemoveLogin) {
 
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 
   backend.RemoveLogin(form_google_);
 
-  EXPECT_EQ(0u, global_mock_libsecret_items.size());
+  EXPECT_TRUE(global_mock_libsecret_items->empty());
 }
 
 // Verify fix for http://crbug.com/408783.
@@ -709,9 +712,9 @@ TEST_F(NativeBackendLibsecretTest, RemoveLoginActionMismatch) {
 
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 
   // Action url match not required for removal.
@@ -719,7 +722,7 @@ TEST_F(NativeBackendLibsecretTest, RemoveLoginActionMismatch) {
 
   backend.RemoveLogin(form_google_);
 
-  EXPECT_EQ(0u, global_mock_libsecret_items.size());
+  EXPECT_TRUE(global_mock_libsecret_items->empty());
 }
 
 TEST_F(NativeBackendLibsecretTest, RemoveNonexistentLogin) {
@@ -728,9 +731,9 @@ TEST_F(NativeBackendLibsecretTest, RemoveNonexistentLogin) {
   // First add an unrelated login.
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 
   // Attempt to remove a login that doesn't exist.
@@ -744,9 +747,9 @@ TEST_F(NativeBackendLibsecretTest, RemoveNonexistentLogin) {
   EXPECT_EQ(1u, form_list.size());
   form_list.clear();
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 }
 
@@ -756,9 +759,9 @@ TEST_F(NativeBackendLibsecretTest, UpdateNonexistentLogin) {
   // First add an unrelated login.
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 
   // Attempt to update a login that doesn't exist.
@@ -766,9 +769,9 @@ TEST_F(NativeBackendLibsecretTest, UpdateNonexistentLogin) {
   backend.UpdateLogin(form_isc_, &changes);
 
   EXPECT_EQ(PasswordStoreChangeList(), changes);
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 }
 
@@ -791,29 +794,9 @@ TEST_F(NativeBackendLibsecretTest, AddDuplicateLogin) {
   actual_changes = backend.AddLogin(form_google_);
   CheckPasswordChanges(expected_changes, actual_changes);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
-                        "chrome-42");
-}
-
-TEST_F(NativeBackendLibsecretTest, ListLoginsAppends) {
-  NativeBackendLibsecret backend(42);
-
-  backend.AddLogin(form_google_);
-
-  // Send the same request twice with the same list both times.
-  ScopedVector<autofill::PasswordForm> form_list;
-  backend.GetAutofillableLogins(&form_list);
-  backend.GetAutofillableLogins(&form_list);
-
-  // Quick check that we got two results back.
-  EXPECT_EQ(2u, form_list.size());
-  form_list.clear();
-
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
-  if (global_mock_libsecret_items.size() > 0)
-    CheckMockSecretItem(global_mock_libsecret_items[0], form_google_,
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
+  if (!global_mock_libsecret_items->empty())
+    CheckMockSecretItem((*global_mock_libsecret_items)[0], form_google_,
                         "chrome-42");
 }
 
@@ -839,7 +822,6 @@ TEST_F(NativeBackendLibsecretTest, AndroidCredentials) {
   EXPECT_EQ(saved_android_form, *form_list[0]);
 }
 
-
 TEST_F(NativeBackendLibsecretTest, RemoveLoginsCreatedBetween) {
   CheckRemoveLoginsBetween(CREATED);
 }
@@ -854,11 +836,11 @@ TEST_F(NativeBackendLibsecretTest, SomeKeyringAttributesAreMissing) {
 
   backend.AddLogin(form_google_);
 
-  EXPECT_EQ(1u, global_mock_libsecret_items.size());
+  EXPECT_EQ(1u, global_mock_libsecret_items->size());
   // Remove a string attribute.
-  global_mock_libsecret_items[0]->RemoveAttribute("avatar_url");
+  (*global_mock_libsecret_items)[0]->RemoveAttribute("avatar_url");
   // Remove an integer attribute.
-  global_mock_libsecret_items[0]->RemoveAttribute("ssl_valid");
+  (*global_mock_libsecret_items)[0]->RemoveAttribute("ssl_valid");
 
   ScopedVector<autofill::PasswordForm> form_list;
   backend.GetAutofillableLogins(&form_list);

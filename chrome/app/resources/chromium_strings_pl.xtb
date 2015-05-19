@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="pl">
+<translation id="2705212601509139398">Ta strona korzysta z wtyczki Chromium Frame, która wkrótce nie będzie obsługiwana. Odinstaluj wtyczkę i pobierz zgodną przeglądarkę.</translation>
 <translation id="6676384891291319759">Skorzystaj z internetu</translation>
 <translation id="8586442755830160949">Copyright <ph name="YEAR"/> Autorzy Chromium. Wszelkie prawa zastrzeżone.</translation>
 <translation id="6373523479360886564">Czy na pewno chcesz odinstalować Chromium?</translation>
@@ -96,7 +97,6 @@
 <translation id="3296368748942286671">Kontynuuj działanie aplikacji w tle po zamknięciu Chromium</translation>
 <translation id="473775607612524610">Aktualizuj</translation>
 <translation id="5466153949126434691">Chromium aktualizuje się automatycznie, więc zawsze masz najnowszą wersję. Po zakończeniu pobierania Chromium uruchomi się ponownie i będzie gotowy do działania.</translation>
-<translation id="7707841053049645517">Ta witryna korzysta z wtyczki Chromium Frame, która wkrótce nie będzie obsługiwana. Odinstaluj wtyczkę i przejdź na nowoczesną przeglądarkę.</translation>
 <translation id="3656661827369545115">Uruchamiaj Chromium automatycznie po włączeniu komputera</translation>
 <translation id="2241627712206172106">Jeśli dzielisz się komputerem ze znajomymi lub rodziną, wszyscy możecie niezależnie przeglądać internet i po swojemu skonfigurować Chromium.</translation>
 <translation id="1763864636252898013">Ten serwer nie mógł udowodnić, że należy do <ph name="DOMAIN"/>. Jego certyfikat bezpieczeństwa nie jest zaufany w systemie operacyjnym tego urządzenia. Może to być spowodowane błędną konfiguracją lub przechwyceniem połączenia przez atakującego.</translation>
@@ -116,6 +116,7 @@
 <translation id="5358375970380395591">Logujesz się na zarządzane konto i przekazujesz jego administratorowi kontrolę nad swoim profilem Chromium. Twoje dane Chromium, takie jak aplikacje, zakładki, historia, hasła i inne ustawienia, zostaną trwale powiązane z użytkownikiem <ph name="USER_NAME"/>. Będzie można je usunąć w Panelu kont Google, ale nie będzie można ich powiązać z innym kontem. <ph name="LEARN_MORE"/></translation>
 <translation id="9036189287518468038">Program uruchamiający aplikacje Chromium</translation>
 <translation id="5563479599352954471">Szukaj jednym kliknięciem</translation>
+<translation id="3256316712990552818">Skopiowana do Chromium</translation>
 <translation id="8493179195440786826">Chromium jest nieaktualny</translation>
 <translation id="911206726377975832">Czy usunąć także dane przeglądania?</translation>
 <translation id="95514773681268843">Domena <ph name="DOMAIN"/> wymaga, by przed korzystaniem z tego urządzenia przeczytać i zaakceptować Warunki korzystania z usługi. Nie rozszerzają, nie zmieniają ani nie ograniczają one Warunków korzystania z systemu Chromium OS.</translation>
@@ -130,7 +131,6 @@
 <translation id="4365115785552740256">Stworzenie Chromium było możliwe dzięki projektowi open source <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> i innym <ph name="BEGIN_LINK_OSS"/>programom o otwartym kodzie źródłowym<ph name="END_LINK_OSS"/>.</translation>
 <translation id="9190841055450128916">Chromium (mDNS-In)</translation>
 <translation id="4987820182225656817">Goście mogą korzystać z Chromium, nie pozostawiając żadnych danych.</translation>
-<translation id="2216475571518225820">Ta witryna korzysta z wtyczki Chromium Frame, która wkrótce nie będzie obsługiwana. Odinstaluj wtyczkę i pobierz zgodną przeglądarkę.</translation>
 <translation id="3487263810738775861">Rozszerzenie ustawiło inną stronę wyświetlaną po uruchomieniu Chromium.</translation>
 <translation id="5877064549588274448">Kanał został zmieniony. Aby zastosować zmiany, uruchom ponownie urządzenie.</translation>
 <translation id="7549178288319965365">System operacyjny Chromium – informacje</translation>
@@ -211,6 +211,7 @@ Niektóre funkcje mogą być niedostępne. Podaj inny katalog z profilem lub uż
 <translation id="811857857463334932">Ten komputer nie będzie otrzymywać aktualizacji Chromium, ponieważ zawiera sprzęt, który nie jest już obsługiwany.</translation>
 <translation id="2910007522516064972">&amp;Chromium – informacje</translation>
 <translation id="8453117565092476964">Archiwum instalatora jest uszkodzone lub nieprawidłowe. Pobierz Chromium ponownie.</translation>
+<translation id="2558641060352364164">Ta strona korzysta z wtyczki Chromium Frame, która wkrótce nie będzie obsługiwana. Odinstaluj wtyczkę i przejdź na nowoczesną przeglądarkę.</translation>
 <translation id="3889543394854987837">Otwórz Chromium, klikając swoją nazwę i rozpocznij przeglądanie.</translation>
 <translation id="3130323860337406239">Chromium używa Twojego mikrofonu.</translation>
 <translation id="7196020411877309443">Dlaczego wyświetla mi się to okienko?</translation>

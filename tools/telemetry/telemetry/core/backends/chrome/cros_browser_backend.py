@@ -5,12 +5,12 @@
 import logging
 import os
 
-from telemetry import decorators
+from telemetry.core.backends.chrome import chrome_browser_backend
+from telemetry.core.backends.chrome import misc_web_contents_backend
 from telemetry.core import exceptions
 from telemetry.core import forwarders
 from telemetry.core import util
-from telemetry.core.backends.chrome import chrome_browser_backend
-from telemetry.core.backends.chrome import misc_web_contents_backend
+from telemetry import decorators
 
 
 class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
@@ -143,7 +143,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         else:
           self.oobe.NavigateFakeLogin(self._username, self._password)
         self._WaitForLogin()
-      except util.TimeoutException:
+      except exceptions.TimeoutException:
         self._cri.TakeScreenShot('login-screen')
         raise exceptions.LoginException('Timed out going through login screen')
 

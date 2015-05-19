@@ -7,6 +7,8 @@
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/output/copy_output_request.h"
+#include "cc/output/copy_output_result.h"
 #include "cc/resources/layer_painter.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_impl_proxy.h"
@@ -16,6 +18,7 @@
 #include "cc/test/layer_test_common.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/single_thread_proxy.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -41,7 +44,7 @@ namespace {
 class MockLayerTreeHost : public LayerTreeHost {
  public:
   explicit MockLayerTreeHost(FakeLayerTreeHostClient* client)
-      : LayerTreeHost(client, nullptr, nullptr, LayerTreeSettings()) {
+      : LayerTreeHost(client, nullptr, nullptr, nullptr, LayerTreeSettings()) {
     InitializeSingleThreaded(client,
                              base::MessageLoopProxy::current(),
                              nullptr);
@@ -60,7 +63,7 @@ class MockLayerPainter : public LayerPainter {
 class LayerTest : public testing::Test {
  public:
   LayerTest()
-      : host_impl_(&proxy_, &shared_bitmap_manager_),
+      : host_impl_(&proxy_, &shared_bitmap_manager_, &task_graph_runner_),
         fake_client_(FakeLayerTreeHostClient::DIRECT_3D) {}
 
  protected:
@@ -131,6 +134,7 @@ class LayerTest : public testing::Test {
 
   FakeImplProxy proxy_;
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
   FakeLayerTreeHostImpl host_impl_;
 
   FakeLayerTreeHostClient fake_client_;
@@ -935,24 +939,16 @@ class LayerTreeHostFactory {
 
   scoped_ptr<LayerTreeHost> Create() {
     return LayerTreeHost::CreateSingleThreaded(
-               &client_,
-               &client_,
-               shared_bitmap_manager_.get(),
-               gpu_memory_buffer_manager_.get(),
-               LayerTreeSettings(),
-               base::MessageLoopProxy::current(),
-               nullptr);
+        &client_, &client_, shared_bitmap_manager_.get(),
+        gpu_memory_buffer_manager_.get(), nullptr, LayerTreeSettings(),
+        base::MessageLoopProxy::current(), nullptr);
   }
 
   scoped_ptr<LayerTreeHost> Create(LayerTreeSettings settings) {
     return LayerTreeHost::CreateSingleThreaded(
-               &client_,
-               &client_,
-               shared_bitmap_manager_.get(),
-               gpu_memory_buffer_manager_.get(),
-               settings,
-               base::MessageLoopProxy::current(),
-               nullptr);
+        &client_, &client_, shared_bitmap_manager_.get(),
+        gpu_memory_buffer_manager_.get(), nullptr, settings,
+        base::MessageLoopProxy::current(), nullptr);
   }
 
  private:
@@ -1255,6 +1251,74 @@ TEST_F(LayerTest, DrawsContentChangedInSetLayerTreeHost) {
   becomes_draws_content->SetIsDrawable(true);
   root_layer->AddChild(becomes_draws_content);
   EXPECT_EQ(1, root_layer->NumDescendantsThatDrawContent());
+}
+
+void ReceiveCopyOutputResult(int* result_count,
+                             scoped_ptr<CopyOutputResult> result) {
+  ++(*result_count);
+}
+
+TEST_F(LayerTest, DedupesCopyOutputRequestsBySource) {
+  scoped_refptr<Layer> layer = Layer::Create();
+  int result_count = 0;
+
+  // Create identical requests without the source being set, and expect the
+  // layer does not abort either one.
+  scoped_ptr<CopyOutputRequest> request = CopyOutputRequest::CreateRequest(
+      base::Bind(&ReceiveCopyOutputResult, &result_count));
+  layer->RequestCopyOfOutput(request.Pass());
+  EXPECT_EQ(0, result_count);
+  request = CopyOutputRequest::CreateRequest(
+      base::Bind(&ReceiveCopyOutputResult, &result_count));
+  layer->RequestCopyOfOutput(request.Pass());
+  EXPECT_EQ(0, result_count);
+
+  // When the layer is destroyed, expect both requests to be aborted.
+  layer = nullptr;
+  EXPECT_EQ(2, result_count);
+
+  layer = Layer::Create();
+  result_count = 0;
+
+  // Create identical requests, but this time the source is being set.  Expect
+  // the first request from |this| source aborts immediately when the second
+  // request from |this| source is made.
+  int did_receive_first_result_from_this_source = 0;
+  request = CopyOutputRequest::CreateRequest(base::Bind(
+      &ReceiveCopyOutputResult, &did_receive_first_result_from_this_source));
+  request->set_source(this);
+  layer->RequestCopyOfOutput(request.Pass());
+  EXPECT_EQ(0, did_receive_first_result_from_this_source);
+  // Make a request from a different source.
+  int did_receive_result_from_different_source = 0;
+  request = CopyOutputRequest::CreateRequest(base::Bind(
+      &ReceiveCopyOutputResult, &did_receive_result_from_different_source));
+  request->set_source(reinterpret_cast<void*>(0xdeadbee0));
+  layer->RequestCopyOfOutput(request.Pass());
+  EXPECT_EQ(0, did_receive_result_from_different_source);
+  // Make a request without specifying the source.
+  int did_receive_result_from_anonymous_source = 0;
+  request = CopyOutputRequest::CreateRequest(base::Bind(
+      &ReceiveCopyOutputResult, &did_receive_result_from_anonymous_source));
+  layer->RequestCopyOfOutput(request.Pass());
+  EXPECT_EQ(0, did_receive_result_from_anonymous_source);
+  // Make the second request from |this| source.
+  int did_receive_second_result_from_this_source = 0;
+  request = CopyOutputRequest::CreateRequest(base::Bind(
+      &ReceiveCopyOutputResult, &did_receive_second_result_from_this_source));
+  request->set_source(this);
+  layer->RequestCopyOfOutput(request.Pass());  // First request to be aborted.
+  EXPECT_EQ(1, did_receive_first_result_from_this_source);
+  EXPECT_EQ(0, did_receive_result_from_different_source);
+  EXPECT_EQ(0, did_receive_result_from_anonymous_source);
+  EXPECT_EQ(0, did_receive_second_result_from_this_source);
+
+  // When the layer is destroyed, the other three requests should be aborted.
+  layer = nullptr;
+  EXPECT_EQ(1, did_receive_first_result_from_this_source);
+  EXPECT_EQ(1, did_receive_result_from_different_source);
+  EXPECT_EQ(1, did_receive_result_from_anonymous_source);
+  EXPECT_EQ(1, did_receive_second_result_from_this_source);
 }
 
 }  // namespace

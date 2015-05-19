@@ -44,6 +44,7 @@ class FakeChromeUserManager : public user_manager::FakeUserManager,
   const user_manager::User* AddUser(const std::string& email) override;
 
   // UserManagerInterface implementation.
+  BootstrapManager* GetBootstrapManager() override;
   MultiProfileUserController* GetMultiProfileUserController() override;
   UserImageManager* GetUserImageManager(const std::string& user_id) override;
   SupervisedUserManager* GetSupervisedUserManager() override;
@@ -58,9 +59,18 @@ class FakeChromeUserManager : public user_manager::FakeUserManager,
   void SessionStarted() override;
   void RemoveUser(const std::string& email,
                   user_manager::RemoveUserDelegate* delegate) override;
+  bool FindKnownUserPrefs(const user_manager::UserID& user_id,
+                          const base::DictionaryValue** out_value) override;
+  void UpdateKnownUserPrefs(const user_manager::UserID& user_id,
+                            const base::DictionaryValue& values,
+                            bool clear) override;
 
   void set_owner_email(const std::string& owner_email) {
     owner_email_ = owner_email;
+  }
+
+  void set_bootstrap_manager(BootstrapManager* bootstrap_manager) {
+    bootstrap_manager_ = bootstrap_manager;
   }
 
   void set_multi_profile_user_controller(
@@ -75,6 +85,7 @@ class FakeChromeUserManager : public user_manager::FakeUserManager,
   scoped_ptr<FakeSupervisedUserManager> supervised_user_manager_;
   std::string owner_email_;
 
+  BootstrapManager* bootstrap_manager_;
   MultiProfileUserController* multi_profile_user_controller_;
 
   typedef std::map<std::string, UserFlow*> FlowMap;

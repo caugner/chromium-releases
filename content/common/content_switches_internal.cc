@@ -17,6 +17,14 @@
 
 namespace content {
 
+namespace {
+
+#if defined(OS_WIN)
+static bool g_win32k_renderer_lockdown_disabled = false;
+#endif
+
+}  // namespace
+
 bool IsPinchToZoomEnabled() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -37,17 +45,20 @@ bool IsPinchToZoomEnabled() {
 
 #if defined(OS_WIN)
 
+void DisableWin32kRendererLockdown() {
+  g_win32k_renderer_lockdown_disabled = true;
+}
+
 bool IsWin32kRendererLockdownEnabled() {
   const std::string group_name =
       base::FieldTrialList::FindFullName("Win32kLockdown");
+  if (g_win32k_renderer_lockdown_disabled)
+    return false;
   if (base::win::GetVersion() < base::win::VERSION_WIN8)
     return false;
   if (!gfx::win::ShouldUseDirectWrite())
     return false;
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  // TODO(wfh): Remove this once NPAPI is gone.
-  if (cmd_line->HasSwitch(switches::kEnableNpapi))
-    return false;
   if (cmd_line->HasSwitch(switches::kEnableWin32kRendererLockDown))
     return true;
   if (cmd_line->HasSwitch(switches::kDisableWin32kRendererLockDown))

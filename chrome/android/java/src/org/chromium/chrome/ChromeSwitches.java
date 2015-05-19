@@ -109,6 +109,12 @@ public abstract class ChromeSwitches {
     /** Enable begin frame scheduling. */
     public static final String ENABLE_BEGIN_FRAME_SCHEDULING = "enable-begin-frame-scheduling";
 
+    /**
+     * Enable enhanced bookmarks feature.
+     * Native switch - switches::kEnhancedBookmarksExperiment
+     */
+    public static final String ENABLE_ENHANCED_BOOKMARKS = "enhanced-bookmarks-experiment";
+
     /** Enable the DOM Distiller. */
     public static final String ENABLE_DOM_DISTILLER = "enable-dom-distiller";
 
@@ -118,6 +124,10 @@ public abstract class ChromeSwitches {
 
     /** Enable the Reader Mode icon in toolbar. */
     public static final String ENABLE_READER_MODE_TOOLBAR_ICON = "enable-reader-mode-toolbar-icon";
+
+    /** Enable Reader Mode button animation. */
+    public static final String ENABLE_READER_MODE_BUTTON_ANIMATION =
+            "enable-dom-distiller-button-animation";
 
     /** Enable the native app banners. */
     public static final String ENABLE_APP_INSTALL_ALERTS = "enable-app-install-alerts";

@@ -4,7 +4,6 @@
 
 #include "extensions/browser/guest_view/extension_options/extension_options_guest.h"
 
-#include "base/metrics/user_metrics.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/navigation_details.h"
@@ -13,6 +12,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/bad_message.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_web_contents_observer.h"
@@ -125,7 +125,7 @@ void ExtensionOptionsGuest::DidInitialize(
                                           std::string());
 }
 
-void ExtensionOptionsGuest::DidStopLoading() {
+void ExtensionOptionsGuest::GuestViewDidStopLoading() {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   DispatchEventToView(new GuestViewBase::Event(
       extension_options_internal::OnLoad::kEventName, args.Pass()));
@@ -139,24 +139,11 @@ int ExtensionOptionsGuest::GetTaskPrefix() const {
   return IDS_EXTENSION_TASK_MANAGER_EXTENSIONOPTIONS_TAG_PREFIX;
 }
 
-void ExtensionOptionsGuest::GuestSizeChangedDueToAutoSize(
-    const gfx::Size& old_size,
-    const gfx::Size& new_size) {
-  extension_options_internal::SizeChangedOptions options;
-  options.old_width = old_size.width();
-  options.old_height = old_size.height();
-  options.new_width = new_size.width();
-  options.new_height = new_size.height();
-  DispatchEventToView(new GuestViewBase::Event(
-      extension_options_internal::OnSizeChanged::kEventName,
-      options.ToValue()));
-}
-
-bool ExtensionOptionsGuest::IsAutoSizeSupported() const {
+bool ExtensionOptionsGuest::IsPreferredSizeModeEnabled() const {
   return true;
 }
 
-bool ExtensionOptionsGuest::IsPreferredSizeModeEnabled() const {
+bool ExtensionOptionsGuest::IsDragAndDropEnabled() const {
   return true;
 }
 
@@ -240,10 +227,17 @@ bool ExtensionOptionsGuest::ShouldCreateWebContents(
 void ExtensionOptionsGuest::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
-  if (attached() && (params.url.GetOrigin() != options_page_.GetOrigin())) {
-    base::RecordAction(base::UserMetricsAction("BadMessageTerminate_EOG"));
-    web_contents()->GetRenderProcessHost()->Shutdown(
-        content::RESULT_CODE_KILLED_BAD_MESSAGE, false /* wait */);
+  if (attached()) {
+    auto guest_zoom_controller =
+        ui_zoom::ZoomController::FromWebContents(web_contents());
+    guest_zoom_controller->SetZoomMode(
+        ui_zoom::ZoomController::ZOOM_MODE_ISOLATED);
+    SetGuestZoomLevelToMatchEmbedder();
+
+    if (params.url.GetOrigin() != options_page_.GetOrigin()) {
+      bad_message::ReceivedBadMessage(web_contents()->GetRenderProcessHost(),
+                                      bad_message::EOG_BAD_ORIGIN);
+    }
   }
 }
 

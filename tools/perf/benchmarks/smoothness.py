@@ -2,10 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from benchmarks import silk_flags
+from benchmarks import webgl_expectations
 from measurements import smoothness
 import page_sets
-from telemetry import benchmark
 
 
 class SmoothnessTop25(benchmark.Benchmark):
@@ -55,6 +57,10 @@ class SmoothnessToughWebGLCases(benchmark.Benchmark):
   page_set = page_sets.ToughWebglCasesPageSet
 
   @classmethod
+  def CreateExpectations(cls):
+    return webgl_expectations.WebGLExpectations()
+
+  @classmethod
   def Name(cls):
     return 'smoothness.tough_webgl_cases'
 
@@ -65,8 +71,22 @@ class SmoothnessMaps(benchmark.Benchmark):
   page_set = page_sets.MapsPageSet
 
   @classmethod
+  def CreateExpectations(cls):
+    return webgl_expectations.MapsExpectations()
+
+  @classmethod
   def Name(cls):
     return 'smoothness.maps'
+
+
+@benchmark.Disabled('android')
+class SmoothnessKeyDesktopMoveCases(benchmark.Benchmark):
+  test = smoothness.Smoothness
+  page_set = page_sets.KeyDesktopMoveCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.key_desktop_move_cases'
 
 
 @benchmark.Enabled('android')
@@ -166,6 +186,22 @@ class SmoothnessSimpleMobilePages(benchmark.Benchmark):
   def Name(cls):
     return 'smoothness.simple_mobile_sites'
 
+@benchmark.Enabled('android')
+class SmoothnessFlingSimpleMobilePages(benchmark.Benchmark):
+  """Measures rendering statistics for flinging a simple mobile sites page set.
+  """
+  test = smoothness.Smoothness
+  page_set = page_sets.SimpleMobileSitesFlingPageSet
+
+  def CustomizeBrowserOptions(self, options):
+    # As the fling parameters cannot be analytically determined to not
+    # overscroll, disable overscrolling explicitly. Overscroll behavior is
+    # orthogonal to fling performance, and its activation is only more noise.
+    options.AppendExtraBrowserArgs('--disable-overscroll-edge-effect')
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.fling.simple_mobile_sites'
 
 @benchmark.Enabled('android', 'chromeos')
 class SmoothnessToughPinchZoomCases(benchmark.Benchmark):
@@ -211,7 +247,7 @@ class SmoothnessGpuRasterizationPolymer(benchmark.Benchmark):
 class SmoothnessToughFastScrollingCases(benchmark.Benchmark):
   test = smoothness.Smoothness
   page_set = page_sets.ToughScrollingCasesPageSet
-  options = {'page_label_filter': 'fastscrolling'}
+  options = {'story_label_filter': 'fastscrolling'}
 
   @classmethod
   def Name(cls):
@@ -250,7 +286,7 @@ class SmoothnessGpuImageDecodingCases(benchmark.Benchmark):
     return 'smoothness.gpu_rasterization_and_decoding.image_decoding_cases'
 
 
-@benchmark.Disabled  # http://crbug.com/458282
+@benchmark.Enabled('android')
 class SmoothnessPathologicalMobileSites(benchmark.Benchmark):
   """Measures task execution statistics while scrolling pathological sites.
   """
@@ -260,3 +296,19 @@ class SmoothnessPathologicalMobileSites(benchmark.Benchmark):
   @classmethod
   def Name(cls):
     return 'smoothness.pathological_mobile_sites'
+
+
+@benchmark.Enabled('android')
+class SmoothnessSyncScrollPathologicalMobileSites(benchmark.Benchmark):
+  """Measures task execution statistics while sync-scrolling pathological sites.
+  """
+  tag = 'sync_scroll'
+  test = smoothness.Smoothness
+  page_set = page_sets.PathologicalMobileSitesPageSet
+
+  def CustomizeBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForSyncScrolling(options)
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.sync_scroll.pathological_mobile_sites'

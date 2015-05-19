@@ -10,11 +10,8 @@ import subprocess
 import tempfile
 import time
 
-from telemetry import decorators
-from telemetry.core import exceptions
-from telemetry.core import util
-from telemetry.core import video
 from telemetry.core.backends import adb_commands
+from telemetry.core import exceptions
 from telemetry.core.forwarders import android_forwarder
 from telemetry.core import platform
 from telemetry.core.platform import android_device
@@ -26,6 +23,9 @@ from telemetry.core.platform.power_monitor import android_temperature_monitor
 from telemetry.core.platform.power_monitor import monsoon_power_monitor
 from telemetry.core.platform.power_monitor import power_monitor_controller
 from telemetry.core.platform.profiler import android_prebuilt_profiler_helper
+from telemetry.core import util
+from telemetry.core import video
+from telemetry import decorators
 from telemetry.util import exception_formatter
 from telemetry.util import external_modules
 
@@ -37,11 +37,12 @@ import certutils  # pylint: disable=F0401
 
 # Get build/android scripts into our path.
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
-from pylib import screenshot  # pylint: disable=F0401
 from pylib.device import device_errors  # pylint: disable=F0401
 from pylib.perf import cache_control  # pylint: disable=F0401
 from pylib.perf import perf_control  # pylint: disable=F0401
 from pylib.perf import thermal_throttle  # pylint: disable=F0401
+from pylib.utils import device_temp_file # pylint: disable=F0401
+from pylib import screenshot  # pylint: disable=F0401
 
 try:
   from pylib.perf import surface_stats_collector  # pylint: disable=F0401
@@ -357,7 +358,11 @@ class AndroidPlatformBackend(
     command = 'ps'
     if pid:
       command += ' -p %d' % pid
-    ps = self._device.RunShellCommand(command)[1:]
+    with device_temp_file.DeviceTempFile(self._device.adb) as ps_out:
+      command += ' > %s' % ps_out.name
+      self._device.RunShellCommand(command)
+      # Get rid of trailing new line and header.
+      ps = self._device.ReadFile(ps_out.name).split('\n')[1:-1]
     output = []
     for line in ps:
       data = line.split()
@@ -636,6 +641,70 @@ class AndroidPlatformBackend(
                                        stdout=subprocess.PIPE).communicate()[0])
     return ret
 
+  @staticmethod
+  def _IsScreenOn(input_methods):
+    """Parser method of IsScreenOn()
+
+    Args:
+      input_methods: Output from dumpsys input_methods
+
+    Returns:
+      boolean: True if screen is on, false if screen is off.
+
+    Raises:
+      ValueError: An unknown value is found for the screen state.
+      AndroidDeviceParsingError: Error in detecting screen state.
+    """
+    for line in input_methods:
+      if 'mScreenOn' in line or 'mInteractive' in line:
+        for pair in line.strip().split(' '):
+          key, value = pair.split('=', 1)
+          if key == 'mScreenOn' or key == 'mInteractive':
+            if value == 'true':
+              return True
+            elif value == 'false':
+              return False
+            else:
+              raise ValueError('Unknown value for %s: %s' % (key, value))
+    raise exceptions.AndroidDeviceParsingError(str(input_methods))
+
+  def IsScreenOn(self):
+    """Determines if device screen is on."""
+    input_methods = self._device.RunShellCommand('dumpsys input_method')
+    return self._IsScreenOn(input_methods)
+
+  @staticmethod
+  def _IsScreenLocked(input_methods):
+    """Parser method for IsScreenLocked()
+
+    Args:
+      input_methods: Output from dumpsys input_methods
+
+    Returns:
+      boolean: True if screen is locked, false if screen is not locked.
+
+    Raises:
+      ValueError: An unknown value is found for the screen lock state.
+      AndroidDeviceParsingError: Error in detecting screen state.
+
+    """
+    for line in input_methods:
+      if 'mHasBeenInactive' in line:
+        for pair in line.strip().split(' '):
+          key, value = pair.split('=', 1)
+          if key == 'mHasBeenInactive':
+            if value == 'true':
+              return True
+            elif value == 'false':
+              return False
+            else:
+              raise ValueError('Unknown value for %s: %s' % (key, value))
+    raise exceptions.AndroidDeviceParsingError(str(input_methods))
+
+  def IsScreenLocked(self):
+    """Determines if device screen is locked."""
+    input_methods = self._device.RunShellCommand('dumpsys input_method')
+    return self._IsScreenLocked(input_methods)
 
 def _FixPossibleAdbInstability():
   """Host side workaround for crbug.com/268450 (adb instability).

@@ -41,7 +41,7 @@ typedef AccessibilityTreeFormatter::Filter Filter;
 // tests it against an expected baseline.
 //
 // The flow of the test is as outlined below.
-// 1. Load an html file from chrome/test/data/accessibility.
+// 1. Load an html file from content/test/data/accessibility.
 // 2. Read the expectation.
 // 3. Browse to the page and serialize the platform specific tree into a human
 //    readable string.
@@ -184,10 +184,8 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaChecked) {
   RunAriaTest(FILE_PATH_LITERAL("aria-checked.html"));
 }
 
-// crbug.com/451047 will cause new elements to be added to the blink a11y tree
-// Re-baseline after the Blink change goes in
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaColumnHeader) {
+                       AccessibilityAriaColumnHeader) {
   RunAriaTest(FILE_PATH_LITERAL("aria-columnheader.html"));
 }
 
@@ -266,8 +264,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaForm) {
   RunAriaTest(FILE_PATH_LITERAL("aria-form.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaGrabbed) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaGrabbed) {
   RunAriaTest(FILE_PATH_LITERAL("aria-grabbed.html"));
 }
 
@@ -383,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityAriaMultiline) {
+                       DISABLED_AccessibilityAriaMultiline) {
   RunAriaTest(FILE_PATH_LITERAL("aria-multiline.html"));
 }
 
@@ -456,10 +453,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRequired) {
   RunAriaTest(FILE_PATH_LITERAL("aria-required.html"));
 }
 
-// crbug.com/451047 will cause new elements to be added to the blink a11y tree
-// Re-baseline after the Blink change goes in
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaRow) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRow) {
   RunAriaTest(FILE_PATH_LITERAL("aria-row.html"));
 }
 
@@ -467,10 +461,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowGroup) {
   RunAriaTest(FILE_PATH_LITERAL("aria-rowgroup.html"));
 }
 
-// crbug.com/451047 will cause new elements to be added to the blink a11y tree
-// Re-baseline after the Blink change goes in
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaRowHeader) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowHeader) {
   RunAriaTest(FILE_PATH_LITERAL("aria-rowheader.html"));
 }
 
@@ -482,19 +473,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSearch) {
   RunAriaTest(FILE_PATH_LITERAL("aria-search.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSearchBox) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-searchbox.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSelected) {
   RunAriaTest(FILE_PATH_LITERAL("aria-selected.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSeparator) {
   RunAriaTest(FILE_PATH_LITERAL("aria-separator.html"));
-}
-
-// crbug.com/451047 will cause new elements to be added to the blink a11y tree
-// Re-baseline after the Blink change goes in
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaSort) {
-  RunAriaTest(FILE_PATH_LITERAL("aria-sort.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSlider) {
@@ -520,6 +508,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaStatus) {
   RunAriaTest(FILE_PATH_LITERAL("aria-status.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSwitch) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-switch.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTab) {
   RunAriaTest(FILE_PATH_LITERAL("aria-tab.html"));
 }
@@ -532,7 +524,8 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTabPanel) {
   RunAriaTest(FILE_PATH_LITERAL("aria-tabpanel.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTextbox) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       DISABLED_AccessibilityAriaTextbox) {
   RunAriaTest(FILE_PATH_LITERAL("aria-textbox.html"));
 }
 
@@ -613,7 +606,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBody) {
   RunHtmlTest(FILE_PATH_LITERAL("body.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBR) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, DISABLED_AccessibilityBR) {
   RunHtmlTest(FILE_PATH_LITERAL("br.html"));
 }
 
@@ -847,7 +840,9 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputMonth) {
 }
 #endif
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputPassword) {
+// crbug.com/84250
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+    DISABLED_AccessibilityInputPassword) {
   RunHtmlTest(FILE_PATH_LITERAL("input-password.html"));
 }
 
@@ -1132,10 +1127,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("table-thead-tbody-tfoot.html"));
 }
 
-// crbug.com/457687 will correct ColumnIndexRange
-// Rebaseline after Blink's change goes in
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityTableSpans) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityTableSpans) {
   RunHtmlTest(FILE_PATH_LITERAL("table-spans.html"));
 }
 

@@ -66,16 +66,16 @@ remoting.HostSetupFlow.prototype.switchToNextStep = function() {
 };
 
 /**
- * @param {remoting.Error} error
+ * @param {!remoting.Error} error
  */
 remoting.HostSetupFlow.prototype.switchToErrorState = function(error) {
-  if (error == remoting.Error.CANCELLED) {
+  if (error.hasTag(remoting.Error.Tag.CANCELLED)) {
     // Stop the setup flow if user rejected one of the actions.
     this.state_ = remoting.HostSetupFlow.State.NONE;
   } else {
     // Current step failed, so switch to corresponding error state.
     if (this.state_ == remoting.HostSetupFlow.State.STARTING_HOST) {
-      if (error == remoting.Error.REGISTRATION_FAILED) {
+      if (error.hasTag(remoting.Error.Tag.REGISTRATION_FAILED)) {
         this.state_ = remoting.HostSetupFlow.State.REGISTRATION_FAILED;
       } else {
         this.state_ = remoting.HostSetupFlow.State.START_HOST_FAILED;
@@ -93,11 +93,15 @@ remoting.HostSetupFlow.prototype.switchToErrorState = function(error) {
 
 /**
  * @param {remoting.HostController} hostController The HostController
- * responsible for the host daemon.
+ *     responsible for the host daemon.
+ * @param {function(!remoting.Error)} onError Function to call when an error
+ *     occurs.
  * @constructor
  */
-remoting.HostSetupDialog = function(hostController) {
+remoting.HostSetupDialog = function(hostController, onError) {
   this.hostController_ = hostController;
+  this.onError_ = onError;
+
   this.pinEntry_ = document.getElementById('daemon-pin-entry');
   this.pinConfirm_ = document.getElementById('daemon-pin-confirm');
   this.pinErrorDiv_ = document.getElementById('daemon-pin-error-div');
@@ -163,9 +167,9 @@ remoting.HostSetupDialog.prototype.showForStart = function() {
     // Although we don't need an access token in order to start the host,
     // using callWithToken here ensures consistent error handling in the
     // case where the refresh token is invalid.
-    remoting.identity.callWithToken(
+    remoting.identity.getToken().then(
         that.showForStartWithToken_.bind(that, state),
-        remoting.showErrorMessage);
+        remoting.Error.handler(that.onError_));
   };
 
   this.hostController_.getLocalHostState(onState);
@@ -207,9 +211,9 @@ remoting.HostSetupDialog.prototype.showForStartWithToken_ =
     }
   }
 
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   function onError(error) {
-    console.error('Error getting consent status: ' + error);
+    console.error('Error getting consent status: ' + error.toString());
   }
 
   this.usageStats_.hidden = true;
@@ -359,7 +363,7 @@ remoting.HostSetupDialog.prototype.installHost_ = function() {
   /** @type {remoting.HostSetupFlow} */
   var flow = this.flow_;
 
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   var onError = function(error) {
     flow.switchToErrorState(error);
     that.updateState_();
@@ -415,7 +419,7 @@ remoting.HostSetupDialog.prototype.startHost_ = function() {
     }
   }
 
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   function onError(error) {
     if (isFlowActive()) {
       flow.switchToErrorState(error);
@@ -450,7 +454,7 @@ remoting.HostSetupDialog.prototype.updatePin_ = function() {
     }
   }
 
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   function onError(error) {
     if (isFlowActive()) {
       flow.switchToErrorState(error);
@@ -487,7 +491,7 @@ remoting.HostSetupDialog.prototype.stopHost_ = function() {
     }
   }
 
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   function onError(error) {
     if (isFlowActive()) {
       flow.switchToErrorState(error);

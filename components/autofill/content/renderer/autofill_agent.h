@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_AUTOFILL_CONTENT_RENDERER_AUTOFILL_AGENT_H_
 #define COMPONENTS_AUTOFILL_CONTENT_RENDERER_AUTOFILL_AGENT_H_
 
+#include <set>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -54,6 +55,11 @@ class AutofillAgent : public content::RenderFrameObserver,
   virtual ~AutofillAgent();
 
  private:
+  // Functor used as a simplified comparison function for FormData.
+  struct FormDataCompare {
+    bool operator()(const FormData& lhs, const FormData& rhs) const;
+  };
+
   // Thunk class for RenderViewObserver methods that haven't yet been migrated
   // to RenderFrameObserver. Should eventually be removed.
   // http://crbug.com/433486
@@ -108,8 +114,10 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   // content::RenderFrameObserver:
   bool OnMessageReceived(const IPC::Message& message) override;
-  void DidCommitProvisionalLoad(bool is_new_navigation) override;
+  void DidCommitProvisionalLoad(bool is_new_navigation,
+                                bool is_same_page_navigation) override;
   void DidFinishDocumentLoad() override;
+  void WillSendSubmitEvent(const blink::WebFormElement& form) override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
   void DidChangeScrollOffset() override;
   void FocusedNodeChanged(const blink::WebNode& node) override;
@@ -138,6 +146,7 @@ class AutofillAgent : public content::RenderFrameObserver,
   virtual void openTextDataListChooser(const blink::WebInputElement& element);
   virtual void dataListOptionsChanged(const blink::WebInputElement& element);
   virtual void firstUserGestureObserved();
+  virtual void xhrSucceeded();
 
   void OnFieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms);
@@ -207,12 +216,24 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Notifies browser of new fillable forms in |render_frame|.
   void ProcessForms();
 
+  // Sends a message to the browser that the form is about to be submitted,
+  // only if the particular message has not been previously submitted for the
+  // form in the current frame.
+  // Additionally, depending on |send_submitted_event| a message is sent to the
+  // browser that the form was submitted.
+  void SendFormEvents(const blink::WebFormElement& form,
+                      bool send_submitted_event);
+
   // Hides any currently showing Autofill popup.
   void HidePopup();
 
   // Formerly cached forms for all frames, now only caches forms for the current
   // frame.
   FormCache form_cache_;
+
+  // Keeps track of the forms for which a "will submit" message has been sent in
+  // this frame's current load. We use a simplified comparison function.
+  std::set<FormData, FormDataCompare> submitted_forms_;
 
   PasswordAutofillAgent* password_autofill_agent_;  // Weak reference.
   PasswordGenerationAgent* password_generation_agent_;  // Weak reference.

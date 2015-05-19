@@ -727,7 +727,7 @@ class ModalDialogDelegate : public DialogDelegateView {
 TEST_F(WidgetTestInteractive, WindowModalWindowDestroyedActivationTest) {
   TestWidgetFocusChangeListener focus_listener;
   WidgetFocusManager::GetInstance()->AddFocusChangeListener(&focus_listener);
-  const std::vector<NativeViewPair>& focus_changes =
+  const std::vector<gfx::NativeView>& focus_changes =
       focus_listener.focus_changes();
 
   // Create a top level widget.
@@ -741,12 +741,12 @@ TEST_F(WidgetTestInteractive, WindowModalWindowDestroyedActivationTest) {
   init_params.native_widget =
       new PlatformDesktopNativeWidget(&top_level_widget);
   top_level_widget.Init(init_params);
-  top_level_widget.Show();
+  ShowSync(&top_level_widget);
 
   gfx::NativeView top_level_native_view = top_level_widget.GetNativeView();
   ASSERT_FALSE(focus_listener.focus_changes().empty());
   EXPECT_EQ(1u, focus_changes.size());
-  EXPECT_EQ(NativeViewPair(NULL, top_level_native_view), focus_changes[0]);
+  EXPECT_EQ(top_level_native_view, focus_changes[0]);
 
   // Create a modal dialog.
   // This instance will be destroyed when the dialog is destroyed.
@@ -756,29 +756,46 @@ TEST_F(WidgetTestInteractive, WindowModalWindowDestroyedActivationTest) {
   Widget* modal_dialog_widget = views::DialogDelegate::CreateDialogWidget(
       dialog_delegate, NULL, top_level_widget.GetNativeView());
   modal_dialog_widget->SetBounds(gfx::Rect(100, 100, 200, 200));
+
+  // Note the dialog widget doesn't need a ShowSync. Since it is modal, it gains
+  // active status synchronously, even on Mac.
   modal_dialog_widget->Show();
 
   gfx::NativeView modal_native_view = modal_dialog_widget->GetNativeView();
   EXPECT_EQ(3u, focus_changes.size());
-  EXPECT_EQ(NativeViewPair(top_level_native_view, modal_native_view),
-            focus_changes[1]);
-  EXPECT_EQ(NativeViewPair(top_level_native_view, modal_native_view),
-            focus_changes[2]);
+  EXPECT_EQ(nullptr, focus_changes[1]);
+  EXPECT_EQ(modal_native_view, focus_changes[2]);
 
+#if defined(OS_MACOSX)
+  // Window modal dialogs on Mac are "sheets", which animate to close before
+  // activating their parent widget.
+  WidgetActivationWaiter waiter(&top_level_widget, true);
+  modal_dialog_widget->Close();
+  waiter.Wait();
+#else
   modal_dialog_widget->CloseNow();
+#endif
 
   EXPECT_EQ(5u, focus_changes.size());
-  EXPECT_EQ(NativeViewPair(modal_native_view, top_level_native_view),
-            focus_changes[3]);
-  EXPECT_EQ(NativeViewPair(modal_native_view, top_level_native_view),
-            focus_changes[4]);
+  EXPECT_EQ(nullptr, focus_changes[3]);
+  EXPECT_EQ(top_level_native_view, focus_changes[4]);
 
   top_level_widget.CloseNow();
   WidgetFocusManager::GetInstance()->RemoveFocusChangeListener(&focus_listener);
 }
 
+// Disabled on Mac. Desktop Mac doesn't have system modal windows since Carbon
+// was deprecated. It does have application modal windows, but only Ash requests
+// those.
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+#define MAYBE_SystemModalWindowReleasesCapture \
+    DISABLED_SystemModalWindowReleasesCapture
+#else
+#define MAYBE_SystemModalWindowReleasesCapture SystemModalWindowReleasesCapture
+#endif
+
 // Test that when opening a system-modal window, capture is released.
-TEST_F(WidgetTestInteractive, SystemModalWindowReleasesCapture) {
+TEST_F(WidgetTestInteractive, MAYBE_SystemModalWindowReleasesCapture) {
   TestWidgetFocusChangeListener focus_listener;
   WidgetFocusManager::GetInstance()->AddFocusChangeListener(&focus_listener);
 
@@ -797,7 +814,7 @@ TEST_F(WidgetTestInteractive, SystemModalWindowReleasesCapture) {
 
   ASSERT_FALSE(focus_listener.focus_changes().empty());
   EXPECT_EQ(top_level_widget.GetNativeView(),
-            focus_listener.focus_changes().back().second);;
+            focus_listener.focus_changes().back());;
 
   EXPECT_FALSE(top_level_widget.HasCapture());
   top_level_widget.SetCapture(NULL);

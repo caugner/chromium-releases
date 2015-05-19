@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
 #include "cc/base/switches.h"
@@ -27,6 +28,7 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/resources/task_graph_runner.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/surfaces/onscreen_display_client.h"
 #include "cc/surfaces/surface_display_output_surface.h"
@@ -53,7 +55,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
-#include "ui/base/android/window_android.h"
+#include "ui/android/window_android.h"
 #include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/frame_time.h"
 #include "webkit/common/gpu/context_provider_in_process.h"
@@ -134,13 +136,33 @@ bool g_use_surface_manager = false;
 base::LazyInstance<cc::SurfaceManager> g_surface_manager =
     LAZY_INSTANCE_INITIALIZER;
 
-cc::SurfaceManager* GetSurfaceManager() {
-  if (!g_use_surface_manager)
-    return nullptr;
-  return g_surface_manager.Pointer();
-}
 
 int g_surface_id_namespace = 0;
+
+class SingleThreadTaskGraphRunner
+    : public cc::TaskGraphRunner,
+      public base::DelegateSimpleThread::Delegate {
+ public:
+  SingleThreadTaskGraphRunner()
+      : worker_thread_(this, "CompositorTileWorker1") {
+    worker_thread_.Start();
+    worker_thread_.SetThreadPriority(base::ThreadPriority::BACKGROUND);
+  }
+
+  ~SingleThreadTaskGraphRunner() override {
+    Shutdown();
+    worker_thread_.Join();
+  }
+
+ private:
+  // Overridden from base::DelegateSimpleThread::Delegate:
+  void Run() override { cc::TaskGraphRunner::Run(); }
+
+  base::DelegateSimpleThread worker_thread_;
+};
+
+base::LazyInstance<SingleThreadTaskGraphRunner> g_task_graph_runner =
+    LAZY_INSTANCE_INITIALIZER;
 
 } // anonymous namespace
 
@@ -162,12 +184,23 @@ bool CompositorImpl::IsInitialized() {
   return g_initialized;
 }
 
+// static
+cc::SurfaceManager* CompositorImpl::GetSurfaceManager() {
+  if (!g_use_surface_manager)
+    return nullptr;
+  return g_surface_manager.Pointer();
+}
+
+// static
+scoped_ptr<cc::SurfaceIdAllocator> CompositorImpl::CreateSurfaceIdAllocator() {
+  return make_scoped_ptr(new cc::SurfaceIdAllocator(++g_surface_id_namespace));
+}
+
 CompositorImpl::CompositorImpl(CompositorClient* client,
                                gfx::NativeWindow root_window)
     : root_layer_(cc::Layer::Create()),
       resource_manager_(&ui_resource_provider_),
-      surface_id_allocator_(
-          new cc::SurfaceIdAllocator(++g_surface_id_namespace)),
+      surface_id_allocator_(CreateSurfaceIdAllocator()),
       has_transparent_background_(false),
       device_scale_factor_(1),
       window_(NULL),
@@ -378,7 +411,7 @@ void CompositorImpl::CreateLayerTreeHost() {
   settings.renderer_settings.refresh_rate = 60.0;
   settings.renderer_settings.allow_antialiasing = false;
   settings.renderer_settings.highp_threshold_min = 2048;
-  settings.impl_side_painting = false;
+  settings.impl_side_painting = true;
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   settings.initial_debug_state.SetRecordRenderingStats(
@@ -389,13 +422,9 @@ void CompositorImpl::CreateLayerTreeHost() {
   settings.single_thread_proxy_scheduler = false;
 
   host_ = cc::LayerTreeHost::CreateSingleThreaded(
-      this,
-      this,
-      HostSharedBitmapManager::current(),
-      BrowserGpuMemoryBufferManager::current(),
-      settings,
-      base::MessageLoopProxy::current(),
-      nullptr);
+      this, this, HostSharedBitmapManager::current(),
+      BrowserGpuMemoryBufferManager::current(), g_task_graph_runner.Pointer(),
+      settings, base::MessageLoopProxy::current(), nullptr);
   host_->SetRootLayer(root_layer_);
 
   host_->SetVisible(true);
@@ -409,6 +438,7 @@ void CompositorImpl::CreateLayerTreeHost() {
 }
 
 void CompositorImpl::SetVisible(bool visible) {
+  TRACE_EVENT1("cc", "CompositorImpl::SetVisible", "visible", visible);
   if (!visible) {
     DCHECK(host_);
     // Look for any layers that were attached to the root for readback
@@ -523,6 +553,12 @@ void CompositorImpl::OnGpuChannelTimeout() {
 void CompositorImpl::RequestNewOutputSurface() {
   output_surface_request_pending_ = true;
 
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER) || defined(SYZYASAN)
+  const int64 kGpuChannelTimeoutInSeconds = 30;
+#else
+  const int64 kGpuChannelTimeoutInSeconds = 10;
+#endif
+
   BrowserGpuChannelHostFactory* factory =
       BrowserGpuChannelHostFactory::instance();
   if (!factory->GetGpuChannel() || factory->GetGpuChannel()->IsLost()) {
@@ -531,8 +567,8 @@ void CompositorImpl::RequestNewOutputSurface() {
         base::Bind(&CompositorImpl::OnGpuChannelEstablished,
                    weak_factory_.GetWeakPtr()));
     establish_gpu_channel_timeout_.Start(
-        FROM_HERE, base::TimeDelta::FromSeconds(7), this,
-        &CompositorImpl::OnGpuChannelTimeout);
+        FROM_HERE, base::TimeDelta::FromSeconds(kGpuChannelTimeoutInSeconds),
+        this, &CompositorImpl::OnGpuChannelTimeout);
     return;
   }
 

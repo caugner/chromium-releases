@@ -16,13 +16,13 @@
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/test/test_views.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/test/test_widget_observer.h"
 #include "ui/views/test/widget_test.h"
@@ -207,33 +207,6 @@ class EventCountHandler : public ui::EventHandler {
   std::map<ui::EventType, int> event_count_;
 
   DISALLOW_COPY_AND_ASSIGN(EventCountHandler);
-};
-
-// Class that closes the widget (which ends up deleting it immediately) when the
-// appropriate event is received.
-class CloseWidgetView : public View {
- public:
-  explicit CloseWidgetView(ui::EventType event_type)
-      : event_type_(event_type) {
-  }
-
-  // ui::EventHandler override:
-  void OnEvent(ui::Event* event) override {
-    if (event->type() == event_type_) {
-      // Go through NativeWidgetPrivate to simulate what happens if the OS
-      // deletes the NativeWindow out from under us.
-      GetWidget()->native_widget_private()->CloseNow();
-    } else {
-      View::OnEvent(event);
-      if (!event->IsTouchEvent())
-        event->SetHandled();
-    }
-  }
-
- private:
-  const ui::EventType event_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(CloseWidgetView);
 };
 
 TEST_F(WidgetTest, WidgetInitParams) {
@@ -1005,8 +978,11 @@ TEST_F(WidgetObserverTest, WidgetBoundsChangedNative) {
 
   EXPECT_FALSE(widget_bounds_changed());
 
-  // Init causes a bounds change, even while not showing.
-  widget->Init(CreateParams(Widget::InitParams::TYPE_WINDOW));
+  // Init causes a bounds change, even while not showing. Note some platforms
+  // cause a bounds change even when the bounds are empty. Mac does not.
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  widget->Init(params);
   EXPECT_TRUE(widget_bounds_changed());
   reset();
 
@@ -1323,12 +1299,12 @@ class DesktopAuraTestValidPaintWidget : public views::Widget {
     views::Widget::Hide();
   }
 
-  void OnNativeWidgetPaint(gfx::Canvas* canvas) override {
+  void OnNativeWidgetPaint(const ui::PaintContext& context) override {
     received_paint_ = true;
     EXPECT_TRUE(expect_paint_);
     if (!expect_paint_)
       received_paint_while_hidden_ = true;
-    views::Widget::OnNativeWidgetPaint(canvas);
+    views::Widget::OnNativeWidgetPaint(context);
   }
 
   bool ReadReceivedPaintAndReset() {
@@ -1411,73 +1387,6 @@ TEST_F(WidgetTest, TestWindowVisibilityAfterHide) {
   EXPECT_FALSE(IsNativeWindowVisible(widget.GetNativeWindow()));
   widget.Show();
   EXPECT_TRUE(IsNativeWindowVisible(widget.GetNativeWindow()));
-}
-
-// The following code verifies we can correctly destroy a Widget from a mouse
-// enter/exit. We could test move/drag/enter/exit but in general we don't run
-// nested message loops from such events, nor has the code ever really dealt
-// with this situation.
-
-// Generates two moves (first generates enter, second real move), a press, drag
-// and release stopping at |last_event_type|.
-void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
-  const gfx::Rect screen_bounds(widget->GetWindowBoundsInScreen());
-  ui::MouseEvent move_event(ui::ET_MOUSE_MOVED, screen_bounds.CenterPoint(),
-                            screen_bounds.CenterPoint(), ui::EventTimeForNow(),
-                            0, 0);
-  ui::EventProcessor* dispatcher = WidgetTest::GetEventProcessor(widget);
-  ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move_event);
-  if (last_event_type == ui::ET_MOUSE_ENTERED || details.dispatcher_destroyed)
-    return;
-  details = dispatcher->OnEventFromSource(&move_event);
-  if (last_event_type == ui::ET_MOUSE_MOVED || details.dispatcher_destroyed)
-    return;
-
-  ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, screen_bounds.CenterPoint(),
-                             screen_bounds.CenterPoint(), ui::EventTimeForNow(),
-                             0, 0);
-  details = dispatcher->OnEventFromSource(&press_event);
-  if (last_event_type == ui::ET_MOUSE_PRESSED || details.dispatcher_destroyed)
-    return;
-
-  gfx::Point end_point(screen_bounds.CenterPoint());
-  end_point.Offset(1, 1);
-  ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, end_point, end_point,
-                            ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&drag_event);
-  if (last_event_type == ui::ET_MOUSE_DRAGGED || details.dispatcher_destroyed)
-    return;
-
-  ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, end_point, end_point,
-                               ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&release_event);
-  if (details.dispatcher_destroyed)
-    return;
-}
-
-// Creates a widget and invokes GenerateMouseEvents() with |last_event_type|.
-void RunCloseWidgetDuringDispatchTest(WidgetTest* test,
-                                      ui::EventType last_event_type) {
-  // |widget| is deleted by CloseWidgetView.
-  Widget* widget = new Widget;
-  Widget::InitParams params =
-      test->CreateParams(Widget::InitParams::TYPE_POPUP);
-  params.native_widget = new PlatformDesktopNativeWidget(widget);
-  params.bounds = gfx::Rect(0, 0, 50, 100);
-  widget->Init(params);
-  widget->SetContentsView(new CloseWidgetView(last_event_type));
-  widget->Show();
-  GenerateMouseEvents(widget, last_event_type);
-}
-
-// Verifies deleting the widget from a mouse pressed event doesn't crash.
-TEST_F(WidgetTest, CloseWidgetDuringMousePress) {
-  RunCloseWidgetDuringDispatchTest(this, ui::ET_MOUSE_PRESSED);
-}
-
-// Verifies deleting the widget from a mouse released event doesn't crash.
-TEST_F(WidgetTest, CloseWidgetDuringMouseReleased) {
-  RunCloseWidgetDuringDispatchTest(this, ui::ET_MOUSE_RELEASED);
 }
 
 #endif  // !defined(OS_CHROMEOS)
@@ -1739,15 +1648,15 @@ TEST_F(WidgetTest, SynthesizeMouseMoveEvent) {
   EXPECT_EQ(1, v2->GetEventCount(ui::ET_MOUSE_ENTERED));
 }
 
+// No touch on desktop Mac. Tracked in http://crbug.com/445520.
+#if !defined(OS_MACOSX) || defined(USE_AURA)
+
 namespace {
 
 // ui::EventHandler which handles all mouse press events.
 class MousePressEventConsumer : public ui::EventHandler {
  public:
-  explicit MousePressEventConsumer() {
-  }
-
-  ~MousePressEventConsumer() override {}
+  MousePressEventConsumer() {}
 
  private:
   // ui::EventHandler:
@@ -1784,6 +1693,8 @@ TEST_F(WidgetTest, MouseEventDispatchWhileTouchIsDown) {
 
   widget->CloseNow();
 }
+
+#endif  // !defined(OS_MACOSX) || defined(USE_AURA)
 
 // Used by SingleWindowClosing to count number of times WindowClosing() has
 // been invoked.
@@ -1902,6 +1813,9 @@ TEST_F(WidgetTest, WidgetDeleted_InOnMousePressed) {
   // Yay we did not crash!
 }
 
+// No touch on desktop Mac. Tracked in http://crbug.com/445520.
+#if !defined(OS_MACOSX) || defined(USE_AURA)
+
 TEST_F(WidgetTest, WidgetDeleted_InDispatchGestureEvent) {
   Widget* widget = new Widget;
   Widget::InitParams params =
@@ -1921,6 +1835,8 @@ TEST_F(WidgetTest, WidgetDeleted_InDispatchGestureEvent) {
 
   // Yay we did not crash!
 }
+
+#endif  // !defined(OS_MACOSX) || defined(USE_AURA)
 
 // See description of RunGetNativeThemeFromDestructor() for details.
 class GetNativeThemeFromDestructorView : public WidgetDelegateView {
@@ -2104,7 +2020,13 @@ TEST_F(WidgetTest, NoCrashOnWidgetDeleteWithPendingEvents) {
 
   ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
   generator.MoveMouseTo(10, 10);
+
+// No touch on desktop Mac. Tracked in http://crbug.com/445520.
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+  generator.ClickLeftButton();
+#else
   generator.PressTouch();
+#endif
   widget.reset();
 }
 

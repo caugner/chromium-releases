@@ -61,37 +61,12 @@ static const char kPayload[] =
 class QuicStreamSequencerTest : public ::testing::Test {
  protected:
   QuicStreamSequencerTest()
-      : connection_(new MockConnection(false)),
+      : connection_(new MockConnection(Perspective::IS_CLIENT)),
         session_(connection_),
         stream_(&session_, 1),
         sequencer_(new QuicStreamSequencer(&stream_)),
         buffered_frames_(
-            QuicStreamSequencerPeer::GetBufferedFrames(sequencer_.get())) {
-  }
-
-  bool VerifyReadableRegions(const char** expected, size_t num_expected) {
-    iovec iovecs[5];
-    size_t num_iovecs = sequencer_->GetReadableRegions(iovecs,
-                                                       arraysize(iovecs));
-    return VerifyIovecs(iovecs, num_iovecs, expected, num_expected);
-  }
-
-  bool VerifyIovecs(iovec* iovecs,
-                    size_t num_iovecs,
-                    const char** expected,
-                    size_t num_expected) {
-    if (num_expected != num_iovecs) {
-      LOG(ERROR) << "Incorrect number of iovecs.  Expected: "
-                 << num_expected << " Actual: " << num_iovecs;
-      return false;
-    }
-    for (size_t i = 0; i < num_expected; ++i) {
-      if (!VerifyIovec(iovecs[i], expected[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
+            QuicStreamSequencerPeer::GetBufferedFrames(sequencer_.get())) {}
 
   bool VerifyIovec(const iovec& iovec, StringPiece expected) {
     if (iovec.iov_len != expected.length()) {

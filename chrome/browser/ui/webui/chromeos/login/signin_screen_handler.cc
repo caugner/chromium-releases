@@ -47,6 +47,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
@@ -110,6 +111,7 @@ class CallOnReturn {
       callback_.Run();
   }
 
+  void CancelScheduledCall() { call_scheduled_ = false; }
   void ScheduleCall() { call_scheduled_ = true; }
 
  private:
@@ -359,6 +361,7 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
   builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
+  builder->Add("addSupervisedUser", IDS_CREATE_SUPERVISED_USER_MENU_LABEL);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
   builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
@@ -460,8 +463,6 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleToggleEnrollmentScreen);
   AddCallback("toggleEnableDebuggingScreen",
               &SigninScreenHandler::HandleToggleEnableDebuggingScreen);
-  AddCallback("switchToEmbeddedSignin",
-              &SigninScreenHandler::HandleSwitchToEmbeddedSignin);
   AddCallback("toggleKioskEnableScreen",
               &SigninScreenHandler::HandleToggleKioskEnableScreen);
   AddCallback("createAccount", &SigninScreenHandler::HandleCreateAccount);
@@ -492,6 +493,8 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleCancelConsumerManagementEnrollment);
   AddCallback("getTouchViewState",
               &SigninScreenHandler::HandleGetTouchViewState);
+  AddCallback("logRemoveUserWarningShown",
+              &SigninScreenHandler::HandleLogRemoveUserWarningShown);
 
   // This message is sent by the kiosk app menu, but is handled here
   // so we can tell the delegate to launch the app.
@@ -536,7 +539,10 @@ void SigninScreenHandler::OnNetworkReady() {
 }
 
 void SigninScreenHandler::UpdateState(NetworkError::ErrorReason reason) {
-  UpdateStateInternal(reason, false);
+  // ERROR_REASON_FRAME_ERROR is an explicit signal from GAIA frame so it shoud
+  // force network error UI update.
+  bool force_update = reason == NetworkError::ERROR_REASON_FRAME_ERROR;
+  UpdateStateInternal(reason, force_update);
 }
 
 void SigninScreenHandler::SetFocusPODCallbackForTesting(
@@ -694,6 +700,7 @@ void SigninScreenHandler::UpdateStateInternal(NetworkError::ErrorReason reason,
       from_not_online_to_online_transition) {
     // Schedules a immediate retry.
     LOG(WARNING) << "Retry frame load since network has been changed.";
+    gaia_reload_reason_ = reason;
     reload_gaia.ScheduleCall();
   }
 
@@ -701,18 +708,22 @@ void SigninScreenHandler::UpdateStateInternal(NetworkError::ErrorReason reason,
       error_screen_should_overlay) {
     // Schedules a immediate retry.
     LOG(WARNING) << "Retry frameload since proxy settings has been changed.";
+    gaia_reload_reason_ = reason;
     reload_gaia.ScheduleCall();
   }
 
   if (reason == NetworkError::ERROR_REASON_FRAME_ERROR &&
+      reason != gaia_reload_reason_ &&
       !IsProxyError(state, reason, FrameError())) {
     LOG(WARNING) << "Retry frame load due to reason: "
                  << NetworkError::ErrorReasonString(reason);
+    gaia_reload_reason_ = reason;
     reload_gaia.ScheduleCall();
   }
 
   if (is_gaia_loading_timeout) {
     LOG(WARNING) << "Retry frame load due to loading timeout.";
+    LOG(ERROR) << "UpdateStateInternal reload 4";
     reload_gaia.ScheduleCall();
   }
 
@@ -721,6 +732,9 @@ void SigninScreenHandler::UpdateStateInternal(NetworkError::ErrorReason reason,
     SetupAndShowOfflineMessage(state, reason);
   } else {
     HideOfflineMessage(state, reason);
+
+    // Cancel scheduled GAIA reload (if any) to prevent double reloads.
+    reload_gaia.CancelScheduledCall();
   }
 }
 
@@ -781,12 +795,14 @@ void SigninScreenHandler::HideOfflineMessage(NetworkStateInformer::State state,
   if (!IsSigninScreenHiddenByError())
     return;
 
+  gaia_reload_reason_ = NetworkError::ERROR_REASON_NONE;
+
   network_error_model_->Hide();
   histogram_helper_->OnErrorHide();
 
   // Forces a reload for Gaia screen on hiding error message.
   if (IsGaiaVisible() || IsGaiaHiddenByError())
-    ReloadGaia(false);
+    ReloadGaia(reason == NetworkError::ERROR_REASON_NETWORK_STATE_CHANGED);
 }
 
 void SigninScreenHandler::ReloadGaia(bool force_reload) {
@@ -1177,12 +1193,9 @@ void SigninScreenHandler::HandleResyncUserData() {
 }
 
 void SigninScreenHandler::HandleLoginUIStateChanged(const std::string& source,
-                                                    bool new_value) {
-  VLOG(0) << "Login WebUI >> active: " << new_value << ", "
+                                                    bool active) {
+  VLOG(0) << "Login WebUI >> active: " << active << ", "
             << "source: " << source;
-
-  if (source == "gaia-signin" && !new_value)
-    gaia_screen_handler_->CancelEmbeddedSignin();
 
   if (!KioskAppManager::Get()->GetAutoLaunchApp().empty() &&
       KioskAppManager::Get()->IsAutoLaunchRequested()) {
@@ -1275,8 +1288,9 @@ void SigninScreenHandler::HandleGetTouchViewState() {
   }
 }
 
-void SigninScreenHandler::HandleSwitchToEmbeddedSignin() {
-  gaia_screen_handler_->SwitchToEmbeddedSignin();
+void SigninScreenHandler::HandleLogRemoveUserWarningShown() {
+  ProfileMetrics::LogProfileDeleteUser(
+      ProfileMetrics::DELETE_PROFILE_USER_MANAGER_SHOW_WARNING);
 }
 
 bool SigninScreenHandler::AllWhitelistedUsersPresent() {

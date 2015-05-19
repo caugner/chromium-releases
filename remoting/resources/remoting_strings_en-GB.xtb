@@ -1,6 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="en-GB">
 <translation id="337167041784729019">Show statistics</translation>
-<translation id="3233367171080043075">You can end at any time.</translation>
 <translation id="7606912958770842224">Enable remote connections</translation>
 <translation id="3785447812627779171">Chromoting
 Host</translation>
@@ -31,7 +30,6 @@ Host</translation>
 <translation id="4368630973089289038">Want to help improve Chromoting? <ph name="LINK_BEGIN"/>Take the survey.<ph name="LINK_END"/></translation>
 <translation id="332624996707057614">Edit computer name</translation>
 <translation id="1996161829609978754">Chrome is downloading the Chromoting Host installer.  Once the download is complete, please run the installer before continuing.</translation>
-<translation id="222632161986885959">A participant in this hangout has offered to help you by controlling your computer. If you accept:</translation>
 <translation id="2046651113449445291">The following clients have been paired with this computer and can connect without supplying a PIN. You can revoke this permission at any time, either individually, or for all clients.</translation>
 <translation id="7658239707568436148">Cancel</translation>
 <translation id="7836926030608666805">Some required components are missing. Please make sure that you're running the latest version of Chrome and try again.</translation>
@@ -51,7 +49,9 @@ Host</translation>
 <translation id="8355326866731426344">This access code will expire in <ph name="TIMEOUT"/></translation>
 <translation id="985602178874221306">The Chromium Authors</translation>
 <translation id="2498359688066513246">Help &amp; feedback</translation>
+<translation id="3606997049964069799">You are not signed in to Chromium. Please sign in and try again.</translation>
 <translation id="6198252989419008588">Change PIN</translation>
+<translation id="7970576581263377361">Authentication failed. Please sign in to Chromium again.</translation>
 <translation id="6167788864044230298">Chrome App Streaming</translation>
 <translation id="170207782578677537">Failed to register this computer.</translation>
 <translation id="4804818685124855865">Disconnect</translation>
@@ -72,12 +72,15 @@ Host</translation>
 <translation id="9188433529406846933">Authorise</translation>
 <translation id="228809120910082333">Please confirm your account and PIN below to allow access by Chromoting.</translation>
 <translation id="7605995381616883502">New connection</translation>
+<translation id="2038229918502634450">Host is restarting, to take into account a policy change.</translation>
 <translation id="2851674870054673688">Once they have entered the code your sharing session will begin.</translation>
 <translation id="5593560073513909978">The service is temporarily unavailable. Please try again later.</translation>
 <translation id="3908017899227008678">Shrink to fit</translation>
 <translation id="8073845705237259513">To use Chrome Remote Desktop, you'll need to add a Google Account to your device.</translation>
+<translation id="2894654864775534701">This computer is currently shared under a different account.</translation>
 <translation id="1199593201721843963">Disable remote connections</translation>
 <translation id="5379087427956679853">Chrome Remote Desktop allows you to securely share your computer over the Web. Both users must be running the Chrome Remote Desktop app, which can be found at <ph name="URL"/>.</translation>
+<translation id="3150823315463303127">Host failed to read the policy.</translation>
 <translation id="2220529011494928058">Report an issue</translation>
 <translation id="174018511426417793">You have no computers registered. To enable remote connections to a computer, install Chrome Remote Desktop there and click “<ph name="BUTTON_NAME"/>”.</translation>
 <translation id="9126115402994542723">Don't ask for a PIN again when connecting to this host from this device.</translation>
@@ -124,15 +127,12 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="2599300881200251572">This service enables incoming connections from Chrome Remote Desktop clients.</translation>
 <translation id="6091564239975589852">Send keys</translation>
 <translation id="4572065712096155137">Access</translation>
-<translation id="5908809458024685848">You are not signed in to Chromoting. Please sign in and try again.</translation>
 <translation id="7401733114166276557">Chrome Remote Desktop</translation>
 <translation id="5510035215749041527">Disconnect now</translation>
 <translation id="3362124771485993931">Re-type PIN</translation>
 <translation id="8196755618196986400">To allow us to contact you for further information, your email address will be included in any feedback that you submit.</translation>
-<translation id="5231421057630485350">The person helping you will be able to control your mouse and keyboard.</translation>
 <translation id="154040539590487450">Failed to start remote access service.</translation>
 <translation id="7948001860594368197">Screen options</translation>
-<translation id="8172070902751707422">Authentication failed. Please sign in to Chrome Remote Desktop again.</translation>
 <translation id="5254120496627797685">Leaving this page will end your Chrome Remote Desktop session.</translation>
 <translation id="7019153418965365059">Unrecognised host error: <ph name="HOST_OFFLINE_REASON"/>.</translation>
 <translation id="712467900648340229">Failed to connect to Cast device.</translation>
@@ -171,6 +171,7 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="2939145106548231838">Authenticate to host</translation>
 <translation id="2366718077645204424">Unable to reach the host. This is probably due to the configuration of the network you are using.</translation>
 <translation id="3776024066357219166">Your Chrome Remote Desktop session has ended.</translation>
+<translation id="1450760146488584666">The requested object does not exist.</translation>
 <translation id="5625493749705183369">Access other computers or allow another user to access your computer securely over the Internet.</translation>
 <translation id="2512228156274966424">NOTE: To ensure that all keyboard shortcuts are available, you can configure Chrome Remote Desktop to ‘Open as window’.</translation>
 <translation id="2699970397166997657">Chromoting</translation>
@@ -200,13 +201,14 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="6527303717912515753">Share</translation>
 <translation id="2926340305933667314">Failed to disable remote access to this computer. Please try again later.</translation>
 <translation id="6865175692670882333">View/edit</translation>
+<translation id="544077782045763683">Host has shut down.</translation>
 <translation id="5859141382851488196">New window…</translation>
 <translation id="2089514346391228378">Remote connections for this computer have been enabled.</translation>
 <translation id="7693372326588366043">Refresh the list of hosts</translation>
 <translation id="8445362773033888690">View in Google Play Store</translation>
-<translation id="8246880134154544773">Authentication failed. Please sign in to Chromoting again.</translation>
 <translation id="1654128982815600832">Enabling remote connections for this computer…</translation>
 <translation id="8187079423890319756">Copyright 2013 The Chromium Authors. All Rights Reserved.</translation>
+<translation id="6221358653751391898">You are not signed in to Chrome. Please sign in and try again.</translation>
 <translation id="7038683108611689168">Help us improve Chromoting by allowing us to collect usage statistics and crash reports.</translation>
 <translation id="6040143037577758943">Close</translation>
 <translation id="4405930547258349619">Core Library</translation>
@@ -237,7 +239,6 @@ Desktop Host</translation>
 <translation id="6550675742724504774">Options</translation>
 <translation id="3339299787263251426">Access your computer securely over the Internet</translation>
 <translation id="979100198331752041">Chrome Remote Desktop on <ph name="HOSTNAME"/> is out-of-date and needs to be updated.</translation>
-<translation id="7729639150174291243">You are not signed in to Chrome Remote Desktop. Please sign in and try again.</translation>
 <translation id="2841013758207633010">Time</translation>
 <translation id="6011539954251327702">Chromoting allows you to securely share your computer over the Web. Both users must be running the Chromoting app, which can be found at <ph name="URL"/>.</translation>
 <translation id="2919669478609886916">You are currently sharing this machine with another user. Do you want to continue sharing?</translation>
@@ -248,6 +249,7 @@ Desktop Host</translation>
 <translation id="3596628256176442606">This service enables incoming connections from Chromoting clients.</translation>
 <translation id="1978866438647250517">• User interface improvements.
 • Reduced network usage when running in the background.</translation>
+<translation id="4741792197137897469">Authentication failed. Please sign in to Chrome again.</translation>
 <translation id="4277463233460010382">This computer is configured to allow one or more clients to connect without entering a PIN.</translation>
 <translation id="837021510621780684">From this computer</translation>
 <translation id="518094545883702183">This information is used only for diagnosing the problem that you are reporting, is available only to someone investigating your report, and is retained for no more than 30 days.</translation>

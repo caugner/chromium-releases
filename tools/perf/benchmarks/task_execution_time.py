@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from measurements import task_execution_time
 import page_sets
-from telemetry import benchmark
 
 
 @benchmark.Enabled('android')
@@ -39,7 +40,7 @@ class TaskExecutionTimeToughSchedulingCases(benchmark.Benchmark):
     return 'task_execution_time.tough_scheduling_cases'
 
 
-@benchmark.Disabled  # http://crbug.com/458282
+@benchmark.Enabled('android')
 class TaskExecutionTimePathologicalMobileSites(benchmark.Benchmark):
 
   """Measures task execution statistics while scrolling pathological sites.

@@ -89,7 +89,7 @@ class MockAudioHistoryHandler : public HotwordAudioHistoryHandler {
 class MockHotwordService : public HotwordService {
  public:
   explicit MockHotwordService(Profile* profile)
-      : HotwordService(profile), service_available_(true) {};
+      : HotwordService(profile), service_available_(true) {}
   ~MockHotwordService() override {}
 
   bool IsServiceAvailable() override { return service_available_; }
@@ -250,6 +250,13 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, IsAvailableTrue) {
   EXPECT_TRUE(listener.WaitUntilSatisfied());
 }
 
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, IsAvailableTrue_NoGet) {
+  service()->setServiceAvailable(true);
+  ExtensionTestMessageListener listener("available: false", false);
+  ASSERT_TRUE(RunComponentExtensionTest("isAvailableNoGet")) << message_;
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+}
+
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, IsAvailableFalse) {
   service()->setServiceAvailable(false);
   ExtensionTestMessageListener listener("available: false", false);
@@ -278,24 +285,6 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, AlwaysOnEnabled) {
         << message_;
     EXPECT_TRUE(listener.WaitUntilSatisfied());
   }
-}
-
-IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, ExperimentalHotwordEnabled) {
-  // Enabled by default.
-  ExtensionTestMessageListener listener("experimentalHotwordEnabled: true",
-                                        false);
-  ASSERT_TRUE(RunComponentExtensionTest("experimentalHotwordEnabled"))
-      << message_;
-  EXPECT_TRUE(listener.WaitUntilSatisfied());
-}
-
-IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest,
-                       ExperimentalHotwordEnabled_Enabled) {
-  ExtensionTestMessageListener listener("experimentalHotwordEnabled: true",
-                                        false);
-  ASSERT_TRUE(RunComponentExtensionTest("experimentalHotwordEnabled"))
-      << message_;
-  EXPECT_TRUE(listener.WaitUntilSatisfied());
 }
 
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnEnabledChanged) {
@@ -403,6 +392,41 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnDeleteSpeakerModel) {
 
   ExtensionTestMessageListener listenerNotification("notification", false);
   EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnSpeakerModelExists) {
+  extensions::HotwordPrivateEventService::GetFactoryInstance();
+  ExtensionTestMessageListener listener("ready", false);
+  ASSERT_TRUE(
+      LoadExtensionAsComponent(test_data_dir_.AppendASCII(
+          "onSpeakerModelExists")));
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  service()->OptIntoHotwording(HotwordService::HOTWORD_ONLY);
+
+  ExtensionTestMessageListener listenerNotification("notification", false);
+  EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, SpeakerModelExistsResult) {
+  EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAlwaysOnSearchEnabled));
+
+  ExtensionTestMessageListener listenerTrue("ready", false);
+  ASSERT_TRUE(RunComponentExtensionTest(
+      "speakerModelExistsResultTrue")) << message_;
+  EXPECT_TRUE(listenerTrue.WaitUntilSatisfied());
+  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAlwaysOnSearchEnabled));
+
+  PrefService* prefs = profile()->GetPrefs();
+  prefs->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled, false);
+  ExtensionTestMessageListener listenerFalse("ready", false);
+  ASSERT_TRUE(RunComponentExtensionTest(
+      "speakerModelExistsResultFalse")) << message_;
+  EXPECT_TRUE(listenerFalse.WaitUntilSatisfied());
+  EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAlwaysOnSearchEnabled));
 }
 
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, Training) {

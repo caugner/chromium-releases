@@ -11,11 +11,9 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/affiliated_match_helper.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
-
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
 #include "components/password_manager/core/browser/password_syncable_service.h"
-#endif
 
 using autofill::PasswordForm;
 
@@ -71,10 +69,17 @@ PasswordStore::PasswordStore(
 }
 
 bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare) {
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
   ScheduleTask(base::Bind(&PasswordStore::InitSyncableService, this, flare));
-#endif
   return true;
+}
+
+void PasswordStore::SetAffiliatedMatchHelper(
+    scoped_ptr<AffiliatedMatchHelper> helper) {
+  affiliated_match_helper_ = helper.Pass();
+}
+
+bool PasswordStore::HasAffiliatedMatchHelper() const {
+  return affiliated_match_helper_;
 }
 
 void PasswordStore::AddLogin(const PasswordForm& form) {
@@ -125,8 +130,15 @@ void PasswordStore::GetLogins(const PasswordForm& form,
   }
   scoped_ptr<GetLoginsRequest> request(new GetLoginsRequest(consumer));
   request->set_ignore_logins_cutoff(ignore_logins_cutoff);
-  ScheduleTask(base::Bind(&PasswordStore::GetLoginsImpl, this, form,
-                          prompt_policy, base::Passed(&request)));
+
+  if (affiliated_match_helper_) {
+    affiliated_match_helper_->GetAffiliatedAndroidRealms(
+        form, base::Bind(&PasswordStore::ScheduleGetLoginsWithAffiliations,
+                         this, form, prompt_policy, base::Passed(&request)));
+  } else {
+    ScheduleTask(base::Bind(&PasswordStore::GetLoginsImpl, this, form,
+                            prompt_policy, base::Passed(&request)));
+  }
 }
 
 void PasswordStore::GetAutofillableLogins(PasswordStoreConsumer* consumer) {
@@ -167,20 +179,18 @@ bool PasswordStore::ScheduleTask(const base::Closure& task) {
 }
 
 void PasswordStore::Shutdown() {
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
   ScheduleTask(base::Bind(&PasswordStore::DestroySyncableService, this));
-#endif
+  // The AffiliationService must be destroyed from the main thread.
+  affiliated_match_helper_.reset();
   shutdown_called_ = true;
 }
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
 base::WeakPtr<syncer::SyncableService>
 PasswordStore::GetPasswordSyncableService() {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   DCHECK(syncable_service_);
   return syncable_service_->AsWeakPtr();
 }
-#endif
 
 PasswordStore::~PasswordStore() {
   DCHECK(shutdown_called_);
@@ -213,10 +223,8 @@ void PasswordStore::NotifyLoginsChanged(
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (!changes.empty()) {
     observers_->Notify(FROM_HERE, &Observer::OnLoginsChanged, changes);
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
     if (syncable_service_)
       syncable_service_->ActOnPasswordStoreChanges(changes);
-#endif
   }
 }
 
@@ -263,7 +271,36 @@ void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
   NotifyLoginsChanged(changes);
 }
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
+void PasswordStore::GetLoginsWithAffiliationsImpl(
+    const PasswordForm& form,
+    AuthorizationPromptPolicy prompt_policy,
+    scoped_ptr<GetLoginsRequest> request,
+    const std::vector<std::string>& additional_android_realms) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  ScopedVector<PasswordForm> results(FillMatchingLogins(form, prompt_policy));
+  for (const std::string& realm : additional_android_realms) {
+    PasswordForm android_form;
+    android_form.scheme = PasswordForm::SCHEME_HTML;
+    android_form.signon_realm = realm;
+    ScopedVector<PasswordForm> more_results(
+        AffiliatedMatchHelper::TransformAffiliatedAndroidCredentials(
+            form, FillMatchingLogins(android_form, DISALLOW_PROMPT)));
+    results.insert(results.end(), more_results.begin(), more_results.end());
+    more_results.weak_clear();
+  }
+  request->NotifyConsumerWithResults(results.Pass());
+}
+
+void PasswordStore::ScheduleGetLoginsWithAffiliations(
+    const PasswordForm& form,
+    AuthorizationPromptPolicy prompt_policy,
+    scoped_ptr<GetLoginsRequest> request,
+    const std::vector<std::string>& additional_android_realms) {
+  ScheduleTask(base::Bind(&PasswordStore::GetLoginsWithAffiliationsImpl, this,
+                          form, prompt_policy, base::Passed(&request),
+                          additional_android_realms));
+}
+
 void PasswordStore::InitSyncableService(
     const syncer::SyncableService::StartSyncFlare& flare) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
@@ -276,6 +313,5 @@ void PasswordStore::DestroySyncableService() {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   syncable_service_.reset();
 }
-#endif
 
 }  // namespace password_manager

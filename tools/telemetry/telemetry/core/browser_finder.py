@@ -7,15 +7,15 @@
 import logging
 import operator
 
-from telemetry import decorators
-from telemetry.core import browser_finder_exceptions
-from telemetry.core import device_finder
 from telemetry.core.backends.chrome import android_browser_finder
 from telemetry.core.backends.chrome import cros_browser_finder
 from telemetry.core.backends.chrome import desktop_browser_finder
 from telemetry.core.backends.chrome import ios_browser_finder
 from telemetry.core.backends.remote import trybot_browser_finder
 from telemetry.core.backends.webdriver import webdriver_desktop_browser_finder
+from telemetry.core import browser_finder_exceptions
+from telemetry.core import device_finder
+from telemetry import decorators
 
 BROWSER_FINDERS = [
   desktop_browser_finder,
@@ -61,12 +61,7 @@ def FindBrowser(options):
     raise browser_finder_exceptions.BrowserFinderException(
         '--remote requires --browser=cros-chrome or cros-chrome-guest.')
 
-  devices = []
-  if options.device and options.device != 'list':
-    devices = device_finder.GetSpecifiedDevices(options)
-  else:
-    devices = device_finder.GetAllAvailableDevices(options)
-
+  devices = device_finder.GetDevicesMatchingOptions(options)
   browsers = []
   default_browsers = []
   for device in devices:
@@ -168,7 +163,7 @@ def GetAllAvailableBrowserTypes(options):
   Raises:
     BrowserFinderException: Options are improperly set, or an error occurred.
   """
-  devices = device_finder.GetAllAvailableDevices(options)
+  devices = device_finder.GetDevicesMatchingOptions(options)
   possible_browsers = []
   for device in devices:
     possible_browsers.extend(GetAllAvailableBrowsers(options, device))

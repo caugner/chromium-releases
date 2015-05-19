@@ -84,11 +84,6 @@
 
 }
 
-#oobe.account-picker.flying-pods #inner-container {
-  -webkit-transition: width 180ms ease,
-                      height 180ms ease;
-}
-
 /* Only play this animation when 'down' class is removed. */
 .oobe-display #inner-container:not(.down) {
   -webkit-transition: -webkit-transform 200ms ease-in-out;
@@ -103,17 +98,6 @@
   display: -webkit-box;
   position: absolute;
   top: 15px;
-}
-
-#close-button-item {
-  -webkit-margin-start: 17px;
-  display: flex;
-  position: absolute;
-  right: 15px;
-  top: 15px;
-  width: 30px;
-  height: 30px;
-  z-index: 1;
 }
 
 #progress-dots {

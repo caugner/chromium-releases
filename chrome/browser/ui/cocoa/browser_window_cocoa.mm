@@ -406,7 +406,7 @@ void BrowserWindowCocoa::ExitFullscreen() {
   [controller_ exitAnyFullscreen];
 }
 
-void BrowserWindowCocoa::UpdateFullscreenExitBubbleContent(
+void BrowserWindowCocoa::UpdateExclusiveAccessExitBubbleContent(
     const GURL& url,
     ExclusiveAccessBubbleType bubble_type) {
   [controller_ updateFullscreenExitBubbleURL:url bubbleType:bubble_type];
@@ -683,11 +683,6 @@ void BrowserWindowCocoa::UserChangedTheme() {
   [controller_ userChangedTheme];
 }
 
-int BrowserWindowCocoa::GetExtraRenderViewHeight() const {
-  // Currently this is only used on linux.
-  return 0;
-}
-
 void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
   NOTIMPLEMENTED();
 }
@@ -819,4 +814,27 @@ void BrowserWindowCocoa::ExecuteExtensionCommand(
     const extensions::Extension* extension,
     const extensions::Command& command) {
   [cocoa_controller() executeExtensionCommand:extension->id() command:command];
+}
+
+ExclusiveAccessContext* BrowserWindowCocoa::GetExclusiveAccessContext() {
+  return this;
+}
+
+Profile* BrowserWindowCocoa::GetProfile() {
+  return browser_->profile();
+}
+
+WebContents* BrowserWindowCocoa::GetActiveWebContents() {
+  return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+void BrowserWindowCocoa::UnhideDownloadShelf() {
+  GetDownloadShelf()->Unhide();
+}
+
+void BrowserWindowCocoa::HideDownloadShelf() {
+  GetDownloadShelf()->Hide();
+  StatusBubble* statusBubble = GetStatusBubble();
+  if (statusBubble)
+    statusBubble->Hide();
 }

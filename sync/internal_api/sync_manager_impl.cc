@@ -901,6 +901,7 @@ void SyncManagerImpl::OnIncomingInvalidation(
     scoped_ptr<InvalidationInterface> invalidation) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  allstatus_.IncrementNotificationsReceived();
   scheduler_->ScheduleInvalidationNudge(
       type,
       invalidation.Pass(),
@@ -968,23 +969,6 @@ bool SyncManagerImpl::ReceivedExperiment(Experiments* experiments) {
             pre_commit_update_avoidance().enabled());
     // We don't bother setting found_experiment.  The frontend doesn't need to
     // know about this.
-  }
-
-  ReadNode enhanced_bookmarks_node(&trans);
-  if (enhanced_bookmarks_node.InitByClientTagLookup(
-          syncer::EXPERIMENTS, syncer::kEnhancedBookmarksTag) ==
-          BaseNode::INIT_OK &&
-      enhanced_bookmarks_node.GetExperimentsSpecifics()
-          .has_enhanced_bookmarks()) {
-    const sync_pb::EnhancedBookmarksFlags& enhanced_bookmarks =
-        enhanced_bookmarks_node.GetExperimentsSpecifics().enhanced_bookmarks();
-    if (enhanced_bookmarks.has_enabled())
-      experiments->enhanced_bookmarks_enabled = enhanced_bookmarks.enabled();
-    if (enhanced_bookmarks.has_extension_id()) {
-      experiments->enhanced_bookmarks_ext_id =
-          enhanced_bookmarks.extension_id();
-    }
-    found_experiment = true;
   }
 
   ReadNode gcm_invalidations_node(&trans);

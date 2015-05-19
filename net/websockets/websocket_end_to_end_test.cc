@@ -59,8 +59,7 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
   std::string extensions() const;
 
   // Implementation of WebSocketEventInterface.
-  ChannelState OnAddChannelResponse(bool fail,
-                                    const std::string& selected_subprotocol,
+  ChannelState OnAddChannelResponse(const std::string& selected_subprotocol,
                                     const std::string& extensions) override;
 
   ChannelState OnDataFrame(bool fin,
@@ -102,7 +101,7 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
   DISALLOW_COPY_AND_ASSIGN(ConnectTestingEventInterface);
 };
 
-ConnectTestingEventInterface::ConnectTestingEventInterface() : failed_(true) {
+ConnectTestingEventInterface::ConnectTestingEventInterface() : failed_(false) {
 }
 
 void ConnectTestingEventInterface::WaitForResponse() {
@@ -125,14 +124,12 @@ std::string ConnectTestingEventInterface::extensions() const {
 typedef ConnectTestingEventInterface::ChannelState ChannelState;
 
 ChannelState ConnectTestingEventInterface::OnAddChannelResponse(
-    bool fail,
     const std::string& selected_subprotocol,
     const std::string& extensions) {
-  failed_ = fail;
   selected_subprotocol_ = selected_subprotocol;
   extensions_ = extensions;
   QuitNestedEventLoop();
-  return fail ? CHANNEL_DELETED : CHANNEL_ALIVE;
+  return CHANNEL_ALIVE;
 }
 
 ChannelState ConnectTestingEventInterface::OnDataFrame(
@@ -245,12 +242,11 @@ class WebSocketEndToEndTest : public ::testing::Test {
     if (!initialised_context_) {
       InitialiseContext();
     }
-    std::vector<std::string> sub_protocols;
     url::Origin origin("http://localhost");
     event_interface_ = new ConnectTestingEventInterface;
     channel_.reset(
         new WebSocketChannel(make_scoped_ptr(event_interface_), &context_));
-    channel_->SendAddChannelRequest(GURL(socket_url), sub_protocols, origin);
+    channel_->SendAddChannelRequest(GURL(socket_url), sub_protocols_, origin);
     event_interface_->WaitForResponse();
     return !event_interface_->failed();
   }
@@ -259,6 +255,7 @@ class WebSocketEndToEndTest : public ::testing::Test {
   scoped_ptr<TestNetworkDelegateWithProxyInfo> network_delegate_;
   TestURLRequestContext context_;
   scoped_ptr<WebSocketChannel> channel_;
+  std::vector<std::string> sub_protocols_;
   bool initialised_context_;
 };
 
@@ -357,7 +354,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HttpsProxyUsed)) {
       AuthCredentials(base::ASCIIToUTF16("foo"), base::ASCIIToUTF16("bar")));
   {
     scoped_ptr<URLRequest> request(
-        context_.CreateRequest(http_page, DEFAULT_PRIORITY, &delegate, NULL));
+        context_.CreateRequest(http_page, DEFAULT_PRIORITY, &delegate));
     request->Start();
     // TestDelegate exits the message loop when the request completes by
     // default.
@@ -403,7 +400,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HstsHttpsToWebSocket)) {
   TestDelegate delegate;
   GURL https_page = https_server.GetURL("files/hsts-headers.html");
   scoped_ptr<URLRequest> request(
-      context_.CreateRequest(https_page, DEFAULT_PRIORITY, &delegate, NULL));
+      context_.CreateRequest(https_page, DEFAULT_PRIORITY, &delegate));
   request->Start();
   // TestDelegate exits the message loop when the request completes.
   base::RunLoop().Run();
@@ -436,7 +433,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HstsWebSocketToHttps)) {
   GURL http_page =
       ReplaceUrlScheme(https_server.GetURL("files/simple.html"), "http");
   scoped_ptr<URLRequest> request(
-      context_.CreateRequest(http_page, DEFAULT_PRIORITY, &delegate, NULL));
+      context_.CreateRequest(http_page, DEFAULT_PRIORITY, &delegate));
   request->Start();
   // TestDelegate exits the message loop when the request completes.
   base::RunLoop().Run();
@@ -457,6 +454,38 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HstsWebSocketToWebSocket)) {
   // Verify via wss:
   GURL ws_url = ReplaceUrlScheme(wss_server.GetURL(kEchoServer), "ws");
   EXPECT_TRUE(ConnectAndWait(ws_url));
+}
+
+// Regression test for crbug.com/180504 "WebSocket handshake fails when HTTP
+// headers have trailing LWS".
+TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(TrailingWhitespace)) {
+  SpawnedTestServer ws_server(SpawnedTestServer::TYPE_WS,
+                              SpawnedTestServer::kLocalhost,
+                              GetWebSocketTestDataDirectory());
+  ASSERT_TRUE(ws_server.Start());
+
+  GURL ws_url = ws_server.GetURL("trailing-whitespace");
+  sub_protocols_.push_back("sip");
+  EXPECT_TRUE(ConnectAndWait(ws_url));
+  EXPECT_EQ("sip", event_interface_->selected_subprotocol());
+}
+
+// This is a regression test for crbug.com/169448 "WebSockets should support
+// header continuations"
+// TODO(ricea): HTTP continuation headers have been deprecated by RFC7230.  If
+// support for continuation headers is removed from Chrome, then this test will
+// break and should be removed.
+TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HeaderContinuations)) {
+  SpawnedTestServer ws_server(SpawnedTestServer::TYPE_WS,
+                              SpawnedTestServer::kLocalhost,
+                              GetWebSocketTestDataDirectory());
+  ASSERT_TRUE(ws_server.Start());
+
+  GURL ws_url = ws_server.GetURL("header-continuation");
+
+  EXPECT_TRUE(ConnectAndWait(ws_url));
+  EXPECT_EQ("permessage-deflate; server_max_window_bits=10",
+            event_interface_->extensions());
 }
 
 }  // namespace

@@ -182,12 +182,12 @@ bool MockPeerConnectionImpl::GetStats(
 
   DCHECK_EQ(kStatsOutputLevelStandard, level);
   webrtc::StatsReport report1(webrtc::StatsReport::NewTypedId(
-      webrtc::StatsReport::kStatsReportTypeSsrc, "1234").Pass());
+      webrtc::StatsReport::kStatsReportTypeSsrc, "1234"));
   webrtc::StatsReport report2(webrtc::StatsReport::NewTypedId(
-      webrtc::StatsReport::kStatsReportTypeSession, "nontrack").Pass());
+      webrtc::StatsReport::kStatsReportTypeSession, "nontrack"));
   report1.set_timestamp(42);
-  report1.AddValue(webrtc::StatsReport::kStatsValueNameFingerprint,
-                   "trackvalue");
+  report1.AddString(webrtc::StatsReport::kStatsValueNameFingerprint,
+                    "trackvalue");
 
   webrtc::StatsReports reports;
   reports.push_back(&report1);
@@ -196,8 +196,8 @@ bool MockPeerConnectionImpl::GetStats(
   // If selector is not given, we pass back two.
   if (!track) {
     report2.set_timestamp(44);
-    report2.AddValue(webrtc::StatsReport::kStatsValueNameFingerprintAlgorithm,
-                     "somevalue");
+    report2.AddString(webrtc::StatsReport::kStatsValueNameFingerprintAlgorithm,
+                      "somevalue");
     reports.push_back(&report2);
   }
 

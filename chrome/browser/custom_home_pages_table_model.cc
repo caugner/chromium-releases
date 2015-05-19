@@ -9,7 +9,6 @@
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -228,8 +228,9 @@ void CustomHomePagesTableModel::SetObserver(ui::TableModelObserver* observer) {
 }
 
 void CustomHomePagesTableModel::LoadTitle(Entry* entry) {
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (history_service) {
     entry->task_id = history_service->QueryURL(
         entry->url,
@@ -243,8 +244,9 @@ void CustomHomePagesTableModel::LoadTitle(Entry* entry) {
 }
 
 void CustomHomePagesTableModel::LoadAllTitles() {
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   // It's possible for multiple LoadAllTitles() queries to be inflight we want
   // to make sure everything is resolved before updating the observer or we risk
   // getting rendering glitches.

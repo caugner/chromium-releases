@@ -13,6 +13,9 @@
   <message name="IDS_CHROMEBASE" desc="The localized name for Chromebase">
     Chromebase
   </message>
+  <message name="IDS_CHROMEBIT" desc="The localized name for Chromebit">
+    Chromebit  
+  </message>
   <!-- Idle logout dialog for retail mode -->
   <message name="IDS_IDLE_LOGOUT_TITLE" desc="Dialog title for the idle logout dialog. Used in retail mode only.">
     Are you still there?
@@ -208,6 +211,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_ERROR_LONG_NAME" desc="Error message displayed when user trys to enter too long name for a file or a folder.">
     This name is too long
   </message>
+  <message name="IDS_FILE_BROWSER_EMPTY_FOLDER" desc="Label shown in an empty folder.">
+    Nothing to see here...
+  </message>
   <message name="IDS_FILE_BROWSER_NEW_FOLDER_BUTTON_LABEL" desc="Label on the 'New folder' button.">
     New folder
   </message>
@@ -243,6 +249,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_CLOSE_VOLUME_BUTTON_LABEL" desc="Title of the action for closing either an archive volume or a volume provided by an extension.">
     Close
+  </message>
+  <message name="IDS_FILE_BROWSER_ADD_NEW_SERVICES_BUTTON_LABEL" desc="Title of the button in the left nav to add new services (file systems) to Files app.">
+    Add new services
   </message>
   <message name="IDS_FILE_BROWSER_ACTION_VIEW" desc="Title of the action to view (no edit) a file.">
     View
@@ -355,6 +364,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_GALLERY_SAVED" desc="In the Gallery, the message informing that editing saved successfully.">
     Saved
   </message>
+  <message name="IDS_FILE_BROWSER_GALLERY_SAVE_FAILED" desc="In the Gallery, the message informing that it failed to save editing image.">
+    Failed to save image.
+  </message>
   <message name="IDS_FILE_BROWSER_GALLERY_OVERWRITE_ORIGINAL" desc="In the Gallery, text on the button to overwrite original file along with the edited copy.">
     Overwrite original
   </message>
@@ -445,6 +457,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_SHARE_BUTTON_LABEL" desc="Menu item label, showing dialog to share the selected file.">
     Share
   </message>
+  <message name="IDS_FILE_BROWSER_TOGGLE_HIDDEN_FILES_COMMAND_LABEL" desc="Label for menu or button with checkmark that toggles visibility of hidden files.">
+    Show hidden files
+  </message>
   <message name="IDS_FILE_BROWSER_TASKS_BUTTON_LABEL" desc="Label for button that selects a task to open the current file.">
     Tasks
   </message>
@@ -474,6 +489,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_COMMAND" desc="Label of button on details panel that invokes cloud import feature.">
     Back up
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_CANCEL_COMMAND" desc="Label of button on details panel that cancels an active import.">
+    Cancel
   </message>
   <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_SCANNING" desc="Cloud import scanning status message.">
     Scanning your media device...
@@ -668,6 +686,9 @@ Press any key to continue exploring.
 
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_TITLE" desc="Title of the suggest app dialog, which shows the list of the apps which supports the selected file.">
     Select an app to open this file
+  </message>
+  <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_FOR_PROVIDERS_TITLE" desc="Title of the suggest app dialog, which shows the list of the apps that can be added to the left nav of Files app.">
+    Available services
   </message>
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_LINK_TO_WEBSTORE" desc="Text of the link to the app list on Chrome Webstore, which shows the more apps than in the suggest app dialog.">
     See more...
@@ -1869,6 +1890,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_PRIVATE_NETWORK" desc="Title for Virtual Private Network (VPN) group on the settings page">
     Private network
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_SECTION_THIRD_PARTY_VPN_NAME_TEMPLATE" desc="Template for constructing the name of a VPN network that is handled by a third-party VPN provider from the provider name and the network name.">
+    <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>: <ph name="NETWORK_NAME">$2<ex>Work Network</ex></ph>
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADD_CONNECTION" desc="Title for control to add a new network connection." >
     Add connection
   </message>
@@ -1878,6 +1902,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_REMEMBERED_NETWORK" desc="Title for section in settings/internet for list of remembered (favirote) networks">
     Remembered networks
 
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_ADD_VPN_TEMPLATE" desc="Template for constructing a menu item that will ask a given VPN provider to show its 'add network' dialog.">
+    Add <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>...
   </message>
   <!-- Network state strings -->
   <message name="IDS_CHROMEOS_NETWORK_STATE_NOT_CONNECTED" desc="Displayed state for a network when not connected.">
@@ -2445,6 +2472,9 @@ Press any key to continue exploring.
   <message name="IDS_IMAGE_SCREEN_SYNCING_PREFERENCES" desc="The message displayed on the image screen while user preferences are syncing.">
     Syncing your preferences
   </message>
+  <message name="IDS_IMAGE_SCREEN_SYNCING_PREFERENCES_NEW_GAIA_FLOW" desc="The message displayed on the image screen of new Gaia flow while user preferences are syncing.">
+    Syncing your preferences...
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIMAX" desc="In settings Internet options, the title for the WiMAX tab.">
     WiMAX
   </message>
@@ -2652,6 +2682,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_OPEN_VPN" desc="In settings Internet options, a string specifying OpenVPN.">
     OpenVPN
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_THIRD_PARTY_VPN" desc="In settings Internet options, a string indicating that a VPN connection is provided by a third party.">
+    Third party
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVICE_NAME" desc="In settings Internet options, a string specifying VPN service name.">
     Service name:
   </message>
@@ -2660,6 +2693,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_TYPE" desc="In settings Internet options, a string specifying VPN provider type.">
     Provider type:
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_NAME" desc="In settings Internet options, a string specifying VPN provider name.">
+    Provider name:
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PSK_PASSPHRASE" desc="In settings Internet options, a string specifying VPN PSK passphrase.">
     Pre-shared key:
@@ -4179,6 +4215,75 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_INSTRUCTIONS_HIDE" desc="The instruction for hiding the keyboard overlay.">
     Type Ctrl+Alt+/ or Escape to hide
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ESC_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'esc' (Escape) key.">
+    esc
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BACK_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'back' key that when pressed the browser goes back to the previous page in the tab's browsing history.">
+    back
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_FORWARD_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'forward' key that when pressed the browser goes forward to the next page in the tab's browsing history.">
+    forward
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_RELOAD_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'reload' key that when pressed the browser reloads the current page.">
+    reload
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_FULL_SCREEN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'full screen' key that when pressed the active window will become full screen.">
+    full screen
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SWITCH_WIN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'switch window' key that when pressed an overview of all windows will be shown on screen.">
+    switch window
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BRIGHT_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'bright down' key that turns the screen's brightness down.">
+    bright down
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BRIGHT_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'bright up' key that turns the screen's brightness up.">
+    bright up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_MUTE_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'mute' key that mutes the system's sound.">
+    mute
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_VOL_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'volume down' key that turns the system's sound volume down.">
+    vol. down
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_VOL_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'volume up' key that turns the system's sound volume up">
+    vol. up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_POWER_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'power' key.">
+    power
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BACKSPACE_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'backspace' key.">
+    backspace
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_TAB_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'tab' key.">
+    tab
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SEARCH_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'search' key.">
+    search
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ENTER_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'enter' key.">
+    enter
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SHIFT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'shift' key.">
+    shift
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_CTRL_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'ctrl' key.">
+    ctrl
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ALT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'alt' key.">
+    alt
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_LEFT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'left' arrow key.">
+    left
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_RIGHT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'right' arrow key.">
+    right
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'up' arrow key.">
+    up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'down' arrow key.">
+    down
+  </message>
   <!-- BEGIN GENERATED KEYBOARD OVERLAY STRINGS -->
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_SHELF_ITEM" desc="The text in the keyboard overlay to explain the shortcut (Open the last shelf item).">
     Last shelf item
@@ -4982,7 +5087,7 @@ Battery full
     Zhuyin input method
   </message>
   <message name="IDS_IME_NAME_INPUTMETHOD_HANGUL" desc="The input method name shows in system tray menu, this is Korean Hangul input method.">
-    Hangul input method
+    Korean input method
   </message>
   <message name="IDS_IME_NAME_INPUTMETHOD_HANGUL_2_SET" desc="The input method name shows in system tray menu, this is Korean Hangul input method, 2 Set mode.">
     Hangul 2 Set
@@ -5504,22 +5609,28 @@ All users must sign out to continue.
     Connect to network
   </message>
   <message name="IDS_PORTAL_DETECTION_NOTIFICATION_TITLE_WIFI" desc="Title for the system notification that current Wi-Fi network is behind captive portal">
-    Connect to Wi-Fi
+    Connect to Wi-Fi network
   </message>
   <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_WIRED" desc="Body of the system notification that current wired network is behind captive portal">
     The network you are using (<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>) may require you to visit its login page.
   </message>
   <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_WIFI" desc="Body of the system notification that current Wi-Fi network is behind captive portal">
-    The Wi-Fi you are using (<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>) may require you to visit its login page.
+    The Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>) may require you to visit its login page.
   </message>
-  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_CHOICE_MESSAGE" desc="Body of the system notification that current network is behind captive portal">
-    <ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph> may require visiting<ph name="LOGIN_URL">$2<ex>portal.ipass.net</ex></ph> to complete your connection..
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_ASK_WIFI" desc="Body of the system notification that asks a user whether to use an extension to authenticate to the network">
+    The Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph>) may require authentication.
   </message>
-  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_EXTENSION_TITLE" desc="Text for the button in the captive portal system notification to connect using extension">
-    Connect using <ph name="PORTAL_PROVIDER">$1<ex>iPass</ex></ph>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_FAILED_WIFI" desc="Body of the system notification that authentication failed and current network is still behind captive portal">
+    Authentication failed. Click to visit the login page for the Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph>).
   </message>
-  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_PORTAL_TITLE" desc="Text for the button in the captive portal system notification to open up the captive portal login page">
-    Visit captive portal site
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_EXTENSION" desc="Button caption to connect using the authenticating extension">
+    Connect using <ph name="ExtensionName">$1<ex>WiFi Company Authenticator</ex></ph>
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_EXTENSION_RETRY" desc="Button caption to connect using the authenticating extension">
+    Retry using <ph name="ExtensionName">$1<ex>WiFi Company Authenticator</ex></ph>
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_PORTAL" desc="Button caption to open the captive portal login page.">
+    Visit captive portal login page
   </message>
 
   <!-- Locale Change Notification-->
@@ -5872,8 +5983,14 @@ All users must sign out to continue.
   <message name="IDS_NETWORK_UI_FORMAT_MANAGED" desc="Label in network property format dropdown for managed ONC properties">
     Managed ONC
   </message>
+  <message name="IDS_NETWORK_UI_FORMAT_STATE" desc="Label in network property format dropdown for ONC State properties">
+    ONC State
+  </message>
   <message name="IDS_NETWORK_UI_FORMAT_SHILL" desc="Label in network property format dropdown for Shill properties">
     Shill
+  </message>
+  <message name="IDS_NETWORK_UI_DEFAULT_NETWORK" desc="Text for the name and status of the default network">
+    Default Network: <ph name="NETWORK">$1<ex>Linksys</ex></ph> State: <ph name="STATE">$2<ex>Connected</ex></ph>
   </message>
   <message name="IDS_NETWORK_UI_VISIBLE_NETWORKS" desc="Label for list of visible networks">
     Visible Networks:
@@ -6069,7 +6186,47 @@ All users must sign out to continue.
   <message name="IDS_FLAGS_DISABLE_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION" desc="Description for the flag to disable user setting to automatically update timezone by user geolocation.">
     If set, automatic timezone update by the current geolocation is turned off.
   </message>
+  <message name="IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_NAME" desc="Title for the flag to disable the new WebView-based sign-in flow.">
+    Disable WebView-based sign-in flow
+  </message>
+  <message name="IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_DESCRIPTION" desc="Description for the flag to disable the new WebView-based sign-in flow.">
+    If set, sign-in will be performed using the old GAIA flow instead of the new WebView-based one.
+  </message>
   <message name="IDS_OPTIONS_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION" desc="Label for checkbox to allow automatic timezone update by user geolocation.">
     Set time zone automatically using your location
   </message>
+  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_NAME" desc="Name of the option to enable punching holes in the Chrome OS firewall.">
+    Enable firewall hole punching.
+  </message>
+  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_DESCRIPTION" desc="Description of the option to enable punching holes in the Chrome OS firewall.">
+    Enable punching holes in the Chrome OS firewall for Chrome Apps that open a TCP/IP server socket or UDP socket.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE" desc="Title of a prompt dialog for granting permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name.">
+    Permission requested
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_MESSAGE" desc="Message in a prompt dialog for granting read-only permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to copy files from <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_WRITABLE_MESSAGE" desc="Message in a prompt dialog for granting full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to access <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>. It may modify or delete your files.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_ALLOW_BUTTON" desc="Label on the button to grant permissions.">
+    Allow
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON" desc="Label on the button to reject permissions.">
+    Deny
+  </message>
+  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_NAME" desc="Name of the option to enable mtp write support.">
+    Enable MTP write support
+  </message>
+  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_DESCRIPTION" desc="Description of the option to enable mtp write support.">
+    Enable MTP write support in file manager. Some operations (editing an image on MTP volume) are not supported yet.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_MESSAGE" desc="Message in a notification about granted read-only pemissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    Read-only access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_WRITABLE_MESSAGE" desc="Message in a notification about granted full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    Read and write access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+
 </grit-part>

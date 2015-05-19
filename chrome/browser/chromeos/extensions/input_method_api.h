@@ -12,6 +12,7 @@
 #include "extensions/browser/extension_function.h"
 
 namespace chromeos {
+class ExtensionDictionaryEventRouter;
 class ExtensionInputMethodEventRouter;
 }
 
@@ -81,9 +82,43 @@ class GetInputMethodsFunction : public UIThreadExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(GetInputMethodsFunction);
 };
 
+// Implements the inputMethodPrivate.fetchAllDictionaryWords method.
+class FetchAllDictionaryWordsFunction : public UIThreadExtensionFunction {
+ public:
+  FetchAllDictionaryWordsFunction() {}
+
+ protected:
+  ~FetchAllDictionaryWordsFunction() override {}
+
+  ResponseAction Run() override;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.fetchAllDictionaryWords",
+                             INPUTMETHODPRIVATE_FETCHALLDICTIONARYWORDS)
+  DISALLOW_COPY_AND_ASSIGN(FetchAllDictionaryWordsFunction);
+};
+
+// Implements the inputMethodPrivate.addWordToDictionary method.
+class AddWordToDictionaryFunction : public UIThreadExtensionFunction {
+ public:
+  AddWordToDictionaryFunction() {}
+
+ protected:
+  ~AddWordToDictionaryFunction() override {}
+
+  ResponseAction Run() override;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.addWordToDictionary",
+                             INPUTMETHODPRIVATE_ADDWORDTODICTIONARY)
+  DISALLOW_COPY_AND_ASSIGN(AddWordToDictionaryFunction);
+};
+
 class InputMethodAPI : public BrowserContextKeyedAPI,
                        public extensions::EventRouter::Observer {
  public:
+  static const char kOnDictionaryChanged[];
+  static const char kOnDictionaryLoaded[];
   static const char kOnInputMethodChanged[];
 
   explicit InputMethodAPI(content::BrowserContext* context);
@@ -116,6 +151,8 @@ class InputMethodAPI : public BrowserContextKeyedAPI,
   // Created lazily upon OnListenerAdded.
   scoped_ptr<chromeos::ExtensionInputMethodEventRouter>
       input_method_event_router_;
+  scoped_ptr<chromeos::ExtensionDictionaryEventRouter>
+      dictionary_event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodAPI);
 };

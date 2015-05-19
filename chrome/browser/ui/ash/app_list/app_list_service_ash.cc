@@ -49,14 +49,20 @@ void AppListServiceAsh::ShowAndSwitchToState(
 
   app_list::ContentsView* contents_view =
       app_list_view->app_list_main_view()->contents_view();
-  contents_view->SetActivePage(contents_view->GetPageIndexForState(state),
-                               app_list_was_open /* animate */);
+  contents_view->SetActiveState(state, app_list_was_open /* animate */);
 }
 
 void AppListServiceAsh::Init(Profile* initial_profile) {
   // Ensure the StartPageService is created here. This early initialization is
   // necessary to allow the WebContents to load before the app list is shown.
-  app_list::StartPageService::Get(initial_profile)->Init();
+  app_list::StartPageService* service =
+      app_list::StartPageService::Get(initial_profile);
+  if (service)
+    service->Init();
+}
+
+void AppListServiceAsh::OnProfileWillBeRemoved(
+    const base::FilePath& profile_path) {
 }
 
 base::FilePath AppListServiceAsh::GetProfilePath(

@@ -293,7 +293,8 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "431326 AppListViewDelegate::SetProfile2"));
 
-    speech_ui_->SetSpeechRecognitionState(app_list::SPEECH_RECOGNITION_OFF);
+    speech_ui_->SetSpeechRecognitionState(app_list::SPEECH_RECOGNITION_OFF,
+                                          false);
     return;
   }
 
@@ -315,8 +316,8 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     template_url_service_observer_.Add(template_url_service);
   }
 
-  model_ =
-      app_list::AppListSyncableServiceFactory::GetForProfile(profile_)->model();
+  model_ = app_list::AppListSyncableServiceFactory::GetForProfile(profile_)
+               ->GetModel();
 
 #if defined(USE_ASH)
   app_sync_ui_state_watcher_.reset(new AppSyncUIStateWatcher(profile_, model_));
@@ -344,7 +345,8 @@ void AppListViewDelegate::SetUpSearchUI() {
 
   speech_ui_->SetSpeechRecognitionState(start_page_service
                                             ? start_page_service->state()
-                                            : app_list::SPEECH_RECOGNITION_OFF);
+                                            : app_list::SPEECH_RECOGNITION_OFF,
+                                        false);
 
   search_resource_manager_.reset(new app_list::SearchResourceManager(
       profile_,
@@ -649,8 +651,17 @@ void AppListViewDelegate::ToggleSpeechRecognitionForHotword(
     const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble) {
   app_list::StartPageService* service =
       app_list::StartPageService::Get(profile_);
-  if (service)
+
+  // Don't start the recognizer or stop the hotword session if there is a
+  // network error. Show the network error message instead.
+  if (service) {
+    if (service->state() == app_list::SPEECH_RECOGNITION_NETWORK_ERROR) {
+      speech_ui_->SetSpeechRecognitionState(
+          app_list::SPEECH_RECOGNITION_NETWORK_ERROR, true);
+      return;
+    }
     service->ToggleSpeechRecognition(preamble);
+  }
 
   // With the new hotword extension, stop the hotword session. With the launcher
   // and NTP, this is unnecessary since the hotwording is implicitly stopped.
@@ -661,8 +672,7 @@ void AppListViewDelegate::ToggleSpeechRecognitionForHotword(
   // should cause a search to happen for 'Ok Google', not two hotword triggers).
   // To get around this, always stop the session when switching to speech
   // recognition.
-  if (HotwordService::IsExperimentalHotwordingEnabled() &&
-      service && service->HotwordEnabled()) {
+  if (service && service->HotwordEnabled()) {
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
     if (hotword_service)
@@ -692,7 +702,7 @@ void AppListViewDelegate::OnSpeechSoundLevelChanged(int16 level) {
 
 void AppListViewDelegate::OnSpeechRecognitionStateChanged(
     app_list::SpeechRecognitionState new_state) {
-  speech_ui_->SetSpeechRecognitionState(new_state);
+  speech_ui_->SetSpeechRecognitionState(new_state, false);
 
   app_list::StartPageService* service =
       app_list::StartPageService::Get(profile_);
@@ -700,7 +710,6 @@ void AppListViewDelegate::OnSpeechRecognitionStateChanged(
   // speech recognition has stopped. Do not request hotwording after the app
   // list has already closed.
   if (new_state == app_list::SPEECH_RECOGNITION_READY &&
-      HotwordService::IsExperimentalHotwordingEnabled() &&
       service && service->HotwordEnabled() &&
       controller_->GetAppListWindow()) {
     HotwordService* hotword_service =
@@ -748,8 +757,11 @@ std::vector<views::View*> AppListViewDelegate::CreateCustomPageWebViews(
     DCHECK_EQ(profile_, web_contents->GetBrowserContext());
 
     // Make the webview transparent.
-    web_contents->GetRenderViewHost()->GetView()->SetBackgroundColor(
-        SK_ColorTRANSPARENT);
+    content::RenderWidgetHostView* render_view_host_view =
+        web_contents->GetRenderViewHost()->GetView();
+    // The RenderWidgetHostView may be null if the renderer has crashed.
+    if (render_view_host_view)
+      render_view_host_view->SetBackgroundColor(SK_ColorTRANSPARENT);
 
     views::WebView* web_view =
         new views::WebView(web_contents->GetBrowserContext());

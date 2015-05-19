@@ -6,20 +6,16 @@
 #define CHROME_BROWSER_PRERENDER_PRERENDER_MANAGER_H_
 
 #include <list>
-#include <map>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task/cancelable_task_tracker.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/predictors/logged_in_predictor_table.h"
 #include "chrome/browser/prerender/prerender_config.h"
@@ -31,7 +27,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
-#include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_monster.h"
 #include "url/gurl.h"
 
@@ -55,16 +50,11 @@ namespace gfx {
 class Size;
 }
 
-namespace net {
-class URLRequestContextGetter;
-}
-
 namespace prerender {
 
 class PrerenderHandle;
 class PrerenderHistory;
 class PrerenderLocalPredictor;
-class PrerenderTracker;
 
 // PrerenderManager is responsible for initiating and keeping prerendered
 // views of web pages. All methods must be called on the UI thread unless
@@ -104,7 +94,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   static const uint8 kNoExperiment = 0;
 
   // Owned by a Profile object for the lifetime of the profile.
-  PrerenderManager(Profile* profile, PrerenderTracker* prerender_tracker);
+  explicit PrerenderManager(Profile* profile);
 
   ~PrerenderManager() override;
 
@@ -265,16 +255,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
       PrerenderContents::MatchCompleteStatus mc_status,
       FinalStatus final_status) const;
 
-  // Record a cookie status histogram (see prerender_histograms.h).
-  void RecordCookieStatus(Origin origin,
-                          uint8 experiment_id,
-                          int cookie_status) const;
-
-  // Record a cookie send type histogram (see prerender_histograms.h).
-  void RecordCookieSendType(Origin origin,
-                            uint8 experiment_id,
-                            int cookie_send_type) const;
-
   // content::NotificationObserver
   void Observe(int type,
                const content::NotificationSource& source,
@@ -286,10 +266,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   const Config& config() const { return config_; }
   Config& mutable_config() { return config_; }
-
-  PrerenderTracker* prerender_tracker() { return prerender_tracker_; }
-
-  bool cookie_store_loaded() { return cookie_store_loaded_; }
 
   // Records that some visible tab navigated (or was redirected) to the
   // provided URL.
@@ -305,12 +281,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                                   bool* lookup_result,
                                   bool* database_was_present,
                                   const base::Closure& result_cb);
-
-  void OnHistoryServiceDidQueryURL(Origin origin,
-                                   uint8 experiment_id,
-                                   bool success,
-                                   const history::URLRow& url_row,
-                                   const history::VisitVector& visits);
 
   Profile* profile() const { return profile_; }
 
@@ -328,17 +298,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   PrerenderLocalPredictor* local_predictor() {
     return local_predictor_.get();
   }
-
-  // Notification that a cookie event happened on a render frame. Will record a
-  // cookie event for a given render frame, if it is being prerendered.
-  // If cookies were sent, all cookies must be supplied in |cookie_list|.
-  static void RecordCookieEvent(int process_id,
-                                int frame_id,
-                                const GURL& url,
-                                const GURL& frame_url,
-                                bool is_for_blocking_resource,
-                                PrerenderContents::CookieEvent event,
-                                const net::CookieList* cookie_list);
 
   // Notification that a prerender has completed and its bytes should be
   // recorded.
@@ -362,15 +321,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // content::RenderProcessHostObserver implementation.
   void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
-
-  // To be called once the cookie store for this profile has been loaded.
-  void OnCookieStoreLoaded();
-
-  // For testing purposes. Issues a callback once the cookie store has been
-  // loaded.
-  void set_on_cookie_store_loaded_cb_for_testing(base::Closure cb) {
-    on_cookie_store_loaded_cb_for_testing_ = cb;
-  }
 
  protected:
   class PrerenderData : public base::SupportsWeakPtr<PrerenderData> {
@@ -444,11 +394,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // might have committed an omnibox navigation. This is used to possibly
   // shorten the TTL of the prerendered page.
   void SourceNavigatedAway(PrerenderData* prerender_data);
-
-  // Gets the request context for the profile.
-  // For unit tests, this will be overriden to return NULL, since it is not
-  // needed.
-  virtual net::URLRequestContextGetter* GetURLRequestContext();
 
  private:
   friend class ::InstantSearchPrerendererTest;
@@ -583,8 +528,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // The profile that owns this PrerenderManager.
   Profile* profile_;
 
-  PrerenderTracker* prerender_tracker_;
-
   // All running prerenders. Sorted by expiry time, in ascending order.
   ScopedVector<PrerenderData> active_prerenders_;
 
@@ -632,8 +575,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   content::NotificationRegistrar notification_registrar_;
 
-  base::CancelableTaskTracker query_url_tracker_;
-
   // The number of bytes transferred over the network for the profile this
   // PrerenderManager is attached to.
   int64 profile_network_bytes_;
@@ -644,11 +585,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Set of process hosts being prerendered.
   typedef std::set<content::RenderProcessHost*> PrerenderProcessSet;
   PrerenderProcessSet prerender_process_hosts_;
-
-  // Indicates whether the cookie store for this profile has fully loaded yet.
-  bool cookie_store_loaded_;
-
-  base::Closure on_cookie_store_loaded_cb_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderManager);
 };

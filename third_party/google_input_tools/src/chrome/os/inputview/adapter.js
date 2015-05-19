@@ -38,7 +38,6 @@ var ContextType = i18n.input.chrome.message.ContextType;
 var FeatureTracker = i18n.input.chrome.inputview.FeatureTracker;
 var FeatureName = i18n.input.chrome.inputview.FeatureName;
 var Name = i18n.input.chrome.message.Name;
-var SizeSpec = i18n.input.chrome.inputview.SizeSpec;
 var Type = i18n.input.chrome.message.Type;
 
 
@@ -114,10 +113,6 @@ Adapter.GoogleSites = {
 
 /** @type {boolean} */
 Adapter.prototype.isA11yMode = false;
-
-
-/** @type {boolean} */
-Adapter.prototype.isExperimental = false;
 
 
 /** @type {boolean} */
@@ -373,7 +368,7 @@ Adapter.prototype.isGestureDeletionEnabled = function() {
   if (this.contextType == ContextType.URL) {
     return false;
   }
-  return this.features.isEnabled(FeatureName.GESTURE_EDITTING);
+  return this.features.isEnabled(FeatureName.GESTURE_DELETION);
 };
 
 
@@ -385,6 +380,7 @@ Adapter.prototype.isGestureDeletionEnabled = function() {
 Adapter.prototype.isGestureTypingEnabled = function() {
   return this.features.isEnabled(FeatureName.GESTURE_TYPING);
 };
+
 
 /**
  * Callback when blurs in the context.
@@ -406,7 +402,7 @@ Adapter.prototype.queryCurrentSite = function() {
   var criteria = {'active': true, 'lastFocusedWindow': true};
   if (chrome && chrome.tabs) {
     chrome.tabs.query(criteria, function(tabs) {
-        tabs[0] && adapter.setCurrentSite_(tabs[0].url);
+      tabs[0] && adapter.setCurrentSite_(tabs[0].url);
     });
   }
 };
@@ -495,7 +491,6 @@ Adapter.prototype.initialize = function(languageCode) {
   if (window.inputview) {
     inputview.getKeyboardConfig((function(config) {
       this.isA11yMode = !!config['a11ymode'];
-      this.isExperimental = !!config['experimental'];
       this.features.initialize(config);
       this.readyState_.markStateReady(StateType.KEYBOARD_CONFIG_READY);
       this.maybeDispatchSettingsReadyEvent_();
@@ -508,7 +503,8 @@ Adapter.prototype.initialize = function(languageCode) {
       this.maybeDispatchSettingsReadyEvent_();
     }).bind(this));
     inputview.getInputMethodConfig((function(config) {
-      this.isQPInputView = !!config['isNewQPInputViewEnabled'];
+      this.isQPInputView = !!config['isNewQPInputViewEnabled'] ||
+          !!config['isNewMDInputViewEnabled'];
       var voiceEnabled = config['isVoiceInputEnabled'];
       if (goog.isDef(voiceEnabled)) {
         this.isVoiceInputEnabled = !!voiceEnabled;
@@ -606,7 +602,6 @@ Adapter.prototype.onVisibilityChange_ = function() {
   chrome.runtime.sendMessage(goog.object.create(
       Name.TYPE, Type.VISIBILITY_CHANGE,
       Name.VISIBILITY, !document.webkitHidden,
-      Name.IS_EXPERIMENTAL, this.isExperimental,
       Name.WORKSPACE_HEIGHT, screen.height - window.innerHeight));
 };
 

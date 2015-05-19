@@ -92,6 +92,8 @@ component("gl") {
     "gl_version_info.h",
     "gpu_switching_manager.cc",
     "gpu_switching_manager.h",
+    "gpu_timing.cc",
+    "gpu_timing.h",
     "scoped_binders.cc",
     "scoped_binders.h",
     "scoped_make_current.cc",
@@ -181,6 +183,8 @@ component("gl") {
   }
   if (is_win) {
     sources += [
+      "angle_platform_impl.cc",
+      "angle_platform_impl.h",
       "gl_bindings_autogen_wgl.cc",
       "gl_bindings_autogen_wgl.h",
       "gl_context_wgl.cc",
@@ -228,7 +232,10 @@ component("gl") {
 
     libs = [ "android" ]
 
-    deps += [ ":gl_jni_headers" ]
+    deps += [
+      ":gl_jni_headers",
+      "//ui/android:ui_java",
+    ]
   }
   if (use_ozone) {
     sources += [
@@ -242,10 +249,6 @@ component("gl") {
       "//ui/ozone",
       "//ui/ozone:ozone_base",
     ]
-  }
-
-  if (is_android && !is_android_webview_build) {
-    deps += [ "//ui/android:ui_java" ]
   }
 }
 

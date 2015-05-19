@@ -156,50 +156,28 @@
     });
   }
 
-  // First makes a call between pc1 and pc2, and then makes a call between pc3
-  // and pc4. The stream sent from pc3 to pc4 is the stream received on pc1.
-  // The stream sent from pc4 to pc3 is cloned from the stream received on pc2
-  // to test that cloning of remote video tracks works as intended.
+  // First makes a call between pc1 and pc2 where a stream is sent from pc1 to
+  // pc2. The stream sent from pc1 to pc2 is cloned from the stream received on 
+  // pc2  to test that cloning of remote video tracks works as intended and is 
+  // sent back to pc1.
   function callAndForwardRemoteStream(constraints) {
     createConnections(null);
     navigator.webkitGetUserMedia(constraints,
-                                 addStreamToBothConnectionsAndNegotiate,
+                                 addStreamToTheFirstConnectionAndNegotiate,
                                  printGetUserMediaError);
-    var gotRemoteStream1 = false;
-    var gotRemoteStream2 = false;
-
-    var onRemoteStream1 = function() {
-      gotRemoteStream1 = true;
-      maybeCallEstablished();
-    }
-
     var onRemoteStream2 = function() {
-      gotRemoteStream2 = true;
-      maybeCallEstablished();
+      // Video has been detected to be playing in pc2. Clone the received 
+      // stream and send it back to pc1.
+      gSecondConnection.addStream(gRemoteStreams['remote-view-2'].clone());
+      negotiate();
     }
 
-    var maybeCallEstablished = function() {
-      if (gotRemoteStream1 && gotRemoteStream2) {
-        onCallEstablished();
-      }
-    }
-
-    var onCallEstablished = function() {
-      thirdConnection = createConnection(null, 'remote-view-3');
-      thirdConnection.addStream(gRemoteStreams['remote-view-1']);
-
-      fourthConnection = createConnection(null, 'remote-view-4');
-      fourthConnection.addStream(gRemoteStreams['remote-view-2'].clone());
-
-      negotiateBetween(thirdConnection, fourthConnection);
-
-      waitForVideo('remote-view-3');
-      waitForVideo('remote-view-4');
-    }
-
-    // Do the forwarding after we have received video.
-    detectVideoPlaying('remote-view-1', onRemoteStream1);
+    // Wait for remove video to be playing in pc2. Once video is playing,
+    // forward the remove stream from pc2 to pc1.
     detectVideoPlaying('remote-view-2', onRemoteStream2);
+
+    // Wait for video to be forwarded back to connection 1.
+    waitForVideo('remote-view-1');
   }
 
   // First makes a call between pc1 and pc2, and then construct a new media
@@ -533,48 +511,48 @@
     setAllEventsOccuredHandler(function() {
       // Add an audio track to the local stream and remove the video track and
       // then renegotiate. But first - setup the expectations.
-      local_stream = gFirstConnection.getLocalStreams()[0];
+      var localStream = gFirstConnection.getLocalStreams()[0];
+      var remoteStream1 = gFirstConnection.getRemoteStreams()[0];
 
-      remote_stream_1 = gFirstConnection.getRemoteStreams()[0];
       // Add an expected event that onaddtrack will be called on the remote
       // mediastream received on gFirstConnection when the audio track is
       // received.
       addExpectedEvent();
-      remote_stream_1.onaddtrack = function(){
-        assertEquals(remote_stream_1.getAudioTracks()[0].id,
-                     local_stream.getAudioTracks()[0].id);
+      remoteStream1.onaddtrack = function(){
+        assertEquals(remoteStream1.getAudioTracks()[0].id,
+                     localStream.getAudioTracks()[0].id);
         eventOccured();
       }
 
       // Add an expectation that the received video track is removed from
       // gFirstConnection.
       addExpectedEvent();
-      remote_stream_1.onremovetrack = function() {
+      remoteStream1.onremovetrack = function() {
         eventOccured();
       }
 
       // Add an expected event that onaddtrack will be called on the remote
       // mediastream received on gSecondConnection when the audio track is
       // received.
-      remote_stream_2 = gSecondConnection.getRemoteStreams()[0];
+      remoteStream2 = gSecondConnection.getRemoteStreams()[0];
       addExpectedEvent();
-      remote_stream_2.onaddtrack = function() {
-        assertEquals(remote_stream_2.getAudioTracks()[0].id,
-                     local_stream.getAudioTracks()[0].id);
+      remoteStream2.onaddtrack = function() {
+        assertEquals(remoteStream2.getAudioTracks()[0].id,
+                     localStream.getAudioTracks()[0].id);
         eventOccured();
       }
 
       // Add an expectation that the received video track is removed from
       // gSecondConnection.
       addExpectedEvent();
-      remote_stream_2.onremovetrack = function() {
+      remoteStream2.onremovetrack = function() {
         eventOccured();
       }
       // When all the above events have occurred- the test pass.
       setAllEventsOccuredHandler(reportTestSuccess);
 
-      local_stream.addTrack(gLocalStream.getAudioTracks()[0]);
-      local_stream.removeTrack(local_stream.getVideoTracks()[0]);
+      localStream.addTrack(gLocalStream.getAudioTracks()[0]);
+      localStream.removeTrack(localStream.getVideoTracks()[0]);
       negotiate();
     });
   }
@@ -615,7 +593,8 @@
 
     // Event handler for when |gSecondConnection| receive a new dataChannel.
     gSecondConnection.ondatachannel = function (event) {
-      var secondDataChannel = event.channel;
+      // Make secondDataChannel global to make sure it's not gc'd.
+      secondDataChannel = event.channel;
 
       // When |secondDataChannel| receive a message, send a message back.
       secondDataChannel.onmessage = function(event) {
@@ -653,7 +632,8 @@
 
     // Event handler for when |gSecondConnection| receive a new dataChannel.
     gSecondConnection.ondatachannel = function (event) {
-      var secondDataChannel = event.channel;
+      // Make secondDataChannel global to make sure it's not gc'd.
+      secondDataChannel = event.channel;
       secondDataChannel.onopen = function() {
         secondDataChannel.send(sendDataString);
       }
@@ -681,7 +661,7 @@
   function addTwoMediaStreamsToOneConnection() {
     createConnections(null);
     navigator.webkitGetUserMedia({audio: true, video: true},
-        CloneStreamAndAddTwoStreamstoOneConnection, printGetUserMediaError);
+        cloneStreamAndAddTwoStreamsToOneConnection, printGetUserMediaError);
   }
 
   function onToneChange(tone) {
@@ -743,7 +723,7 @@
 
   // Called if getUserMedia succeeds, then clone the stream, send two streams
   // from one peer connection.
-  function CloneStreamAndAddTwoStreamstoOneConnection(localStream) {
+  function cloneStreamAndAddTwoStreamsToOneConnection(localStream) {
     displayAndRemember(localStream);
 
     var clonedStream = null;
@@ -780,15 +760,14 @@
     negotiate();
   }
 
-  // Called if getUserMedia succeeds when we want to send a modified
-  // MediaStream. A new MediaStream is created and the video track from
-  // |localStream| is added.
+  // A new MediaStream is created with video track from |localStream| and is
+  // added to both peer connections.
   function createNewVideoStreamAndAddToBothConnections(localStream) {
     displayAndRemember(localStream);
-    var new_stream = new webkitMediaStream();
-    new_stream.addTrack(localStream.getVideoTracks()[0]);
-    gFirstConnection.addStream(new_stream);
-    gSecondConnection.addStream(new_stream);
+    var newStream = new webkitMediaStream();
+    newStream.addTrack(localStream.getVideoTracks()[0]);
+    gFirstConnection.addStream(newStream);
+    gSecondConnection.addStream(newStream);
     negotiate();
   }
 

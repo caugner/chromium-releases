@@ -133,20 +133,19 @@ ComponentLoader::~ComponentLoader() {
 
 void ComponentLoader::LoadAll() {
   TRACE_EVENT0("browser,startup", "ComponentLoader::LoadAll");
-  const base::TimeTicks start_time = base::TimeTicks::Now();
+  SCOPED_UMA_HISTOGRAM_TIMER("Extensions.LoadAllComponentTime");
+
   for (RegisteredComponentExtensions::iterator it =
           component_extensions_.begin();
       it != component_extensions_.end(); ++it) {
     Load(*it);
   }
-  UMA_HISTOGRAM_TIMES("Extensions.LoadAllComponentTime",
-                      base::TimeTicks::Now() - start_time);
 }
 
 base::DictionaryValue* ComponentLoader::ParseManifest(
     const std::string& manifest_contents) const {
-  JSONStringValueSerializer serializer(manifest_contents);
-  scoped_ptr<base::Value> manifest(serializer.Deserialize(NULL, NULL));
+  JSONStringValueDeserializer deserializer(manifest_contents);
+  scoped_ptr<base::Value> manifest(deserializer.Deserialize(NULL, NULL));
 
   if (!manifest.get() || !manifest->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Failed to parse extension manifest.";
@@ -335,8 +334,7 @@ void ComponentLoader::AddHangoutServicesExtension() {
 }
 
 void ComponentLoader::AddHotwordAudioVerificationApp() {
-  if (HotwordService::IsExperimentalHotwordingEnabled() &&
-      HotwordServiceFactory::IsHotwordHardwareAvailable()) {
+  if (HotwordServiceFactory::IsAlwaysOnAvailable()) {
     Add(IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("hotword_audio_verification")));
   }
@@ -344,13 +342,8 @@ void ComponentLoader::AddHotwordAudioVerificationApp() {
 
 void ComponentLoader::AddHotwordHelperExtension() {
   if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
-    if (HotwordService::IsExperimentalHotwordingEnabled()) {
-      Add(IDR_HOTWORD_MANIFEST,
-          base::FilePath(FILE_PATH_LITERAL("hotword")));
-    } else {
-      Add(IDR_HOTWORD_HELPER_MANIFEST,
-          base::FilePath(FILE_PATH_LITERAL("hotword_helper")));
-    }
+    Add(IDR_HOTWORD_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("hotword")));
   }
 }
 
@@ -449,6 +442,11 @@ void ComponentLoader::AddKeyboardApp() {
 }
 
 void ComponentLoader::AddWebStoreApp() {
+#if defined(OS_CHROMEOS)
+  if (!IsNormalSession())
+    return;
+#endif
+
   AddWithNameAndDescription(IDR_WEBSTORE_MANIFEST,
                             base::FilePath(FILE_PATH_LITERAL("web_store")),
                             IDS_WEBSTORE_NAME_STORE,

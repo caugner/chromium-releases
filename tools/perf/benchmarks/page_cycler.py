@@ -2,13 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from measurements import page_cycler
 import page_sets
-from telemetry import benchmark
 
 
 class _PageCycler(benchmark.Benchmark):
   options = {'pageset_repeat': 6}
+  cold_load_percent = 50  # % of page visits for which a cold load is forced
 
   @classmethod
   def Name(cls):
@@ -20,14 +22,15 @@ class _PageCycler(benchmark.Benchmark):
         action='store_true',
         help='Enable the speed index metric.')
 
-    parser.add_option('--cold-load-percent', type='int', default=50,
-                      help='%d of page visits for which a cold load is forced')
+  @classmethod
+  def ValueCanBeAddedPredicate(cls, _, is_first_result):
+    return cls.cold_load_percent > 0 or not is_first_result
 
   def CreatePageTest(self, options):
     return page_cycler.PageCycler(
         page_repeat = options.page_repeat,
         pageset_repeat = options.pageset_repeat,
-        cold_load_percent = options.cold_load_percent,
+        cold_load_percent = self.cold_load_percent,
         report_speed_index = options.report_speed_index)
 
 
@@ -127,7 +130,9 @@ class PageCyclerMoz(_PageCycler):
     return 'page_cycler.moz'
 
 
-@benchmark.Disabled('linux', 'win', 'mac')  # crbug.com/353260
+# Win, mac, linux: crbug.com/353260
+# Android: crbug.com/473161
+@benchmark.Disabled('linux', 'win', 'mac', 'android')
 class PageCyclerNetsimTop10(_PageCycler):
   """Measures load time of the top 10 sites under simulated cable network.
 
@@ -139,10 +144,10 @@ class PageCyclerNetsimTop10(_PageCycler):
   tag = 'netsim'
   page_set = page_sets.Top10PageSet
   options = {
-      'cold_load_percent': 100,
       'extra_wpr_args_as_string': '--shaping_type=proxy --net=cable',
       'pageset_repeat': 6,
   }
+  cold_load_percent = 100
 
   @classmethod
   def Name(cls):
@@ -152,7 +157,7 @@ class PageCyclerNetsimTop10(_PageCycler):
     return page_cycler.PageCycler(
         page_repeat = options.page_repeat,
         pageset_repeat = options.pageset_repeat,
-        cold_load_percent = options.cold_load_percent,
+        cold_load_percent = self.cold_load_percent,
         report_speed_index = options.report_speed_index,
         clear_cache_before_each_run = True)
 
@@ -195,7 +200,7 @@ class PageCyclerToughLayoutCases(_PageCycler):
     return 'page_cycler.tough_layout_cases'
 
 
-# crbug.com/273986: This test is really flakey on xp.
+# crbug.com/273986: This test is flakey on Windows.
 @benchmark.Disabled('win')
 class PageCyclerTypical25(_PageCycler):
   """Page load time benchmark for a 25 typical web pages.
@@ -211,6 +216,21 @@ class PageCyclerTypical25(_PageCycler):
   def CreatePageSet(self, options):
     return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
+# crbug.com/273986: This test is flakey on Windows.
+@benchmark.Disabled  # crbug.com/463346: Test is crashing Chrome.
+class PageCyclerOopifTypical25(_PageCycler):
+  """ A varation of the benchmark above, but running in --site-per-process
+  to allow measuring performance of out-of-process iframes.
+  """
+  @classmethod
+  def Name(cls):
+    return 'page_cycler_oopif.typical_25'
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs(['--site-per-process'])
+
+  def CreatePageSet(self, options):
+    return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
 @benchmark.Disabled # crbug.com/443730
 class PageCyclerBigJs(_PageCycler):
@@ -218,4 +238,3 @@ class PageCyclerBigJs(_PageCycler):
   @classmethod
   def Name(cls):
     return 'page_cycler.big_js'
-

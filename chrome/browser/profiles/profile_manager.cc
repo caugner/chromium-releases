@@ -259,10 +259,6 @@ ProfileManager::ProfileManager(const base::FilePath& user_data_dir)
       this,
       chrome::NOTIFICATION_BROWSER_CLOSE_CANCELLED,
       content::NotificationService::AllSources());
-  registrar_.Add(
-      this,
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources());
 
   if (ProfileShortcutManager::IsFeatureEnabled() && !user_data_dir_.empty())
     profile_shortcut_manager_.reset(ProfileShortcutManager::Create(
@@ -712,7 +708,7 @@ void ProfileManager::ScheduleProfileForDeletion(
                                   base::Unretained(this),
                                   profile_dir,
                                   last_non_supervised_profile_path,
-                                  callback),
+                                  CreateCallback()),
                        base::string16(),
                        base::string16(),
                        std::string());
@@ -802,6 +798,11 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   bool force_supervised_user_id =
+#if defined(OS_CHROMEOS)
+      g_browser_process->platform_part()
+              ->profile_helper()
+              ->GetSigninProfileDir() != profile->GetPath() &&
+#endif
       command_line->HasSwitch(switches::kSupervisedUserId);
   if (force_supervised_user_id) {
     supervised_user_id =
@@ -907,10 +908,6 @@ void ProfileManager::Observe(
                                          active_profiles_.end(), profile));
         save_active_profiles = !closing_all_browsers_;
       }
-      break;
-    }
-    case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED: {
-      save_active_profiles = !closing_all_browsers_;
       break;
     }
     default: {

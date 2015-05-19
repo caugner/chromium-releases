@@ -16,8 +16,8 @@ if (is_android) {
 
   if (!defined(default_android_sdk_root)) {
     default_android_sdk_root = "//third_party/android_tools/sdk"
-    default_android_sdk_version = "21"
-    default_android_sdk_build_tools_version = "21.0.1"
+    default_android_sdk_version = "22"
+    default_android_sdk_build_tools_version = "22.0.0"
   }
 
   if (!defined(google_play_services_library)) {
@@ -30,9 +30,8 @@ if (is_android) {
     android_sdk_version = default_android_sdk_version
     android_sdk_build_tools_version = default_android_sdk_build_tools_version
 
-    # This is set when building the Android WebView inside the Android build
-    # system, using the 'android' gyp backend. The WebView code is still built
-    # when this is unset, but builds using the normal chromium build system.
+    # WebView now builds in a normal android build; don't use this.
+    # TODO(torne): remove this. http://crbug.com/440793
     is_android_webview_build = false
 
     android_default_keystore_path =
@@ -44,6 +43,9 @@ if (is_android) {
     # identifying various build artifacts corresponding to a particular build of
     # chrome (e.g. where to find archived symbols).
     android_chrome_build_id = "\"\""
+
+    # Set to true to run findbugs on JAR targets.
+    run_findbugs = false
   }
 
   # Host stuff -----------------------------------------------------------------

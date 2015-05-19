@@ -32,8 +32,8 @@
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread.h"
-#include "net/base/net_log.h"
 #include "net/base/net_util.h"
+#include "net/log/net_log.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -420,6 +420,7 @@ class MockBrowserContext : public BrowserContext {
   MOCK_METHOD0(GetSpecialStoragePolicy, storage::SpecialStoragePolicy*());
   MOCK_METHOD0(GetPushMessagingService, PushMessagingService*());
   MOCK_METHOD0(GetSSLHostStateDelegate, SSLHostStateDelegate*());
+  MOCK_METHOD0(GetPermissionManager, PermissionManager*());
 
   scoped_ptr<ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& path) override {

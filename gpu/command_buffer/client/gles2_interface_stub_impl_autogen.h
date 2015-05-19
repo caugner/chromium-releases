@@ -226,6 +226,13 @@ void GLES2InterfaceStub::DrawElements(GLenum /* mode */,
                                       GLenum /* type */,
                                       const void* /* indices */) {
 }
+void GLES2InterfaceStub::DrawRangeElements(GLenum /* mode */,
+                                           GLuint /* start */,
+                                           GLuint /* end */,
+                                           GLsizei /* count */,
+                                           GLenum /* type */,
+                                           const void* /* indices */) {
+}
 void GLES2InterfaceStub::Enable(GLenum /* cap */) {
 }
 void GLES2InterfaceStub::EnableVertexAttribArray(GLuint /* index */) {
@@ -389,6 +396,12 @@ void GLES2InterfaceStub::GetShaderSource(GLuint /* shader */,
 }
 const GLubyte* GLES2InterfaceStub::GetString(GLenum /* name */) {
   return 0;
+}
+void GLES2InterfaceStub::GetSynciv(GLsync /* sync */,
+                                   GLenum /* pname */,
+                                   GLsizei /* bufsize */,
+                                   GLsizei* /* length */,
+                                   GLint* /* values */) {
 }
 void GLES2InterfaceStub::GetTexParameterfv(GLenum /* target */,
                                            GLenum /* pname */,
@@ -981,6 +994,15 @@ void* GLES2InterfaceStub::MapBufferSubDataCHROMIUM(GLuint /* target */,
 }
 void GLES2InterfaceStub::UnmapBufferSubDataCHROMIUM(const void* /* mem */) {
 }
+void* GLES2InterfaceStub::MapBufferRange(GLenum /* target */,
+                                         GLintptr /* offset */,
+                                         GLsizeiptr /* size */,
+                                         GLbitfield /* access */) {
+  return 0;
+}
+GLboolean GLES2InterfaceStub::UnmapBuffer(GLenum /* target */) {
+  return 0;
+}
 void* GLES2InterfaceStub::MapTexSubImage2DCHROMIUM(GLenum /* target */,
                                                    GLint /* level */,
                                                    GLint /* xoffset */,
@@ -1063,9 +1085,14 @@ void GLES2InterfaceStub::TexImageIOSurface2DCHROMIUM(GLenum /* target */,
 void GLES2InterfaceStub::CopyTextureCHROMIUM(GLenum /* target */,
                                              GLenum /* source_id */,
                                              GLenum /* dest_id */,
-                                             GLint /* level */,
                                              GLint /* internalformat */,
                                              GLenum /* dest_type */) {
+}
+void GLES2InterfaceStub::CopySubTextureCHROMIUM(GLenum /* target */,
+                                                GLenum /* source_id */,
+                                                GLenum /* dest_id */,
+                                                GLint /* xoffset */,
+                                                GLint /* yoffset */) {
 }
 void GLES2InterfaceStub::DrawArraysInstancedANGLE(GLenum /* mode */,
                                                   GLint /* first */,

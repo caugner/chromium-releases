@@ -324,6 +324,9 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddLocalizedString("registerPromoButtonText",
                              IDS_PRINT_PREVIEW_REGISTER_PROMO_BUTTON_TEXT);
   source->AddLocalizedString(
+      "extensionDestinationIconTooltip",
+      IDS_PRINT_PREVIEW_EXTENSION_DESTINATION_ICON_TOOLTIP);
+  source->AddLocalizedString(
       "advancedSettingsSearchBoxPlaceholder",
       IDS_PRINT_PREVIEW_ADVANCED_SETTINGS_SEARCH_BOX_PLACEHOLDER);
   source->AddLocalizedString("advancedSettingsDialogTitle",
@@ -632,6 +635,7 @@ void PrintPreviewUI::OnSetOptionsFromDocument(
   options.SetBoolean(printing::kSettingDisableScaling,
                      params.is_scaling_disabled);
   options.SetInteger(printing::kSettingCopies, params.copies);
+  options.SetInteger(printing::kSettingDuplexMode, params.duplex);
   web_ui()->CallJavascriptFunction("printPresetOptionsFromDocument", options);
 }
 

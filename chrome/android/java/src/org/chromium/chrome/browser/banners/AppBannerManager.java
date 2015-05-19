@@ -133,10 +133,10 @@ public class AppBannerManager extends EmptyTabObserver {
         };
     }
 
-    /** Enables the app banners for testing. */
+    /** Enables or disables the app banners for testing. */
     @VisibleForTesting
-    static void setIsEnabledForTesting() {
-        sIsEnabled = true;
+    static void setIsEnabledForTesting(boolean state) {
+        sIsEnabled = state;
     }
 
     /** Sets a constant (in days) that gets added to the time when the current time is requested. */
@@ -151,7 +151,7 @@ public class AppBannerManager extends EmptyTabObserver {
         nativeDisableSecureSchemeCheckForTesting();
     }
 
-    /** Returns whether a BitmapFetcher is actively retrieving an app icon. */
+    /** Returns whether a AppBannerDataFetcher is actively retrieving data. */
     @VisibleForTesting
     public boolean isFetcherActiveForTesting() {
         return nativeIsFetcherActive(mNativePointer);
@@ -159,14 +159,14 @@ public class AppBannerManager extends EmptyTabObserver {
 
     private static native boolean nativeIsEnabled();
     private native long nativeInit(int iconSize);
-    private native void nativeDestroy(long nativeAppBannerManager);
-    private native void nativeReplaceWebContents(long nativeAppBannerManager,
+    private native void nativeDestroy(long nativeAppBannerManagerAndroid);
+    private native void nativeReplaceWebContents(long nativeAppBannerManagerAndroid,
             WebContents webContents);
-    private native boolean nativeOnAppDetailsRetrieved(long nativeAppBannerManager, AppData data,
-            String title, String packageName, String imageUrl);
+    private native boolean nativeOnAppDetailsRetrieved(long nativeAppBannerManagerAndroid,
+            AppData data, String title, String packageName, String imageUrl);
 
     // Testing methods.
     private static native void nativeSetTimeDeltaForTesting(int days);
     private static native void nativeDisableSecureSchemeCheckForTesting();
-    private native boolean nativeIsFetcherActive(long nativeAppBannerManager);
+    private native boolean nativeIsFetcherActive(long nativeAppBannerManagerAndroid);
 }

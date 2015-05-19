@@ -9,9 +9,10 @@
   'variables': {
     'extra_files%': [],
     'generated_html_files': [
-      '<(SHARED_INTERMEDIATE_DIR)/main.html',
-      '<(SHARED_INTERMEDIATE_DIR)/wcs_sandbox.html',
       '<(SHARED_INTERMEDIATE_DIR)/background.html',
+      '<(SHARED_INTERMEDIATE_DIR)/main.html',
+      '<(SHARED_INTERMEDIATE_DIR)/message_window.html',
+      '<(SHARED_INTERMEDIATE_DIR)/wcs_sandbox.html',
     ],
     'dr_webapp_locales_listfile': '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)_locales.txt',
   },
@@ -21,50 +22,7 @@
   ],
   'conditions': [
     ['run_jscompile != 0', {
-      'variables': {
-        'success_stamp': '<(PRODUCT_DIR)/<(_target_name)_jscompile.stamp',
-        'success_stamp_bt': '<(PRODUCT_DIR)/<(_target_name)_bt_jscompile.stamp',
-      },
-      'actions': [
-        {
-          'action_name': 'Verify remoting webapp',
-          'inputs': [
-            '<@(remoting_webapp_crd_js_files)',
-            '<@(remoting_webapp_js_proto_files)',
-          ],
-          'outputs': [
-            '<(success_stamp)',
-          ],
-          'action': [
-            'python', '../third_party/closure_compiler/checker.py',
-            '--strict',
-            '--no-single-file',
-            '--success-stamp', '<(success_stamp)',
-            '<@(remoting_webapp_crd_js_files)',
-            '<@(remoting_webapp_js_proto_files)',
-          ],
-        },
-        {
-          'action_name': 'Verify remoting webapp with browsertests',
-          'inputs': [
-            '<@(remoting_webapp_crd_js_files)',
-            '<@(remoting_webapp_browsertest_all_js_files)',
-            '<@(remoting_webapp_js_proto_files)',
-          ],
-          'outputs': [
-            '<(success_stamp_bt)',
-          ],
-          'action': [
-            'python', '../third_party/closure_compiler/checker.py',
-            '--strict',
-            '--no-single-file',
-            '--success-stamp', '<(success_stamp_bt)',
-            '<@(remoting_webapp_crd_js_files)',
-            '<@(remoting_webapp_browsertest_all_js_files)',
-            '<@(remoting_webapp_js_proto_files)',
-          ],
-        },
-      ],  # actions
+      'includes': ['remoting_webapp_compile.gypi'],
     }],
   ],
   'actions': [
@@ -115,6 +73,8 @@
         '<@(extra_files)',
         '--locales_listfile',
         '<(dr_webapp_locales_listfile)',
+        '--use_gcd',
+        '<(remoting_use_gcd)',
       ],
     },
   ],

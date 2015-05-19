@@ -13,14 +13,14 @@ import sys
 # OS_ARCH_COMBOS maps from OS and platform to the OpenSSL assembly "style" for
 # that platform and the extension used by asm files.
 OS_ARCH_COMBOS = [
-    ('linux', 'arm', 'elf', [''], 'S'),
-    ('linux', 'aarch64', 'linux64', [''], 'S'),
-    ('linux', 'x86', 'elf', ['-fPIC'], 'S'),
-    ('linux', 'x86_64', 'elf', [''], 'S'),
-    ('mac', 'x86', 'macosx', ['-fPIC'], 'S'),
-    ('mac', 'x86_64', 'macosx', [''], 'S'),
-    ('win', 'x86', 'win32n', [''], 'asm'),
-    ('win', 'x86_64', 'nasm', [''], 'asm'),
+    ('linux', 'arm', 'elf', [], 'S'),
+    ('linux', 'aarch64', 'linux64', [], 'S'),
+    ('linux', 'x86', 'elf', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
+    ('linux', 'x86_64', 'elf', [], 'S'),
+    ('mac', 'x86', 'macosx', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
+    ('mac', 'x86_64', 'macosx', [], 'S'),
+    ('win', 'x86', 'win32n', ['-DOPENSSL_IA32_SSE2'], 'asm'),
+    ('win', 'x86_64', 'nasm', [], 'asm'),
 ]
 
 # NON_PERL_FILES enumerates assembly files that are not processed by the
@@ -194,6 +194,13 @@ def PrintVariableSection(out, name, files):
 def main():
   crypto_c_files = FindCFiles(os.path.join('src', 'crypto'), NoTests)
   ssl_c_files = FindCFiles(os.path.join('src', 'ssl'), NoTests)
+
+  # Generate err_data.c
+  with open('err_data.c', 'w+') as err_data:
+    subprocess.check_call(['go', 'run', 'err_data_generate.go'],
+                          cwd=os.path.join('src', 'crypto', 'err'),
+                          stdout=err_data)
+  crypto_c_files.append('err_data.c')
 
   with open('boringssl.gypi', 'w+') as gypi:
     gypi.write(FILE_HEADER + '{\n  \'variables\': {\n')

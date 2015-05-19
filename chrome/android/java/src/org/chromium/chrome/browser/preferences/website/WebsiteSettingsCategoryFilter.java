@@ -14,7 +14,9 @@ public class WebsiteSettingsCategoryFilter {
     private static final String FILTER_ALL_SITES = "all_sites";
     private static final String FILTER_COOKIES = "cookies";
     private static final String FILTER_CAMERA_MIC = "use_camera_or_mic";
+    private static final String FILTER_JAVASCRIPT = "javascript";
     private static final String FILTER_DEVICE_LOCATION = "device_location";
+    private static final String FILTER_FULLSCREEN = "fullscreen";
     private static final String FILTER_USE_STORAGE = "use_storage";
     private static final String FILTER_POPUPS = "popups";
     public static final String FILTER_PUSH_NOTIFICATIONS = "push_notifications";
@@ -36,6 +38,10 @@ public class WebsiteSettingsCategoryFilter {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION;
         } else if (showPushNotificationsSites(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
+        } else if (showJavaScriptSites(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT;
+        } else if (showFullscreenSites(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_FULLSCREEN;
         }
         return -1;
     }
@@ -62,6 +68,22 @@ public class WebsiteSettingsCategoryFilter {
      */
     public boolean showCameraMicSites(String filterValue) {
         return filterValue.equals(FILTER_CAMERA_MIC);
+    }
+
+    /**
+     * @param filterValue A category value.
+     * @return Whether the category passed is the javascript category.
+     */
+    public boolean showJavaScriptSites(String filterValue) {
+        return filterValue.equals(FILTER_JAVASCRIPT);
+    }
+
+    /**
+     * @param filterValue A category value.
+     * @return Whether the category passed is the fullscreen category.
+     */
+    public boolean showFullscreenSites(String filterValue) {
+        return filterValue.equals(FILTER_FULLSCREEN);
     }
 
     /**

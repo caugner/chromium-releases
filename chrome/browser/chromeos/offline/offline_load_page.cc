@@ -60,7 +60,7 @@ OfflineLoadPage::OfflineLoadPage(WebContents* web_contents,
 }
 
 OfflineLoadPage::~OfflineLoadPage() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
 }
 
@@ -111,13 +111,13 @@ void OfflineLoadPage::OverrideRendererPrefs(
 }
 
 void OfflineLoadPage::OnProceed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   proceeded_ = true;
   NotifyBlockingPageComplete(true);
 }
 
 void OfflineLoadPage::OnDontProceed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Ignore if it's already proceeded.
   if (proceeded_)
     return;
@@ -132,7 +132,9 @@ void OfflineLoadPage::CommandReceived(const std::string& cmd) {
   }
   // TODO(oshima): record action for metrics.
   if (command == "open_network_settings") {
-    ash::Shell::GetInstance()->system_tray_delegate()->ShowNetworkSettings("");
+    ash::Shell::GetInstance()
+        ->system_tray_delegate()
+        ->ShowNetworkSettingsForGuid("");
   } else if (command == "open_connectivity_diagnostics") {
     Profile* profile = Profile::FromBrowserContext(
         web_contents_->GetBrowserContext());
@@ -155,7 +157,7 @@ void OfflineLoadPage::NotifyBlockingPageComplete(bool proceed) {
 
 void OfflineLoadPage::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const bool online = type != net::NetworkChangeNotifier::CONNECTION_NONE;
   DVLOG(1) << "ConnectionTypeObserver notification received: state="
            << (online ? "online" : "offline");

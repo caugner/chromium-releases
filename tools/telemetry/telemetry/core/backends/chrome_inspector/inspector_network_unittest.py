@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import decorators
 from telemetry.core.backends.chrome_inspector import inspector_network
+from telemetry import decorators
 from telemetry.unittest_util import tab_test_case
 
 
@@ -28,7 +28,7 @@ class InspectorNetworkTabTest(tab_test_case.TabTestCase):
     return self._tab.timeline_model.GetAllEventsOfName('HTTPResponse')
 
   # crbug.com/449979, crbug.com/452279, crbug.com/455269
-  @decorators.Disabled('mac', 'android', 'win')
+  @decorators.Disabled('mac', 'android', 'win', 'linux')
   def testHTTPResponseTimelineRecorder(self):
     tests = {
         'blank.html': InspectorNetworkTabTest.TestCase(responses_count=1),

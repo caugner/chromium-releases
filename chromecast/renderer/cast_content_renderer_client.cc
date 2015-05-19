@@ -8,11 +8,14 @@
 
 #include "base/command_line.h"
 #include "base/memory/memory_pressure_listener.h"
+#include "base/strings/string_number_conversions.h"
 #include "chromecast/common/chromecast_switches.h"
+#include "chromecast/crash/cast_crash_keys.h"
+#include "chromecast/media/base/media_caps.h"
 #include "chromecast/renderer/cast_media_load_deferrer.h"
 #include "chromecast/renderer/cast_render_process_observer.h"
 #include "chromecast/renderer/key_systems_cast.h"
-#include "chromecast/renderer/media/cma_media_renderer_factory.h"
+#include "chromecast/renderer/media/chromecast_media_renderer_factory.h"
 #include "components/network_hints/renderer/prescient_networking_dispatcher.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
@@ -91,13 +94,13 @@ CastContentRendererClient::~CastContentRendererClient() {
 }
 
 void CastContentRendererClient::RenderThreadStarted() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 #if defined(USE_NSS)
   // Note: Copied from chrome_render_process_observer.cc to fix b/8676652.
   //
   // On platforms where the system NSS shared libraries are used,
   // initialize NSS now because it won't be able to load the .so's
   // after entering the sandbox.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!command_line->HasSwitch(switches::kSingleProcess))
     crypto::InitNSSSafely();
 #endif
@@ -106,11 +109,31 @@ void CastContentRendererClient::RenderThreadStarted() {
   PlatformPollFreemem();
 #endif
 
+  // Set the initial known codecs mask.
+  if (command_line->HasSwitch(switches::kHdmiSinkSupportedCodecs)) {
+    int hdmi_codecs_mask;
+    if (base::StringToInt(command_line->GetSwitchValueASCII(
+                              switches::kHdmiSinkSupportedCodecs),
+                          &hdmi_codecs_mask)) {
+      ::media::SetHdmiSinkCodecs(hdmi_codecs_mask);
+    }
+  }
+
   cast_observer_.reset(
       new CastRenderProcessObserver(PlatformGetRendererMessageFilters()));
 
   prescient_networking_dispatcher_.reset(
       new network_hints::PrescientNetworkingDispatcher());
+
+  std::string last_launched_app =
+      command_line->GetSwitchValueNative(switches::kLastLaunchedApp);
+  if (!last_launched_app.empty())
+    base::debug::SetCrashKeyValue(crash_keys::kLastApp, last_launched_app);
+
+  std::string previous_app =
+      command_line->GetSwitchValueNative(switches::kPreviousApp);
+  if (!previous_app.empty())
+    base::debug::SetCrashKeyValue(crash_keys::kPreviousApp, previous_app);
 }
 
 void CastContentRendererClient::RenderViewCreated(
@@ -149,8 +172,8 @@ CastContentRendererClient::CreateMediaRendererFactory(
     return nullptr;
 
   return scoped_ptr<::media::RendererFactory>(
-      new chromecast::media::CmaMediaRendererFactory(
-          render_frame->GetRoutingID()));
+      new chromecast::media::ChromecastMediaRendererFactory(
+          media_log, render_frame->GetRoutingID()));
 }
 #endif
 

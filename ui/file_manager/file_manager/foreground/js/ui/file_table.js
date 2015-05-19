@@ -26,8 +26,7 @@ FileTableColumnModel.prototype.__proto__ =
 
 /**
  * Minimum width of column.
- * @const
- * @type {number}
+ * @const {number}
  * @private
  */
 FileTableColumnModel.MIN_WIDTH_ = 10;
@@ -43,12 +42,16 @@ FileTableColumnModel.MIN_WIDTH_ = 10;
 FileTableColumnModel.prototype.applyColumnPositions_ = function(newPos) {
   // Check the minimum width and adjust the positions.
   for (var i = 0; i < newPos.length - 2; i++) {
-    if (newPos[i + 1] - newPos[i] < FileTableColumnModel.MIN_WIDTH_) {
+    if (!this.columns_[i].visible) {
+      newPos[i + 1] = newPos[i];
+    } else if (newPos[i + 1] - newPos[i] < FileTableColumnModel.MIN_WIDTH_) {
       newPos[i + 1] = newPos[i] + FileTableColumnModel.MIN_WIDTH_;
     }
   }
   for (var i = newPos.length - 1; i >= 2; i--) {
-    if (newPos[i] - newPos[i - 1] < FileTableColumnModel.MIN_WIDTH_) {
+    if (!this.columns_[i - 1].visible) {
+      newPos[i - 1] = newPos[i];
+    } else if (newPos[i] - newPos[i - 1] < FileTableColumnModel.MIN_WIDTH_) {
       newPos[i - 1] = newPos[i] - FileTableColumnModel.MIN_WIDTH_;
     }
   }
@@ -97,24 +100,21 @@ FileTableColumnModel.prototype.handleSplitterDragEnd = function() {
 };
 
 /**
- * Initialize columnPos_ which is used in setWidthAndKeepTotal().
+ * Initialize a column snapshot which is used in setWidthAndKeepTotal().
  */
 FileTableColumnModel.prototype.initializeColumnPos = function() {
-  this.columnPos_ = [0];
-  for (var i = 0; i < this.columns_.length; i++) {
-    this.columnPos_[i + 1] = this.columns_[i].width + this.columnPos_[i];
-  }
+  this.snapshot_ = new FileTableColumnModel.ColumnSnapshot(this.columns_);
 };
 
 /**
- * Destroy columnPos_ which is used in setWidthAndKeepTotal().
+ * Destroy the column snapshot which is used in setWidthAndKeepTotal().
  */
 FileTableColumnModel.prototype.destroyColumnPos = function() {
-  this.columnPos_ = null;
+  this.snapshot_ = null;
 };
 
 /**
- * Sets the width of column with keeping the total width of table.
+ * Sets the width of column while keeping the total width of table.
  * Before and after calling this method, you must initialize and destroy
  * columnPos with initializeColumnPos() and destroyColumnPos().
  * @param {number} columnIndex Index of column that is resized.
@@ -122,36 +122,11 @@ FileTableColumnModel.prototype.destroyColumnPos = function() {
  */
 FileTableColumnModel.prototype.setWidthAndKeepTotal = function(
     columnIndex, columnWidth) {
-  // Skip to resize 'selection' column
-  if (columnIndex < 0 ||
-      columnIndex >= this.columns_.length ||
-      !this.columnPos_) {
-    return;
-  }
+  columnWidth = Math.max(columnWidth, FileTableColumnModel.MIN_WIDTH_);
+  this.snapshot_.setWidth(columnIndex, columnWidth);
+  this.applyColumnPositions_(this.snapshot_.newPos);
 
-  // Calculate new positions of column splitters.
-  var newPosStart =
-      this.columnPos_[columnIndex] + Math.max(columnWidth,
-                                              FileTableColumnModel.MIN_WIDTH_);
-  var newPos = [];
-  var posEnd = this.columnPos_[this.columns_.length];
-  for (var i = 0; i < columnIndex + 1; i++) {
-    newPos[i] = this.columnPos_[i];
-  }
-  for (var i = columnIndex + 1; i < this.columns_.length; i++) {
-    var posStart = this.columnPos_[columnIndex + 1];
-    newPos[i] = (posEnd - newPosStart) *
-                (this.columnPos_[i] - posStart) /
-                (posEnd - posStart) +
-                newPosStart;
-    // Faster alternative to Math.floor for non-negative numbers.
-    newPos[i] = ~~newPos[i];
-  }
-  newPos[columnIndex] = this.columnPos_[columnIndex];
-  newPos[this.columns_.length] = posEnd;
-  this.applyColumnPositions_(newPos);
-
-  // Notifiy about resizing
+  // Notify about resizing
   cr.dispatchSimpleEvent(this, 'resize');
 };
 
@@ -168,6 +143,154 @@ FileTableColumnModel.prototype.getHitColumn = function(x) {
   if (i >= this.columns_.length)
     return null;
   return {index: i, hitPosition: x, width: this.columns_[i].width};
+};
+
+/** @override */
+FileTableColumnModel.prototype.setVisible = function(index, visible) {
+  if (index < 0 || index > this.columns_.size -1)
+    return;
+
+  var column = this.columns_[index];
+  if (column.visible === visible)
+    return;
+
+  // Re-layout the table.  This overrides the default column layout code in the
+  // parent class.
+  var snapshot = new FileTableColumnModel.ColumnSnapshot(this.columns_);
+
+  column.visible = visible;
+
+  // Keep the current column width, but adjust the other columns to accomodate
+  // the new column.
+  snapshot.setWidth(index, column.width);
+  this.applyColumnPositions_(snapshot.newPos);
+};
+
+/**
+ * Export a set of column widths for use by #restoreColumnWidths.  Use these two
+ * methods instead of manually saving and setting column widths, because doing
+ * the latter will not correctly save/restore column widths for hidden columns.
+ * @see #restoreColumnWidths
+ * @return {!Object} config
+ */
+FileTableColumnModel.prototype.exportColumnConfig = function() {
+  // Make a snapshot, and use that to compute a column layout where all the
+  // columns are visible.
+  var snapshot = new FileTableColumnModel.ColumnSnapshot(this.columns_);
+  for (var i = 0; i < this.columns_.length; i++) {
+    if (!this.columns_[i].visible) {
+      snapshot.setWidth(i, this.columns_[i].absoluteWidth);
+    }
+  }
+  // Export the column widths.
+  var config = {};
+  for (var i = 0; i < this.columns_.length; i++) {
+    config[this.columns_[i].id] = {
+      width: snapshot.newPos[i + 1] - snapshot.newPos[i]
+    };
+  }
+  return config;
+};
+
+/**
+ * Restores a set of column widths previously created by calling
+ * #exportColumnConfig.
+ * @see #exportColumnConfig
+ * @param {!Object} config
+ */
+FileTableColumnModel.prototype.restoreColumnConfig = function(config) {
+  // Convert old-style raw column widths into new-style config objects.
+  if (Array.isArray(config)) {
+    var tmpConfig = {};
+    tmpConfig[this.columns_[0].id] = config[0];
+    tmpConfig[this.columns_[1].id] = config[1];
+    tmpConfig[this.columns_[3].id] = config[2];
+    tmpConfig[this.columns_[4].id] = config[3];
+    config = tmpConfig;
+  }
+
+  // Columns must all be made visible before restoring their widths.  Save the
+  // current visibility so it can be restored after.
+  var visibility = [];
+  for (var i = 0; i < this.columns_.length; i++) {
+    visibility[i] = this.columns_[i].visible;
+    this.columns_[i].visible = true;
+  }
+
+  // Do not use external setters (e.g. #setVisible, #setWidth) here because they
+  // trigger layout thrash, and also try to dynamically resize columns, which
+  // interferes with restoring the old column layout.
+  for (var columnId in config) {
+    var column = this.columns_[this.indexOf(columnId)];
+    if (column) {
+      // Set column width.  Ignore invalid widths.
+      var width = ~~config[columnId].width;
+      if (width > 0)
+        column.width = width;
+    }
+  }
+
+  // Restore column visibility.  Use setVisible here, to trigger table relayout.
+  for (var i = 0; i < this.columns_.length; i++) {
+    this.setVisible(i, visibility[i]);
+  }
+};
+
+/**
+ * A helper class for performing resizing of columns.
+ * @param {!Array<!cr.ui.table.TableColumn>} columns
+ * @constructor
+ */
+FileTableColumnModel.ColumnSnapshot = function(columns) {
+  /** @private {!Array<number>} */
+  this.columnPos_ = [0];
+  for (var i = 0; i < columns.length; i++) {
+    this.columnPos_[i + 1] = columns[i].width + this.columnPos_[i];
+  }
+
+  /**
+   * Starts off as a copy of the current column positions, but gets modified.
+   * @private {!Array<number>}
+   */
+  this.newPos = this.columnPos_.slice(0);
+};
+
+/**
+ * Set the width of the given column.  The snapshot will keep the total width of
+ * the table constant.
+ * @param {number} index
+ * @param {number} width
+ */
+FileTableColumnModel.ColumnSnapshot.prototype.setWidth = function(
+    index, width) {
+  // Skip to resize 'selection' column
+  if (index < 0 ||
+      index >= this.columnPos_.length - 1 ||
+      !this.columnPos_) {
+    return;
+  }
+
+  // Round up if the column is shrinking, and down if the column is expanding.
+  // This prevents off-by-one drift.
+  var currentWidth = this.columnPos_[index + 1] - this.columnPos_[index];
+  var round = width < currentWidth ? Math.ceil : Math.floor;
+
+  // Calculate new positions of column splitters.
+  var newPosStart = this.columnPos_[index] + width;
+  var posEnd = this.columnPos_[this.columnPos_.length - 1];
+  for (var i = 0; i < index + 1; i++) {
+    this.newPos[i] = this.columnPos_[i];
+  }
+  for (var i = index + 1; i < this.columnPos_.length - 1; i++) {
+    var posStart = this.columnPos_[index + 1];
+    this.newPos[i] = (posEnd - newPosStart) *
+                (this.columnPos_[i] - posStart) /
+                (posEnd - posStart) +
+                newPosStart;
+    this.newPos[i] = round(this.newPos[i]);
+  }
+  this.newPos[index] = this.columnPos_[index];
+  this.newPos[this.columnPos_.length - 1] = posEnd;
 };
 
 /**
@@ -224,7 +347,7 @@ FileTable.prototype.__proto__ = cr.ui.Table.prototype;
 /**
  * Decorates the element.
  * @param {!Element} self Table to decorate.
- * @param {!FileSystemMetadata} fileSystemMetadata To retrieve
+ * @param {!MetadataModel} metadataModel To retrieve
  *     metadata.
  * @param {VolumeManagerWrapper} volumeManager To retrieve volume info.
  * @param {!importer.HistoryLoader} historyLoader
@@ -232,11 +355,11 @@ FileTable.prototype.__proto__ = cr.ui.Table.prototype;
  *                           False if a file open/save dialog.
  */
 FileTable.decorate = function(
-    self, fileSystemMetadata, volumeManager, historyLoader, fullPage) {
+    self, metadataModel, volumeManager, historyLoader, fullPage) {
   cr.ui.Table.decorate(self);
   FileTableList.decorate(self.list);
   self.__proto__ = FileTable.prototype;
-  self.fileSystemMetadata_ = fileSystemMetadata;
+  self.metadataModel_ = metadataModel;
   self.volumeManager_ = volumeManager;
   self.historyLoader_ = historyLoader;
 
@@ -252,6 +375,18 @@ FileTable.decorate = function(
   /** @private {function(!Event)} */
   self.onThumbnailLoadedBound_ = self.onThumbnailLoaded_.bind(self);
 
+  /**
+   * Reflects the visibility of import status in the UI.  Assumption: import
+   * status is only enabled in import-eligible locations.  See
+   * ImportController#onDirectoryChanged.  For this reason, the code in this
+   * class checks if import status is visible, and if so, assumes that all the
+   * files are in an import-eligible location.
+   * TODO(kenobi): Clean this up once import status is queryable from metadata.
+   *
+   * @private {boolean}
+   */
+  self.importStatusVisible_ = true;
+
   var nameColumn = new cr.ui.table.TableColumn(
       'name', str('NAME_COLUMN_LABEL'), fullPage ? 386 : 324);
   nameColumn.renderFunction = self.renderName_.bind(self);
@@ -262,8 +397,9 @@ FileTable.decorate = function(
   sizeColumn.defaultOrder = 'desc';
 
   var statusColumn = new cr.ui.table.TableColumn(
-      'status', str('STATUS_COLUMN_LABEL'), 50, true);
+      'status', str('STATUS_COLUMN_LABEL'), 60, true);
   statusColumn.renderFunction = self.renderStatus_.bind(self);
+  statusColumn.visible = self.importStatusVisible_;
 
   var typeColumn = new cr.ui.table.TableColumn(
       'type', str('TYPE_COLUMN_LABEL'), fullPage ? 110 : 110);
@@ -277,13 +413,10 @@ FileTable.decorate = function(
   var columns = [
       nameColumn,
       sizeColumn,
+      statusColumn,
       typeColumn,
       modTimeColumn
   ];
-  // Display the status column only if cloud imports are enabled.
-  if (self.importEnabled) {
-    columns.splice(2, 0, statusColumn);
-  }
 
   var columnModel = new FileTableColumnModel(columns);
 
@@ -306,7 +439,7 @@ FileTable.decorate = function(
 
   // Override header#redraw to use FileTableSplitter.
   /** @this {cr.ui.table.TableHeader} */
-  self.header_.redraw = function() {
+  self.header.redraw = function() {
     this.__proto__.redraw.call(this);
     // Extend table splitters
     var splitters = this.querySelectorAll('.table-header-splitter');
@@ -394,7 +527,8 @@ FileTable.prototype.onThumbnailLoaded_ = function(event) {
     var box = listItem.querySelector('.detail-thumbnail');
     if (box) {
       this.setThumbnailImage_(
-          assertInstanceof(box, HTMLDivElement), event.dataUrl);
+          assertInstanceof(box, HTMLDivElement), event.dataUrl,
+          true /* with animation */);
     }
   }
 };
@@ -437,6 +571,18 @@ FileTable.prototype.fitColumn = function(index) {
   this.columnModel.initializeColumnPos();
   this.columnModel.setWidthAndKeepTotal(index, Math.ceil(width));
   this.columnModel.destroyColumnPos();
+};
+
+/**
+ * Sets the visibility of the cloud import status column.
+ * @param {boolean} visible
+ */
+FileTable.prototype.setImportStatusVisible = function(visible) {
+  if (this.importStatusVisible_ != visible) {
+    this.importStatusVisible_ = visible;
+    this.columnModel.setVisible(this.columnModel.indexOf('status'), visible);
+    this.relayout();
+  }
 };
 
 /**
@@ -494,9 +640,12 @@ FileTable.prototype.shouldStartDragSelection_ = function(event) {
     return true;
 
   // Check if the point is on the column contents or not.
-  var item = this.list.getListItemByIndex(itemIndex);
   switch (this.columnModel.columns_[hitColumn.index].id) {
     case 'name':
+      var item = this.list.getListItemByIndex(itemIndex);
+      if (!item)
+        return false;
+
       var spanElement = item.querySelector('.filename-label span');
       var spanRect = spanElement.getBoundingClientRect();
       // The this.list.cachedBounds_ object is set by
@@ -527,8 +676,10 @@ FileTable.prototype.renderName_ = function(entry, columnId, table) {
       (this.ownerDocument.createElement('div'));
 
   var icon = filelist.renderFileTypeIcon(this.ownerDocument, entry);
-  if (FileType.isImage(entry) || FileType.isVideo(entry))
+  if (FileType.isImage(entry) || FileType.isVideo(entry) ||
+      FileType.isRaw(entry)) {
     icon.appendChild(this.renderThumbnail_(entry));
+  }
   icon.appendChild(this.renderCheckmark_());
   label.appendChild(icon);
 
@@ -564,7 +715,7 @@ FileTable.prototype.renderSize_ = function(entry, columnId, table) {
  * @private
  */
 FileTable.prototype.updateSize_ = function(div, entry) {
-  var metadata = this.fileSystemMetadata_.getCache(
+  var metadata = this.metadataModel_.getCache(
       [entry], ['size', 'hosted'])[0];
   var size = metadata.size;
   if (size === null || size === undefined) {
@@ -606,7 +757,9 @@ FileTable.prototype.renderStatus_ = function(entry, columnId, table) {
  *     or 'unknown'.
  */
 FileTable.prototype.getImportStatus_ = function(entry, destination) {
-  if (!importer.isEligibleEntry(this.volumeManager_, entry)) {
+  // If import status is not visible, early out because there's no point
+  // retrieving it.
+  if (!this.importStatusVisible_ || !importer.isEligibleType(entry)) {
     // Our import history doesn't deal with directories.
     // TODO(kenobi): May need to revisit this if the above assumption changes.
     return Promise.resolve('unknown');
@@ -664,7 +817,7 @@ FileTable.prototype.renderType_ = function(entry, columnId, table) {
   var div = /** @type {!HTMLDivElement} */
       (this.ownerDocument.createElement('div'));
   div.className = 'type';
-  div.textContent = FileType.typeToString(FileType.getType(entry));
+  div.textContent = FileListModel.getFileTypeString(FileType.getType(entry));
   return div;
 };
 
@@ -694,7 +847,7 @@ FileTable.prototype.renderDate_ = function(entry, columnId, table) {
  * @private
  */
 FileTable.prototype.updateDate_ = function(div, entry) {
-  var modTime = this.fileSystemMetadata_.getCache(
+  var modTime = this.metadataModel_.getCache(
       [entry], ['modificationTime'])[0].modificationTime;
 
   if (!modTime) {
@@ -738,13 +891,8 @@ FileTable.prototype.updateFileMetadata = function(item, entry) {
       /** @type {!HTMLDivElement} */ (item.querySelector('.date')), entry);
   this.updateSize_(
       /** @type {!HTMLDivElement} */ (item.querySelector('.size')), entry);
-
-  // The status column isn't always visible.
-  // TODO(kenobi): Clean up once the status column's fate is determined.
-  var statusEl = item.querySelector('.status');
-  if (statusEl) {
-    this.updateStatus_(/** @type {!HTMLDivElement} */ (statusEl), entry);
-  }
+  this.updateStatus_(
+      /** @type {!HTMLDivElement} */ (item.querySelector('.status')), entry);
 };
 
 /**
@@ -776,7 +924,7 @@ FileTable.prototype.updateListItemsMetadata = function(type, entries) {
     forEachCell('.table-row-cell > .date', function(item, entry, listItem) {
       filelist.updateListItemExternalProps(
           listItem,
-          this.fileSystemMetadata_.getCache(
+          this.metadataModel_.getCache(
               [entry], ['availableOffline', 'customIconUrl', 'shared'])[0]);
     });
   } else if (type === 'import-history') {
@@ -795,7 +943,7 @@ FileTable.prototype.updateListItemsMetadata = function(type, entries) {
  */
 FileTable.prototype.renderTableRow_ = function(baseRenderFunction, entry) {
   var item = baseRenderFunction(entry, this);
-  filelist.decorateListItem(item, entry, this.fileSystemMetadata_);
+  filelist.decorateListItem(item, entry, this.metadataModel_);
   return item;
 };
 
@@ -814,7 +962,8 @@ FileTable.prototype.renderThumbnail_ = function(entry) {
   if (this.listThumbnailLoader_ &&
       this.listThumbnailLoader_.getThumbnailFromCache(entry)) {
     this.setThumbnailImage_(
-        box, this.listThumbnailLoader_.getThumbnailFromCache(entry).dataUrl);
+        box, this.listThumbnailLoader_.getThumbnailFromCache(entry).dataUrl,
+        false /* without animation */);
   }
 
   return box;
@@ -824,12 +973,31 @@ FileTable.prototype.renderThumbnail_ = function(entry) {
  * Sets thumbnail image to the box.
  * @param {!HTMLDivElement} box Detail thumbnail div element.
  * @param {string} dataUrl Data url of thumbnail.
+ * @param {boolean} shouldAnimate Whether the thumbnail is shown with animation
+ *     or not.
  * @private
  */
-FileTable.prototype.setThumbnailImage_ = function(box, dataUrl) {
-  // TODO(yawano): Add transition animation for thumbnail update.
-  box.style.backgroundImage = 'url(' + dataUrl + ')';
-  box.classList.add('loaded');
+FileTable.prototype.setThumbnailImage_ = function(box, dataUrl, shouldAnimate) {
+  var oldThumbnails = box.querySelectorAll('.thumbnail');
+
+  var thumbnail = box.ownerDocument.createElement('div');
+  thumbnail.classList.add('thumbnail');
+  thumbnail.style.backgroundImage = 'url(' + dataUrl + ')';
+  thumbnail.addEventListener('webkitAnimationEnd', function() {
+    // Remove animation css once animation is completed in order not to animate
+    // again when an item is attached to the dom again.
+    thumbnail.classList.remove('animate');
+
+    for (var i = 0; i < oldThumbnails.length; i++) {
+      if (box.contains(oldThumbnails[i]))
+        box.removeChild(oldThumbnails[i]);
+    }
+  });
+
+  if (shouldAnimate)
+    thumbnail.classList.add('animate');
+
+  box.appendChild(thumbnail);
 };
 
 /**
@@ -866,15 +1034,15 @@ FileTable.prototype.relayoutImmediately_ = function() {
  * Common item decoration for table's and grid's items.
  * @param {cr.ui.ListItem} li List item.
  * @param {Entry} entry The entry.
- * @param {!FileSystemMetadata} fileSystemMetadata Cache to
+ * @param {!MetadataModel} metadataModel Cache to
  *     retrieve metadada.
  */
-filelist.decorateListItem = function(li, entry, fileSystemMetadata) {
+filelist.decorateListItem = function(li, entry, metadataModel) {
   li.classList.add(entry.isDirectory ? 'directory' : 'file');
   // The metadata may not yet be ready. In that case, the list item will be
   // updated when the metadata is ready via updateListItemsMetadata. For files
   // not on an external backend, externalProps is not available.
-  var externalProps = fileSystemMetadata.getCache(
+  var externalProps = metadataModel.getCache(
       [entry], ['hosted', 'availableOffline', 'customIconUrl', 'shared'])[0];
   filelist.updateListItemExternalProps(li, externalProps);
 
@@ -1052,7 +1220,7 @@ filelist.handlePointerDownUp = function(e, index) {
     }
   }
   sm.endChange();
-}
+};
 
 /**
  * Handles key events on file list to change the selection state.
@@ -1099,6 +1267,13 @@ filelist.handleKeyDown = function(e) {
   if (sm.multiple && e.keyCode == 65 &&
       (cr.isMac && e.metaKey || !cr.isMac && e.ctrlKey)) {
     sm.selectAll();
+    e.preventDefault();
+    return;
+  }
+
+  // Esc
+  if (e.keyCode === 27 && !e.ctrlKey && !e.shiftKey) {
+    sm.unselectAll();
     e.preventDefault();
     return;
   }
@@ -1173,4 +1348,4 @@ filelist.handleKeyDown = function(e) {
     if (prevent)
       e.preventDefault();
   }
-}
+};

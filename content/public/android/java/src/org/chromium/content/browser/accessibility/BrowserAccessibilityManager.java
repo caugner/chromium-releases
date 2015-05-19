@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser.accessibility;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
@@ -38,6 +39,7 @@ import java.util.Locale;
  * accessibility.
  */
 @JNINamespace("content")
+@TargetApi(Build.VERSION_CODES.JELLY_BEAN)
 public class BrowserAccessibilityManager {
     private static final String TAG = "BrowserAccessibilityManager";
 
@@ -406,10 +408,11 @@ public class BrowserAccessibilityManager {
 
         // Update the cursor or selection based on the traversal. If it's an editable
         // text node, set the real editing cursor too.
-        if (forwards)
+        if (forwards) {
             mSelectionEndIndex = itemEndIndex;
-        else
+        } else {
             mSelectionEndIndex = itemStartIndex;
+        }
         if (!extendSelection) {
             mSelectionStartIndex = mSelectionEndIndex;
         }
@@ -457,10 +460,11 @@ public class BrowserAccessibilityManager {
         // this node and its subtree. If accessibility focus is on anything other than
         // the root, do it - otherwise set it to -1 so we don't load inline text boxes
         // for the whole subtree of the root.
-        if (mAccessibilityFocusId == mCurrentRootId)
+        if (mAccessibilityFocusId == mCurrentRootId) {
             nativeSetAccessibilityFocus(mNativeObj, -1);
-        else
+        } else {
             nativeSetAccessibilityFocus(mNativeObj, mAccessibilityFocusId);
+        }
 
         sendAccessibilityEvent(mAccessibilityFocusId,
                 AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED);

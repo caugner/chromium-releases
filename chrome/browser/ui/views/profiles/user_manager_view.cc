@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/profiles/user_manager_view.h"
 
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -62,6 +63,9 @@ void UserManager::Show(
     // active profile to Guest.
     profiles::SetActiveProfileToGuestIfLocked();
 
+    // Note the time we started opening the User Manager.
+    instance_->set_user_manager_started_showing(base::Time::Now());
+
     // If there's a user manager window open already, just activate it.
     instance_->GetWidget()->Activate();
     return;
@@ -69,12 +73,14 @@ void UserManager::Show(
 
   // Create the system profile, if necessary, and open the user manager
   // from the system profile.
+  UserManagerView* user_manager = new UserManagerView();
+  user_manager->set_user_manager_started_showing(base::Time::Now());
   profiles::CreateSystemProfileForUserManager(
       profile_path_to_focus,
       tutorial_mode,
       profile_open_action,
       base::Bind(&UserManagerView::OnSystemProfileCreated,
-                 base::Passed(make_scoped_ptr(new UserManagerView))));
+                 base::Passed(make_scoped_ptr(user_manager))));
 }
 
 void UserManager::Hide() {
@@ -86,11 +92,17 @@ bool UserManager::IsShowing() {
   return instance_ ? instance_->GetWidget()->IsActive() : false;
 }
 
+void UserManager::OnUserManagerShown() {
+  if (instance_)
+    instance_->LogTimeToOpen();
+}
+
 // UserManagerView -------------------------------------------------------------
 
 UserManagerView::UserManagerView()
     : web_view_(NULL),
-      keep_alive_(new AutoKeepAlive(NULL)) {
+      keep_alive_(new AutoKeepAlive(NULL)),
+      user_manager_started_showing_(base::Time()) {
 }
 
 UserManagerView::~UserManagerView() {
@@ -124,11 +136,20 @@ void UserManagerView::Init(Profile* system_profile, const GURL& url) {
   // monitor in a multiple-monitor setup.
   //
   // If the last active profile is empty (for example, starting up chrome
-  // when all existing profiles are locked) or we can't find an active
+  // when all existing profiles are locked), not loaded (for example, if guest
+  // was set after locking the only open profile) or we can't find an active
   // browser, bounds will remain empty and the user manager will be centered on
   // the default monitor by default.
+  //
+  // Note the profile is accessed via GetProfileByPath(GetLastUsedProfileDir())
+  // instead of GetLastUsedProfile().  If the last active profile isn't loaded,
+  // the latter may try to synchronously load it, which can only be done on a
+  // thread where disk IO is allowed.
   gfx::Rect bounds;
-  Profile* profile = ProfileManager::GetLastUsedProfile();
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  const base::FilePath& last_used_profile_path =
+      profile_manager->GetLastUsedProfileDir(profile_manager->user_data_dir());
+  Profile* profile = profile_manager->GetProfileByPath(last_used_profile_path);
   if (profile) {
     Browser* browser = chrome::FindLastActiveWithProfile(profile,
         chrome::GetActiveDesktop());
@@ -173,6 +194,15 @@ void UserManagerView::Init(Profile* system_profile, const GURL& url) {
 
   GetWidget()->Show();
   web_view_->RequestFocus();
+}
+
+void UserManagerView::LogTimeToOpen() {
+  if (user_manager_started_showing_ == base::Time())
+    return;
+
+  ProfileMetrics::LogTimeToOpenUserManager(
+      base::Time::Now() - user_manager_started_showing_);
+  user_manager_started_showing_ = base::Time();
 }
 
 bool UserManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {

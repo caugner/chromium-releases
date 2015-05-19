@@ -133,21 +133,36 @@ class Promise(object):
     if isinstance(self._result, Promise):
       return self._result.Then(onFullfilled, onRejected)
     def GeneratorFunction(resolve, reject):
+      recover = reject
+      if onRejected:
+        recover = resolve
       if self._state == Promise.STATE_PENDING:
         self._onFulfilled.append(_Delegate(resolve, reject, onFullfilled))
-        self._onRejected.append(_Delegate(reject, reject, onRejected))
+        self._onRejected.append(_Delegate(recover, reject, onRejected))
       if self._state == self.STATE_FULLFILLED:
         _Delegate(resolve, reject, onFullfilled)(self._result)
       if self._state == self.STATE_REJECTED:
-        recover = reject
-        if onRejected:
-          recover = resolve
         _Delegate(recover, reject, onRejected)(self._result)
     return Promise(GeneratorFunction)
 
   def Catch(self, onCatched):
     """Equivalent to |Then(None, onCatched)|"""
     return self.Then(None, onCatched)
+
+  def __getattr__(self, attribute):
+    """
+    Allows to get member of a promise. It will return a promise that will
+    resolve to the member of the result.
+    """
+    return self.Then(lambda v: getattr(v, attribute))
+
+  def __call__(self, *args, **kwargs):
+    """
+    Allows to call this promise. It will return a promise that will resolved to
+    the result of calling the result of this promise with the given arguments.
+    """
+    return self.Then(lambda v: v(*args, **kwargs))
+
 
   def _Resolve(self, value):
     if self.state != Promise.STATE_PENDING:
@@ -173,6 +188,16 @@ class Promise(object):
       f(reason)
     self._onFulfilled = None
     self._onRejected = None
+
+
+def async(f):
+  def _ResolvePromises(*args, **kwargs):
+    keys = kwargs.keys()
+    values = kwargs.values()
+    all_args = list(args) + values
+    return Promise.All(*all_args).Then(
+        lambda r: f(*r[:len(args)], **dict(zip(keys, r[len(args):]))))
+  return _ResolvePromises
 
 
 def _IterateAction(iterable):

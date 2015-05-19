@@ -15,8 +15,8 @@ import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
 import android.text.format.DateUtils;
 
+import org.chromium.base.CommandLine;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.UmaBridge;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.infobar.DataReductionProxyInfoBar;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
@@ -37,24 +37,13 @@ public class BandwidthReductionPreferences extends PreferenceFragment {
 
     private static final String SHARED_PREF_DISPLAYED_INFOBAR = "displayed_data_reduction_infobar";
 
+    // This is the same as Chromium data_reduction_proxy::switches::kEnableDataReductionProxy.
+    private static final String ENABLE_DATA_REDUCTION_PROXY = "enable-spdy-proxy-auth";
+
     private boolean mIsEnabled;
     private boolean mWasEnabledAtCreation;
     // Whether the current activity is started from the Data Reduction Promo.
     private boolean mFromPromo;
-    // State transitions for data reduction settings. These correspond to
-    // DataReductionProxy.SettingsConversion defined in
-    // /tools/histograms/histograms.xml.
-    public static final int DATA_REDUCTION_OFF_TO_OFF = 0;
-    public static final int DATA_REDUCTION_OFF_TO_ON = 1;
-    public static final int DATA_REDUCTION_ON_TO_OFF = 2;
-    public static final int DATA_REDUCTION_ON_TO_ON = 3;
-    public static final int DATA_REDUCTION_INDEX_BOUNDARY = 4;
-
-    // Static flags to track if the first enable/disable for the session
-    // has happened, independent of instantiations of this class.
-    private static boolean sProxyTurnedOnThisSession = false;
-    private static boolean sProxyTurnedOffThisSession = false;
-    private static Object sProxyLock = new Object();
 
     public static void launchDataReductionSSLInfoBar(Context context, WebContents webContents) {
         // The infobar is displayed if the Chrome instance is part of the SSL experiment field
@@ -70,18 +59,6 @@ public class BandwidthReductionPreferences extends PreferenceFragment {
                 context.getString(R.string.learn_more),
                 context.getString(R.string.data_reduction_experiment_link_url));
         setDisplayedDataReductionInfoBar(context, true);
-    }
-
-    private void toggleProxyTurnOn(boolean value) {
-        synchronized (sProxyLock) {
-            sProxyTurnedOnThisSession = value;
-        }
-    }
-
-    private void toggleProxyTurnOff(boolean value) {
-        synchronized (sProxyLock) {
-            sProxyTurnedOffThisSession = value;
-        }
     }
 
     @Override
@@ -106,24 +83,29 @@ public class BandwidthReductionPreferences extends PreferenceFragment {
     public void onDestroy() {
         super.onDestroy();
 
-        int statusChange = DATA_REDUCTION_OFF_TO_OFF;
+        if (mFromPromo) {
+            // The promo isn't shown unless the proxy is disabled.
+            if (mIsEnabled) {
+                DataReductionProxyUma.dataReductionProxyUIAction(
+                        DataReductionProxyUma.ACTION_SETTINGS_LINK_ENABLED);
+                return;
+            }
+            DataReductionProxyUma.dataReductionProxyUIAction(
+                    DataReductionProxyUma.ACTION_SETTINGS_LINK_NOT_ENABLED);
+            return;
+        }
+
+        int statusChange;
         if (mWasEnabledAtCreation) {
-            statusChange = mIsEnabled ? DATA_REDUCTION_ON_TO_ON : DATA_REDUCTION_ON_TO_OFF;
+            statusChange = mIsEnabled
+                    ? DataReductionProxyUma.ACTION_ON_TO_ON
+                    : DataReductionProxyUma.ACTION_ON_TO_OFF;
         } else {
-            statusChange = mIsEnabled ? DATA_REDUCTION_OFF_TO_ON : DATA_REDUCTION_OFF_TO_OFF;
+            statusChange = mIsEnabled
+                    ? DataReductionProxyUma.ACTION_OFF_TO_ON
+                    : DataReductionProxyUma.ACTION_OFF_TO_OFF;
         }
-        UmaBridge.dataReductionProxySettings(statusChange);
-        if (mFromPromo && statusChange == DATA_REDUCTION_OFF_TO_ON) {
-            UmaBridge.dataReductionProxyTurnedOnFromPromo();
-        }
-        if (statusChange == DATA_REDUCTION_OFF_TO_ON && !sProxyTurnedOnThisSession) {
-            toggleProxyTurnOn(true);
-            UmaBridge.dataReductionProxyTurnedOn();
-        }
-        if (statusChange == DATA_REDUCTION_ON_TO_OFF && !sProxyTurnedOffThisSession) {
-            toggleProxyTurnOff(true);
-            UmaBridge.dataReductionProxyTurnedOff();
-        }
+        DataReductionProxyUma.dataReductionProxyUIAction(statusChange);
     }
 
     /**
@@ -200,16 +182,17 @@ public class BandwidthReductionPreferences extends PreferenceFragment {
     }
 
     private void createReduceDataUsageSwitch(boolean isEnabled) {
-        ChromeSwitchPreference reduceDataUsageSwitch =
+        final ChromeSwitchPreference reduceDataUsageSwitch =
                 new ChromeSwitchPreference(getActivity(), null);
         reduceDataUsageSwitch.setKey(PREF_REDUCE_DATA_USAGE_SWITCH);
         reduceDataUsageSwitch.setSummaryOn(R.string.text_on);
         reduceDataUsageSwitch.setSummaryOff(R.string.text_off);
+        reduceDataUsageSwitch.setDrawDivider(true);
         reduceDataUsageSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
             public boolean onPreferenceChange(Preference preference, Object newValue) {
                 DataReductionProxySettings.getInstance().setDataReductionProxyEnabled(
-                        (boolean) newValue);
+                        reduceDataUsageSwitch.getContext(), (boolean) newValue);
                 BandwidthReductionPreferences.this.updatePreferences((boolean) newValue);
                 return true;
             }
@@ -217,7 +200,8 @@ public class BandwidthReductionPreferences extends PreferenceFragment {
         reduceDataUsageSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
             @Override
             public boolean isPreferenceControlledByPolicy(Preference preference) {
-                return DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
+                return CommandLine.getInstance().hasSwitch(ENABLE_DATA_REDUCTION_PROXY)
+                        || DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
             }
         });
 

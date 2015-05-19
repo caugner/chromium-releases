@@ -348,7 +348,22 @@ void WaitForResizeComplete(WebContents* web_contents) {
     resize_observer.Wait();
   }
 }
-#endif  // USE_AURA
+#elif defined(OS_ANDROID)
+bool IsResizeComplete(RenderWidgetHostImpl* widget_host) {
+  return !widget_host->resize_ack_pending_for_testing();
+}
+
+void WaitForResizeComplete(WebContents* web_contents) {
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  if (!IsResizeComplete(widget_host)) {
+    WindowedNotificationObserver resize_observer(
+        NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+        base::Bind(IsResizeComplete, widget_host));
+    resize_observer.Wait();
+  }
+}
+#endif
 
 void SimulateMouseClick(WebContents* web_contents,
                         int modifiers,
@@ -393,6 +408,20 @@ void SimulateTapAt(WebContents* web_contents, const gfx::Point& point) {
   tap.type = blink::WebGestureEvent::GestureTap;
   tap.x = point.x();
   tap.y = point.y();
+  tap.modifiers = blink::WebInputEvent::ControlKey;
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  widget_host->ForwardGestureEvent(tap);
+}
+
+void SimulateTapWithModifiersAt(WebContents* web_contents,
+                                unsigned modifiers,
+                                const gfx::Point& point) {
+  blink::WebGestureEvent tap;
+  tap.type = blink::WebGestureEvent::GestureTap;
+  tap.x = point.x();
+  tap.y = point.y();
+  tap.modifiers = modifiers;
   RenderWidgetHostImpl* widget_host =
       RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
   widget_host->ForwardGestureEvent(tap);
@@ -766,7 +795,7 @@ const base::string16& TitleWatcher::WaitAndGetTitle() {
   return observed_title_;
 }
 
-void TitleWatcher::DidStopLoading(RenderViewHost* render_view_host) {
+void TitleWatcher::DidStopLoading() {
   // When navigating through the history, the restored NavigationEntry's title
   // will be used. If the entry ends up having the same title after we return
   // to it, as will usually be the case, then WebContentsObserver::TitleSet

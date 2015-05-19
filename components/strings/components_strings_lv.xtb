@@ -52,6 +52,7 @@
 <translation id="7441627299479586546">Politikas subjekts nav pareizs.</translation>
 <translation id="3885155851504623709">Pagasts</translation>
 <translation id="6973656660372572881">Ir norādīti gan fiksēti starpniekserveri, gan .pac skripta URL.</translation>
+<translation id="1426410128494586442">Jā</translation>
 <translation id="4506176782989081258">Validācijas kļūda: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076">Neizdevās tulkot šādā valodā: <ph name="TARGET_LANGUAGE"/>.</translation>
 <translation id="4103249731201008433">Ierīces sērijas numurs nav derīgs.</translation>
@@ -70,11 +71,13 @@
 <translation id="1132774398110320017">Chrome automātiskās aizpildes iestatījumi...</translation>
 <translation id="6458467102616083041">Ignorēta, jo ar politiku ir atspējota noklusējuma meklēšana.</translation>
 <translation id="1227224963052638717">Nezināma politika.</translation>
+<translation id="4250680216510889253">Nē</translation>
 <translation id="9207861905230894330">Rakstu neizdevās pievienot.</translation>
 <translation id="5872918882028971132">Vecāku ieteikumi</translation>
 <translation id="337363190475750230">Tika noņemta piekļuve</translation>
 <translation id="2367567093518048410">Līmenis</translation>
 <translation id="7977590112176369853">&lt;ievadīt vaicājumu&gt;</translation>
+<translation id="552553974213252141">Vai iegūtais teksts bija pareizs?</translation>
 <translation id="7610193165460212391">Vērtība pārsniedz diapazonu: <ph name="VALUE"/>.</translation>
 <translation id="3739623965217189342">Jūsu kopētā saite</translation>
 <translation id="8311778656528046050">Vai jūs tiešām vēlaties atkārtoti ielādēt šo lapu?</translation>
@@ -84,7 +87,6 @@
 <translation id="3024663005179499861">Politikas tips nav pareizs.</translation>
 <translation id="2030481566774242610">Vai domājāt <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, derīga līdz: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">Šī vērtība vairs netiek atbalstīta šai politikai.</translation>
 <translation id="3145945101586104090">Neizdevās atšifrēt atbildi.</translation>

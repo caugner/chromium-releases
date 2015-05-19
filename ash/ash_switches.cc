@@ -33,6 +33,10 @@ const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 // WorkspaceLayoutManager.
 const char kAshDisableLockLayoutManager[] = "ash-disable-lock-layout-manager";
 
+// Disables the window backdrops normally used in maximize mode (TouchView).
+const char kAshDisableMaximizeModeWindowBackdrop[] =
+    "ash-disable-maximize-mode-window-backdrop";
+
 #if defined(OS_CHROMEOS)
 // Disable the support for WebContents to lock the screen orientation.
 const char kAshDisableScreenOrientationLock[] =
@@ -61,12 +65,15 @@ const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
 const char kAshEnablePowerButtonQuickLock[] =
     "ash-enable-power-button-quick-lock";
 
+// Specifies the screen rotation animation to use. Possible values are:
+// "partial-rotation", "partial-rotation-slow", "full-rotation", and
+// "full-rotation-slow". See ash/rotator/screen_rotation_animator.cc for more
+// details.
+const char kAshEnableScreenRotationAnimation[] =
+    "ash-screen-rotation-animation";
+
 // Enables software based mirroring.
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
-
-// Enables gesture swipe to close windows while in Overview mode.
-const char kAshEnableSwipeToCloseInOverviewMode[] =
-    "ash-enable-swipe-to-close-in-overview-mode";
 
 // Enables touch view testing.
 // TODO(skuhne): Remove TOGGLE_TOUCH_VIEW_TESTING accelerator once this

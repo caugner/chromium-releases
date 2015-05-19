@@ -13,8 +13,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/content_visit_delegate.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -28,9 +26,11 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/content/browser/history_database_helper.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "content/public/browser/resource_request_info.h"
@@ -68,9 +68,9 @@ KeyedService* BuildHistoryService(content::BrowserContext* context) {
     return NULL;
   }
 
-  HistoryService* history_service =
-      new HistoryService(ChromeHistoryClientFactory::GetForProfile(profile),
-                         scoped_ptr<history::VisitDelegate>());
+  history::HistoryService* history_service = new history::HistoryService(
+      ChromeHistoryClientFactory::GetForProfile(profile),
+      scoped_ptr<history::VisitDelegate>());
   if (history_service->Init(
           profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
           history::HistoryDatabaseParamsForPath(profile->GetPath()))) {
@@ -164,7 +164,7 @@ class MockOffDomainInclusionDetector
 // being destructed.
 class ScopedHistoryEntry {
  public:
-  ScopedHistoryEntry(HistoryService* history_service, const GURL& url)
+  ScopedHistoryEntry(history::HistoryService* history_service, const GURL& url)
       : history_service_(history_service), url_(url) {
     base::RunLoop run_loop;
 
@@ -188,7 +188,7 @@ class ScopedHistoryEntry {
   }
 
  private:
-  HistoryService* history_service_;
+  history::HistoryService* history_service_;
   const GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedHistoryEntry);
@@ -225,14 +225,15 @@ class OffDomainInclusionDetectorTest : public testing::TestWithParam<TestCase> {
                               bool parent_is_main_frame) const {
     const GURL url(url_str);
 
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        testing_profile_, ServiceAccessType::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            testing_profile_, ServiceAccessType::EXPLICIT_ACCESS);
     scoped_ptr<ScopedHistoryEntry> scoped_history_entry;
     if (ShouldAddSimulatedURLsToHistory())
       scoped_history_entry.reset(new ScopedHistoryEntry(history_service, url));
 
     scoped_ptr<net::URLRequest> url_request(
-        context_.CreateRequest(url, net::DEFAULT_PRIORITY, NULL, NULL));
+        context_.CreateRequest(url, net::DEFAULT_PRIORITY, NULL));
 
     if (!referrer.empty())
       url_request->SetReferrer(referrer);
@@ -408,12 +409,56 @@ TEST_P(OffDomainInclusionDetectorTest, NoEventForSameDomainInclusions) {
   }
 }
 
+TEST_P(OffDomainInclusionDetectorTest, NoEventForSameIPInclusions) {
+  for (content::ResourceType tested_type :
+       kResourceTypesObservedIfInMainFrame) {
+    SCOPED_TRACE(tested_type);
+
+    SimulateTestURLRequest("http://1.2.3.4/foo",
+                           "http://1.2.3.4/bar",
+                           tested_type,
+                           true,    // is_main_frame
+                           false);  // parent_is_main_frame
+
+    EXPECT_EQ(AnalysisEvent::NO_EVENT, GetLastEventAndReset());
+  }
+}
+
 TEST_P(OffDomainInclusionDetectorTest, OffDomainInclusionInMainFrame) {
   for (content::ResourceType tested_type :
        kResourceTypesObservedIfInMainFrame) {
     SCOPED_TRACE(tested_type);
 
     SimulateTestURLRequest("http://offdomain.com/foo",
+                           "http://mydomain.com/bar", tested_type,
+                           true,    // is_main_frame
+                           false);  // parent_is_main_frame
+
+    EXPECT_EQ(GetExpectedOffDomainInclusionEventType(), GetLastEventAndReset());
+  }
+}
+
+TEST_P(OffDomainInclusionDetectorTest, OffIPIPInclusionInMainFrame) {
+  for (content::ResourceType tested_type :
+       kResourceTypesObservedIfInMainFrame) {
+    SCOPED_TRACE(tested_type);
+
+    SimulateTestURLRequest("http://1.2.3.4/foo",
+                           "http://5.6.7.8/bar",
+                           tested_type,
+                           true,    // is_main_frame
+                           false);  // parent_is_main_frame
+
+    EXPECT_EQ(GetExpectedOffDomainInclusionEventType(), GetLastEventAndReset());
+  }
+}
+
+TEST_P(OffDomainInclusionDetectorTest, OffDomainIPInclusionInMainFrame) {
+  for (content::ResourceType tested_type :
+       kResourceTypesObservedIfInMainFrame) {
+    SCOPED_TRACE(tested_type);
+
+    SimulateTestURLRequest("http://1.2.3.4/foo",
                            "http://mydomain.com/bar",
                            tested_type,
                            true,    // is_main_frame

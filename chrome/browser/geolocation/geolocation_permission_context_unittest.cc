@@ -129,7 +129,7 @@ class GeolocationPermissionContextTests
                                     bool user_gesture);
 
   void PermissionResponse(const PermissionRequestID& id,
-                          bool allowed);
+                          ContentSetting content_setting);
   void CheckPermissionMessageSent(int bridge_id, bool allowed);
   void CheckPermissionMessageSentForTab(int tab, int bridge_id, bool allowed);
   void CheckPermissionMessageSentInternal(MockRenderProcessHost* process,
@@ -190,8 +190,9 @@ void GeolocationPermissionContextTests::RequestGeolocationPermission(
 
 void GeolocationPermissionContextTests::PermissionResponse(
     const PermissionRequestID& id,
-    bool allowed) {
-  responses_[id.render_process_id()] = std::make_pair(id.bridge_id(), allowed);
+    ContentSetting content_setting) {
+  responses_[id.render_process_id()] =
+      std::make_pair(id.bridge_id(), content_setting == CONTENT_SETTING_ALLOW);
 }
 
 void GeolocationPermissionContextTests::CheckPermissionMessageSent(
@@ -220,8 +221,7 @@ void GeolocationPermissionContextTests::CheckPermissionMessageSentInternal(
 }
 
 void GeolocationPermissionContextTests::AddNewTab(const GURL& url) {
-  content::WebContents* new_tab = content::WebContents::Create(
-      content::WebContents::CreateParams(profile()));
+  content::WebContents* new_tab = CreateTestWebContents();
   new_tab->GetController().LoadURL(
       url, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   content::RenderFrameHostTester::For(new_tab->GetMainFrame())

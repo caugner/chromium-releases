@@ -18,6 +18,8 @@
         'image/image_ios_unittest.mm',
         'image/image_skia_unittest.cc',
         'image/image_unittest.cc',
+        'ios/NSString+CrStringDrawing_unittest.mm',
+        'ios/uikit_util_unittest.mm',
         'screen_unittest.cc',
         'test/run_all_unittests.cc',
         'text_elider_unittest.cc',
@@ -41,6 +43,7 @@
         'color_utils_unittest.cc',
         'display_change_notifier_unittest.cc',
         'display_unittest.cc',
+        'font_fallback_mac_unittest.cc',
         'font_list_unittest.cc',
         'font_render_params_linux_unittest.cc',
         'geometry/box_unittest.cc',
@@ -50,7 +53,6 @@
         'geometry/point3_unittest.cc',
         'geometry/point_unittest.cc',
         'geometry/quad_unittest.cc',
-        'geometry/r_tree_unittest.cc',
         'geometry/rect_unittest.cc',
         'geometry/safe_integer_conversions_unittest.cc',
         'geometry/scroll_offset_unittest.cc',
@@ -60,6 +62,7 @@
         'image/image_mac_unittest.mm',
         'image/image_util_unittest.cc',
         'mac/coordinate_conversion_unittest.mm',
+        'nine_image_painter_unittest.cc',
         'platform_font_linux_unittest.cc',
         'platform_font_mac_unittest.mm',
         'range/range_mac_unittest.mm',
@@ -115,6 +118,10 @@
         ['use_aura==1', {
           'sources!': [
             'screen_unittest.cc',
+          ],
+        },{
+          'sources!': [
+            'nine_image_painter_unittest.cc',
           ],
         }],
         ['OS == "win"', {

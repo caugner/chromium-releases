@@ -201,7 +201,7 @@ DownloadFileWithDelay::~DownloadFileWithDelay() {}
 void DownloadFileWithDelay::RenameAndUniquify(
     const base::FilePath& full_path,
     const RenameCompletionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DownloadFileImpl::RenameAndUniquify(
       full_path, base::Bind(DownloadFileWithDelay::RenameCallbackWrapper,
                             owner_, callback));
@@ -209,7 +209,7 @@ void DownloadFileWithDelay::RenameAndUniquify(
 
 void DownloadFileWithDelay::RenameAndAnnotate(
     const base::FilePath& full_path, const RenameCompletionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DownloadFileImpl::RenameAndAnnotate(
       full_path, base::Bind(DownloadFileWithDelay::RenameCallbackWrapper,
                             owner_, callback));
@@ -221,7 +221,7 @@ void DownloadFileWithDelay::RenameCallbackWrapper(
     const RenameCompletionCallback& original_callback,
     DownloadInterruptReason reason,
     const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!factory)
     return;
   factory->AddRenameCallback(base::Bind(original_callback, reason, path));
@@ -242,10 +242,9 @@ DownloadFile* DownloadFileWithDelayFactory::CreateFile(
     scoped_ptr<ByteStreamReader> stream,
     const net::BoundNetLog& bound_net_log,
     base::WeakPtr<DownloadDestinationObserver> observer) {
-  scoped_ptr<PowerSaveBlocker> psb(
-      PowerSaveBlocker::Create(
-          PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-          "Download in progress"));
+  scoped_ptr<PowerSaveBlocker> psb(PowerSaveBlocker::Create(
+      PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+      PowerSaveBlocker::kReasonOther, "Download in progress"));
   return new DownloadFileWithDelay(
       save_info.Pass(), default_download_directory, url, referrer_url,
       calculate_hash, stream.Pass(), bound_net_log,
@@ -253,7 +252,7 @@ DownloadFile* DownloadFileWithDelayFactory::CreateFile(
 }
 
 void DownloadFileWithDelayFactory::AddRenameCallback(base::Closure callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   rename_callbacks_.push_back(callback);
   if (waiting_)
     base::MessageLoopForUI::current()->Quit();
@@ -261,12 +260,12 @@ void DownloadFileWithDelayFactory::AddRenameCallback(base::Closure callback) {
 
 void DownloadFileWithDelayFactory::GetAllRenameCallbacks(
     std::vector<base::Closure>* results) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   results->swap(rename_callbacks_);
 }
 
 void DownloadFileWithDelayFactory::WaitForSomeCallback() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (rename_callbacks_.empty()) {
     waiting_ = true;
@@ -292,18 +291,18 @@ class CountingDownloadFile : public DownloadFileImpl {
                          stream.Pass(), bound_net_log, observer) {}
 
   ~CountingDownloadFile() override {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     active_files_--;
   }
 
   void Initialize(const InitializeCallback& callback) override {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     active_files_++;
     return DownloadFileImpl::Initialize(callback);
   }
 
   static void GetNumberActiveFiles(int* result) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     *result = active_files_;
   }
 
@@ -342,10 +341,9 @@ class CountingDownloadFileFactory : public DownloadFileFactory {
       scoped_ptr<ByteStreamReader> stream,
       const net::BoundNetLog& bound_net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
-    scoped_ptr<PowerSaveBlocker> psb(
-        PowerSaveBlocker::Create(
-            PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-            "Download in progress"));
+    scoped_ptr<PowerSaveBlocker> psb(PowerSaveBlocker::Create(
+        PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+        PowerSaveBlocker::kReasonOther, "Download in progress"));
     return new CountingDownloadFile(
         save_info.Pass(), default_downloads_directory, url, referrer_url,
         calculate_hash, stream.Pass(), bound_net_log,
@@ -472,7 +470,7 @@ class DownloadCreateObserver : DownloadManager::Observer {
   }
 
   DownloadItem* WaitForFinished() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (!item_) {
       waiting_ = true;
       RunMessageLoop();

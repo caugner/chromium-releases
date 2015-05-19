@@ -93,6 +93,12 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& payment_url() const { return payment_url_; }
   bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
 
+  // VPN property accessors
+  const std::string& vpn_provider_type() const { return vpn_provider_type_; }
+  const std::string& third_party_vpn_provider_extension_id() const {
+    return third_party_vpn_provider_extension_id_;
+  }
+
   // Returns true if |connection_state_| is a connected/connecting state.
   bool IsConnectedState() const;
   bool IsConnectingState() const;
@@ -179,6 +185,11 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string roaming_;
   std::string payment_url_;
   bool cellular_out_of_credits_;
+
+  // VPN properties, used to construct the display name and to show the correct
+  // configuration dialog.
+  std::string vpn_provider_type_;
+  std::string third_party_vpn_provider_extension_id_;
 
   // TODO(pneubeck): Remove this once (Managed)NetworkConfigurationHandler
   // provides proxy configuration. crbug.com/241775

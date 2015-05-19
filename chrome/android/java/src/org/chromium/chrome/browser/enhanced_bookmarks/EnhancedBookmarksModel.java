@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.enhanced_bookmarks;
 
 import org.chromium.base.ObserverList;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.BookmarksBridge;
 import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.BookmarksBridge.BookmarkModelObserver;
@@ -18,7 +19,6 @@ import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content_public.browser.WebContents;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -51,21 +51,17 @@ public class EnhancedBookmarksModel {
     /**
      * Initialize enhanced bookmark model for last used non-incognito profile with a java-side image
      * cache that has the given size.
-     * @param salientImageCacheSize Maximum cache size in bytes.
-     */
-    public EnhancedBookmarksModel(int salientImageCacheSize) {
-        Profile originalProfile = Profile.getLastUsedProfile().getOriginalProfile();
-        mBookmarksBridge = new BookmarksBridge(originalProfile);
-        mEnhancedBookmarksBridge = new EnhancedBookmarksBridge(originalProfile,
-                salientImageCacheSize);
-    }
-
-    /**
-     * Initialize enhanced bookmark model with no cache for salient images. This constructor uses
-     * the last non-incognito profile.
      */
     public EnhancedBookmarksModel() {
-        this(0);
+        Profile originalProfile = Profile.getLastUsedProfile().getOriginalProfile();
+        mBookmarksBridge = new BookmarksBridge(originalProfile);
+        mEnhancedBookmarksBridge = new EnhancedBookmarksBridge(originalProfile);
+    }
+
+    @VisibleForTesting
+    public EnhancedBookmarksModel(Profile profile) {
+        mBookmarksBridge = new BookmarksBridge(profile);
+        mEnhancedBookmarksBridge = new EnhancedBookmarksBridge(profile);
     }
 
     /**
@@ -165,13 +161,6 @@ public class EnhancedBookmarksModel {
      */
     public List<BookmarkId> getTopLevelFolderIDs(boolean getSpecial, boolean getNormal) {
         return mBookmarksBridge.getTopLevelFolderIDs(getSpecial, getNormal);
-    }
-
-    /**
-     * @see BookmarksBridge#getUncategorizedBookmarkIDs()
-     */
-    public List<BookmarkId> getUncategorizedBookmarkIDs() {
-        return Collections.emptyList();
     }
 
     /**
@@ -280,7 +269,8 @@ public class EnhancedBookmarksModel {
     }
 
     /**
-     * @see EnhancedBookmarksBridge#moveBookmark(BookmarkId, BookmarkId)
+     * Calls {@link EnhancedBookmarksBridge#moveBookmark(BookmarkId, BookmarkId)} in a reversed
+     * order of the list, in order to let the last item appear at the top.
      */
     public void moveBookmarks(List<BookmarkId> bookmarkIds, BookmarkId newParentId) {
         for (int i = bookmarkIds.size() - 1; i >= 0; i--) {
@@ -398,5 +388,13 @@ public class EnhancedBookmarksModel {
      */
     public void removeSearchObserver(SearchServiceObserver observer) {
         mEnhancedBookmarksBridge.removeSearchObserver(observer);
+    }
+
+    /**
+     * @see BookmarksBridge#loadEmptyPartnerBookmarkShimForTesting()
+     */
+    @VisibleForTesting
+    public void loadEmptyPartnerBookmarkShimForTesting() {
+        mBookmarksBridge.loadEmptyPartnerBookmarkShimForTesting();
     }
 }

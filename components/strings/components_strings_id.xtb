@@ -52,6 +52,7 @@
 <translation id="7441627299479586546">Subjek kebijakan salah</translation>
 <translation id="3885155851504623709">Parish</translation>
 <translation id="6973656660372572881">Server proxy tetap dan URL skrip .pac telah ditentukan.</translation>
+<translation id="1426410128494586442">Ya</translation>
 <translation id="4506176782989081258">Kesalahan validasi: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076">Penerjemahan ke <ph name="TARGET_LANGUAGE"/> gagal.</translation>
 <translation id="4103249731201008433">Nomor seri perangkat tidak valid</translation>
@@ -70,11 +71,13 @@
 <translation id="1132774398110320017">Setelan IsiOtomatis Chrome...</translation>
 <translation id="6458467102616083041">Diabaikan karena penelusuran default dinonaktifkan oleh kebijakan.</translation>
 <translation id="1227224963052638717">Kebijakan tidak dikenal.</translation>
+<translation id="4250680216510889253">Tidak</translation>
 <translation id="9207861905230894330">Gagal menambahkan artikel.</translation>
 <translation id="5872918882028971132">Saran Induk</translation>
 <translation id="337363190475750230">Tidak ditetapkan</translation>
 <translation id="2367567093518048410">Tingkat</translation>
 <translation id="7977590112176369853">&lt;masukkan permintaan&gt;</translation>
+<translation id="552553974213252141">Apakah teks diekstrak dengan benar?</translation>
 <translation id="7610193165460212391">Nilai di luar jangkauan <ph name="VALUE"/>.</translation>
 <translation id="3739623965217189342">Tautan yang Anda salin</translation>
 <translation id="8311778656528046050">Yakin ingin memuat ulang laman ini?</translation>
@@ -84,7 +87,6 @@
 <translation id="3024663005179499861">Jenis kebijakan salah</translation>
 <translation id="2030481566774242610">Mungkin maksud Anda <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, Kedaluwarsa: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">Nilai ini sudah usang untuk kebijakan ini.</translation>
 <translation id="3145945101586104090">Gagal mendekodekan tanggapan</translation>

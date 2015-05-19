@@ -9,11 +9,14 @@ Eventually, this will be based on adb_wrapper.
 # pylint: disable=unused-argument
 
 import collections
+import contextlib
 import itertools
 import logging
 import multiprocessing
 import os
+import posixpath
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -29,6 +32,7 @@ from pylib.device import intent
 from pylib.device import logcat_monitor
 from pylib.device.commands import install_commands
 from pylib.utils import apk_helper
+from pylib.utils import base_error
 from pylib.utils import device_temp_file
 from pylib.utils import host_utils
 from pylib.utils import md5sum
@@ -44,6 +48,29 @@ _DEFAULT_RETRIES = 3
 # the timeout_retry decorators.
 DEFAULT = object()
 
+_CONTROL_CHARGING_COMMANDS = [
+  {
+    # Nexus 4
+    'witness_file': '/sys/module/pm8921_charger/parameters/disabled',
+    'enable_command': 'echo 0 > /sys/module/pm8921_charger/parameters/disabled',
+    'disable_command':
+        'echo 1 > /sys/module/pm8921_charger/parameters/disabled',
+  },
+  {
+    # Nexus 5
+    # Setting the HIZ bit of the bq24192 causes the charger to actually ignore
+    # energy coming from USB. Setting the power_supply offline just updates the
+    # Android system to reflect that.
+    'witness_file': '/sys/kernel/debug/bq24192/INPUT_SRC_CONT',
+    'enable_command': (
+        'echo 0x4A > /sys/kernel/debug/bq24192/INPUT_SRC_CONT && '
+        'echo 1 > /sys/class/power_supply/usb/online'),
+    'disable_command': (
+        'echo 0xCA > /sys/kernel/debug/bq24192/INPUT_SRC_CONT && '
+        'chmod 644 /sys/class/power_supply/usb/online && '
+        'echo 0 > /sys/class/power_supply/usb/online'),
+  },
+]
 
 @decorators.WithExplicitTimeoutAndRetries(
     _DEFAULT_TIMEOUT, _DEFAULT_RETRIES)
@@ -104,6 +131,7 @@ def _JoinLines(lines):
 class DeviceUtils(object):
 
   _MAX_ADB_COMMAND_LENGTH = 512
+  _MAX_ADB_OUTPUT_LENGTH = 32768
   _VALID_SHELL_VARIABLE = re.compile('^[a-zA-Z_][a-zA-Z0-9_]*$')
 
   # Property in /data/local.prop that controls Java assertions.
@@ -140,8 +168,13 @@ class DeviceUtils(object):
     self._default_timeout = default_timeout
     self._default_retries = default_retries
     self._cache = {}
+    self._client_caches = {}
     assert hasattr(self, decorators.DEFAULT_TIMEOUT_ATTR)
     assert hasattr(self, decorators.DEFAULT_RETRIES_ATTR)
+
+  def __str__(self):
+    """Returns the device serial."""
+    return self.adb.GetDeviceSerial()
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def IsOnline(self, timeout=None, retries=None):
@@ -159,7 +192,7 @@ class DeviceUtils(object):
     """
     try:
       return self.adb.GetState() == 'device'
-    except device_errors.BaseError as exc:
+    except base_error.BaseError as exc:
       logging.info('Failed to get state: %s', exc)
       return False
 
@@ -374,7 +407,7 @@ class DeviceUtils(object):
       return not self.IsOnline()
 
     self.adb.Reboot()
-    self._cache = {}
+    self._ClearCache()
     timeout_retry.WaitFor(device_offline, wait_period=1)
     if block:
       self.WaitUntilFullyBooted(wifi=wifi)
@@ -908,6 +941,21 @@ class DeviceUtils(object):
       os.makedirs(dirname)
     self.adb.Pull(device_path, host_path)
 
+  def _ReadFileWithPull(self, device_path):
+    try:
+      d = tempfile.mkdtemp()
+      host_temp_path = os.path.join(d, 'tmp_ReadFileWithPull')
+      self.adb.Pull(device_path, host_temp_path)
+      with open(host_temp_path, 'r') as host_temp:
+        return host_temp.read()
+    finally:
+      if os.path.exists(d):
+        shutil.rmtree(d)
+
+  _LS_RE = re.compile(
+      r'(?P<perms>\S+) +(?P<owner>\S+) +(?P<group>\S+) +(?:(?P<size>\d+) +)?'
+      + r'(?P<date>\S+) +(?P<time>\S+) +(?P<name>.+)$')
+
   @decorators.WithTimeoutAndRetriesFromInstance()
   def ReadFile(self, device_path, as_root=False,
                timeout=None, retries=None):
@@ -931,8 +979,29 @@ class DeviceUtils(object):
       CommandTimeoutError on timeout.
       DeviceUnreachableError on missing device.
     """
-    return _JoinLines(self.RunShellCommand(
-        ['cat', device_path], as_root=as_root, check_return=True))
+    # TODO(jbudorick): Implement a generic version of Stat() that handles
+    # as_root=True, then switch this implementation to use that.
+    size = None
+    ls_out = self.RunShellCommand(['ls', '-l', device_path], as_root=as_root,
+                                  check_return=True)
+    for line in ls_out:
+      m = self._LS_RE.match(line)
+      if m and m.group('name') == posixpath.basename(device_path):
+        size = int(m.group('size'))
+        break
+    else:
+      logging.warning('Could not determine size of %s.', device_path)
+
+    if size is None or size <= self._MAX_ADB_OUTPUT_LENGTH:
+      return _JoinLines(self.RunShellCommand(
+          ['cat', device_path], as_root=as_root, check_return=True))
+    elif as_root and self.NeedsSU():
+      with device_temp_file.DeviceTempFile(self.adb) as device_temp:
+        self.RunShellCommand(['cp', device_path, device_temp.name],
+                             as_root=True, check_return=True)
+        return self._ReadFileWithPull(device_temp.name)
+    else:
+      return self._ReadFileWithPull(device_path)
 
   def _WriteFileWithPush(self, device_path, contents):
     with tempfile.NamedTemporaryFile() as host_temp:
@@ -1370,9 +1439,158 @@ class DeviceUtils(object):
     """
     return logcat_monitor.LogcatMonitor(self.adb, *args, **kwargs)
 
-  def __str__(self):
-    """Returns the device serial."""
-    return self.adb.GetDeviceSerial()
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def GetBatteryInfo(self, timeout=None, retries=None):
+    """Gets battery info for the device.
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    Returns:
+      A dict containing various battery information as reported by dumpsys
+      battery.
+    """
+    result = {}
+    # Skip the first line, which is just a header.
+    for line in self.RunShellCommand(
+        ['dumpsys', 'battery'], check_return=True)[1:]:
+      # If usb charging has been disabled, an extra line of header exists.
+      if 'UPDATES STOPPED' in line:
+        logging.warning('Dumpsys battery not receiving updates. '
+                        'Run dumpsys battery reset if this is in error.')
+      elif ':' not in line:
+        logging.warning('Unknown line found in dumpsys battery.')
+        logging.warning(line)
+      else:
+        k, v = line.split(': ', 1)
+        result[k.strip()] = v.strip()
+    return result
+
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def GetCharging(self, timeout=None, retries=None):
+    """Gets the charging state of the device.
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    Returns:
+      True if the device is charging, false otherwise.
+    """
+    battery_info = self.GetBatteryInfo()
+    for k in ('AC powered', 'USB powered', 'Wireless powered'):
+      if (k in battery_info and
+          battery_info[k].lower() in ('true', '1', 'yes')):
+        return True
+    return False
+
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def SetCharging(self, enabled, timeout=None, retries=None):
+    """Enables or disables charging on the device.
+
+    Args:
+      enabled: A boolean indicating whether charging should be enabled or
+        disabled.
+      timeout: timeout in seconds
+      retries: number of retries
+    """
+    if 'charging_config' not in self._cache:
+      for c in _CONTROL_CHARGING_COMMANDS:
+        if self.FileExists(c['witness_file']):
+          self._cache['charging_config'] = c
+          break
+      else:
+        raise device_errors.CommandFailedError(
+            'Unable to find charging commands.')
+
+    if enabled:
+      command = self._cache['charging_config']['enable_command']
+    else:
+      command = self._cache['charging_config']['disable_command']
+
+    def set_and_verify_charging():
+      self.RunShellCommand(command, check_return=True)
+      return self.GetCharging() == enabled
+
+    timeout_retry.WaitFor(set_and_verify_charging, wait_period=1)
+
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def DisableBatteryUpdates(self, timeout=None, retries=None):
+    """ Resets battery data and makes device appear like it is not
+    charging so that it will collect power data since last charge.
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    """
+    def battery_updates_disabled():
+      return self.GetCharging() is False
+
+    self.RunShellCommand(
+        ['dumpsys', 'batterystats', '--reset'], check_return=True)
+    battery_data = self.RunShellCommand(
+        ['dumpsys', 'batterystats', '--charged', '--checkin'],
+        check_return=True)
+    ROW_TYPE_INDEX = 3
+    PWI_POWER_INDEX = 5
+    for line in battery_data:
+      l = line.split(',')
+      if (len(l) > PWI_POWER_INDEX and l[ROW_TYPE_INDEX] == 'pwi'
+          and l[PWI_POWER_INDEX] != 0):
+        raise device_errors.CommandFailedError(
+            'Non-zero pmi value found after reset.')
+    self.RunShellCommand(['dumpsys', 'battery', 'set', 'usb', '0'],
+                         check_return=True)
+    timeout_retry.WaitFor(battery_updates_disabled, wait_period=1)
+
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def EnableBatteryUpdates(self, timeout=None, retries=None):
+    """ Restarts device charging so that dumpsys no longer collects power data.
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    """
+    def battery_updates_enabled():
+      return self.GetCharging() is True
+
+    self.RunShellCommand(['dumpsys', 'battery', 'set', 'usb', '1'],
+                         check_return=True)
+    self.RunShellCommand(['dumpsys', 'battery', 'reset'], check_return=True)
+    timeout_retry.WaitFor(battery_updates_enabled, wait_period=1)
+
+  # TODO(rnephew): Remove when battery_utils is switched to.
+  @contextlib.contextmanager
+  def BatteryMeasurement(self, timeout=None, retries=None):
+    """Context manager that enables battery data collection. It makes
+    the device appear to stop charging so that dumpsys will start collecting
+    power data since last charge. Once the with block is exited, charging is
+    resumed and power data since last charge is no longer collected.
+
+    Only for devices L and higher.
+
+    Example usage:
+      with BatteryMeasurement():
+        browser_actions()
+        get_power_data() # report usage within this block
+      after_measurements() # Anything that runs after power
+                           # measurements are collected
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    """
+    if self.build_version_sdk < constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP:
+      raise device_errors.CommandFailedError('Device must be L or higher.')
+    try:
+      self.DisableBatteryUpdates(timeout=timeout, retries=retries)
+      yield
+    finally:
+      self.EnableBatteryUpdates(timeout=timeout, retries=retries)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def GetDevicePieWrapper(self, timeout=None, retries=None):
@@ -1435,3 +1653,15 @@ class DeviceUtils(object):
       return parallelizer.Parallelizer(devices)
     else:
       return parallelizer.SyncParallelizer(devices)
+
+  def GetClientCache(self, client_name):
+    """Returns client cache."""
+    if client_name not in self._client_caches:
+      self._client_caches[client_name] = {}
+    return self._client_caches[client_name]
+
+  def _ClearCache(self):
+    """Clears all caches."""
+    for client in self._client_caches:
+      self._client_caches[client].clear()
+    self._cache.clear()

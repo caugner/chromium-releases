@@ -14,14 +14,24 @@ import java.io.Serializable;
 public class PopupExceptionInfo implements Serializable {
     private final String mPattern;
     private final String mSetting;
+    private final String mSource;
 
-    public PopupExceptionInfo(String pattern, String setting) {
+    public PopupExceptionInfo(String pattern, String setting, String source) {
         mPattern = pattern;
         mSetting = setting;
+        mSource = source;
     }
 
     public String getPattern() {
         return mPattern;
+    }
+
+    public String getSetting() {
+        return mPattern;
+    }
+
+    public String getSource() {
+        return mSource;
     }
 
     /**

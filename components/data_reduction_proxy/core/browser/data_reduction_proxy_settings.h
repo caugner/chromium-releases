@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_SETTINGS_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_SETTINGS_H_
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -24,7 +25,7 @@ class DataReductionProxyConfig;
 class DataReductionProxyEventStore;
 class DataReductionProxyIOData;
 class DataReductionProxyService;
-class DataReductionProxyStatisticsPrefs;
+class DataReductionProxyCompressionStats;
 
 // The number of days of bandwidth usage statistics that are tracked.
 const unsigned int kNumDaysInHistory = 60;
@@ -59,6 +60,8 @@ enum ProxyStartupState {
 class DataReductionProxySettings {
  public:
   typedef std::vector<long long> ContentLengthList;
+  typedef base::Callback<bool(const std::string&, const std::string&)>
+      SyntheticFieldTrialRegistrationCallback;
 
   DataReductionProxySettings();
   virtual ~DataReductionProxySettings();
@@ -71,12 +74,14 @@ class DataReductionProxySettings {
       DataReductionProxyIOData* io_data,
       scoped_ptr<DataReductionProxyService> data_reduction_proxy_service);
 
-  base::WeakPtr<DataReductionProxyStatisticsPrefs> statistics_prefs();
+  base::WeakPtr<DataReductionProxyCompressionStats> compression_stats();
 
-  // Sets the |on_data_reduction_proxy_enabled_| callback and runs to register
-  // the DataReductionProxyEnabled synthetic field trial.
-  void SetOnDataReductionEnabledCallback(
-      const base::Callback<void(bool)>& on_data_reduction_proxy_enabled);
+  // Sets the |register_synthetic_field_trial_| callback and runs to register
+  // the DataReductionProxyEnabled and the DataReductionProxyLoFiEnabled
+  // synthetic field trial.
+  void SetCallbackToRegisterSyntheticFieldTrial(
+      const SyntheticFieldTrialRegistrationCallback&
+          on_data_reduction_proxy_enabled);
 
   // Returns true if the proxy is enabled.
   bool IsDataReductionProxyEnabled() const;
@@ -160,13 +165,14 @@ class DataReductionProxySettings {
     return promo_allowed_;
   }
 
-  // The data reduction proxy primary origin
-  const std::string PrimaryOrigin() const {
-    return primary_origin_;
-  }
-
   DataReductionProxyService* data_reduction_proxy_service() {
     return data_reduction_proxy_service_.get();
+  }
+
+  // Returns the |DataReductionProxyConfig| being used. May be null if
+  // InitDataReductionProxySettings has not been called.
+  DataReductionProxyConfig* Config() const {
+    return config_;
   }
 
   // Permits changing the underlying |DataReductionProxyConfig| without running
@@ -216,6 +222,21 @@ class DataReductionProxySettings {
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
                            CheckInitMetricsWhenNotAllowed);
 
+  // Returns true if both LoFi and the proxy are enabled.
+  bool IsLoFiEnabled() const;
+
+  // Registers the trial "SyntheticDataReductionProxySetting" with the group
+  // "Enabled" or "Disabled". Indicates whether the proxy is turned on or not.
+  void RegisterDataReductionProxyFieldTrial();
+
+  // Registers the trial "SyntheticDataReductionProxyLoFiSetting" with the group
+  // "Enabled" or "Disabled". Indicates whether LoFi is turned on or not.
+  // The group won't be reported if it changes while compiling the report. LoFi
+  // has its own field trial because it is expected that the user will be
+  // switching states often. It can be assumed that when no LoFi group is
+  // reported, the user was in a mixed LoFi state.
+  void RegisterLoFiFieldTrial();
+
   void OnProxyEnabledPrefChange();
   void OnProxyAlternativeEnabledPrefChange();
 
@@ -228,7 +249,6 @@ class DataReductionProxySettings {
   bool allowed_;
   bool alternative_allowed_;
   bool promo_allowed_;
-  std::string primary_origin_;
 
   BooleanPrefMember spdy_proxy_auth_enabled_;
   BooleanPrefMember data_reduction_proxy_alternative_enabled_;
@@ -243,7 +263,7 @@ class DataReductionProxySettings {
   // The caller must ensure that the |config_| outlives this instance.
   DataReductionProxyConfig* config_;
 
-  base::Callback<void(bool)> on_data_reduction_proxy_enabled_;
+  SyntheticFieldTrialRegistrationCallback register_synthetic_field_trial_;
 
   base::ThreadChecker thread_checker_;
 

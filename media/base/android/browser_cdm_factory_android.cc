@@ -15,9 +15,10 @@ namespace media {
 
 scoped_ptr<BrowserCdm> BrowserCdmFactoryAndroid::CreateBrowserCdm(
     const std::string& key_system,
+    bool use_secure_surface,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
-    const SessionErrorCB& session_error_cb,
+    const LegacySessionErrorCB& legacy_session_error_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb) {
   if (!MediaDrmBridge::IsKeySystemSupported(key_system)) {
@@ -25,33 +26,31 @@ scoped_ptr<BrowserCdm> BrowserCdmFactoryAndroid::CreateBrowserCdm(
     return scoped_ptr<BrowserCdm>();
   }
 
-  scoped_ptr<MediaDrmBridge> cdm(MediaDrmBridge::Create(
-      key_system, session_message_cb, session_closed_cb, session_error_cb,
-      session_keys_change_cb, session_expiration_update_cb));
+  scoped_ptr<MediaDrmBridge> cdm(
+      MediaDrmBridge::Create(key_system, session_message_cb, session_closed_cb,
+                             legacy_session_error_cb, session_keys_change_cb,
+                             session_expiration_update_cb));
   if (!cdm) {
     NOTREACHED() << "MediaDrmBridge cannot be created for " << key_system;
     return scoped_ptr<BrowserCdm>();
   }
 
-  // TODO(xhwang/ddorwin): Pass the security level from key system.
-  // http://crbug.com/459400
+  // TODO(sandersd): Pass the security level from key system.
+  // http://crbug.com/467779
   if (key_system == kWidevineKeySystem) {
     MediaDrmBridge::SecurityLevel security_level =
-        MediaDrmBridge::SECURITY_LEVEL_3;
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kMediaDrmEnableNonCompositing)) {
-      security_level = MediaDrmBridge::SECURITY_LEVEL_1;
-    }
+        use_secure_surface ? MediaDrmBridge::SECURITY_LEVEL_1
+                           : MediaDrmBridge::SECURITY_LEVEL_3;
     if (!cdm->SetSecurityLevel(security_level)) {
       DVLOG(1) << "failed to set security level " << security_level;
       return scoped_ptr<BrowserCdm>();
     }
   } else {
     // Assume other key systems do not support full compositing.
-    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kMediaDrmEnableNonCompositing)) {
-      NOTREACHED() << key_system << " may require "
-                   << switches::kMediaDrmEnableNonCompositing;
+    if (!use_secure_surface) {
+      NOTREACHED()
+          << key_system
+          << " may require use_video_overlay_for_embedded_encrypted_video";
       return scoped_ptr<BrowserCdm>();
     }
   }

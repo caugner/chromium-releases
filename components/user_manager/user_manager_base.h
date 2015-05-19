@@ -15,6 +15,7 @@
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_id.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_manager_export.h"
 #include "components/user_manager/user_type.h"
@@ -23,6 +24,7 @@ class PrefService;
 class PrefRegistrySimple;
 
 namespace base {
+class DictionaryValue;
 class ListValue;
 class TaskRunner;
 }
@@ -103,8 +105,24 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
       UserManager::UserSessionStateObserver* obs) override;
   void NotifyLocalStateChanged() override;
   void ChangeUserChildStatus(User* user, bool is_child) override;
+  bool FindKnownUserPrefs(const UserID& user_id,
+                          const base::DictionaryValue** out_value) override;
+  void UpdateKnownUserPrefs(const UserID& user_id,
+                            const base::DictionaryValue& values,
+                            bool clear) override;
+  bool GetKnownUserStringPref(const UserID& user_id,
+                              const std::string& path,
+                              std::string* out_value) override;
+  void SetKnownUserStringPref(const UserID& user_id,
+                              const std::string& path,
+                              const std::string& in_value) override;
+  void UpdateGaiaID(const UserID& user_id, const std::string& gaia_id) override;
+  bool FindGaiaID(const UserID& user_id, std::string* out_value) override;
 
   virtual void SetIsCurrentUserNew(bool is_new);
+
+  // TODO(xiyuan): Figure out a better way to expose this info.
+  virtual bool HasPendingBootstrap(const std::string& user_id) const;
 
   // Helper function that copies users from |users_list| to |users_vector| and
   // |users_set|. Duplicates and users already present in |existing_users| are
@@ -321,6 +339,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Updates user account after locale was resolved.
   void DoUpdateAccountLocale(const std::string& user_id,
                              scoped_ptr<std::string> resolved_locale);
+
+  // Removes all user preferences associated with |user_id|.
+  void RemoveKnownUserPrefs(const UserID& user_id);
 
   // Indicates stage of loading user from prefs.
   UserLoadStage user_loading_stage_;

@@ -20,6 +20,7 @@
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/app_list/views/custom_launcher_page_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -88,10 +89,10 @@ class CustomLauncherPageBrowserTest
 
   // Set the active page on the app list, according to |state|. Does not wait
   // for any animation or custom page to complete.
-  void SetActivePageAndVerify(app_list::AppListModel::State state) {
+  void SetActiveStateAndVerify(app_list::AppListModel::State state) {
     app_list::ContentsView* contents_view =
         GetAppListView()->app_list_main_view()->contents_view();
-    contents_view->SetActivePage(contents_view->GetPageIndexForState(state));
+    contents_view->SetActiveState(state);
     EXPECT_TRUE(contents_view->IsStateActive(state));
   }
 
@@ -103,8 +104,8 @@ class CustomLauncherPageBrowserTest
 
     app_list::ContentsView* contents_view =
         GetAppListView()->app_list_main_view()->contents_view();
-    views::WebView* custom_page_view =
-        static_cast<views::WebView*>(contents_view->custom_page_view());
+    views::WebView* custom_page_view = static_cast<views::WebView*>(
+        contents_view->custom_page_view()->custom_launcher_page_contents());
     content::RenderFrameHost* custom_page_frame =
         custom_page_view->GetWebContents()->GetMainFrame();
 
@@ -133,15 +134,14 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
 
   {
     ExtensionTestMessageListener listener("onPageProgressAt1", false);
-    contents_view->SetActivePage(contents_view->GetPageIndexForState(
-        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
+    contents_view->SetActiveState(
+        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
 
     listener.WaitUntilSatisfied();
   }
   {
     ExtensionTestMessageListener listener("onPageProgressAt0", false);
-    contents_view->SetActivePage(contents_view->GetPageIndexForState(
-        app_list::AppListModel::STATE_START));
+    contents_view->SetActiveState(app_list::AppListModel::STATE_START);
 
     listener.WaitUntilSatisfied();
   }
@@ -162,7 +162,8 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
       contents_view->IsStateActive(app_list::AppListModel::STATE_START));
 
   // Find the clickzone.
-  gfx::Rect bounds = contents_view->GetCustomPageCollapsedBounds();
+  gfx::Rect bounds =
+      contents_view->custom_page_view()->GetCollapsedLauncherPageBounds();
   bounds.Intersect(contents_view->bounds());
   gfx::Point point_in_clickzone = bounds.CenterPoint();
   views::View::ConvertPointToWidget(contents_view, &point_in_clickzone);
@@ -193,7 +194,7 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
       app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
 
   // Back to the start page. And send a mouse wheel event.
-  SetActivePageAndVerify(app_list::AppListModel::STATE_START);
+  SetActiveStateAndVerify(app_list::AppListModel::STATE_START);
   // Generate wheel events above the clickzone.
   event_generator.MoveMouseRelativeTo(window, point_above_clickzone);
   // Scrolling left, right or up should do nothing.
@@ -224,7 +225,7 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
 #endif
 
   // Back to the start page. And send a scroll gesture.
-  SetActivePageAndVerify(app_list::AppListModel::STATE_START);
+  SetActiveStateAndVerify(app_list::AppListModel::STATE_START);
   // Going down should do nothing.
   event_generator.GestureScrollSequence(
       point_above_clickzone, point_in_clickzone, step_delay, num_steps);
@@ -237,7 +238,7 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
       app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
 
   // Back to the start page. And send a trackpad scroll event.
-  SetActivePageAndVerify(app_list::AppListModel::STATE_START);
+  SetActiveStateAndVerify(app_list::AppListModel::STATE_START);
   // Going down left, right or up should do nothing.
   event_generator.ScrollSequence(point_in_clickzone, step_delay, -5, 0,
                                  num_steps, num_fingers);
@@ -254,7 +255,7 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
       app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
 
   // Back to the start page. And send a tap gesture.
-  SetActivePageAndVerify(app_list::AppListModel::STATE_START);
+  SetActiveStateAndVerify(app_list::AppListModel::STATE_START);
   // Tapping outside the clickzone should do nothing.
   event_generator.GestureTapAt(point_above_clickzone);
   EXPECT_TRUE(
@@ -278,8 +279,8 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest, LauncherPageSubpages) {
 
   {
     ExtensionTestMessageListener listener("onPageProgressAt1", false);
-    contents_view->SetActivePage(contents_view->GetPageIndexForState(
-        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
+    contents_view->SetActiveState(
+        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
     listener.WaitUntilSatisfied();
     EXPECT_TRUE(contents_view->IsStateActive(
         app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
@@ -324,8 +325,8 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
   app_list::ContentsView* contents_view =
       app_list_view->app_list_main_view()->contents_view();
 
-  views::WebView* custom_page_view =
-      static_cast<views::WebView*>(contents_view->custom_page_view());
+  views::WebView* custom_page_view = static_cast<views::WebView*>(
+      contents_view->custom_page_view()->custom_launcher_page_contents());
 
   content::RenderFrameHost* custom_page_frame =
       custom_page_view->GetWebContents()->GetMainFrame();
@@ -370,8 +371,7 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest, LauncherPageSetEnabled) {
   app_list::ContentsView* contents_view =
       app_list_view->app_list_main_view()->contents_view();
 
-  views::WebView* custom_page_view =
-      static_cast<views::WebView*>(contents_view->custom_page_view());
+  views::View* custom_page_view = contents_view->custom_page_view();
   ASSERT_TRUE(
       contents_view->IsStateActive(app_list::AppListModel::STATE_START));
 
@@ -387,6 +387,8 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest, LauncherPageSetEnabled) {
   EXPECT_TRUE(custom_page_view->visible());
 }
 
+// Currently this is flaky.
+// Disabled test http://crbug.com/463456
 IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
                        LauncherPageFocusTraversal) {
   LoadAndLaunchPlatformApp(kCustomLauncherPagePath, "Launched");
@@ -398,31 +400,34 @@ IN_PROC_BROWSER_TEST_F(CustomLauncherPageBrowserTest,
 
   ASSERT_TRUE(
       contents_view->IsStateActive(app_list::AppListModel::STATE_START));
-  EXPECT_EQ(app_list_view->GetFocusManager()->GetFocusedView(),
-            search_box_view->search_box());
 
   {
     ExtensionTestMessageListener listener("onPageProgressAt1", false);
-    contents_view->SetActivePage(contents_view->GetPageIndexForState(
-        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
+    contents_view->SetActiveState(
+        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
     listener.WaitUntilSatisfied();
-    EXPECT_TRUE(contents_view->IsStateActive(
-        app_list::AppListModel::STATE_CUSTOM_LAUNCHER_PAGE));
-    EXPECT_EQ(app_list_view->GetFocusManager()->GetFocusedView(),
-              search_box_view->search_box());
   }
-  {
-    ExtensionTestMessageListener listener("textfieldFocused", false);
-    app_list_view->GetFocusManager()->AdvanceFocus(false);
-    listener.WaitUntilSatisfied();
-    EXPECT_NE(app_list_view->GetFocusManager()->GetFocusedView(),
-              search_box_view->search_box());
-  }
-  {
-    ExtensionTestMessageListener listener("textfieldBlurred", false);
-    app_list_view->GetFocusManager()->AdvanceFocus(false);
-    listener.WaitUntilSatisfied();
-    EXPECT_EQ(app_list_view->GetFocusManager()->GetFocusedView(),
-              search_box_view->search_box());
-  }
+
+  // Expect that the search box and webview are the only two focusable views.
+  views::View* search_box_textfield = search_box_view->search_box();
+  views::WebView* custom_page_webview = static_cast<views::WebView*>(
+      contents_view->custom_page_view()->custom_launcher_page_contents());
+  EXPECT_EQ(custom_page_webview,
+            app_list_view->GetFocusManager()->GetNextFocusableView(
+                search_box_textfield, search_box_textfield->GetWidget(), false,
+                false));
+  EXPECT_EQ(
+      search_box_textfield,
+      app_list_view->GetFocusManager()->GetNextFocusableView(
+          custom_page_webview, custom_page_webview->GetWidget(), false, false));
+
+  // And in reverse.
+  EXPECT_EQ(
+      search_box_textfield,
+      app_list_view->GetFocusManager()->GetNextFocusableView(
+          custom_page_webview, custom_page_webview->GetWidget(), true, false));
+  EXPECT_EQ(custom_page_webview,
+            app_list_view->GetFocusManager()->GetNextFocusableView(
+                search_box_textfield, search_box_textfield->GetWidget(), true,
+                false));
 }

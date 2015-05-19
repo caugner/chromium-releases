@@ -89,7 +89,6 @@
 #include "net/base/dns_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_status_flags.h"
@@ -103,6 +102,7 @@
 #include "net/cert/x509_certificate_net_log_param.h"
 #include "net/cert/x509_util.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
 #include "net/ocsp/nss_ocsp.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/nss_ssl_util.h"
@@ -1857,14 +1857,6 @@ int SSLClientSocketNSS::Core::DoHandshake() {
         base::Bind(&AddLogEventWithCallback, weak_net_log_,
                    NetLog::TYPE_SSL_HANDSHAKE_ERROR,
                    CreateNetLogSSLErrorCallback(net_error, 0)));
-
-    // If the handshake already succeeded (because the server requests but
-    // doesn't require a client cert), we need to invalidate the SSL session
-    // so that we won't try to resume the non-client-authenticated session in
-    // the next handshake.  This will cause the server to ask for a client
-    // cert again.
-    if (rv == SECSuccess && SSL_InvalidateSession(nss_fd_) != SECSuccess)
-      LOG(WARNING) << "Couldn't invalidate SSL session: " << PR_GetError();
   } else if (rv == SECSuccess) {
     if (!handshake_callback_called_) {
       false_started_ = true;
@@ -2296,10 +2288,6 @@ void SSLClientSocketNSS::Core::DoReadCallback(int rv) {
   PostOrRunCallback(
       FROM_HERE,
       base::Bind(&Core::DidNSSRead, this, rv));
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "418183 SSLClientSocketNSS::Core::DoReadCallback"));
   PostOrRunCallback(
       FROM_HERE,
       base::Bind(base::ResetAndReturn(&user_read_callback_), rv));
@@ -2724,11 +2712,6 @@ void SSLClientSocketNSS::Core::DidNSSWrite(int result) {
 }
 
 void SSLClientSocketNSS::Core::BufferSendComplete(int result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "418183 DidCompleteReadWrite => Core::BufferSendComplete"));
-
   if (!OnNSSTaskRunner()) {
     if (detached_)
       return;
@@ -2772,11 +2755,6 @@ void SSLClientSocketNSS::Core::OnGetChannelIDComplete(int result) {
 void SSLClientSocketNSS::Core::BufferRecvComplete(
     IOBuffer* read_buffer,
     int result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "418183 DidCompleteReadWrite => SSLClientSocketNSS::Core::..."));
-
   DCHECK(read_buffer);
 
   if (!OnNSSTaskRunner()) {
@@ -2937,21 +2915,6 @@ bool SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
 
   LeaveFunction("");
   return true;
-}
-
-std::string SSLClientSocketNSS::GetSessionCacheKey() const {
-  NOTIMPLEMENTED();
-  return std::string();
-}
-
-bool SSLClientSocketNSS::InSessionCache() const {
-  // For now, always return true so that SSLConnectJobs are never held back.
-  return true;
-}
-
-void SSLClientSocketNSS::SetHandshakeCompletionCallback(
-    const base::Closure& callback) {
-  NOTIMPLEMENTED();
 }
 
 void SSLClientSocketNSS::GetSSLCertRequestInfo(
@@ -3260,6 +3223,20 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
     SSL_CipherPrefSet(nss_fd_, *it, PR_FALSE);
   }
 
+  if (!ssl_config_.enable_deprecated_cipher_suites) {
+    const PRUint16* const ssl_ciphers = SSL_GetImplementedCiphers();
+    const PRUint16 num_ciphers = SSL_GetNumImplementedCiphers();
+    for (int i = 0; i < num_ciphers; i++) {
+      SSLCipherSuiteInfo info;
+      if (SSL_GetCipherSuiteInfo(ssl_ciphers[i], &info, sizeof(info)) !=
+          SECSuccess) {
+        continue;
+      }
+      if (info.symCipher == ssl_calg_rc4)
+        SSL_CipherPrefSet(nss_fd_, ssl_ciphers[i], PR_FALSE);
+    }
+  }
+
   // Support RFC 5077
   rv = SSL_OptionSet(nss_fd_, SSL_ENABLE_SESSION_TICKETS, PR_TRUE);
   if (rv != SECSuccess) {
@@ -3356,13 +3333,32 @@ int SSLClientSocketNSS::InitializeSSLPeerName() {
   // SSL tunnel through a proxy -- GetPeerName returns the proxy's address
   // rather than the destination server's address in that case.
   std::string peer_id = host_and_port_.ToString();
-  // If the ssl_session_cache_shard_ is non-empty, we append it to the peer id.
-  // This will cause session cache misses between sockets with different values
-  // of ssl_session_cache_shard_ and this is used to partition the session cache
-  // for incognito mode.
-  if (!ssl_session_cache_shard_.empty()) {
-    peer_id += "/" + ssl_session_cache_shard_;
+  // Append |ssl_session_cache_shard_| to the peer id. This is used to partition
+  // the session cache for incognito mode.
+  peer_id += "/" + ssl_session_cache_shard_;
+  peer_id += "/";
+  // Shard the session cache based on maximum protocol version. This causes
+  // fallback connections to use a separate session cache.
+  switch (ssl_config_.version_max) {
+    case SSL_PROTOCOL_VERSION_SSL3:
+      peer_id += "ssl3";
+      break;
+    case SSL_PROTOCOL_VERSION_TLS1:
+      peer_id += "tls1";
+      break;
+    case SSL_PROTOCOL_VERSION_TLS1_1:
+      peer_id += "tls1.1";
+      break;
+    case SSL_PROTOCOL_VERSION_TLS1_2:
+      peer_id += "tls1.2";
+      break;
+    default:
+      NOTREACHED();
   }
+  peer_id += "/";
+  if (ssl_config_.enable_deprecated_cipher_suites)
+    peer_id += "deprecated";
+
   SECStatus rv = SSL_SetSockPeerID(nss_fd_, const_cast<char*>(peer_id.c_str()));
   if (rv != SECSuccess)
     LogFailedNSSFunction(net_log_, "SSL_SetSockPeerID", peer_id.c_str());

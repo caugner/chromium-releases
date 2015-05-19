@@ -7,11 +7,9 @@
 #include <map>
 
 #include "base/command_line.h"
-#include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/values.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
-#include "net/proxy/proxy_retry_info.h"
 #include "net/proxy/proxy_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,14 +34,15 @@ class DataReductionProxyParamsTest : public testing::Test {
                    const std::string& expected_ssl_origin,
                    const std::string& expected_alt_origin,
                    const std::string& expected_alt_fallback_origin,
-                   const std::string& expected_probe_url) {
+                   const std::string& expected_secure_proxy_check_url) {
     EXPECT_EQ(expected_origin, params.origin().ToURI());
     EXPECT_EQ(expected_fallback_origin, params.fallback_origin().ToURI());
     EXPECT_EQ(expected_ssl_origin, params.ssl_origin().ToURI());
     EXPECT_EQ(expected_alt_origin, params.alt_origin().ToURI());
     EXPECT_EQ(expected_alt_fallback_origin,
               params.alt_fallback_origin().ToURI());
-    EXPECT_EQ(GURL(expected_probe_url), params.probe_url());
+    EXPECT_EQ(GURL(expected_secure_proxy_check_url),
+              params.secure_proxy_check_url());
   }
 };
 
@@ -60,7 +59,7 @@ TEST_F(DataReductionProxyParamsTest, EverythingDefined) {
               TestDataReductionProxyParams::DefaultSSLOrigin(),
               TestDataReductionProxyParams::DefaultAltOrigin(),
               TestDataReductionProxyParams::DefaultAltFallbackOrigin(),
-              TestDataReductionProxyParams::DefaultProbeURL());
+              TestDataReductionProxyParams::DefaultSecureProxyCheckURL());
 }
 
 TEST_F(DataReductionProxyParamsTest, NoDevOrigin) {
@@ -78,7 +77,7 @@ TEST_F(DataReductionProxyParamsTest, NoDevOrigin) {
               TestDataReductionProxyParams::DefaultSSLOrigin(),
               TestDataReductionProxyParams::DefaultAltOrigin(),
               TestDataReductionProxyParams::DefaultAltFallbackOrigin(),
-              TestDataReductionProxyParams::DefaultProbeURL());
+              TestDataReductionProxyParams::DefaultSecureProxyCheckURL());
 }
 
 TEST_F(DataReductionProxyParamsTest, Flags) {
@@ -98,8 +97,8 @@ TEST_F(DataReductionProxyParamsTest, Flags) {
       switches::kDataReductionProxyAltFallback,
       TestDataReductionProxyParams::FlagAltFallbackOrigin());
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kDataReductionProxyProbeURL,
-      TestDataReductionProxyParams::FlagProbeURL());
+      switches::kDataReductionProxySecureProxyCheckURL,
+      TestDataReductionProxyParams::FlagSecureProxyCheckURL());
   TestDataReductionProxyParams params(
       DataReductionProxyParams::kAllowed |
       DataReductionProxyParams::kFallbackAllowed |
@@ -113,7 +112,7 @@ TEST_F(DataReductionProxyParamsTest, Flags) {
               TestDataReductionProxyParams::FlagSSLOrigin(),
               TestDataReductionProxyParams::FlagAltOrigin(),
               TestDataReductionProxyParams::FlagAltFallbackOrigin(),
-              TestDataReductionProxyParams::FlagProbeURL());
+              TestDataReductionProxyParams::FlagSecureProxyCheckURL());
 }
 
 TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
@@ -217,7 +216,7 @@ TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
       true,
       false,
       true,
-      TestDataReductionProxyParams::HAS_PROBE_URL,
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
       false
     },
     {
@@ -291,7 +290,7 @@ TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
       true,
       false,
       true,
-      TestDataReductionProxyParams::HAS_PROBE_URL,
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
       false
     },
     {
@@ -366,7 +365,7 @@ TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
       false,
       false,
       true,
-      TestDataReductionProxyParams::HAS_PROBE_URL,
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
       false
     },
     {
@@ -431,7 +430,7 @@ TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
       false,
       false,
       true,
-      TestDataReductionProxyParams::HAS_PROBE_URL,
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
       false
     },
     {
@@ -505,7 +504,7 @@ TEST_F(DataReductionProxyParamsTest, InvalidConfigurations) {
       true,
       false,
       true,
-      TestDataReductionProxyParams::HAS_PROBE_URL,
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
       false
     },
   };
@@ -761,477 +760,37 @@ TEST_F(DataReductionProxyParamsTest, IsDataReductionProxy) {
   }
 }
 
-std::string GetRetryMapKeyFromOrigin(std::string origin) {
-  // The retry map has the scheme prefix for https but not for http
-  return origin;
-}
-
-TEST_F(DataReductionProxyParamsTest, AreProxiesBypassed) {
-  const struct {
-    // proxy flags
-    bool allowed;
-    bool fallback_allowed;
-    bool alt_allowed;
-    // is https request
-    bool is_https;
-    // proxies in retry map
-    bool origin;
-    bool fallback_origin;
-    bool alt_origin;
-    bool alt_fallback_origin;
-    bool ssl_origin;
-
-    bool expected_result;
-  } tests[]  = {
-      { // proxy flags
-        false,
-        false,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        false,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        true,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        false,
-        false,
-        true,
-        // is https request
-        true,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        true,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        true,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        false,
-        true,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        false,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        true,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        true,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        false,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        false,
-        true,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        false,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        true,
-        false,
-        false,
-        false,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        true,
-        false,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        false,
-        true,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        true,
-        true,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        false,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        true,
-        true,
-        false,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        false,
-        true,
-        false,
-        // is https request
-        false,
-        // proxies in retry map
-        false,
-        false,
-        true,
-        false,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        false,
-        true,
-        true,
-        false,
-        // expected result
-        false,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        false,
-        // proxies in retry map
-        true,
-        true,
-        true,
-        true,
-        true,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        true,
-        // proxies in retry map
-        true,
-        true,
-        true,
-        true,
-        true,
-        // expected result
-        true,
-      },
-      { // proxy flags
-        true,
-        true,
-        true,
-        // is https request
-        true,
-        // proxies in retry map
-        true,
-        true,
-        true,
-        true,
-        false,
-        // expected result
-        false,
-      },
-  };
-
-  // The retry map has the scheme prefix for https but not for http.
-  std::string origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultOrigin());
-  std::string fallback_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultFallbackOrigin());
-  std::string alt_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultAltOrigin());
-  std::string alt_fallback_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultAltFallbackOrigin());
-  std::string ssl_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultSSLOrigin());
-
-  for (size_t i = 0; i < arraysize(tests); ++i) {
-    net::ProxyConfig::ProxyRules rules;
-    std::vector<std::string> proxies;
-
-    if (tests[i].allowed)
-      proxies.push_back(origin);
-    if (tests[i].alt_allowed)
-      proxies.push_back(alt_origin);
-    if (tests[i].allowed && tests[i].fallback_allowed)
-      proxies.push_back(fallback_origin);
-    if (tests[i].alt_allowed && tests[i].fallback_allowed)
-      proxies.push_back(alt_fallback_origin);
-
-    std::string proxy_rules = "http=" + JoinString(proxies, ",") + ",direct://;"
-        + (tests[i].alt_allowed ? ("https=" + ssl_origin + ",direct://;") : "");
-
-    rules.ParseFromString(proxy_rules);
-
-    int flags = 0;
-    if (tests[i].allowed)
-      flags |= DataReductionProxyParams::kAllowed;
-    if (tests[i].alt_allowed)
-      flags |= DataReductionProxyParams::kAlternativeAllowed;
-    if (tests[i].fallback_allowed)
-      flags |= DataReductionProxyParams::kFallbackAllowed;
-    unsigned int has_definitions =
-        TestDataReductionProxyParams::HAS_EVERYTHING &
-        ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-        ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN;
-    TestDataReductionProxyParams params(flags, has_definitions);
-
-    net::ProxyRetryInfoMap retry_map;
-    net::ProxyRetryInfo retry_info;
-    retry_info.bad_until = base::TimeTicks() + base::TimeDelta::Max();
-
-    if (tests[i].origin)
-      retry_map[origin] = retry_info;
-    if (tests[i].fallback_origin)
-      retry_map[fallback_origin] = retry_info;
-    if (tests[i].alt_origin)
-      retry_map[alt_origin] = retry_info;
-    if (tests[i].alt_fallback_origin)
-      retry_map[alt_fallback_origin] = retry_info;
-    if (tests[i].ssl_origin)
-      retry_map[ssl_origin] = retry_info;
-
-    bool was_bypassed = params.AreProxiesBypassed(retry_map,
-                                                  rules,
-                                                  tests[i].is_https,
-                                                  NULL);
-
-    EXPECT_EQ(tests[i].expected_result, was_bypassed);
-  }
-}
-
-TEST_F(DataReductionProxyParamsTest, AreProxiesBypassedRetryDelay) {
-  std::string origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultOrigin());
-  std::string fallback_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultFallbackOrigin());
-
-  net::ProxyConfig::ProxyRules rules;
-  std::vector<std::string> proxies;
-
-  proxies.push_back(origin);
-  proxies.push_back(fallback_origin);
-
-  std::string proxy_rules = "http=" + JoinString(proxies, ",") + ",direct://;";
-
-  rules.ParseFromString(proxy_rules);
-
-  int flags = 0;
-  flags |= DataReductionProxyParams::kAllowed;
-  flags |= DataReductionProxyParams::kFallbackAllowed;
-  unsigned int has_definitions =
-      TestDataReductionProxyParams::HAS_EVERYTHING &
-      ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-      ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN;
-  TestDataReductionProxyParams params(flags, has_definitions);
-
-  net::ProxyRetryInfoMap retry_map;
-  net::ProxyRetryInfo retry_info;
-
-  retry_info.bad_until = base::TimeTicks() + base::TimeDelta::Max();
-  retry_map[origin] = retry_info;
-
-  retry_info.bad_until = base::TimeTicks();
-  retry_map[fallback_origin] = retry_info;
-
-  bool was_bypassed = params.AreProxiesBypassed(retry_map,
-                                                rules,
-                                                false,
-                                                NULL);
-
-  EXPECT_FALSE(was_bypassed);
-
-  base::TimeDelta delay = base::TimeDelta::FromHours(2);
-  retry_info.bad_until = base::TimeTicks::Now() + delay;
-  retry_info.current_delay = delay;
-  retry_map[origin] = retry_info;
-
-  delay = base::TimeDelta::FromHours(1);
-  retry_info.bad_until = base::TimeTicks::Now() + delay;
-  retry_info.current_delay = delay;
-  retry_map[fallback_origin] = retry_info;
-
-  base::TimeDelta min_retry_delay;
-  was_bypassed = params.AreProxiesBypassed(retry_map,
-                                           rules,
-                                           false,
-                                           &min_retry_delay);
-  EXPECT_TRUE(was_bypassed);
-  EXPECT_EQ(delay, min_retry_delay);
-}
-
 TEST_F(DataReductionProxyParamsTest, AndroidOnePromoFieldTrial) {
   EXPECT_TRUE(DataReductionProxyParams::IsIncludedInAndroidOnePromoFieldTrial(
       "google/sprout/sprout:4.4.4/KPW53/1379542:user/release-keys"));
   EXPECT_FALSE(DataReductionProxyParams::IsIncludedInAndroidOnePromoFieldTrial(
       "google/hammerhead/hammerhead:5.0/LRX210/1570415:user/release-keys"));
+}
+
+TEST_F(DataReductionProxyParamsTest, PopulateConfigResponse) {
+  DataReductionProxyParams params(
+      DataReductionProxyParams::kAllowed |
+      DataReductionProxyParams::kAlternativeAllowed);
+  scoped_ptr<base::DictionaryValue> values(new base::DictionaryValue());
+  params.PopulateConfigResponse(values.get());
+  base::DictionaryValue* proxy_config;
+  EXPECT_TRUE(values->GetDictionary("proxyConfig", &proxy_config));
+  base::ListValue* proxy_servers;
+  EXPECT_TRUE(proxy_config->GetList("httpProxyServers", &proxy_servers));
+  EXPECT_TRUE(proxy_servers->GetSize() == 2);
+  base::DictionaryValue* server;
+  EXPECT_TRUE(proxy_servers->GetDictionary(0, &server));
+  std::string host;
+  int port;
+  EXPECT_TRUE(server->GetString("host", &host));
+  EXPECT_TRUE(server->GetInteger("port", &port));
+  EXPECT_EQ(params.origin().host_port_pair().host(), host);
+  EXPECT_EQ(params.origin().host_port_pair().port(), port);
+  EXPECT_TRUE(proxy_servers->GetDictionary(1, &server));
+  EXPECT_TRUE(server->GetString("host", &host));
+  EXPECT_TRUE(server->GetInteger("port", &port));
+  EXPECT_EQ(params.fallback_origin().host_port_pair().host(), host);
+  EXPECT_EQ(params.fallback_origin().host_port_pair().port(), port);
 }
 
 }  // namespace data_reduction_proxy

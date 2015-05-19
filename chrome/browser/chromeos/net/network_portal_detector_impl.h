@@ -28,6 +28,8 @@
 #include "net/url_request/url_fetcher.h"
 #include "url/gurl.h"
 
+class NetworkingConfigTest;
+
 namespace net {
 class URLRequestContextGetter;
 }
@@ -76,6 +78,7 @@ class NetworkPortalDetectorImpl
   void Enable(bool start_detection) override;
   bool StartDetectionIfIdle() override;
   void SetStrategy(PortalDetectorStrategy::StrategyId id) override;
+  void OnLockScreenRequest() override;
 
   // NetworkStateHandlerObserver implementation:
   void DefaultNetworkChanged(const NetworkState* network) override;
@@ -86,6 +89,7 @@ class NetworkPortalDetectorImpl
   base::TimeTicks GetCurrentTimeTicks() override;
 
  private:
+  friend class ::NetworkingConfigTest;
   friend class NetworkPortalDetectorImplTest;
   friend class NetworkPortalDetectorImplBrowserTest;
 
@@ -124,6 +128,9 @@ class NetworkPortalDetectorImpl
 
   // Stops whole detection process.
   void StopDetection();
+
+  // Stops and restarts the detection process.
+  void RetryDetection();
 
   // Initiates Captive Portal detection attempt after |delay|.
   void ScheduleAttempt(const base::TimeDelta& delay);

@@ -8,8 +8,8 @@
 #include "chrome/browser/ui/autofill/card_unmask_prompt_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/CardUnmaskBridge_jni.h"
-#include "ui/base/android/view_android.h"
-#include "ui/base/android/window_android.h"
+#include "ui/android/view_android.h"
+#include "ui/android/window_android.h"
 
 namespace autofill {
 
@@ -47,6 +47,7 @@ void CardUnmaskPromptViewAndroid::Show() {
       instructions.obj(),
       ResourceMapper::MapFromChromiumId(controller_->GetCvcImageRid()),
       controller_->ShouldRequestExpirationDate(),
+      controller_->CanStoreLocally(),
       controller_->GetStoreLocallyStartState(),
       view_android->GetWindowAndroid()->GetJavaObject().obj()));
 
@@ -56,7 +57,7 @@ void CardUnmaskPromptViewAndroid::Show() {
 bool CardUnmaskPromptViewAndroid::CheckUserInputValidity(JNIEnv* env,
                                                          jobject obj,
                                                          jstring response) {
-  return controller_->InputTextIsValid(
+  return controller_->InputCvcIsValid(
       base::android::ConvertJavaStringToUTF16(env, response));
 }
 
@@ -88,9 +89,16 @@ void CardUnmaskPromptViewAndroid::DisableAndWaitForVerification() {
   Java_CardUnmaskBridge_disableAndWaitForVerification(env, java_object_.obj());
 }
 
-void CardUnmaskPromptViewAndroid::GotVerificationResult(bool success) {
+void CardUnmaskPromptViewAndroid::GotVerificationResult(
+    const base::string16& error_message,
+    bool allow_retry) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CardUnmaskBridge_verificationFinished(env, java_object_.obj(), success);
+  ScopedJavaLocalRef<jstring> message;
+  if (!error_message.empty())
+      message = base::android::ConvertUTF16ToJavaString(env, error_message);
+
+  Java_CardUnmaskBridge_verificationFinished(env, java_object_.obj(),
+                                             message.obj(), allow_retry);
 }
 
 // static

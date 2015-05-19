@@ -1110,6 +1110,7 @@ void AppsGridView::SetSelectedItemByIndex(const Index& index) {
 
   EnsureViewVisible(index);
   selected_view_ = new_selection;
+  selected_view_->SetTitleSubpixelAA();
   selected_view_->SchedulePaint();
   selected_view_->NotifyAccessibilityEvent(
       ui::AX_EVENT_FOCUS, true);
@@ -1623,7 +1624,9 @@ void AppsGridView::EndDragForReparentInHiddenFolderGridView() {
 
 void AppsGridView::OnFolderItemRemoved() {
   DCHECK(folder_delegate_);
-  item_list_ = NULL;
+  if (item_list_)
+    item_list_->RemoveObserver(this);
+  item_list_ = nullptr;
 }
 
 void AppsGridView::StartDragAndDropHostDrag(const gfx::Point& grid_location) {

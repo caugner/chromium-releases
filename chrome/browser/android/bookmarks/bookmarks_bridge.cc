@@ -15,7 +15,6 @@
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
@@ -98,7 +97,7 @@ BookmarksBridge::BookmarksBridge(JNIEnv* env,
       bookmark_model_(NULL),
       client_(NULL),
       partner_bookmarks_shim_(NULL) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   profile_ = ProfileAndroid::FromProfileAndroid(j_profile);
   bookmark_model_ = BookmarkModelFactory::GetForProfile(profile_);
   client_ = ChromeBookmarkClientFactory::GetForProfile(profile_);
@@ -143,17 +142,18 @@ static jlong Init(JNIEnv* env, jobject obj, jobject j_profile) {
 static jboolean IsEnhancedBookmarksFeatureEnabled(JNIEnv* env,
                                                   jclass clazz,
                                                   jobject j_profile) {
-  Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
-  return IsEnhancedBookmarksEnabled(profile->GetPrefs());
+  return IsEnhancedBookmarksEnabled();
 }
 
-static bool IsEditBookmarksEnabled() {
-  return ProfileManager::GetLastUsedProfile()->GetPrefs()->GetBoolean(
+static bool IsEditBookmarksEnabled(Profile* profile) {
+  return profile->GetPrefs()->GetBoolean(
       bookmarks::prefs::kEditBookmarksEnabled);
 }
 
-static jboolean IsEditBookmarksEnabled(JNIEnv* env, jclass clazz) {
-  return IsEditBookmarksEnabled();
+static jboolean IsEditBookmarksEnabled(JNIEnv* env,
+                                       jclass clazz,
+                                       jobject j_profile) {
+  return IsEditBookmarksEnabled(ProfileAndroid::FromProfileAndroid(j_profile));
 }
 
 void BookmarksBridge::LoadEmptyPartnerBookmarkShimForTesting(JNIEnv* env,
@@ -603,7 +603,7 @@ ScopedJavaLocalRef<jobject> BookmarksBridge::AddFolder(JNIEnv* env,
 void BookmarksBridge::DeleteBookmark(JNIEnv* env,
                                      jobject obj,
                                      jobject j_bookmark_id_obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsLoaded());
 
   long bookmark_id = JavaBookmarkIdGetId(env, j_bookmark_id_obj);
@@ -627,7 +627,7 @@ void BookmarksBridge::MoveBookmark(JNIEnv* env,
                                    jobject j_bookmark_id_obj,
                                    jobject j_parent_id_obj,
                                    jint index) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsLoaded());
 
   long bookmark_id = JavaBookmarkIdGetId(env, j_bookmark_id_obj);
@@ -710,7 +710,7 @@ ScopedJavaLocalRef<jobject> BookmarksBridge::AddBookmark(
 }
 
 void BookmarksBridge::Undo(JNIEnv* env, jobject obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsLoaded());
   BookmarkUndoService* undo_service =
       BookmarkUndoServiceFactory::GetForProfile(profile_);
@@ -719,7 +719,7 @@ void BookmarksBridge::Undo(JNIEnv* env, jobject obj) {
 }
 
 void BookmarksBridge::StartGroupingUndos(JNIEnv* env, jobject obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsLoaded());
   DCHECK(!grouped_bookmark_actions_.get()); // shouldn't have started already
   grouped_bookmark_actions_.reset(
@@ -727,7 +727,7 @@ void BookmarksBridge::StartGroupingUndos(JNIEnv* env, jobject obj) {
 }
 
 void BookmarksBridge::EndGroupingUndos(JNIEnv* env, jobject obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsLoaded());
   DCHECK(grouped_bookmark_actions_.get()); // should only call after start
   grouped_bookmark_actions_.reset();
@@ -738,7 +738,7 @@ base::string16 BookmarksBridge::GetTitle(const BookmarkNode* node) const {
     return partner_bookmarks_shim_->GetTitle(node);
 
   if (node == bookmark_model_->bookmark_bar_node()
-      && IsEnhancedBookmarksEnabled(profile_->GetPrefs())) {
+      && IsEnhancedBookmarksEnabled()) {
     return l10n_util::GetStringUTF16(IDS_ENHANCED_BOOKMARK_BAR_FOLDER_NAME);
   }
 
@@ -808,7 +808,7 @@ bool BookmarksBridge::IsEditable(const BookmarkNode* node) const {
       node->type() != BookmarkNode::URL)) {
     return false;
   }
-  if (!IsEditBookmarksEnabled())
+  if (!IsEditBookmarksEnabled(profile_))
     return false;
   if (partner_bookmarks_shim_->IsPartnerBookmark(node))
     return partner_bookmarks_shim_->IsEditable(node);

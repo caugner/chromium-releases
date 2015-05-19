@@ -36,10 +36,10 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/dom_distiller/content/web_contents_main_frame_observer.h"
 #include "components/password_manager/core/browser/password_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/voice_search_tab_helper.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
 #include "chrome/browser/enhanced_bookmarks/android/enhanced_bookmark_tab_helper.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
@@ -86,10 +86,6 @@
 #include "chrome/browser/printing/print_view_manager_basic.h"
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-#include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#endif
 
 using content::WebContents;
 
@@ -166,6 +162,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   ContextMenuHelper::CreateForWebContents(web_contents);
   EnhancedBookmarkTabHelper::CreateForWebContents(web_contents);
   SingleTabModeTabHelper::CreateForWebContents(web_contents);
+  VoiceSearchTabHelper::CreateForWebContents(web_contents);
   WindowAndroidHelper::CreateForWebContents(web_contents);
 #else
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
@@ -220,21 +217,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
     dom_distiller::WebContentsMainFrameObserver::CreateForWebContents(
         web_contents);
   }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // If this is not an incognito window, setup to handle one-click login.
-  // We don't want to check that the profile is already connected at this time
-  // because the connected state may change while this tab is open.  Having a
-  // one-click signin helper attached does not cause problems if the profile
-  // happens to be already connected.
-  if (switches::IsEnableWebBasedSignin() &&
-      OneClickSigninHelper::CanOffer(web_contents,
-                                     OneClickSigninHelper::CAN_OFFER_FOR_ALL,
-                                     std::string(),
-                                     NULL)) {
-    OneClickSigninHelper::CreateForWebContents(web_contents);
-  }
-#endif
 
   if (predictors::ResourcePrefetchPredictorFactory::GetForProfile(
       web_contents->GetBrowserContext())) {

@@ -29,6 +29,7 @@ import com.android.webview.chromium.WebViewDelegateFactory.WebViewDelegate;
 import org.chromium.android_webview.AwBrowserContext;
 import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
 import org.chromium.android_webview.AwDataReductionProxyManager;
@@ -78,6 +79,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private WebStorageAdapter mWebStorage;
     private WebViewDatabaseAdapter mWebViewDatabase;
     private AwDevToolsServer mDevToolsServer;
+    private Context mWrappedAppContext;
 
     private ArrayList<WeakReference<WebViewChromium>> mWebViewsToStart =
             new ArrayList<WeakReference<WebViewChromium>>();
@@ -290,7 +292,11 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     private Context getWrappedCurrentApplicationContext() {
-        return ResourcesContextWrapperFactory.get(mWebViewDelegate.getApplication());
+        if (mWrappedAppContext == null) {
+            mWrappedAppContext = ResourcesContextWrapperFactory.get(
+                    mWebViewDelegate.getApplication());
+        }
+        return mWrappedAppContext;
     }
 
     AwBrowserContext getBrowserContext() {
@@ -321,18 +327,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     private void setUpResources(Context context) {
-        try {
-            final String packageName = WebViewFactory.getLoadedPackageInfo().packageName;
-            ResourceRewriter.rewriteRValues(
-                    mWebViewDelegate.getPackageId(context.getResources(), packageName));
-        } catch (RuntimeException e) {
-            // TODO(torne): remove this when we're no longer using the Android build system.
-            // The Android.mk-based build uses a different resources package name than the
-            // ninja-based build: the resources are always called com.android.webview even if the
-            // manifest has had the package renamed.
-            ResourceRewriter.rewriteRValues(
-                    mWebViewDelegate.getPackageId(context.getResources(), "com.android.webview"));
-        }
+        final String packageName = WebViewFactory.getLoadedPackageInfo().packageName;
+        ResourceRewriter.rewriteRValues(
+                mWebViewDelegate.getPackageId(context.getResources(), packageName));
 
         AwResource.setResources(context.getResources());
         AwResource.setErrorPageResources(android.R.raw.loaderror, android.R.raw.nodomain);
@@ -388,7 +385,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
                     @Override
                     public Uri[] parseFileChooserResult(int resultCode, Intent intent) {
-                        return FileChooserParamsAdapter.parseFileChooserResult(resultCode, intent);
+                        return AwContentsClient.parseFileChooserResult(resultCode, intent);
                     }
                 };
             }

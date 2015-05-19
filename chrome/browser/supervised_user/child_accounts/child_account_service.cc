@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 
@@ -91,7 +92,17 @@ bool ChildAccountService::IsChildAccountDetectionEnabled() {
   if (command_line->HasSwitch(switches::kEnableChildAccountDetection))
     return true;
 
-  return group_name == "Enabled";
+  if (group_name == "Disabled")
+    return false;
+  return true;
+}
+
+void ChildAccountService::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(
+      prefs::kChildAccountStatusKnown,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 void ChildAccountService::SetIsChildAccount(bool is_child_account) {
@@ -120,12 +131,25 @@ void ChildAccountService::Init() {
     StartFetchingServiceFlags();
 }
 
+bool ChildAccountService::IsChildAccountStatusKnown() {
+  return profile_->GetPrefs()->GetBoolean(prefs::kChildAccountStatusKnown);
+}
+
 void ChildAccountService::Shutdown() {
   family_fetcher_.reset();
   CancelFetchingServiceFlags();
   SupervisedUserServiceFactory::GetForProfile(profile_)->SetDelegate(NULL);
   DCHECK(!active_);
   SigninManagerFactory::GetForProfile(profile_)->RemoveObserver(this);
+}
+
+
+void ChildAccountService::AddChildStatusReceivedCallback(
+    const base::Closure& callback) {
+  if (IsChildAccountStatusKnown())
+    callback.Run();
+  else
+    status_received_callback_list_.push_back(callback);
 }
 
 bool ChildAccountService::SetActive(bool active) {
@@ -324,6 +348,17 @@ void ChildAccountService::OnFlagsFetched(
   bool is_child_account =
       std::find(flags.begin(), flags.end(),
                 kIsChildAccountServiceFlagName) != flags.end();
+
+  bool status_was_known = profile_->GetPrefs()->GetBoolean(
+      prefs::kChildAccountStatusKnown);
+  profile_->GetPrefs()->SetBoolean(prefs::kChildAccountStatusKnown, true);
+
+  if (!status_was_known) {
+    for (auto& callback : status_received_callback_list_)
+      callback.Run();
+    status_received_callback_list_.clear();
+  }
+
   SetIsChildAccount(is_child_account);
 
   ScheduleNextStatusFlagUpdate(

@@ -7,8 +7,10 @@ part of bindings;
 abstract class Stub extends core.MojoEventStreamListener {
   int _outstandingResponseFutures = 0;
   bool _isClosing = false;
+  Completer _closeCompleter;
 
-  Stub(core.MojoMessagePipeEndpoint endpoint) : super(endpoint);
+  Stub.fromEndpoint(core.MojoMessagePipeEndpoint endpoint)
+      : super.fromEndpoint(endpoint);
 
   Stub.fromHandle(core.MojoHandle handle) : super.fromHandle(handle);
 
@@ -40,25 +42,31 @@ abstract class Stub extends core.MojoEventStreamListener {
       responseFuture.then((response) {
         _outstandingResponseFutures--;
         if (isOpen) {
-          endpoint.write(response.buffer,
-                         response.buffer.lengthInBytes,
-                         response.handles);
-          if (!endpoint.status.isOk) {
-            throw 'message pipe write failed: ${endpoint.status}';
-          }
+          endpoint.write(
+              response.buffer, response.buffer.lengthInBytes, response.handles);
+          // FailedPrecondition is only used to indicate that the other end of
+          // the pipe has been closed. We can ignore the close here and wait for
+          // the PeerClosed signal on the event stream.
+          assert(endpoint.status.isOk || endpoint.status.isFailedPrecondition);
           if (_isClosing && (_outstandingResponseFutures == 0)) {
             // This was the final response future for which we needed to send
             // a response. It is safe to close.
-            super.close();
-            _isClosing = false;
+            super.close().then((_) {
+              _isClosing = false;
+              _closeCompleter.complete(null);
+              _closeCompleter = null;
+            });
           }
         }
       });
     } else if (_isClosing && (_outstandingResponseFutures == 0)) {
       // We are closing, there is no response to send for this message, and
       // there are no outstanding response futures. Do the close now.
-      super.close();
-      _isClosing = false;
+      super.close().then((_) {
+        _isClosing = false;
+        _closeCompleter.complete(null);
+        _closeCompleter = null;
+      });
     }
   }
 
@@ -68,17 +76,27 @@ abstract class Stub extends core.MojoEventStreamListener {
 
   // NB: |nodefer| should only be true when calling close() while handling an
   // exception thrown from handleRead(), e.g. when we receive a malformed
-  // message.
-  void close({bool nodefer : false}) {
-    if (!isOpen) return;
-    if (!nodefer && (isInHandler || (_outstandingResponseFutures > 0))) {
+  // message, or when we have received the PEER_CLOSED event.
+  @override
+  Future close({bool nodefer: false}) {
+    if (isOpen &&
+        !nodefer &&
+        (isInHandler || (_outstandingResponseFutures > 0))) {
       // Either close() is being called from within handleRead() or
       // handleWrite(), or close() is being called while there are outstanding
       // response futures. Defer the actual close until all response futures
       // have been resolved.
       _isClosing = true;
+      _closeCompleter = new Completer();
+      return _closeCompleter.future;
     } else {
-      super.close();
+      return super.close(nodefer: nodefer).then((_) {
+        if (_isClosing) {
+          _isClosing = false;
+          _closeCompleter.complete(null);
+          _closeCompleter = null;
+        }
+      });
     }
   }
 
@@ -90,5 +108,10 @@ abstract class Stub extends core.MojoEventStreamListener {
   Message buildResponseWithId(Struct response, int name, int id, int flags) {
     var header = new MessageHeader.withRequestId(name, flags, id);
     return response.serializeWithHeader(header);
+  }
+
+  String toString() {
+    var superString = super.toString();
+    return "Stub(${superString})";
   }
 }

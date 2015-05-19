@@ -11,6 +11,9 @@
 
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
+#include "extensions/browser/extension_function.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
 class GURL;
@@ -40,39 +43,37 @@ struct HashAndFilePath;
 
 namespace extensions {
 
-// Implements the chrome.fileManagerPrivate.requestFileSystem method.
-class FileManagerPrivateRequestFileSystemFunction
-    : public LoggedAsyncExtensionFunction {
+// Grant permission to request externalfile scheme. The permission is needed to
+// start drag for external file URL.
+class FileManagerPrivateEnableExternalFileSchemeFunction
+    : public UIThreadExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.requestFileSystem",
-                             FILEMANAGERPRIVATE_REQUESTFILESYSTEM)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.enableExternalFileScheme",
+                             FILEMANAGERPRIVATE_ENABLEEXTERNALFILESCHEME);
 
  protected:
-  ~FileManagerPrivateRequestFileSystemFunction() override {}
-
-  // AsyncExtensionFunction overrides.
-  bool RunAsync() override;
+  ~FileManagerPrivateEnableExternalFileSchemeFunction() override {}
 
  private:
-  void RespondSuccessOnUIThread(const std::string& name,
-                                const GURL& root_url);
-  void RespondFailedOnUIThread(base::File::Error error_code);
+  ExtensionFunction::ResponseAction Run() override;
+};
 
-  // Called when something goes wrong. Records the error to |error_| per the
-  // error code and reports that the private API function failed.
-  void DidFail(base::File::Error error_code);
+// Grants R/W permissions to profile-specific directories (Drive, Downloads)
+// from other profiles.
+class FileManagerPrivateGrantAccessFunction : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateGrantAccessFunction();
 
-  // Sets up file system access permissions to the extension identified by
-  // |child_id|.
-  bool SetupFileSystemAccessPermissions(
-      scoped_refptr<storage::FileSystemContext> file_system_context,
-      int child_id,
-      Profile* profile,
-      scoped_refptr<const extensions::Extension> extension);
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.grantAccess",
+                             FILEMANAGERPRIVATE_GRANTACCESS)
 
-  // Called when the entry definition is computed.
-  void OnEntryDefinition(
-      const file_manager::util::EntryDefinition& entry_definition);
+ protected:
+  ~FileManagerPrivateGrantAccessFunction() override {}
+
+ private:
+  ExtensionFunction::ResponseAction Run() override;
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateGrantAccessFunction);
 };
 
 // Base class for FileManagerPrivateAddFileWatchFunction and
@@ -300,6 +301,25 @@ class FileManagerPrivateIsUMAEnabledFunction
  private:
   ExtensionFunction::ResponseAction Run() override;
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateIsUMAEnabledFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.setEntryTag method.
+class FileManagerPrivateSetEntryTagFunction : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateSetEntryTagFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.setEntryTag",
+                             FILEMANAGERPRIVATE_SETENTRYTAG)
+ protected:
+  ~FileManagerPrivateSetEntryTagFunction() override {}
+
+ private:
+  const ChromeExtensionFunctionDetails chrome_details_;
+
+  // Called when setting a tag is completed with either a success or an error.
+  void OnSetEntryPropertyCompleted(drive::FileError result);
+
+  ExtensionFunction::ResponseAction Run() override;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateSetEntryTagFunction);
 };
 
 }  // namespace extensions

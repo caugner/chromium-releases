@@ -12,19 +12,19 @@ import socket
 import sys
 import urllib2
 
-from telemetry import decorators
-from telemetry.core import exceptions
-from telemetry.core import forwarders
-from telemetry.core import user_agent
-from telemetry.core import util
-from telemetry.core import web_contents
-from telemetry.core import wpr_modes
 from telemetry.core.backends import browser_backend
 from telemetry.core.backends.chrome import extension_backend
 from telemetry.core.backends.chrome import system_info_backend
 from telemetry.core.backends.chrome import tab_list_backend
 from telemetry.core.backends.chrome_inspector import devtools_client_backend
 from telemetry.core.backends.chrome_inspector import devtools_http
+from telemetry.core import exceptions
+from telemetry.core import forwarders
+from telemetry.core import user_agent
+from telemetry.core import util
+from telemetry.core import web_contents
+from telemetry.core import wpr_modes
+from telemetry import decorators
 from telemetry.unittest_util import options_for_unittests
 
 
@@ -189,7 +189,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     """ Wait for browser to come up. """
     try:
       util.WaitFor(self.HasBrowserFinishedLaunching, timeout=30)
-    except (util.TimeoutException, exceptions.ProcessGoneException) as e:
+    except (exceptions.TimeoutException, exceptions.ProcessGoneException) as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)
       raise exceptions.BrowserConnectionGoneException(self.browser, e)
@@ -204,7 +204,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
         'Waiting for extensions required devtool client to be initiated first')
     try:
       util.WaitFor(self._AllExtensionsLoaded, timeout=60)
-    except util.TimeoutException:
+    except exceptions.TimeoutException:
       logging.error('ExtensionsToLoad: ' +
           repr([e.extension_id for e in self._extensions_to_load]))
       logging.error('Extension list: ' +
@@ -245,14 +245,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
         if not res:
           return False
     return True
-
-  def ListInspectableContexts(self):
-    try:
-      return self._devtools_client.ListInspectableContexts()
-    except devtools_http.DevToolsClientConnectionError as e:
-      if not self.IsBrowserRunning():
-        raise exceptions.BrowserGoneException(self.browser, e)
-      raise exceptions.BrowserConnectionGoneException(self.browser, e)
 
   @property
   def browser_directory(self):

@@ -8,6 +8,7 @@
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/values.h"
@@ -15,10 +16,9 @@
 #include "jni/CronetUrlRequestContext_jni.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log_logger.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/http/http_auth_handler_factory.h"
-#include "net/proxy/proxy_config_service_fixed.h"
+#include "net/log/net_log_logger.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
@@ -147,11 +147,11 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
         jcronet_url_request_context) {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   DCHECK(!is_context_initialized_);
+  DCHECK(proxy_config_service_);
   // TODO(mmenke):  Add method to have the builder enable SPDY.
   net::URLRequestContextBuilder context_builder;
   context_builder.set_network_delegate(new BasicNetworkDelegate());
-  context_builder.set_proxy_config_service(
-      new net::ProxyConfigServiceFixed(net::ProxyConfig()));
+  context_builder.set_proxy_config_service(proxy_config_service_.release());
   config->ConfigureURLRequestContextBuilder(&context_builder);
 
   context_.reset(context_builder.Build());
@@ -197,11 +197,11 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
 
       net::HostPortPair quic_hint_host_port_pair(canon_host,
                                                  quic_hint.port);
-      context_->http_server_properties()->SetAlternateProtocol(
-          quic_hint_host_port_pair,
-          static_cast<uint16>(quic_hint.alternate_port),
-          net::AlternateProtocol::QUIC,
-          1.0f);
+      net::AlternativeService alternative_service(
+          net::AlternateProtocol::QUIC, "",
+          static_cast<uint16>(quic_hint.alternate_port));
+      context_->http_server_properties()->SetAlternativeService(
+          quic_hint_host_port_pair, alternative_service, 1.0f);
     }
   }
 
@@ -265,7 +265,7 @@ CronetURLRequestContextAdapter::GetNetworkTaskRunner() const {
 void CronetURLRequestContextAdapter::StartNetLogToFile(JNIEnv* env,
                                                        jobject jcaller,
                                                        jstring jfile_name) {
-  GetNetworkTaskRunner()->PostTask(
+  PostTaskToNetworkThread(
       FROM_HERE,
       base::Bind(
           &CronetURLRequestContextAdapter::StartNetLogToFileOnNetworkThread,
@@ -274,7 +274,7 @@ void CronetURLRequestContextAdapter::StartNetLogToFile(JNIEnv* env,
 }
 
 void CronetURLRequestContextAdapter::StopNetLog(JNIEnv* env, jobject jcaller) {
-  GetNetworkTaskRunner()->PostTask(
+  PostTaskToNetworkThread(
       FROM_HERE,
       base::Bind(&CronetURLRequestContextAdapter::StopNetLogOnNetworkThread,
                  base::Unretained(this)));
@@ -283,24 +283,25 @@ void CronetURLRequestContextAdapter::StopNetLog(JNIEnv* env, jobject jcaller) {
 void CronetURLRequestContextAdapter::StartNetLogToFileOnNetworkThread(
     const std::string& file_name) {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+  DCHECK(is_context_initialized_);
+  DCHECK(context_);
   // Do nothing if already logging to a file.
   if (net_log_logger_)
     return;
-
   base::FilePath file_path(file_name);
-  FILE* file = base::OpenFile(file_path, "w");
+  base::ScopedFILE file(base::OpenFile(file_path, "w"));
   if (!file)
     return;
 
-  scoped_ptr<base::Value> constants(net::NetLogLogger::GetConstants());
-  net_log_logger_.reset(new net::NetLogLogger(file, *constants));
-  net_log_logger_->StartObserving(context_->net_log());
+  net_log_logger_.reset(new net::NetLogLogger());
+  net_log_logger_->StartObserving(context_->net_log(), file.Pass(), nullptr,
+                                  context_.get());
 }
 
 void CronetURLRequestContextAdapter::StopNetLogOnNetworkThread() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   if (net_log_logger_) {
-    net_log_logger_->StopObserving();
+    net_log_logger_->StopObserving(context_.get());
     net_log_logger_.reset();
   }
 }
@@ -309,7 +310,6 @@ void CronetURLRequestContextAdapter::StopNetLogOnNetworkThread() {
 // returns 0 otherwise.
 static jlong CreateRequestContextAdapter(JNIEnv* env,
                                          jclass jcaller,
-                                         jobject japp_context,
                                          jstring jconfig) {
   std::string config_string =
       base::android::ConvertJavaStringToUTF8(env, jconfig);

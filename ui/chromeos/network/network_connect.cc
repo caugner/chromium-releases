@@ -76,7 +76,7 @@ class NetworkConnectImpl : public NetworkConnect {
                            bool shared) override;
   base::string16 GetShillErrorString(const std::string& error,
                                      const std::string& service_path) override;
-  void ShowNetworkSettings(const std::string& service_path) override;
+  void ShowNetworkSettingsForPath(const std::string& service_path) override;
 
  private:
   void HandleUnconfiguredNetwork(const std::string& service_path);
@@ -142,9 +142,15 @@ void NetworkConnectImpl::HandleUnconfiguredNetwork(
     return;
   }
 
-  if (network->type() == shill::kTypeWimax ||
-      network->type() == shill::kTypeVPN) {
+  if (network->type() == shill::kTypeWimax) {
     delegate_->ShowNetworkConfigure(service_path);
+    return;
+  }
+
+  if (network->type() == shill::kTypeVPN) {
+    // Third-party VPNs handle configuration UI themselves.
+    if (network->vpn_provider_type() != shill::kProviderThirdPartyVpn)
+      delegate_->ShowNetworkConfigure(service_path);
     return;
   }
 
@@ -159,7 +165,7 @@ void NetworkConnectImpl::HandleUnconfiguredNetwork(
     }
     // No special configure or setup for |network|, show the settings UI.
     if (chromeos::LoginState::Get()->IsUserLoggedIn()) {
-      delegate_->ShowNetworkSettings(service_path);
+      ShowNetworkSettingsForPath(service_path);
     }
     return;
   }
@@ -211,7 +217,7 @@ void NetworkConnectImpl::OnConnectFailed(
 
   // Already connected to the network, show the settings UI for the network.
   if (error_name == NetworkConnectionHandler::kErrorConnected) {
-    ShowNetworkSettings(service_path);
+    ShowNetworkSettingsForPath(service_path);
     return;
   }
 
@@ -608,8 +614,10 @@ base::string16 NetworkConnectImpl::GetShillErrorString(
                                     base::UTF8ToUTF16(error));
 }
 
-void NetworkConnectImpl::ShowNetworkSettings(const std::string& service_path) {
-  delegate_->ShowNetworkSettings(service_path);
+void NetworkConnectImpl::ShowNetworkSettingsForPath(
+    const std::string& service_path) {
+  const NetworkState* network = GetNetworkState(service_path);
+  delegate_->ShowNetworkSettingsForGuid(network ? network->guid() : "");
 }
 
 }  // namespace

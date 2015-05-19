@@ -29,7 +29,7 @@ remoting.DnsBlackholeChecker = function(signalStrategy) {
   this.signalStrategy_.setStateChangedCallback(
       this.onWrappedSignalStrategyStateChanged_.bind(this));
 
-  /** @type {?function(remoting.SignalStrategy.State):void} @private */
+  /** @private {?function(remoting.SignalStrategy.State):void} */
   this.onStateChangedCallback_ = null;
 
   /** @private */
@@ -38,7 +38,7 @@ remoting.DnsBlackholeChecker = function(signalStrategy) {
   /** @private */
   this.blackholeState_ = BlackholeState.PENDING;
 
-  /** @type {?XMLHttpRequest} @private */
+  /** @private {?remoting.Xhr} */
   this.xhr_ = null;
 };
 
@@ -85,9 +85,11 @@ remoting.DnsBlackholeChecker.prototype.connect = function(server,
 
   this.signalStrategy_.connect(server, username, authToken);
 
-  this.xhr_ =
-      remoting.xhr.get(remoting.DnsBlackholeChecker.URL_TO_REQUEST_,
-                       this.onHttpRequestDone_.bind(this));
+  this.xhr_ = new remoting.Xhr({
+    method: 'GET',
+    url: remoting.DnsBlackholeChecker.URL_TO_REQUEST_
+  });
+  this.xhr_.start().then(this.onHttpRequestDone_.bind(this));
 };
 
 remoting.DnsBlackholeChecker.prototype.getState = function() {
@@ -96,7 +98,7 @@ remoting.DnsBlackholeChecker.prototype.getState = function() {
 
 remoting.DnsBlackholeChecker.prototype.getError = function() {
   if (this.blackholeState_ == BlackholeState.BLOCKED) {
-    return remoting.Error.NOT_AUTHORIZED;
+    return new remoting.Error(remoting.Error.Tag.NOT_AUTHORIZED);
   }
 
   return this.signalStrategy_.getError();
@@ -108,10 +110,7 @@ remoting.DnsBlackholeChecker.prototype.getJid = function() {
 };
 
 remoting.DnsBlackholeChecker.prototype.dispose = function() {
-  if (this.xhr_) {
-    this.xhr_.abort();
-    this.xhr_ = null;
-  }
+  this.xhr_ = null;
   base.dispose(this.signalStrategy_);
   this.setState_(remoting.SignalStrategy.State.CLOSED);
 };
@@ -151,12 +150,18 @@ remoting.DnsBlackholeChecker.prototype.onWrappedSignalStrategyStateChanged_ =
 };
 
 /**
- * @param {XMLHttpRequest} xhr
+ * @param {!remoting.Xhr.Response} response
  * @private
  */
-remoting.DnsBlackholeChecker.prototype.onHttpRequestDone_ = function(xhr) {
+remoting.DnsBlackholeChecker.prototype.onHttpRequestDone_ = function(response) {
+  if (this.xhr_ == null) {
+    // This happens when the dispose() method is called while a
+    // request is pending.
+    return;
+  }
+
   this.xhr_ = null;
-  if (xhr.status >= 200 && xhr.status <= 299) {
+  if (response.status >= 200 && response.status <= 299) {
     console.log("DNS blackhole check succeeded.");
     this.blackholeState_ = BlackholeState.OPEN;
     if (this.signalStrategy_.getState() ==
@@ -164,14 +169,15 @@ remoting.DnsBlackholeChecker.prototype.onHttpRequestDone_ = function(xhr) {
       this.setState_(remoting.SignalStrategy.State.CONNECTED);
     }
   } else {
-    console.error("DNS blackhole check failed: " + xhr.status + " " +
-                  xhr.statusText + ". Response URL: " + xhr.responseURL +
-                  ". Response Text: " + xhr.responseText);
+    console.error("DNS blackhole check failed: " + response.status + " " +
+                  response.statusText + ". Response URL: " +
+                  response.url + ". Response Text: " +
+                  response.getText());
     this.blackholeState_ = BlackholeState.BLOCKED;
     base.dispose(this.signalStrategy_);
     this.setState_(remoting.SignalStrategy.State.FAILED);
   }
-}
+};
 
 /**
  * @param {remoting.SignalStrategy.State} newState

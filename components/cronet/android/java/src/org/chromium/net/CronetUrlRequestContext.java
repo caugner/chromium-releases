@@ -15,6 +15,7 @@ import android.util.Log;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.NativeClassQualifiedName;
+import org.chromium.base.UsedByReflection;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * UrlRequest context using Chromium HTTP stack implementation.
  */
 @JNINamespace("cronet")
+@UsedByReflection("UrlRequestContext.java")
 public class CronetUrlRequestContext extends UrlRequestContext  {
     private static final int LOG_NONE = 3;  // LOG(FATAL), no VLOG.
     private static final int LOG_DEBUG = -1;  // LOG(FATAL...INFO), VLOG(1)
@@ -39,12 +41,12 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
     private long mUrlRequestContextAdapter = 0;
     private Thread mNetworkThread;
 
+    @UsedByReflection("UrlRequestContext.java")
     public CronetUrlRequestContext(Context context,
                                    UrlRequestContextConfig config) {
         CronetLibraryLoader.ensureInitialized(context, config);
         nativeSetMinLogLevel(getLoggingLevel());
-        mUrlRequestContextAdapter = nativeCreateRequestContextAdapter(
-                context, config.toString());
+        mUrlRequestContextAdapter = nativeCreateRequestContextAdapter(config.toString());
         if (mUrlRequestContextAdapter == 0) {
             throw new NullPointerException("Context Adapter creation failed.");
         }
@@ -195,8 +197,7 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
     }
 
     // Native methods are implemented in cronet_url_request_context.cc.
-    private static native long nativeCreateRequestContextAdapter(
-            Context context, String config);
+    private static native long nativeCreateRequestContextAdapter(String config);
 
     private static native int nativeSetMinLogLevel(int loggingLevel);
 

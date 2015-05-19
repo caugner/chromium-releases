@@ -282,13 +282,13 @@
           Chrome Remote Desktop allows you to securely share your computer over the Web. Both users must be running the Chrome Remote Desktop app, which can be found at <ph name="URL">$1<ex>&lt;a href=http://chrome.google.com/remotedesktop&gt;chrome.google.com/remotedesktop&lt;/a&gt;</ex></ph>.
         </message>
         <message desc="Error displayed if authentication fails. This can be caused by stale credentials, in which logging out of the web-app and retrying can fix the problem." name="IDS_ERROR_AUTHENTICATION_FAILED" formatter_data="android_java">
-          Authentication failed. Please sign in to Chrome Remote Desktop again.
+          Authentication failed. Please sign in to Chrome again.
         </message>
         <message desc="Error displayed when the computer has a policy that only users in a particular domain may use it as a Chrome Remote Desktop host, and a user in a different domain is trying to use it as a Chrome Remote Desktop host." name="IDS_ERROR_INVALID_HOST_DOMAIN">
           Policy settings do not permit sharing this computer as a Chrome Remote Desktop host. Contact your system administrator for assistance.
         </message>
         <message desc="Error displayed when an operation is attempted that requires a signed-in user, but no-one is currently signed in." name="IDS_ERROR_NOT_AUTHENTICATED">
-          You are not signed in to Chrome Remote Desktop. Please sign in and try again.
+          You are not signed in to Chrome. Please sign in and try again.
         </message>
         <message desc="Message displayed when the current computer is accepting remote connections." name="IDS_HOME_DAEMON_ACTIVE_MESSAGE">
           You may securely access this computer using Chrome Remote Desktop.
@@ -378,13 +378,13 @@
           Chromoting allows you to securely share your computer over the Web. Both users must be running the Chromoting app, which can be found at <ph name="URL">$1<ex>&lt;a href=http://chrome.google.com/remotedesktop&gt;chrome.google.com/remotedesktop&lt;/a&gt;</ex></ph>.
         </message>
         <message desc="Error displayed if authentication fails. This can be caused by stale credentials, in which logging out of the web-app and retrying can fix the problem." name="IDS_ERROR_AUTHENTICATION_FAILED" formatter_data="android_java">
-          Authentication failed. Please sign in to Chromoting again.
+          Authentication failed. Please sign in to Chromium again.
         </message>
         <message desc="Error displayed when the computer has a policy that only users in a particular domain may use it as a Chromoting host, and a user in a different domain is trying to use it as a Chromoting host." name="IDS_ERROR_INVALID_HOST_DOMAIN">
           Policy settings do not permit sharing this computer as a Chromoting host. Contact your system administrator for assistance.
         </message>
         <message desc="Error displayed when an operation is attempted that requires a signed-in user, but no-one is currently signed in." name="IDS_ERROR_NOT_AUTHENTICATED">
-          You are not signed in to Chromoting. Please sign in and try again.
+          You are not signed in to Chromium. Please sign in and try again.
         </message>
         <message desc="Message displayed when the current computer is accepting remote connections." name="IDS_HOME_DAEMON_ACTIVE_MESSAGE">
           You may securely access this computer using Chromoting.
@@ -469,7 +469,9 @@
       <message desc="Message shown if the user is not authorized to perform the requested action." name="IDS_ERROR_NOT_AUTHORIZED">
         You do not have permission to perform that action.
       </message>
-
+      <message desc="Message shown if the user is is trying to modify an object that does not exist." name="IDS_ERROR_NOT_FOUND">
+        The requested object does not exist.
+      </message>
       <!-- The following strings are AppRemoting-specific -->
       <message desc="Message shown if the user is not authorized to run the app." name="IDS_ERROR_APP_NOT_AUTHORIZED">
         You do not have permission to run this application.
@@ -730,7 +732,7 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Menu option for toggle full-screen mode." name="IDS_FULL_SCREEN" formatter_data="android_java">
         Full screen
       </message>
-      <message desc="Icon to leave full-screen mode." name="IDS_EXIT_FULL_SCREEN">
+      <message desc="Icon to leave full-screen mode." name="IDS_EXIT_FULL_SCREEN" formatter_data="android_java">
         Exit full screen
       </message>
       <message desc="Tool-tip for the window's close icon." name="IDS_CLOSE_WINDOW">
@@ -768,6 +770,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Button displayed when the current computer is not accepting remote connections. Clicking this button causes it to start accepting remote connections." name="IDS_HOME_DAEMON_START_BUTTON">
         Enable remote connections
+      </message>
+      <message desc="Message displayed in the application to indicate that this computer is remotely accessible, but only from a different account than the one that the user is currently signed in as." name="IDS_HOME_DAEMON_HOST_ENABLED_OTHER_ACCOUNT">
+        This computer is currently shared under a different account.
       </message>
       <message desc="Explanatory text displayed when the user enables remote access or changes the PIN." name="IDS_HOST_SETUP_DIALOG_DESCRIPTION">
         To protect access to this computer, please choose a PIN of <ph name="BOLD_START">$1<ex>&lt;b&gt;</ex></ph>at least six digits<ph name="BOLD_END">$2<ex>&lt;/b&gt;</ex></ph>. This PIN will be required when connecting from another location.
@@ -863,37 +868,57 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
         <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (last online <ph name="DATE_OR_TIME">$2<ex>1/6/2013 or 11:23:32 AM</ex></ph>)
       </message>
       <message desc="Error message indicating that the host is offline, because the host failed to initialize (i.e. failed to generate a host certificate, run out of memory early during startup, failed to set up inter-process communication, etc.)."
-               name="IDS_OFFLINE_REASON_INITIALIZATION_FAILED">
+               name="IDS_OFFLINE_REASON_INITIALIZATION_FAILED" formatter_data="android_java">
         Host initialization failed.
       </message>
       <message desc="Error message indicating that the host is offline, because the host configuration is invalid."
-               name="IDS_OFFLINE_REASON_INVALID_HOST_CONFIGURATION">
+               name="IDS_OFFLINE_REASON_INVALID_HOST_CONFIGURATION" formatter_data="android_java">
         Invalid host configuration.
       </message>
       <message desc="Error message indicating that the host is offline, because the host configuration specifies a host id that is not found in the Chrome Remote Desktop Directory service (possibly because the host entry was deleted by the user)."
-               name="IDS_OFFLINE_REASON_INVALID_HOST_ID">
+               name="IDS_OFFLINE_REASON_INVALID_HOST_ID" formatter_data="android_java">
         Invalid host id.
       </message>
       <message desc="Error message indicating that the host is offline, because the host configuration specifies an OAuth credential that is rejected when the host tries to authenticate itself to Chrome Remote Desktop Directory service."
-               name="IDS_OFFLINE_REASON_INVALID_OAUTH_CREDENTIALS">
+               name="IDS_OFFLINE_REASON_INVALID_OAUTH_CREDENTIALS" formatter_data="android_java">
         Host is configured with invalid OAuth credentials.
       </message>
       <message desc="Error message indicating that the host is offline, because the host is owned by a user from a domain different than the domain mandated by RemoteAccessHostDomain policy."
-               name="IDS_OFFLINE_REASON_INVALID_HOST_DOMAIN">
+               name="IDS_OFFLINE_REASON_INVALID_HOST_DOMAIN" formatter_data="android_java">
         Invalid host owner domain.
       </message>
       <message desc="Error message indicating that the host is offline, because RemoteAccessHostRequireCurtain policy requires curtain mode, which is not supported when 'launchd' runs an instance of the host at the console login screen on a Mac."
-               name="IDS_OFFLINE_REASON_LOGIN_SCREEN_NOT_SUPPORTED">
+               name="IDS_OFFLINE_REASON_LOGIN_SCREEN_NOT_SUPPORTED" formatter_data="android_java">
         Host running at the console logic screen has shutdown to support curtain mode by switching to a host running in a user-specific session.
       </message>
+      <message desc="Error message indicating that the host is offline, because the host policy was unreadable (unparseable, inaccessible, mistyped or malformed)."
+               name="IDS_OFFLINE_REASON_POLICY_READ_ERROR" formatter_data="android_java">
+        Host failed to read the policy.
+      </message>
+      <message desc="Error message indicating that the host is temporarily offline, because the host is restarting due to a policy change."
+               name="IDS_OFFLINE_REASON_POLICY_CHANGE_REQUIRES_RESTART" formatter_data="android_java">
+        Host is restarting, to take into account a policy change.
+      </message>
+      <message desc="Error message indicating that the host is offline, because another process has requested the host to shut down (via a SIGTERM signal)."
+               name="IDS_OFFLINE_REASON_SUCCESS_EXIT" formatter_data="android_java">
+        Host has shut down.
+      </message>
       <message desc="Error message indicating that the host is offline, because RemoteAccessHostMatchUsername policy is enabled and there is a mismatch between the name of the local user (that the host is associated with) and the name of the Google account registered as the host owner (i.e. 'johndoe' if the host is owned by 'johndoe@example.com' Google account)"
-               name="IDS_OFFLINE_REASON_USERNAME_MISMATCH">
+               name="IDS_OFFLINE_REASON_USERNAME_MISMATCH" formatter_data="android_java">
         Invalid host owner.
       </message>
-      <message desc="Description of why host is offline, when client gets a host-offline-reason it doesn't recognize."
-               name="IDS_OFFLINE_REASON_UNKNOWN">
-        Unrecognized host error: <ph name="HOST_OFFLINE_REASON">$1<ex>EXIT_CODE_FROM_HOST_NEWER_THAN_CLIENT</ex></ph>.
-      </message>
+      <if expr="is_android">
+        <message desc="Description of why host is offline, when client gets a host-offline-reason it doesn't recognize."
+                 name="IDS_OFFLINE_REASON_UNKNOWN" formatter_data="android_java">
+          Unrecognized host error: <ph name="HOST_OFFLINE_REASON">%1$s<ex>EXIT_CODE_FROM_HOST_NEWER_THAN_CLIENT</ex></ph>.
+        </message>
+      </if>
+      <if expr="not is_android">
+        <message desc="Description of why host is offline, when client gets a host-offline-reason it doesn't recognize."
+                 name="IDS_OFFLINE_REASON_UNKNOWN">
+          Unrecognized host error: <ph name="HOST_OFFLINE_REASON">$1<ex>EXIT_CODE_FROM_HOST_NEWER_THAN_CLIENT</ex></ph>.
+        </message>
+      </if>
       <message desc="Modified version of the host name shown for hosts that are running an out-of-date version of the Me2Me host software." name="IDS_UPDATE_REQUIRED">
         <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (out-of-date)
       </message>
@@ -1061,15 +1086,6 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Label for the Feedback button displayed in the Android Help screen. Pressing this button causes the Feedback screen to be shown." name="IDS_ACTIONBAR_FEEDBACK" formatter_data="android_java">
         Feedback
-      </message>
-      <message desc="Message displayed in the Hangouts confirm dialog. This message is shown to the Hangouts participant receiving remote assistance before the access code is generated.  The dialog informs the user of the implications of accepting remote assistance.  It also provides a way for the user to decline the assistance." name="IDS_HANGOUTS_CONFIRM_DIALOG_MESSAGE_1" >
-        A participant in this hangout has offered to help you by controlling your computer.  If you accept:
-      </message>
-      <message desc="Message displayed in the Hangouts confirm dialog. This message is shown to the Hangouts participant receiving remote assistance before the access code is generated.  The dialog informs the user of the implications of accepting remote assistance.  It also provides a way for the user to decline the assistance." name="IDS_HANGOUTS_CONFIRM_DIALOG_MESSAGE_2" >
-        The person helping you will be able to control your mouse and keyboard.
-      </message>
-      <message desc="Message displayed in the Hangouts confirm dialog. This message is shown to the Hangouts participant receiving remote assistance before the access code is generated.  The dialog informs the user of the implications of accepting remote assistance.  It also provides a way for the user to decline the assistance." name="IDS_HANGOUTS_CONFIRM_DIALOG_MESSAGE_3" >
-        You can end at any time.
       </message>
       <message desc="Label for button to accept remote assistance.  This button appears in the Hangouts confirm dialog." name="IDS_HANGOUTS_CONFIRM_DIALOG_ACCEPT" >
         Accept

@@ -7,6 +7,7 @@
 #include "ash/ash_switches.h"
 #include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
+#include "ash/rotator/screen_rotation_animator.h"
 #include "ash/shell.h"
 #include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "base/auto_reset.h"
@@ -44,7 +45,7 @@ blink::WebScreenOrientationLockType GetDisplayNaturalOrientation() {
   ash::DisplayInfo info =
       display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId());
   gfx::Size size = info.size_in_pixel();
-  switch (info.rotation()) {
+  switch (info.GetActiveRotation()) {
     case gfx::Display::ROTATE_0:
     case gfx::Display::ROTATE_180:
       return size.height() >= size.width()
@@ -111,15 +112,16 @@ void ScreenOrientationController::SetRotationLocked(bool rotation_locked) {
 }
 
 void ScreenOrientationController::SetDisplayRotation(
-    gfx::Display::Rotation rotation) {
+    gfx::Display::Rotation rotation,
+    gfx::Display::RotationSource source) {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   if (!display_manager->HasInternalDisplay())
     return;
   current_rotation_ = rotation;
   base::AutoReset<bool> auto_ignore_display_configuration_updates(
       &ignore_display_configuration_updates_, true);
-  display_manager->SetDisplayRotation(gfx::Display::InternalDisplayId(),
-                                      rotation);
+  ash::ScreenRotationAnimator(gfx::Display::InternalDisplayId())
+      .Rotate(rotation, source);
 }
 
 void ScreenOrientationController::OnWindowActivated(aura::Window* gained_active,
@@ -147,16 +149,16 @@ void ScreenOrientationController::OnWindowDestroying(aura::Window* window) {
 }
 
 void ScreenOrientationController::OnAccelerometerUpdated(
-    const chromeos::AccelerometerUpdate& update) {
+    scoped_refptr<const chromeos::AccelerometerUpdate> update) {
   if (rotation_locked_ && !CanRotateInLockedState())
     return;
-  if (!update.has(chromeos::ACCELEROMETER_SOURCE_SCREEN))
+  if (!update->has(chromeos::ACCELEROMETER_SOURCE_SCREEN))
     return;
   // Ignore the reading if it appears unstable. The reading is considered
   // unstable if it deviates too much from gravity
-  if (ui::IsAccelerometerReadingStable(update,
+  if (ui::IsAccelerometerReadingStable(*update,
                                        chromeos::ACCELEROMETER_SOURCE_SCREEN)) {
-    HandleScreenRotation(update.get(chromeos::ACCELEROMETER_SOURCE_SCREEN));
+    HandleScreenRotation(update->get(chromeos::ACCELEROMETER_SOURCE_SCREEN));
   }
 }
 
@@ -195,11 +197,12 @@ void ScreenOrientationController::Unlock(content::WebContents* web_contents) {
 void ScreenOrientationController::OnDisplayConfigurationChanged() {
   if (ignore_display_configuration_updates_)
     return;
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+  if (!display_manager->HasInternalDisplay())
+    return;
   gfx::Display::Rotation user_rotation =
-      Shell::GetInstance()
-          ->display_manager()
-          ->GetDisplayInfo(gfx::Display::InternalDisplayId())
-          .rotation();
+      display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId())
+          .GetActiveRotation();
   if (user_rotation != current_rotation_) {
     // A user may change other display configuration settings. When the user
     // does change the rotation setting, then lock rotation to prevent the
@@ -211,11 +214,14 @@ void ScreenOrientationController::OnDisplayConfigurationChanged() {
 
 void ScreenOrientationController::OnMaximizeModeStarted() {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  if (!display_manager->HasInternalDisplay())
-    return;
-  current_rotation_ = user_rotation_ =
-      display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId())
-          .rotation();
+  // Do not exit early, as the internal display can be determined after Maximize
+  // Mode has started. (chrome-os-partner:38796)
+  // Always start observing.
+  if (display_manager->HasInternalDisplay()) {
+    current_rotation_ = user_rotation_ =
+        display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId())
+            .GetActiveRotation();
+  }
   if (!rotation_locked_)
     LoadDisplayRotationProperties();
   chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
@@ -223,18 +229,17 @@ void ScreenOrientationController::OnMaximizeModeStarted() {
 }
 
 void ScreenOrientationController::OnMaximizeModeEnded() {
-  if (!Shell::GetInstance()->display_manager()->HasInternalDisplay())
-    return;
   chromeos::AccelerometerReader::GetInstance()->RemoveObserver(this);
   Shell::GetInstance()->display_controller()->RemoveObserver(this);
   if (current_rotation_ != user_rotation_)
-    SetDisplayRotation(user_rotation_);
+    SetDisplayRotation(user_rotation_, gfx::Display::ROTATION_SOURCE_USER);
 }
 
 void ScreenOrientationController::LockRotation(
-    gfx::Display::Rotation rotation) {
+    gfx::Display::Rotation rotation,
+    gfx::Display::RotationSource source) {
   SetRotationLocked(true);
-  SetDisplayRotation(rotation);
+  SetDisplayRotation(rotation, source);
 }
 
 void ScreenOrientationController::LockRotationToOrientation(
@@ -267,7 +272,8 @@ void ScreenOrientationController::LockRotationToOrientation(
           blink::WebScreenOrientationLockLandscape);
       break;
     case blink::WebScreenOrientationLockNatural:
-      LockRotation(gfx::Display::ROTATE_0);
+      LockRotation(gfx::Display::ROTATE_0,
+                   gfx::Display::ROTATION_SOURCE_ACTIVE);
       break;
     default:
       NOTREACHED();
@@ -279,14 +285,16 @@ void ScreenOrientationController::LockRotationToPrimaryOrientation(
     blink::WebScreenOrientationLockType lock_orientation) {
   LockRotation(natural_orientation_ == lock_orientation
                    ? gfx::Display::ROTATE_0
-                   : gfx::Display::ROTATE_90);
+                   : gfx::Display::ROTATE_90,
+               gfx::Display::ROTATION_SOURCE_ACTIVE);
 }
 
 void ScreenOrientationController::LockRotationToSecondaryOrientation(
     blink::WebScreenOrientationLockType lock_orientation) {
   LockRotation(natural_orientation_ == lock_orientation
                    ? gfx::Display::ROTATE_180
-                   : gfx::Display::ROTATE_270);
+                   : gfx::Display::ROTATE_270,
+               gfx::Display::ROTATION_SOURCE_ACTIVE);
 }
 
 void ScreenOrientationController::LockToRotationMatchingOrientation(
@@ -297,20 +305,22 @@ void ScreenOrientationController::LockToRotationMatchingOrientation(
 
   gfx::Display::Rotation rotation =
       display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId())
-          .rotation();
+          .GetActiveRotation();
   if (natural_orientation_ == lock_orientation) {
     if (rotation == gfx::Display::ROTATE_0 ||
         rotation == gfx::Display::ROTATE_180) {
       SetRotationLocked(true);
     } else {
-      LockRotation(gfx::Display::ROTATE_0);
+      LockRotation(gfx::Display::ROTATE_0,
+                   gfx::Display::ROTATION_SOURCE_ACTIVE);
     }
   } else {
     if (rotation == gfx::Display::ROTATE_90 ||
         rotation == gfx::Display::ROTATE_270) {
       SetRotationLocked(true);
     } else {
-      LockRotation(gfx::Display::ROTATE_90);
+      LockRotation(gfx::Display::ROTATE_90,
+                   gfx::Display::ROTATION_SOURCE_ACTIVE);
     }
   }
 }
@@ -362,14 +372,16 @@ void ScreenOrientationController::HandleScreenRotation(
 
   if (new_rotation != current_rotation_ &&
       IsRotationAllowedInLockedState(new_rotation))
-    SetDisplayRotation(new_rotation);
+    SetDisplayRotation(new_rotation,
+                       gfx::Display::ROTATION_SOURCE_ACCELEROMETER);
 }
 
 void ScreenOrientationController::LoadDisplayRotationProperties() {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   if (!display_manager->registered_internal_display_rotation_lock())
     return;
-  SetDisplayRotation(display_manager->registered_internal_display_rotation());
+  SetDisplayRotation(display_manager->registered_internal_display_rotation(),
+                     gfx::Display::ROTATION_SOURCE_ACCELEROMETER);
   SetRotationLocked(true);
 }
 

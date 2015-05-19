@@ -215,6 +215,10 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
       l10n_util::GetStringUTF16(
           IDS_EASY_UNLOCK_SETUP_INTRO_RETRY_FIND_PHONE_BUTTON_LABEL));
   strings->SetString(
+      "setupIntroCloseFindPhoneButtonLabel",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_INTRO_CLOSE_FIND_PHONE_BUTTON_LABEL));
+  strings->SetString(
       "setupIntroHowIsThisSecureLinkText",
       l10n_util::GetStringUTF16(
           IDS_EASY_UNLOCK_SETUP_INTRO_HOW_IS_THIS_SECURE_LINK_TEXT));
@@ -304,6 +308,14 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
       "setupErrorOffline",
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_SETUP_ERROR_OFFLINE, device_type));
+  strings->SetString(
+      "setupErrorRemoteSoftwareOutOfDate",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_ERROR_REMOTE_SOFTWARE_OUT_OF_DATE));
+  strings->SetString(
+      "setupErrorRemoteSoftwareOutOfDateGeneric",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_ERROR_REMOTE_SOFTWARE_OUT_OF_DATE_GENERIC));
   strings->SetString(
       "setupErrorFindingPhone",
       l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_ERROR_FINDING_PHONE));
@@ -774,6 +786,23 @@ bool EasyUnlockPrivateShowErrorBubbleFunction::RunSync() {
       base::UTF8ToUTF16(params->message),
       gfx::Range(params->link_range.start, params->link_range.end),
       GURL(params->link_target), anchor_rect, web_contents);
+#else
+  SetError("Not supported on non-Views platforms.");
+#endif
+  return true;
+}
+
+EasyUnlockPrivateHideErrorBubbleFunction::
+    EasyUnlockPrivateHideErrorBubbleFunction() {
+}
+
+EasyUnlockPrivateHideErrorBubbleFunction::
+    ~EasyUnlockPrivateHideErrorBubbleFunction() {
+}
+
+bool EasyUnlockPrivateHideErrorBubbleFunction::RunSync() {
+#if defined(TOOLKIT_VIEWS)
+  HideProximityAuthErrorBubble();
 #else
   SetError("Not supported on non-Views platforms.");
 #endif

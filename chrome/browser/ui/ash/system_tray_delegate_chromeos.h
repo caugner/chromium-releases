@@ -39,6 +39,10 @@
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
 
+namespace ash {
+class VPNDelegate;
+}
+
 namespace user_manager {
 class User;
 }
@@ -88,7 +92,7 @@ class SystemTrayDelegateChromeOS
   bool ShouldShowSettings() override;
   void ShowDateSettings() override;
   void ShowSetTimeDialog() override;
-  void ShowNetworkSettings(const std::string& service_path) override;
+  void ShowNetworkSettingsForGuid(const std::string& guid) override;
   void ShowBluetoothSettings() override;
   void ShowDisplaySettings() override;
   void ShowChromeSlow() override;
@@ -142,6 +146,7 @@ class SystemTrayDelegateChromeOS
       ash::ShutdownPolicyObserver* observer) override;
   void ShouldRebootOnShutdown(
       const ash::RebootOnShutdownCallback& callback) override;
+  ash::VPNDelegate* GetVPNDelegate() const override;
 
   // Overridden from user_manager::UserManager::UserSessionStateObserver:
   void UserAddedToSession(const user_manager::User* active_user) override;
@@ -215,10 +220,10 @@ class SystemTrayDelegateChromeOS
       ui::ime::InputMethodMenuManager* manager) override;
 
   // Overridden from CrasAudioHandler::AudioObserver.
-  void OnOutputVolumeChanged() override;
-  void OnOutputMuteChanged() override;
-  void OnInputGainChanged() override;
-  void OnInputMuteChanged() override;
+  void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
+  void OnOutputMuteChanged(bool mute_on) override;
+  void OnInputNodeGainChanged(uint64_t node_id, int gain) override;
+  void OnInputMuteChanged(bool mute_on) override;
   void OnAudioNodesChanged() override;
   void OnActiveOutputNodeChanged() override;
   void OnActiveInputNodeChanged() override;
@@ -293,6 +298,7 @@ class SystemTrayDelegateChromeOS
   base::ScopedPtrHashMap<std::string, ash::tray::UserAccountsDelegate>
       accounts_delegates_;
   scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
+  scoped_ptr<ash::VPNDelegate> vpn_delegate_;
 
   ObserverList<ash::CustodianInfoTrayObserver>
       custodian_info_changed_observers_;

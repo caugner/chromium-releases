@@ -5,55 +5,62 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
+#include "net/log/net_log.h"
+#include "net/proxy/proxy_config.h"
+#include "net/proxy/proxy_retry_info.h"
 
 namespace base {
 class SingleThreadTaskRunner;
+class TimeDelta;
 }
 
 namespace net {
+class HostPortPair;
 class NetLog;
+class URLRequest;
 class URLRequestStatus;
 }
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyConfigValues;
 class DataReductionProxyConfigurator;
 class DataReductionProxyEventStore;
-class DataReductionProxyParams;
 class DataReductionProxyService;
+struct DataReductionProxyTypeInfo;
 
 // Values of the UMA DataReductionProxy.ProbeURL histogram.
 // This enum must remain synchronized with
 // DataReductionProxyProbeURLFetchResult in metrics/histograms/histograms.xml.
 // TODO(marq): Rename these histogram buckets with s/DISABLED/RESTRICTED/, so
 //     their names match the behavior they track.
-enum ProbeURLFetchResult {
-  // The probe failed because the Internet was disconnected.
+enum SecureProxyCheckFetchResult {
+  // The secure proxy check failed because the Internet was disconnected.
   INTERNET_DISCONNECTED = 0,
 
-  // The probe failed for any other reason, and as a result, the proxy was
-  // disabled.
+  // The secure proxy check failed for any other reason, and as a result, the
+  // proxy was disabled.
   FAILED_PROXY_DISABLED,
 
-  // The probe failed, but the proxy was already restricted.
+  // The secure proxy check failed, but the proxy was already restricted.
   FAILED_PROXY_ALREADY_DISABLED,
 
-  // The probe succeeded, and as a result the proxy was restricted.
+  // The secure proxy check succeeded, and as a result the proxy was restricted.
   SUCCEEDED_PROXY_ENABLED,
 
-  // The probe succeeded, but the proxy was already restricted.
+  // The secure proxy check succeeded, but the proxy was already restricted.
   SUCCEEDED_PROXY_ALREADY_ENABLED,
 
   // This must always be last.
-  PROBE_URL_FETCH_RESULT_COUNT
+  SECURE_PROXY_CHECK_FETCH_RESULT_COUNT
 };
 
 // Central point for holding the Data Reduction Proxy configuration.
@@ -69,24 +76,94 @@ class DataReductionProxyConfig
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       net::NetLog* net_log,
-      scoped_ptr<DataReductionProxyParams> params,
+      scoped_ptr<DataReductionProxyConfigValues> config_values,
       DataReductionProxyConfigurator* configurator,
       DataReductionProxyEventStore* event_store);
   ~DataReductionProxyConfig() override;
 
-  // Returns the underlying |DataReductionProxyParams| instance.
-  DataReductionProxyParams* params() const {
-    return params_.get();
-  }
-
   void SetDataReductionProxyService(
       base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service);
 
-  // This method expects to run on the UI thread. It permits the data reduction
-  // proxy configuration to change based on changes initiated by the user.
+  // This method expects to run on the UI thread. It permits the Data Reduction
+  // Proxy configuration to change based on changes initiated by the user.
   virtual void SetProxyPrefs(bool enabled,
                              bool alternative_enabled,
                              bool at_startup);
+
+  // Provides a mechanism for an external object to force |this| to refresh
+  // the Data Reduction Proxy configuration from |config_values_| and apply to
+  // |configurator_|. Used by the Data Reduction Proxy config service client.
+  void ReloadConfig();
+
+  // Returns true if a Data Reduction Proxy was used for the given |request|.
+  // If true, |proxy_info.proxy_servers.first| will contain the name of the
+  // proxy that was used. |proxy_info.proxy_servers.second| will contain the
+  // name of the data reduction proxy server that would be used if
+  // |proxy_info.proxy_server.first| is bypassed, if one exists. In addition,
+  // |proxy_info| will note if the proxy used was a fallback, an alternative,
+  // or a proxy for ssl; these are not mutually exclusive. |proxy_info| can be
+  // NULL if the caller isn't interested in its values.
+  virtual bool WasDataReductionProxyUsed(
+      const net::URLRequest* request,
+      DataReductionProxyTypeInfo* proxy_info) const;
+
+  // Returns true if the specified |host_port_pair| matches a Data Reduction
+  // Proxy. If true, |proxy_info.proxy_servers.first| will contain the name of
+  // the proxy that matches. |proxy_info.proxy_servers.second| will contain the
+  // name of the data reduction proxy server that would be used if
+  // |proxy_info.proxy_server.first| is bypassed, if one exists. In addition,
+  // |proxy_info| will note if the proxy was a fallback, an alternative, or a
+  // proxy for ssl; these are not mutually exclusive. |proxy_info| can be NULL
+  // if the caller isn't interested in its values. Virtual for testing.
+  virtual bool IsDataReductionProxy(
+      const net::HostPortPair& host_port_pair,
+      DataReductionProxyTypeInfo* proxy_info) const;
+
+  // Returns true if this request would be bypassed by the Data Reduction Proxy
+  // based on applying the |data_reduction_proxy_config| param rules to the
+  // request URL.
+  // Virtualized for mocking.
+  virtual bool IsBypassedByDataReductionProxyLocalRules(
+      const net::URLRequest& request,
+      const net::ProxyConfig& data_reduction_proxy_config) const;
+
+  // Checks if all configured data reduction proxies are in the retry map.
+  // Returns true if the request is bypassed by all configured data reduction
+  // proxies that apply to the request scheme. If all possible data reduction
+  // proxies are bypassed, returns the minimum retry delay of the bypassed data
+  // reduction proxies in min_retry_delay (if not NULL). If there are no
+  // bypassed data reduction proxies for the request scheme, returns false and
+  // does not assign min_retry_delay.
+  // Virtualized for mocking.
+  virtual bool AreDataReductionProxiesBypassed(
+      const net::URLRequest& request,
+      const net::ProxyConfig& data_reduction_proxy_config,
+      base::TimeDelta* min_retry_delay) const;
+
+  // Returns true if the proxy is on the retry map and the retry delay is not
+  // expired. If proxy is bypassed, retry_delay (if not NULL) returns the delay
+  // of proxy_server. If proxy is not bypassed, retry_delay is not assigned.
+  bool IsProxyBypassed(const net::ProxyRetryInfoMap& retry_map,
+                       const net::ProxyServer& proxy_server,
+                       base::TimeDelta* retry_delay) const;
+
+  // Check whether the |proxy_rules| contain any of the data reduction proxies.
+  virtual bool ContainsDataReductionProxy(
+      const net::ProxyConfig::ProxyRules& proxy_rules) const;
+
+  // Returns true if the proxy was using the HTTP tunnel for a HTTPS origin.
+  bool UsingHTTPTunnel(const net::HostPortPair& proxy_server) const;
+
+  // Returns true if the Data Reduction Proxy configuration may be used.
+  bool allowed() const;
+
+  // Returns true if the alternative Data Reduction Proxy configuration may be
+  // used.
+  bool alternative_allowed() const;
+
+  // Returns true if the Data Reduction Proxy promo may be shown. This is not
+  // tied to whether the Data Reduction Proxy is enabled.
+  bool promo_allowed() const;
 
  protected:
   // Sets the proxy configs, enabling or disabling the proxy according to
@@ -103,8 +180,9 @@ class DataReductionProxyConfig
   virtual void LogProxyState(bool enabled, bool restricted, bool at_startup);
 
   // Virtualized for mocking. Records UMA containing the result of requesting
-  // the probe URL.
-  virtual void RecordProbeURLFetchResult(ProbeURLFetchResult result);
+  // the secure proxy check.
+  virtual void RecordSecureProxyCheckFetchResult(
+      SecureProxyCheckFetchResult result);
 
   // Virtualized for mocking. Returns the list of network interfaces in use.
   // |interfaces| can be null.
@@ -116,9 +194,15 @@ class DataReductionProxyConfig
   friend class MockDataReductionProxyConfig;
   friend class TestDataReductionProxyConfig;
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
+                           TestGetDataReductionProxies);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            TestOnIPAddressChanged);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            TestSetProxyConfigsHoldback);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
+                           AreProxiesBypassed);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
+                           AreProxiesBypassedRetryDelay);
 
   // NetworkChangeNotifier::IPAddressObserver:
   void OnIPAddressChanged() override;
@@ -132,15 +216,15 @@ class DataReductionProxyConfig
                                   bool restricted,
                                   bool at_startup);
 
-  // Begins a probe request to determine if the Data Reduction Proxy is
+  // Begins a secure proxy check to determine if the Data Reduction Proxy is
   // permitted to use the HTTPS proxy servers.
-  void StartProbe();
+  void StartSecureProxyCheck();
 
-  // Parses the probe responses and appropriately configures the Data Reduction
-  // Proxy rules.
-  virtual void HandleProbeResponse(const std::string& response,
-                                   const net::URLRequestStatus& status);
-  virtual void HandleProbeResponseOnIOThread(
+  // Parses the secure proxy check responses and appropriately configures the
+  // Data Reduction Proxy rules.
+  virtual void HandleSecureProxyCheckResponse(
+      const std::string& response, const net::URLRequestStatus& status);
+  virtual void HandleSecureProxyCheckResponseOnIOThread(
       const std::string& response, const net::URLRequestStatus& status);
 
   // Adds the default proxy bypass rules for the Data Reduction Proxy.
@@ -150,6 +234,19 @@ class DataReductionProxyConfig
   // Data Reduction Proxy has been disabled.
   bool DisableIfVPN();
 
+  // Checks if all configured data reduction proxies are in the retry map.
+  // Returns true if the request is bypassed by all configured data reduction
+  // proxies that apply to the request scheme. If all possible data reduction
+  // proxies are bypassed, returns the minimum retry delay of the bypassed data
+  // reduction proxies in min_retry_delay (if not NULL). If there are no
+  // bypassed data reduction proxies for the request scheme, returns false and
+  // does not assign min_retry_delay.
+  bool AreProxiesBypassed(
+      const net::ProxyRetryInfoMap& retry_map,
+      const net::ProxyConfig::ProxyRules& proxy_rules,
+      bool is_https,
+      base::TimeDelta* min_retry_delay) const;
+
   bool restricted_by_carrier_;
   bool disabled_on_vpn_;
   bool unreachable_;
@@ -157,7 +254,7 @@ class DataReductionProxyConfig
   bool alternative_enabled_by_user_;
 
   // Contains the configuration data being used.
-  scoped_ptr<DataReductionProxyParams> params_;
+  scoped_ptr<DataReductionProxyConfigValues> config_values_;
 
   // |io_task_runner_| should be the task runner for running operations on the
   // IO thread.
@@ -168,10 +265,10 @@ class DataReductionProxyConfig
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // The caller must ensure that the |net_log_|, if set, outlives this instance.
-  // It is used to create new instances of |bound_net_log_| on canary
-  // requests. |bound_net_log_| permits the correlation of the begin and end
-  // phases of a given canary request, and a new one is created for each
-  // canary check (with |net_log_| as a parameter).
+  // It is used to create new instances of |bound_net_log_| on secure proxy
+  // checks. |bound_net_log_| permits the correlation of the begin and end
+  // phases of a given secure proxy check, and a new one is created for each
+  // secure proxy check (with |net_log_| as a parameter).
   net::NetLog* net_log_;
   net::BoundNetLog bound_net_log_;
 
@@ -183,9 +280,9 @@ class DataReductionProxyConfig
 
   base::ThreadChecker thread_checker_;
 
-  // A weak pointer to a |DataReductionProxyService| to perform probe requests.
-  // The weak pointer is required since the |DataReductionProxyService| is
-  // destroyed before this instance of the |DataReductionProxyConfig|.
+  // A weak pointer to a |DataReductionProxyService| to perform secure proxy
+  // checks. The weak pointer is required since the |DataReductionProxyService|
+  // is destroyed before this instance of the |DataReductionProxyConfig|.
   base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyConfig);

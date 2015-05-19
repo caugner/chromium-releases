@@ -71,7 +71,8 @@ class ServiceWorkerHandleTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
-    helper_.reset(new EmbeddedWorkerTestHelper(kRenderProcessId));
+    helper_.reset(
+        new EmbeddedWorkerTestHelper(base::FilePath(), kRenderProcessId));
 
     dispatcher_host_ = new TestingServiceWorkerDispatcherHost(
         kRenderProcessId, helper_->context_wrapper(),
@@ -100,8 +101,7 @@ class ServiceWorkerHandleTest : public testing::Test {
     ASSERT_EQ(SERVICE_WORKER_OK, status);
 
     provider_host_.reset(new ServiceWorkerProviderHost(
-        kRenderProcessId, kRenderFrameId, 1,
-        SERVICE_WORKER_PROVIDER_FOR_CONTROLLEE,
+        kRenderProcessId, kRenderFrameId, 1, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
         helper_->context()->AsWeakPtr(), dispatcher_host_.get()));
 
     helper_->SimulateAddProcessToPattern(pattern, kRenderProcessId);
@@ -145,7 +145,7 @@ TEST_F(ServiceWorkerHandleTest, OnVersionStateChanged) {
   // ...dispatch install event.
   status = SERVICE_WORKER_ERROR_FAILED;
   version_->SetStatus(ServiceWorkerVersion::INSTALLING);
-  version_->DispatchInstallEvent(-1, CreateReceiverOnCurrentThread(&status));
+  version_->DispatchInstallEvent(CreateReceiverOnCurrentThread(&status));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(SERVICE_WORKER_OK, status);
 

@@ -85,6 +85,7 @@ void CastContentWindow::CreateWindowTree(
   window_tree_host_->InitHost();
   window_tree_host_->window()->SetLayoutManager(
       new CastFillLayout(window_tree_host_->window()));
+  window_tree_host_->compositor()->SetBackgroundColor(SK_ColorBLACK);
 
   focus_client_.reset(new aura::test::TestFocusClient());
   aura::client::SetFocusClient(
@@ -116,6 +117,14 @@ scoped_ptr<content::WebContents> CastContentWindow::CreateWebContents(
 
 void CastContentWindow::DidFirstVisuallyNonEmptyPaint() {
   metrics::CastMetricsHelper::GetInstance()->LogTimeToFirstPaint();
+}
+
+void CastContentWindow::MediaPaused() {
+  metrics::CastMetricsHelper::GetInstance()->LogMediaPause();
+}
+
+void CastContentWindow::MediaStartedPlaying() {
+  metrics::CastMetricsHelper::GetInstance()->LogMediaPlay();
 }
 
 }  // namespace chromecast

@@ -157,7 +157,8 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
                ssl_bulk_ciphers, ssl_key_exchanges, enable_npn,
                record_resume_info, tls_intolerant,
                tls_intolerance_type, signed_cert_timestamps,
-               fallback_scsv_enabled, ocsp_response, disable_session_cache):
+               fallback_scsv_enabled, ocsp_response,
+               alert_after_handshake):
     self.cert_chain = tlslite.api.X509CertChain()
     self.cert_chain.parsePemList(pem_cert_and_key)
     # Force using only python implementation - otherwise behavior is different
@@ -202,11 +203,10 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
     if tls_intolerant != 0:
       self.ssl_handshake_settings.tlsIntolerant = (3, tls_intolerant)
       self.ssl_handshake_settings.tlsIntoleranceType = tls_intolerance_type
+    if alert_after_handshake:
+      self.ssl_handshake_settings.alertAfterHandshake = True
 
-
-    if disable_session_cache:
-      self.session_cache = None
-    elif record_resume_info:
+    if record_resume_info:
       # If record_resume_info is true then we'll replace the session cache with
       # an object that records the lookups and inserts that it sees.
       self.session_cache = RecordingSSLSessionCache()
@@ -1325,14 +1325,14 @@ class TestPageHandler(testserver_base.BasePageHandler):
     wait_sec = 1.0
     if query_char >= 0:
       try:
-        wait_sec = int(self.path[query_char + 1:])
+        wait_sec = float(self.path[query_char + 1:])
       except ValueError:
         pass
     time.sleep(wait_sec)
     self.send_response(200)
     self.send_header('Content-Type', 'text/plain')
     self.end_headers()
-    self.wfile.write("waited %d seconds" % wait_sec)
+    self.wfile.write("waited %.1f seconds" % wait_sec)
     return True
 
   def ChunkedServerHandler(self):
@@ -2049,7 +2049,7 @@ class ServerRunner(testserver_base.TestServerRunner):
                                  "base64"),
                              self.options.fallback_scsv,
                              stapled_ocsp_response,
-                             self.options.disable_session_cache)
+                             self.options.alert_after_handshake)
         print 'HTTPS server started on https://%s:%d...' % \
             (host, server.server_port)
       else:
@@ -2114,11 +2114,12 @@ class ServerRunner(testserver_base.TestServerRunner):
       # Instantiate a dummy authorizer for managing 'virtual' users
       authorizer = pyftpdlib.ftpserver.DummyAuthorizer()
 
-      # Define a new user having full r/w permissions and a read-only
-      # anonymous user
+      # Define a new user having full r/w permissions
       authorizer.add_user('chrome', 'chrome', my_data_dir, perm='elradfmw')
 
-      authorizer.add_anonymous(my_data_dir)
+      # Define a read-only anonymous user unless disabled
+      if not self.options.no_anonymous_ftp_user:
+        authorizer.add_anonymous(my_data_dir)
 
       # Instantiate FTP handler class
       ftp_handler = pyftpdlib.ftpserver.FTPHandler
@@ -2149,11 +2150,6 @@ class ServerRunner(testserver_base.TestServerRunner):
 
   def add_options(self):
     testserver_base.TestServerRunner.add_options(self)
-    self.option_parser.add_option('--disable-session-cache',
-                                  action='store_true',
-                                  dest='disable_session_cache',
-                                  help='tells the server to disable the'
-                                  'TLS session cache.')
     self.option_parser.add_option('-f', '--ftp', action='store_const',
                                   const=SERVER_FTP, default=SERVER_HTTP,
                                   dest='server_type',
@@ -2287,6 +2283,16 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   help='If set, the OCSP server will return '
                                   'a tryLater status rather than the actual '
                                   'OCSP response.')
+    self.option_parser.add_option('--alert-after-handshake',
+                                  dest='alert_after_handshake',
+                                  default=False, action='store_true',
+                                  help='If set, the server will send a fatal '
+                                  'alert immediately after the handshake.')
+    self.option_parser.add_option('--no-anonymous-ftp-user',
+                                  dest='no_anonymous_ftp_user',
+                                  default=False, action='store_true',
+                                  help='If set, the FTP server will not create '
+                                  'an anonymous user.')
 
 
 if __name__ == '__main__':

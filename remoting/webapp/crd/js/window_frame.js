@@ -17,30 +17,18 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.WindowFrame = function(titleBar) {
-  /**
-   * @type {remoting.DesktopConnectedView}
-   * @private
-   */
+  /** @private {remoting.DesktopConnectedView} */
   this.desktopConnectedView_ = null;
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.titleBar_ = titleBar;
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.title_ = /** @type {HTMLElement} */
       (titleBar.querySelector('.window-title'));
   base.debug.assert(this.title_ != null);
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.maximizeRestoreControl_ = /** @type {HTMLElement} */
       (titleBar.querySelector('.window-maximize-restore'));
   base.debug.assert(this.maximizeRestoreControl_ != null);
@@ -52,10 +40,7 @@ remoting.WindowFrame = function(titleBar) {
       this.onShowOptionsMenu_.bind(this),
       this.onHideOptionsMenu_.bind(this));
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.optionsMenuList_ = /** @type {HTMLElement} */
       (optionsButton.querySelector('.window-options-menu'));
   base.debug.assert(this.optionsMenuList_ != null);
@@ -68,7 +53,7 @@ remoting.WindowFrame = function(titleBar) {
     { cls: 'window-maximize-restore',
       fn: this.maximizeOrRestoreWindow_.bind(this) },
     { cls: 'window-minimize', fn: this.minimizeWindow_.bind(this) },
-    { cls: 'window-close', fn: window.close.bind(window) },
+    { cls: 'window-close', fn: remoting.app.quit.bind(remoting.app) },
     { cls: 'window-controls-stub', fn: this.toggleWindowControls_.bind(this) }
   ];
   for (var i = 0; i < handlers.length; ++i) {
@@ -150,7 +135,7 @@ remoting.WindowFrame.prototype.disconnectSession_ = function() {
   if (chrome.app.window.current().isFullscreen()) {
     chrome.app.window.current().restore();
   }
-  remoting.disconnect();
+  remoting.app.disconnect();
 };
 
 /**

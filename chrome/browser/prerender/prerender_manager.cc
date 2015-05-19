@@ -21,7 +21,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/predictor_database.h"
@@ -35,7 +34,6 @@
 #include "chrome/browser/prerender/prerender_local_predictor.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -57,18 +55,15 @@
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
 using content::RenderViewHost;
-using content::RenderFrameHost;
 using content::SessionStorageNamespace;
 using content::WebContents;
 using predictors::LoggedInPredictorTable;
@@ -229,18 +224,15 @@ struct PrerenderManager::NavigationRecord {
   base::TimeTicks time;
 };
 
-PrerenderManager::PrerenderManager(Profile* profile,
-                                   PrerenderTracker* prerender_tracker)
+PrerenderManager::PrerenderManager(Profile* profile)
     : profile_(profile),
-      prerender_tracker_(prerender_tracker),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
       last_prerender_start_time_(GetCurrentTimeTicks() -
           base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs)),
       prerender_history_(new PrerenderHistory(kHistoryLength)),
       histograms_(new PrerenderHistograms()),
       profile_network_bytes_(0),
-      last_recorded_profile_network_bytes_(0),
-      cookie_store_loaded_(false) {
+      last_recorded_profile_network_bytes_(0) {
   // There are some assumptions that the PrerenderManager is on the UI thread.
   // Any other checks simply make sure that the PrerenderManager is accessed on
   // the same thread that it was created on.
@@ -537,11 +529,6 @@ WebContents* PrerenderManager::SwapInternal(
       prerender_data->contents()->GetRenderViewHost()->GetProcess();
   process_host->RemoveObserver(this);
   prerender_process_hosts_.erase(process_host);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&PrerenderTracker::RemovePrerenderCookieStoreOnIOThread,
-                 base::Unretained(prerender_tracker()), process_host->GetID(),
-                 true));
   if (!prerender_data->contents()->load_start_time().is_null()) {
     histograms_->RecordTimeUntilUsed(
         prerender_data->contents()->origin(),
@@ -991,12 +978,6 @@ void PrerenderManager::SourceNavigatedAway(PrerenderData* prerender_data) {
   SortActivePrerenders();
 }
 
-net::URLRequestContextGetter* PrerenderManager::GetURLRequestContext() {
-  return content::BrowserContext::GetDefaultStoragePartition(profile_)->
-      GetURLRequestContext();
-}
-
-
 // private
 PrerenderHandle* PrerenderManager::AddPrerender(
     Origin origin,
@@ -1063,14 +1044,6 @@ PrerenderHandle* PrerenderManager::AddPrerender(
     return NULL;
   }
 
-  if (IsPrerenderCookieStoreEnabled() && !cookie_store_loaded()) {
-    // Only prerender if the cookie store for this profile has been loaded.
-    // This is required by PrerenderCookieMonster.
-    RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, experiment, FINAL_STATUS_COOKIE_STORE_NOT_LOADED);
-    return NULL;
-  }
-
   PrerenderContents* prerender_contents = CreatePrerenderContents(
       url, referrer, origin, experiment);
   DCHECK(prerender_contents);
@@ -1095,12 +1068,8 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   gfx::Size contents_size =
       size.IsEmpty() ? config_.default_tab_bounds.size() : size;
 
-  net::URLRequestContextGetter* request_context =
-      (IsPrerenderCookieStoreEnabled() ? GetURLRequestContext() : NULL);
-
   prerender_contents->StartPrerendering(contents_size,
-                                        session_storage_namespace,
-                                        request_context);
+                                        session_storage_namespace);
 
   DCHECK(IsControlGroup(experiment) ||
          prerender_contents->prerendering_has_started() ||
@@ -1109,21 +1078,6 @@ PrerenderHandle* PrerenderManager::AddPrerender(
 
   if (GetMode() == PRERENDER_MODE_EXPERIMENT_MULTI_PRERENDER_GROUP)
     histograms_->RecordConcurrency(active_prerenders_.size());
-
-  // Query the history to see if the URL being prerendered has ever been
-  // visited before.
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
-  if (history_service) {
-    history_service->QueryURL(
-        url,
-        false,
-        base::Bind(&PrerenderManager::OnHistoryServiceDidQueryURL,
-                   base::Unretained(this),
-                   origin,
-                   experiment),
-        &query_url_tracker_);
-  }
 
   StartSchedulingPeriodicCleanups();
   return prerender_handle;
@@ -1504,73 +1458,6 @@ void PrerenderManager::LoggedInPredictorDataReceived(
   logged_in_state_.swap(new_map);
 }
 
-// static
-void PrerenderManager::RecordCookieEvent(int process_id,
-                                         int frame_id,
-                                         const GURL& url,
-                                         const GURL& frame_url,
-                                         bool is_for_blocking_resource,
-                                         PrerenderContents::CookieEvent event,
-                                         const net::CookieList* cookie_list) {
-  RenderFrameHost* rfh = RenderFrameHost::FromID(process_id, frame_id);
-  WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
-  if (!web_contents)
-    return;
-
-  bool is_main_frame = (rfh == web_contents->GetMainFrame());
-
-  bool is_third_party_cookie =
-    (!frame_url.is_empty() &&
-     !net::registry_controlled_domains::SameDomainOrHost(
-         url, frame_url,
-         net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
-
-  PrerenderContents* prerender_contents =
-      PrerenderContents::FromWebContents(web_contents);
-
-  if (!prerender_contents)
-    return;
-
-  base::Time earliest_create_date;
-  if (event == PrerenderContents::COOKIE_EVENT_SEND) {
-    if (!cookie_list || cookie_list->empty())
-      return;
-    for (size_t i = 0; i < cookie_list->size(); i++) {
-      if (earliest_create_date.is_null() ||
-          (*cookie_list)[i].CreationDate() < earliest_create_date) {
-        earliest_create_date = (*cookie_list)[i].CreationDate();
-      }
-    }
-  }
-
-  prerender_contents->RecordCookieEvent(event,
-                                        is_main_frame && url == frame_url,
-                                        is_third_party_cookie,
-                                        is_for_blocking_resource,
-                                        earliest_create_date);
-}
-
-void PrerenderManager::RecordCookieStatus(Origin origin,
-                                          uint8 experiment_id,
-                                          int cookie_status) const {
-  histograms_->RecordCookieStatus(origin, experiment_id, cookie_status);
-}
-
-void PrerenderManager::RecordCookieSendType(Origin origin,
-                                            uint8 experiment_id,
-                                            int cookie_send_type) const {
-  histograms_->RecordCookieSendType(origin, experiment_id, cookie_send_type);
-}
-
-void PrerenderManager::OnHistoryServiceDidQueryURL(
-    Origin origin,
-    uint8 experiment_id,
-    bool success,
-    const history::URLRow& url_row,
-    const history::VisitVector& /*visits*/) {
-  histograms_->RecordPrerenderPageVisitedStatus(origin, experiment_id, success);
-}
-
 void PrerenderManager::RecordNetworkBytes(Origin origin,
                                           bool used,
                                           int64 prerender_bytes) {
@@ -1596,12 +1483,6 @@ void PrerenderManager::AddProfileNetworkBytesIfEnabled(int64 bytes) {
     profile_network_bytes_ += bytes;
 }
 
-void PrerenderManager::OnCookieStoreLoaded() {
-  cookie_store_loaded_ = true;
-  if (!on_cookie_store_loaded_cb_for_testing_.is_null())
-    on_cookie_store_loaded_cb_for_testing_.Run();
-}
-
 void PrerenderManager::AddPrerenderProcessHost(
     content::RenderProcessHost* process_host) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -1614,10 +1495,8 @@ void PrerenderManager::AddPrerenderProcessHost(
 bool PrerenderManager::MayReuseProcessHost(
     content::RenderProcessHost* process_host) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // If prerender cookie stores are disabled, there is no need to require
-  // isolated prerender processes.
-  if (!IsPrerenderCookieStoreEnabled())
-    return true;
+  // Isolate prerender processes to make the resource monitoring check more
+  // accurate.
   return (prerender_process_hosts_.find(process_host) ==
           prerender_process_hosts_.end());
 }
@@ -1627,10 +1506,6 @@ void PrerenderManager::RenderProcessHostDestroyed(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   size_t erased = prerender_process_hosts_.erase(host);
   DCHECK_EQ(1u, erased);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&PrerenderTracker::RemovePrerenderCookieStoreOnIOThread,
-                 base::Unretained(prerender_tracker()), host->GetID(), false));
 }
 
 }  // namespace prerender

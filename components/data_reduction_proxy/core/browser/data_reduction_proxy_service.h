@@ -32,8 +32,7 @@ typedef base::Callback<void(const std::string&, const net::URLRequestStatus&)>
     FetcherResponseCallback;
 
 class DataReductionProxySettings;
-class DataReductionProxyStatisticsPrefs;
-
+class DataReductionProxyCompressionStats;
 
 // Contains and initializes all Data Reduction Proxy objects that have a
 // lifetime based on the UI thread.
@@ -42,11 +41,11 @@ class DataReductionProxyService : public base::NonThreadSafe,
  public:
   // The caller must ensure that |settings| and |request_context| remain alive
   // for the lifetime of the |DataReductionProxyService| instance. This instance
-  // will take ownership of |statistics_prefs|.
+  // will take ownership of |compression_stats|.
   // TODO(jeremyim): DataReductionProxyService should own
   // DataReductionProxySettings and not vice versa.
   DataReductionProxyService(
-      scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs,
+      scoped_ptr<DataReductionProxyCompressionStats> compression_stats,
       DataReductionProxySettings* settings,
       net::URLRequestContextGetter* request_context_getter);
 
@@ -54,20 +53,21 @@ class DataReductionProxyService : public base::NonThreadSafe,
 
   void Shutdown();
 
-  // Requests the given |probe_url|. Upon completion, returns the results to the
-  // caller via the |fetcher_callback|. Virtualized for unit testing.
-  virtual void CheckProbeURL(const GURL& probe_url,
-                             FetcherResponseCallback fetcher_callback);
+  // Requests the given |secure_proxy_check_url|. Upon completion, returns the
+  // results to the caller via the |fetcher_callback|. Virtualized for unit
+  // testing.
+  virtual void SecureProxyCheck(const GURL& secure_proxy_check_url,
+                                FetcherResponseCallback fetcher_callback);
 
-  // Constructs statistics prefs. This should not be called if a valid
-  // statistics prefs is passed into the constructor.
+  // Constructs compression stats. This should not be called if a valid
+  // compression stats is passed into the constructor.
   void EnableCompressionStatisticsLogging(
       PrefService* prefs,
       scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
       const base::TimeDelta& commit_delay);
 
-  DataReductionProxyStatisticsPrefs* statistics_prefs() const {
-    return statistics_prefs_.get();
+  DataReductionProxyCompressionStats* compression_stats() const {
+    return compression_stats_.get();
   }
 
   DataReductionProxySettings* settings() const {
@@ -77,9 +77,10 @@ class DataReductionProxyService : public base::NonThreadSafe,
   base::WeakPtr<DataReductionProxyService> GetWeakPtr();
 
  protected:
-  // Virtualized for testing. Returns a fetcher for the probe to check if OK for
-  // the proxy to use TLS.
-  virtual net::URLFetcher* GetURLFetcherForProbe(const GURL& probe_url);
+  // Virtualized for testing. Returns a fetcher to check if it is permitted to
+  // use the secure proxy.
+  virtual net::URLFetcher* GetURLFetcherForSecureProxyCheck(
+      const GURL& secure_proxy_check_url);
 
  private:
   // net::URLFetcherDelegate:
@@ -87,12 +88,12 @@ class DataReductionProxyService : public base::NonThreadSafe,
 
   net::URLRequestContextGetter* url_request_context_getter_;
 
-  // The URLFetcher being used for the canary check.
+  // The URLFetcher being used for the secure proxy check.
   scoped_ptr<net::URLFetcher> fetcher_;
   FetcherResponseCallback fetcher_callback_;
 
   // Tracks compression statistics to be displayed to the user.
-  scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs_;
+  scoped_ptr<DataReductionProxyCompressionStats> compression_stats_;
 
   DataReductionProxySettings* settings_;
 

@@ -40,7 +40,7 @@ class BookmarkImageService : public KeyedService,
 
   ~BookmarkImageService() override;
 
-  typedef base::Callback<void(const ImageRecord&)> ImageCallback;
+  typedef base::Callback<void(scoped_refptr<ImageRecord>)> ImageCallback;
 
   // KeyedService:
   void Shutdown() override;
@@ -84,17 +84,20 @@ class BookmarkImageService : public KeyedService,
   // Returns true if the image for the page_url is currently being fetched.
   bool IsPageUrlInProgress(const GURL& page_url);
 
-  // Stores the image to local storage. If update_bookmarks is true, relates the
-  // corresponding bookmark to image_url.
+  // Stores the new image to local storage. If update_bookmarks is true, relates
+  // the corresponding bookmark to image_url.
   void ProcessNewImage(const GURL& page_url,
                        bool update_bookmarks,
-                       const gfx::Image& image,
-                       const GURL& image_url);
+                       const GURL& image_url,
+                       scoped_ptr<gfx::Image> image);
+
+  // Resizes large images to proper size that fits device display. This method
+  // should _not_ run on the UI thread.
+  virtual scoped_ptr<gfx::Image> ResizeImage(const gfx::Image& image) = 0;
 
   // Sets a new image for a bookmark. If the given page_url is bookmarked and
   // the image is retrieved from the image_url, then the image is locally
   // stored. If update_bookmark is true the URL is also added to the bookmark.
-  // This is the only method subclass needs to implement.
   virtual void RetrieveSalientImage(
       const GURL& page_url,
       const GURL& image_url,
@@ -120,30 +123,32 @@ class BookmarkImageService : public KeyedService,
                           ImageCallback stack_callback);
 
   // Processes the requests that have been waiting on an image.
-  void ProcessRequests(const GURL& page_url, const ImageRecord& image);
+  void ProcessRequests(const GURL& page_url, scoped_refptr<ImageRecord> image);
 
-  // Once an image is retrieved this method updates the store with it. Returns
-  // the newly formed ImageRecord.  This is typically called on |pool_|, the
-  // background sequenced worker pool for this object.
-  ImageRecord StoreImage(const gfx::Image& image,
-                         const GURL& image_url,
-                         const GURL& page_url);
+  // Once an image is retrieved this method calls ResizeImage() and updates the
+  // store with the smaller image, then returns the newly formed ImageRecord.
+  // This is typically called on |pool_|, the background sequenced worker pool
+  // for this object.
+  scoped_refptr<ImageRecord> ResizeAndStoreImage(
+      scoped_refptr<ImageRecord> image_info,
+      const GURL& page_url);
 
   // Calls |StoreImage| in the background.  This should only be called from the
   // main thread.
-  void PostTaskToStoreImage(const gfx::Image& image,
+  void PostTaskToStoreImage(scoped_ptr<gfx::Image> image,
                             const GURL& image_url,
                             const GURL& page_url);
 
   // Called when |StoreImage| as been posted.  This should only be called from
   // the main thread.
-  void OnStoreImagePosted(const GURL& page_url, const ImageRecord& image);
+  void OnStoreImagePosted(const GURL& page_url,
+                          scoped_refptr<ImageRecord> image);
 
   // Called when retrieving an image from the image store fails, to trigger
   // retrieving the image from the url stored in the bookmark (if any).
   void FetchCallback(const GURL& page_url,
                      ImageCallback original_callback,
-                     const ImageRecord& record);
+                     scoped_refptr<ImageRecord> record);
 
   // Remove the image stored for this bookmark (if it exists). Called when a
   // bookmark is deleted.

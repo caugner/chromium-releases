@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_SHELL_WEBKIT_TEST_RUNNER_H_
-#define CONTENT_SHELL_WEBKIT_TEST_RUNNER_H_
+#ifndef CONTENT_SHELL_RENDERER_LAYOUT_TEST_WEBKIT_TEST_RUNNER_H_
+#define CONTENT_SHELL_RENDERER_LAYOUT_TEST_WEBKIT_TEST_RUNNER_H_
 
 #include <vector>
 
@@ -64,8 +64,6 @@ class WebKitTestRunner : public RenderViewObserver,
       const blink::WebScreenOrientationType& orientation) override;
   void ResetScreenOrientation() override;
   void DidChangeBatteryStatus(const blink::WebBatteryStatus& status) override;
-  void SetScreenAvailability(bool available) override;
-  void ResetPresentationService() override;
   void PrintMessage(const std::string& message) override;
   void PostTask(WebTask* task) override;
   void PostDelayedTask(WebTask* task, long long ms) override;
@@ -165,4 +163,4 @@ class WebKitTestRunner : public RenderViewObserver,
 
 }  // namespace content
 
-#endif  // CONTENT_SHELL_WEBKIT_TEST_RUNNER_H_
+#endif  // CONTENT_SHELL_RENDERER_LAYOUT_TEST_WEBKIT_TEST_RUNNER_H_

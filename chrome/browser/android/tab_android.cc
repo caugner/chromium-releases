@@ -12,7 +12,7 @@
 #include "cc/layers/layer.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
-#include "chrome/browser/android/uma_utils.h"
+#include "chrome/browser/android/metrics/uma_utils.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
@@ -59,10 +59,12 @@
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/top_controls_state.h"
@@ -292,17 +294,6 @@ void TabAndroid::SwapTabContents(content::WebContents* old_contents,
                                  bool did_start_load,
                                  bool did_finish_load) {
   JNIEnv* env = base::android::AttachCurrentThread();
-
-  // We need to notify the native InfobarContainer so infobars can be swapped.
-  InfoBarContainerAndroid* infobar_container =
-      reinterpret_cast<InfoBarContainerAndroid*>(
-          Java_Tab_getNativeInfoBarContainer(
-              env,
-              weak_java_tab_.get(env).obj()));
-  InfoBarService* new_infobar_service =
-      new_contents ? InfoBarService::FromWebContents(new_contents) : NULL;
-  infobar_container->ChangeInfoBarManager(new_infobar_service);
-
   Java_Tab_swapWebContents(
       env,
       weak_java_tab_.get(env).obj(),
@@ -493,6 +484,18 @@ void TabAndroid::DestroyWebContents(JNIEnv* env,
   web_contents()->SetDelegate(NULL);
 
   if (delete_native) {
+    // Terminate the renderer process if this is the last tab.
+    // If there's no unload listener, FastShutdownForPageCount kills the
+    // renderer process. Otherwise, we go with the slow path where renderer
+    // process shuts down itself when ref count becomes 0.
+    // This helps the render process exit quickly which avoids some issues
+    // during shutdown. See https://codereview.chromium.org/146693011/
+    // and http://crbug.com/338709 for details.
+    content::RenderProcessHost* process =
+        web_contents()->GetRenderProcessHost();
+    if (process)
+      process->FastShutdownForPageCount(1);
+
     web_contents_.reset();
     synced_tab_delegate_->ResetWebContents();
   } else {
@@ -725,6 +728,14 @@ void TabAndroid::UpdateTopControlsState(JNIEnv* env,
   WebContents* sender = web_contents();
   sender->Send(new ChromeViewMsg_UpdateTopControlsState(
       sender->GetRoutingID(), constraints_state, current_state, animate));
+
+  if (sender->ShowingInterstitialPage()) {
+    content::RenderViewHost* interstitial_view_host =
+        sender->GetInterstitialPage()->GetMainFrame()->GetRenderViewHost();
+    interstitial_view_host->Send(new ChromeViewMsg_UpdateTopControlsState(
+        interstitial_view_host->GetRoutingID(), constraints_state,
+        current_state, animate));
+  }
 }
 
 void TabAndroid::SearchByImageInNewTabAsync(JNIEnv* env, jobject obj) {
@@ -764,6 +775,11 @@ jlong TabAndroid::GetBookmarkId(JNIEnv* env,
   return -1;
 }
 
+bool TabAndroid::HasPrerenderedUrl(JNIEnv* env, jobject obj, jstring url) {
+  GURL gurl(base::android::ConvertJavaStringToUTF8(env, url));
+  return HasPrerenderedUrl(gurl);
+}
+
 namespace {
 
 class ChromeInterceptNavigationDelegate : public InterceptNavigationDelegate {
@@ -785,7 +801,7 @@ class ChromeInterceptNavigationDelegate : public InterceptNavigationDelegate {
 
 void TabAndroid::SetInterceptNavigationDelegate(JNIEnv* env, jobject obj,
                                                jobject delegate) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   InterceptNavigationDelegate::Associate(
       web_contents(),
       make_scoped_ptr(new ChromeInterceptNavigationDelegate(env, delegate)));
@@ -827,7 +843,8 @@ void TabAndroid::DetachOverlayContentViewCore(JNIEnv* env,
                                                          jcontent_view_core);
   DCHECK(content_view_core);
 
-  content_view_core->GetLayer()->RemoveFromParent();
+  if (content_view_core->GetLayer()->parent() == content_layer_)
+    content_view_core->GetLayer()->RemoveFromParent();
 }
 
 static void Init(JNIEnv* env, jobject obj) {

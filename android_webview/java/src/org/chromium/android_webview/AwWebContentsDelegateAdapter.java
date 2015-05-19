@@ -4,8 +4,10 @@
 
 package org.chromium.android_webview;
 
+import android.annotation.SuppressLint;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Handler;
@@ -77,9 +79,39 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
             }
             if (direction != 0 && tryToMoveFocus(direction)) return;
         }
+        handleMediaKey(event);
         mContentsClient.onUnhandledKeyEvent(event);
     }
 
+    /**
+     * Redispatches unhandled media keys. This allows bluetooth headphones with play/pause or
+     * other buttons to function correctly.
+     */
+    private void handleMediaKey(KeyEvent e) {
+        switch (e.getKeyCode()) {
+            case KeyEvent.KEYCODE_MUTE:
+            case KeyEvent.KEYCODE_HEADSETHOOK:
+            case KeyEvent.KEYCODE_MEDIA_PLAY:
+            case KeyEvent.KEYCODE_MEDIA_PAUSE:
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case KeyEvent.KEYCODE_MEDIA_STOP:
+            case KeyEvent.KEYCODE_MEDIA_NEXT:
+            case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+            case KeyEvent.KEYCODE_MEDIA_REWIND:
+            case KeyEvent.KEYCODE_MEDIA_RECORD:
+            case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+            case KeyEvent.KEYCODE_MEDIA_CLOSE:
+            case KeyEvent.KEYCODE_MEDIA_EJECT:
+            case KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK:
+                AudioManager am = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
+                am.dispatchMediaKeyEvent(e);
+                break;
+            default:
+                break;
+        }
+    }
+
+    @SuppressLint("NewApi")  // View#getLayoutDirection requires API level 17.
     @Override
     public boolean takeFocus(boolean reverse) {
         int direction =
@@ -117,8 +149,12 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
                 break;
         }
 
-        return mContentsClient.onConsoleMessage(
+        boolean result = mContentsClient.onConsoleMessage(
                 new ConsoleMessage(message, sourceId, lineNumber, messageLevel));
+        if (result && message != null && message.startsWith("[blocked]")) {
+            Log.e(TAG, "Blocked URL: " + message);
+        }
+        return result;
     }
 
     @Override
@@ -177,12 +213,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     @Override
     public void runFileChooser(final int processId, final int renderId, final int modeFlags,
             String acceptTypes, String title, String defaultFilename, boolean capture) {
-        AwContentsClient.FileChooserParams params = new AwContentsClient.FileChooserParams();
-        params.mode = modeFlags;
-        params.acceptTypes = acceptTypes;
-        params.title = title;
-        params.defaultFilename = defaultFilename;
-        params.capture = capture;
+        AwContentsClient.FileChooserParamsImpl params = new AwContentsClient.FileChooserParamsImpl(
+                modeFlags, acceptTypes, title, defaultFilename, capture);
 
         mContentsClient.showFileChooser(new ValueCallback<String[]>() {
             boolean mCompleted = false;
@@ -217,8 +249,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     @Override
     public void navigationStateChanged(int flags) {
         if ((flags & InvalidateTypes.URL) != 0
-                && mAwContents.hasAccessedInitialDocument()
-                && mAwContents.getDidAttemptLoad()) {
+                && mAwContents.isPopupWindow()
+                && mAwContents.hasAccessedInitialDocument()) {
             // Hint the client to show the last committed url, as it may be unsafe to show
             // the pending entry.
             String url = mAwContents.getLastCommittedUrl();
@@ -237,6 +269,11 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         } else {
             mContentViewClient.exitFullscreen();
         }
+    }
+
+    @Override
+    public void loadingStateChanged() {
+        mContentsClient.onReceivedTitle(mAwContents.getTitle());
     }
 
     private static class GetDisplayNameTask extends AsyncTask<Void, Void, String[]> {

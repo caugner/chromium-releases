@@ -41,10 +41,10 @@
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cookie_crypto_delegate.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/extras/sqlite/cookie_crypto_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -469,34 +469,18 @@ void SafeBrowsingService::StartOnIOThread(
     return;
   enabled_ = true;
 
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455469 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455469 SafeBrowsingService::GetProtocolConfig"));
   SafeBrowsingProtocolConfig config = GetProtocolConfig();
 
 #if defined(FULL_SAFE_BROWSING)
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455469 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455469 SafeBrowsingDatabaseManager::StartOnIOThread"));
   DCHECK(database_manager_.get());
   database_manager_->StartOnIOThread();
 
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455469 is fixed.
-  tracked_objects::ScopedTracker tracking_profile3(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455469 SafeBrowsingProtocolManager::Create"));
   DCHECK(!protocol_manager_);
   protocol_manager_ = SafeBrowsingProtocolManager::Create(
       database_manager_.get(), url_request_context_getter, config);
   protocol_manager_->Initialize();
 #endif
 
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455469 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455469 SafeBrowsingPingManager::Create"));
   DCHECK(!ping_manager_);
   ping_manager_ = SafeBrowsingPingManager::Create(
       url_request_context_getter, config);

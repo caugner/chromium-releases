@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="en-GB">
+<translation id="2705212601509139398">This site is using the Chromium Frame plug-in that will soon be unsupported. Please uninstall it and download a compatible browser.</translation>
 <translation id="6676384891291319759">Access the Internet</translation>
 <translation id="8586442755830160949">Copyright <ph name="YEAR"/> The Chromium Authors. All rights reserved.</translation>
 <translation id="6373523479360886564">Are you sure you want to uninstall Chromium?</translation>
@@ -98,7 +99,6 @@ Some features may be unavailable and changes to preferences won't be saved.</tra
 <translation id="3296368748942286671">Continue running background apps when Chromium is closed</translation>
 <translation id="473775607612524610">Update</translation>
 <translation id="5466153949126434691">Chromium updates automatically so you always have the freshest version. When this download completes, Chromium will restart and you'll be on your way.</translation>
-<translation id="7707841053049645517">This site is using the Chromium Frame plug-in which will soon be unsupported. Please uninstall it and upgrade to a modern browser.</translation>
 <translation id="3656661827369545115">Launch Chromium automatically when your computer starts</translation>
 <translation id="2241627712206172106">If you share a computer, friends and family can browse separately and set up Chromium just the way they want.</translation>
 <translation id="1763864636252898013">This server could not prove that it is <ph name="DOMAIN"/>; its security certificate is not trusted by your device's operating system. This may be caused by a misconfiguration or an attacker intercepting your connection.</translation>
@@ -120,6 +120,7 @@ Some features may be unavailable and changes to preferences won't be saved.</tra
 <translation id="5358375970380395591">You are signing in with a managed account and giving its administrator control over your Chromium profile. Your Chromium data, such as your apps, bookmarks, history, passwords and other settings will become permanently tied to <ph name="USER_NAME"/>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account. <ph name="LEARN_MORE"/></translation>
 <translation id="9036189287518468038">Chromium App Launcher</translation>
 <translation id="5563479599352954471">Search with one touch</translation>
+<translation id="3256316712990552818">Copied to Chromium</translation>
 <translation id="8493179195440786826">Chromium is Out of Date</translation>
 <translation id="911206726377975832">Also delete your browsing data?</translation>
 <translation id="95514773681268843"><ph name="DOMAIN"/> requires that you read and accept the following Terms of Service before using this device. These terms do not expand, modify or limit the Chromium OS Terms.</translation>
@@ -134,7 +135,6 @@ Some features may be unavailable and changes to preferences won't be saved.</tra
 <translation id="4365115785552740256">Chromium is made possible by the <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> open source project and other <ph name="BEGIN_LINK_OSS"/>open source software<ph name="END_LINK_OSS"/>.</translation>
 <translation id="9190841055450128916">Chromium (mDNS-In)</translation>
 <translation id="4987820182225656817">Guests can use Chromium without leaving anything behind.</translation>
-<translation id="2216475571518225820">This site is using the Chromium Frame plug-in that will soon be unsupported. Please uninstall it and download a compatible browser.</translation>
 <translation id="3487263810738775861">An extension has changed what page is shown when you start Chromium.</translation>
 <translation id="5877064549588274448">Channel changed. Restart your device to apply changes.</translation>
 <translation id="7549178288319965365">About Chromium OS</translation>
@@ -216,6 +216,7 @@ Some features may be unavailable. Please specify a different profile directory o
 <translation id="811857857463334932">This computer will no longer receive Chromium updates because its hardware is no longer supported.</translation>
 <translation id="2910007522516064972">About &amp;Chromium</translation>
 <translation id="8453117565092476964">The installer archive is corrupted or invalid. Please download Chromium again.</translation>
+<translation id="2558641060352364164">This site is using the Chromium Frame plug-in which will soon be unsupported. Please uninstall it and upgrade to a modern browser.</translation>
 <translation id="3889543394854987837">Click your name to open Chromium and start browsing.</translation>
 <translation id="3130323860337406239">Chromium is using your microphone.</translation>
 <translation id="7196020411877309443">Why am I seeing this?</translation>

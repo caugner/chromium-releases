@@ -12,6 +12,7 @@ import sys
 import mojo_bindings.messaging as messaging
 import mojo_bindings.promise as promise
 import mojo_bindings.serialization as serialization
+import mojo_system
 
 
 class MojoEnumType(type):
@@ -273,6 +274,10 @@ class InterfaceManager(object):
 
     router.Start()
 
+  def NewRequest(self):
+    pipe = mojo_system.MessagePipe()
+    return (self.Proxy(pipe.handle0), InterfaceRequest(pipe.handle1))
+
   def _InternalProxy(self, router, error_handler):
     if error_handler is None:
       error_handler = _ProxyErrorHandler()
@@ -529,6 +534,7 @@ def _StubAccept(methods):
               payload.data, payload.handles)).AsDict()
       response = getattr(self.impl, method.name)(**parameters)
       if header.expects_response:
+        @promise.async
         def SendResponse(response):
           if isinstance(response, dict):
             response_message = _GetMessage(method,
@@ -539,8 +545,8 @@ def _StubAccept(methods):
                                            messaging.MESSAGE_IS_RESPONSE_FLAG,
                                            response)
           response_message.header.request_id = header.request_id
-          responder.Accept(response_message)
-        p = promise.Promise.Resolve(response).Then(SendResponse)
+          return responder.Accept(response_message)
+        p = SendResponse(response)
         if self.impl.manager:
           # Close the connection in case of error.
           p.Catch(lambda _: self.impl.manager.Close())
@@ -550,6 +556,7 @@ def _StubAccept(methods):
       # Close the connection in case of error.
       logging.warning(
           'Error occured in accept method. Connection will be closed.')
+      logging.debug("Exception", exc_info=True)
       if self.impl.manager:
         self.impl.manager.Close()
       return False

@@ -32,11 +32,9 @@ importer.ImportRunner.prototype.importFromScanResult;
  *
  * @param {!ProgressCenter} progressCenter
  * @param {!importer.HistoryLoader} historyLoader
- * @param {!importer.DuplicateFinder.Factory} duplicateFinderFactory
  * @param {!analytics.Tracker} tracker
  */
-importer.MediaImportHandler =
-    function(progressCenter, historyLoader, duplicateFinderFactory, tracker) {
+importer.MediaImportHandler = function(progressCenter, historyLoader, tracker) {
   /** @private {!ProgressCenter} */
   this.progressCenter_ = progressCenter;
 
@@ -54,15 +52,21 @@ importer.MediaImportHandler =
     chrome.power.releaseKeepAwake();
   });
 
-  /** @private {!importer.DuplicateFinder.Factory} */
-  this.duplicateFinderFactory_ = duplicateFinderFactory;
-
   /** @private {!analytics.Tracker} */
   this.tracker_ = tracker;
 
   /** @private {number} */
   this.nextTaskId_ = 0;
 };
+
+// The name of the Drive property used to tag imported files.  Used to look up
+// the property later.
+importer.MediaImportHandler.IMPORTS_TAG_KEY = 'cloud-import';
+
+// The value of the Drive property used to tag imported files.  Cloud import
+// only imports 'media' right now - change this to an enum if other types of
+// files start being imported.
+importer.MediaImportHandler.IMPORTS_TAG_VALUE = 'media';
 
 /** @override */
 importer.MediaImportHandler.prototype.importFromScanResult =
@@ -73,11 +77,11 @@ importer.MediaImportHandler.prototype.importFromScanResult =
       this.historyLoader_,
       scanResult,
       directoryPromise,
-      this.duplicateFinderFactory_.create(),
       destination,
       this.tracker_);
 
   task.addObserver(this.onTaskProgress_.bind(this, task));
+  task.addObserver(this.onFileImported_.bind(this, task));
 
   this.queue_.queueTask(task);
 
@@ -121,7 +125,7 @@ importer.MediaImportHandler.prototype.onTaskProgress_ =
           strf('CLOUD_IMPORT_ITEMS_REMAINING', task.remainingFilesCount);
       item.progressValue = task.processedBytes;
       item.state = ProgressItemState.PROGRESSING;
-    break;
+      break;
     case UpdateType.COMPLETE:
       item.message = '';
       item.progressValue = item.progressMax;
@@ -143,6 +147,38 @@ importer.MediaImportHandler.prototype.onTaskProgress_ =
 };
 
 /**
+ * Tags newly-imported files with a Drive property.
+ * @param {!importer.TaskQueue.Task} task
+ * @param {string} updateType
+ * @param {Object=} updateInfo
+ */
+importer.MediaImportHandler.prototype.onFileImported_ =
+    function(task, updateType, updateInfo) {
+  if (updateType !==
+      importer.MediaImportHandler.ImportTask.UpdateType.ENTRY_CHANGED) {
+    return;
+  }
+  // Update info must exist for ENTRY_CHANGED notifications.
+  console.assert(updateInfo && updateInfo.destination);
+  var info =
+      /** @type {!importer.MediaImportHandler.ImportTask.EntryChangedInfo} */ (
+          updateInfo);
+
+  // Tag the import with a private drive property.
+  chrome.fileManagerPrivate.setEntryTag(
+      info.destination.toURL(),
+      'private',  // Scoped to just this app.
+      importer.MediaImportHandler.IMPORTS_TAG_KEY,
+      importer.MediaImportHandler.IMPORTS_TAG_VALUE,
+      function() {
+        if (chrome.runtime.lastError) {
+          console.error('Unable to tag imported media: ' +
+              chrome.runtime.lastError.message);
+        }
+      });
+};
+
+/**
  * Note that this isn't an actual FileOperationManager.Task.  It currently uses
  * the FileOperationManager (and thus *spawns* an associated
  * FileOperationManager.CopyTask) but this is a temporary state of affairs.
@@ -155,8 +191,6 @@ importer.MediaImportHandler.prototype.onTaskProgress_ =
  * @param {!importer.HistoryLoader} historyLoader
  * @param {!importer.ScanResult} scanResult
  * @param {!Promise<!DirectoryEntry>} directoryPromise
- * @param {!importer.DuplicateFinder} duplicateFinder A duplicate-finder linked
- *     to the import destination, that will be used to deduplicate imports.
  * @param {!importer.Destination} destination The logical destination.
  * @param {!analytics.Tracker} tracker
  */
@@ -165,7 +199,6 @@ importer.MediaImportHandler.ImportTask = function(
     historyLoader,
     scanResult,
     directoryPromise,
-    duplicateFinder,
     destination,
     tracker) {
 
@@ -178,9 +211,6 @@ importer.MediaImportHandler.ImportTask = function(
 
   /** @private {!Promise<!DirectoryEntry>} */
   this.directoryPromise_ = directoryPromise;
-
-  /** @private {!importer.DuplicateFinder} */
-  this.deduplicator_ = duplicateFinder;
 
   /** @private {!importer.ScanResult} */
   this.scanResult_ = scanResult;
@@ -205,9 +235,6 @@ importer.MediaImportHandler.ImportTask = function(
 
   /** @private {boolean} Indicates whether this task was canceled. */
   this.canceled_ = false;
-
-  /** @private {number} Number of files deduped by content dedupe. */
-  this.dedupeCount_ = 0;
 
   /** @private {number} */
   this.errorCount_ = 0;
@@ -256,6 +283,8 @@ importer.MediaImportHandler.ImportTask.prototype.run = function() {
   this.scanResult_.whenFinal()
       .then(this.initialize_.bind(this))
       .then(this.importScanEntries_.bind(this))
+      .then(this.markDuplicatesImported_.bind(this))
+      .then(this.onSuccess_.bind(this))
       .catch(importer.getLogger().catcher('import-task-run'));
 };
 
@@ -277,14 +306,11 @@ importer.MediaImportHandler.ImportTask.prototype.requestCancel = function() {
 /** @private */
 importer.MediaImportHandler.ImportTask.prototype.initialize_ = function() {
   var stats = this.scanResult_.getStatistics();
-
   this.remainingFilesCount_ = stats.newFileCount;
   this.totalBytes_ = stats.sizeBytes;
   this.notify(importer.TaskQueue.UpdateType.PROGRESS);
 
   this.tracker_.send(metrics.ImportEvents.STARTED);
-  this.tracker_.send(metrics.ImportEvents.HISTORY_DEDUPE_COUNT
-                     .value(stats.duplicateFileCount));
 };
 
 /**
@@ -295,14 +321,42 @@ importer.MediaImportHandler.ImportTask.prototype.initialize_ = function() {
  */
 importer.MediaImportHandler.ImportTask.prototype.importScanEntries_ =
     function() {
+  var resolver = new importer.Resolver();
   this.directoryPromise_.then(
       /** @this {importer.MediaImportHandler.ImportTask} */
       function(destinationDirectory) {
         AsyncUtil.forEach(
             this.scanResult_.getFileEntries(),
             this.importOne_.bind(this, destinationDirectory),
-            this.onSuccess_.bind(this));
+            resolver.resolve,
+            resolver);
       }.bind(this));
+  return resolver.promise;
+};
+
+/**
+ * Marks all duplicate entries as imported.
+ *
+ * @private
+ */
+importer.MediaImportHandler.ImportTask.prototype.markDuplicatesImported_ =
+    function() {
+  this.historyLoader_.getHistory().then(
+      /**
+       * @param {!importer.ImportHistory} history
+       * @this {importer.MediaImportHandler.ImportTask}
+       */
+      function(history) {
+        this.scanResult_.getDuplicateFileEntries().forEach(
+            /**
+             * @param {!FileEntry} entry
+             * @this {importer.MediaImportHandler.ImportTask}
+             */
+            function(entry) {
+              history.markImported(entry, this.destination_);
+            }.bind(this));
+      }.bind(this))
+      .catch(importer.getLogger().catcher('import-task-mark-dupes-imported'));
 };
 
 /**
@@ -316,27 +370,12 @@ importer.MediaImportHandler.ImportTask.prototype.importOne_ =
     function(destinationDirectory, completionCallback, entry) {
   if (this.canceled_) {
     this.notify(importer.TaskQueue.UpdateType.CANCELED);
-    this.tracker_.send(metrics.ImportEvents.CANCELLED);
+    this.tracker_.send(metrics.ImportEvents.IMPORT_CANCELLED);
     this.sendImportStats_();
     return;
   }
 
-  this.deduplicator_.checkDuplicate(entry)
-      .then(
-          /** @param {boolean} isDuplicate */
-          function(isDuplicate) {
-            if (isDuplicate) {
-              // If the given file is a duplicate, don't import it again.  Just
-              // update the progress indicator.
-              this.dedupeCount_++;
-              this.markAsImported_(entry);
-              this.processedBytes_ += entry.size;
-              this.notify(importer.TaskQueue.UpdateType.PROGRESS);
-              return Promise.resolve();
-            } else {
-              return this.copy_(entry, destinationDirectory);
-            }
-          }.bind(this))
+  this.copy_(entry, destinationDirectory)
       // Regardless of the result of this copy, push on to the next file.
       .then(completionCallback)
       .catch(
@@ -350,8 +389,9 @@ importer.MediaImportHandler.ImportTask.prototype.importOne_ =
 /**
  * @param {!FileEntry} entry The file to copy.
  * @param {!DirectoryEntry} destinationDirectory The destination directory.
- * @return {!Promise<!FileEntry>} Resolves to the destination file when the copy
- *     is complete.
+ * @return {!Promise<FileEntry>} Resolves to the destination file when the copy
+ *     is complete.  The FileEntry may be null if the import was cancelled.  The
+ *     promise will reject if an error occurs.
  * @private
  */
 importer.MediaImportHandler.ImportTask.prototype.copy_ =
@@ -400,7 +440,7 @@ importer.MediaImportHandler.ImportTask.prototype.copy_ =
    */
   var onComplete = function(destinationEntry) {
     this.cancelCallback_ = null;
-    this.markAsCopied_(entry, destinationEntry);
+    this.markAsCopied_(entry, /** @type {!FileEntry} */ (destinationEntry));
     this.notify(importer.TaskQueue.UpdateType.PROGRESS);
     resolver.resolve(destinationEntry);
   };
@@ -408,13 +448,20 @@ importer.MediaImportHandler.ImportTask.prototype.copy_ =
   /** @this {importer.MediaImportHandler.ImportTask} */
   var onError = function(error) {
     this.cancelCallback_ = null;
-    this.errorCount_++;
     // Log the bytes as processed in spite of the error.  This ensures
     // completion of the progress bar.
     this.processedBytes_ -= currentBytes;
     this.processedBytes_ += entry.size;
-    this.notify(importer.TaskQueue.UpdateType.ERROR);
-    resolver.reject(error);
+    if (error.name === util.FileError.ABORT_ERR) {
+      // Task cancellations result in the error callback being triggered with an
+      // ABORT_ERR, but we want to ignore these errors.
+      this.notify(importer.TaskQueue.UpdateType.PROGRESS);
+      resolver.resolve(null);
+    } else {
+      this.errorCount_++;
+      this.notify(importer.TaskQueue.UpdateType.ERROR);
+      resolver.reject(error);
+    }
   };
 
   fileOperationUtil.deduplicatePath(destinationDirectory, entry.name)
@@ -479,37 +526,50 @@ importer.MediaImportHandler.ImportTask.prototype.markAsImported_ =
 /** @private */
 importer.MediaImportHandler.ImportTask.prototype.onSuccess_ = function() {
   this.notify(importer.TaskQueue.UpdateType.COMPLETE);
-  this.tracker_.send(metrics.ImportEvents.ENDED);
   this.sendImportStats_();
 };
 
 /**
  * Sends import statistics to analytics.
  */
-importer.MediaImportHandler.ImportTask.prototype.sendImportStats_ = function() {
+importer.MediaImportHandler.ImportTask.prototype.sendImportStats_ =
+    function() {
+
+  var scanStats = this.scanResult_.getStatistics();
+
   this.tracker_.send(
-      metrics.ImportEvents.CONTENT_DEDUPE_COUNT
-          .value(this.dedupeCount_));
-  // TODO(kenobi): Send correct import byte counts.
-  var importFileCount = this.scanResult_.getStatistics().newFileCount -
-      (this.dedupeCount_ + this.remainingFilesCount_);
+      metrics.ImportEvents.MEGABYTES_IMPORTED.value(
+          // Make megabytes of our bytes.
+          Math.floor(this.processedBytes_ / (1024 * 1024))));
+
   this.tracker_.send(
-      metrics.ImportEvents.FILE_COUNT
-          .value(importFileCount));
+      metrics.ImportEvents.FILES_IMPORTED.value(
+          // Substract the remaining files, in case the task was cancelled.
+          scanStats.newFileCount - this.remainingFilesCount_));
 
-  this.tracker_.send(metrics.ImportEvents.ERROR.value(this.errorCount_));
+  if (this.errorCount_ > 0) {
+    this.tracker_.send(metrics.ImportEvents.ERRORS.value(this.errorCount_));
+  }
 
-  // Send aggregate deduplication timings, to avoid flooding analytics with one
-  // timing per file.
-  var deduplicatorStats = this.deduplicator_.getStatistics();
-  this.tracker_.sendTiming(
-      metrics.Categories.ACQUISITION,
-      metrics.timing.Variables.COMPUTE_HASH,
-      deduplicatorStats.computeHashTime,
-      'In Place');
-  this.tracker_.sendTiming(
-      metrics.Categories.ACQUISITION,
-      metrics.timing.Variables.SEARCH_BY_HASH,
-      deduplicatorStats.searchHashTime);
+  // Finally we want to report on the number of duplicates
+  // that were identified during scanning.
+  var totalDeduped = 0;
+  Object.keys(scanStats.duplicates).forEach(
+      /**
+       * @param {!importer.Disposition} disposition
+       * @this {importer.MediaImportHandler.ImportTask}
+       */
+      function(disposition) {
+        var count = scanStats.duplicates[disposition];
+        totalDeduped += count;
+        this.tracker_.send(
+            metrics.ImportEvents.FILES_DEDUPLICATED
+                .label(disposition)
+                .value(count));
+      }.bind(this));
 
+  this.tracker_.send(
+      metrics.ImportEvents.FILES_DEDUPLICATED
+          .label('all-duplicates')
+          .value(totalDeduped));
 };

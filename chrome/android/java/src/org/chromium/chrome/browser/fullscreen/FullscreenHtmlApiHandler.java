@@ -21,6 +21,8 @@ import android.view.WindowManager;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.preferences.website.ContentSetting;
+import org.chromium.chrome.browser.preferences.website.FullscreenInfo;
 import org.chromium.chrome.browser.widget.TextBubble;
 import org.chromium.content.browser.ContentViewCore;
 
@@ -48,14 +50,14 @@ public class FullscreenHtmlApiHandler {
 
     private static final int NOTIFICATION_BUBBLE_ALPHA = 252; // 255 * 0.99
 
+    private static final String TAG = "FullscreenHtmlApiHandler";
+
     private static boolean sFullscreenNotificationShown;
 
     private final Window mWindow;
     private final Handler mHandler;
     private final FullscreenHtmlApiDelegate mDelegate;
     private final int mNotificationMaxDimension;
-
-    private final boolean mPersistentFullscreenSupported;
 
     // We still need this since we are setting fullscreen UI state on the contentviewcore's
     // container view, and a tab can have null content view core, i.e., if you navigate
@@ -66,6 +68,7 @@ public class FullscreenHtmlApiHandler {
 
     private TextBubble mNotificationBubble;
     private OnLayoutChangeListener mFullscreenOnLayoutChangeListener;
+    private FullscreenInfoBarDelegate mFullscreenInfoBarDelegate;
 
     /**
      * Delegate that allows embedders to react to fullscreen API requests.
@@ -193,13 +196,10 @@ public class FullscreenHtmlApiHandler {
      *
      * @param window The window containing the view going to fullscreen.
      * @param delegate The delegate that allows embedders to handle fullscreen transitions.
-     * @param persistentFullscreenSupported
      */
-    public FullscreenHtmlApiHandler(Window window, FullscreenHtmlApiDelegate delegate,
-            boolean persistentFullscreenSupported) {
+    public FullscreenHtmlApiHandler(Window window, FullscreenHtmlApiDelegate delegate) {
         mWindow = window;
         mDelegate = delegate;
-        mPersistentFullscreenSupported = persistentFullscreenSupported;
         mHandler = new FullscreenHandler(this);
         Resources resources = mWindow.getContext().getResources();
         float density = resources.getDisplayMetrics().density;
@@ -213,8 +213,6 @@ public class FullscreenHtmlApiHandler {
      * @param enabled Whether to enable persistent fullscreen mode.
      */
     public void setPersistentFullscreenMode(boolean enabled) {
-        if (!mPersistentFullscreenSupported) return;
-
         if (mIsPersistentMode == enabled) return;
 
         mIsPersistentMode = enabled;
@@ -253,6 +251,7 @@ public class FullscreenHtmlApiHandler {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
             systemUiVisibility &= ~SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
             systemUiVisibility &= ~SYSTEM_UI_FLAG_FULLSCREEN;
+            systemUiVisibility &= ~getExtraFullscreenUIFlags();
         } else {
             mWindow.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
             mWindow.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -272,7 +271,16 @@ public class FullscreenHtmlApiHandler {
             }
         };
         contentView.addOnLayoutChangeListener(mFullscreenOnLayoutChangeListener);
-        contentViewCore.getWebContents().exitFullscreen();
+
+        // getWebContents() will return null if contentViewCore has been destroyed
+        if (contentViewCore.getWebContents() != null) {
+            contentViewCore.getWebContents().exitFullscreen();
+        }
+
+        if (mFullscreenInfoBarDelegate != null) {
+            mFullscreenInfoBarDelegate.closeFullscreenInfoBar();
+            mFullscreenInfoBarDelegate = null;
+        }
     }
 
     /**
@@ -292,6 +300,7 @@ public class FullscreenHtmlApiHandler {
             } else {
                 systemUiVisibility |= SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
             }
+            systemUiVisibility |= getExtraFullscreenUIFlags();
         } else {
             mWindow.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             mWindow.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
@@ -325,6 +334,11 @@ public class FullscreenHtmlApiHandler {
         contentView.setSystemUiVisibility(systemUiVisibility);
         mContentViewCoreInFullscreen = contentViewCore;
         mTabInFullscreen = tab;
+        FullscreenInfo fullscreenInfo = new FullscreenInfo(tab.getUrl(), null);
+        ContentSetting fullscreenPermission = fullscreenInfo.getContentSetting();
+        if (fullscreenPermission != ContentSetting.ALLOW) {
+            mFullscreenInfoBarDelegate = FullscreenInfoBarDelegate.create(this, tab);
+        }
     }
 
     /**
@@ -408,5 +422,19 @@ public class FullscreenHtmlApiHandler {
         if (mTabInFullscreen == null || !mIsPersistentMode || !hasWindowFocus) return;
         mHandler.sendEmptyMessageDelayed(
                 MSG_ID_SET_FULLSCREEN_SYSTEM_UI_FLAGS, ANDROID_CONTROLS_SHOW_DURATION_MS);
+    }
+
+    /*
+     * Helper method to return extra fullscreen UI flags for Kitkat devices.
+     * @return fullscreen flags to be applied to system UI visibility.
+     */
+    private int getExtraFullscreenUIFlags() {
+        int flags = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            flags |= View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            flags |= View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+            flags |= View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+        }
+        return flags;
     }
 }

@@ -9,50 +9,30 @@ var remoting = remoting || {};
 
 /**
  * Initialize the host list.
+ *
+ * @param {function(string)} handleConnect Function to call to connect to the
+ *     host with |hostId|.
  */
-remoting.initHostlist_ = function() {
+remoting.initHostlist_ = function(handleConnect) {
+  remoting.hostController = new remoting.HostController();
   remoting.hostList = new remoting.HostList(
       document.getElementById('host-list'),
       document.getElementById('host-list-empty'),
       document.getElementById('host-list-error-message'),
       document.getElementById('host-list-refresh-failed-button'),
-      document.getElementById('host-list-loading-indicator'));
+      document.getElementById('host-list-loading-indicator'),
+      remoting.showErrorMessage,
+      handleConnect);
 
-  isHostModeSupported_().then(
-      /** @param {Boolean} supported */
-      function(supported) {
-        if (supported) {
-          var noShare = document.getElementById('unsupported-platform-message');
-          noShare.parentNode.removeChild(noShare);
-        } else {
-          var button = document.getElementById('share-button');
-          button.disabled = true;
-        }
-      });
-
-  /**
-   * @return {Promise} A promise that resolves to the id of the current
-   * containing tab/window.
-   */
-  var getCurrentId = function () {
-    if (base.isAppsV2()) {
-      return Promise.resolve(chrome.app.window.current().id);
+  isHostModeSupported_().then(function(/** boolean */ supported) {
+    if (supported) {
+      var noShare = document.getElementById('unsupported-platform-message');
+      noShare.parentNode.removeChild(noShare);
+    } else {
+      var button = document.getElementById('share-button');
+      button.disabled = true;
     }
-
-    /**
-     * @param {function(*=):void} resolve
-     * @param {function(*=):void} reject
-     */
-    return new Promise(function(resolve, reject) {
-      /** @param {chrome.Tab} tab */
-      chrome.tabs.getCurrent(function(tab){
-        if (tab) {
-          resolve(String(tab.id));
-        }
-        reject('Cannot retrieve the current tab.');
-      });
-    });
-  };
+  });
 
   var onLoad = function() {
     // Parse URL parameters.
@@ -60,23 +40,7 @@ remoting.initHostlist_ = function() {
     if ('mode' in urlParams) {
       if (urlParams['mode'] === 'me2me') {
         var hostId = urlParams['hostId'];
-        remoting.connectMe2Me(hostId);
-        return;
-      } else if (urlParams['mode'] === 'hangout') {
-        getCurrentId().then(
-            /** @param {*} id */
-            function(id) {
-              /** @type {string} */
-              var accessCode = urlParams['accessCode'];
-              var connector = remoting.app.getSessionConnector();
-              remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
-              connector.connectIT2Me(accessCode);
-
-              document.body.classList.add('hangout-remote-desktop');
-              var senderId = /** @type {string} */ (String(id));
-              var hangoutSession = new remoting.HangoutSession(senderId);
-              hangoutSession.init();
-            });
+        handleConnect(hostId);
         return;
       }
     }
@@ -95,7 +59,6 @@ function isHostModeSupported_() {
   if (remoting.HostInstaller.canInstall()) {
     return Promise.resolve(true);
   }
-
   return remoting.HostInstaller.isInstalled();
 }
 
@@ -104,10 +67,7 @@ function isHostModeSupported_() {
  * and also if the user cancels pin entry or the connection in session mode.
  */
 remoting.initHomeScreenUi = function() {
-  remoting.hostController = new remoting.HostController();
   remoting.setMode(remoting.AppMode.HOME);
-  remoting.hostSetupDialog =
-      new remoting.HostSetupDialog(remoting.hostController);
   var dialog = document.getElementById('paired-clients-list');
   var message = document.getElementById('paired-client-manager-message');
   var deleteAll = document.getElementById('delete-all-paired-clients');
@@ -154,10 +114,10 @@ remoting.updateLocalHostState = function() {
    */
   var onHasFeatureResponse = function(response) {
     /**
-     * @param {remoting.Error} error
+     * @param {!remoting.Error} error
      */
     var onError = function(error) {
-      console.error('Failed to get pairing status: ' + error);
+      console.error('Failed to get pairing status: ' + error.toString());
       remoting.pairedClientManager.setPairedClients([]);
     };
 
@@ -198,10 +158,26 @@ remoting.startDesktopRemotingForTesting = function() {
   }
 }
 
+/**
+ * @param {!remoting.Error} error The failure reason.
+ */
+remoting.showErrorMessage = function(error) {
+  l10n.localizeElementFromTag(
+      document.getElementById('token-refresh-error-message'),
+      error.getTag());
+  var auth_failed = (error.hasTag(remoting.Error.Tag.AUTHENTICATION_FAILED));
+  if (auth_failed && base.isAppsV2()) {
+    remoting.handleAuthFailureAndRelaunch();
+  } else {
+    document.getElementById('token-refresh-auth-failed').hidden = !auth_failed;
+    document.getElementById('token-refresh-other-error').hidden = auth_failed;
+    remoting.setMode(remoting.AppMode.TOKEN_REFRESH_FAILED);
+  }
+};
+
 
 remoting.startDesktopRemoting = function() {
-  remoting.app = new remoting.Application(remoting.app_capabilities());
-  var desktop_remoting = new remoting.DesktopRemoting(remoting.app);
+  remoting.app = new remoting.DesktopRemoting(remoting.app_capabilities());
   remoting.app.start();
 };
 

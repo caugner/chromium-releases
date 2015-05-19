@@ -129,6 +129,8 @@ class BluetoothMediaTransportClientImpl
   void Acquire(const dbus::ObjectPath& object_path,
                const AcquireCallback& callback,
                const ErrorCallback& error_callback) override {
+    VLOG(1) << "Acquire - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface, kAcquire);
@@ -150,6 +152,8 @@ class BluetoothMediaTransportClientImpl
   void TryAcquire(const dbus::ObjectPath& object_path,
                   const AcquireCallback& callback,
                   const ErrorCallback& error_callback) override {
+    VLOG(1) << "TryAcquire - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface,
@@ -172,6 +176,8 @@ class BluetoothMediaTransportClientImpl
   void Release(const dbus::ObjectPath& object_path,
                const base::Closure& callback,
                const ErrorCallback& error_callback) override {
+    VLOG(1) << "Release - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface, kRelease);
@@ -235,7 +241,16 @@ class BluetoothMediaTransportClientImpl
     if (reader.PopFileDescriptor(&fd) &&
         reader.PopUint16(&read_mtu) &&
         reader.PopUint16(&write_mtu)) {
-      callback.Run(fd, read_mtu, write_mtu);
+      fd.CheckValidity();
+      DCHECK(fd.is_valid());
+
+      VLOG(1) << "OnAcquireSuccess - fd: "<<  fd.value()
+              <<", read MTU: " << read_mtu
+              <<", write MTU: " << write_mtu;
+
+      // The ownership of the file descriptor is transferred to the user
+      // application.
+      callback.Run(&fd, read_mtu, write_mtu);
       return;
     }
 

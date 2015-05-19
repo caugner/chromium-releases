@@ -205,6 +205,13 @@ public abstract class SwipableOverlayView extends ScrollView {
         }
     }
 
+    /**
+     * @return the ContentViewCore that this View is monitoring.
+     */
+    protected ContentViewCore getContentViewCore() {
+        return mContentViewCore;
+    }
+
     public void addToParentView(ViewGroup parentView) {
         if (parentView != null && parentView.indexOfChild(this) == -1) {
             parentView.addView(this, createLayoutParams());
@@ -646,7 +653,7 @@ public abstract class SwipableOverlayView extends ScrollView {
                         PropertyValuesHolder.ofFloat("translationY", getTranslationY(), y));
 
         mCurrentAnimation = new AnimatorSet();
-        mCurrentAnimation.setDuration(duration);
+        mCurrentAnimation.setDuration(Math.max(duration, 0));
         mCurrentAnimation.playTogether(alphaAnimator, translationXAnimator, translationYAnimator);
         mCurrentAnimation.addListener(mAnimatorListenerAdapter);
         mCurrentAnimation.setInterpolator(mInterpolator);

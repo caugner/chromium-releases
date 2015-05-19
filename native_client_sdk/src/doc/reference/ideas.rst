@@ -28,6 +28,18 @@ native-client-discuss_ mailing list so that we can help you find a mentor.
 
 .. _native-client-discuss: https://groups.google.com/group/native-client-discuss
 
+Google Summer of Code
+=====================
+
+PNaCl participates in the `2015 Google Summer of Code`_ (see the `PNaCl GSoC
+page`_). `Student applications`_ are open March 16–27. Discuss project ideas no
+native-client-discuss_, and submit your proposal on the GSoC page by the
+deadline.
+
+.. _PNaCl GSoC page: https://www.google-melange.com/gsoc/org2/google/gsoc2015/pnacl
+.. _2015 Google Summer of Code: https://www.google-melange.com/gsoc/homepage/google/gsoc2015
+.. _Student applications: https://www.google-melange.com/gsoc/document/show/gsoc_program/google/gsoc2015/help_page#4._How_does_a_student_apply
+
 Ideas
 =====
 
@@ -191,13 +203,16 @@ TCC
 ---
 
 * **Project:** Port Fabrice Ballard's Tiny C Compiler _TCC to NaCl and PNaCl.
-* **Brief explanation:** Port TCC to NaCl and enhance to follow NaCl sandboxing
-  rule, as well as emitting PNaCl bitcode. The same could be done with `Pico
-  C`_.
+* **Brief explanation:** Port TCC to NaCl and enhance to follow `NaCl sandboxing
+  rules`_, as well as emitting `PNaCl bitcode`_. The same could be done with
+  `Pico C`_.
 * **Expected results:** Compiler ported and code generator working. Can run a
   small benchmark of your choice.
 * **Knowledge Prerequisite:** C, assembly, compilers.
+* **Mentor:** JF Bastien.
 
+.. _`NaCl sandboxing rules`: https://developer.chrome.com/native-client/reference/sandbox_internals/index
+.. _`PNaCl bitcode`: https://developer.chrome.com/native-client/reference/pnacl-bitcode-manual
 .. _TCC: http://bellard.org/tcc/
 .. _`Pico C`: https://code.google.com/p/picoc
 
@@ -311,6 +326,22 @@ Security-enhanced PNaCl
 * **Knowledge Prerequisite:** Security.
 * **Mentor:** JF Bastien.
 
+Sanitizer Support
+^^^^^^^^^^^^^^^^^
+
+* **Project:** Sanitizer support for untrusted code.
+* **Brief explanation:** LLVM supports many sanitizers_ for C/C++ using the
+  ``-fsanitize=<name>``. Some of these sanitizers currently work, and some don't
+  because they use clever tricks to perform their work, such as using ``mmap``
+  to allocate a special shadow memory region with a specific address. This
+  project requires adding full support to all of LLVM's sanitizers for untrusted
+  user code within PNaCl.
+* **Expected results:** The sanitizer tests successfully run as untrusted code
+  within PNaCl.
+* **Knowledge Prerequisite:** Compilers.
+* **Mentor:** JF Bastien.
+
+.. _sanitizers: http://clang.llvm.org/docs/UsersManual.html#controlling-code-generation
 
 NaCl
 ----

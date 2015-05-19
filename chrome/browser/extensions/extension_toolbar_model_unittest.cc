@@ -28,7 +28,9 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/value_builder.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
@@ -53,28 +55,28 @@ class ExtensionToolbarModelTestObserver
 
  private:
   // ExtensionToolbarModel::Observer:
-  void ToolbarExtensionAdded(const Extension* extension, int index) override {
+  void OnToolbarExtensionAdded(const Extension* extension, int index) override {
     ++inserted_count_;
   }
 
-  void ToolbarExtensionRemoved(const Extension* extension) override {
+  void OnToolbarExtensionRemoved(const Extension* extension) override {
     ++removed_count_;
   }
 
-  void ToolbarExtensionMoved(const Extension* extension, int index) override {
+  void OnToolbarExtensionMoved(const Extension* extension, int index) override {
     ++moved_count_;
   }
 
-  void ToolbarExtensionUpdated(const Extension* extension) override {}
+  void OnToolbarExtensionUpdated(const Extension* extension) override {}
 
   bool ShowExtensionActionPopup(const Extension* extension,
                                 bool grant_active_tab) override {
     return false;
   }
 
-  void ToolbarVisibleCountChanged() override {}
+  void OnToolbarVisibleCountChanged() override {}
 
-  void ToolbarHighlightModeChanged(bool is_highlighting) override {
+  void OnToolbarHighlightModeChanged(bool is_highlighting) override {
     // Add one if highlighting, subtract one if not.
     highlight_mode_count_ += is_highlighting ? 1 : -1;
   }
@@ -1127,6 +1129,35 @@ TEST_F(ExtensionToolbarModelUnitTest, ToolbarModelPrefChange) {
   EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(2));
   EXPECT_EQ(inserted_and_removed_difference,
             observer()->inserted_count() - observer()->removed_count());
+}
+
+TEST_F(ExtensionToolbarModelUnitTest, ComponentExtesionsAddedToEnd) {
+  Init();
+
+  ASSERT_TRUE(AddBrowserActionExtensions());
+
+  EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(0));
+  EXPECT_EQ(browser_action_b(), GetExtensionAtIndex(1));
+  EXPECT_EQ(browser_action_c(), GetExtensionAtIndex(2));
+
+  const char kName[] = "component";
+  DictionaryBuilder manifest;
+  manifest.Set("name", kName)
+          .Set("description", "An extension")
+          .Set("manifest_version", 2)
+          .Set("version", "1.0.0")
+          .Set("browser_action", DictionaryBuilder().Pass());
+  scoped_refptr<const Extension> component_extension =
+      ExtensionBuilder().SetManifest(manifest.Pass())
+                        .SetID(crx_file::id_util::GenerateId(kName))
+                        .SetLocation(Manifest::COMPONENT)
+                        .Build();
+  service()->AddExtension(component_extension.get());
+
+  EXPECT_EQ(component_extension.get(), GetExtensionAtIndex(0));
+  EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(1));
+  EXPECT_EQ(browser_action_b(), GetExtensionAtIndex(2));
+  EXPECT_EQ(browser_action_c(), GetExtensionAtIndex(3));
 }
 
 }  // namespace extensions

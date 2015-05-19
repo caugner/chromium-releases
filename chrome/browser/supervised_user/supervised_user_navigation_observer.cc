@@ -8,7 +8,6 @@
 #include "base/callback.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/history/content/browser/history_context_helper.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
@@ -235,8 +235,9 @@ void SupervisedUserNavigationObserver::OnRequestBlockedInternal(
   // Add the entry to the history database.
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile, ServiceAccessType::IMPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::IMPLICIT_ACCESS);
 
   // |history_service| is null if saving history is disabled.
   if (history_service)

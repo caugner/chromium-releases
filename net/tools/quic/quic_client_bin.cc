@@ -47,9 +47,11 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/cert/cert_verifier.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
 #include "net/quic/crypto/proof_verifier_chromium.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_server_id.h"
@@ -57,6 +59,7 @@
 #include "net/tools/epoll_server/epoll_server.h"
 #include "net/tools/quic/quic_client.h"
 #include "net/tools/quic/spdy_utils.h"
+#include "net/tools/quic/synchronous_host_resolver.h"
 #include "url/gurl.h"
 
 using base::StringPiece;
@@ -169,14 +172,18 @@ int main(int argc, char *argv[]) {
   // protocol is required in the URL.
   GURL url(urls[0]);
   string host = FLAGS_host;
-  // TODO(rtenneti): get ip_addr from hostname by doing host resolution.
   if (host.empty()) {
-    LOG(ERROR) << "--host must be specified\n";
-    return 1;
+    host = url.host();
   }
   if (!net::ParseIPLiteralToNumber(host, &ip_addr)) {
-    LOG(ERROR) << "--host could not be parsed as an IP address\n";
-    return 1;
+    net::AddressList addresses;
+    int rv = net::tools::SynchronousHostResolver::Resolve(host, &addresses);
+    if (rv != net::OK) {
+      LOG(ERROR) << "Unable to resolve '" << host << "' : "
+                 << net::ErrorToShortString(rv);
+      return 1;
+    }
+    ip_addr = addresses[0].address();
   }
 
   string host_port = net::IPAddressToStringWithPort(ip_addr, FLAGS_port);
@@ -262,7 +269,8 @@ int main(int argc, char *argv[]) {
       cout << " " << kv.first << ": " << kv.second << endl;
     }
     cout << "body: " << FLAGS_body << endl;
-    cout << endl << "Response:";
+    cout << endl;
+    cout << "Response:" << endl;
     cout << "headers: " << client.latest_response_headers() << endl;
     cout << "body: " << client.latest_response_body() << endl;
   }

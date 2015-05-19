@@ -12,13 +12,13 @@
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/media_log.h"
 #include "media/base/mock_demuxer_host.h"
 #include "media/base/test_data_util.h"
 #include "media/base/test_helpers.h"
 #include "media/filters/chunk_demuxer.h"
 #include "media/formats/webm/cluster_builder.h"
 #include "media/formats/webm/webm_constants.h"
-#include "media/formats/webm/webm_crypto_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::AnyNumber;
@@ -141,8 +141,6 @@ static void OnSeekDone_OKExpected(bool* called, PipelineStatus status) {
   *called = true;
 }
 
-static void LogFunc(const std::string& str) { DVLOG(1) << str; }
-
 class ChunkDemuxerTest : public ::testing::Test {
  protected:
   enum CodecsIndex {
@@ -179,7 +177,7 @@ class ChunkDemuxerTest : public ::testing::Test {
     Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb = base::Bind(
         &ChunkDemuxerTest::OnEncryptedMediaInitData, base::Unretained(this));
     demuxer_.reset(new ChunkDemuxer(
-        open_cb, encrypted_media_init_data_cb, base::Bind(&LogFunc),
+        open_cb, encrypted_media_init_data_cb, base::Bind(&AddLogEntryForTest),
         scoped_refptr<MediaLog>(new MediaLog()), true));
   }
 
@@ -1160,7 +1158,7 @@ class ChunkDemuxerTest : public ::testing::Test {
 
   MOCK_METHOD0(DemuxerOpened, void());
   MOCK_METHOD2(OnEncryptedMediaInitData,
-               void(const std::string& init_data_type,
+               void(EmeInitDataType init_data_type,
                     const std::vector<uint8>& init_data));
 
   MOCK_METHOD0(InitSegmentReceived, void(void));
@@ -1223,7 +1221,7 @@ TEST_F(ChunkDemuxerTest, Init) {
       int need_key_count = (is_audio_encrypted ? 1 : 0) +
                            (is_video_encrypted ? 1 : 0);
       EXPECT_CALL(*this, OnEncryptedMediaInitData(
-                             kWebMInitDataType,
+                             EmeInitDataType::WEBM,
                              std::vector<uint8>(
                                  kEncryptedMediaInitData,
                                  kEncryptedMediaInitData +

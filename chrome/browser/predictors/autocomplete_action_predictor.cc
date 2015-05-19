@@ -16,7 +16,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_result.h"
@@ -80,8 +80,9 @@ AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
   } else {
     // Request the in-memory database from the history to force it to load so
     // it's available as soon as possible.
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile_, ServiceAccessType::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile_, ServiceAccessType::EXPLICIT_ACCESS);
     if (history_service)
       history_service->InMemoryDatabase();
 
@@ -448,8 +449,9 @@ void AutocompleteActionPredictor::CreateCaches(
   }
 
   // If the history service is ready, delete any old or invalid entries.
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!TryDeleteOldEntries(history_service)) {
     // Wait for the notification that the history service is ready and the URL
     // DB is loaded.
@@ -458,7 +460,8 @@ void AutocompleteActionPredictor::CreateCaches(
   }
 }
 
-bool AutocompleteActionPredictor::TryDeleteOldEntries(HistoryService* service) {
+bool AutocompleteActionPredictor::TryDeleteOldEntries(
+    history::HistoryService* service) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(!profile_->IsOffTheRecord());
   DCHECK(!initialized_);
@@ -578,7 +581,7 @@ void AutocompleteActionPredictor::Shutdown() {
 }
 
 void AutocompleteActionPredictor::OnURLsDeleted(
-    HistoryService* history_service,
+    history::HistoryService* history_service,
     bool all_history,
     bool expired,
     const history::URLRows& deleted_rows,
@@ -593,7 +596,7 @@ void AutocompleteActionPredictor::OnURLsDeleted(
 }
 
 void AutocompleteActionPredictor::OnHistoryServiceLoaded(
-    HistoryService* history_service) {
+    history::HistoryService* history_service) {
   TryDeleteOldEntries(history_service);
   history_service_observer_.Remove(history_service);
 }

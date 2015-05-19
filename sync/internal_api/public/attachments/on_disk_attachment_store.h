@@ -11,6 +11,7 @@
 #include "sync/api/attachments/attachment.h"
 #include "sync/api/attachments/attachment_id.h"
 #include "sync/api/attachments/attachment_store.h"
+#include "sync/api/attachments/attachment_store_backend.h"
 #include "sync/base/sync_export.h"
 
 namespace attachment_store_pb {
@@ -42,14 +43,19 @@ class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBackend,
   void Init(const AttachmentStore::InitCallback& callback) override;
   void Read(const AttachmentIdList& ids,
             const AttachmentStore::ReadCallback& callback) override;
-  void Write(const AttachmentList& attachments,
+  void Write(AttachmentStore::Component component,
+             const AttachmentList& attachments,
              const AttachmentStore::WriteCallback& callback) override;
-  void Drop(const AttachmentIdList& ids,
-            const AttachmentStore::DropCallback& callback) override;
+  void SetReference(AttachmentStore::Component component,
+                    const AttachmentIdList& ids) override;
+  void DropReference(AttachmentStore::Component component,
+                     const AttachmentIdList& ids,
+                     const AttachmentStore::DropCallback& callback) override;
   void ReadMetadata(
       const AttachmentIdList& ids,
       const AttachmentStore::ReadMetadataCallback& callback) override;
   void ReadAllMetadata(
+      AttachmentStore::Component component,
       const AttachmentStore::ReadMetadataCallback& callback) override;
 
  private:
@@ -63,12 +69,18 @@ class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBackend,
   scoped_ptr<Attachment> ReadSingleAttachment(
       const AttachmentId& attachment_id);
   // Writes single attachment to store. Returns false in case of errors.
-  bool WriteSingleAttachment(const Attachment& attachment);
-  // Reads single store_pb::RecordMetadata from levelDB into the provided
-  // buffer. Returns false in case of an error.
+  bool WriteSingleAttachment(const Attachment& attachment,
+                             AttachmentStore::Component component);
+  // Reads single attachment_store_pb::RecordMetadata from levelDB into the
+  // provided buffer. Returns false in case of an error.
   bool ReadSingleRecordMetadata(
       const AttachmentId& attachment_id,
       attachment_store_pb::RecordMetadata* record_metadata);
+  // Writes single attachment_store_pb::RecordMetadata to levelDB. Returns false
+  // in case of an error.
+  bool WriteSingleRecordMetadata(
+      const AttachmentId& attachment_id,
+      const attachment_store_pb::RecordMetadata& record_metadata);
 
   static std::string MakeDataKeyFromAttachmentId(
       const AttachmentId& attachment_id);

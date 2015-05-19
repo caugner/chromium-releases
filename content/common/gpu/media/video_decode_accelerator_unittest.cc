@@ -61,9 +61,9 @@
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #elif defined(OS_CHROMEOS)
 #if defined(USE_V4L2_CODEC)
+#include "content/common/gpu/media/v4l2_device.h"
 #include "content/common/gpu/media/v4l2_slice_video_decode_accelerator.h"
 #include "content/common/gpu/media/v4l2_video_decode_accelerator.h"
-#include "content/common/gpu/media/v4l2_video_device.h"
 #endif
 #if defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
@@ -516,7 +516,9 @@ GLRenderingVDAClient::CreateDXVAVDA() {
 #if defined(OS_WIN)
   if (base::win::GetVersion() >= base::win::VERSION_WIN7)
     decoder.reset(
-        new DXVAVideoDecodeAccelerator(base::Bind(&DoNothingReturnTrue)));
+        new DXVAVideoDecodeAccelerator(
+            base::Bind(&DoNothingReturnTrue),
+            rendering_helper_->GetGLContext().get()));
 #endif
   return decoder.Pass();
 }

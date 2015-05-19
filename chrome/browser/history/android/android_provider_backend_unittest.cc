@@ -15,7 +15,6 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -24,6 +23,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/history/core/browser/android/android_time.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/keyword_search_term.h"
@@ -254,7 +254,7 @@ class AndroidProviderBackendTest : public testing::Test {
   base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
-  ChromeHistoryClient* history_client_;
+  history::HistoryClient* history_client_;
 
   DISALLOW_COPY_AND_ASSIGN(AndroidProviderBackendTest);
 };
@@ -289,8 +289,8 @@ TEST_F(AndroidProviderBackendTest, UpdateTables) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
   history_backend->Init(std::string(), false,
                         TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);
@@ -427,8 +427,8 @@ TEST_F(AndroidProviderBackendTest, QueryHistoryAndBookmarks) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
   history_backend->Init(std::string(), false,
                         TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);
@@ -1864,8 +1864,8 @@ TEST_F(AndroidProviderBackendTest, QueryWithoutThumbnailDB) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
   history_backend->Init(std::string(), false,
                         TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);

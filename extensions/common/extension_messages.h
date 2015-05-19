@@ -16,6 +16,7 @@
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/common/host_id.h"
 #include "extensions/common/permissions/media_galleries_permission_data.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/socket_permission_data.h"
@@ -37,6 +38,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::SocketPermissionRequest::OperationType,
 
 IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::InjectionType,
                           extensions::UserScript::INJECTION_TYPE_LAST)
+
+IPC_ENUM_TRAITS_MAX_VALUE(HostID::HostType, HostID::HOST_TYPE_LAST)
 
 // Parameters structure for ExtensionHostMsg_AddAPIActionToActivityLog and
 // ExtensionHostMsg_AddEventToActivityLog.
@@ -106,9 +109,8 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   // The extension API request id, for responding.
   IPC_STRUCT_MEMBER(int, request_id)
 
-  // The ID of the requesting extension. To know which isolated world to
-  // execute the code inside of.
-  IPC_STRUCT_MEMBER(std::string, extension_id)
+  // The ID of the requesting injection host.
+  IPC_STRUCT_MEMBER(HostID, host_id)
 
   // Whether the code is JavaScript or CSS.
   IPC_STRUCT_MEMBER(bool, is_javascript)
@@ -338,6 +340,14 @@ struct ParamTraits<extensions::ManifestPermissionSet> {
 };
 
 template <>
+struct ParamTraits<HostID> {
+  typedef HostID param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
 struct ParamTraits<ExtensionMsg_PermissionSetStruct> {
   typedef ExtensionMsg_PermissionSetStruct param_type;
   static void Write(Message* m, const param_type& p);
@@ -440,16 +450,17 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_ExecuteCode,
 // handle is valid in the context of the renderer.
 // If |owner| is not empty, then the shared memory handle refers to |owner|'s
 // programmatically-defined scripts. Otherwise, the handle refers to all
-// extensions' statically defined scripts.
-// If |changed_extensions| is not empty, only the extensions in that set will
-// be updated. Otherwise, all extensions that have scripts in the shared memory
-// region will be updated. Note that the empty set => all extensions case is not
+// hosts' statically defined scripts. So far, only extension-hosts support
+// statically defined scripts; WebUI-hosts don't.
+// If |changed_hosts| is not empty, only the host in that set will
+// be updated. Otherwise, all hosts that have scripts in the shared memory
+// region will be updated. Note that the empty set => all hosts case is not
 // supported for per-extension programmatically-defined script regions; in such
-// regions, the owner is expected to list itself as the only changed extension.
+// regions, the owner is expected to list itself as the only changed host.
 IPC_MESSAGE_CONTROL3(ExtensionMsg_UpdateUserScripts,
                      base::SharedMemoryHandle,
-                     extensions::ExtensionId /* owner */,
-                     std::set<std::string> /* changed extensions */)
+                     HostID /* owner */,
+                     std::set<HostID> /* changed hosts */)
 
 // Trigger to execute declarative content script under browser control.
 IPC_MESSAGE_ROUTED4(ExtensionMsg_ExecuteDeclarativeScript,
@@ -759,11 +770,6 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
 // Sent by the renderer when it has received a Blob handle from the browser.
 IPC_MESSAGE_CONTROL1(ExtensionHostMsg_TransferBlobsAck,
                      std::vector<std::string> /* blob_uuids */)
-
-// Informs of updated frame names.
-IPC_MESSAGE_ROUTED2(ExtensionHostMsg_FrameNameChanged,
-                    bool /* is_top_level */,
-                    std::string /* name */)
 
 // Tells listeners that a detailed message was reported to the console by
 // WebKit.

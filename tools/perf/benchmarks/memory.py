@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from measurements import memory
 import page_sets
-from telemetry import benchmark
 
 
 @benchmark.Enabled('android')
@@ -17,7 +18,6 @@ class MemoryMobile(benchmark.Benchmark):
     return 'memory.mobile_memory'
 
 
-@benchmark.Disabled  # http://crbug.com/459646
 class MemoryTop7Stress(benchmark.Benchmark):
   """Use (recorded) real world web sites and measure memory consumption."""
   test = memory.Memory

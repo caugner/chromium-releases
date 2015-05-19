@@ -12,6 +12,12 @@ cr.define('hotword.constants', function() {
 var AUDIO_LOG_SECONDS = 2;
 
 /**
+ * Timeout in seconds, for detecting false positives with a hotword stream.
+ * @const {number}
+ */
+var HOTWORD_STREAM_TIMEOUT_SECONDS = 2;
+
+/**
  * Hotword data shared module extension's ID.
  * @const {string}
  */
@@ -103,6 +109,7 @@ var Event = {
   TRIGGER: 'trigger',
   SPEAKER_MODEL_SAVED: 'speaker model saved',
   ERROR: 'error',
+  TIMEOUT: 'timeout',
 };
 
 /**
@@ -116,6 +123,7 @@ var NaClPlugin = {
   MODEL_PREFIX: 'm',
   STOP: 's',
   LOG: 'l',
+  DSP: 'd',
   BEGIN_SPEAKER_MODEL: 'b',
   ADAPT_SPEAKER_MODEL: 'a',
   FINISH_SPEAKER_MODEL: 'f',
@@ -125,7 +133,8 @@ var NaClPlugin = {
   READY_FOR_AUDIO: 'audio',
   STOPPED: 'stopped',
   HOTWORD_DETECTED: 'hotword',
-  MS_CONFIGURED: 'ms_configured'
+  MS_CONFIGURED: 'ms_configured',
+  TIMEOUT: 'timeout'
 };
 
 /**
@@ -141,8 +150,8 @@ var CommandToPage = {
 };
 
 /**
- * Messages sent from the Google page to the injected scripts
- * and then passed to the extension.
+ * Messages sent from the Google page to the extension or to the
+ * injected script and then passed to the extension.
  * @enum {string}
  */
 var CommandFromPage = {
@@ -155,7 +164,14 @@ var CommandFromPage = {
   CLICKED_RESUME: 'hcc',
   CLICKED_RESTART: 'hcr',
   CLICKED_DEBUG: 'hcd',
-  WAKE_UP_HELPER: 'wuh'
+  WAKE_UP_HELPER: 'wuh',
+  // Command specifically for the opt-in promo below this line.
+  // User has explicitly clicked 'no'.
+  CLICKED_NO_OPTIN: 'hcno',
+  // User has opted in.
+  CLICKED_OPTIN: 'hco',
+  // User clicked on the microphone.
+  PAGE_WAKEUP: 'wu'
 };
 
 /**
@@ -267,6 +283,7 @@ return {
   CLIENT_PORT_NAME: CLIENT_PORT_NAME,
   COMMAND_FIELD_NAME: COMMAND_FIELD_NAME,
   FILE_SYSTEM_SIZE_BYTES: FILE_SYSTEM_SIZE_BYTES,
+  HOTWORD_STREAM_TIMEOUT_SECONDS: HOTWORD_STREAM_TIMEOUT_SECONDS,
   NUM_TRAINING_UTTERANCES: NUM_TRAINING_UTTERANCES,
   SHARED_MODULE_ID: SHARED_MODULE_ID,
   SHARED_MODULE_ROOT: SHARED_MODULE_ROOT,

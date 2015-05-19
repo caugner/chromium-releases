@@ -393,18 +393,18 @@ FileFilter.prototype.filter = function(entry) {
 
 /**
  * File list.
- * @param {!FileSystemMetadata} fileSystemMetadata
+ * @param {!MetadataModel} metadataModel
  * @constructor
  * @extends {cr.ui.ArrayDataModel}
  */
-function FileListModel(fileSystemMetadata) {
+function FileListModel(metadataModel) {
   cr.ui.ArrayDataModel.call(this, []);
 
   /**
-   * @private {!FileSystemMetadata}
+   * @private {!MetadataModel}
    * @const
    */
-  this.fileSystemMetadata_ = fileSystemMetadata;
+  this.metadataModel_ = metadataModel;
 
   // Initialize compare functions.
   this.setCompareFunction('name',
@@ -422,7 +422,36 @@ function FileListModel(fileSystemMetadata) {
    * @private
    */
   this.isDescendingOrder_ = false;
+
+  /**
+   * The number of folders in the list.
+   * @private {number}
+   */
+  this.numFolders_ = 0;
+
+  /**
+   * The number of files in the list.
+   * @private {number}
+   */
+  this.numFiles_ = 0;
+
+  /**
+   * The number of image files in the list.
+   * @private {number}
+   */
+  this.numImageFiles_ = 0;
 }
+
+/**
+ * @param {!Object} fileType Type object returned by FileType.getType().
+ * @return {string} Localized string representation of file type.
+ */
+FileListModel.getFileTypeString = function(fileType) {
+  if (fileType.subtype)
+    return strf(fileType.name, fileType.subtype);
+  else
+    return str(fileType.name);
+};
 
 FileListModel.prototype = {
   __proto__: cr.ui.ArrayDataModel.prototype
@@ -456,6 +485,91 @@ FileListModel.prototype.prepareSort = function(field, callback) {
 };
 
 /**
+ * Removes and adds items to the model.
+ * @param {number} index The index of the item to update.
+ * @param {number} deleteCount The number of items to remove.
+ * @param {...*} var_args The items to add.
+ * @return {!Array} An array with the removed items.
+ * @override
+ */
+FileListModel.prototype.splice = function(index, deleteCount, var_args) {
+  for (var i = index; i < index + deleteCount; i++) {
+    if (i >= 0 && i < this.length)
+      this.onRemoveEntryFromList_(/** @type {!Entry} */ (this.item(i)));
+  }
+  for (var i = 2; i < arguments.length; i++) {
+    this.onAddEntryToList_(arguments[i]);
+  }
+
+  cr.ui.ArrayDataModel.prototype.splice.apply(this, arguments);
+};
+
+/**
+ * @override
+ */
+FileListModel.prototype.replaceItem = function(oldItem, newItem) {
+  this.onRemoveEntryFromList_(oldItem);
+  this.onAddEntryToList_(newItem);
+
+  cr.ui.ArrayDataModel.prototype.replaceItem.apply(this, arguments);
+};
+
+/**
+ * Returns the number of files in this file list.
+ * @return {number} The number of files.
+ */
+FileListModel.prototype.getFileCount = function() {
+  return this.numFiles_;
+};
+
+/**
+ * Returns the number of folders in this file list.
+ * @return {number} The number of folders.
+ */
+FileListModel.prototype.getFolderCount = function() {
+  return this.numFolders_;
+};
+
+/**
+ * Returns true if image files are dominant in this file list.
+ * @return {boolean}
+ */
+FileListModel.prototype.isImageDominant = function() {
+  return this.numFiles_ >= 0 &&
+      this.numImageFiles_ / this.numFiles_ >= 0.8;
+};
+
+/**
+ * Updates the statistics about contents when new entry is about to be added.
+ * @param {Entry} entry Entry of the new item.
+ * @private
+ */
+FileListModel.prototype.onAddEntryToList_ = function(entry) {
+  if (entry.isDirectory)
+    this.numFolders_++;
+  else
+    this.numFiles_++;
+
+  if (FileType.isImage(entry) || FileType.isRaw(entry))
+    this.numImageFiles_++;
+};
+
+/**
+ * Updates the statistics about contents when an entry is about to be removed.
+ * @param {Entry} entry Entry of the item to be removed.
+ * @private
+ */
+FileListModel.prototype.onRemoveEntryFromList_ = function(entry) {
+  if (entry.isDirectory)
+    this.numFolders_--;
+  else
+    this.numFiles_--;
+
+  if (FileType.isImage(entry) || FileType.isRaw(entry))
+    this.numImageFiles_--;
+};
+
+/**
  * Compares entries by name.
  * @param {!Entry} a First entry.
  * @param {!Entry} b Second entry.
@@ -483,7 +597,7 @@ FileListModel.prototype.compareMtime_ = function(a, b) {
     return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
   var properties =
-      this.fileSystemMetadata_.getCache([a, b], ['modificationTime']);
+      this.metadataModel_.getCache([a, b], ['modificationTime']);
   var aTime = properties[0].modificationTime || 0;
   var bTime = properties[1].modificationTime || 0;
 
@@ -508,7 +622,7 @@ FileListModel.prototype.compareSize_ = function(a, b) {
   if (a.isDirectory !== b.isDirectory)
     return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
-  var properties = this.fileSystemMetadata_.getCache([a, b], ['size']);
+  var properties = this.metadataModel_.getCache([a, b], ['size']);
   var aSize = properties[0].size || 0;
   var bSize = properties[1].size || 0;
 
@@ -527,8 +641,8 @@ FileListModel.prototype.compareType_ = function(a, b) {
   if (a.isDirectory !== b.isDirectory)
     return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
-  var aType = FileType.typeToString(FileType.getType(a));
-  var bType = FileType.typeToString(FileType.getType(b));
+  var aType = FileListModel.getFileTypeString(FileType.getType(a));
+  var bType = FileListModel.getFileTypeString(FileType.getType(b));
 
   var result = util.collator.compare(aType, bType);
   return result !== 0 ? result : util.compareName(a, b);
@@ -539,20 +653,20 @@ FileListModel.prototype.compareType_ = function(a, b) {
  * TODO(yoshiki): remove this. crbug.com/224869.
  *
  * @param {FileFilter} fileFilter The file-filter context.
- * @param {!FileSystemMetadata} fileSystemMetadata
+ * @param {!MetadataModel} metadataModel
  * @constructor
  */
-function FileListContext(fileFilter, fileSystemMetadata) {
+function FileListContext(fileFilter, metadataModel) {
   /**
    * @type {FileListModel}
    */
-  this.fileList = new FileListModel(fileSystemMetadata);
+  this.fileList = new FileListModel(metadataModel);
 
   /**
-   * @public {!FileSystemMetadata}
+   * @public {!MetadataModel}
    * @const
    */
-  this.fileSystemMetadata = fileSystemMetadata;
+  this.metadataModel = metadataModel;
 
   /**
    * @type {FileFilter}
@@ -580,6 +694,11 @@ FileListContext.createPrefetchPropertyNames_ = function() {
   for (var i = 0; i < Command.METADATA_PREFETCH_PROPERTY_NAMES.length; i++) {
     set[Command.METADATA_PREFETCH_PROPERTY_NAMES[i]] = true;
   }
+  for (var i = 0;
+       i < FileSelection.METADATA_PREFETCH_PROPERTY_NAMES.length;
+       i++) {
+    set[FileSelection.METADATA_PREFETCH_PROPERTY_NAMES[i]] = true;
+  }
   return Object.keys(set);
 };
 
@@ -593,7 +712,8 @@ FileListContext.createPrefetchPropertyNames_ = function() {
  * @param {FileListContext} context The file list context.
  * @param {boolean} isSearch True for search directory contents, otherwise
  *     false.
- * @param {DirectoryEntry} directoryEntry The entry of the current directory.
+ * @param {DirectoryEntry|FakeEntry} directoryEntry The entry of the current
+ *     directory.
  * @param {function():ContentScanner} scannerFactory The factory to create
  *     ContentScanner instance.
  * @constructor
@@ -656,7 +776,7 @@ DirectoryContents.prototype.setFileList = function(fileList) {
 DirectoryContents.prototype.createMetadataSnapshot = function() {
   var snapshot = {};
   var entries = /** @type {!Array<!Entry>} */ (this.fileList_.slice());
-  var metadata = this.context_.fileSystemMetadata.getCache(
+  var metadata = this.context_.metadataModel.getCache(
       entries, ['modificationTime']);
   for (var i = 0; i < entries.length; i++) {
     snapshot[entries[i].toURL()] = metadata[i];
@@ -693,7 +813,7 @@ DirectoryContents.prototype.replaceContextFileList = function() {
     if (this.metadataSnapshot_) {
       var updatedIndexes = [];
       var entries = /** @type {!Array<!Entry>} */ (this.fileList_.slice());
-      var newMetadatas = this.context_.fileSystemMetadata.getCache(
+      var newMetadatas = this.context_.metadataModel.getCache(
           entries, ['modificationTime']);
 
       for (var i = 0; i < entries.length; i++) {
@@ -731,8 +851,8 @@ DirectoryContents.prototype.isSearch = function() {
 };
 
 /**
- * @return {DirectoryEntry} A DirectoryEntry for current directory. In case of
- *     search -- the top directory from which search is run.
+ * @return {DirectoryEntry|FakeEntry} A DirectoryEntry for current directory.
+ *     In case of search -- the top directory from which search is run.
  */
 DirectoryContents.prototype.getDirectoryEntry = function() {
   return this.directoryEntry_;
@@ -789,20 +909,33 @@ DirectoryContents.prototype.update = function(updatedEntries, removedUrls) {
   }
 
   var updatedList = [];
+  var updatedIndexes = [];
   for (var i = 0; i < this.fileList_.length; i++) {
     var url = this.fileList_.item(i).toURL();
 
     if (url in removedMap) {
-      this.fileList_.splice(i, 1);
+      // Find the maximum range in which all items need to be removed.
+      var begin = i;
+      var end = i + 1;
+      while (end < this.fileList_.length &&
+             this.fileList_.item(end).toURL() in removedMap) {
+        end++;
+      }
+      // Remove the range [begin, end) at once to avoid multiple sorting.
+      this.fileList_.splice(begin, end - begin);
       i--;
       continue;
     }
 
     if (url in updatedMap) {
       updatedList.push(updatedMap[url]);
+      updatedIndexes.push(i);
       delete updatedMap[url];
     }
   }
+
+  if (updatedIndexes.length > 0)
+    this.fileList_.updateIndexes(updatedIndexes);
 
   var addedList = [];
   for (var url in updatedMap) {
@@ -810,7 +943,7 @@ DirectoryContents.prototype.update = function(updatedEntries, removedUrls) {
   }
 
   if (removedUrls.length > 0)
-    this.context_.fileSystemMetadata.notifyEntriesRemoved(removedUrls);
+    this.context_.metadataModel.notifyEntriesRemoved(removedUrls);
 
   this.prefetchMetadata(updatedList, true, function() {
     this.onNewEntries_(true, addedList);
@@ -843,21 +976,6 @@ DirectoryContents.prototype.cancelScan = function() {
  */
 DirectoryContents.prototype.onScanFinished_ = function() {
   this.scanner_ = null;
-
-  this.processNewEntriesQueue_.run(function(callback) {
-    // TODO(yoshiki): Here we should fire the update event of changed
-    // items. Currently we have a method this.fileList_.updateIndex() to
-    // fire an event, but this method takes only 1 argument and invokes sort
-    // one by one. It is obviously time wasting. Instead, we call sort
-    // directory.
-    // In future, we should implement a good method like updateIndexes and
-    // use it here.
-    var status = this.fileList_.sortStatus;
-    if (status)
-      this.fileList_.sort(status.field, status.direction);
-
-    callback();
-  }.bind(this));
 };
 
 /**
@@ -909,7 +1027,9 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
   // Caching URL to reduce a number of calls of toURL in sort.
   // This is a temporary solution. We need to fix a root cause of slow toURL.
   // See crbug.com/370908 for detail.
-  entriesFiltered.forEach(function(entry) { entry.cachedUrl = entry.toURL(); });
+  entriesFiltered.forEach(function(entry) {
+    entry['cachedUrl'] = entry.toURL();
+  });
 
   if (entriesFiltered.length === 0)
     return;
@@ -975,8 +1095,8 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
 DirectoryContents.prototype.prefetchMetadata =
     function(entries, refresh, callback) {
   if (refresh)
-    this.context_.fileSystemMetadata.notifyEntriesChanged(entries);
-  this.context_.fileSystemMetadata.get(
+    this.context_.metadataModel.notifyEntriesChanged(entries);
+  this.context_.metadataModel.get(
       entries, this.context_.prefetchPropertyNames).then(callback);
 };
 
@@ -1042,9 +1162,8 @@ DirectoryContents.createForLocalSearch = function(
  * on Drive File System.
  *
  * @param {FileListContext} context File list context.
- * @param {DirectoryEntry} fakeDirectoryEntry Fake directory entry representing
- *     the set of result entries. This serves as a top directory for the
- *     search.
+ * @param {!FakeEntry} fakeDirectoryEntry Fake directory entry representing the
+ *     set of result entries. This serves as a top directory for the search.
  * @param {!DriveMetadataSearchContentScanner.SearchType} searchType The type of
  *     the search. The scanner will restricts the entries based on the given
  *     type.

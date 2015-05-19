@@ -10,6 +10,7 @@
 
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
+#include "ios/web/public/web_view_type.h"
 #include "ui/base/layout.h"
 
 namespace base {
@@ -20,8 +21,10 @@ class GURL;
 
 #ifdef __OBJC__
 @class UIWebView;
+@class NSString;
 #else
 class UIWebView;
+class NSString;
 #endif
 
 namespace web {
@@ -61,12 +64,15 @@ class WebClient {
   // Used to decide URL formating.
   virtual std::string GetAcceptLangs(BrowserState* state) const;
 
+  // Returns the embedding application locale string.
+  virtual std::string GetApplicationLocale() const;
+
   // Returns true if URL has application specific schema. Embedder must return
   // true for every custom app specific schema it supports. For example Chromium
   // browser would return true for "chrome://about" URL.
   virtual bool IsAppSpecificURL(const GURL& url) const;
 
-  // Returns text to be displayed for an unsupported plug-in.
+  // Returns text to be displayed for an unsupported plugin.
   virtual base::string16 GetPluginNotSupportedText() const;
 
   // Returns a string describing the embedder product name and version, of the
@@ -100,6 +106,10 @@ class WebClient {
   // Gives the embedder a chance to add url rewriters to the BrowserURLRewriter
   // singleton.
   virtual void PostBrowserURLRewriterCreation(BrowserURLRewriter* rewriter) {}
+
+  // Gives the embedder a chance to provide the JavaScript to be injected into
+  // the web view as early as possible. Result must not be nil.
+  virtual NSString* GetEarlyPageScript(WebViewType web_view_type) const;
 };
 
 }  // namespace web

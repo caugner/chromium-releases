@@ -6,12 +6,12 @@ from collections import defaultdict
 
 from telemetry.core.platform import tracing_category_filter
 from telemetry.core.platform import tracing_options
-from telemetry.page import page_test
 from telemetry.timeline import model as model_module
 from telemetry.value import trace
-from telemetry.web_perf import timeline_interaction_record as tir_module
+from telemetry.web_perf.metrics import layout
 from telemetry.web_perf.metrics import responsiveness_metric
 from telemetry.web_perf.metrics import smoothness
+from telemetry.web_perf import timeline_interaction_record as tir_module
 
 # TimelineBasedMeasurement considers all instrumentation as producing a single
 # timeline. But, depending on the amount of instrumentation that is enabled,
@@ -27,23 +27,18 @@ ALL_OVERHEAD_LEVELS = [
   DEBUG_OVERHEAD_LEVEL
 ]
 
-DEFAULT_METRICS = {
-  tir_module.IS_SMOOTH: smoothness.SmoothnessMetric,
-  tir_module.IS_RESPONSIVE: responsiveness_metric.ResponsivenessMetric,
-}
+
+def _GetAllTimelineBasedMetrics():
+  # TODO(nednguyen): use discovery pattern to return all the instances of
+  # all TimelineBasedMetrics class in web_perf/metrics/ folder.
+  # This cannot be done until crbug.com/460208 is fixed.
+  return (smoothness.SmoothnessMetric(),
+          responsiveness_metric.ResponsivenessMetric(),
+          layout.LayoutMetric())
+
 
 class InvalidInteractions(Exception):
   pass
-
-
-def _GetMetricsFromFlags(record_custom_flags):
-  flags_set = set(record_custom_flags)
-  unknown_flags = flags_set.difference(DEFAULT_METRICS)
-  if unknown_flags:
-    raise Exception("Unknown metric flags: %s" % sorted(unknown_flags))
-
-  return [metric() for flag, metric in DEFAULT_METRICS.iteritems()
-          if flag in flags_set]
 
 
 # TODO(nednguyen): Get rid of this results wrapper hack after we add interaction
@@ -86,13 +81,10 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
 
 
 class _TimelineBasedMetrics(object):
-  def __init__(self, model, renderer_thread, interaction_records,
-               get_metrics_from_flags_callback):
+  def __init__(self, model, renderer_thread, interaction_records):
     self._model = model
     self._renderer_thread = renderer_thread
     self._interaction_records = interaction_records
-    self._get_metrics_from_flags_callback = \
-        get_metrics_from_flags_callback
 
   def AddResults(self, results):
     interactions_by_label = defaultdict(list)
@@ -111,15 +103,7 @@ class _TimelineBasedMetrics(object):
     if not interactions:
       return
 
-    # Either all or none of the interactions should have that metric flags.
-    records_custom_flags = set(interactions[0].GetUserDefinedFlags())
-    for interaction in interactions[1:]:
-      if records_custom_flags != set(interaction.GetUserDefinedFlags()):
-        raise InvalidInteractions('Interaction records with the same logical '
-                                  'name must have the same flags.')
-
-    metrics_list = self._get_metrics_from_flags_callback(records_custom_flags)
-    for metric in metrics_list:
+    for metric in _GetAllTimelineBasedMetrics():
       metric.AddResults(self._model, self._renderer_thread,
                         interactions, wrapped_results)
 
@@ -131,8 +115,7 @@ class Options(object):
   Benchmark.CreateTimelineBasedMeasurementOptions.
   """
 
-  def __init__(self, overhead_level=NO_OVERHEAD_LEVEL,
-               get_metrics_from_flags_callback=_GetMetricsFromFlags):
+  def __init__(self, overhead_level=NO_OVERHEAD_LEVEL):
     """As the amount of instrumentation increases, so does the overhead.
     The user of the measurement chooses the overhead level that is appropriate,
     and the tracing is filtered accordingly.
@@ -140,9 +123,6 @@ class Options(object):
     overhead_level: Can either be a custom TracingCategoryFilter object or
         one of NO_OVERHEAD_LEVEL, MINIMAL_OVERHEAD_LEVEL or
         DEBUG_OVERHEAD_LEVEL.
-    get_metrics_from_flags_callback: Callback function which returns a
-        a list of metrics based on timeline record flags. See the default
-        _GetMetricsFromFlags() as an example.
     """
     if (not isinstance(overhead_level,
                        tracing_category_filter.TracingCategoryFilter) and
@@ -153,7 +133,6 @@ class Options(object):
 
     self._overhead_level = overhead_level
     self._extra_category_filters = []
-    self._get_metrics_from_flags_callback = get_metrics_from_flags_callback
 
   def ExtendTraceCategoryFilters(self, filters):
     self._extra_category_filters.extend(filters)
@@ -165,10 +144,6 @@ class Options(object):
   @property
   def overhead_level(self):
     return self._overhead_level
-
-  @property
-  def get_metrics_from_flags_callback(self):
-    return self._get_metrics_from_flags_callback
 
 
 class TimelineBasedMeasurement(object):
@@ -244,35 +219,9 @@ class TimelineBasedMeasurement(object):
     for renderer_thread, interaction_records in (
         threads_to_records_map.iteritems()):
       meta_metrics = _TimelineBasedMetrics(
-          model, renderer_thread, interaction_records,
-          self._tbm_options.get_metrics_from_flags_callback)
+          model, renderer_thread, interaction_records)
       meta_metrics.AddResults(results)
 
   def DidRunUserStory(self, tracing_controller):
     if tracing_controller.is_tracing_running:
       tracing_controller.Stop()
-
-
-class TimelineBasedPageTest(page_test.PageTest):
-  """Page test that collects metrics with TimelineBasedMeasurement."""
-  def __init__(self, tbm):
-    super(TimelineBasedPageTest, self).__init__('RunPageInteractions')
-    self._measurement = tbm
-
-  @property
-  def measurement(self):
-    return self._measurement
-
-  def WillNavigateToPage(self, page, tab):
-    tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.WillRunUserStory(
-        tracing_controller, page.GetSyntheticDelayCategories())
-
-  def ValidateAndMeasurePage(self, page, tab, results):
-    """Collect all possible metrics and added them to results."""
-    tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.Measure(tracing_controller, results)
-
-  def CleanUpAfterPage(self, page, tab):
-    tracing_controller = tab.browser.platform.tracing_controller
-    self._measurement.DidRunUserStory(tracing_controller)

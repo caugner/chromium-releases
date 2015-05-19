@@ -21,9 +21,10 @@
     "chrome://extension-icon/",
     "chrome://resources/",
     "chrome://theme/",
-    "fileBrowserHandler",
     "fileManagerPrivate",
-    "fileSystem",
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
     "fullscreen",
     "metricsPrivate",
     "storage",
@@ -32,13 +33,23 @@
   "file_handlers": {
     "open": {
       "extensions": [
+        // Image
         "bmp",
         "gif",
         "ico",
         "jpg",
         "jpeg",
         "png",
-        "webp"
+        "webp",
+        // Raw: Sync with the raw type list in file_type.js.
+        "arw",
+        "cr2",
+        "dng",
+        "nef",
+        "nrw",
+        "orf",
+        "raf",
+        "rw2"
       ]
     }
   },
@@ -58,6 +69,7 @@
         "chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/background/js/background_base.js",
         "chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/background/js/test_util_base.js",
         "chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/background/js/volume_manager.js",
+        "js/test_util.js",
         "js/background.js"
       ]
     },

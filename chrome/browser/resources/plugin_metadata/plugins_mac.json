@@ -99,7 +99,7 @@
       {
         "version": "0",
         "status": "requires_authorization",
-        "comment": "The Real Player plug-in for mac doesn't expose a version at all."
+        "comment": "The Real Player plugin for mac doesn't expose a version at all."
       }
     ],
     "lang": "en-US",
@@ -115,9 +115,9 @@
     ],
     "versions": [
       {
-        "version": "17.0.0.134",
+        "version": "16.0.0.305",
         "status": "requires_authorization",
-        "reference": "https://helpx.adobe.com/security/products/flash-player/apsb15-05.html"
+        "reference": "https://helpx.adobe.com/security/products/flash-player/apsb15-04.html"
       }
     ],
     "lang": "en-US",

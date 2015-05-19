@@ -9,17 +9,21 @@
 #include "base/prefs/pref_member.h"
 #include "base/single_thread_task_runner.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_service_client.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
 
 namespace data_reduction_proxy {
 
@@ -41,18 +45,38 @@ DataReductionProxyIOData::DataReductionProxyIOData(
   scoped_ptr<DataReductionProxyParams> params(
       new DataReductionProxyParams(param_flags));
   params->EnableQuic(enable_quic);
-  request_options_.reset(new DataReductionProxyRequestOptions(
-      client_, params.get(), io_task_runner_));
-  request_options_->Init();
   event_store_.reset(new DataReductionProxyEventStore(ui_task_runner));
   configurator_.reset(new DataReductionProxyConfigurator(
       io_task_runner, net_log, event_store_.get()));
+  bool use_config_client = DataReductionProxyParams::IsConfigClientEnabled();
+  DataReductionProxyMutableConfigValues* raw_mutable_config = nullptr;
+  if (use_config_client) {
+    scoped_ptr<DataReductionProxyMutableConfigValues> mutable_config =
+        DataReductionProxyMutableConfigValues::CreateFromParams(io_task_runner_,
+                                                                params.get());
+    raw_mutable_config = mutable_config.get();
+    config_.reset(new DataReductionProxyConfig(
+        io_task_runner_, ui_task_runner_, net_log, mutable_config.Pass(),
+        configurator_.get(), event_store_.get()));
+  } else {
+    config_.reset(new DataReductionProxyConfig(
+        io_task_runner_, ui_task_runner_, net_log, params.Pass(),
+        configurator_.get(), event_store_.get()));
+  }
+
+  request_options_.reset(new DataReductionProxyRequestOptions(
+      client_, config_.get(), io_task_runner_));
+  request_options_->Init();
+
+  if (use_config_client) {
+    config_client_.reset(new DataReductionProxyConfigServiceClient(
+        params.Pass(), GetBackoffPolicy(), request_options_.get(),
+        raw_mutable_config, config_.get(), io_task_runner_));
+  }
+
   proxy_delegate_.reset(
-      new DataReductionProxyDelegate(request_options_.get(), params.get()));
-  config_.reset(new DataReductionProxyConfig(
-      io_task_runner_, ui_task_runner_, net_log, params.Pass(),
-      configurator_.get(), event_store_.get()));
-}
+      new DataReductionProxyDelegate(request_options_.get(), config_.get()));
+ }
 
 DataReductionProxyIOData::DataReductionProxyIOData() : shutdown_on_ui_(false) {
 }
@@ -91,7 +115,7 @@ scoped_ptr<net::URLRequestInterceptor>
 DataReductionProxyIOData::CreateInterceptor() {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   return make_scoped_ptr(new DataReductionProxyInterceptor(
-      config_->params(), usage_stats_.get(), event_store_.get()));
+      config_.get(), bypass_stats_.get(), event_store_.get()));
 }
 
 scoped_ptr<DataReductionProxyNetworkDelegate>
@@ -101,15 +125,22 @@ DataReductionProxyIOData::CreateNetworkDelegate(
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   scoped_ptr<DataReductionProxyNetworkDelegate> network_delegate(
       new DataReductionProxyNetworkDelegate(
-          wrapped_network_delegate.Pass(), config_->params(),
+          wrapped_network_delegate.Pass(), config_.get(),
           request_options_.get(), configurator_.get()));
-  if (track_proxy_bypass_statistics && !usage_stats_) {
-    usage_stats_.reset(new data_reduction_proxy::DataReductionProxyUsageStats(
-        config_->params(), service_, ui_task_runner_));
+  if (track_proxy_bypass_statistics && !bypass_stats_) {
+    bypass_stats_.reset(new DataReductionProxyBypassStats(
+        config_.get(), base::Bind(&DataReductionProxyIOData::SetUnreachable,
+                                  base::Unretained(this)), ui_task_runner_));
     network_delegate->InitIODataAndUMA(ui_task_runner_, this, &enabled_,
-                                       usage_stats_.get());
+                                       bypass_stats_.get());
   }
   return network_delegate.Pass();
+}
+
+void DataReductionProxyIOData::SetUnreachable(bool unreachable) {
+  DCHECK(ui_task_runner_->BelongsToCurrentThread());
+  if (service_)
+    service_->settings()->SetUnreachable(unreachable);
 }
 
 }  // namespace data_reduction_proxy

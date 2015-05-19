@@ -4,8 +4,6 @@
 
 #include "chromeos/network/network_configuration_handler.h"
 
-#include <string>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/format_macros.h"
@@ -13,7 +11,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -67,9 +64,9 @@ void LogConfigProperties(const std::string& desc,
   for (base::DictionaryValue::Iterator iter(properties); !iter.IsAtEnd();
        iter.Advance()) {
     std::string v = "******";
-    if (!shill_property_util::IsPassphraseKey(iter.key()))
+    if (shill_property_util::IsLoggableShillProperty(iter.key()))
       base::JSONWriter::Write(&iter.value(), &v);
-    NET_LOG(DEBUG) << desc << ": " << path + "." + iter.key() + "=" + v;
+    NET_LOG(USER) << desc << ": " << path + "." + iter.key() + "=" + v;
   }
 }
 
@@ -202,7 +199,7 @@ void NetworkConfigurationHandler::GetShillProperties(
     const std::string& service_path,
     const network_handler::DictionaryResultCallback& callback,
     const network_handler::ErrorCallback& error_callback) {
-  NET_LOG(USER) << "GetProperties: " << service_path;
+  NET_LOG(USER) << "GetShillProperties: " << service_path;
   DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
       dbus::ObjectPath(service_path),
       base::Bind(&NetworkConfigurationHandler::GetPropertiesCallback,
@@ -220,7 +217,7 @@ void NetworkConfigurationHandler::SetShillProperties(
       callback.Run();
     return;
   }
-  NET_LOG(USER) << "SetProperties: " << service_path;
+  NET_LOG(USER) << "SetShillProperties: " << service_path;
 
   scoped_ptr<base::DictionaryValue> properties_to_set(
       shill_properties.DeepCopy());
@@ -264,7 +261,7 @@ void NetworkConfigurationHandler::ClearShillProperties(
       callback.Run();
     return;
   }
-  NET_LOG(USER) << "ClearProperties: " << service_path;
+  NET_LOG(USER) << "ClearShillProperties: " << service_path;
   for (std::vector<std::string>::const_iterator iter = names.begin();
        iter != names.end(); ++iter) {
     NET_LOG(DEBUG) << "ClearProperty: " << service_path << "." << *iter;
@@ -300,7 +297,7 @@ void NetworkConfigurationHandler::CreateShillConfiguration(
   scoped_ptr<base::DictionaryValue> properties_to_set(
       shill_properties.DeepCopy());
 
-  NET_LOG(USER) << "CreateConfiguration: " << type << ": " << network_id;
+  NET_LOG(USER) << "CreateShillConfiguration: " << type << ": " << network_id;
 
   std::string profile_path;
   properties_to_set->GetStringWithoutPathExpansion(shill::kProfileProperty,

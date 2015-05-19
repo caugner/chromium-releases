@@ -26,8 +26,6 @@
       'browser/geolocation/mock_location_arbitrator.h',
       'browser/geolocation/mock_location_provider.cc',
       'browser/geolocation/mock_location_provider.h',
-      'browser/renderer_host/media/mock_media_observer.cc',
-      'browser/renderer_host/media/mock_media_observer.h',
       'public/test/async_file_test_helper.cc',
       'public/test/async_file_test_helper.h',
       'public/test/browser_test.h',
@@ -99,6 +97,7 @@
       'public/test/test_synchronous_compositor_android.h',
       'public/test/test_utils.cc',
       'public/test/test_utils.h',
+      'public/test/test_web_contents_factory.h',
       'public/test/unittest_test_suite.cc',
       'public/test/unittest_test_suite.h',
       'public/test/web_contents_observer_sanity_checker.cc',
@@ -164,6 +163,7 @@
       'test/test_render_view_host_factory.h',
       'test/test_web_contents.cc',
       'test/test_web_contents.h',
+      'test/test_web_contents_factory.cc',
       'test/web_gesture_curve_mock.cc',
       'test/web_gesture_curve_mock.h',
       'test/web_layer_tree_view_impl_for_testing.cc',
@@ -198,6 +198,7 @@
       'browser/database_browsertest.cc',
       'browser/device_sensors/device_inertial_sensor_browsertest.cc',
       'browser/devtools/protocol/devtools_protocol_browsertest.cc',
+      'browser/devtools/site_per_process_devtools_browsertest.cc',
       'browser/dom_storage/dom_storage_browsertest.cc',
       'browser/download/download_browsertest.cc',
       'browser/download/drag_download_file_browsertest.cc',
@@ -227,7 +228,6 @@
       'browser/renderer_host/input/touch_input_browsertest.cc',
       'browser/renderer_host/render_process_host_browsertest.cc',
       'browser/renderer_host/render_view_host_browsertest.cc',
-      'browser/renderer_host/render_widget_host_browsertest.cc',
       'browser/renderer_host/render_widget_host_view_browsertest.cc',
       'browser/screen_orientation/screen_orientation_browsertest.cc',
       'browser/security_exploit_browsertest.cc',
@@ -250,10 +250,12 @@
       'renderer/devtools/v8_sampling_profiler_browsertest.cc',
       'renderer/gin_browsertest.cc',
       'renderer/mouse_lock_dispatcher_browsertest.cc',
+      'renderer/render_frame_impl_browsertest.cc',
       'renderer/render_thread_impl_browsertest.cc',
       'renderer/render_view_browsertest.cc',
       'renderer/render_view_browsertest_mac.mm',
       'renderer/render_widget_browsertest.cc',
+      'renderer/visual_state_browsertest.cc',
       'test/accessibility_browser_test_utils.cc',
       'test/accessibility_browser_test_utils.h',
       'test/browser_test_utils_browsertest.cc',
@@ -332,9 +334,13 @@
       'browser/appcache/mock_appcache_storage.cc',
       'browser/appcache/mock_appcache_storage.h',
       'browser/appcache/mock_appcache_storage_unittest.cc',
+      'browser/background_sync/background_sync_manager_unittest.cc',
       'browser/browser_thread_unittest.cc',
       'browser/browser_url_handler_impl_unittest.cc',
       'browser/byte_stream_unittest.cc',
+      'browser/cache_storage/cache_storage_cache_unittest.cc',
+      'browser/cache_storage/cache_storage_manager_unittest.cc',
+      'browser/cache_storage/cache_storage_scheduler_unittest.cc',
       'browser/child_process_security_policy_unittest.cc',
       'browser/cocoa/system_hotkey_map_unittest.mm',
       'browser/compositor/buffer_queue_unittest.cc',
@@ -467,11 +473,15 @@
       'browser/media/midi_host_unittest.cc',
       'browser/media/webrtc_identity_store_unittest.cc',
       'browser/net/sqlite_persistent_cookie_store_unittest.cc',
+      'browser/notifications/notification_database_data_unittest.cc',
+      'browser/notifications/notification_database_unittest.cc',
+      'browser/notifications/platform_notification_context_unittest.cc',
       'browser/notification_service_impl_unittest.cc',
       'browser/power_monitor_message_broadcaster_unittest.cc',
       'browser/power_profiler/power_profiler_service_unittest.cc',
       'browser/power_usage_monitor_impl_unittest.cc',
       'browser/presentation/presentation_service_impl_unittest.cc',
+      'browser/presentation/presentation_type_converters_unittest.cc',
       'browser/quota/mock_quota_manager.cc',
       'browser/quota/mock_quota_manager.h',
       'browser/quota/mock_quota_manager_proxy.cc',
@@ -484,6 +494,7 @@
       'browser/quota/quota_temporary_storage_evictor_unittest.cc',
       'browser/quota/storage_monitor_unittest.cc',
       'browser/quota/usage_tracker_unittest.cc',
+      'browser/renderer_host/begin_frame_observer_proxy_unittest.cc',
       'browser/renderer_host/clipboard_message_filter_unittest.cc',
       'browser/renderer_host/input/gesture_event_queue_unittest.cc',
       'browser/renderer_host/input/input_router_impl_unittest.cc',
@@ -498,6 +509,7 @@
       'browser/renderer_host/input/touch_action_filter_unittest.cc',
       'browser/renderer_host/input/touch_emulator_unittest.cc',
       'browser/renderer_host/input/touch_event_queue_unittest.cc',
+      'browser/renderer_host/input/web_input_event_unittest.cc',
       'browser/renderer_host/input/web_input_event_util_unittest.cc',
       'browser/renderer_host/media/audio_input_device_manager_unittest.cc',
       'browser/renderer_host/media/audio_renderer_host_unittest.cc',
@@ -523,9 +535,6 @@
       'browser/service_worker/embedded_worker_instance_unittest.cc',
       'browser/service_worker/embedded_worker_test_helper.cc',
       'browser/service_worker/embedded_worker_test_helper.h',
-      'browser/service_worker/service_worker_cache_scheduler_unittest.cc',
-      'browser/service_worker/service_worker_cache_storage_manager_unittest.cc',
-      'browser/service_worker/service_worker_cache_unittest.cc',
       'browser/service_worker/service_worker_context_request_handler_unittest.cc',
       'browser/service_worker/service_worker_context_unittest.cc',
       'browser/service_worker/service_worker_controllee_request_handler_unittest.cc',
@@ -572,11 +581,16 @@
       'child/notifications/notification_data_conversions_unittest.cc',
       'child/power_monitor_broadcast_source_unittest.cc',
       'child/resource_dispatcher_unittest.cc',
+      'child/scheduler/nestable_task_runner_for_test.cc',
+      'child/scheduler/nestable_task_runner_for_test.h',
+      'child/scheduler/prioritizing_task_queue_selector_unittest.cc',
+      'child/scheduler/scheduler_helper_unittest.cc',
+      'child/scheduler/task_queue_manager_unittest.cc',
+      'child/service_worker/service_worker_dispatcher_unittest.cc',
       'child/simple_webmimeregistry_impl_unittest.cc',
       'child/site_isolation_policy_unittest.cc',
       'child/v8_value_converter_impl_unittest.cc',
       'child/web_data_consumer_handle_impl_unittest.cc',
-      'child/web_gesture_curve_impl_unittest.cc',
       'child/web_url_loader_impl_unittest.cc',
       'child/webcrypto/test/aes_cbc_unittest.cc',
       'child/webcrypto/test/aes_ctr_unittest.cc',
@@ -649,6 +663,7 @@
       'renderer/media/android/media_info_loader_unittest.cc',
       'renderer/media/audio_message_filter_unittest.cc',
       'renderer/media/audio_renderer_mixer_manager_unittest.cc',
+      'renderer/media/midi_message_filter_unittest.cc',
       'renderer/media/render_media_client_unittest.cc',
       'renderer/media/render_media_log_unittest.cc',
       'renderer/media/video_capture_impl_manager_unittest.cc',
@@ -656,10 +671,10 @@
       'renderer/media/video_capture_message_filter_unittest.cc',
       'renderer/render_thread_impl_unittest.cc',
       'renderer/render_widget_unittest.cc',
+      'renderer/scheduler/deadline_task_runner_unittest.cc',
       'renderer/scheduler/renderer_scheduler_impl_unittest.cc',
-      'renderer/scheduler/renderer_task_queue_selector_unittest.cc',
       'renderer/scheduler/resource_dispatch_throttler_unittest.cc',
-      'renderer/scheduler/task_queue_manager_unittest.cc',
+      'renderer/scheduler/webthread_impl_for_scheduler_unittest.cc',
       'renderer/screen_orientation/screen_orientation_dispatcher_unittest.cc',
       'renderer/skia_benchmarking_extension_unittest.cc',
       'test/fileapi_test_file_set.cc',
@@ -960,6 +975,8 @@
       'target_name': 'content_unittests',
       'type': '<(gtest_target_type)',
       'dependencies': [
+        'browser/background_sync/background_sync_proto.gyp:background_sync_proto',
+        'browser/notifications/notification_proto.gyp:notification_proto',
         'browser/service_worker/service_worker_proto.gyp:service_worker_proto',
         'browser/speech/proto/speech_proto.gyp:speech_proto',
         'content.gyp:content_browser',
@@ -982,6 +999,7 @@
         '../third_party/re2/re2.gyp:re2',
         '../ui/accessibility/accessibility.gyp:accessibility',
         '../ui/base/ui_base.gyp:ui_base',
+        '../ui/events/events.gyp:blink',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
         '../ui/gfx/ipc/gfx_ipc.gyp:gfx_ipc',
@@ -1035,6 +1053,11 @@
             'browser/file_descriptor_info_impl_unittest.cc',
           ],
         }],
+        ['OS == "mac"', {
+          'dependencies': [
+            '../third_party/ocmock/ocmock.gyp:ocmock',
+          ],
+        }],
         ['enable_plugins==1', {
           'sources': [ '<@(content_unittests_plugins_sources)' ],
         }],
@@ -1066,7 +1089,7 @@
         ['enable_web_speech==1', {
           'sources': [ '<@(content_unittests_speech_sources)' ],
         }],
-        ['OS=="linux"', {
+        ['OS=="linux" and use_dbus==1', {
           'dependencies': [
             '../build/linux/system.gyp:dbus',
             '../dbus/dbus.gyp:dbus_test_support',
@@ -1117,6 +1140,8 @@
           'sources!': [
             'browser/geolocation/network_location_provider_unittest.cc',
             'browser/geolocation/wifi_data_provider_common_unittest.cc',
+            'browser/media/audio_stream_monitor_unittest.cc',
+            'browser/renderer_host/begin_frame_observer_proxy_unittest.cc',
             'browser/webui/url_data_manager_backend_unittest.cc',
           ],
           'dependencies': [
@@ -1240,6 +1265,8 @@
             'browser/net/sqlite_persistent_cookie_store_perftest.cc',
             'browser/renderer_host/input/input_router_impl_perftest.cc',
             'common/cc_messages_perftest.cc',
+            'common/discardable_shared_memory_heap_perftest.cc',
+            'child/scheduler/task_queue_manager_perftest.cc',
             'test/run_all_perftests.cc',
           ],
           'conditions': [
@@ -1593,7 +1620,7 @@
                   '../testing/android/native_test.gyp:native_test_native_code',
                   '../gpu/gpu.gyp:gpu_unittest_utils',
                 ],
-              }, { # OS!="android"
+              }, {  # OS!="android"
                 'sources/': [
                   ['exclude', '^common/gpu/media/android_video_decode_accelerator_unittest.cc'],
                 ],
@@ -1624,8 +1651,8 @@
               }],
               ['use_ozone==1 and chromeos==1', {
                 'dependencies': [
-                  '../ui/display/display.gyp:display', # Used by rendering_helper.cc
-                  '../ui/ozone/ozone.gyp:ozone',       # Used by rendering_helper.cc
+                  '../ui/display/display.gyp:display',  # Used by rendering_helper.cc
+                  '../ui/ozone/ozone.gyp:ozone',  # Used by rendering_helper.cc
                 ],
               }],
             ],
@@ -1662,6 +1689,11 @@
                 'dependencies': [
                   '../build/linux/system.gyp:libdrm',
                 ]
+              }],
+              ['use_ozone==1', {
+                'dependencies': [
+                  '../ui/ozone/ozone.gyp:ozone',
+                ],
               }],
             ],
           },
@@ -1996,10 +2028,30 @@
             'apk_name': 'ContentShellTest',
             'java_in_dir': 'shell/android/javatests',
             'resource_dir': 'shell/android/shell_apk/res',
-            'additional_src_dirs': ['public/android/javatests/',],
+            'additional_src_dirs': ['public/android/javatests/', ],
             'is_test_apk': 1,
           },
           'includes': [ '../build/java_apk.gypi' ],
+        },
+        {
+          # GN: //content/public/android:content_junit_tests
+          'target_name': 'content_junit_tests',
+          'type': 'none',
+          'dependencies': [
+            'content.gyp:content_java',
+            '../base/base.gyp:base_java',
+            '../base/base.gyp:base_java_test_support',
+            '../testing/android/junit/junit_test.gyp:junit_test_support',
+          ],
+          'variables': {
+            'main_class': 'org.chromium.testing.local.JunitTestMain',
+            'src_paths': [
+              'public/android/junit/',
+            ],
+          },
+          'includes': [
+            '../build/host_jar.gypi',
+          ],
         },
       ],
     }],

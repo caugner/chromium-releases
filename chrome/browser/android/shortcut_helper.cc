@@ -15,15 +15,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/worker_pool.h"
-#include "chrome/browser/android/manifest_icon_selector.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/manifest/manifest_icon_selector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/web_application_info.h"
 #include "components/dom_distiller/core/url_utils.h"
+#include "components/favicon/core/favicon_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -130,6 +130,7 @@ void ShortcutHelper::OnDidGetManifest(const content::Manifest& manifest) {
     web_contents()->DownloadImage(icon_src,
                                   false,
                                   preferred_icon_size_in_px_,
+                                  false,
                                   base::Bind(&ShortcutHelper::OnDidDownloadIcon,
                                              weak_ptr_factory_.GetWeakPtr()));
     manifest_icon_status_ = MANIFEST_ICON_STATUS_FETCHING;
@@ -243,8 +244,9 @@ void ShortcutHelper::AddShortcutUsingFavicon() {
   icon_types.push_back(favicon_base::FAVICON);
   icon_types.push_back(favicon_base::TOUCH_PRECOMPOSED_ICON |
                        favicon_base::TOUCH_ICON);
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
 
   // Using favicon if its size is not smaller than platform required size,
   // otherwise using the largest icon among all avaliable icons.

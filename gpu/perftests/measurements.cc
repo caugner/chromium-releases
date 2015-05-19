@@ -5,8 +5,8 @@
 #include "gpu/perftests/measurements.h"
 
 #include "base/logging.h"
-#include "gpu/command_buffer/service/gpu_timing.h"
 #include "testing/perf/perf_test.h"
+#include "ui/gl/gpu_timing.h"
 
 namespace gpu {
 
@@ -25,16 +25,16 @@ Measurement::Measurement(const std::string& name,
     : name(name), wall_time(wall_time), cpu_time(cpu_time), gpu_time(gpu_time) {
 }
 
-void Measurement::PrintResult() const {
-  perf_test::PrintResult(name, "_wall", "", wall_time.InMillisecondsF(), "ms",
-                         true);
+void Measurement::PrintResult(const std::string& graph) const {
+  perf_test::PrintResult(graph, "", name + "_wall", wall_time.InMillisecondsF(),
+                         "ms", true);
   if (cpu_time.InMicroseconds() >= 0) {
-    perf_test::PrintResult(name, "_cpu", "", cpu_time.InMillisecondsF(), "ms",
-                           true);
+    perf_test::PrintResult(graph, "", name + "_cpu", cpu_time.InMillisecondsF(),
+                           "ms", true);
   }
   if (gpu_time.InMicroseconds() >= 0) {
-    perf_test::PrintResult(name, "_gpu", "", gpu_time.InMillisecondsF(), "ms",
-                           true);
+    perf_test::PrintResult(graph, "", name + "_gpu", gpu_time.InMillisecondsF(),
+                           "ms", true);
   }
 }
 
@@ -52,9 +52,9 @@ Measurement Measurement::Divide(int a) const {
 Measurement::~Measurement() {
 }
 
-MeasurementTimers::MeasurementTimers(GPUTiming* gpu_timing)
+MeasurementTimers::MeasurementTimers(gfx::GPUTimingClient* gpu_timing_client)
     : wall_time_start_(), cpu_time_start_(), gpu_timer_() {
-  DCHECK(gpu_timing);
+  DCHECK(gpu_timing_client);
   wall_time_start_ = base::TimeTicks::NowFromSystemTraceTime();
   if (base::TimeTicks::IsThreadNowSupported()) {
     cpu_time_start_ = base::TimeTicks::ThreadNow();
@@ -64,8 +64,8 @@ MeasurementTimers::MeasurementTimers(GPUTiming* gpu_timing)
     logged_once = true;
   }
 
-  if (gpu_timing->IsAvailable()) {
-    gpu_timer_.reset(new GPUTimer(gpu_timing));
+  if (gpu_timing_client->IsAvailable()) {
+    gpu_timer_ = gpu_timing_client->CreateGPUTimer();
     gpu_timer_->Start();
   }
 }
@@ -96,6 +96,9 @@ Measurement MeasurementTimers::GetAsMeasurement(const std::string& name) {
 }
 
 MeasurementTimers::~MeasurementTimers() {
+  if (gpu_timer_.get()) {
+    gpu_timer_->Destroy(true);
+  }
 }
 
 }  // namespace gpu

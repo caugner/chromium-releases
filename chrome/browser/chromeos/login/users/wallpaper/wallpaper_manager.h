@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
+#include "components/user_manager/user_manager.h"
 #include "components/wallpaper/wallpaper_layout.h"
 #include "components/wallpaper/wallpaper_manager_base.h"
 #include "content/public/browser/notification_observer.h"
@@ -30,22 +31,27 @@
 
 namespace chromeos {
 
-class WallpaperManager : public wallpaper::WallpaperManagerBase {
+class WallpaperManager :
+    public wallpaper::WallpaperManagerBase,
+    public user_manager::UserManager::UserSessionStateObserver {
  public:
   class PendingWallpaper;
 
-  WallpaperManager();
   ~WallpaperManager() override;
 
-  // Get pointer to singleton WallpaperManager instance, create it if necessary.
+  // Creates an instance of Wallpaper Manager. If there is no instance, create
+  // one. Otherwise, returns the existing instance.
+  static void Initialize();
+
+  // Gets pointer to singleton WallpaperManager instance.
   static WallpaperManager* Get();
+
+  // Deletes the existing instance of WallpaperManager. Allows the
+  // WallpaperManager to remove any observers it has registered.
+  static void Shutdown();
 
   // Returns the appropriate wallpaper resolution for all root windows.
   WallpaperResolution GetAppropriateResolution() override;
-
-  // Indicates imminent shutdown, allowing the WallpaperManager to remove any
-  // observers it has registered.
-  void Shutdown() override;
 
   // Adds PowerManagerClient, TimeZoneSettings and CrosSettings observers.
   void AddObservers() override;
@@ -115,55 +121,16 @@ class WallpaperManager : public wallpaper::WallpaperManagerBase {
   // Returns queue size.
   size_t GetPendingListSizeForTesting() const override;
 
+  // Overridden from user_manager::UserManager::UserSessionStateObserver:
+  void UserChangedChildStatus(user_manager::User* user) override;
+
  private:
   friend class TestApi;
   friend class WallpaperManagerBrowserTest;
   friend class WallpaperManagerBrowserTestDefaultWallpaper;
   friend class WallpaperManagerPolicyTest;
 
-  // Clears all obsolete wallpaper prefs from old version wallpaper pickers.
-  void ClearObsoleteWallpaperPrefs() override;
-
-  // Initialize wallpaper of registered device after device policy is trusted.
-  // Note that before device is enrolled, it proceeds with untrusted setting.
-  void InitializeRegisteredDeviceWallpaper() override;
-
-  // Gets wallpaper information of |user_id| from Local State or memory. Returns
-  // false if wallpaper information is not found.
-  bool GetUserWallpaperInfo(const std::string& user_id,
-                            wallpaper::WallpaperInfo* info) const override;
-
-  // Sets wallpaper to the decoded wallpaper if |update_wallpaper| is true.
-  // Otherwise, cache wallpaper to memory if not logged in.  (Takes a UserImage
-  // because that's the callback interface provided by UserImageLoader.)
-  void OnWallpaperDecoded(const std::string& user_id,
-                          wallpaper::WallpaperLayout layout,
-                          bool update_wallpaper,
-                          wallpaper::MovableOnDestroyCallbackHolder on_finish,
-                          const user_manager::UserImage& user_image) override;
-
-  // Starts to load wallpaper at |wallpaper_path|. If |wallpaper_path| is the
-  // same as |current_wallpaper_path_|, do nothing. Must be called on UI thread.
-  void StartLoad(const std::string& user_id,
-                 const wallpaper::WallpaperInfo& info,
-                 bool update_wallpaper,
-                 const base::FilePath& wallpaper_path,
-                 wallpaper::MovableOnDestroyCallbackHolder on_finish) override;
-
-  // This is called after we check that supplied default wallpaper files exist.
-  void SetCustomizedDefaultWallpaperAfterCheck(
-      const GURL& wallpaper_url,
-      const base::FilePath& downloaded_file,
-      scoped_ptr<CustomizedWallpaperRescaledFiles> rescaled_files) override;
-
-  // Check the result of ResizeCustomizedDefaultWallpaper and finally
-  // apply Customized Default Wallpaper.
-  void OnCustomizedDefaultWallpaperResized(
-      const GURL& wallpaper_url,
-      scoped_ptr<CustomizedWallpaperRescaledFiles> rescaled_files,
-      scoped_ptr<bool> success,
-      scoped_ptr<gfx::ImageSkia> small_wallpaper_image,
-      scoped_ptr<gfx::ImageSkia> large_wallpaper_image) override;
+  WallpaperManager();
 
   // Returns modifiable PendingWallpaper.
   // Returns pending_inactive_ or creates new PendingWallpaper if necessary.
@@ -173,26 +140,41 @@ class WallpaperManager : public wallpaper::WallpaperManagerBase {
   // This is called by PendingWallpaper when load is finished.
   void RemovePendingWallpaperFromList(PendingWallpaper* pending);
 
-  // Sets wallpaper to decoded default.
+  // WallpaperManagerBase overrides:
+  void InitializeRegisteredDeviceWallpaper() override;
+  bool GetUserWallpaperInfo(const std::string& user_id,
+                            wallpaper::WallpaperInfo* info) const override;
+  void OnWallpaperDecoded(const std::string& user_id,
+                          wallpaper::WallpaperLayout layout,
+                          bool update_wallpaper,
+                          wallpaper::MovableOnDestroyCallbackHolder on_finish,
+                          const user_manager::UserImage& user_image) override;
+  void StartLoad(const std::string& user_id,
+                 const wallpaper::WallpaperInfo& info,
+                 bool update_wallpaper,
+                 const base::FilePath& wallpaper_path,
+                 wallpaper::MovableOnDestroyCallbackHolder on_finish) override;
+  void SetCustomizedDefaultWallpaperAfterCheck(
+      const GURL& wallpaper_url,
+      const base::FilePath& downloaded_file,
+      scoped_ptr<CustomizedWallpaperRescaledFiles> rescaled_files) override;
+  void OnCustomizedDefaultWallpaperResized(
+      const GURL& wallpaper_url,
+      scoped_ptr<CustomizedWallpaperRescaledFiles> rescaled_files,
+      scoped_ptr<bool> success,
+      scoped_ptr<gfx::ImageSkia> small_wallpaper_image,
+      scoped_ptr<gfx::ImageSkia> large_wallpaper_image) override;
   void OnDefaultWallpaperDecoded(
       const base::FilePath& path,
       const wallpaper::WallpaperLayout layout,
       scoped_ptr<user_manager::UserImage>* result,
       wallpaper::MovableOnDestroyCallbackHolder on_finish,
       const user_manager::UserImage& user_image) override;
-
-  // Start decoding given default wallpaper.
   void StartLoadAndSetDefaultWallpaper(
       const base::FilePath& path,
       const wallpaper::WallpaperLayout layout,
       wallpaper::MovableOnDestroyCallbackHolder on_finish,
       scoped_ptr<user_manager::UserImage>* result_out) override;
-
-  // Use given files as new default wallpaper.
-  // Reloads current wallpaper, if old default was loaded.
-  // Current value of default_wallpaper_image_ is destroyed.
-  // Sets default_wallpaper_image_ either to |small_wallpaper_image| or
-  // |large_wallpaper_image| depending on GetAppropriateResolution().
   void SetDefaultWallpaperPath(
       const base::FilePath& customized_default_wallpaper_file_small,
       scoped_ptr<gfx::ImageSkia> small_wallpaper_image,

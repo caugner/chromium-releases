@@ -21,11 +21,11 @@ class URLRequestInterceptor;
 namespace data_reduction_proxy {
 
 class DataReductionProxyConfig;
+class DataReductionProxyConfigServiceClient;
 class DataReductionProxyConfigurator;
 class DataReductionProxyEventStore;
 class DataReductionProxyService;
-class DataReductionProxyStatisticsPrefs;
-class DataReductionProxyUsageStats;
+class DataReductionProxyBypassStats;
 
 // Contains and initializes all Data Reduction Proxy objects that operate on
 // the IO thread.
@@ -99,8 +99,8 @@ class DataReductionProxyIOData {
   }
 
   // Used for testing.
-  DataReductionProxyUsageStats* usage_stats() const {
-    return usage_stats_.get();
+  DataReductionProxyBypassStats* bypass_stats() const {
+    return bypass_stats_.get();
   }
 
   DataReductionProxyDebugUIService* debug_ui_service() const {
@@ -117,6 +117,9 @@ class DataReductionProxyIOData {
 
   // Used for testing.
   DataReductionProxyIOData();
+
+  // Records that the data reduction proxy is unreachable or not.
+  void SetUnreachable(bool unreachable);
 
   // The type of Data Reduction Proxy client.
   Client client_;
@@ -142,10 +145,13 @@ class DataReductionProxyIOData {
   base::WeakPtr<DataReductionProxyService> service_;
 
   // Tracker of various metrics to be reported in UMA.
-  scoped_ptr<DataReductionProxyUsageStats> usage_stats_;
+  scoped_ptr<DataReductionProxyBypassStats> bypass_stats_;
 
   // Constructs credentials suitable for authenticating the client.
   scoped_ptr<DataReductionProxyRequestOptions> request_options_;
+
+  // Requests new Data Reduction Proxy configurations from a remote service.
+  scoped_ptr<DataReductionProxyConfigServiceClient> config_client_;
 
   // A net log.
   net::NetLog* net_log_;

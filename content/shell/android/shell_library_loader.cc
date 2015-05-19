@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/android/jni_android.h"
-#include "base/android/jni_onload_delegate.h"
+#include "base/bind.h"
 #include "content/public/app/content_jni_onload.h"
 #include "content/public/app/content_main.h"
 #include "content/public/browser/android/compositor.h"
@@ -12,17 +12,11 @@
 
 namespace {
 
-class ShellJNIOnLoadDelegate : public base::android::JNIOnLoadDelegate {
- public:
-  bool RegisterJNI(JNIEnv* env) override;
-  bool Init() override;
-};
-
-bool ShellJNIOnLoadDelegate::RegisterJNI(JNIEnv* env) {
+bool RegisterJNI(JNIEnv* env) {
   return content::android::RegisterShellJni(env);
 }
 
-bool ShellJNIOnLoadDelegate::Init() {
+bool Init() {
   content::Compositor::Initialize();
   content::SetContentMainDelegate(new content::ShellMainDelegate());
   return true;
@@ -33,9 +27,13 @@ bool ShellJNIOnLoadDelegate::Init() {
 
 // This is called by the VM when the shared library is first loaded.
 JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-  ShellJNIOnLoadDelegate delegate;
-  if (!content::android::OnJNIOnLoad(vm, &delegate))
+  std::vector<base::android::RegisterCallback> register_callbacks;
+  register_callbacks.push_back(base::Bind(&RegisterJNI));
+  std::vector<base::android::InitCallback> init_callbacks;
+  init_callbacks.push_back(base::Bind(&Init));
+  if (!content::android::OnJNIOnLoadRegisterJNI(vm, register_callbacks) ||
+      !content::android::OnJNIOnLoadInit(init_callbacks)) {
     return -1;
-
+  }
   return JNI_VERSION_1_4;
 }

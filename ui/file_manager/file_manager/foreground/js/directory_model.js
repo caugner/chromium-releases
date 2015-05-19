@@ -11,20 +11,25 @@ var SHORT_RESCAN_INTERVAL = 100;
 /**
  * Data model of the file manager.
  *
+ * @constructor
+ * @extends {cr.EventTarget}
+ *
  * @param {boolean} singleSelection True if only one file could be selected
  *                                  at the time.
  * @param {FileFilter} fileFilter Instance of FileFilter.
- * @param {!MetadataProviderCache} metadataProviderCache Metadata cache.
- * @param {!FileSystemMetadata} fileSystemMetadata Metadata model.
+ * @param {!MetadataModel} metadataModel Metadata model.
  *     service.
  * @param {VolumeManagerWrapper} volumeManager The volume manager.
  * @param {!FileOperationManager} fileOperationManager File operation manager.
- * @constructor
- * @extends {cr.EventTarget}
+ * @param {!analytics.Tracker} tracker
  */
-function DirectoryModel(singleSelection, fileFilter,
-                        metadataProviderCache, fileSystemMetadata,
-                        volumeManager, fileOperationManager) {
+function DirectoryModel(
+    singleSelection,
+    fileFilter,
+    metadataModel,
+    volumeManager,
+    fileOperationManager,
+    tracker) {
   this.fileListSelection_ = singleSelection ?
       new FileListSingleSelectionModel() : new FileListSelectionModel();
 
@@ -43,12 +48,16 @@ function DirectoryModel(singleSelection, fileFilter,
                                     this.onFilterChanged_.bind(this));
 
   this.currentFileListContext_ =
-      new FileListContext(fileFilter,  fileSystemMetadata);
+      new FileListContext(fileFilter,  metadataModel);
   this.currentDirContents_ =
       DirectoryContents.createForDirectory(this.currentFileListContext_, null);
+  /**
+   * Empty file list which is used as a dummy for inactive view of file list.
+   * @type {!FileListModel}
+   */
+  this.emptyFileList_ = new FileListModel(metadataModel);
 
-  this.metadataProviderCache_ = metadataProviderCache;
-  this.fileSystemMetadata_ = fileSystemMetadata;
+  this.metadataModel_ = metadataModel;
 
   this.volumeManager_ = volumeManager;
   this.volumeManager_.volumeInfoList.addEventListener(
@@ -67,6 +76,9 @@ function DirectoryModel(singleSelection, fileFilter,
       fileOperationManager,
       'entries-changed',
       this.onEntriesChanged_.bind(this));
+
+  /** @private {!analytics.Tracker} */
+  this.tracker_ = tracker;
 }
 
 /**
@@ -86,6 +98,13 @@ DirectoryModel.prototype.dispose = function() {
  */
 DirectoryModel.prototype.getFileList = function() {
   return this.currentFileListContext_.fileList;
+};
+
+/**
+ * @return {!FileListModel} File list which is always empty.
+ */
+DirectoryModel.prototype.getEmptyFileList = function() {
+  return this.emptyFileList_;
 };
 
 /**
@@ -271,7 +290,7 @@ DirectoryModel.prototype.getFileFilter = function() {
 };
 
 /**
- * @return {DirectoryEntry} Current directory.
+ * @return {DirectoryEntry|FakeEntry} Current directory.
  */
 DirectoryModel.prototype.getCurrentDirEntry = function() {
   return this.currentDirContents_.getDirectoryEntry();
@@ -496,7 +515,7 @@ DirectoryModel.prototype.clearAndScan_ = function(newDirContents,
   }.bind(this);
 
   // Clear the table, and start scanning.
-  this.metadataProviderCache_.clearAll();
+  this.metadataModel_.clearAllCache();
   cr.dispatchSimpleEvent(this, 'scan-started');
   var fileList = this.getFileList();
   fileList.splice(0, fileList.length);
@@ -609,7 +628,8 @@ DirectoryModel.prototype.scan_ = function(
     // Record metric for Downloads directory.
     if (!dirContents.isSearch()) {
       var locationInfo =
-          this.volumeManager_.getLocationInfo(dirContents.getDirectoryEntry());
+          this.volumeManager_.getLocationInfo(
+              assert(dirContents.getDirectoryEntry()));
       if (locationInfo.volumeInfo.volumeType ===
           VolumeManagerCommon.VolumeType.DOWNLOADS &&
           locationInfo.isRootEntry) {
@@ -770,8 +790,8 @@ DirectoryModel.prototype.findIndexByEntry_ = function(entry) {
  * correctly.
  * TODO(hidehiko): investigate more background, and remove this if possible.
  *
- * @param {Entry} oldEntry The old entry.
- * @param {Entry} newEntry The new entry.
+ * @param {!Entry} oldEntry The old entry.
+ * @param {!Entry} newEntry The new entry.
  * @param {function()=} opt_callback Called on completion.
  */
 DirectoryModel.prototype.onRenameEntry = function(
@@ -779,8 +799,10 @@ DirectoryModel.prototype.onRenameEntry = function(
   this.currentDirContents_.prefetchMetadata([newEntry], true, function() {
     // If the current directory is the old entry, then quietly change to the
     // new one.
-    if (util.isSameEntry(oldEntry, this.getCurrentDirEntry()))
-      this.changeDirectoryEntry(newEntry);
+    if (util.isSameEntry(oldEntry, this.getCurrentDirEntry())) {
+      this.changeDirectoryEntry(
+          /** @type {!DirectoryEntry|!FakeEntry} */ (newEntry));
+    }
 
     // Replace the old item with the new item. oldEntry instance itself may
     // have been removed/replaced from the list during the async process, we
@@ -832,11 +854,12 @@ DirectoryModel.prototype.createDirectory = function(name,
                                                     abortCallback) {
   // Obtain and check the current directory.
   var entry = this.getCurrentDirEntry();
-  if (!entry || this.isSearching()) {
+  if (!entry || this.isSearching() || util.isFakeEntry(entry)) {
     errorCallback(util.createDOMError(
         util.FileError.INVALID_MODIFICATION_ERR));
     return;
   }
+  entry = /** @type {DirectoryEntry} */ (entry);
 
   var dirContents = this.currentDirContents_;
   var sequence = this.changeDirectorySequence_;
@@ -846,7 +869,7 @@ DirectoryModel.prototype.createDirectory = function(name,
 
       then(function(newEntry) {
         // Refresh the cache.
-        this.fileSystemMetadata_.notifyEntriesCreated([newEntry]);
+        this.metadataModel_.notifyEntriesCreated([newEntry]);
         return new Promise(function(onFulfilled, onRejected) {
           dirContents.prefetchMetadata(
               [newEntry], false, onFulfilled.bind(null, newEntry));
@@ -890,8 +913,8 @@ DirectoryModel.prototype.createDirectory = function(name,
  * activateDirectoryEntry instead of this, which is higher-level function and
  * cares about the selection.
  *
- * @param {DirectoryEntry|Object} dirEntry The entry of the new directory to
- *     be opened.
+ * @param {!DirectoryEntry|!FakeEntry} dirEntry The entry of the new directory
+ *     to be opened.
  * @param {function()=} opt_callback Executed if the directory loads
  *     successfully.
  */
@@ -920,16 +943,16 @@ DirectoryModel.prototype.changeDirectoryEntry = function(
           var previousDirEntry =
               this.currentDirContents_.getDirectoryEntry();
           this.clearAndScan_(
-              newDirectoryContents,
-              function(result) {
-                // Calls the callback of the method when successful.
-                if (result && opt_callback)
-                  opt_callback();
+               newDirectoryContents,
+               function(result) {
+                 // Calls the callback of the method when successful.
+                 if (result && opt_callback)
+                   opt_callback();
 
-                // Notify that the current task of this.directoryChangeQueue_
-                // is completed.
-                setTimeout(queueTaskCallback, 0);
-              });
+                 // Notify that the current task of this.directoryChangeQueue_
+                 // is completed.
+                 setTimeout(queueTaskCallback, 0);
+               });
 
           // For tests that open the dialog to empty directories, everything
           // is loaded at this point.
@@ -944,8 +967,63 @@ DirectoryModel.prototype.changeDirectoryEntry = function(
           event.newDirEntry = dirEntry;
           event.volumeChanged = previousVolumeInfo !== currentVolumeInfo;
           this.dispatchEvent(event);
+
+          if (event.volumeChanged) {
+            this.onVolumeChanged_(currentVolumeInfo);
+          }
         }.bind(this));
   }.bind(this, this.changeDirectorySequence_));
+};
+
+/**
+ * Handles volume changed by sending an analytics appView event.
+ *
+ * @param {!VolumeInfo} volumeInfo The new volume info.
+ * @return {!Promise} resolves once handling is done.
+ * @private
+ */
+DirectoryModel.prototype.onVolumeChanged_ = function(volumeInfo) {
+  // NOTE: That dynamic values, like volume name MUST NOT
+  // be sent to GA as that value can contain PII.
+  // VolumeType is an enum.
+  // ...
+  // But we can do stuff like figure out if this is a media device or vanilla
+  // removable device.
+  return Promise.resolve(undefined)
+      .then(
+          /** @this {DirectoryModel} */
+          function() {
+            switch (volumeInfo.volumeType) {
+              case VolumeManagerCommon.VolumeType.REMOVABLE:
+                return importer.hasMediaDirectory(volumeInfo.fileSystem.root)
+                    .then(
+                        /**
+                         * @param {boolean} hasMedia
+                         * @return {string}
+                         */
+                        function(hasMedia) {
+                          return hasMedia ?
+                              volumeInfo.volumeType + ':with-media-dir' :
+                              volumeInfo.volumeType;
+                        });
+              case VolumeManagerCommon.VolumeType.PROVIDED:
+                var extensionId = volumeInfo.extensionId;
+                var extensionName =
+                    metrics.getFileSystemProviderName(extensionId, 'unknown');
+                // Make note of an unrecognized extension id. When we see
+                // high counts for a particular id, we should add it to the
+                // whitelist in metrics_events.js.
+                if (extensionId && extensionName == 'unknown') {
+                  this.tracker_.send(
+                      metrics.Internals.UNRECOGNIZED_FILE_SYSTEM_PROVIDER
+                          .label(extensionId));
+                }
+                return volumeInfo.volumeType + ':' + extensionName;
+              default:
+                return volumeInfo.volumeType;
+            }
+          }.bind(this))
+      .then(this.tracker_.sendAppView.bind(this.tracker_));
 };
 
 /**
@@ -955,8 +1033,8 @@ DirectoryModel.prototype.changeDirectoryEntry = function(
  *    directory.
  *  - Clears the selection, if the given directory is the current directory.
  *
- * @param {DirectoryEntry|Object} dirEntry The entry of the new directory to
- *     be opened.
+ * @param {!DirectoryEntry|!FakeEntry} dirEntry The entry of the new directory
+ *     to be opened.
  * @param {function()=} opt_callback Executed if the directory loads
  *     successfully.
  */
@@ -1091,7 +1169,7 @@ DirectoryModel.prototype.onVolumeInfoListUpdated_ = function(event) {
  * Creates directory contents for the entry and query.
  *
  * @param {FileListContext} context File list context.
- * @param {!DirectoryEntry} entry Current directory.
+ * @param {!DirectoryEntry|!FakeEntry} entry Current directory.
  * @param {string=} opt_query Search query string.
  * @return {DirectoryContents} Directory contents.
  * @private
@@ -1108,10 +1186,12 @@ DirectoryModel.prototype.createDirectoryContents_ =
 
   if (query && canUseDriveSearch) {
     // Drive search.
-    return DirectoryContents.createForDriveSearch(context, entry, query);
+    return DirectoryContents.createForDriveSearch(
+        context, /** @type {!DirectoryEntry} */ (entry), query);
   } else if (query) {
     // Local search.
-    return DirectoryContents.createForLocalSearch(context, entry, query);
+    return DirectoryContents.createForLocalSearch(
+        context, /** @type {!DirectoryEntry} */ (entry), query);
   } if (locationInfo.isSpecialSearchRoot) {
     // Drive special search.
     var searchType;
@@ -1134,11 +1214,12 @@ DirectoryModel.prototype.createDirectoryContents_ =
     }
     return DirectoryContents.createForDriveMetadataSearch(
         context,
-        entry,
+        /** @type {!FakeEntry} */ (entry),
         searchType);
   } else {
     // Local fetch or search.
-    return DirectoryContents.createForDirectory(context, entry);
+    return DirectoryContents.createForDirectory(
+        context, /** @type {!DirectoryEntry} */ (entry));
   }
 };
 
@@ -1176,7 +1257,7 @@ DirectoryModel.prototype.search = function(query,
       if (this.isSearching()) {
         var newDirContents = this.createDirectoryContents_(
             this.currentFileListContext_,
-            currentDirEntry);
+            assert(currentDirEntry));
         this.clearAndScan_(newDirContents,
                            callback);
       } else {
@@ -1186,7 +1267,7 @@ DirectoryModel.prototype.search = function(query,
     }
 
     var newDirContents = this.createDirectoryContents_(
-        this.currentFileListContext_, currentDirEntry, query);
+        this.currentFileListContext_, assert(currentDirEntry), query);
     if (!newDirContents) {
       callback();
       return;

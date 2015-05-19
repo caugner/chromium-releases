@@ -64,11 +64,10 @@ class TestQuicConnection : public QuicConnection {
                        address,
                        helper,
                        writer_factory,
-                       true   /* owns_writer */,
-                       false  /* is_server */,
-                       false  /* is_secure */,
-                       versions) {
-  }
+                       true /* owns_writer */,
+                       Perspective::IS_CLIENT,
+                       false /* is_secure */,
+                       versions) {}
 
   void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm) {
     QuicConnectionPeer::SetSendAlgorithm(this, send_algorithm);
@@ -146,7 +145,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
   }
 
   ~QuicHttpStreamTest() {
-    session_->CloseSessionOnError(ERR_ABORTED);
+    session_->CloseSessionOnError(ERR_ABORTED, QUIC_INTERNAL_ERROR);
     for (size_t i = 0; i < writes_.size(); i++) {
       delete writes_[i].packet;
     }
@@ -197,7 +196,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
         WillRepeatedly(Return(QuicTime::Delta::Zero()));
     EXPECT_CALL(*send_algorithm_, BandwidthEstimate()).WillRepeatedly(
         Return(QuicBandwidth::Zero()));
-    EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _)).Times(AnyNumber());
     helper_.reset(new QuicConnectionHelper(runner_.get(), &clock_,
                                            &random_generator_));
     TestPacketWriterFactory writer_factory(socket);

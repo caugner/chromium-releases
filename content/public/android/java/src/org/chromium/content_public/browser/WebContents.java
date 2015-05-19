@@ -229,4 +229,26 @@ public interface WebContents {
      * @return Whether the initial empty page has been accessed by a script.
      */
     public boolean hasAccessedInitialDocument();
+
+    /**
+     * This returns the theme color as set by the theme-color meta tag after getting rid of the
+     * alpha.
+     * @param The default color to be returned if the cached color is not valid.
+     * @return The theme color for the content as set by the theme-color meta tag.
+     */
+    public int getThemeColor(int defaultColor);
+
+    /**
+     * Add an observer to the WebContents
+     *
+     * @param observer The observer to add.
+     */
+    void addObserver(WebContentsObserver observer);
+
+    /**
+     * Remove an observer from the WebContents
+     *
+     * @param observer The observer to remove.
+     */
+    void removeObserver(WebContentsObserver observer);
 }

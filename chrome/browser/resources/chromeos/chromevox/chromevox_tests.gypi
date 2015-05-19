@@ -113,7 +113,9 @@
             '<(mock_js)',
             '<(test_api_js)',
             '<(js2gtest)',
+            'testing/callback_helper.js',
             'testing/chromevox_e2e_test_base.js',
+            'testing/chromevox_next_e2e_test_base.js',
             'testing/assert_additions.js',
           ],
           'outputs': [
@@ -175,6 +177,7 @@
         'common/page_selection_test.unitjs',
         'common/selection_util_test.unitjs',
         'common/spannable_test.unitjs',
+        'common/string_util_test.unitjs',
         'chromevox/injected/event_watcher_test.unitjs',
         'chromevox/injected/live_regions_test.unitjs',
         'chromevox/injected/user_commands_test.unitjs',

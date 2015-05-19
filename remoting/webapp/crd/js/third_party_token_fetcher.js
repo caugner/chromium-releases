@@ -45,8 +45,7 @@ remoting.ThirdPartyTokenFetcher = function(
   this.tokenUrlPatterns_ = tokenUrlPatterns;
   this.hostPublicKey_ = hostPublicKey;
   if (chrome.identity) {
-    /** @type {function():void}
-     * @private */
+    /** @private {function():void} */
     this.fetchTokenInternal_ = this.fetchTokenIdentityApi_.bind(this);
     this.redirectUri_ = 'https://' + window.location.hostname +
         '.chromiumapp.org/ThirdPartyAuth';
@@ -133,7 +132,7 @@ remoting.ThirdPartyTokenFetcher.prototype.parseRedirectUrl_ =
  * @private
  */
 remoting.ThirdPartyTokenFetcher.prototype.getFullTokenUrl_ = function() {
-  return this.tokenUrl_ + '?' + remoting.xhr.urlencodeParamHash({
+  return this.tokenUrl_ + '?' + remoting.Xhr.urlencodeParamHash({
     'redirect_uri': this.redirectUri_,
     'scope': this.tokenScope_,
     'client_id': this.hostPublicKey_,

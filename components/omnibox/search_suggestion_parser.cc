@@ -24,6 +24,8 @@
 namespace {
 
 AutocompleteMatchType::Type GetAutocompleteMatchType(const std::string& type) {
+  if (type == "CALCULATOR")
+    return AutocompleteMatchType::CALCULATOR;
   if (type == "ENTITY")
     return AutocompleteMatchType::SEARCH_SUGGEST_ENTITY;
   if (type == "TAIL")
@@ -351,7 +353,7 @@ scoped_ptr<base::Value> SearchSuggestionParser::DeserializeJsonData(
     // Remove any XSSI guards to allow for JSON parsing.
     json_data.remove_prefix(response_start_index);
 
-    JSONStringValueSerializer deserializer(json_data);
+    JSONStringValueDeserializer deserializer(json_data);
     deserializer.set_allow_trailing_comma(true);
     int error_code = 0;
     scoped_ptr<base::Value> data(deserializer.Deserialize(&error_code, NULL));
@@ -471,6 +473,12 @@ bool SearchSuggestionParser::ParseSuggestResults(
             languages));
       }
     } else {
+      // TODO(dschuyler) If the "= " is no longer sent from the back-end
+      // then this may be removed.
+      if ((match_type == AutocompleteMatchType::CALCULATOR) &&
+          !suggestion.compare(0, 2, base::UTF8ToUTF16("= ")))
+        suggestion.erase(0, 2);
+
       base::string16 match_contents = suggestion;
       base::string16 match_contents_prefix;
       base::string16 annotation;
@@ -516,7 +524,6 @@ bool SearchSuggestionParser::ParseSuggestResults(
       }
 
       bool should_prefetch = static_cast<int>(index) == prefetch_index;
-      // TODO(kochi): Improve calculator suggestion presentation.
       results->suggest_results.push_back(SuggestResult(
           base::CollapseWhitespace(suggestion, false), match_type,
           base::CollapseWhitespace(match_contents, false),

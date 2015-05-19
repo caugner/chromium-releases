@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="id">
+<translation id="2705212601509139398">Situs ini menggunakan plugin Chromium Frame yang akan segera tidak didukung. Copot pemasangannya dan unduh browser yang kompatibel.</translation>
 <translation id="6676384891291319759">Akses Internet</translation>
 <translation id="8586442755830160949">Hak Cipta <ph name="YEAR"/> Pengarang Chromium. Semua hak dilindungi undang-undang.</translation>
 <translation id="6373523479360886564">Anda yakin ingin mencopot pemasangan Chromium?</translation>
@@ -96,7 +97,6 @@
 <translation id="3296368748942286671">Lanjutkan aplikasi yang berjalan di latar belakang jika Chromium ditutup</translation>
 <translation id="473775607612524610">Mutakhirkan</translation>
 <translation id="5466153949126434691">Chromium otomatis diperbarui sehingga Anda selalu memiliki versi terbaru. Saat unduhan ini selesai, Chromium akan dimulai ulang dan siap digunakan.</translation>
-<translation id="7707841053049645517">Situs ini menggunakan konten digital Chromium Frame yang akan segera tidak didukung. Copot pemasangannya dan tingkatkan versi ke browser modern.</translation>
 <translation id="3656661827369545115">Meluncurkan Chromium secara otomatis saat komputer Anda dimulai</translation>
 <translation id="2241627712206172106">Jika Anda berbagi komputer, teman dan keluarga bisa menjelajah secara terpisah dan menyiapkan Chromium sesuai keinginannya.</translation>
 <translation id="1763864636252898013">Server ini tidak dapat membuktikan bahwa ini adalah <ph name="DOMAIN"/>; sertifikat keamanannya tidak dipercaya oleh sistem operasi perangkat Anda. Hal ini dapat disebabkan oleh kesalahan konfigurasi atau penyerang memotong sambungan Anda.</translation>
@@ -112,12 +112,13 @@
 <translation id="1869480248812203386">Anda dapat membantu membuat Chromium lebih aman dan lebih mudah digunakan dengan melaporkan detail secara otomatis tentang kemungkinan insiden keamanan ke Google.</translation>
 <translation id="5094747076828555589">Server ini tidak dapat membuktikan bahwa ini adalah <ph name="DOMAIN"/>; sertifikat keamanannya tidak dipercaya oleh Chromium. Hal ini dapat disebabkan oleh kesalahan konfigurasi atau penyerang memotong sambungan Anda.</translation>
 <translation id="6970811910055250180">Memperbarui perangkat Anda...</translation>
-<translation id="2485422356828889247">Copot instalasi</translation>
+<translation id="2485422356828889247">Copot pemasangan</translation>
 <translation id="85843667276690461">Dapatkan bantuan tentang penggunaan Chromium</translation>
 <translation id="7731057871445607139">Chromium berperilaku aneh?</translation>
 <translation id="5358375970380395591">Anda masuk dengan akun yang dikelola dan memberikan administratornya kontrol atas profil Chromium Anda. Data Chromium Anda, seperti aplikasi, bookmark, riwayat, sandi, dan setelan lain selamanya akan dikaitkan ke <ph name="USER_NAME"/>. Anda dapat menghapus data ini melalui Dasbor Akun Google, namun Anda tidak akan dapat mengaitkan data ini dengan akun yang lain. <ph name="LEARN_MORE"/></translation>
 <translation id="9036189287518468038">Peluncur Aplikasi Chromium</translation>
 <translation id="5563479599352954471">Telusuri dengan satu sentuhan</translation>
+<translation id="3256316712990552818">Disalin ke Chromium</translation>
 <translation id="8493179195440786826">Chromium Terlalu Lawas</translation>
 <translation id="911206726377975832">Hapus juga data rambanan Anda?</translation>
 <translation id="95514773681268843"><ph name="DOMAIN"/> mewajibkan Anda membaca dan menyetujui Persyaratan Layanan sebelum menggunakan perangkat ini. Persyaratan ini tidak memperluas, mengubah, atau membatasi Persyaratan Chromium OS.</translation>
@@ -132,7 +133,6 @@
 <translation id="4365115785552740256">Chromium tercipta berkat proyek sumber terbuka <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> dan berbagai <ph name="BEGIN_LINK_OSS"/>perangkat lunak sumber terbuka<ph name="END_LINK_OSS"/> lainnya.</translation>
 <translation id="9190841055450128916">Chromium (mDNS-In)</translation>
 <translation id="4987820182225656817">Tamu dapat menggunakan Chromium tanpa meninggalkan apa pun.</translation>
-<translation id="2216475571518225820">Situs ini menggunakan konten digital Chromium Frame yang akan segera tidak didukung. Copot pemasangannya dan unduh browser yang kompatibel.</translation>
 <translation id="3487263810738775861">Sebuah ekstensi telah mengubah apa yang ditampilkan oleh laman saat Anda memulai Chromium.</translation>
 <translation id="5877064549588274448">Saluran diubah. Mulai ulang perangkat Anda untuk menerapkan perubahan.</translation>
 <translation id="7549178288319965365">Tentang OS Chromium</translation>
@@ -214,6 +214,7 @@ Sebagian fitur mungkin tidak tersedia. Tentukan direktori profil yang berbeda at
 <translation id="811857857463334932">Komputer ini tidak akan lagi menerima pembaruan Chromium karena perangkat kerasnya tidak didukung lagi.</translation>
 <translation id="2910007522516064972">Tentang &amp;Chromium</translation>
 <translation id="8453117565092476964">Arsip pemasang rusak atau tidak valid. Unduh Chromium lagi.</translation>
+<translation id="2558641060352364164">Situs ini menggunakan plugin Chromium Frame yang akan segera tidak didukung. Copot pemasangannya dan tingkatkan versi ke browser modern.</translation>
 <translation id="3889543394854987837">Klik nama Anda untuk membuka Chromium dan mulai menjelajah.</translation>
 <translation id="3130323860337406239">Chromium menggunakan mikrofon Anda.</translation>
 <translation id="7196020411877309443">Mengapa saya melihat ini?</translation>

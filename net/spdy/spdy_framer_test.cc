@@ -881,10 +881,10 @@ TEST_P(SpdyFramerTest, DuplicateHeader) {
 
   if (IsSpdy2()) {
     frame.WriteUInt16(2);  // Number of headers.
-    frame.WriteString("name");
-    frame.WriteString("value1");
-    frame.WriteString("name");
-    frame.WriteString("value2");
+    frame.WriteStringPiece16("name");
+    frame.WriteStringPiece16("value1");
+    frame.WriteStringPiece16("name");
+    frame.WriteStringPiece16("value2");
   } else {
     frame.WriteUInt32(2);  // Number of headers.
     frame.WriteStringPiece32("name");
@@ -927,8 +927,8 @@ TEST_P(SpdyFramerTest, MultiValueHeader) {
   string value("value1\0value2", 13);
   if (IsSpdy2()) {
     frame.WriteUInt16(1);  // Number of headers.
-    frame.WriteString("name");
-    frame.WriteString(value);
+    frame.WriteStringPiece16("name");
+    frame.WriteStringPiece16(value);
   } else if (spdy_version_ > SPDY3) {
     // TODO(jgraettinger): If this pattern appears again, move to test class.
     std::map<string, string> header_set;
@@ -2524,10 +2524,6 @@ TEST_P(SpdyFramerTest, CreateSettings) {
 
     SpdySettingsFlags kFlags = static_cast<SpdySettingsFlags>(0x01);
     SpdySettingsIds kId = SETTINGS_INITIAL_WINDOW_SIZE;
-    SettingsMap settings;
-    settings[kId] = SettingsFlagsAndValue(kFlags, kValue);
-    EXPECT_EQ(kFlags, settings[kId].first);
-    EXPECT_EQ(kValue, settings[kId].second);
     settings_ir.AddSetting(kId,
                            kFlags & SETTINGS_FLAG_PLEASE_PERSIST,
                            kFlags & SETTINGS_FLAG_PERSISTED,
@@ -3283,6 +3279,17 @@ TEST_P(SpdyFramerTest, CreatePushPromiseUncompressed) {
   }
 }
 
+TEST_P(SpdyFramerTest, GetNumberRequiredContinuationFrames) {
+  if (spdy_version_ <= SPDY3) {
+    return;
+  }
+
+  SpdyFramer framer(spdy_version_);
+  // Test case from https://crbug.com/464748.
+  EXPECT_EQ(1u, framer.GetNumberRequiredContinuationFrames(2039));
+  EXPECT_EQ(2u, framer.GetNumberRequiredContinuationFrames(2040));
+}
+
 TEST_P(SpdyFramerTest, CreateContinuationUncompressed) {
   if (spdy_version_ <= SPDY3) {
     return;
@@ -3293,18 +3300,19 @@ TEST_P(SpdyFramerTest, CreateContinuationUncompressed) {
   const char kDescription[] = "CONTINUATION frame";
 
   const unsigned char kFrameData[] = {
-     0x00, 0x00, 0x12, 0x09, 0x00,  // CONTINUATION
-     0x00, 0x00, 0x00, 0x2a,  // Stream 42
-     0x00, 0x03, 0x62, 0x61,  // @.ba
-     0x72, 0x03, 0x66, 0x6f,  // r.fo
-     0x6f, 0x00, 0x03, 0x66,  // o@.f
-     0x6f, 0x6f, 0x03, 0x62,  // oo.b
-     0x61, 0x72,              // ar
+      0x00, 0x00, 0x12, 0x09,  // CONTINUATION
+      0x04, 0x00, 0x00, 0x00,  // end_headers = true
+      0x2a, 0x00, 0x03, 0x62,  // Stream 42, @.b
+      0x61, 0x72, 0x03, 0x66,  // ar.f
+      0x6f, 0x6f, 0x00, 0x03,  // oo@.
+      0x66, 0x6f, 0x6f, 0x03,  // foo.
+      0x62, 0x61, 0x72,        // bar
   };
 
   SpdyContinuationIR continuation(42);
   continuation.SetHeader("bar", "foo");
   continuation.SetHeader("foo", "bar");
+  continuation.set_end_headers(true);
   scoped_ptr<SpdySerializedFrame> frame(
     framer.SerializeContinuation(continuation));
   CompareFrame(kDescription, *frame, kFrameData, arraysize(kFrameData));
@@ -3460,6 +3468,12 @@ TEST_P(SpdyFramerTest, CreatePriority) {
   };
   SpdyPriorityIR priority_ir(2, 1, 16, true);
   scoped_ptr<SpdySerializedFrame> frame(framer.SerializeFrame(priority_ir));
+  CompareFrame(kDescription, *frame, kFrameData, arraysize(kFrameData));
+  SpdyPriorityIR priority2(2);
+  priority2.set_parent_stream_id(1);
+  priority2.set_weight(16);
+  priority2.set_exclusive(true);
+  frame.reset(framer.SerializeFrame(priority2));
   CompareFrame(kDescription, *frame, kFrameData, arraysize(kFrameData));
 }
 

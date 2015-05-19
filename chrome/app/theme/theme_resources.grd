@@ -26,6 +26,7 @@
            BECAUSE YOUR RESOURCES ARE FUNCTIONALLY RELATED OR FALL UNDER THE
            SAME CONDITIONALS. -->
       <structure type="chrome_scaled_image" name="IDR_ACCESSED_COOKIES" file="common/accessed_cookies.png" />
+      <structure type="chrome_scaled_image" name="IDR_ALERT_RED" file="common/alert_red.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_CAMERA" file="common/allowed_camera.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_DOWNLOADS" file="common/allowed_downloads.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_FULLSCREEN" file="common/allowed_fullscreen.png" />
@@ -250,6 +251,15 @@
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_16" file="common/download_progress_foreground16.png" />
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_32" file="common/download_progress_foreground32.png" />
       <if expr="chromeos">
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_DOWNLOADING" file="common/downloads/download-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_WARNING" file="common/downloads/warning-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MALICIOUS" file="common/downloads/malicious-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_INCOGNITO" file="common/downloads/incognito-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE" file="common/downloads/delete-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DOWNLOAD" file="common/downloads/download-small-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_FOLDER" file="common/downloads/folder-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_PAUSE" file="common/downloads/pause-icon.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_RESUME" file="common/downloads/resume-icon.png" />
         <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_FAILURE" file="cros/enable_debugging_failure.png" />
         <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_SUCCESS" file="cros/enable_debugging_success.png" />
         <structure type="chrome_scaled_image" name="IDR_ENROLL_FAILURE" file="cros/enroll_failure.png" />
@@ -271,52 +281,12 @@
       </if>
       <structure type="chrome_scaled_image" name="IDR_FILE_FOLDER" file="common/folder.png" />
       <if expr="chromeos">
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_ARCHIVE" file="cros/file_types/archive.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_ARCHIVE_WHITE" file="cros/file_types/archive_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_AUDIO" file="cros/file_types/audio.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_AUDIO_WHITE" file="cros/file_types/audio_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_DRIVE" file="cros/file_types/drive.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_EXCEL" file="cros/file_types/excel.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_EXCEL_WHITE" file="cros/file_types/excel_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FOLDER" file="cros/file_types/folder.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FOLDER_WHITE" file="cros/file_types/folder_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FOLDER_SHARED" file="cros/file_types/folder_shared.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FOLDER_SHARED_WHITE" file="cros/file_types/folder_shared_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FORM" file="cros/file_types/form.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_FORM_WHITE" file="cros/file_types/form_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GDOC" file="cros/file_types/gdoc.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GDOC_WHITE" file="cros/file_types/gdoc_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GDRAW" file="cros/file_types/gdraw.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GDRAW_WHITE" file="cros/file_types/gdraw_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GENERIC" file="cros/file_types/generic.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GENERIC_WHITE" file="cros/file_types/generic_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GLINK" file="cros/file_types/glink.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GLINK_WHITE" file="cros/file_types/glink_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GMAP" file="cros/file_types/gmap.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GMAP_WHITE" file="cros/file_types/gmap_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSHEET" file="cros/file_types/gsheet.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSHEET_WHITE" file="cros/file_types/gsheet_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSLIDES" file="cros/file_types/gslides.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSLIDES_WHITE" file="cros/file_types/gslides_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GTABLE" file="cros/file_types/gtable.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GTABLE_WHITE" file="cros/file_types/gtable_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_IMAGE" file="cros/file_types/image.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_IMAGE_WHITE" file="cros/file_types/image_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_PDF" file="cros/file_types/pdf.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_PDF_WHITE" file="cros/file_types/pdf_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_PPT" file="cros/file_types/ppt.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_PPT_WHITE" file="cros/file_types/ppt_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_SCRIPT" file="cros/file_types/script.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_SCRIPT_WHITE" file="cros/file_types/script_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_SITES" file="cros/file_types/sites.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_SITES_WHITE" file="cros/file_types/sites_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_VIDEO" file="cros/file_types/video.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_VIDEO_WHITE" file="cros/file_types/video_white.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_WORD" file="cros/file_types/word.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_WORD_WHITE" file="cros/file_types/word_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_AUDIO" file="cros/file_types/thumbnails/audio.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_FOLDER" file="cros/file_types/thumbnails/folder.png" />
-        <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_FOLDER_SHARED" file="cros/file_types/thumbnails/folder_shared.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_GENERIC" file="cros/file_types/thumbnails/generic.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_IMAGE" file="cros/file_types/thumbnails/image.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_LARGE_VIDEO" file="cros/file_types/thumbnails/video.png" />
@@ -397,7 +367,7 @@
         <structure type="chrome_scaled_image" name="IDR_ICON_POWER_WHITE" file="cros/icon_power_white.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_INFO" file="common/info_small.png" />
-      <if expr="toolkit_views and not is_macosx">
+      <if expr="(toolkit_views and not is_macosx) or mac_views_browser">
         <structure type="chrome_scaled_image" name="IDR_INFOBARBUTTON_HOVER_BOTTOM" file="common/infobarbutton_bottom_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_INFOBARBUTTON_HOVER_BOTTOM_LEFT" file="common/infobarbutton_bottom_left_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_INFOBARBUTTON_HOVER_BOTTOM_RIGHT" file="common/infobarbutton_bottom_right_hover.png" />
@@ -435,6 +405,13 @@
         <structure type="chrome_scaled_image" name="IDR_INFOBAR_CRYPTOTOKEN" file="common/infobar_cryptotoken.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_DESKTOP_NOTIFICATIONS" file="common/infobar_desktop_notifications.png" />
+      <if expr="is_android">
+        <!-- The actual image here is not used; this line only exists to
+             reserve a valid ID, so the Android code can map it to the
+             appropriate Android resource.  So we just refer to a random
+             image. -->
+        <structure type="chrome_scaled_image" name="IDR_INFOBAR_FULLSCREEN" file="chromium/product_logo_32.png" />
+      </if>
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_GEOLOCATION" file="common/infobar_geolocation.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_MEDIA_STREAM_CAMERA" file="common/infobar_media_stream_camera.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_MEDIA_STREAM_MIC" file="common/infobar_media_stream_mic.png" />
@@ -467,6 +444,11 @@
       <if expr="chromeos">
         <!-- TODO(nkostylev): This resource needs to be removed when cros login code is moved to ash. -->
         <structure type="chrome_scaled_image" name="IDR_LAUNCHER_BACKGROUND" file="cros/launcher_background.png" />
+        <structure type="chrome_scaled_image" name="IDR_LOGIN_BACK_BUTTTON" file="cros/login_back_button.png" />
+        <structure type="chrome_scaled_image" name="IDR_LOGIN_BACK_BUTTTON_MASKED" file="cros/login_back_button_masked.png" />
+        <structure type="chrome_scaled_image" name="IDR_LOGIN_CLOSE_BUTTTON" file="cros/login_close_button.png" />
+        <structure type="chrome_scaled_image" name="IDR_LOGIN_CLOSE_BUTTTON_MASKED" file="cros/login_close_button_masked.png" />
+        <structure type="chrome_scaled_image" name="IDR_LOGIN_CLOSE_BUTTTON_ON_WHITE" file="cros/login_close_button_on_white.png" />
         <structure type="chrome_scaled_image" name="IDR_LOGIN_PASSWORD_CAPS_LOCK" file="cros/login_password_capslock.png" />
       </if>
       <if expr="chromeos">
@@ -527,6 +509,7 @@
       <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_WELCOME_ICON" file="common/notification_welcome_icon.png" />
       <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_WELCOME_LEARN_MORE" file="common/notification_welcome_learn_more.png" />
       <structure type="chrome_scaled_image" name="IDR_NOTIFIER_BLOCK_BUTTON" file="common/block_notifier.png" />
+      <structure type="chrome_scaled_image" name="IDR_OMNIBOX_CALCULATOR_SELECTED" file="common/omnibox_calculator_selected.png" />
       <structure type="chrome_scaled_image" name="IDR_OMNIBOX_CONTENT_SETTING_BUBBLE_BOTTOM" file="common/omnibox_content_setting_bubble_bottom.png" />
       <structure type="chrome_scaled_image" name="IDR_OMNIBOX_CONTENT_SETTING_BUBBLE_BOTTOM_LEFT" file="common/omnibox_content_setting_bubble_bottom_left.png" />
       <structure type="chrome_scaled_image" name="IDR_OMNIBOX_CONTENT_SETTING_BUBBLE_BOTTOM_RIGHT" file="common/omnibox_content_setting_bubble_bottom_right.png" />
@@ -650,6 +633,9 @@
       <structure type="chrome_scaled_image" name="IDR_PHONE_FAVICON" file="common/favicon_phone.png" />
       <structure type="chrome_scaled_image" name="IDR_PLUGINS_FAVICON" file="common/favicon_extensions.png" />
       <structure type="chrome_scaled_image" name="IDR_PRERENDER" file="common/prerender_succeed_icon.png" />
+      <if expr="chromeos">
+        <structure type="chrome_scaled_image" name="IDR_PRINTER_NOTIFICATION" file="cros/printer_notification.png" />
+      </if>
       <if expr="not _google_chrome">
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO" file="chromium/product_logo.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_16" file="chromium/product_logo_16.png" />
@@ -835,7 +821,13 @@
         <structure type="chrome_scaled_image" name="IDR_AVATAR_THEMED_MAC_BUTTON_NORMAL_TOP_LEFT" file="mac/avatar_button/sign_in_button_themed_top_left.png" />
         <structure type="chrome_scaled_image" name="IDR_AVATAR_THEMED_MAC_BUTTON_NORMAL_TOP_RIGHT" file="mac/avatar_button/sign_in_button_themed_top_right.png" />
       </if>
-
+      <!-- Media Router -->
+      <if expr="enable_media_router">
+        <structure type="chrome_scaled_image" name="IDR_MEDIA_ROUTER_ICON" file="common/media_router.png" />
+        <structure type="chrome_scaled_image" name="IDR_MEDIA_ROUTER_ACTIVE_ICON" file="common/media_router_active.png" />
+        <structure type="chrome_scaled_image" name="IDR_MEDIA_ROUTER_ERROR_ICON" file="common/media_router_error.png" />
+        <structure type="chrome_scaled_image" name="IDR_MEDIA_ROUTER_WARNING_ICON" file="common/media_router_warning.png" />
+      </if>
       <if expr="enable_app_list">
         <structure type="chrome_scaled_image" name="IDR_PROFILE_PICTURE_LOADING" file="profile_loading.png" />
       </if>
@@ -870,156 +862,6 @@
         <structure type="chrome_scaled_image" name="IDR_SETTINGS_APP_ICON_16" file="settings_app_icon_16.png" />
         <structure type="chrome_scaled_image" name="IDR_SETTINGS_APP_ICON_32" file="settings_app_icon_32.png" />
         <structure type="chrome_scaled_image" name="IDR_SETTINGS_APP_ICON_48" file="settings_app_icon_48.png" />
-      </if>
-      <if expr="toolkit_views and not is_macosx">
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_BOTTOM_LEFT" file="common/chip_brokenssl_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_BOTTOM" file="common/chip_brokenssl_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_BOTTOM_RIGHT" file="common/chip_brokenssl_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_CENTER" file="common/chip_brokenssl_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_RIGHT" file="common/chip_brokenssl_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_LEFT" file="common/chip_brokenssl_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_TOP_LEFT" file="common/chip_brokenssl_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_TOP_RIGHT" file="common/chip_brokenssl_top_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_BROKENSSL_TOP" file="common/chip_brokenssl_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_BOTTOM_LEFT" file="common/chip_extended_validation_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_BOTTOM" file="common/chip_extended_validation_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_BOTTOM_RIGHT" file="common/chip_extended_validation_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_CENTER" file="common/chip_extended_validation_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_RIGHT" file="common/chip_extended_validation_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_LEFT" file="common/chip_extended_validation_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_TOP_LEFT" file="common/chip_extended_validation_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_TOP_RIGHT" file="common/chip_extended_validation_top_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_EV_TOP" file="common/chip_extended_validation_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_BOTTOM_LEFT" file="common/chip_malware_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_BOTTOM" file="common/chip_malware_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_BOTTOM_RIGHT" file="common/chip_malware_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_CENTER" file="common/chip_malware_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_RIGHT" file="common/chip_malware_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_LEFT" file="common/chip_malware_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_TOP_LEFT" file="common/chip_malware_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_TOP_RIGHT" file="common/chip_malware_top_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_SITE_CHIP_MALWARE_TOP" file="common/chip_malware_top.png" />
-      </if>
-      <if expr="toolkit_views or is_macosx">
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_BOTTOM_LEFT" file="common/chip_normal_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_BOTTOM" file="common/chip_normal_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_BOTTOM_RIGHT" file="common/chip_normal_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_LEFT" file="common/chip_normal_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_CENTER" file="common/chip_normal_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_RIGHT" file="common/chip_normal_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_TOP_LEFT" file="common/chip_normal_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_TOP" file="common/chip_normal_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_NORMAL_TOP_RIGHT" file="common/chip_normal_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_BOTTOM_LEFT" file="common/chip_pressed_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_BOTTOM" file="common/chip_pressed_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_BOTTOM_RIGHT" file="common/chip_pressed_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_LEFT" file="common/chip_pressed_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_CENTER" file="common/chip_pressed_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_RIGHT" file="common/chip_pressed_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_TOP_LEFT" file="common/chip_pressed_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_TOP" file="common/chip_pressed_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_PRESSED_TOP_RIGHT" file="common/chip_pressed_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_BOTTOM_LEFT" file="common/chip_hover_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_BOTTOM" file="common/chip_hover_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_BOTTOM_RIGHT" file="common/chip_hover_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_LEFT" file="common/chip_hover_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_CENTER" file="common/chip_hover_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_RIGHT" file="common/chip_hover_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_TOP_LEFT" file="common/chip_hover_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_TOP" file="common/chip_hover_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_HOVER_TOP_RIGHT" file="common/chip_hover_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_BOTTOM_LEFT" file="common/chip_brokenssl_normal_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_BOTTOM" file="common/chip_brokenssl_normal_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_BOTTOM_RIGHT" file="common/chip_brokenssl_normal_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_LEFT" file="common/chip_brokenssl_normal_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_CENTER" file="common/chip_brokenssl_normal_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_RIGHT" file="common/chip_brokenssl_normal_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_TOP_LEFT" file="common/chip_brokenssl_normal_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_TOP" file="common/chip_brokenssl_normal_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_NORMAL_TOP_RIGHT" file="common/chip_brokenssl_normal_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_BOTTOM_LEFT" file="common/chip_brokenssl_pressed_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_BOTTOM" file="common/chip_brokenssl_pressed_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_BOTTOM_RIGHT" file="common/chip_brokenssl_pressed_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_LEFT" file="common/chip_brokenssl_pressed_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_CENTER" file="common/chip_brokenssl_pressed_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_RIGHT" file="common/chip_brokenssl_pressed_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_TOP_LEFT" file="common/chip_brokenssl_pressed_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_TOP" file="common/chip_brokenssl_pressed_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_PRESSED_TOP_RIGHT" file="common/chip_brokenssl_pressed_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_BOTTOM_LEFT" file="common/chip_brokenssl_hover_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_BOTTOM" file="common/chip_brokenssl_hover_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_BOTTOM_RIGHT" file="common/chip_brokenssl_hover_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_LEFT" file="common/chip_brokenssl_hover_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_CENTER" file="common/chip_brokenssl_hover_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_RIGHT" file="common/chip_brokenssl_hover_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_TOP_LEFT" file="common/chip_brokenssl_hover_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_TOP" file="common/chip_brokenssl_hover_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_BROKENSSL_HOVER_TOP_RIGHT" file="common/chip_brokenssl_hover_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_BOTTOM_LEFT" file="common/chip_extended_validation_normal_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_BOTTOM" file="common/chip_extended_validation_normal_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_BOTTOM_RIGHT" file="common/chip_extended_validation_normal_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_LEFT" file="common/chip_extended_validation_normal_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_CENTER" file="common/chip_extended_validation_normal_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_RIGHT" file="common/chip_extended_validation_normal_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_TOP_LEFT" file="common/chip_extended_validation_normal_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_TOP" file="common/chip_extended_validation_normal_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_NORMAL_TOP_RIGHT" file="common/chip_extended_validation_normal_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_BOTTOM_LEFT" file="common/chip_extended_validation_pressed_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_BOTTOM" file="common/chip_extended_validation_pressed_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_BOTTOM_RIGHT" file="common/chip_extended_validation_pressed_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_LEFT" file="common/chip_extended_validation_pressed_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_CENTER" file="common/chip_extended_validation_pressed_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_RIGHT" file="common/chip_extended_validation_pressed_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_TOP_LEFT" file="common/chip_extended_validation_pressed_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_TOP" file="common/chip_extended_validation_pressed_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_PRESSED_TOP_RIGHT" file="common/chip_extended_validation_pressed_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_BOTTOM_LEFT" file="common/chip_extended_validation_hover_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_BOTTOM" file="common/chip_extended_validation_hover_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_BOTTOM_RIGHT" file="common/chip_extended_validation_hover_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_LEFT" file="common/chip_extended_validation_hover_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_CENTER" file="common/chip_extended_validation_hover_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_RIGHT" file="common/chip_extended_validation_hover_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_TOP_LEFT" file="common/chip_extended_validation_hover_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_TOP" file="common/chip_extended_validation_hover_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_EV_HOVER_TOP_RIGHT" file="common/chip_extended_validation_hover_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_BOTTOM_LEFT" file="common/chip_malware_normal_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_BOTTOM" file="common/chip_malware_normal_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_BOTTOM_RIGHT" file="common/chip_malware_normal_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_LEFT" file="common/chip_malware_normal_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_CENTER" file="common/chip_malware_normal_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_RIGHT" file="common/chip_malware_normal_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_TOP_LEFT" file="common/chip_malware_normal_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_TOP" file="common/chip_malware_normal_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_NORMAL_TOP_RIGHT" file="common/chip_malware_normal_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_BOTTOM_LEFT" file="common/chip_malware_pressed_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_BOTTOM" file="common/chip_malware_pressed_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_BOTTOM_RIGHT" file="common/chip_malware_pressed_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_LEFT" file="common/chip_malware_pressed_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_CENTER" file="common/chip_malware_pressed_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_RIGHT" file="common/chip_malware_pressed_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_TOP_LEFT" file="common/chip_malware_pressed_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_TOP" file="common/chip_malware_pressed_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_PRESSED_TOP_RIGHT" file="common/chip_malware_pressed_top_right.png" />
-
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_BOTTOM_LEFT" file="common/chip_malware_hover_bottom_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_BOTTOM" file="common/chip_malware_hover_bottom.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_BOTTOM_RIGHT" file="common/chip_malware_hover_bottom_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_LEFT" file="common/chip_malware_hover_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_CENTER" file="common/chip_malware_hover_center.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_RIGHT" file="common/chip_malware_hover_right.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_TOP_LEFT" file="common/chip_malware_hover_top_left.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_TOP" file="common/chip_malware_hover_top.png" />
-        <structure type="chrome_scaled_image" name="IDR_ORIGIN_CHIP_MALWARE_HOVER_TOP_RIGHT" file="common/chip_malware_hover_top_right.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_SETTINGS_FAVICON" file="common/favicon_settings.png" />
       <structure type="chrome_scaled_image" name="IDR_SHARE" file="share.png" />
@@ -1133,6 +975,9 @@
       <if expr="is_macosx or is_ios">
         <structure type="chrome_scaled_image" name="IDR_THEME_TAB_BACKGROUND" file="mac/theme_default_inactive.png" />
         <structure type="chrome_scaled_image" name="IDR_THEME_TAB_BACKGROUND_INACTIVE" file="mac/theme_default_inactive_background.png" />
+        <if expr="mac_views_browser">
+          <structure type="chrome_scaled_image" name="IDR_THEME_TAB_BACKGROUND_INCOGNITO" file="mac/theme_default_inactive.png" />
+        </if>
       </if>
       <structure type="chrome_scaled_image" name="IDR_THEME_TAB_BACKGROUND_V" file="theme_tab_background_glass.png" />
       <if expr="not use_ash and not is_macosx and not is_ios">

@@ -3,6 +3,7 @@ include_rules = [
   "+ash",
   "+athena/content/public",
   "+chrome/app",
+  "+chrome/chrome_watcher",
   "+chrome/grit",  # For generated headers
   "+chrome/installer",
   "+chrome_elf/blacklist",
@@ -19,8 +20,10 @@ include_rules = [
   "+components/autofill/core/common",
   "+components/bookmarks/browser",
   "+components/bookmarks/common",
+  "+components/bookmarks/managed",
   "+components/bookmarks/test",
   "+components/browser_watcher",
+  "+components/browsing_data",
   "+components/cdm/browser",
   "+components/cloud_devices/common",
   "+components/component_updater",
@@ -34,6 +37,7 @@ include_rules = [
   "+components/dom_distiller",
   "+components/domain_reliability",
   "+components/enhanced_bookmarks",
+  "+components/favicon",
   "+components/favicon_base",
   "+components/feedback",
   "+components/gcm_driver",
@@ -109,6 +113,7 @@ include_rules = [
   "+grit",  # TODO(thestig) Remove. For generated headers
   "+installer_util_strings",  # For generated headers
   "+jni",
+  "+media/audio", # For media audio hang monitor.
   "+media/base",  # For media switches
   "+policy",  # For generated headers and source
   "+ppapi/c",  # For various types.
@@ -124,6 +129,7 @@ include_rules = [
   "+sync/internal_api/public/attachments",  # Needed for tests.
   "+sync/protocol",  # Sync protobuf files.
   "+sync/util",  # Sync utilities like GetSessionName.
+  "+syzygy/kasko",
   "+third_party/cros_system_api",
   "+win8/util",
 
@@ -165,6 +171,7 @@ include_rules = [
   "-third_party/WebKit",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationLockType.h",
+  "+third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h",
   "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/web/WebCache.h",
   "+third_party/WebKit/public/web/WebContextMenuData.h",

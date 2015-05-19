@@ -2,11 +2,38 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
-  'includes': [
-    '../base/base.isolate',
-    '../gin/v8.isolate',
-  ],
   'conditions': [
+    ['use_x11==0', {
+      'variables': {
+        'command': [
+          '../testing/test_env.py',
+          '<(PRODUCT_DIR)/components_browsertests<(EXECUTABLE_SUFFIX)',
+          '--brave-new-test-launcher',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+      },
+    }],
+    ['use_x11==1', {
+      'variables': {
+        'command': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)',
+          '<(PRODUCT_DIR)/components_browsertests',
+          '--brave-new-test-launcher',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+        'files': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+      },
+    }],
     ['OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
         'files': [
@@ -20,41 +47,8 @@
     }],
     ['OS=="linux"', {
       'variables': {
-        'command': [
-          '../testing/xvfb.py',
-          '<(PRODUCT_DIR)',
-          '<(PRODUCT_DIR)/components_browsertests',
-          '--brave-new-test-launcher',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
-          '--msan=<(msan)',
-          '--tsan=<(tsan)',
-        ],
         'files': [
-          '../testing/xvfb.py',
           '<(PRODUCT_DIR)/libosmesa.so',
-        ],
-      },
-    }],
-    ['OS=="linux" and use_ozone==0', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
-        ],
-      },
-    }],
-    ['OS=="mac" or OS=="win"', {
-      'variables': {
-        'command': [
-          '../testing/test_env.py',
-          '<(PRODUCT_DIR)/components_browsertests<(EXECUTABLE_SUFFIX)',
-          '--brave-new-test-launcher',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
-          '--msan=<(msan)',
-          '--tsan=<(tsan)',
         ],
       },
     }],
@@ -75,5 +69,10 @@
         ],
       },
     }],
+  ],
+  'includes': [
+    '../base/base.isolate',
+    '../gin/v8.isolate',
+    '../third_party/angle/angle.isolate',
   ],
 }

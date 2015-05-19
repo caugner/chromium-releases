@@ -38,6 +38,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/gfx/animation/animation_container.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
@@ -114,7 +115,11 @@ const int kTouchResizeLayoutTimeMS = 2000;
 // Amount the left edge of a tab is offset from the rectangle of the tab's
 // favicon/title/close box.  Related to the width of IDR_TAB_ACTIVE_LEFT.
 // Affects the size of the "V" between adjacent tabs.
+#if defined(OS_MACOSX)
+const int kTabHorizontalOffset = -19;
+#else
 const int kTabHorizontalOffset = -26;
+#endif
 
 // Amount to adjust the clip by when the tab is stacked before the active index.
 const int kStackedTabLeftClip = 20;
@@ -521,11 +526,16 @@ void TabStrip::RemoveTabDelegate::AnimationCanceled(
 
 // static
 const char TabStrip::kViewClassName[] = "TabStrip";
-const int TabStrip::kNewTabButtonHorizontalOffset = -11;
 const int TabStrip::kNewTabButtonVerticalOffset = 7;
-const int TabStrip::kMiniToNonMiniGap = 3;
 const int TabStrip::kNewTabButtonAssetWidth = 34;
 const int TabStrip::kNewTabButtonAssetHeight = 18;
+#if defined(OS_MACOSX)
+const int TabStrip::kNewTabButtonHorizontalOffset = -8;
+const int TabStrip::kMiniToNonMiniGap = 2;
+#else
+const int TabStrip::kNewTabButtonHorizontalOffset = -11;
+const int TabStrip::kMiniToNonMiniGap = 3;
+#endif
 
 TabStrip::TabStrip(TabStripController* controller)
     : controller_(controller),
@@ -969,28 +979,12 @@ bool TabStrip::SupportsMultipleSelection() {
   return touch_layout_ == NULL;
 }
 
-// TODO(tdanderson): Modify this logic and clean up related code once a
-//                   decision has been made on the experimental
-//                   flag --tab-close-buttons-hidden-with-touch.
-bool TabStrip::ShouldHideCloseButtonForInactiveTab(const Tab* tab) {
-  DCHECK(!tab->IsActive());
-
-  // Do not force the close button to hide if mouse was used as
-  // the last input type to interact with the tab strip.
-  if (!stacked_layout_)
+bool TabStrip::ShouldHideCloseButtonForInactiveTabs() {
+  if (!touch_layout_)
     return false;
 
-  std::string switch_value =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kTabCloseButtonsHiddenWithTouch);
-  int width = tab->width();
-  if (switch_value == "always" ||
-      (switch_value == "narrow" && width < Tab::GetStandardSize().width()) ||
-      (switch_value == "stacked" && width <= Tab::GetTouchWidth())) {
-    return true;
-  }
-
-  return false;
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHideInactiveStackedTabCloseButtons);
 }
 
 void TabStrip::SelectTab(Tab* tab) {
@@ -1247,8 +1241,8 @@ void TabStrip::Layout() {
   DoLayout();
 }
 
-void TabStrip::PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) {
+void TabStrip::PaintChildren(const ui::PaintContext& context) {
+  gfx::Canvas* canvas = context.canvas();
   // The view order doesn't match the paint order (tabs_ contains the tab
   // ordering). Additionally we need to paint the tabs that are closing in
   // |tabs_closing_map_|.
@@ -1268,7 +1262,7 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
   if (inactive_tab_alpha < 255)
     canvas->SaveLayerAlpha(inactive_tab_alpha);
 
-  PaintClosingTabs(canvas, tab_count(), cull_set);
+  PaintClosingTabs(tab_count(), context);
 
   for (int i = tab_count() - 1; i >= 0; --i) {
     Tab* tab = tab_at(i);
@@ -1285,7 +1279,7 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
     } else if (!tab->IsActive()) {
       if (!tab->IsSelected()) {
         if (!stacked_layout_)
-          tab->Paint(canvas, cull_set);
+          tab->Paint(context);
       } else {
         selected_tabs.push_back(tab);
       }
@@ -1293,19 +1287,19 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
       active_tab = tab;
       active_tab_index = i;
     }
-    PaintClosingTabs(canvas, i, cull_set);
+    PaintClosingTabs(i, context);
   }
 
   // Draw from the left and then the right if we're in touch mode.
   if (stacked_layout_ && active_tab_index >= 0) {
     for (int i = 0; i < active_tab_index; ++i) {
       Tab* tab = tab_at(i);
-      tab->Paint(canvas, cull_set);
+      tab->Paint(context);
     }
 
     for (int i = tab_count() - 1; i > active_tab_index; --i) {
       Tab* tab = tab_at(i);
-      tab->Paint(canvas, cull_set);
+      tab->Paint(context);
     }
   }
   if (inactive_tab_alpha < 255)
@@ -1337,26 +1331,26 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
   // Now selected but not active. We don't want these dimmed if using native
   // frame, so they're painted after initial pass.
   for (size_t i = 0; i < selected_tabs.size(); ++i)
-    selected_tabs[i]->Paint(canvas, cull_set);
+    selected_tabs[i]->Paint(context);
 
   // Next comes the active tab.
   if (active_tab && !is_dragging)
-    active_tab->Paint(canvas, cull_set);
+    active_tab->Paint(context);
 
   // Paint the New Tab button.
   if (inactive_tab_alpha < 255)
     canvas->SaveLayerAlpha(inactive_tab_alpha);
-  newtab_button_->Paint(canvas, cull_set);
+  newtab_button_->Paint(context);
   if (inactive_tab_alpha < 255)
     canvas->Restore();
 
   // And the dragged tabs.
   for (size_t i = 0; i < tabs_dragging.size(); ++i)
-    tabs_dragging[i]->Paint(canvas, cull_set);
+    tabs_dragging[i]->Paint(context);
 
   // If the active tab is being dragged, it goes last.
   if (active_tab && is_dragging)
-    active_tab->Paint(canvas, cull_set);
+    active_tab->Paint(context);
 }
 
 const char* TabStrip::GetClassName() const {
@@ -1989,15 +1983,13 @@ TabStrip::FindClosingTabResult TabStrip::FindClosingTab(const Tab* tab) {
   return FindClosingTabResult(tabs_closing_map_.end(), Tabs::iterator());
 }
 
-void TabStrip::PaintClosingTabs(gfx::Canvas* canvas,
-                                int index,
-                                const views::CullSet& cull_set) {
+void TabStrip::PaintClosingTabs(int index, const ui::PaintContext& context) {
   if (tabs_closing_map_.find(index) == tabs_closing_map_.end())
     return;
 
   const Tabs& tabs = tabs_closing_map_[index];
   for (Tabs::const_reverse_iterator i(tabs.rbegin()); i != tabs.rend(); ++i)
-    (*i)->Paint(canvas, cull_set);
+    (*i)->Paint(context);
 }
 
 void TabStrip::UpdateStackedLayoutFromMouseEvent(views::View* source,

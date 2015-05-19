@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/pickle.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/persistent_notification_delegate.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/notifications/profile_notification.h"
@@ -57,8 +58,9 @@ scoped_ptr<Pickle> SerializePersistentNotification(
   pickle->WriteInt(static_cast<int>(notification_data.direction));
   pickle->WriteString(notification_data.lang);
   pickle->WriteString16(notification_data.body);
-  pickle->WriteString16(notification_data.tag);
+  pickle->WriteString(notification_data.tag);
   pickle->WriteString(notification_data.icon.spec());
+  pickle->WriteBool(notification_data.silent);
 
   // The origin which is displaying the notification.
   pickle->WriteString(origin.spec());
@@ -88,8 +90,9 @@ bool UnserializePersistentNotification(
       !iterator.ReadInt(&direction_value) ||
       !iterator.ReadString(&notification_data->lang) ||
       !iterator.ReadString16(&notification_data->body) ||
-      !iterator.ReadString16(&notification_data->tag) ||
-      !iterator.ReadString(&icon_url)) {
+      !iterator.ReadString(&notification_data->tag) ||
+      !iterator.ReadString(&icon_url) ||
+      !iterator.ReadBool(&notification_data->silent)) {
     return false;
   }
 
@@ -153,7 +156,6 @@ bool NotificationUIManagerAndroid::OnNotificationClicked(
     JNIEnv* env,
     jobject java_object,
     jstring notification_id,
-    jint platform_id,
     jbyteArray serialized_notification_data) {
   std::string id = ConvertJavaStringToUTF8(env, notification_id);
 
@@ -186,11 +188,10 @@ bool NotificationUIManagerAndroid::OnNotificationClicked(
     return false;
   }
 
-  // Store the platform id, tag, and origin of this notification so that it can
-  // be closed.
-  RegeneratedNotificationInfo notification_info(notification_data.tag,
-                                                platform_id, origin.spec());
-  regenerated_notification_infos_.insert(std::make_pair(id, notification_info));
+  // Store the tag and origin of this notification so that it can later be
+  // closed using these details.
+  regenerated_notification_infos_[id] =
+      std::make_pair(notification_data.tag, origin.spec());
 
   PlatformNotificationServiceImpl* service =
       PlatformNotificationServiceImpl::GetInstance();
@@ -219,14 +220,19 @@ bool NotificationUIManagerAndroid::OnNotificationClosed(
 
   const Notification& notification = iter->second->notification();
   notification.delegate()->Close(true /** by_user **/);
-  RemoveProfileNotification(iter->second);
+  RemoveProfileNotification(iter->second, true /* close */);
   return true;
 }
 
 void NotificationUIManagerAndroid::Add(const Notification& notification,
                                        Profile* profile) {
-  if (Update(notification, profile))
-    return;
+  // If the given notification is replacing an older one, drop its associated
+  // profile notification object without closing the platform notification.
+  // We'll use the native Android system to perform a smoother replacement.
+  ProfileNotification* notification_to_replace =
+      FindNotificationToReplace(notification, profile);
+  if (notification_to_replace)
+    RemoveProfileNotification(notification_to_replace, false /* close */);
 
   ProfileNotification* profile_notification =
       new ProfileNotification(profile, notification);
@@ -237,7 +243,7 @@ void NotificationUIManagerAndroid::Add(const Notification& notification,
   JNIEnv* env = AttachCurrentThread();
 
   ScopedJavaLocalRef<jstring> tag =
-      ConvertUTF16ToJavaString(env, notification.replace_id());
+      ConvertUTF8ToJavaString(env, notification.tag());
   ScopedJavaLocalRef<jstring> id = ConvertUTF8ToJavaString(
       env, profile_notification->notification().id());
   ScopedJavaLocalRef<jstring> title = ConvertUTF16ToJavaString(
@@ -265,7 +271,7 @@ void NotificationUIManagerAndroid::Add(const Notification& notification,
     if (!pickle) {
       LOG(ERROR) <<
           "Unable to serialize the notification, payload too large (max 1MB).";
-      RemoveProfileNotification(profile_notification);
+      RemoveProfileNotification(profile_notification, true /* close */);
       return;
     }
 
@@ -273,44 +279,30 @@ void NotificationUIManagerAndroid::Add(const Notification& notification,
         env, static_cast<const uint8*>(pickle->data()), pickle->size());
   }
 
-  int platform_id = Java_NotificationUIManager_displayNotification(
-      env, java_object_.obj(), tag.obj(), id.obj(), title.obj(), body.obj(),
-      icon.obj(), origin.obj(), notification_data.obj());
+  Java_NotificationUIManager_displayNotification(
+      env,
+      java_object_.obj(),
+      tag.obj(),
+      id.obj(),
+      title.obj(),
+      body.obj(),
+      icon.obj(),
+      origin.obj(),
+      notification.silent(),
+      notification_data.obj());
 
-  RegeneratedNotificationInfo notification_info(
-      notification.replace_id(), platform_id,
-      notification.origin_url().GetOrigin().spec());
-  regenerated_notification_infos_.insert(std::make_pair(
-      profile_notification->notification().id(), notification_info));
+  regenerated_notification_infos_[profile_notification->notification().id()] =
+      std::make_pair(notification.tag(),
+                     notification.origin_url().GetOrigin().spec());
 
   notification.delegate()->Display();
 }
 
 bool NotificationUIManagerAndroid::Update(const Notification& notification,
                                           Profile* profile) {
-  const base::string16& replace_id = notification.replace_id();
-  if (replace_id.empty())
-    return false;
-
-  const GURL origin_url = notification.origin_url();
-  DCHECK(origin_url.is_valid());
-
-  for (const auto& iterator : profile_notifications_) {
-    ProfileNotification* profile_notification = iterator.second;
-    if (profile_notification->notification().replace_id() != replace_id ||
-        profile_notification->notification().origin_url() != origin_url ||
-        profile_notification->profile() != profile)
-      continue;
-
-    std::string notification_id = profile_notification->notification().id();
-
-    // TODO(peter): Use Android's native notification replacement mechanism.
-    // Right now FALSE is returned from this function even when we would be
-    // able to update the notification, so that Add() creates a new one.
-    RemoveProfileNotification(profile_notification);
-    break;
-  }
-
+  // This method is currently only called from extensions and local discovery,
+  // both of which are not supported on Android.
+  NOTIMPLEMENTED();
   return false;
 }
 
@@ -334,7 +326,7 @@ bool NotificationUIManagerAndroid::CancelById(const std::string& delegate_id,
   ProfileNotification* profile_notification =
       FindProfileNotification(profile_notification_id);
   if (profile_notification) {
-    RemoveProfileNotification(profile_notification);
+    RemoveProfileNotification(profile_notification, true /* close */);
     return true;
   }
 
@@ -372,7 +364,7 @@ bool NotificationUIManagerAndroid::CancelAllBySourceOrigin(
 
     ProfileNotification* profile_notification = current_iterator->second;
     if (profile_notification->notification().origin_url() == source_origin) {
-      RemoveProfileNotification(profile_notification);
+      RemoveProfileNotification(profile_notification, true /* close */);
       removed = true;
     }
   }
@@ -391,7 +383,7 @@ bool NotificationUIManagerAndroid::CancelAllByProfile(ProfileID profile_id) {
     ProfileID current_profile_id =
         NotificationUIManager::GetProfileID(profile_notification->profile());
     if (current_profile_id == profile_id) {
-      RemoveProfileNotification(profile_notification);
+      RemoveProfileNotification(profile_notification, true /* close */);
       removed = true;
     }
   }
@@ -421,18 +413,20 @@ void NotificationUIManagerAndroid::PlatformCloseNotification(
     return;
 
   RegeneratedNotificationInfo notification_info = iterator->second;
-  int platform_id = notification_info.platform_id;
   JNIEnv* env = AttachCurrentThread();
 
   ScopedJavaLocalRef<jstring> tag =
-      ConvertUTF16ToJavaString(env, notification_info.tag);
+      ConvertUTF8ToJavaString(env, notification_info.first);
   ScopedJavaLocalRef<jstring> origin =
-      ConvertUTF8ToJavaString(env, notification_info.origin);
+      ConvertUTF8ToJavaString(env, notification_info.second);
+  ScopedJavaLocalRef<jstring> java_notification_id =
+      ConvertUTF8ToJavaString(env, notification_id);
 
   regenerated_notification_infos_.erase(notification_id);
 
   Java_NotificationUIManager_closeNotification(
-      env, java_object_.obj(), tag.obj(), platform_id, origin.obj());
+      env, java_object_.obj(), tag.obj(), java_notification_id.obj(),
+      origin.obj());
 }
 
 void NotificationUIManagerAndroid::AddProfileNotification(
@@ -446,9 +440,10 @@ void NotificationUIManagerAndroid::AddProfileNotification(
 }
 
 void NotificationUIManagerAndroid::RemoveProfileNotification(
-    ProfileNotification* profile_notification) {
+    ProfileNotification* profile_notification, bool close) {
   std::string notification_id = profile_notification->notification().id();
-  PlatformCloseNotification(notification_id);
+  if (close)
+    PlatformCloseNotification(notification_id);
 
   profile_notifications_.erase(notification_id);
   delete profile_notification;
@@ -463,3 +458,22 @@ ProfileNotification* NotificationUIManagerAndroid::FindProfileNotification(
   return iter->second;
 }
 
+ProfileNotification* NotificationUIManagerAndroid::FindNotificationToReplace(
+    const Notification& notification, Profile* profile) const {
+  const std::string& tag = notification.tag();
+  if (tag.empty())
+    return nullptr;
+
+  const GURL origin_url = notification.origin_url();
+  DCHECK(origin_url.is_valid());
+
+  for (const auto& iterator : profile_notifications_) {
+    ProfileNotification* profile_notification = iterator.second;
+    if (profile_notification->notification().tag() == tag ||
+        profile_notification->notification().origin_url() == origin_url ||
+        profile_notification->profile() == profile) {
+      return profile_notification;
+    }
+  }
+  return nullptr;
+}

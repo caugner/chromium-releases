@@ -111,6 +111,10 @@ static void GetOrigins(JNIEnv* env,
         Java_WebsitePreferenceBridge_insertPushNotificationIntoList(
             env, list, jorigin.obj(), jembedder.obj());
         break;
+      case CONTENT_SETTINGS_TYPE_FULLSCREEN:
+        Java_WebsitePreferenceBridge_insertFullscreenInfoIntoList(
+            env, list, jorigin.obj(), jembedder.obj());
+        break;
       default:
         DCHECK(false);
         break;
@@ -141,9 +145,11 @@ static void SetSettingForOrigin(JNIEnv* env,
   ContentSetting setting = CONTENT_SETTING_DEFAULT;
   switch (value) {
     case -1: break;
+    case 0: setting = CONTENT_SETTING_DEFAULT; break;
     case 1: setting = CONTENT_SETTING_ALLOW; break;
     case 2: setting = CONTENT_SETTING_BLOCK; break;
     default:
+      // Note: CONTENT_SETTINGS_ASK is not and should not be supported.
       NOTREACHED();
   }
   GetHostContentSettingsMap()->SetContentSetting(
@@ -153,6 +159,26 @@ static void SetSettingForOrigin(JNIEnv* env,
       std::string(),
       setting);
   WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
+}
+
+static void GetFullscreenOrigins(JNIEnv* env,
+                                 jclass clazz,
+                                 jobject list,
+                                 jboolean managedOnly) {
+  GetOrigins(env, CONTENT_SETTINGS_TYPE_FULLSCREEN, list, managedOnly);
+}
+
+static jint GetFullscreenSettingForOrigin(JNIEnv* env, jclass clazz,
+    jstring origin, jstring embedder) {
+  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN,
+                             origin, embedder);
+}
+
+static void SetFullscreenSettingForOrigin(JNIEnv* env, jclass clazz,
+    jstring origin, jstring embedder, jint value) {
+  GURL embedder_url(ConvertJavaStringToUTF8(env, embedder));
+  SetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_FULLSCREEN,
+      origin, ContentSettingsPattern::FromURLNoWildcard(embedder_url), value);
 }
 
 static void GetGeolocationOrigins(JNIEnv* env,
@@ -337,6 +363,12 @@ static void SetCookieSettingForOrigin(JNIEnv* env, jclass clazz,
   }
   WebSiteSettingsUmaUtil::LogPermissionChange(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS, setting);
+}
+
+static jboolean IsContentSettingsPatternValid(JNIEnv* env, jclass clazz,
+    jstring pattern) {
+  return ContentSettingsPattern::FromString(
+      ConvertJavaStringToUTF8(env, pattern)).IsValid();
 }
 
 namespace {
@@ -536,7 +568,7 @@ class StorageDataDeleter :
   friend class base::RefCountedThreadSafe<StorageDataDeleter>;
 
   void OnHostDataDeleted(storage::QuotaStatusCode) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     quota_manager_->ResetUsageTracker(type_);
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,

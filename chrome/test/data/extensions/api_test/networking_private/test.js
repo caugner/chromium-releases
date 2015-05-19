@@ -51,6 +51,10 @@ var availableTests = [
     chrome.networkingPrivate.createNetwork(
         false, { 'GUID': kGuid }, callbackPass(callbackResult));
   },
+  function forgetNetwork() {
+    chrome.networkingPrivate.forgetNetwork(
+        kGuid, callbackPass(callbackResult));
+  },
   function getNetworks() {
     chrome.networkingPrivate.getNetworks(
         { networkType: 'Ethernet' }, callbackPass(callbackResult));
@@ -82,6 +86,10 @@ var availableTests = [
   function startDisconnect() {
     chrome.networkingPrivate.startDisconnect(
         kGuid, callbackPass(callbackResult));
+  },
+  function startActivate() {
+    chrome.networkingPrivate.startActivate(
+        kGuid, '' /* carrier */, callbackPass(callbackResult));
   },
   function verifyDestination() {
     chrome.networkingPrivate.verifyDestination(

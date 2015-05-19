@@ -28,6 +28,12 @@
 #include "ui/gfx/platform_font_win.h"
 #endif
 
+#if defined(OS_MACOSX)
+#include <ApplicationServices/ApplicationServices.h>
+
+#include "ui/gfx/render_text_mac.h"
+#endif
+
 using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
 using base::WideToUTF16;
@@ -163,34 +169,80 @@ class TestSkiaTextRenderer : public internal::SkiaTextRenderer {
   DISALLOW_COPY_AND_ASSIGN(TestSkiaTextRenderer);
 };
 
+// Given a buffer to test against, this can be used to test various areas of the
+// rectangular buffer against a specific color value.
+class TestRectangleBuffer {
+ public:
+  TestRectangleBuffer(const wchar_t* string,
+                      const SkColor* buffer,
+                      uint32_t stride,
+                      uint32_t row_count)
+      : string_(string),
+        buffer_(buffer),
+        stride_(stride),
+        row_count_(row_count) {}
+
+  // Test if any values in the rectangular area are anything other than |color|.
+  void EnsureSolidRect(SkColor color,
+                       int left,
+                       int top,
+                       int width,
+                       int height) const {
+    ASSERT_LT(top, row_count_) << string_;
+    ASSERT_LE(top + height, row_count_) << string_;
+    ASSERT_LT(left, stride_) << string_;
+    ASSERT_LE(left + width, stride_) << string_ << ", left " << left
+                                     << ", width " << width << ", stride_ "
+                                     << stride_;
+    for (int y = top; y < top + height; ++y) {
+      for (int x = left; x < left + width; ++x) {
+        SkColor buffer_color = buffer_[x + y * stride_];
+        EXPECT_EQ(color, buffer_color) << string_ << " at " << x << ", " << y;
+      }
+    }
+  }
+
+ private:
+  const wchar_t* string_;
+  const SkColor* buffer_;
+  int stride_;
+  int row_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestRectangleBuffer);
+};
+
 }  // namespace
 
 class RenderTextTest : public testing::Test {
 };
 
-TEST_F(RenderTextTest, DefaultStyle) {
+TEST_F(RenderTextTest, DefaultStyles) {
   // Check the default styles applied to new instances and adjusted text.
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   EXPECT_TRUE(render_text->text().empty());
   const wchar_t* const cases[] = { kWeak, kLtr, L"Hello", kRtl, L"", L"" };
   for (size_t i = 0; i < arraysize(cases); ++i) {
     EXPECT_TRUE(render_text->colors().EqualsValueForTesting(SK_ColorBLACK));
+    EXPECT_TRUE(
+        render_text->baselines().EqualsValueForTesting(NORMAL_BASELINE));
     for (size_t style = 0; style < NUM_TEXT_STYLES; ++style)
       EXPECT_TRUE(render_text->styles()[style].EqualsValueForTesting(false));
     render_text->SetText(WideToUTF16(cases[i]));
   }
 }
 
-TEST_F(RenderTextTest, SetColorAndStyle) {
+TEST_F(RenderTextTest, SetStyles) {
   // Ensure custom default styles persist across setting and clearing text.
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   const SkColor color = SK_ColorRED;
   render_text->SetColor(color);
+  render_text->SetBaselineStyle(SUPERSCRIPT);
   render_text->SetStyle(BOLD, true);
   render_text->SetStyle(UNDERLINE, false);
   const wchar_t* const cases[] = { kWeak, kLtr, L"Hello", kRtl, L"", L"" };
   for (size_t i = 0; i < arraysize(cases); ++i) {
     EXPECT_TRUE(render_text->colors().EqualsValueForTesting(color));
+    EXPECT_TRUE(render_text->baselines().EqualsValueForTesting(SUPERSCRIPT));
     EXPECT_TRUE(render_text->styles()[BOLD].EqualsValueForTesting(true));
     EXPECT_TRUE(render_text->styles()[UNDERLINE].EqualsValueForTesting(false));
     render_text->SetText(WideToUTF16(cases[i]));
@@ -203,38 +255,55 @@ TEST_F(RenderTextTest, SetColorAndStyle) {
   }
 }
 
-TEST_F(RenderTextTest, ApplyColorAndStyle) {
+TEST_F(RenderTextTest, ApplyStyles) {
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetText(ASCIIToUTF16("012345678"));
 
   // Apply a ranged color and style and check the resulting breaks.
   render_text->ApplyColor(SK_ColorRED, Range(1, 4));
+  render_text->ApplyBaselineStyle(SUPERIOR, Range(2, 4));
   render_text->ApplyStyle(BOLD, true, Range(2, 5));
   std::vector<std::pair<size_t, SkColor> > expected_color;
   expected_color.push_back(std::pair<size_t, SkColor>(0, SK_ColorBLACK));
   expected_color.push_back(std::pair<size_t, SkColor>(1, SK_ColorRED));
   expected_color.push_back(std::pair<size_t, SkColor>(4, SK_ColorBLACK));
   EXPECT_TRUE(render_text->colors().EqualsForTesting(expected_color));
+  std::vector<std::pair<size_t, BaselineStyle>> expected_baseline_style;
+  expected_baseline_style.push_back(
+      std::pair<size_t, BaselineStyle>(0, NORMAL_BASELINE));
+  expected_baseline_style.push_back(
+      std::pair<size_t, BaselineStyle>(2, SUPERIOR));
+  expected_baseline_style.push_back(
+      std::pair<size_t, BaselineStyle>(4, NORMAL_BASELINE));
+  EXPECT_TRUE(
+      render_text->baselines().EqualsForTesting(expected_baseline_style));
   std::vector<std::pair<size_t, bool> > expected_style;
   expected_style.push_back(std::pair<size_t, bool>(0, false));
   expected_style.push_back(std::pair<size_t, bool>(2, true));
   expected_style.push_back(std::pair<size_t, bool>(5, false));
   EXPECT_TRUE(render_text->styles()[BOLD].EqualsForTesting(expected_style));
 
-  // Ensure setting a color and style overrides the ranged colors and styles.
+  // Ensure that setting a value overrides the ranged values.
   render_text->SetColor(SK_ColorBLUE);
   EXPECT_TRUE(render_text->colors().EqualsValueForTesting(SK_ColorBLUE));
+  render_text->SetBaselineStyle(SUBSCRIPT);
+  EXPECT_TRUE(render_text->baselines().EqualsValueForTesting(SUBSCRIPT));
   render_text->SetStyle(BOLD, false);
   EXPECT_TRUE(render_text->styles()[BOLD].EqualsValueForTesting(false));
 
-  // Apply a color and style over the text end and check the resulting breaks.
-  // (INT_MAX should be used instead of the text length for the range end)
+  // Apply a value over the text end and check the resulting breaks (INT_MAX
+  // should be used instead of the text length for the range end)
   const size_t text_length = render_text->text().length();
   render_text->ApplyColor(SK_ColorRED, Range(0, text_length));
+  render_text->ApplyBaselineStyle(SUPERIOR, Range(0, text_length));
   render_text->ApplyStyle(BOLD, true, Range(2, text_length));
   std::vector<std::pair<size_t, SkColor> > expected_color_end;
   expected_color_end.push_back(std::pair<size_t, SkColor>(0, SK_ColorRED));
   EXPECT_TRUE(render_text->colors().EqualsForTesting(expected_color_end));
+  std::vector<std::pair<size_t, BaselineStyle>> expected_baseline_end;
+  expected_baseline_end.push_back(
+      std::pair<size_t, BaselineStyle>(0, SUPERIOR));
+  EXPECT_TRUE(render_text->baselines().EqualsForTesting(expected_baseline_end));
   std::vector<std::pair<size_t, bool> > expected_style_end;
   expected_style_end.push_back(std::pair<size_t, bool>(0, false));
   expected_style_end.push_back(std::pair<size_t, bool>(2, true));
@@ -281,6 +350,39 @@ TEST_F(RenderTextTest, ApplyColorAndStyle) {
   EXPECT_TRUE(render_text->styles()[UNDERLINE].EqualsForTesting(
       expected_underline));
 #endif  // OS_MACOSX
+}
+
+TEST_F(RenderTextTest, AppendTextKeepsStyles) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  // Setup basic functionality.
+  render_text->SetText(ASCIIToUTF16("abc"));
+  render_text->ApplyColor(SK_ColorRED, Range(0, 1));
+  render_text->ApplyBaselineStyle(SUPERSCRIPT, Range(1, 2));
+  render_text->ApplyStyle(UNDERLINE, true, Range(2, 3));
+  // Verify basic functionality.
+  std::vector<std::pair<size_t, SkColor>> expected_color;
+  expected_color.push_back(std::pair<size_t, SkColor>(0, SK_ColorRED));
+  expected_color.push_back(std::pair<size_t, SkColor>(1, SK_ColorBLACK));
+  EXPECT_TRUE(render_text->colors().EqualsForTesting(expected_color));
+  std::vector<std::pair<size_t, BaselineStyle>> expected_baseline;
+  expected_baseline.push_back(
+      std::pair<size_t, BaselineStyle>(0, NORMAL_BASELINE));
+  expected_baseline.push_back(std::pair<size_t, BaselineStyle>(1, SUPERSCRIPT));
+  expected_baseline.push_back(
+      std::pair<size_t, BaselineStyle>(2, NORMAL_BASELINE));
+  EXPECT_TRUE(render_text->baselines().EqualsForTesting(expected_baseline));
+  std::vector<std::pair<size_t, bool>> expected_style;
+  expected_style.push_back(std::pair<size_t, bool>(0, false));
+  expected_style.push_back(std::pair<size_t, bool>(2, true));
+  EXPECT_TRUE(
+      render_text->styles()[UNDERLINE].EqualsForTesting(expected_style));
+  // Ensure AppendText maintains current text styles.
+  render_text->AppendText(ASCIIToUTF16("def"));
+  EXPECT_EQ(render_text->GetDisplayText(), ASCIIToUTF16("abcdef"));
+  EXPECT_TRUE(render_text->colors().EqualsForTesting(expected_color));
+  EXPECT_TRUE(render_text->baselines().EqualsForTesting(expected_baseline));
+  EXPECT_TRUE(
+      render_text->styles()[UNDERLINE].EqualsForTesting(expected_style));
 }
 
 // TODO(asvitkine): Cursor movements tests disabled on Mac because RenderTextMac
@@ -538,6 +640,20 @@ TEST_F(RenderTextTest, ElidedObscuredText) {
   render_text->SetText(WideToUTF16(L"abcdef"));
   EXPECT_EQ(WideToUTF16(L"abcdef"), render_text->text());
   EXPECT_EQ(WideToUTF16(L"**\x2026"), render_text->GetDisplayText());
+}
+
+TEST_F(RenderTextTest, ElidedEmail) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  render_text->SetText(ASCIIToUTF16("test@example.com"));
+  const gfx::Size size = render_text->GetStringSize();
+
+  const base::string16 long_email =
+      ASCIIToUTF16("longemailaddresstest@example.com");
+  render_text->SetText(long_email);
+  render_text->SetElideBehavior(ELIDE_EMAIL);
+  render_text->SetDisplayRect(gfx::Rect(size));
+  EXPECT_GE(size.width(), render_text->GetStringSize().width());
+  EXPECT_GT(long_email.size(), render_text->GetDisplayText().size());
 }
 
 TEST_F(RenderTextTest, TruncatedText) {
@@ -1974,6 +2090,7 @@ TEST_F(RenderTextTest, Multiline_MinWidth) {
   RenderTextHarfBuzz render_text;
   render_text.SetDisplayRect(Rect(1, 1000));
   render_text.SetMultiline(true);
+  render_text.SetWordWrapBehavior(WRAP_LONG_WORDS);
   Canvas canvas;
 
   for (size_t i = 0; i < arraysize(kTestStrings); ++i) {
@@ -2007,6 +2124,7 @@ TEST_F(RenderTextTest, Multiline_NormalWidth) {
   render_text.set_glyph_width_for_test(5);
   render_text.SetDisplayRect(Rect(50, 1000));
   render_text.SetMultiline(true);
+  render_text.SetWordWrapBehavior(WRAP_LONG_WORDS);
   render_text.SetHorizontalAlignment(ALIGN_TO_HEAD);
 
   Canvas canvas;
@@ -2144,7 +2262,6 @@ TEST_F(RenderTextTest, Multiline_NewlineCharacterReplacement) {
   }
 }
 
-#if !defined(OS_MACOSX)
 // Ensure horizontal alignment works in multiline mode.
 TEST_F(RenderTextTest, Multiline_HorizontalAlignment) {
   const struct {
@@ -2193,7 +2310,46 @@ TEST_F(RenderTextTest, Multiline_HorizontalAlignment) {
     }
   }
 }
-#endif
+
+TEST_F(RenderTextTest, Multiline_WordWrapBehavior) {
+  const int kGlyphSize = 5;
+  const struct {
+    const WordWrapBehavior behavior;
+    const size_t num_lines;
+    const Range char_ranges[4];
+  } kTestScenarios[] = {
+    { IGNORE_LONG_WORDS, 3u,
+      { Range(0, 4), Range(4, 11), Range(11, 14), Range::InvalidRange() } },
+    { TRUNCATE_LONG_WORDS, 3u,
+      { Range(0, 4), Range(4, 8), Range(11, 14), Range::InvalidRange() } },
+    { WRAP_LONG_WORDS, 4u,
+      { Range(0, 4), Range(4, 8), Range(8, 11), Range(11, 14) } },
+    // TODO(mukai): implement ELIDE_LONG_WORDS. It's not used right now.
+  };
+  RenderTextHarfBuzz render_text;
+  render_text.SetMultiline(true);
+  render_text.SetText(ASCIIToUTF16("foo fooooo foo"));
+  render_text.set_glyph_width_for_test(kGlyphSize);
+  render_text.SetDisplayRect(Rect(0, 0, kGlyphSize * 4, 0));
+
+  Canvas canvas;
+
+  for (size_t i = 0; i < arraysize(kTestScenarios); ++i) {
+    SCOPED_TRACE(base::StringPrintf(
+        "kTestScenarios[%" PRIuS "] %d", i, kTestScenarios[i].behavior));
+    render_text.SetWordWrapBehavior(kTestScenarios[i].behavior);
+    render_text.Draw(&canvas);
+
+    ASSERT_EQ(kTestScenarios[i].num_lines, render_text.lines().size());
+    for (size_t j = 0; j < render_text.lines().size(); ++j) {
+      SCOPED_TRACE(base::StringPrintf("%" PRIuS "-th line", j));
+      EXPECT_EQ(kTestScenarios[i].char_ranges[j],
+                render_text.lines()[j].segments[0].char_range);
+      EXPECT_EQ(kTestScenarios[i].char_ranges[j].length() * kGlyphSize,
+                render_text.lines()[j].size.width());
+    }
+  }
+}
 
 TEST_F(RenderTextTest, NewlineWithoutMultilineFlag) {
   const wchar_t* kTestStrings[] = {
@@ -2510,6 +2666,23 @@ TEST_F(RenderTextTest, HarfBuzz_EmptyRun) {
   EXPECT_EQ(Range(0, 0), glyphs);
 }
 
+// Ensure the line breaker doesn't compute the word's width bigger than the
+// actual size. See http://crbug.com/470073
+TEST_F(RenderTextTest, HarfBuzz_WordWidthWithDiacritics) {
+  RenderTextHarfBuzz render_text;
+  const base::string16 kWord = WideToUTF16(L"\u0906\u092A\u0915\u0947 ");
+  render_text.SetText(kWord);
+  const gfx::SizeF text_size = render_text.GetStringSizeF();
+
+  render_text.SetText(kWord + kWord);
+  render_text.SetMultiline(true);
+  EXPECT_EQ(text_size.width() * 2, render_text.GetStringSizeF().width());
+  EXPECT_EQ(text_size.height(), render_text.GetStringSizeF().height());
+  render_text.SetDisplayRect(gfx::Rect(0, 0, std::ceil(text_size.width()), 0));
+  EXPECT_NEAR(text_size.width(), render_text.GetStringSizeF().width(), 1.0f);
+  EXPECT_EQ(text_size.height() * 2, render_text.GetStringSizeF().height());
+}
+
 // Ensure a string fits in a display rect with a width equal to the string's.
 TEST_F(RenderTextTest, StringFitsOwnWidth) {
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
@@ -2571,43 +2744,194 @@ TEST_F(RenderTextTest, HarfBuzz_UniscribeFallback) {
 }
 #endif  // defined(OS_WIN)
 
+// Ensure that the fallback fonts offered by gfx::GetFallbackFontFamilies() are
+// tried. Note this test assumes the font "Arial" doesn't provide a unicode
+// glyph for a particular character, and that there exists a system fallback
+// font which does.
+#if defined(OS_WIN) || defined(OS_MACOSX)
+TEST_F(RenderTextTest, HarfBuzz_UnicodeFallback) {
+  RenderTextHarfBuzz render_text;
+  render_text.SetFontList(FontList("Arial, 12px"));
+
+  // Korean character "han".
+  render_text.SetText(WideToUTF16(L"\xd55c"));
+  render_text.EnsureLayout();
+  internal::TextRunList* run_list = render_text.GetRunList();
+  ASSERT_EQ(1U, run_list->size());
+  EXPECT_EQ(0U, run_list->runs()[0]->CountMissingGlyphs());
+}
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
 // Ensure that the width reported by RenderText is sufficient for drawing. Draws
-// to a canvas and checks whether any pixel beyond the width is colored.
+// to a canvas and checks if any pixel beyond the bounding rectangle is colored.
 TEST_F(RenderTextTest, TextDoesntClip) {
-  const wchar_t* kTestStrings[] = { L"Save", L"Remove", L"TEST", L"W", L"WWW" };
+  const wchar_t* kTestStrings[] = {
+      L"            ",
+      // TODO(dschuyler): Underscores draw outside GetStringSize;
+      // crbug.com/459812.  This appears to be a preexisting issue that wasn't
+      // revealed by the prior unit tests.
+      // L"TEST_______",
+      L"TEST some stuff",
+      L"WWWWWWWWWW",
+      L"gAXAXAXAXAXAXA",
+      // TODO(dschuyler): A-Ring draws outside GetStringSize; crbug.com/459812.
+      // L"g\x00C5X\x00C5X\x00C5X\x00C5X\x00C5X\x00C5X\x00C5",
+      L"\x0647\x0654\x0647\x0654\x0647\x0654\x0647\x0654\x0645\x0631\x062D"
+      L"\x0628\x0627"};
   const Size kCanvasSize(300, 50);
-  const int kTestWidth = 10;
+  const int kTestSize = 10;
 
   skia::RefPtr<SkSurface> surface = skia::AdoptRef(
       SkSurface::NewRasterN32Premul(kCanvasSize.width(), kCanvasSize.height()));
   scoped_ptr<Canvas> canvas(
       Canvas::CreateCanvasWithoutScaling(surface->getCanvas(), 1.0f));
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  render_text->SetDisplayRect(Rect(kCanvasSize));
-  render_text->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  render_text->SetHorizontalAlignment(ALIGN_LEFT);
   render_text->SetColor(SK_ColorBLACK);
 
   for (auto string : kTestStrings) {
     surface->getCanvas()->clear(SK_ColorWHITE);
     render_text->SetText(WideToUTF16(string));
+    const Size string_size = render_text->GetStringSize();
+    render_text->ApplyBaselineStyle(SUPERSCRIPT, Range(1, 2));
+    render_text->ApplyBaselineStyle(SUPERIOR, Range(3, 4));
+    render_text->ApplyBaselineStyle(INFERIOR, Range(5, 6));
+    render_text->ApplyBaselineStyle(SUBSCRIPT, Range(7, 8));
     render_text->SetStyle(BOLD, true);
-    render_text->Draw(canvas.get());
-    int width = render_text->GetStringSize().width();
-    ASSERT_LT(width + kTestWidth, kCanvasSize.width());
-    const uint32* buffer = static_cast<const uint32*>(
-        surface->peekPixels(NULL, NULL));
-    ASSERT_NE(nullptr, buffer);
+    render_text->SetDisplayRect(
+        Rect(kTestSize, kTestSize, string_size.width(), string_size.height()));
+    // Allow the RenderText to paint outside of its display rect.
+    render_text->set_clip_to_display_rect(false);
+    ASSERT_LE(string_size.width() + kTestSize * 2, kCanvasSize.width());
 
-    for (int y = 0; y < kCanvasSize.height(); ++y) {
-      // Allow one column of anti-aliased pixels past the expected width.
-      SkColor color = buffer[width + y * kCanvasSize.width()];
-      EXPECT_LT(220U, color_utils::GetLuminanceForColor(color)) << string;
-      for (int x = 1; x < kTestWidth; ++x) {
-        color = buffer[width + x + y * kCanvasSize.width()];
-        EXPECT_EQ(SK_ColorWHITE, color) << string;
-      }
+    render_text->Draw(canvas.get());
+    ASSERT_LT(string_size.width() + kTestSize, kCanvasSize.width());
+    const uint32* buffer =
+        static_cast<const uint32*>(surface->peekPixels(nullptr, nullptr));
+    ASSERT_NE(nullptr, buffer);
+    TestRectangleBuffer rect_buffer(string, buffer, kCanvasSize.width(),
+                                    kCanvasSize.height());
+    {
+#if !defined(OS_CHROMEOS)
+      // TODO(dschuyler): On ChromeOS text draws above the GetStringSize rect.
+      SCOPED_TRACE("TextDoesntClip Top Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, 0, kCanvasSize.width(),
+                                  kTestSize);
+#endif
+    }
+    {
+      SCOPED_TRACE("TextDoesntClip Bottom Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0,
+                                  kTestSize + string_size.height(),
+                                  kCanvasSize.width(), kTestSize);
+    }
+    {
+      SCOPED_TRACE("TextDoesntClip Left Side");
+#if defined(OS_WIN)
+      // TODO(dschuyler): On Windows XP the Unicode test draws to the left edge
+      // as if it is ignoring the SetDisplayRect shift by kTestSize.  This
+      // appears to be a preexisting issue that wasn't revealed by the prior
+      // unit tests.
+#elif defined(OS_MACOSX) || defined(OS_CHROMEOS)
+      // TODO(dschuyler): On Windows (non-XP), Chrome OS and Mac smoothing draws
+      // left of text.  This appears to be a preexisting issue that wasn't
+      // revealed by the prior unit tests.
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize, kTestSize - 1,
+                                  string_size.height());
+#else
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize, kTestSize,
+                                  string_size.height());
+#endif
+    }
+    {
+      SCOPED_TRACE("TextDoesntClip Right Side");
+#if !defined(OS_MACOSX)
+      // TODO(dschuyler): On Mac text draws to right of GetStringSize.  This
+      // appears to be a preexisting issue that wasn't revealed by the prior
+      // unit tests.
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE,
+                                  kTestSize + string_size.width(), kTestSize,
+                                  kTestSize, string_size.height());
+#endif
     }
   }
 }
+
+// Ensure that the text will clip to the display rect. Draws to a canvas and
+// checks whether any pixel beyond the bounding rectangle is colored.
+TEST_F(RenderTextTest, TextDoesClip) {
+  const wchar_t* kTestStrings[] = {L"TEST", L"W", L"WWWW", L"gAXAXWWWW"};
+  const Size kCanvasSize(300, 50);
+  const int kTestSize = 10;
+
+  skia::RefPtr<SkSurface> surface = skia::AdoptRef(
+      SkSurface::NewRasterN32Premul(kCanvasSize.width(), kCanvasSize.height()));
+  scoped_ptr<Canvas> canvas(
+      Canvas::CreateCanvasWithoutScaling(surface->getCanvas(), 1.0f));
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  render_text->SetHorizontalAlignment(ALIGN_LEFT);
+  render_text->SetColor(SK_ColorBLACK);
+
+  for (auto string : kTestStrings) {
+    surface->getCanvas()->clear(SK_ColorWHITE);
+    render_text->SetText(WideToUTF16(string));
+    const Size string_size = render_text->GetStringSize();
+    int fake_width = string_size.width() / 2;
+    int fake_height = string_size.height() / 2;
+    render_text->SetDisplayRect(
+        Rect(kTestSize, kTestSize, fake_width, fake_height));
+    render_text->set_clip_to_display_rect(true);
+    render_text->Draw(canvas.get());
+    ASSERT_LT(string_size.width() + kTestSize, kCanvasSize.width());
+    const uint32* buffer =
+        static_cast<const uint32*>(surface->peekPixels(nullptr, nullptr));
+    ASSERT_NE(nullptr, buffer);
+    TestRectangleBuffer rect_buffer(string, buffer, kCanvasSize.width(),
+                                    kCanvasSize.height());
+    {
+      SCOPED_TRACE("TextDoesClip Top Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, 0, kCanvasSize.width(),
+                                  kTestSize);
+    }
+
+    {
+      SCOPED_TRACE("TextDoesClip Bottom Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize + fake_height,
+                                  kCanvasSize.width(), kTestSize);
+    }
+    {
+      SCOPED_TRACE("TextDoesClip Left Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize, kTestSize,
+                                  fake_height);
+    }
+    {
+      SCOPED_TRACE("TextDoesClip Right Side");
+      rect_buffer.EnsureSolidRect(SK_ColorWHITE, kTestSize + fake_width,
+                                  kTestSize, kTestSize, fake_height);
+    }
+  }
+}
+
+#if defined(OS_MACOSX)
+TEST_F(RenderTextTest, Mac_ElidedText) {
+  RenderTextMac render_text;
+  base::string16 text(ASCIIToUTF16("This is an example."));
+  render_text.SetText(text);
+  gfx::Size string_size = render_text.GetStringSize();
+  render_text.SetDisplayRect(gfx::Rect(string_size));
+  render_text.EnsureLayout();
+  // NOTE: Character and glyph counts are only comparable for simple text.
+  EXPECT_EQ(text.size(),
+            static_cast<size_t>(CTLineGetGlyphCount(render_text.line_)));
+
+  render_text.SetElideBehavior(ELIDE_TAIL);
+  string_size.set_width(string_size.width() / 2);
+  render_text.SetDisplayRect(gfx::Rect(string_size));
+  render_text.EnsureLayout();
+  CFIndex glyph_count = CTLineGetGlyphCount(render_text.line_);
+  EXPECT_GT(text.size(), static_cast<size_t>(glyph_count));
+  EXPECT_NE(0, glyph_count);
+}
+#endif
 
 }  // namespace gfx

@@ -30,6 +30,30 @@ const int kRoundTripsNeeded = 4;
 // time).
 const int kConstantTimeMs = 75;
 
+// Extract capture begin/end timestamps from |video_frame|'s metadata and log
+// it.
+void LogVideoCaptureTimestamps(const CastEnvironment& cast_environment,
+                               const media::VideoFrame& video_frame,
+                               RtpTimestamp rtp_timestamp) {
+  base::TimeTicks capture_begin_time;
+  base::TimeTicks capture_end_time;
+  if (!video_frame.metadata()->GetTimeTicks(
+          media::VideoFrameMetadata::CAPTURE_BEGIN_TIME, &capture_begin_time) ||
+      !video_frame.metadata()->GetTimeTicks(
+          media::VideoFrameMetadata::CAPTURE_END_TIME, &capture_end_time)) {
+    // The frame capture timestamps were not provided by the video capture
+    // source.  Simply log the events as happening right now.
+    capture_begin_time = capture_end_time =
+        cast_environment.Clock()->NowTicks();
+  }
+  cast_environment.Logging()->InsertFrameEvent(
+      capture_begin_time, FRAME_CAPTURE_BEGIN, VIDEO_EVENT, rtp_timestamp,
+      kFrameIdUnknown);
+  cast_environment.Logging()->InsertFrameEvent(
+      capture_end_time, FRAME_CAPTURE_END, VIDEO_EVENT, rtp_timestamp,
+      kFrameIdUnknown);
+}
+
 }  // namespace
 
 // Note, we use a fixed bitrate value when external video encoder is used.
@@ -45,22 +69,21 @@ VideoSender::VideoSender(
     CastTransportSender* const transport_sender,
     const PlayoutDelayChangeCB& playout_delay_change_cb)
     : FrameSender(
-        cast_environment,
-        false,
-        transport_sender,
-        base::TimeDelta::FromMilliseconds(video_config.rtcp_interval),
-        kVideoFrequency,
-        video_config.ssrc,
-        video_config.max_frame_rate,
-        video_config.min_playout_delay,
-        video_config.max_playout_delay,
-        video_config.use_external_encoder ?
-            NewFixedCongestionControl(
-                (video_config.min_bitrate + video_config.max_bitrate) / 2) :
-            NewAdaptiveCongestionControl(cast_environment->Clock(),
-                                         video_config.max_bitrate,
-                                         video_config.min_bitrate,
-                                         video_config.max_frame_rate)),
+          cast_environment,
+          false,
+          transport_sender,
+          kVideoFrequency,
+          video_config.ssrc,
+          video_config.max_frame_rate,
+          video_config.min_playout_delay,
+          video_config.max_playout_delay,
+          video_config.use_external_encoder
+              ? NewFixedCongestionControl(
+                    (video_config.min_bitrate + video_config.max_bitrate) / 2)
+              : NewAdaptiveCongestionControl(cast_environment->Clock(),
+                                             video_config.max_bitrate,
+                                             video_config.min_bitrate,
+                                             video_config.max_frame_rate)),
       frames_in_encoder_(0),
       last_bitrate_(0),
       playout_delay_change_cb_(playout_delay_change_cb),
@@ -108,15 +131,7 @@ void VideoSender::InsertRawVideoFrame(
 
   const RtpTimestamp rtp_timestamp =
       TimeDeltaToRtpDelta(video_frame->timestamp(), kVideoFrequency);
-  const base::TimeTicks insertion_time = cast_environment_->Clock()->NowTicks();
-  // TODO(miu): Plumb in capture timestamps.  For now, make it look like capture
-  // took zero time by setting the BEGIN and END event to the same timestamp.
-  cast_environment_->Logging()->InsertFrameEvent(
-      insertion_time, FRAME_CAPTURE_BEGIN, VIDEO_EVENT, rtp_timestamp,
-      kFrameIdUnknown);
-  cast_environment_->Logging()->InsertFrameEvent(
-      insertion_time, FRAME_CAPTURE_END, VIDEO_EVENT, rtp_timestamp,
-      kFrameIdUnknown);
+  LogVideoCaptureTimestamps(*cast_environment_, *video_frame, rtp_timestamp);
 
   // Used by chrome/browser/extension/api/cast_streaming/performance_test.cc
   TRACE_EVENT_INSTANT2(

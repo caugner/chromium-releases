@@ -125,6 +125,26 @@ class NetworkingPrivateCreateNetworkFunction : public AsyncExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateCreateNetworkFunction);
 };
 
+// Implements the chrome.networkingPrivate.createNetwork method.
+class NetworkingPrivateForgetNetworkFunction : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateForgetNetworkFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.forgetNetwork",
+                             NETWORKINGPRIVATE_FORGETNETWORK);
+
+ protected:
+  ~NetworkingPrivateForgetNetworkFunction() override;
+
+  // AsyncExtensionFunction overrides.
+  bool RunAsync() override;
+
+ private:
+  void Success();
+  void Failure(const std::string& error);
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateForgetNetworkFunction);
+};
+
 // Implements the chrome.networkingPrivate.getNetworks method.
 class NetworkingPrivateGetNetworksFunction : public AsyncExtensionFunction {
  public:
@@ -276,6 +296,26 @@ class NetworkingPrivateStartDisconnectFunction : public AsyncExtensionFunction {
   void Failure(const std::string& error);
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateStartDisconnectFunction);
+};
+
+// Implements the chrome.networkingPrivate.startActivate method.
+class NetworkingPrivateStartActivateFunction : public AsyncExtensionFunction {
+ public:
+  NetworkingPrivateStartActivateFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.startActivate",
+                             NETWORKINGPRIVATE_STARTACTIVATE);
+
+ protected:
+  ~NetworkingPrivateStartActivateFunction() override;
+
+  // AsyncExtensionFunction overrides.
+  bool RunAsync() override;
+
+ private:
+  void Success();
+  void Failure(const std::string& error);
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateStartActivateFunction);
 };
 
 // Implements the chrome.networkingPrivate.verifyDestination method.

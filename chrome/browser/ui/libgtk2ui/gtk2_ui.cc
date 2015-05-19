@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
 
+#include <math.h>
 #include <set>
 
 #include <pango/pango.h>
@@ -161,6 +162,7 @@ const int kThemeImages[] = {
 // TODO(erg): Decide what to do about other icons that appear in the omnibox,
 // e.g. content settings icons.
 const int kAutocompleteImages[] = {
+  IDR_OMNIBOX_CALCULATOR,
   IDR_OMNIBOX_EXTENSION_APP,
   IDR_OMNIBOX_HTTP,
   IDR_OMNIBOX_HTTP_DARK,
@@ -379,16 +381,24 @@ gfx::FontRenderParams GetGtkFontRenderParams() {
   return params;
 }
 
-// Queries GTK for its font DPI setting and returns the number of pixels in a
-// point.
-double GetPixelsInPoint() {
+double GetDPI() {
   GtkSettings* gtk_settings = gtk_settings_get_default();
   CHECK(gtk_settings);
   gint gtk_dpi = -1;
   g_object_get(gtk_settings, "gtk-xft-dpi", &gtk_dpi, NULL);
 
   // GTK multiplies the DPI by 1024 before storing it.
-  double dpi = (gtk_dpi > 0) ? gtk_dpi / 1024.0 : 96.0;
+  return (gtk_dpi > 0) ? gtk_dpi / 1024.0 : 96.0;
+}
+
+// Queries GTK for its font DPI setting and returns the number of pixels in a
+// point.
+double GetPixelsInPoint(float device_scale_factor) {
+  double dpi = GetDPI();
+
+  // Take device_scale_factor into account — if Chrome already scales the
+  // entire UI up by 2x, we should not also scale up.
+  dpi /= device_scale_factor;
 
   // There are 72 points in an inch.
   return dpi / 72.0;
@@ -413,7 +423,8 @@ views::LinuxUI::NonClientMiddleClickAction GetDefaultMiddleClickAction() {
 Gtk2UI::Gtk2UI()
     : default_font_size_pixels_(0),
       default_font_style_(gfx::Font::NORMAL),
-      middle_click_action_(GetDefaultMiddleClickAction()) {
+      middle_click_action_(GetDefaultMiddleClickAction()),
+      device_scale_factor_(1.0) {
   GtkInitFromCommandLine(*base::CommandLine::ForCurrentProcess());
 }
 
@@ -1092,6 +1103,7 @@ SkBitmap Gtk2UI::GenerateGtkThemeBitmap(int id) const {
     // different colors between the omnibox and the normal background area.
     // TODO(erg): Decide what to do about other icons that appear in the
     // omnibox, e.g. content settings icons.
+    case IDR_OMNIBOX_CALCULATOR:
     case IDR_OMNIBOX_EXTENSION_APP:
     case IDR_OMNIBOX_HTTP:
     case IDR_OMNIBOX_SEARCH:
@@ -1384,7 +1396,7 @@ void Gtk2UI::UpdateDefaultFont(const PangoFontDescription* desc) {
     const double size_points = pango_font_description_get_size(desc) /
         static_cast<double>(PANGO_SCALE);
     default_font_size_pixels_ = static_cast<int>(
-        GetPixelsInPoint() * size_points + 0.5);
+        GetPixelsInPoint(device_scale_factor_) * size_points + 0.5);
     query.point_size = static_cast<int>(size_points);
   }
 
@@ -1405,6 +1417,19 @@ void Gtk2UI::OnStyleSet(GtkWidget* widget, GtkStyle* previous_style) {
   ClearAllThemeData();
   LoadGtkValues();
   NativeThemeGtk2::instance()->NotifyObservers();
+}
+
+void Gtk2UI::UpdateDeviceScaleFactor(float device_scale_factor) {
+  device_scale_factor_ = device_scale_factor;
+  GtkStyle* label_style = gtk_rc_get_style(fake_label_.get());
+  UpdateDefaultFont(label_style->font_desc);
+}
+
+float Gtk2UI::GetDeviceScaleFactor() const {
+  const int kCSSDefaultDPI = 96;
+  float scale = GetDPI() / kCSSDefaultDPI;
+  // Round to 2 decimals, e.g. to 1.33.
+  return roundf(scale * 100) / 100;
 }
 
 }  // namespace libgtk2ui

@@ -6,13 +6,15 @@
 
 import os
 
-from metrics import power
 from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
+
+from metrics import power
+
 
 DESCRIPTIONS = {
     'ai-astar':
@@ -68,8 +70,7 @@ def _Mean(l):
 
 class _KrakenMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_KrakenMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_KrakenMeasurement, self).__init__()
     self._power_metric = None
 
   def CustomizeBrowserOptions(self, options):

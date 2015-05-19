@@ -6,7 +6,7 @@ var goog = {};
 goog.async = {};
 
 /**
- * @interface
+ * @constructor
  * @template VALUE
  */
 goog.async.Deferred;
@@ -18,6 +18,19 @@ goog.async.Deferred;
  * @template T
  */
 goog.async.Deferred.prototype.addCallback;
+
+/** @param {VALUE=} opt_result */
+goog.async.Deferred.prototype.callback;
+
+/**
+ * @param {?(function(this:THIS, VALUE):
+ *             (RESULT|IThenable<RESULT>|Thenable))=} opt_onFulfilled
+ * @param {?(function(this:THIS, *): *)=} opt_onRejected
+ * @param {THIS=} opt_context
+ * @return {!Promise<RESULT>}
+ * @template RESULT,THIS
+ */
+goog.async.Deferred.prototype.then;
 
 var analytics = {};
 
@@ -175,6 +188,9 @@ analytics.Config.prototype.isTrackingPermitted;
 
 /** @param {number} sampleRate */
 analytics.Config.prototype.setSampleRate;
+
+/** @return {!goog.async.Deferred} Settles once the id has been reset. */
+analytics.Config.prototype.resetUserId;
 
 
 /** @interface */

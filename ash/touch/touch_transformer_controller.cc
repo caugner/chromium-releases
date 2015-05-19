@@ -22,7 +22,7 @@ DisplayManager* GetDisplayManager() {
   return Shell::GetInstance()->display_manager();
 }
 
-ui::TouchscreenDevice FindTouchscreenById(unsigned int id) {
+ui::TouchscreenDevice FindTouchscreenById(int id) {
   const std::vector<ui::TouchscreenDevice>& touchscreens =
       ui::DeviceDataManager::GetInstance()->touchscreen_devices();
   for (const auto& touchscreen : touchscreens) {
@@ -126,7 +126,7 @@ TouchTransformerController::~TouchTransformerController() {
 
 void TouchTransformerController::UpdateTouchTransformer() const {
   ui::DeviceDataManager* device_manager = ui::DeviceDataManager::GetInstance();
-  device_manager->ClearTouchTransformerRecord();
+  device_manager->ClearTouchDeviceAssociations();
 
   // Display IDs and DisplayInfo for mirror or extended mode.
   int64 display1_id = gfx::Display::kInvalidDisplayID;
@@ -175,40 +175,34 @@ void TouchTransformerController::UpdateTouchTransformer() const {
       Shell::GetInstance()->display_configurator()->framebuffer_size();
 
   if (display_manager->IsMirrored()) {
-    // In extended but software mirroring mode, there is only one X root window
-    // that associates with both displays.
     if (GetDisplayManager()->software_mirroring_enabled()) {
-      aura::Window* root = display_controller->GetPrimaryRootWindow();
-      RootWindowController::ForWindow(root)->ash_host()->UpdateDisplayID(
-          display1_id, display2_id);
-      DisplayInfo source_display =
+      // In extended but software mirroring mode, there is a WindowTreeHost for
+      // each display, but all touches are forwarded to the primary root
+      // window's WindowTreeHost.
+      DisplayInfo target_display =
           display_controller->GetPrimaryDisplayId() == display1_id ? display1
                                                                    : display2;
-      // Mapping from framebuffer size to the source display's native
-      // resolution.
       device_manager->UpdateTouchInfoForDisplay(
-          display1_id, display1.touch_device_id(),
-          GetTouchTransform(source_display, display1,
+          target_display.id(), display1.touch_device_id(),
+          GetTouchTransform(target_display, display1,
                             FindTouchscreenById(display1.touch_device_id()),
                             fb_size));
       device_manager->UpdateTouchInfoForDisplay(
-          display2_id, display2.touch_device_id(),
-          GetTouchTransform(source_display, display2,
+          target_display.id(), display2.touch_device_id(),
+          GetTouchTransform(target_display, display2,
                             FindTouchscreenById(display2.touch_device_id()),
                             fb_size));
     } else {
-      // In mirror mode, both displays share the same root window so
-      // both display ids are associated with the root window.
-      aura::Window* root = display_controller->GetPrimaryRootWindow();
-      RootWindowController::ForWindow(root)->ash_host()->UpdateDisplayID(
-          display1_id, display2_id);
+      // In mirror mode, there is just one WindowTreeHost and two displays. Make
+      // the WindowTreeHost accept touch events from both displays.
+      int64 primary_display_id = display_controller->GetPrimaryDisplayId();
       device_manager->UpdateTouchInfoForDisplay(
-          display1_id, display1.touch_device_id(),
+          primary_display_id, display1.touch_device_id(),
           GetTouchTransform(display1, display1,
                             FindTouchscreenById(display1.touch_device_id()),
                             fb_size));
       device_manager->UpdateTouchInfoForDisplay(
-          display2_id, display2.touch_device_id(),
+          primary_display_id, display2.touch_device_id(),
           GetTouchTransform(display2, display2,
                             FindTouchscreenById(display2.touch_device_id()),
                             fb_size));
@@ -219,15 +213,6 @@ void TouchTransformerController::UpdateTouchTransformer() const {
   if (display_manager->num_connected_displays() > 1) {
     // In actual extended mode, each display is associated with one
     // WindowTreeHost.
-    aura::Window* root1 =
-        display_controller->GetRootWindowForDisplayId(display1_id);
-    aura::Window* root2 =
-        display_controller->GetRootWindowForDisplayId(display2_id);
-    RootWindowController::ForWindow(root1)->ash_host()->UpdateDisplayID(
-        display1_id, gfx::Display::kInvalidDisplayID);
-    RootWindowController::ForWindow(root2)->ash_host()->UpdateDisplayID(
-        display2_id, gfx::Display::kInvalidDisplayID);
-    // Mapping from framebuffer size to each display's native resolution.
     device_manager->UpdateTouchInfoForDisplay(
         display1_id, display1.touch_device_id(),
         GetTouchTransform(display1, display1,
@@ -241,11 +226,7 @@ void TouchTransformerController::UpdateTouchTransformer() const {
     return;
   }
 
-  // Single display mode. The root window has one associated display id.
-  aura::Window* root =
-      display_controller->GetRootWindowForDisplayId(single_display.id());
-  RootWindowController::ForWindow(root)->ash_host()->UpdateDisplayID(
-      single_display.id(), gfx::Display::kInvalidDisplayID);
+  // Single display mode. The WindowTreeHost has one associated display id.
   device_manager->UpdateTouchInfoForDisplay(
       single_display_id, single_display.touch_device_id(),
       GetTouchTransform(single_display, single_display,

@@ -9,6 +9,7 @@
 #include "chrome/browser/enhanced_bookmarks/android/bookmark_image_service_android.h"
 #include "chrome/browser/enhanced_bookmarks/enhanced_bookmark_model_factory.h"
 #include "chrome/grit/browser_resources.h"
+#include "chrome/renderer/chrome_isolated_world_ids.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/enhanced_bookmarks/enhanced_bookmark_model.h"
 #include "content/public/browser/browser_context.h"
@@ -18,7 +19,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
 #include "net/base/load_flags.h"
+#include "skia/ext/image_operations.h"
+#include "ui/base/device_form_factor.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/image/image_skia.h"
 
 using content::Referrer;
@@ -33,6 +37,30 @@ BookmarkImageServiceAndroid::BookmarkImageServiceAndroid(
           EnhancedBookmarkModelFactory::GetForBrowserContext(browserContext),
           make_scoped_refptr(content::BrowserThread::GetBlockingPool())),
       browser_context_(browserContext) {
+  // The images we're saving will be used locally. So it's wasteful to store
+  // images larger than the device resolution.
+  gfx::DeviceDisplayInfo display_info;
+  int max_length = std::min(display_info.GetPhysicalDisplayWidth(),
+                            display_info.GetPhysicalDisplayHeight());
+  // GetPhysicalDisplay*() returns 0 for pre-JB MR1. If so, fall back to the
+  // second best option we have.
+  if (max_length == 0) {
+    max_length = std::min(display_info.GetDisplayWidth(),
+                          display_info.GetDisplayHeight());
+  }
+
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
+    max_length = max_length / 2;
+  } else if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
+    max_length = max_length * 3 / 4;
+  }
+
+  DCHECK(max_length > 0);
+  max_size_.set_height(max_length);
+  max_size_.set_width(max_length);
+}
+
+BookmarkImageServiceAndroid::~BookmarkImageServiceAndroid() {
 }
 
 void BookmarkImageServiceAndroid::RetrieveSalientImage(
@@ -45,7 +73,8 @@ void BookmarkImageServiceAndroid::RetrieveSalientImage(
       enhanced_bookmark_model_->bookmark_model()
           ->GetMostRecentlyAddedUserNodeForURL(page_url);
   if (!bookmark || !image_url.is_valid()) {
-    ProcessNewImage(page_url, update_bookmark, gfx::Image(), image_url);
+    ProcessNewImage(page_url, update_bookmark, image_url,
+                    scoped_ptr<gfx::Image>(new gfx::Image()));
     return;
   }
 
@@ -87,11 +116,12 @@ void BookmarkImageServiceAndroid::RetrieveSalientImageFromContext(
                               .as_string());
   }
 
-  render_frame_host->ExecuteJavaScript(
+  render_frame_host->ExecuteJavaScriptInIsolatedWorld(
       script_,
       base::Bind(
           &BookmarkImageServiceAndroid::RetrieveSalientImageFromContextCallback,
-          base::Unretained(this), page_url, update_bookmark));
+          base::Unretained(this), page_url, update_bookmark),
+      chrome::ISOLATED_WORLD_ID_CHROME_INTERNAL);
 }
 
 void BookmarkImageServiceAndroid::FinishSuccessfulPageLoadForTab(
@@ -184,6 +214,36 @@ void BookmarkImageServiceAndroid::RetrieveSalientImageFromContextCallback(
                        referrer_policy, update_bookmark);
 }
 
+scoped_ptr<gfx::Image> BookmarkImageServiceAndroid::ResizeImage(
+    const gfx::Image& image) {
+  DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  scoped_ptr<gfx::Image> result(new gfx::Image());
+
+  if (image.Width() > max_size_.width() &&
+      image.Height() > max_size_.height()) {
+    float resize_ratio = std::min(
+        ((float)max_size_.width()) / image.Width(),
+        ((float)max_size_.height()) / image.Height());
+    // +0.5f is for correct rounding. Without it, it's possible that dest_width
+    // is smaller than max_size_.Width() by one.
+    int dest_width = static_cast<int>(resize_ratio * image.Width() + 0.5f);
+    int dest_height = static_cast<int>(
+        resize_ratio * image.Height() + 0.5f);
+
+    *result = gfx::Image::CreateFrom1xBitmap(
+        skia::ImageOperations::Resize(image.AsBitmap(),
+                                      skia::ImageOperations::RESIZE_BEST,
+                                      dest_width,
+                                      dest_height));
+    result->AsImageSkia().MakeThreadSafe();
+  } else {
+    *result = image;
+  }
+
+  return result.Pass();
+}
+
 void BookmarkImageServiceAndroid::BitmapFetcherHandler::Start(
     content::BrowserContext* browser_context,
     const std::string& referrer,
@@ -199,17 +259,19 @@ void BookmarkImageServiceAndroid::BitmapFetcherHandler::Start(
 }
 
 void BookmarkImageServiceAndroid::BitmapFetcherHandler::OnFetchComplete(
-    const GURL url,
+    const GURL& url,
     const SkBitmap* bitmap) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  gfx::Image image;
+  scoped_ptr<gfx::Image> image;
   if (bitmap) {
     gfx::ImageSkia imageSkia = gfx::ImageSkia::CreateFrom1xBitmap(*bitmap);
     imageSkia.MakeThreadSafe();
-    image = gfx::Image(imageSkia);
+    image.reset(new gfx::Image(imageSkia));
+  } else {
+    image.reset(new gfx::Image());
   }
-  service_->ProcessNewImage(page_url_, update_bookmark_, image, url);
+  service_->ProcessNewImage(page_url_, update_bookmark_, url, image.Pass());
 
   delete this;
 }

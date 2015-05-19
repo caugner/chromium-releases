@@ -92,11 +92,13 @@
 //
 //<include src="app_installer.js">
 //<include src="app_state_controller.js">
+//<include src="column_visibility_controller.js">
 //<include src="cws_container_client.js">
 //<include src="dialog_action_controller.js">
 //<include src="dialog_type.js">
 //<include src="directory_contents.js">
 //<include src="directory_model.js">
+//<include src="empty_folder_controller.js">
 //<include src="file_manager.js">
 //<include src="file_manager_commands.js">
 //<include src="file_selection.js">
@@ -109,11 +111,11 @@
 //<include src="launch_param.js">
 //<include src="metadata/content_metadata_provider.js">
 //<include src="metadata/external_metadata_provider.js">
-//<include src="metadata/file_system_metadata.js">
 //<include src="metadata/file_system_metadata_provider.js">
-//<include src="metadata/metadata_cache.js">
 //<include src="metadata/metadata_cache_item.js">
 //<include src="metadata/metadata_item.js">
+//<include src="metadata/metadata_model.js">
+//<include src="metadata/multi_metadata_provider.js">
 //<include src="metadata/thumbnail_model.js">
 //<include src="metadata_update_controller.js">
 //<include src="naming_controller.js">
@@ -133,6 +135,7 @@
 //<include src="ui/dialog_footer.js">
 //<include src="ui/directory_tree.js">
 //<include src="ui/drag_selector.js">
+//<include src="ui/empty_folder.js">
 //<include src="ui/error_dialog.js">
 //<include src="ui/file_grid.js">
 //<include src="ui/file_manager_ui.js">

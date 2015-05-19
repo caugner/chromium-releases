@@ -12,12 +12,13 @@ Power usage is also measured.
 
 import time
 
-from metrics import keychain_metric
-from metrics import power
 from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.value import histogram
 from telemetry.value import histogram_util
+
+from metrics import keychain_metric
+from metrics import power
 
 # TODO: Revisit this test once multitab support is finalized.
 
@@ -27,7 +28,7 @@ class TabSwitching(page_test.PageTest):
   SAMPLE_TIME = 30
 
   def __init__(self):
-    super(TabSwitching, self).__init__(action_name_to_run='RunPageInteractions')
+    super(TabSwitching, self).__init__()
     self._first_page_in_pageset = True
     self._power_metric = None
 

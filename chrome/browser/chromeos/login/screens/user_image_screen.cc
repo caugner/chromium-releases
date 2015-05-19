@@ -89,8 +89,6 @@ UserImageScreen::~UserImageScreen() {
   CameraPresenceNotifier::GetInstance()->RemoveObserver(this);
   if (view_)
     view_->Unbind();
-  if (image_decoder_.get())
-    image_decoder_->set_delegate(NULL);
 }
 
 void UserImageScreen::OnScreenReady() {
@@ -100,15 +98,10 @@ void UserImageScreen::OnScreenReady() {
 }
 
 void UserImageScreen::OnPhotoTaken(const std::string& raw_data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   user_photo_ = gfx::ImageSkia();
-  if (image_decoder_.get())
-    image_decoder_->set_delegate(NULL);
-  image_decoder_ = new ImageDecoder(this, raw_data,
-                                    ImageDecoder::DEFAULT_CODEC);
-  scoped_refptr<base::MessageLoopProxy> task_runner =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
-  image_decoder_->Start(task_runner);
+  ImageDecoder::Cancel(this);
+  ImageDecoder::Start(this, raw_data);
 }
 
 void UserImageScreen::OnCameraPresenceCheckDone(bool is_camera_present) {
@@ -120,15 +113,13 @@ void UserImageScreen::HideCurtain() {
     view_->HideCurtain();
 }
 
-void UserImageScreen::OnImageDecoded(const ImageDecoder* decoder,
-                                     const SkBitmap& decoded_image) {
-  DCHECK_EQ(image_decoder_.get(), decoder);
+void UserImageScreen::OnImageDecoded(const SkBitmap& decoded_image) {
   user_photo_ = gfx::ImageSkia::CreateFrom1xBitmap(decoded_image);
   if (accept_photo_after_decoding_)
     OnImageAccepted();
 }
 
-void UserImageScreen::OnDecodeImageFailed(const ImageDecoder* decoder) {
+void UserImageScreen::OnDecodeImageFailed() {
   NOTREACHED() << "Failed to decode PNG image from WebUI";
 }
 

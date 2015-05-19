@@ -40,6 +40,14 @@ namespace {
 
 size_t StrideInBytes(size_t width, gfx::GpuMemoryBuffer::Format format) {
   switch (format) {
+    case gfx::GpuMemoryBuffer::ATCIA:
+    case gfx::GpuMemoryBuffer::DXT5:
+      return width;
+    case gfx::GpuMemoryBuffer::ATC:
+    case gfx::GpuMemoryBuffer::DXT1:
+    case gfx::GpuMemoryBuffer::ETC1:
+      DCHECK_EQ(width % 2, 0U);
+      return width / 2;
     case gfx::GpuMemoryBuffer::RGBA_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
       return width * 4;
@@ -64,15 +72,16 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
 
   // Overridden from gfx::GpuMemoryBuffer:
-  void* Map() override {
+  bool Map(void** data) override {
     mapped_ = true;
-    return &bytes_->data().front();
+    *data = &bytes_->data().front();
+    return true;
   }
   void Unmap() override { mapped_ = false; }
   bool IsMapped() const override { return mapped_; }
   Format GetFormat() const override { return format_; }
-  uint32 GetStride() const override {
-    return StrideInBytes(size_.width(), format_);
+  void GetStride(uint32* stride) const override {
+    *stride = StrideInBytes(size_.width(), format_);
   }
   gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();

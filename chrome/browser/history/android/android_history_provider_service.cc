@@ -4,15 +4,15 @@
 
 #include "chrome/browser/history/android/android_history_provider_service.h"
 
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/android/android_provider_backend.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/android/android_history_types.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 
 namespace {
 
@@ -38,10 +38,12 @@ class AndroidProviderTask : public history::HistoryDBTask {
 
  private:
   // history::HistoryDBTask implementation.
-  bool RunOnDBThread(history::HistoryBackend* backend,
+  bool RunOnDBThread(history::HistoryBackend* history_backend,
                      history::HistoryDatabase* db) override {
-    if (backend->android_provider_backend())
-      result_ = request_cb_.Run(backend->android_provider_backend());
+    history::AndroidProviderBackend* android_provider_backend =
+      history::AndroidProviderBackend::FromHistoryBackend(history_backend);
+    if (android_provider_backend)
+      result_ = request_cb_.Run(android_provider_backend);
     return true;
   }
 
@@ -252,7 +254,7 @@ AndroidHistoryProviderService::QueryHistoryAndBookmarks(
     const std::string& sort_order,
     const QueryCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(nullptr);
@@ -273,7 +275,7 @@ AndroidHistoryProviderService::UpdateHistoryAndBookmarks(
     const std::vector<base::string16>& selection_args,
     const UpdateCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -292,7 +294,7 @@ AndroidHistoryProviderService::DeleteHistoryAndBookmarks(
     const std::vector<base::string16>& selection_args,
     const DeleteCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -310,7 +312,7 @@ AndroidHistoryProviderService::InsertHistoryAndBookmark(
     const history::HistoryAndBookmarkRow& values,
     const InsertCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -328,7 +330,7 @@ AndroidHistoryProviderService::DeleteHistory(
     const std::vector<base::string16>& selection_args,
     const DeleteCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -348,7 +350,7 @@ AndroidHistoryProviderService::MoveStatement(
     int destination,
     const MoveStatementCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(current_pos);
@@ -363,7 +365,7 @@ AndroidHistoryProviderService::MoveStatement(
 
 void AndroidHistoryProviderService::CloseStatement(
     history::AndroidStatement* statement) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     delete statement;
@@ -379,7 +381,7 @@ AndroidHistoryProviderService::InsertSearchTerm(
     const history::SearchRow& row,
     const InsertCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -398,7 +400,7 @@ AndroidHistoryProviderService::UpdateSearchTerms(
     const std::vector<base::string16>& selection_args,
     const UpdateCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -417,7 +419,7 @@ AndroidHistoryProviderService::DeleteSearchTerms(
     const std::vector<base::string16>& selection_args,
     const DeleteCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(0);
@@ -438,7 +440,7 @@ AndroidHistoryProviderService::QuerySearchTerms(
     const std::string& sort_order,
     const QueryCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!hs) {
     callback.Run(nullptr);
@@ -457,7 +459,7 @@ AndroidHistoryProviderService::GetLargestRawFaviconForID(
     favicon_base::FaviconID favicon_id,
     const favicon_base::FaviconRawBitmapCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  FaviconService* fs = FaviconServiceFactory::GetForProfile(
+  favicon::FaviconService* fs = FaviconServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(fs);
   return fs->GetLargestRawFaviconForID(favicon_id, callback, tracker);

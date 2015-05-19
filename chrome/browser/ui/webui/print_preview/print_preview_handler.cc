@@ -37,7 +37,7 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/account_reconcilor_factory.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -57,7 +57,7 @@
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/cloud_devices/common/printer_description.h"
 #include "components/printing/common/print_messages.h"
-#include "components/signin/core/browser/account_reconcilor.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -580,7 +580,7 @@ PrintPreviewHandler::PrintPreviewHandler()
       manage_cloud_printers_dialog_request_count_(0),
       reported_failed_preview_(false),
       has_logged_printers_count_(false),
-      reconcilor_(NULL),
+      gaia_cookie_manager_service_(NULL),
       weak_factory_(this) {
   ReportUserActionHistogram(PREVIEW_STARTED);
 }
@@ -589,7 +589,7 @@ PrintPreviewHandler::~PrintPreviewHandler() {
   if (select_file_dialog_.get())
     select_file_dialog_->ListenerDestroyed();
 
-  UnregisterForMergeSession();
+  UnregisterForGaiaCookieChanges();
 }
 
 void PrintPreviewHandler::RegisterMessages() {
@@ -657,7 +657,7 @@ void PrintPreviewHandler::RegisterMessages() {
       "getExtensionPrinterCapabilities",
       base::Bind(&PrintPreviewHandler::HandleGetExtensionPrinterCapabilities,
                  base::Unretained(this)));
-  RegisterForMergeSession();
+  RegisterForGaiaCookieChanges();
 }
 
 bool PrintPreviewHandler::PrivetPrintingEnabled() {
@@ -915,9 +915,10 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
 
     EnsureExtensionPrinterHandlerSet();
     extension_printer_handler_->StartPrint(
-        destination_id, capabilities, print_ticket, gfx::Size(width, height),
-        data, base::Bind(&PrintPreviewHandler::OnExtensionPrintResult,
-                         base::Unretained(this)));
+        destination_id, capabilities, title, print_ticket,
+        gfx::Size(width, height), data,
+        base::Bind(&PrintPreviewHandler::OnExtensionPrintResult,
+                   base::Unretained(this)));
     return;
   }
 
@@ -1309,7 +1310,7 @@ void PrintPreviewHandler::OnPrintDialogShown() {
   ClosePreviewDialog();
 }
 
-void PrintPreviewHandler::MergeSessionCompleted(
+void PrintPreviewHandler::OnAddAccountToCookieCompleted(
     const std::string& account_id,
     const GoogleServiceAuthError& error) {
   OnSigninComplete();
@@ -1621,11 +1622,9 @@ bool PrintPreviewHandler::CreatePrivetHTTP(
 
   privet_http_factory_ =
       local_discovery::PrivetHTTPAsynchronousFactory::CreateInstance(
-          service_discovery_client_.get(),
           Profile::FromWebUI(web_ui())->GetRequestContext());
-  privet_http_resolution_ = privet_http_factory_->CreatePrivetHTTP(
-      name, device_description->address, callback);
-  privet_http_resolution_->Start();
+  privet_http_resolution_ = privet_http_factory_->CreatePrivetHTTP(name);
+  privet_http_resolution_->Start(device_description->address, callback);
 
   return true;
 }
@@ -1702,19 +1701,20 @@ void PrintPreviewHandler::OnExtensionPrintResult(bool success,
                                    base::StringValue(status));
 }
 
-void PrintPreviewHandler::RegisterForMergeSession() {
-  DCHECK(!reconcilor_);
+void PrintPreviewHandler::RegisterForGaiaCookieChanges() {
+  DCHECK(!gaia_cookie_manager_service_);
   Profile* profile = Profile::FromWebUI(web_ui());
   if (switches::IsEnableAccountConsistency() && !profile->IsOffTheRecord()) {
-    reconcilor_ = AccountReconcilorFactory::GetForProfile(profile);
-    if (reconcilor_)
-      reconcilor_->AddMergeSessionObserver(this);
+    gaia_cookie_manager_service_ =
+        GaiaCookieManagerServiceFactory::GetForProfile(profile);
+    if (gaia_cookie_manager_service_)
+      gaia_cookie_manager_service_->AddObserver(this);
   }
 }
 
-void PrintPreviewHandler::UnregisterForMergeSession() {
-  if (reconcilor_)
-    reconcilor_->RemoveMergeSessionObserver(this);
+void PrintPreviewHandler::UnregisterForGaiaCookieChanges() {
+  if (gaia_cookie_manager_service_)
+    gaia_cookie_manager_service_->RemoveObserver(this);
 }
 
 void PrintPreviewHandler::SetPdfSavedClosureForTesting(

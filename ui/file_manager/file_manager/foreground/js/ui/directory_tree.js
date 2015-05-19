@@ -17,8 +17,8 @@ var DirectoryItemTreeBaseMethods = {};
  * Finds a parent directory of the {@code entry} in {@code this}, and
  * invokes the DirectoryItem.selectByEntry() of the found directory.
  *
- * @param {!DirectoryEntry|!Object} entry The entry to be searched for. Can be
- *     a fake.
+ * @param {!DirectoryEntry|!FakeEntry} entry The entry to be searched for. Can
+ *     be a fake.
  * @return {boolean} True if the parent item is found.
  * @this {(DirectoryItem|VolumeItem|DirectoryTree)}
  */
@@ -153,8 +153,8 @@ DirectoryItem.prototype.updateSubElementsFromList = function(recursive) {
 /**
  * Calls DirectoryItemTreeBaseMethods.updateSubElementsFromList().
  *
- * @param {!DirectoryEntry|!Object} entry The entry to be searched for. Can be
- *     a fake.
+ * @param {!DirectoryEntry|!FakeEntry} entry The entry to be searched for. Can
+ *     be a fake.
  * @return {boolean} True if the parent item is found.
  */
 DirectoryItem.prototype.searchAndSelectByEntry = function(entry) {
@@ -292,7 +292,7 @@ DirectoryItem.prototype.updateSharedStatusIcon = function() {
 
 /**
  * Select the item corresponding to the given {@code entry}.
- * @param {!DirectoryEntry|!Object} entry The entry to be selected. Can be a
+ * @param {!DirectoryEntry|!FakeEntry} entry The entry to be selected. Can be a
  *     fake.
  */
 DirectoryItem.prototype.selectByEntry = function(entry) {
@@ -347,7 +347,7 @@ function SubDirectoryItem(label, dirEntry, parentDirItem, tree) {
 
   // Sets up icons of the item.
   var icon = item.querySelector('.icon');
-  icon.classList.add('volume-icon');
+  icon.classList.add('item-icon');
   var location = tree.volumeManager.getLocationInfo(item.entry);
   if (location && location.rootType && location.isRootEntry) {
     icon.setAttribute('volume-type-icon', location.rootType);
@@ -396,8 +396,8 @@ SubDirectoryItem.prototype.setContextMenu = function(menu) {
  */
 SubDirectoryItem.prototype.updateSharedStatusIcon = function() {
   var icon = this.querySelector('.icon');
-  this.parentTree_.fileSystemMetadata.notifyEntriesChanged([this.dirEntry_]);
-  this.parentTree_.fileSystemMetadata.get([this.dirEntry_], ['shared']).then(
+  this.parentTree_.metadataModel.notifyEntriesChanged([this.dirEntry_]);
+  this.parentTree_.metadataModel.get([this.dirEntry_], ['shared']).then(
       function(metadata) {
         icon.classList.toggle('shared', metadata[0] && metadata[0].shared);
       });
@@ -410,8 +410,9 @@ SubDirectoryItem.prototype.updateSharedStatusIcon = function() {
  * A TreeItem which represents a volume. Volume items are displayed as
  * top-level children of DirectoryTree.
  *
- * @param {NavigationModelItem} modelItem NavigationModelItem of this volume.
- * @param {DirectoryTree} tree Current tree, which contains this item.
+ * @param {!NavigationModelVolumeItem} modelItem NavigationModelItem of this
+ *     volume.
+ * @param {!DirectoryTree} tree Current tree, which contains this item.
  * @extends {DirectoryItem}
  * @constructor
  */
@@ -505,7 +506,7 @@ VolumeItem.prototype.isRemovable_ = function() {
  * @private
  */
 VolumeItem.prototype.setupIcon_ = function(icon, volumeInfo) {
-  icon.classList.add('volume-icon');
+  icon.classList.add('item-icon');
   if (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.PROVIDED) {
     var backgroundImage = '-webkit-image-set(' +
         'url(chrome://extension-icon/' + volumeInfo.extensionId +
@@ -545,6 +546,12 @@ VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
       unmountCommand.execute(this);
     }.bind(this));
     rowElement.appendChild(ejectButton);
+
+    // Add paper-ripple effect on the eject button.
+    var ripple = cr.doc.createElement('paper-ripple');
+    ripple.setAttribute('fit', '');
+    ripple.className = 'circle recenteringTouch';
+    ejectButton.appendChild(ripple);
   }
 };
 
@@ -556,8 +563,9 @@ VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
  * A TreeItem which represents a Drive volume. Drive volume has fake entries
  * such as Recent, Shared with me, and Offline in it.
  *
- * @param {NavigationModelItem} modelItem NavigationModelItem of this volume.
- * @param {DirectoryTree} tree Current tree, which contains this item.
+ * @param {!NavigationModelVolumeItem} modelItem NavigationModelItem of this
+ *     volume.
+ * @param {!DirectoryTree} tree Current tree, which contains this item.
  * @extends {VolumeItem}
  * @constructor
  */
@@ -651,7 +659,7 @@ DriveVolumeItem.prototype.updateItemByEntry = function(changedDirectoryEntry) {
 
 /**
  * Select the item corresponding to the given entry.
- * @param {!DirectoryEntry|!Object} entry The directory entry to be selected.
+ * @param {!DirectoryEntry|!FakeEntry} entry The directory entry to be selected.
  *     Can be a fake.
  * @override
  */
@@ -667,8 +675,9 @@ DriveVolumeItem.prototype.selectByEntry = function(entry) {
  * A TreeItem which represents a shortcut for Drive folder.
  * Shortcut items are displayed as top-level children of DirectoryTree.
  *
- * @param {NavigationModelItem} modelItem NavigationModelItem of this volume.
- * @param {DirectoryTree} tree Current tree, which contains this item.
+ * @param {!NavigationModelShortcutItem} modelItem NavigationModelItem of this
+ *     volume.
+ * @param {!DirectoryTree} tree Current tree, which contains this item.
  * @extends {cr.ui.TreeItem}
  * @constructor
  */
@@ -683,7 +692,7 @@ function ShortcutItem(modelItem, tree) {
   item.innerHTML = TREE_ITEM_INNTER_HTML;
 
   var icon = item.querySelector('.icon');
-  icon.classList.add('volume-icon');
+  icon.classList.add('item-icon');
   icon.setAttribute('volume-type-icon', VolumeManagerCommon.VolumeType.DRIVE);
 
   if (tree.contextMenuForRootItems)
@@ -710,8 +719,8 @@ ShortcutItem.prototype = {
  * Finds a parent directory of the {@code entry} in {@code this}, and
  * invokes the DirectoryItem.selectByEntry() of the found directory.
  *
- * @param {!DirectoryEntry|!Object} entry The entry to be searched for. Can be
- *     a fake.
+ * @param {!DirectoryEntry|!FakeEntry} entry The entry to be searched for. Can
+ *     be a fake.
  * @return {boolean} True if the parent item is found.
  */
 ShortcutItem.prototype.searchAndSelectByEntry = function(entry) {
@@ -776,6 +785,77 @@ ShortcutItem.prototype.activate = function() {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+// CommandItem
+
+/**
+ * A TreeItem which represents a command button.
+ * Command items are displayed as top-level children of DirectoryTree.
+ *
+ * @param {NavigationModelCommandItem} modelItem
+ * @param {DirectoryTree} tree Current tree, which contains this item.
+ * @extends {cr.ui.TreeItem}
+ * @constructor
+ */
+function CommandItem(modelItem, tree) {
+  var item = new cr.ui.TreeItem();
+  item.__proto__ = CommandItem.prototype;
+
+  item.parentTree_ = tree;
+  item.modelItem_ = modelItem;
+
+  item.innerHTML = TREE_ITEM_INNTER_HTML;
+
+  var icon = item.querySelector('.icon');
+  icon.classList.add('item-icon');
+  icon.setAttribute('command-icon', modelItem.command.id);
+
+  item.label = modelItem.label;
+  return item;
+}
+
+CommandItem.prototype = {
+  __proto__: cr.ui.TreeItem.prototype,
+  get entry() {
+    return null;
+  },
+  get modelItem() {
+    return this.modelItem_;
+  },
+  get labelElement() {
+    return this.firstElementChild.querySelector('.label');
+  }
+};
+
+/**
+ * @param {!DirectoryEntry|!FakeEntry} entry
+ * @return {boolean} True if the parent item is found.
+ */
+CommandItem.prototype.searchAndSelectByEntry = function(entry) {
+  return false;
+};
+
+/**
+ * @override
+ */
+CommandItem.prototype.handleClick = function(e) {
+  this.activate();
+};
+
+/**
+ * @param {!DirectoryEntry} entry
+ */
+CommandItem.prototype.selectByEntry = function(entry) {
+};
+
+/**
+ * Executes the command.
+ */
+CommandItem.prototype.activate = function() {
+  this.modelItem_.command.execute();
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
 // DirectoryTree
 
 /**
@@ -792,15 +872,14 @@ function DirectoryTree() {}
  * @param {HTMLElement} el Element to be DirectoryTree.
  * @param {!DirectoryModel} directoryModel Current DirectoryModel.
  * @param {!VolumeManagerWrapper} volumeManager VolumeManager of the system.
- * @param {!FileSystemMetadata} fileSystemMetadata Shared MetadataCache
- *     instance.
+ * @param {!MetadataModel} metadataModel Shared MetadataModel instance.
  * @param {boolean} fakeEntriesVisible True if it should show the fakeEntries.
  */
 DirectoryTree.decorate = function(
-    el, directoryModel, volumeManager, fileSystemMetadata, fakeEntriesVisible) {
+    el, directoryModel, volumeManager, metadataModel, fakeEntriesVisible) {
   el.__proto__ = DirectoryTree.prototype;
   /** @type {DirectoryTree} */ (el).decorateDirectoryTree(
-      directoryModel, volumeManager, fileSystemMetadata, fakeEntriesVisible);
+      directoryModel, volumeManager, metadataModel, fakeEntriesVisible);
 };
 
 DirectoryTree.prototype = {
@@ -839,11 +918,11 @@ DirectoryTree.prototype = {
   },
 
   /**
-   * The reference to shared FileSystemMetadata instance.
-   * @type {!FileSystemMetadata}
+   * The reference to shared MetadataModel instance.
+   * @type {!MetadataModel}
    */
-  get fileSystemMetadata() {
-    return this.fileSystemMetadata_;
+  get metadataModel() {
+    return this.metadataModel_;
   },
 
   set dataModel(dataModel) {
@@ -882,8 +961,9 @@ DirectoryTree.prototype.updateSubElementsFromList = function(recursive) {
   for (var i = 0; i < this.items.length;) {
     var found = false;
     for (var j = 0; j < this.dataModel.length; j++) {
-      if (NavigationModelItem.isSame(this.items[i].modelItem,
-                                     this.dataModel.item(j))) {
+      // Comparison by references, which is safe here, as model items are long
+      // living.
+      if (this.items[i].modelItem === this.dataModel.item(j)) {
         found = true;
         break;
       }
@@ -902,21 +982,26 @@ DirectoryTree.prototype.updateSubElementsFromList = function(recursive) {
   var itemIndex = 0;
   while (modelIndex < this.dataModel.length) {
     if (itemIndex < this.items.length &&
-        NavigationModelItem.isSame(this.items[itemIndex].modelItem,
-                                   this.dataModel.item(modelIndex))) {
+        this.items[itemIndex].modelItem === this.dataModel.item(modelIndex)) {
       if (recursive && this.items[itemIndex] instanceof VolumeItem)
         this.items[itemIndex].updateSubDirectories(true);
     } else {
       var modelItem = this.dataModel.item(modelIndex);
-      if (modelItem.isVolume) {
-        if (modelItem.volumeInfo.volumeType ===
-            VolumeManagerCommon.VolumeType.DRIVE) {
-          this.addAt(new DriveVolumeItem(modelItem, this), itemIndex);
-        } else {
-          this.addAt(new VolumeItem(modelItem, this), itemIndex);
-        }
-      } else {
-        this.addAt(new ShortcutItem(modelItem, this), itemIndex);
+      switch (modelItem.type) {
+        case NavigationModelItemType.VOLUME:
+          if (modelItem.volumeInfo.volumeType ===
+              VolumeManagerCommon.VolumeType.DRIVE) {
+            this.addAt(new DriveVolumeItem(modelItem, this), itemIndex);
+          } else {
+            this.addAt(new VolumeItem(modelItem, this), itemIndex);
+          }
+          break;
+        case NavigationModelItemType.SHORTCUT:
+          this.addAt(new ShortcutItem(modelItem, this), itemIndex);
+          break;
+        case NavigationModelItemType.COMMAND:
+          this.addAt(new CommandItem(modelItem, this), itemIndex);
+          break;
       }
     }
     itemIndex++;
@@ -931,8 +1016,8 @@ DirectoryTree.prototype.updateSubElementsFromList = function(recursive) {
  * Finds a parent directory of the {@code entry} in {@code this}, and
  * invokes the DirectoryItem.selectByEntry() of the found directory.
  *
- * @param {!DirectoryEntry|!Object} entry The entry to be searched for. Can be
- *     a fake.
+ * @param {!DirectoryEntry|!FakeEntry} entry The entry to be searched for. Can
+ *     be a fake.
  * @return {boolean} True if the parent item is found.
  */
 DirectoryTree.prototype.searchAndSelectByEntry = function(entry) {
@@ -959,18 +1044,17 @@ DirectoryTree.prototype.searchAndSelectByEntry = function(entry) {
  * Decorates an element.
  * @param {!DirectoryModel} directoryModel Current DirectoryModel.
  * @param {!VolumeManagerWrapper} volumeManager VolumeManager of the system.
- * @param {!FileSystemMetadata} fileSystemMetadata Shared MetadataCache
- *     instance.
+ * @param {!MetadataModel} metadataModel Shared MetadataModel instance.
  * @param {boolean} fakeEntriesVisible True if it should show the fakeEntries.
  */
 DirectoryTree.prototype.decorateDirectoryTree = function(
-    directoryModel, volumeManager, fileSystemMetadata, fakeEntriesVisible) {
+    directoryModel, volumeManager, metadataModel, fakeEntriesVisible) {
   cr.ui.Tree.prototype.decorate.call(this);
 
   this.sequence_ = 0;
   this.directoryModel_ = directoryModel;
   this.volumeManager_ = volumeManager;
-  this.fileSystemMetadata_ = fileSystemMetadata;
+  this.metadataModel_ = metadataModel;
   this.models_ = [];
 
   this.fileFilter_ = this.directoryModel_.getFileFilter();
@@ -998,7 +1082,7 @@ DirectoryTree.prototype.decorateDirectoryTree = function(
 
 /**
  * Select the item corresponding to the given entry.
- * @param {!DirectoryEntry|!Object} entry The directory entry to be selected.
+ * @param {!DirectoryEntry|!FakeEntry} entry The directory entry to be selected.
  *     Can be a fake.
  */
 DirectoryTree.prototype.selectByEntry = function(entry) {

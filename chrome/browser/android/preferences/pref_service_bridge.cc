@@ -104,6 +104,17 @@ bool IsContentSettingManaged(ContentSettingsType content_settings_type) {
   return provider == HostContentSettingsMap::POLICY_PROVIDER;
 }
 
+bool IsContentSettingManagedByCustodian(
+    ContentSettingsType content_settings_type) {
+  std::string source;
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  content_settings->GetDefaultContentSetting(content_settings_type, &source);
+  HostContentSettingsMap::ProviderType provider =
+      content_settings->GetProviderTypeFromSource(source);
+  return provider == HostContentSettingsMap::SUPERVISED_PROVIDER;
+}
+
 bool IsContentSettingUserModifiable(ContentSettingsType content_settings_type) {
   std::string source;
   HostContentSettingsMap* content_settings =
@@ -162,9 +173,19 @@ static jboolean GetRememberPasswordsEnabled(JNIEnv* env, jobject obj) {
       password_manager::prefs::kPasswordManagerSavingEnabled);
 }
 
+static jboolean GetPasswordManagerAutoSigninEnabled(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(
+      password_manager::prefs::kPasswordManagerAutoSignin);
+}
+
 static jboolean GetRememberPasswordsManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(
       password_manager::prefs::kPasswordManagerSavingEnabled);
+}
+
+static jboolean GetPasswordManagerAutoSigninManaged(JNIEnv* env, jobject obj) {
+  return GetPrefService()->IsManagedPreference(
+      password_manager::prefs::kPasswordManagerAutoSignin);
 }
 
 static jboolean GetDoNotTrackEnabled(JNIEnv* env, jobject obj) {
@@ -209,9 +230,15 @@ static jboolean GetSearchSuggestManaged(JNIEnv* env, jobject obj) {
 }
 
 static jboolean GetProtectedMediaIdentifierEnabled(JNIEnv* env, jobject obj) {
+  // Migrate Settings from Preferences to the Host Content Settings Map.
+  // TODO (knn): Remove this once users have migrated.
+  PrefService* prefs = GetPrefService();
+  if (!prefs->GetBoolean(prefs::kProtectedMediaIdentifierEnabled)) {
+    prefs->SetBoolean(prefs::kProtectedMediaIdentifierEnabled, true);
+    SetProtectedMediaIdentifierEnabled(env, obj, false);
+  }
   return GetBooleanForContentSetting(
-             CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER) &&
-         GetPrefService()->GetBoolean(prefs::kProtectedMediaIdentifierEnabled);
+      CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER);
 }
 
 static jboolean GetPushNotificationsEnabled(JNIEnv* env, jobject obj) {
@@ -219,19 +246,24 @@ static jboolean GetPushNotificationsEnabled(JNIEnv* env, jobject obj) {
 }
 
 static jboolean GetAllowLocationEnabled(JNIEnv* env, jobject obj) {
-  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
-         GetPrefService()->GetBoolean(prefs::kGeolocationEnabled);
+  // Migrate Settings from Preferences to the Host Content Settings Map.
+  // TODO (knn): Remove this once users have migrated.
+  PrefService* prefs = GetPrefService();
+  // Non-user-modifiable preference levels should have been migrated already.
+  DCHECK(prefs->IsUserModifiablePreference(prefs::kGeolocationEnabled));
+  if (!prefs->GetBoolean(prefs::kGeolocationEnabled)) {
+    prefs->SetBoolean(prefs::kGeolocationEnabled, true);
+    SetAllowLocationEnabled(env, obj, false);
+  }
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION);
 }
 
 static jboolean GetAllowLocationUserModifiable(JNIEnv* env, jobject obj) {
-  return IsContentSettingUserModifiable(CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
-         GetPrefService()->IsUserModifiablePreference(
-             prefs::kGeolocationEnabled);
+  return IsContentSettingUserModifiable(CONTENT_SETTINGS_TYPE_GEOLOCATION);
 }
 
 static jboolean GetAllowLocationManagedByCustodian(JNIEnv* env, jobject obj) {
-  return GetPrefService()->IsPreferenceManagedByCustodian(
-      prefs::kGeolocationEnabled);
+  return IsContentSettingManagedByCustodian(CONTENT_SETTINGS_TYPE_GEOLOCATION);
 }
 
 static jboolean GetResolveNavigationErrorEnabled(JNIEnv* env, jobject obj) {
@@ -271,6 +303,17 @@ static jboolean GetIncognitoModeEnabled(JNIEnv* env, jobject obj) {
 static jboolean GetIncognitoModeManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(
       prefs::kIncognitoModeAvailability);
+}
+
+static jboolean GetFullscreenManaged(JNIEnv* env, jobject obj) {
+  return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_FULLSCREEN);
+}
+
+static jboolean GetFullscreenAllowed(JNIEnv* env, jobject obj) {
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  return content_settings->GetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_FULLSCREEN, NULL) == CONTENT_SETTING_ALLOW;
 }
 
 namespace {
@@ -331,6 +374,10 @@ static void ClearBrowsingData(JNIEnv* env, jobject obj, jboolean history,
                                 BrowsingDataHelper::UNPROTECTED_WEB);
 }
 
+static jboolean CanDeleteBrowsingHistory(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(prefs::kAllowDeletingBrowserHistory);
+}
+
 static void SetAllowCookiesEnabled(JNIEnv* env, jobject obj, jboolean allow) {
   HostContentSettingsMap* host_content_settings_map =
       GetOriginalProfile()->GetHostContentSettingsMap();
@@ -350,23 +397,50 @@ static void SetRememberPasswordsEnabled(JNIEnv* env, jobject obj,
       password_manager::prefs::kPasswordManagerSavingEnabled, allow);
 }
 
+static void SetPasswordManagerAutoSigninEnabled(JNIEnv* env,
+                                                jobject obj,
+                                                jboolean enabled) {
+  GetPrefService()->SetBoolean(
+      password_manager::prefs::kPasswordManagerAutoSignin, enabled);
+}
+
 static void SetProtectedMediaIdentifierEnabled(JNIEnv* env,
                                                jobject obj,
                                                jboolean is_enabled) {
-  GetPrefService()->SetBoolean(prefs::kProtectedMediaIdentifierEnabled,
-                               is_enabled);
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
+      is_enabled ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
 }
 
-static void SetAllowLocationEnabled(JNIEnv* env, jobject obj, jboolean allow) {
-  GetPrefService()->SetBoolean(prefs::kGeolocationEnabled, allow);
+static void SetAllowLocationEnabled(JNIEnv* env,
+                                    jobject obj,
+                                    jboolean is_enabled) {
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION,
+      is_enabled ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
 }
 
 static void SetCameraMicEnabled(JNIEnv* env, jobject obj, jboolean allow) {
   HostContentSettingsMap* host_content_settings_map =
       GetOriginalProfile()->GetHostContentSettingsMap();
   host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
       allow ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+      allow ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
+}
+
+static void SetFullscreenAllowed(JNIEnv* env, jobject obj, jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_FULLSCREEN,
+      allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_ASK);
 }
 
 static void SetPushNotificationsEnabled(JNIEnv* env,
@@ -463,26 +537,22 @@ static void SetAllowPopupsEnabled(JNIEnv* env, jobject obj, jboolean allow) {
 }
 
 static jboolean GetCameraMicEnabled(JNIEnv* env, jobject obj) {
-  PrefService* prefs = GetPrefService();
-  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
-         prefs->GetBoolean(prefs::kAudioCaptureAllowed) &&
-         prefs->GetBoolean(prefs::kVideoCaptureAllowed);
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
+         GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
 }
 
 static jboolean GetCameraMicUserModifiable(JNIEnv* env, jobject obj) {
-  PrefService* prefs = GetPrefService();
-  return IsContentSettingUserModifiable(CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
-         prefs->IsUserModifiablePreference(prefs::kAudioCaptureAllowed) &&
-         prefs->IsUserModifiablePreference(prefs::kVideoCaptureAllowed);
+  return IsContentSettingUserModifiable(
+             CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
+         IsContentSettingUserModifiable(
+             CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
 }
 
 static jboolean GetCameraMicManagedByCustodian(JNIEnv* env, jobject obj) {
-  PrefService* prefs = GetPrefService();
-  if (prefs->IsPreferenceManagedByCustodian(prefs::kVideoCaptureAllowed))
-    return true;
-  if (prefs->IsPreferenceManagedByCustodian(prefs::kAudioCaptureAllowed))
-    return true;
-  return false;
+  return IsContentSettingManagedByCustodian(
+             CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
+         IsContentSettingManagedByCustodian(
+             CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
 }
 
 static jboolean GetAutologinEnabled(JNIEnv* env, jobject obj) {
@@ -494,19 +564,37 @@ static void SetAutologinEnabled(JNIEnv* env, jobject obj,
   GetPrefService()->SetBoolean(prefs::kAutologinEnabled, autologinEnabled);
 }
 
-static void SetPopupException(JNIEnv* env, jobject obj, jstring pattern,
-                              jboolean allow) {
+static void SetJavaScriptAllowed(JNIEnv* env, jobject obj, jstring pattern,
+                                 int setting) {
   HostContentSettingsMap* host_content_settings_map =
       GetOriginalProfile()->GetHostContentSettingsMap();
   host_content_settings_map->SetContentSetting(
       ContentSettingsPattern::FromString(ConvertJavaStringToUTF8(env, pattern)),
       ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_POPUPS,
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT,
       "",
-      allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+      static_cast<ContentSetting>(setting));
 }
 
-static void RemovePopupException(JNIEnv* env, jobject obj, jstring pattern) {
+static void GetJavaScriptExceptions(JNIEnv* env, jobject obj, jobject list) {
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  ContentSettingsForOneType entries;
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, "", &entries);
+  for (size_t i = 0; i < entries.size(); ++i) {
+    Java_PrefServiceBridge_addJavaScriptExceptionToList(
+        env, list,
+        ConvertUTF8ToJavaString(
+            env, entries[i].primary_pattern.ToString()).obj(),
+        ConvertUTF8ToJavaString(
+            env, GetStringForContentSettingsType(entries[i].setting)).obj(),
+        ConvertUTF8ToJavaString(env, entries[i].source).obj());
+  }
+}
+
+static void SetPopupException(JNIEnv* env, jobject obj, jstring pattern,
+                              int setting) {
   HostContentSettingsMap* host_content_settings_map =
       GetOriginalProfile()->GetHostContentSettingsMap();
   host_content_settings_map->SetContentSetting(
@@ -514,7 +602,7 @@ static void RemovePopupException(JNIEnv* env, jobject obj, jstring pattern) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_POPUPS,
       "",
-      CONTENT_SETTING_DEFAULT);
+      static_cast<ContentSetting>(setting));
 }
 
 static void GetPopupExceptions(JNIEnv* env, jobject obj, jobject list) {

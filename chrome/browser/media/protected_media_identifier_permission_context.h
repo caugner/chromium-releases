@@ -27,6 +27,10 @@ class RenderViewHost;
 class WebContents;
 }
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 // Manages protected media identifier permissions flow, and delegates UI
 // handling via PermissionQueueController.
 class ProtectedMediaIdentifierPermissionContext
@@ -54,18 +58,20 @@ class ProtectedMediaIdentifierPermissionContext
                         const GURL& requesting_frame,
                         bool allowed) override;
 
-  // Returns whether "Protected content" is enabled. It can be disabled by a
-  // user in the master switch in content settings, or by the device policy.
+  // Returns whether "Protected content" is enabled based on factors other
+  // than the protected media identifier content setting itself. For example,
+  // it can be disabled by a master switch in content settings, in incognito or
+  // guest mode, or by the device policy.
   bool IsProtectedMediaIdentifierEnabled() const;
 
 #if defined(OS_CHROMEOS)
-  void OnPlatformVerificationResult(
+  void OnPlatformVerificationConsentResponse(
       content::WebContents* web_contents,
       const PermissionRequestID& id,
       const GURL& requesting_origin,
       const GURL& embedding_origin,
       const BrowserPermissionCallback& callback,
-      chromeos::attestation::PlatformVerificationFlow::ConsentResponse
+      chromeos::attestation::PlatformVerificationDialog::ConsentResponse
           response);
 
   // |this| is shared among multiple WebContents, so we could receive multiple

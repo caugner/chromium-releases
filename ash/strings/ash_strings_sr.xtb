@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Додај налог за <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Тастатура на екрану је онемогућена</translation>
 <translation id="1057289296854808272">Ротација је укључена (додирните овде да бисте променили то)</translation>
+<translation id="5548285847212963613">Додатак „<ph name="EXTENSION_NAME"/>“ може да помогне у повезивању са овом мрежом.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> и <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Дугме за додатне опције</translation>
 <translation id="7904094684485781019">Администратор за овај налог је забранио вишеструко пријављивање.</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">Напуштање сесије</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Да</translation>
+<translation id="4804818685124855865">Прекини везу</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Одјави ме</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">Статусна трака, време <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Закључај</translation>
 <translation id="2805756323405976993">Апликације</translation>
-<translation id="2313845391432982560">Додатак „<ph name="EXTENSION_NAME"/>“ може да конфигурише ову мрежу.</translation>
 <translation id="2872961005593481000">Искључи</translation>
 <translation id="3433830597744061105">Управљај налозима</translation>
 <translation id="742594950370306541">Камера се користи.</translation>

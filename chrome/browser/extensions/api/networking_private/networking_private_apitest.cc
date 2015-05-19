@@ -71,6 +71,12 @@ class TestDelegate : public NetworkingPrivateDelegate {
     StringResult(success_callback, failure_callback);
   }
 
+  void ForgetNetwork(const std::string& guid,
+                     const VoidCallback& success_callback,
+                     const FailureCallback& failure_callback) override {
+    VoidResult(success_callback, failure_callback);
+  }
+
   void GetNetworks(const std::string& network_type,
                    bool configured_only,
                    bool visible_only,
@@ -99,6 +105,13 @@ class TestDelegate : public NetworkingPrivateDelegate {
   void StartDisconnect(const std::string& guid,
                        const VoidCallback& success_callback,
                        const FailureCallback& failure_callback) override {
+    VoidResult(success_callback, failure_callback);
+  }
+
+  void StartActivate(const std::string& guid,
+                     const std::string& carrier,
+                     const VoidCallback& success_callback,
+                     const FailureCallback& failure_callback) override {
     VoidResult(success_callback, failure_callback);
   }
 
@@ -161,6 +174,8 @@ class TestDelegate : public NetworkingPrivateDelegate {
     } else {
       scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue);
       result->SetString(::onc::network_config::kGUID, guid);
+      result->SetString(::onc::network_config::kType,
+                        ::onc::network_config::kWiFi);
       success_callback.Run(result.Pass());
     }
   }
@@ -331,6 +346,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, CreateNetwork) {
   EXPECT_TRUE(RunNetworkingSubtest("createNetwork")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, ForgetNetwork) {
+  EXPECT_TRUE(RunNetworkingSubtest("forgetNetwork")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, GetNetworks) {
   EXPECT_TRUE(RunNetworkingSubtest("getNetworks")) << message_;
 }
@@ -364,6 +383,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, StartConnect) {
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, StartDisconnect) {
   EXPECT_TRUE(RunNetworkingSubtest("startDisconnect")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, StartActivate) {
+  EXPECT_TRUE(RunNetworkingSubtest("startActivate")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, VerifyDestination) {
@@ -420,6 +443,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, CreateNetwork) {
   EXPECT_FALSE(RunNetworkingSubtest("createNetwork")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, ForgetNetwork) {
+  EXPECT_FALSE(RunNetworkingSubtest("forgetNetwork")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, GetNetworks) {
   EXPECT_FALSE(RunNetworkingSubtest("getNetworks")) << message_;
 }
@@ -443,6 +470,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, StartConnect) {
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, StartDisconnect) {
   EXPECT_FALSE(RunNetworkingSubtest("startDisconnect")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, StartActivate) {
+  EXPECT_FALSE(RunNetworkingSubtest("startActivate")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, VerifyDestination) {

@@ -42,20 +42,20 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "components/history/content/browser/download_constants_utils.h"
 #include "components/history/content/browser/history_database_helper.h"
 #include "components/history/core/browser/download_constants.h"
 #include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/in_memory_database.h"
+#include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/history/core/test/history_unittest_base.h"
@@ -136,8 +136,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   // Creates the HistoryBackend and HistoryDatabase on the current thread,
   // assigning the values to backend_ and db_.
   void CreateBackendAndDatabase() {
-    backend_ =
-        new HistoryBackend(history_dir_, new BackendDelegate(this), NULL);
+    backend_ = new HistoryBackend(new BackendDelegate(this), nullptr);
     backend_->Init(std::string(), false,
                    HistoryDatabaseParamsForPath(history_dir_));
     db_ = backend_->db_.get();
@@ -979,9 +978,7 @@ TEST_F(HistoryBackendDBTest,
 
 class HistoryTest : public testing::Test {
  public:
-  HistoryTest()
-      : got_thumbnail_callback_(false),
-        query_url_success_(false) {
+  HistoryTest() : query_url_success_(false) {
   }
 
   ~HistoryTest() override {}
@@ -999,7 +996,7 @@ class HistoryTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
-    history_service_.reset(new HistoryService);
+    history_service_.reset(new history::HistoryService);
     if (!history_service_->Init(std::string(),
                                 HistoryDatabaseParamsForPath(history_dir_))) {
       history_service_.reset();
@@ -1036,7 +1033,7 @@ class HistoryTest : public testing::Test {
   // Fills the query_url_row_ and query_url_visits_ structures with the
   // information about the given URL and returns true. If the URL was not
   // found, this will return false and those structures will not be changed.
-  bool QueryURL(HistoryService* history, const GURL& url) {
+  bool QueryURL(history::HistoryService* history, const GURL& url) {
     history_service_->QueryURL(
         url,
         true,
@@ -1063,7 +1060,7 @@ class HistoryTest : public testing::Test {
 
   // Fills in saved_redirects_ with the redirect information for the given URL,
   // returning true on success. False means the URL was not found.
-  void QueryRedirectsFrom(HistoryService* history, const GURL& url) {
+  void QueryRedirectsFrom(history::HistoryService* history, const GURL& url) {
     history_service_->QueryRedirectsFrom(
         url,
         base::Bind(&HistoryTest::OnRedirectQueryComplete,
@@ -1091,15 +1088,10 @@ class HistoryTest : public testing::Test {
   // When non-NULL, this will be deleted on tear down and we will block until
   // the backend thread has completed. This allows tests for the history
   // service to use this feature, but other tests to ignore this.
-  scoped_ptr<HistoryService> history_service_;
+  scoped_ptr<history::HistoryService> history_service_;
 
   // names of the database files
   base::FilePath history_dir_;
-
-  // Set by the thumbnail callback when we get data, you should be sure to
-  // clear this before issuing a thumbnail request.
-  bool got_thumbnail_callback_;
-  std::vector<unsigned char> thumbnail_data_;
 
   // Set by the redirect callback when we get data. You should be sure to
   // clear this before issuing a redirect request.

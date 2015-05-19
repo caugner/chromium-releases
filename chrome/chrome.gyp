@@ -277,6 +277,7 @@
         {
           # A library containing the actual code for the app mode app, shared
           # by unit tests.
+          # GN: //chrome/common:app_mode_app_support
           'target_name': 'app_mode_app_support',
           'type': 'static_library',
           'variables': { 'enable_wexit_time_destructors': 1, },
@@ -515,11 +516,11 @@
             'safe_browsing_proto',
           ],
           'sources': [
-            'browser/safe_browsing/binary_feature_extractor.cc',
-            'browser/safe_browsing/binary_feature_extractor.h',
-            'browser/safe_browsing/binary_feature_extractor_win.cc',
-            'browser/safe_browsing/pe_image_reader_win.cc',
-            'browser/safe_browsing/pe_image_reader_win.h',
+            'common/safe_browsing/binary_feature_extractor.cc',
+            'common/safe_browsing/binary_feature_extractor.h',
+            'common/safe_browsing/binary_feature_extractor_win.cc',
+            'common/safe_browsing/pe_image_reader_win.cc',
+            'common/safe_browsing/pe_image_reader_win.h',
             'tools/safe_browsing/sb_sigutil.cc',
           ],
         },
@@ -618,13 +619,17 @@
             '../components/components.gyp:gcm_driver_java',
             '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
+            '../components/components.gyp:precache_java',
             '../components/components.gyp:variations_java',
             '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
+            '../media/media.gyp:media_java',
             '../printing/printing.gyp:printing_java',
             '../sync/sync.gyp:sync_java',
             '../third_party/android_data_chart/android_data_chart.gyp:android_data_chart_java',
+            '../third_party/android_media/android_media.gyp:android_media_java',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
+            '../third_party/android_tools/android_tools.gyp:android_support_v7_mediarouter_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
             '../third_party/android_tools/android_tools.gyp:google_play_services_javalib',
             '../ui/android/ui_android.gyp:ui_java',
@@ -783,7 +788,7 @@
         },
       ],
     }],
-    ['syzyasan==1', {
+    ['kasko==1', {
       'variables': {
         'kasko_exe_dir': '<(DEPTH)/third_party/kasko',
       },

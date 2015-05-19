@@ -8,8 +8,10 @@
       "Test for chrome.fileSystemProvider.onGetMetadataRequested(). Mime types.",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "file_handlers": {
     "magic_handler": {

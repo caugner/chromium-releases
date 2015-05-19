@@ -31,12 +31,21 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
                                                  InputDeviceType type,
                                                  const EventDeviceInfo& devinfo,
                                                  scoped_ptr<Delegate> delegate)
-    : EventConverterEvdev(fd, path, id, type),
+    : EventConverterEvdev(fd,
+                          path,
+                          id,
+                          type,
+                          devinfo.name(),
+                          devinfo.vendor_id(),
+                          devinfo.product_id()),
       has_keyboard_(devinfo.HasKeyboard()),
       has_mouse_(devinfo.HasMouse()),
       has_touchpad_(devinfo.HasTouchpad()),
       has_caps_lock_led_(devinfo.HasLedEvent(LED_CAPSL)),
       delegate_(delegate.Pass()) {
+  // This class assumes it does not deal with internal keyboards.
+  CHECK(!has_keyboard_ || type != INPUT_DEVICE_INTERNAL);
+
   memset(&evdev_, 0, sizeof(evdev_));
   evdev_.log = OnLogMessage;
   evdev_.log_udata = this;
@@ -85,17 +94,6 @@ bool EventReaderLibevdevCros::HasTouchpad() const {
 
 bool EventReaderLibevdevCros::HasCapsLockLed() const {
   return has_caps_lock_led_;
-}
-
-void EventReaderLibevdevCros::SetAllowedKeys(
-    scoped_ptr<std::set<DomCode>> allowed_keys) {
-  DCHECK(HasKeyboard());
-  delegate_->SetAllowedKeys(allowed_keys.Pass());
-}
-
-void EventReaderLibevdevCros::AllowAllKeys() {
-  DCHECK(HasKeyboard());
-  delegate_->AllowAllKeys();
 }
 
 void EventReaderLibevdevCros::OnStopped() {

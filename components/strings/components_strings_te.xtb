@@ -52,6 +52,7 @@
 <translation id="7441627299479586546">చెల్లని విధాన విషయం</translation>
 <translation id="3885155851504623709">పారిష్</translation>
 <translation id="6973656660372572881">రెండు స్థిర ప్రాక్సీ సర్వర్లు మరియు ఒక .pac స్క్రిప్ట్ URL పేర్కొనబడ్డాయి.</translation>
+<translation id="1426410128494586442">అవును</translation>
 <translation id="4506176782989081258">ధృవీకరణ లోపం: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076"><ph name="TARGET_LANGUAGE"/>కు అనువాదం విఫలమైంది.</translation>
 <translation id="4103249731201008433">పరికరం క్రమ సంఖ్య చెల్లదు</translation>
@@ -70,11 +71,13 @@
 <translation id="1132774398110320017">Chrome స్వయంపూర్తి సెట్టింగ్‌లు...</translation>
 <translation id="6458467102616083041">విధానంచే డిపాల్ట్ శోధన ఆపివేయబడినందున విస్మరించబడింది.</translation>
 <translation id="1227224963052638717">తెలియని విధానం.</translation>
+<translation id="4250680216510889253">కాదు</translation>
 <translation id="9207861905230894330">కథనాన్ని జోడించడంలో విఫలమైంది.</translation>
 <translation id="5872918882028971132">తల్లి/తండ్రి సూచనలు</translation>
 <translation id="337363190475750230">కేటాయింపు తీసివేయబడింది</translation>
 <translation id="2367567093518048410">స్థాయి</translation>
 <translation id="7977590112176369853">&lt;ప్రశ్నను ఎంటర్ చెయ్యండి&gt;</translation>
+<translation id="552553974213252141">వచనం సరిగ్గా సంగ్రహించబడిందా?</translation>
 <translation id="7610193165460212391">విలువ <ph name="VALUE"/> పరిధి వెలుపల ఉంది.</translation>
 <translation id="3739623965217189342">మీరు కాపీ చేసిన లింక్</translation>
 <translation id="8311778656528046050">మీరు ఈ పేజీని మళ్లీ లోడ్ చేయాలనుకుంటున్నారా?</translation>
@@ -84,7 +87,6 @@
 <translation id="3024663005179499861">చెల్లని విధాన రకం</translation>
 <translation id="2030481566774242610">మీ ఉద్దేశ్యం <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">మాస్టర్‌కార్డ్</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, గడువు తేదీ: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">అమెరికన్ ఎక్స్‌ప్రెస్</translation>
 <translation id="225207911366869382">ఈ విధానం కోసం ఈ విలువ తగ్గించబడింది.</translation>
 <translation id="3145945101586104090">ప్రతిస్పందనను డీకోడ్ చేయడంలో విఫలమైంది</translation>

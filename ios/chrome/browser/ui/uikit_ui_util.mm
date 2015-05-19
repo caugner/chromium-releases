@@ -17,8 +17,8 @@
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/gfx/ios/uikit_util.h"
 #include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
-#include "ui/ios/uikit_util.h"
 
 namespace {
 
@@ -118,7 +118,7 @@ void AddBorderShadow(UIView* view, CGFloat offset, UIColor* color) {
       CGPointMake(rect.origin.x, rect.origin.y)};
   int numberOfWaypoints = sizeof(waypoints) / sizeof(waypoints[0]);
   CGMutablePathRef outline = CGPathCreateMutable();
-  CGPathAddLines(outline, NULL, waypoints, numberOfWaypoints);
+  CGPathAddLines(outline, nullptr, waypoints, numberOfWaypoints);
   view.layer.shadowColor = [color CGColor];
   view.layer.shadowOpacity = 1.0;
   view.layer.shadowOffset = CGSizeZero;
@@ -138,11 +138,11 @@ void AddRoundedBorderShadow(UIView* view, CGFloat radius, UIColor* color) {
   CGFloat minY = CGRectGetMinY(rect);
   CGFloat midY = CGRectGetMidY(rect);
   CGFloat maxY = CGRectGetMaxY(rect);
-  CGPathMoveToPoint(path, NULL, minX, midY);
-  CGPathAddArcToPoint(path, NULL, minX, minY, midX, minY, radius);
-  CGPathAddArcToPoint(path, NULL, maxX, minY, maxX, midY, radius);
-  CGPathAddArcToPoint(path, NULL, maxX, maxY, midX, maxY, radius);
-  CGPathAddArcToPoint(path, NULL, minX, maxY, minX, midY, radius);
+  CGPathMoveToPoint(path, nullptr, minX, midY);
+  CGPathAddArcToPoint(path, nullptr, minX, minY, midX, minY, radius);
+  CGPathAddArcToPoint(path, nullptr, maxX, minY, maxX, midY, radius);
+  CGPathAddArcToPoint(path, nullptr, maxX, maxY, midX, maxY, radius);
+  CGPathAddArcToPoint(path, nullptr, minX, maxY, minX, midY, radius);
   CGPathCloseSubpath(path);
   view.layer.shadowColor = [color CGColor];
   view.layer.shadowOpacity = 1.0;
@@ -185,12 +185,11 @@ UIColor* GetSettingsBackgroundColor() {
 
 UIImage* ResizeImage(UIImage* image,
                      CGSize targetSize,
-                     BOOL preserveAspectRatio,
-                     BOOL trimToFit) {
+                     ProjectionMode projectionMode) {
   CGSize revisedTargetSize;
   CGRect projectTo;
 
-  CalculateProjection([image size], targetSize, preserveAspectRatio, trimToFit,
+  CalculateProjection([image size], targetSize, projectionMode,
                       revisedTargetSize, projectTo);
 
   if (CGRectEqualToRect(projectTo, CGRectZero))
@@ -282,7 +281,7 @@ UIImage* BlurImage(UIImage* image,
       for (int i = 0; i < 3; ++i) {
         vImageBoxConvolve_ARGB8888(inBuffer,            // src.
                                    outBuffer,           // dst.
-                                   NULL,                // tempBuffer.
+                                   nullptr,             // tempBuffer.
                                    0,                   // srcOffsetToROI_X.
                                    0,                   // srcOffsetToROI_Y
                                    radius,              // kernel_height
@@ -310,7 +309,7 @@ UIImage* BlurImage(UIImage* image,
             (int16_t)roundf(floatingPointSaturationMatrix[i] * divisor);
       }
       vImageMatrixMultiply_ARGB8888(inBuffer, outBuffer, saturationMatrix,
-                                    divisor, NULL, NULL, kvImageNoFlags);
+                                    divisor, nullptr, nullptr, kvImageNoFlags);
     }
     if (outBuffer == &effectOutBuffer)
       effectImage = UIGraphicsGetImageFromCurrentImageContext();

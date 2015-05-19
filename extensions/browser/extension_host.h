@@ -7,18 +7,16 @@
 
 #include <set>
 #include <string>
-#include <vector>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer/elapsed_timer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/deferred_start_render_host.h"
 #include "extensions/browser/extension_function_dispatcher.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/stack_frame.h"
 #include "extensions/common/view_type.h"
 
@@ -49,7 +47,7 @@ class ExtensionHost : public DeferredStartRenderHost,
                       public content::WebContentsDelegate,
                       public content::WebContentsObserver,
                       public ExtensionFunctionDispatcher::Delegate,
-                      public content::NotificationObserver {
+                      public ExtensionRegistryObserver {
  public:
   ExtensionHost(const Extension* extension,
                 content::SiteInstance* site_instance,
@@ -61,7 +59,7 @@ class ExtensionHost : public DeferredStartRenderHost,
   content::WebContents* host_contents() const { return host_contents_.get(); }
   content::RenderViewHost* render_view_host() const;
   content::RenderProcessHost* render_process_host() const;
-  bool did_stop_loading() const { return did_stop_loading_; }
+  bool has_loaded_once() const { return has_loaded_once_; }
   bool document_element_available() const {
     return document_element_available_;
   }
@@ -86,9 +84,9 @@ class ExtensionHost : public DeferredStartRenderHost,
   void AddObserver(ExtensionHostObserver* observer);
   void RemoveObserver(ExtensionHostObserver* observer);
 
-  // Called when an IPC message is dispatched to the RenderView associated with
-  // this ExtensionHost.
-  void OnMessageDispatched(const std::string& event_name, int message_id);
+  // Called when an event is dispatched to the event page associated with this
+  // ExtensionHost.
+  void OnBackgroundEventDispatched(const std::string& event_name, int event_id);
 
   // Called by the ProcessManager when a network request is started by the
   // extension corresponding to this ExtensionHost.
@@ -105,7 +103,8 @@ class ExtensionHost : public DeferredStartRenderHost,
   void RenderViewReady() override;
   void RenderProcessGone(base::TerminationStatus status) override;
   void DocumentAvailableInMainFrame() override;
-  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DidStartLoading() override;
+  void DidStopLoading() override;
 
   // content::WebContentsDelegate:
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
@@ -126,17 +125,15 @@ class ExtensionHost : public DeferredStartRenderHost,
                                   content::MediaStreamType type) override;
   bool IsNeverVisible(content::WebContents* web_contents) override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ExtensionRegistryObserver:
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
  protected:
-  content::NotificationRegistrar* registrar() { return &registrar_; }
-
-  // Called after the extension page finishes loading but before the
-  // EXTENSION_HOST_DID_STOP_LOADING notification is sent.
-  virtual void OnDidStopLoading();
+  // Called each time this ExtensionHost completes a load finishes loading,
+  // before any stop-loading notifications or observer methods are called.
+  virtual void OnDidStopFirstLoad();
 
   // Navigates to the initial page.
   virtual void LoadInitialURL();
@@ -147,12 +144,19 @@ class ExtensionHost : public DeferredStartRenderHost,
  private:
   // DeferredStartRenderHost:
   void CreateRenderViewNow() override;
+  void AddDeferredStartRenderHostObserver(
+      DeferredStartRenderHostObserver* observer) override;
+  void RemoveDeferredStartRenderHostObserver(
+      DeferredStartRenderHostObserver* observer) override;
 
   // Message handlers.
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
-  void OnEventAck(int message_id);
+  void OnEventAck(int event_id);
   void OnIncrementLazyKeepaliveCount();
   void OnDecrementLazyKeepaliveCount();
+
+  // Records UMA for load events.
+  void RecordStopLoadingUMA();
 
   // Delegate for functionality that cannot exist in the extensions module.
   scoped_ptr<ExtensionHostDelegate> delegate_;
@@ -174,8 +178,10 @@ class ExtensionHost : public DeferredStartRenderHost,
   // host, so we can send messages to it before it finishes loading.
   content::RenderViewHost* render_view_host_;
 
-  // Whether the RenderWidget has reported that it has stopped loading.
-  bool did_stop_loading_;
+  // Whether the ExtensionHost has finished loading some content at least once.
+  // There may be subsequent loads - such as reloads and navigations - and this
+  // will not affect its value (it will remain true).
+  bool has_loaded_once_;
 
   // True if the main frame has finished parsing.
   bool document_element_available_;
@@ -186,8 +192,6 @@ class ExtensionHost : public DeferredStartRenderHost,
   // Messages sent out to the renderer that have not been acknowledged yet.
   std::set<int> unacked_messages_;
 
-  content::NotificationRegistrar registrar_;
-
   ExtensionFunctionDispatcher extension_function_dispatcher_;
 
   // The type of view being hosted.
@@ -197,6 +201,8 @@ class ExtensionHost : public DeferredStartRenderHost,
   scoped_ptr<base::ElapsedTimer> load_start_;
 
   ObserverList<ExtensionHostObserver> observer_list_;
+  ObserverList<DeferredStartRenderHostObserver>
+      deferred_start_render_host_observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

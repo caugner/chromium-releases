@@ -528,6 +528,24 @@ class WebViewInteractiveTest
     last_drop_data_ = last_drop_data;
   }
 
+  void FullscreenTestHelper(const std::string& test_name,
+                            const std::string& test_dir) {
+    TestHelper(test_name, test_dir, NO_TEST_SERVER);
+    content::WebContents* embedder_web_contents =
+        GetFirstAppWindowWebContents();
+    ASSERT_TRUE(embedder_web_contents);
+    ASSERT_TRUE(guest_web_contents());
+    // Click the guest to request fullscreen.
+    ExtensionTestMessageListener passed_listener(
+        "FULLSCREEN_STEP_PASSED", false);
+    passed_listener.set_failure_message("TEST_FAILED");
+    content::SimulateMouseClickAt(guest_web_contents(),
+                                  0,
+                                  blink::WebMouseEvent::ButtonLeft,
+                                  gfx::Point(20, 20));
+    ASSERT_TRUE(passed_listener.WaitUntilSatisfied());
+  }
+
  protected:
   TestGuestViewManagerFactory factory_;
   content::WebContents* guest_web_contents_;
@@ -891,6 +909,23 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
   GetGuestViewManager()->WaitForGuestRemoved(2u);
 }
 
+// Tests whether <webview> context menu sees <webview> local coordinates
+// in its RenderViewContextMenu params.
+// Local coordinates are required for plugin actions to work properly.
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ContextMenuParamCoordinates) {
+  TestHelper("testCoordinates", "web_view/context_menus/coordinates",
+             NO_TEST_SERVER);
+  ASSERT_TRUE(guest_web_contents());
+
+  ContextMenuWaiter menu_observer(content::NotificationService::AllSources());
+  SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost(),
+                        blink::WebMouseEvent::ButtonRight, 10, 20);
+  // Wait until the context menu is opened and closed.
+  menu_observer.WaitForMenuOpenAndClose();
+  ASSERT_EQ(10, menu_observer.params().x);
+  ASSERT_EQ(20, menu_observer.params().y);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ExecuteCode) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "execute_code")) << message_;
@@ -996,6 +1031,40 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
   TestHelper("testPointerLockLostWithFocus",
              "web_view/pointerlock",
              NO_TEST_SERVER);
+}
+
+// Disable this on mac, throws an assertion failure on teardown which
+// will result in flakiness:
+//
+// "not is fullscreen state"
+// "*** Assertion failure in -[_NSWindowFullScreenTransition
+//     transitionedWindowFrame],"
+// See similar bug: http://crbug.com/169820.
+//
+// In addition to the above, these tests are flaky on many platforms:
+// http://crbug.com/468660
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenAllow_EmbedderHasPermission) {
+  FullscreenTestHelper("testFullscreenAllow",
+                       "web_view/fullscreen/embedder_has_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenDeny_EmbedderHasPermission) {
+  FullscreenTestHelper("testFullscreenDeny",
+                       "web_view/fullscreen/embedder_has_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenAllow_EmbedderHasNoPermission) {
+  FullscreenTestHelper("testFullscreenAllow",
+                       "web_view/fullscreen/embedder_has_no_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenDeny_EmbedderHasNoPermission) {
+  FullscreenTestHelper("testFullscreenDeny",
+                       "web_view/fullscreen/embedder_has_no_permission");
 }
 
 // This test exercies the following scenario:

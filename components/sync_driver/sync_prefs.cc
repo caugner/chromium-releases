@@ -72,17 +72,6 @@ void SyncPrefs::RegisterProfilePrefs(
   user_types.Remove(syncer::BOOKMARKS);
   user_types.Remove(syncer::DEVICE_INFO);
 
-  // These two prefs are set from sync experiment to enable enhanced bookmarks.
-  registry->RegisterIntegerPref(
-      prefs::kEnhancedBookmarksExperimentEnabled,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-
-  registry->RegisterStringPref(
-      prefs::kEnhancedBookmarksExtensionId,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-
   // All types are set to off by default, which forces a configuration to
   // explicitly enable them. GetPreferredTypes() will ensure that any new
   // implicit types are enabled when their pref group is, or via
@@ -120,30 +109,6 @@ void SyncPrefs::RegisterProfilePrefs(
       prefs::kSyncSessionsGUID,
       std::string(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-
-  // We will start prompting people about new data types after the launch of
-  // SESSIONS - all previously launched data types are treated as if they are
-  // already acknowledged.
-  syncer::ModelTypeSet model_set;
-  model_set.Put(syncer::BOOKMARKS);
-  model_set.Put(syncer::PREFERENCES);
-  model_set.Put(syncer::PASSWORDS);
-  model_set.Put(syncer::AUTOFILL_PROFILE);
-  model_set.Put(syncer::AUTOFILL_WALLET_DATA);
-  model_set.Put(syncer::AUTOFILL);
-  model_set.Put(syncer::THEMES);
-  model_set.Put(syncer::EXTENSIONS);
-  model_set.Put(syncer::NIGORI);
-  model_set.Put(syncer::SEARCH_ENGINES);
-  model_set.Put(syncer::APPS);
-  model_set.Put(syncer::APP_LIST);
-  model_set.Put(syncer::TYPED_URLS);
-  model_set.Put(syncer::SESSIONS);
-  model_set.Put(syncer::ARTICLES);
-  model_set.Put(syncer::WIFI_CREDENTIALS);
-  registry->RegisterListPref(prefs::kSyncAcknowledgedSyncTypes,
-                             syncer::ModelTypeSetToValue(model_set),
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   registry->RegisterIntegerPref(
       prefs::kSyncRemainingRollbackTries, 0,
@@ -372,20 +337,6 @@ void SyncPrefs::SetSpareBootstrapToken(const std::string& token) {
 }
 #endif
 
-void SyncPrefs::AcknowledgeSyncedTypes(syncer::ModelTypeSet types) {
-  DCHECK(CalledOnValidThread());
-  // Add the types to the current set of acknowledged
-  // types, and then store the resulting set in prefs.
-  const syncer::ModelTypeSet acknowledged_types =
-      Union(types,
-            syncer::ModelTypeSetFromValue(
-                *pref_service_->GetList(prefs::kSyncAcknowledgedSyncTypes)));
-
-  scoped_ptr<base::ListValue> value(
-      syncer::ModelTypeSetToValue(acknowledged_types));
-  pref_service_->Set(prefs::kSyncAcknowledgedSyncTypes, *value);
-}
-
 int SyncPrefs::GetRemainingRollbackTries() const {
   return pref_service_->GetInteger(prefs::kSyncRemainingRollbackTries);
 }
@@ -404,12 +355,6 @@ void SyncPrefs::OnSyncManagedPrefChanged() {
 void SyncPrefs::SetManagedForTest(bool is_managed) {
   DCHECK(CalledOnValidThread());
   pref_service_->SetBoolean(prefs::kSyncManaged, is_managed);
-}
-
-syncer::ModelTypeSet SyncPrefs::GetAcknowledgeSyncedTypesForTest() const {
-  DCHECK(CalledOnValidThread());
-  return syncer::ModelTypeSetFromValue(
-      *pref_service_->GetList(prefs::kSyncAcknowledgedSyncTypes));
 }
 
 void SyncPrefs::RegisterPrefGroups() {

@@ -56,6 +56,8 @@ const char* const kKnownSettings[] = {
     kAttestationForContentProtectionEnabled,
     kDeviceAttestationEnabled,
     kDeviceOwner,
+    kHeartbeatEnabled,
+    kHeartbeatFrequency,
     kPolicyMissingMitigationMode,
     kReleaseChannel,
     kReleaseChannelDelegated,
@@ -79,6 +81,7 @@ const char* const kKnownSettings[] = {
     kDeviceDisabled,
     kDeviceDisabledMessage,
     kRebootOnShutdown,
+    kExtensionCacheSize,
 };
 
 bool HasOldMetricsFile() {
@@ -326,6 +329,26 @@ void DecodeReportingPolicies(
   }
 }
 
+void DecodeHeartbeatPolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PrefValueMap* new_values_cache) {
+  if (!policy.has_device_heartbeat_settings())
+    return;
+
+  const em::DeviceHeartbeatSettingsProto& heartbeat_policy =
+      policy.device_heartbeat_settings();
+  if (heartbeat_policy.has_heartbeat_enabled()) {
+    new_values_cache->SetBoolean(
+        kHeartbeatEnabled,
+        heartbeat_policy.heartbeat_enabled());
+  }
+  if (heartbeat_policy.has_heartbeat_frequency()) {
+    new_values_cache->SetInteger(
+        kHeartbeatFrequency,
+        heartbeat_policy.heartbeat_frequency());
+  }
+}
+
 void DecodeGenericPolicies(
     const em::ChromeDeviceSettingsProto& policy,
     PrefValueMap* new_values_cache) {
@@ -393,6 +416,13 @@ void DecodeGenericPolicies(
         policy.attestation_settings().content_protection_enabled());
   } else {
     new_values_cache->SetBoolean(kAttestationForContentProtectionEnabled, true);
+  }
+
+  if (policy.has_extension_cache_size() &&
+      policy.extension_cache_size().has_extension_cache_size()) {
+    new_values_cache->SetInteger(
+        kExtensionCacheSize,
+        policy.extension_cache_size().extension_cache_size());
   }
 }
 
@@ -587,6 +617,7 @@ void DeviceSettingsProvider::UpdateValuesCache(
   DecodeNetworkPolicies(settings, &new_values_cache);
   DecodeAutoUpdatePolicies(settings, &new_values_cache);
   DecodeReportingPolicies(settings, &new_values_cache);
+  DecodeHeartbeatPolicies(settings, &new_values_cache);
   DecodeGenericPolicies(settings, &new_values_cache);
   DecodeDeviceState(policy_data, &new_values_cache);
 

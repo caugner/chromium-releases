@@ -19,6 +19,7 @@ class FakeSupervisedUserManager;
 
 FakeChromeUserManager::FakeChromeUserManager()
     : supervised_user_manager_(new FakeSupervisedUserManager),
+      bootstrap_manager_(NULL),
       multi_profile_user_controller_(NULL) {
 }
 
@@ -63,6 +64,10 @@ void FakeChromeUserManager::AddKioskAppUser(
 void FakeChromeUserManager::LoginUser(const std::string& email) {
   UserLoggedIn(email, ProfileHelper::GetUserIdHashByUserIdForTesting(email),
                false /* browser_restart */);
+}
+
+BootstrapManager* FakeChromeUserManager::GetBootstrapManager() {
+  return bootstrap_manager_;
 }
 
 MultiProfileUserController*
@@ -166,6 +171,18 @@ UserFlow* FakeChromeUserManager::GetDefaultUserFlow() const {
   if (!default_flow_.get())
     default_flow_.reset(new DefaultUserFlow());
   return default_flow_.get();
+}
+
+bool FakeChromeUserManager::FindKnownUserPrefs(
+    const user_manager::UserID& user_id,
+    const base::DictionaryValue** out_value) {
+  return false;
+}
+
+void FakeChromeUserManager::UpdateKnownUserPrefs(
+    const user_manager::UserID& user_id,
+    const base::DictionaryValue& values,
+    bool clear) {
 }
 
 }  // namespace chromeos

@@ -81,6 +81,8 @@ class AwContents : public FindHelper::Listener,
                                  const std::string& host,
                                  const std::string& realm);
 
+  void SetOffscreenPreRaster(bool enabled);
+
   // Methods called from Java.
   void SetJavaPeers(JNIEnv* env,
                     jobject obj,
@@ -203,8 +205,8 @@ class AwContents : public FindHelper::Listener,
                          float min_page_scale_factor,
                          float max_page_scale_factor) override;
   void DidOverscroll(gfx::Vector2d overscroll_delta) override;
-
-  const BrowserViewRenderer* GetBrowserViewRenderer() const;
+  void ParentDrawConstraintsUpdated(
+      const ParentCompositorDrawConstraints& draw_constraints) override {}
 
   void ClearCache(JNIEnv* env, jobject obj, jboolean include_disk_files);
   void SetPendingWebContentsForPopup(scoped_ptr<content::WebContents> pending);
@@ -232,6 +234,8 @@ class AwContents : public FindHelper::Listener,
   // Geolocation API support
   void ShowGeolocationPrompt(const GURL& origin, base::Callback<void(bool)>);
   void HideGeolocationPrompt(const GURL& origin);
+
+  void SetDipScaleInternal(float dip_scale);
 
   JavaObjectWeakGlobalRef java_ref_;
   scoped_ptr<AwWebContentsDelegate> web_contents_delegate_;

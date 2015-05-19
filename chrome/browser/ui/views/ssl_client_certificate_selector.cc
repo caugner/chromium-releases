@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/web_modal/popup_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/client_certificate_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cert_request_info.h"
@@ -23,12 +24,11 @@
 SSLClientCertificateSelector::SSLClientCertificateSelector(
     content::WebContents* web_contents,
     const scoped_refptr<net::SSLCertRequestInfo>& cert_request_info,
-    const chrome::SelectCertificateCallback& callback)
+    scoped_ptr<content::ClientCertificateDelegate> delegate)
     : CertificateSelector(cert_request_info->client_certs, web_contents),
       SSLClientAuthObserver(web_contents->GetBrowserContext(),
                             cert_request_info,
-                            callback) {
-  DVLOG(1) << __FUNCTION__;
+                            delegate.Pass()) {
 }
 
 SSLClientCertificateSelector::~SSLClientCertificateSelector() {
@@ -42,19 +42,15 @@ void SSLClientCertificateSelector::Init() {
 }
 
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
-  DVLOG(1) << __FUNCTION__;
   GetWidget()->Close();
 }
 
 bool SSLClientCertificateSelector::Cancel() {
-  DVLOG(1) << __FUNCTION__;
-  StopObserving();
   CertificateSelected(nullptr);
   return true;
 }
 
 bool SSLClientCertificateSelector::Accept() {
-  DVLOG(1) << __FUNCTION__;
   scoped_refptr<net::X509Certificate> cert = GetSelectedCert();
   if (cert.get()) {
     // Remove the observer before we try unlocking, otherwise we might act on a
@@ -76,8 +72,16 @@ bool SSLClientCertificateSelector::Accept() {
   return false;
 }
 
+bool SSLClientCertificateSelector::Close() {
+  // By default, closing the dialog calls the Cancel method. However, selecting
+  // cancel in the UI currently continues the request with no certificate,
+  // remembering the selection. If the dialog is closed by closing the
+  // containing tab, the request should abort.
+  CancelCertificateSelection();
+  return true;
+}
+
 void SSLClientCertificateSelector::Unlocked(net::X509Certificate* cert) {
-  DVLOG(1) << __FUNCTION__;
   CertificateSelected(cert);
   GetWidget()->Close();
 }
@@ -87,11 +91,18 @@ namespace chrome {
 void ShowSSLClientCertificateSelector(
     content::WebContents* contents,
     net::SSLCertRequestInfo* cert_request_info,
-    const chrome::SelectCertificateCallback& callback) {
-  DVLOG(1) << __FUNCTION__ << " " << contents;
+    scoped_ptr<content::ClientCertificateDelegate> delegate) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  SSLClientCertificateSelector* selector =
-      new SSLClientCertificateSelector(contents, cert_request_info, callback);
+
+  // Not all WebContentses can show modal dialogs.
+  //
+  // TODO(davidben): Move this hook to the WebContentsDelegate and only try to
+  // show a dialog in Browser's implementation. https://crbug.com/456255
+  if (web_modal::PopupManager::FromWebContents(contents) == nullptr)
+    return;
+
+  SSLClientCertificateSelector* selector = new SSLClientCertificateSelector(
+      contents, cert_request_info, delegate.Pass());
   selector->Init();
   selector->Show();
 }

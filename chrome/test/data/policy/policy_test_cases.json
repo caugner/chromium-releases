@@ -143,6 +143,11 @@
       { "pref": "spdy.disabled" }
     ]
   },
+  
+  "QuicAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "QuicAllowed": true }
+  },
 
   "DisabledSchemes": {
     "os": ["win", "linux", "mac", "chromeos"],
@@ -468,6 +473,14 @@
 
   "ClearSiteDataOnExit": {
     "note": "This policy is retired, see http://crbug.com/133291."
+  },
+
+  "CaptivePortalAuthenticationIgnoresProxy": {
+    "os": ["chromeos"],
+    "test_policy": { "CaptivePortalAuthenticationIgnoresProxy": true },
+    "pref_mappings": [
+      { "pref": "proxy.captive_portal_ignores_proxy" }
+    ]
   },
 
   "ProxyMode": {
@@ -2226,6 +2239,12 @@
   "DeviceOpenNetworkConfiguration": {
   },
 
+  "HeartbeatEnabled": {
+  },
+
+  "HeartbeatFrequency": {
+  },
+
   "ReportDeviceVersionInfo": {
   },
 
@@ -2399,6 +2418,12 @@
   },
 
   "DeviceTransferSAMLCookies": {
+  },
+
+  "ExtensionCacheSize": {
+  },
+  
+  "DeviceLoginScreenDomainAutoComplete": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

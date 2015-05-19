@@ -440,7 +440,7 @@ TEST_F(CertVerifyProcTest, MAYBE_ExtraneousMD5RootCert) {
   ASSERT_NE(static_cast<X509Certificate*>(NULL), extra_cert.get());
 
   scoped_refptr<X509Certificate> root_cert =
-      ImportCertFromFile(certs_dir, "cross-signed-root-sha1.pem");
+      ImportCertFromFile(certs_dir, "cross-signed-root-sha256.pem");
   ASSERT_NE(static_cast<X509Certificate*>(NULL), root_cert.get());
 
   ScopedTestRoot scoped_root(root_cert.get());
@@ -1592,5 +1592,29 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     VerifyName,
     CertVerifyProcNameTest,
     testing::ValuesIn(kVerifyNameData));
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+// Test that CertVerifyProcMac reacts appropriately when Apple's certificate
+// verifier rejects a certificate with a fatal error. This is a regression
+// test for https://crbug.com/472291.
+TEST_F(CertVerifyProcTest, LargeKey) {
+  // Load root_ca_cert.pem into the test root store.
+  ScopedTestRoot test_root(
+      ImportCertFromFile(GetTestCertsDirectory(), "root_ca_cert.pem").get());
+
+  scoped_refptr<X509Certificate> cert(
+      ImportCertFromFile(GetTestCertsDirectory(), "large_key.pem"));
+
+  // Apple's verifier rejects this certificate as invalid because the
+  // RSA key is too large. If a future version of OS X changes this,
+  // large_key.pem may need to be regenerated with a larger key.
+  int flags = 0;
+  CertVerifyResult verify_result;
+  int error = Verify(cert.get(), "127.0.0.1", flags, NULL, empty_cert_list_,
+                     &verify_result);
+  EXPECT_EQ(ERR_CERT_INVALID, error);
+  EXPECT_EQ(CERT_STATUS_INVALID, verify_result.cert_status);
+}
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 }  // namespace net

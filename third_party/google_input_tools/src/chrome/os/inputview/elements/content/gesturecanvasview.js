@@ -12,14 +12,15 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 goog.provide('i18n.input.chrome.inputview.elements.content.GestureCanvasView');
+goog.provide('i18n.input.chrome.inputview.elements.content.GestureCanvasView.Point');
 
 goog.require('goog.async.Delay');
 goog.require('goog.dom.TagName');
 goog.require('goog.dom.classlist');
+goog.require('goog.style');
 goog.require('i18n.input.chrome.inputview.Css');
 goog.require('i18n.input.chrome.inputview.elements.Element');
 goog.require('i18n.input.chrome.inputview.elements.ElementType');
-
 
 goog.scope(function() {
 var Css = i18n.input.chrome.inputview.Css;
@@ -43,6 +44,13 @@ i18n.input.chrome.inputview.elements.content.GestureCanvasView =
       ElementType.GESTURE_CANVAS_VIEW, opt_eventTarget);
 
   /**
+   * Flag used to indicate whether or not gesturing is currently occuring.
+   *
+   * @type {boolean}
+   */
+  this.isGesturing = false;
+
+  /**
    * Actual canvas for drawing the gesture trail.
    *
    * @private {!Element}
@@ -57,11 +65,11 @@ i18n.input.chrome.inputview.elements.content.GestureCanvasView =
   this.drawingContext_;
 
   /**
-   * Drag events whose points should be drawn on the canvas.
+   * A list of list of gesture points to be rendered on the canvas as strokes.
    *
-   * @private {!Array}
+   * @private {!Array<GestureStroke>}
    */
-  this.dragEventList_ = [];
+  this.strokeList_ = [];
 
   /** @private {!goog.async.Delay} */
   this.animator_ = new goog.async.Delay(this.animateGestureTrail_, 0, this);
@@ -69,6 +77,227 @@ i18n.input.chrome.inputview.elements.content.GestureCanvasView =
 var GestureCanvasView =
     i18n.input.chrome.inputview.elements.content.GestureCanvasView;
 goog.inherits(GestureCanvasView, i18n.input.chrome.inputview.elements.Element);
+
+
+
+/**
+ * A single stroke on the canvas.
+ *
+ * @constructor
+ */
+i18n.input.chrome.inputview.elements.content.GestureCanvasView.GestureStroke =
+    function() {
+  /**
+   * The list of points that make up this stroke.
+   *
+   * @type {!Array.<!Point>}
+   */
+  this.points = [];
+
+  /**
+   * Whether or not this stroke is considered active. i.e. whether or not it
+   * should be considered for rendering and decoding.
+   *
+   * @private {boolean}
+   */
+  this.isActive_ = false;
+};
+var GestureStroke =
+    i18n.input.chrome.inputview.elements.content.GestureCanvasView
+        .GestureStroke;
+
+
+/**
+ * Rate at which the ttl should degrade for the fading stroke effect.
+ *
+ * @const {number}
+ */
+GestureStroke.DEGRADATION_RATE = 5;
+
+
+/**
+ * Starting time-to-live value.
+ *
+ * @const {number}
+ */
+GestureStroke.STARTING_TTL = 255;
+
+
+// TODO(stevet): This is temporary and needs to be updated with a dynamic value
+// that considers other parameters like the width of character keys.
+/**
+ * Distance threshold for when a stroke is considered active, in pixels.
+ *
+ * @const {number}
+ */
+GestureStroke.ACTIVE_THRESHOLD = 40;
+
+
+/**
+ * Calculates the color of the point based on the ttl.
+ *
+ * @param {number} ttl The time to live of the point.
+ * @return {string} The color to use for the point.
+ * @private
+ */
+GestureStroke.calculateColor_ = function(ttl) {
+  var shade = GestureStroke.STARTING_TTL - ttl;
+  if (shade < 0) {
+    shade = 0;
+  }
+  return 'rgb(' + shade + ', ' + shade + ', ' + shade + ')';
+};
+
+
+/**
+ * Calculates the distance between two points.
+ *
+ * @param {!Point} first The first point.
+ * @param {!Point} second The second point.
+ * @return {number} The number of pixels between first and second.
+ * @private
+ */
+GestureStroke.calculateDistance_ = function(first, second) {
+  // Simply use the Pythagorean.
+  var a = Math.abs(first.x - second.x);
+  var b = Math.abs(first.y - second.y);
+  return Math.sqrt(Math.pow(a, 2) + Math.pow(b, 2));
+};
+
+
+/**
+ * Calculates the line width of the point based on the ttl.
+ *
+ * @param {number} ttl The time to live of the point.
+ * @return {number} The line width to use for the point.
+ * @private
+ */
+GestureStroke.calculateLineWidth_ = function(ttl) {
+  var ratio = ttl / GestureStroke.STARTING_TTL;
+  if (ratio < 0) {
+    ratio = 0;
+  }
+  return 9 * ratio;
+};
+
+
+/**
+ * Degrades all the points in this stroke.
+ *
+ * @return {boolean} Returns true if it was possible to degrade one or more
+ *     points, otherwise it means that this stroke is now empty.
+ */
+GestureStroke.prototype.degrade = function() {
+  var all_empty = true;
+  for (var i = 0; i < this.points.length; i++) {
+    if (this.points[i].ttl > 0) {
+      this.points[i].ttl -= GestureStroke.DEGRADATION_RATE;
+      all_empty = false;
+    }
+  }
+  return !all_empty;
+};
+
+
+/**
+ * Draw the gesture trail for this stroke onto the canvas context.
+ *
+ * @param {!CanvasRenderingContext2D} context The drawing context to render to.
+ */
+GestureStroke.prototype.draw = function(context) {
+  // Only start drawing active strokes. Note that TTL still updates even if a
+  // stroke is not yet active.
+  if (!this.isActive()) {
+    return;
+  }
+
+  for (var i = 1; i < this.points.length; i++) {
+    var first = this.points[i - 1];
+    var second = this.points[i];
+    // All rendering calculations are based on the second point in the segment
+    // because there must be at least two points for something to be rendered.
+    var ttl = second.ttl;
+    if (ttl <= 0) {
+      continue;
+    }
+
+    context.beginPath();
+    context.moveTo(first.x, first.y);
+    context.lineTo(second.x, second.y);
+    // TODO(stevet): Use alpha and #00B4CC.
+    context.strokeStyle = GestureStroke.calculateColor_(ttl);
+    context.fillStyle = 'none';
+    context.lineWidth = GestureStroke.calculateLineWidth_(ttl);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.stroke();
+  }
+};
+
+
+/**
+ * Returns true iff this stroke is considered "active". This means that it has
+ * passed a certain threshold and should be considered for rendering and
+ * decoding.
+ *
+ * @return {boolean} Whether or not the stroke is active.
+ */
+GestureStroke.prototype.isActive = function() {
+  // Once a stroke is active, it remains active.
+  if (this.isActive_) {
+    return this.isActive_;
+  }
+
+  if (this.points.length < 2) {
+    return false;
+  }
+
+  // Calculate the distance between the first point and the latest one.
+  this.isActive_ = GestureStroke.calculateDistance_(
+      this.points[0], this.points[this.points.length - 1]) >
+          GestureStroke.ACTIVE_THRESHOLD;
+
+  return this.isActive_;
+};
+
+
+
+/**
+ * One point in the gesture stroke.
+ *
+ * This class is used for both rendering the gesture stroke, and also for
+ * transmitting the stroke coordinates to the recognizer for decoding.
+ *
+ * @param {number} x The x coordinate.
+ * @param {number} y The y coordinate.
+ * @constructor
+ */
+i18n.input.chrome.inputview.elements.content.GestureCanvasView.Point =
+    function(x, y) {
+  /**
+   * The left offset relative to the canvas.
+   *
+   * @type {number}
+   */
+  this.x = x;
+
+  /**
+   * The top offset relative to the canvas.
+   *
+   * @type {number}
+   */
+  this.y = y;
+
+  /**
+   * The time-to-live value of the point, used to render the trail fading
+   * effect.
+   *
+   * @type {number}
+   */
+  this.ttl = GestureStroke.STARTING_TTL;
+};
+var Point =
+    i18n.input.chrome.inputview.elements.content.GestureCanvasView.Point;
 
 
 /**
@@ -81,27 +310,8 @@ GestureCanvasView.prototype.draw_ = function() {
   this.drawingContext_.clearRect(
       0, 0, this.drawingCanvas_.width, this.drawingCanvas_.height);
 
-  // Event positions come in relative to the top of the entire content area, so
-  // grab the canvas offset in order to calculate the correct position to draw
-  // the strokes.
-  var offset = goog.style.getPageOffset(this.drawingCanvas_);
-
-  // Iterate through all the points and draw them.
-  for (var i = 1; i < this.dragEventList_.length; i++) {
-    // TODO(stevet): The following is a basic implementation of the trail
-    // rendering. This should be later be updated to be more efficient and
-    // support effects like fading.
-    var first = this.dragEventList_[i - 1];
-    var second = this.dragEventList_[i];
-    this.drawingContext_.beginPath();
-    this.drawingContext_.strokeStyle = '#00B4CC';
-    this.drawingContext_.fillStyle = 'none';
-    this.drawingContext_.lineWidth = 8;
-    this.drawingContext_.lineCap = 'round';
-    this.drawingContext_.lineJoin = 'round';
-    this.drawingContext_.moveTo(first.x - offset.x, first.y - offset.y);
-    this.drawingContext_.lineTo(second.x - offset.x, second.y - offset.y);
-    this.drawingContext_.stroke();
+  for (var i = 0; i < this.strokeList_.length; i++) {
+    this.strokeList_[i].draw(this.drawingContext_);
   }
 };
 
@@ -117,6 +327,8 @@ GestureCanvasView.prototype.createDom = function() {
   this.drawingCanvas_ = dom.createDom(TagName.CANVAS, Css.DRAWING_CANVAS);
   this.drawingContext_ = this.drawingCanvas_.getContext('2d');
   dom.appendChild(elem, this.drawingCanvas_);
+
+  this.animator_.start();
 };
 
 
@@ -132,16 +344,29 @@ GestureCanvasView.prototype.resize = function(width, height) {
 
 
 /**
- * Add a new point to the collection of points, and refresh the view.
+ * Converts a drag event to a gesture Point and adds it to the collection of
+ * points.
  *
  * @param {!i18n.input.chrome.inputview.events.DragEvent} e Drag event to draw.
  */
-GestureCanvasView.prototype.addPointAndDraw = function(e) {
-  // Add to the collection.
-  this.dragEventList_.push(e);
+GestureCanvasView.prototype.addPoint = function(e) {
+  // Check if the last stroke was active before this point in order to determine
+  // if the user is gesturing. Only check the last stroke and not all the
+  // strokes because all previous strokes might be rendering/degrading, but that
+  // does not determine if the user is currently gesturing.
+  var was_active = this.latestStrokeActive_();
 
-  // Refresh the view.
-  this.draw_();
+  if (this.strokeList_.length == 0) {
+    this.strokeList_.push(new GestureStroke());
+  }
+
+  this.strokeList_[this.strokeList_.length - 1].points.push(
+      this.createGesturePoint_(e));
+
+  // If the new point |e| activated the last stroke, set gesturing to true.
+  if (!was_active && this.latestStrokeActive_()) {
+    this.isGesturing = true;
+  }
 };
 
 
@@ -149,8 +374,50 @@ GestureCanvasView.prototype.addPointAndDraw = function(e) {
  * Clear the view.
  */
 GestureCanvasView.prototype.clear = function() {
-  this.dragEventList_ = [];
+  this.strokeList_ = [];
   this.draw_();
+};
+
+
+/**
+ * Returns true iff the last stroke is currently active.
+ *
+ * @return {boolean} Whether or not the last stroke is active.
+ * @private
+ */
+GestureCanvasView.prototype.latestStrokeActive_ = function() {
+  if (this.strokeList_.length == 0) {
+    return false;
+  }
+  return this.strokeList_[this.strokeList_.length - 1].isActive();
+};
+
+
+/**
+ * Begins a new gesture.
+ *
+ * @param {!i18n.input.chrome.inputview.events.PointerEvent} e Drag event to
+ *        draw.
+ */
+GestureCanvasView.prototype.startStroke = function(e) {
+  // Always start a new array to separate previous strokes from this new one.
+  this.strokeList_.push(new GestureStroke());
+
+  this.strokeList_[this.strokeList_.length - 1].points.push(
+      this.createGesturePoint_(e));
+};
+
+
+/**
+ * Ends the current gesture.
+ *
+ * @param {!i18n.input.chrome.inputview.events.PointerEvent} e Final pointer
+ *     event to handle.
+ */
+GestureCanvasView.prototype.endStroke = function(e) {
+  // TODO(stevet): Ensure that this gets called even when the final touch event
+  //     is not on the client.
+  this.isGesturing = false;
 };
 
 
@@ -160,6 +427,45 @@ GestureCanvasView.prototype.clear = function() {
  * @private
  */
 GestureCanvasView.prototype.animateGestureTrail_ = function() {
-  // TODO(stevet): Implement the gesture trail animation here.
+  // TODO(stevet): This approximates drawing at 60fps. Refactor this and the
+  // voice input code to use a common call to requestRenderFrame.
+  var timeStep = 16;
+
+  this.draw_();
+  this.degradeStrokes_();
+  this.animator_.start(timeStep);
 };
+
+
+/**
+ * Returns a gesture point for a given event, with the correct coordinates.
+ *
+ * @param {!i18n.input.chrome.inputview.events.DragEvent|
+ *         i18n.input.chrome.inputview.events.PointerEvent} e The event to
+ *             convert.
+ * @return {Point} The converted gesture point.
+ * @private
+ */
+GestureCanvasView.prototype.createGesturePoint_ = function(e) {
+  var offset = goog.style.getPageOffset(this.drawingCanvas_);
+  return new Point(e.x - offset.x, e.y - offset.y);
+};
+
+
+/**
+ * Degrades the ttl of the points in all gesture strokes.
+ *
+ * @private
+ */
+GestureCanvasView.prototype.degradeStrokes_ = function() {
+  for (var i = 0; i < this.strokeList_.length; i++) {
+    // In the case where all points in the list are empty, dispose of the first.
+    if (!this.strokeList_[i].degrade()) {
+      this.strokeList_.splice(i, 1);
+      i--;
+    }
+  }
+};
+
+
 });  // goog.scope

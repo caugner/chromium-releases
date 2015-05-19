@@ -37,25 +37,26 @@ class ScopedPyRef {
  public:
   explicit ScopedPyRef(PyObject* object);
   ScopedPyRef(PyObject* object, ScopedPyRefAcquire);
+  ScopedPyRef(const ScopedPyRef& other);
 
   ~ScopedPyRef();
 
   // Releases ownership of the python object contained by this instance.
   PyObject* Release();
 
-  operator PyObject*() const;
+  operator PyObject*() const { return object_; }
+
+  ScopedPyRef& operator=(const ScopedPyRef& other);
 
  private:
   PyObject* object_;
-
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ScopedPyRef);
 };
 
 
 class PythonClosure : public mojo::Closure::Runnable {
  public:
   PythonClosure(PyObject* callable, const mojo::Closure& quit);
-  ~PythonClosure();
+  ~PythonClosure() override;
 
   void Run() const override;
 

@@ -32,6 +32,7 @@ import org.chromium.sync.test.util.MockAccountManager;
 import org.chromium.sync.test.util.MockSyncContentResolverDelegate;
 import org.chromium.ui.base.PageTransition;
 
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -61,8 +62,7 @@ public class SyncTest extends ChromeShellTestBase {
         MockSyncContentResolverDelegate syncContentResolverDelegate =
                 new MockSyncContentResolverDelegate();
         syncContentResolverDelegate.setMasterSyncAutomatically(true);
-        AndroidSyncSettings.overrideAndroidSyncSettingsForTests(
-                mContext, syncContentResolverDelegate);
+        AndroidSyncSettings.overrideForTests(mContext, syncContentResolverDelegate);
         // This call initializes the ChromeSigninController to use our test context.
         ChromeSigninController.get(mContext);
         startChromeBrowserProcessSync(getInstrumentation().getTargetContext());
@@ -87,6 +87,16 @@ public class SyncTest extends ChromeShellTestBase {
         });
 
         super.tearDown();
+    }
+
+    /**
+     * This is a regression test for http://crbug.com/475299.
+     */
+    @LargeTest
+    @Feature({"Sync"})
+    public void testGcmInitialized() throws Throwable {
+        setupTestAccountAndSignInToSync(FOREIGN_SESSION_TEST_MACHINE_ID);
+        assertTrue(ChromeSigninController.get(mContext).isGcmInitialized());
     }
 
     @LargeTest
@@ -177,11 +187,11 @@ public class SyncTest extends ChromeShellTestBase {
                 AccountManagerHelper.createAccountFromName(SyncTestUtil.DEFAULT_TEST_ACCOUNT);
 
         // Disabling Android sync should turn Chrome sync engine off.
-        AndroidSyncSettings.get(mContext).disableChromeSync(account);
+        AndroidSyncSettings.get(mContext).disableChromeSync();
         SyncTestUtil.verifySyncIsDisabled(mContext, account);
 
         // Enabling Android sync should turn Chrome sync engine on.
-        AndroidSyncSettings.get(mContext).enableChromeSync(account);
+        AndroidSyncSettings.get(mContext).enableChromeSync();
         SyncTestUtil.ensureSyncInitialized(mContext);
         SyncTestUtil.verifySignedInWithAccount(mContext, account);
     }
@@ -217,6 +227,57 @@ public class SyncTest extends ChromeShellTestBase {
 
         assertTrue("The typed URL entity for " + urlToLoad + " was not found on the fake server.",
                 synced);
+    }
+
+    /**
+     * Retrieves a local entity count and asserts that {@code expected} entities exist on the client
+     * with the ModelType represented by {@code modelTypeString}.
+     *
+     * TODO(pvalenzuela): Replace modelTypeString with the native ModelType enum or something else
+     * that will avoid callers needing to specify the native string version.
+     */
+    private void assertLocalEntityCount(String modelTypeString, int expected)
+            throws InterruptedException {
+        final SyncTestUtil.AboutSyncInfoGetter aboutInfoGetter =
+                new SyncTestUtil.AboutSyncInfoGetter(getActivity());
+        try {
+            runTestOnUiThread(aboutInfoGetter);
+        } catch (Throwable t) {
+            Log.w(TAG,
+                    "Exception while trying to fetch about sync info from ProfileSyncService.", t);
+            fail("Unable to fetch sync info from ProfileSyncService.");
+        }
+        boolean receivedModelTypeCounts = CriteriaHelper.pollForCriteria(new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    return !aboutInfoGetter.getModelTypeCount().isEmpty();
+                }
+        }, SyncTestUtil.UI_TIMEOUT_MS, SyncTestUtil.CHECK_INTERVAL_MS);
+        assertTrue("No model type counts present. Sync might be disabled.",
+                receivedModelTypeCounts);
+
+        Map<String, Integer> modelTypeCount = aboutInfoGetter.getModelTypeCount();
+        assertTrue("No count for model type: " + modelTypeString,
+                modelTypeCount.containsKey(modelTypeString));
+
+        // Reduce by one to account for type's root entity. This entity is always included but
+        // these tests don't care about its existence.
+        int actual = modelTypeCount.get(modelTypeString) - 1;
+        assertEquals("Expected amount of local client entities did not match.", expected, actual);
+    }
+
+    @LargeTest
+    @Feature({"Sync"})
+    public void testDownloadTypedUrl() throws InterruptedException {
+        setupTestAccountAndSignInToSync(FOREIGN_SESSION_TEST_MACHINE_ID);
+
+        assertLocalEntityCount("Typed URLs", 0);
+        mFakeServerHelper.injectTypedUrl("data:text,testDownloadTypedUrl");
+        SyncTestUtil.triggerSyncAndWaitForCompletion(mContext);
+        assertLocalEntityCount("Typed URLs", 1);
+
+        // TODO(pvalenzuela): Also verify that the downloaded typed URL matches the one that was
+        // injected. This data should be retrieved from the Sync node browser data.
     }
 
     private void setupTestAccountAndSignInToSync(

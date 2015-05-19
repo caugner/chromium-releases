@@ -91,8 +91,9 @@ public class ActivityDelegate {
             if (!isValidActivity(isIncognito, intent)) continue;
 
             int tabId = getTabIdFromIntent(intent);
+            if (tabId == Tab.INVALID_TAB_ID) continue;
+
             String initialUrl = getInitialUrlForDocument(intent);
-            if (tabId == Tab.INVALID_TAB_ID || initialUrl == null) continue;
             entries.add(new Entry(tabId, initialUrl));
         }
         return entries;
@@ -182,5 +183,20 @@ public class ActivityDelegate {
         Uri data = intent.getData();
         return TextUtils.equals(data.getScheme(), UrlConstants.DOCUMENT_SCHEME)
                 ? data.getQuery() : null;
+    }
+
+    /**
+     * Return whether any incognito tabs are visible to the user in Android's Overview list.
+     */
+    public boolean isIncognitoDocumentAccessibleToUser() {
+        Context context = ApplicationStatus.getApplicationContext();
+        ActivityManager activityManager =
+                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+
+        for (ActivityManager.AppTask task : activityManager.getAppTasks()) {
+            Intent intent = DocumentUtils.getBaseIntentFromTask(task);
+            if (isValidActivity(true, intent)) return true;
+        }
+        return false;
     }
 }

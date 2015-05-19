@@ -38,10 +38,10 @@ QuicByteCount QuicSentPacketManagerPeer::GetReceiveWindow(
 }
 
 // static
-void QuicSentPacketManagerPeer::SetIsServer(
+void QuicSentPacketManagerPeer::SetPerspective(
     QuicSentPacketManager* sent_packet_manager,
-    bool is_server) {
-  sent_packet_manager->is_server_ = is_server;
+    Perspective perspective) {
+  sent_packet_manager->perspective_ = perspective;
 }
 
 // static
@@ -75,20 +75,6 @@ void QuicSentPacketManagerPeer::SetLossAlgorithm(
 RttStats* QuicSentPacketManagerPeer::GetRttStats(
     QuicSentPacketManager* sent_packet_manager) {
   return &sent_packet_manager->rtt_stats_;
-}
-
-// static
-QuicPacketCount QuicSentPacketManagerPeer::GetNackCount(
-    const QuicSentPacketManager* sent_packet_manager,
-    QuicPacketSequenceNumber sequence_number) {
-  return sent_packet_manager->unacked_packets_.
-      GetTransmissionInfo(sequence_number).nack_count;
-}
-
-// static
-size_t QuicSentPacketManagerPeer::GetPendingRetransmissionCount(
-    const QuicSentPacketManager* sent_packet_manager) {
-  return sent_packet_manager->pending_retransmissions_.size();
 }
 
 // static

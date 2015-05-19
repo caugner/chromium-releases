@@ -16,14 +16,15 @@
 #include "base/prefs/pref_member.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "components/signin/core/browser/signin_manager_base.h"
+#include "components/sync_driver/sync_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -53,7 +54,8 @@ namespace options {
 // Chrome browser options page UI handler.
 class BrowserOptionsHandler
     : public OptionsPageUIHandler,
-      public ProfileSyncServiceObserver,
+      public ProfileInfoCacheObserver,
+      public sync_driver::SyncServiceObserver,
       public SigninManagerBase::Observer,
       public ui::SelectFileDialog::Listener,
       public ShellIntegration::DefaultWebClientObserver,
@@ -77,7 +79,7 @@ class BrowserOptionsHandler
   void RegisterMessages() override;
   void Uninitialize() override;
 
-  // ProfileSyncServiceObserver implementation.
+  // sync_driver::SyncServiceObserver implementation.
   void OnStateChanged() override;
 
   // SigninManagerBase::Observer implementation.
@@ -112,6 +114,14 @@ class BrowserOptionsHandler
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
+
+ // ProfileInfoCacheObserver implementation.
+ void OnProfileAdded(const base::FilePath& profile_path) override;
+ void OnProfileWasRemoved(const base::FilePath& profile_path,
+                          const base::string16& profile_name) override;
+ void OnProfileNameChanged(const base::FilePath& profile_path,
+                           const base::string16& old_profile_name) override;
+ void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
 #if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   void OnCloudPrintPrefsChanged();

@@ -9,18 +9,17 @@
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/prefs/pref_store.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "content/public/browser/cookie_store_factory.h"
 
+class JsonPrefStore;
+
 namespace chrome_browser_net {
 class Predictor;
 }  // namespace chrome_browser_net
-
-namespace content {
-class CookieCryptoDelegate;
-}  // namespace content
 
 namespace data_reduction_proxy {
 class DataReductionProxyNetworkDelegate;
@@ -31,6 +30,7 @@ class DomainReliabilityMonitor;
 }  // namespace domain_reliability
 
 namespace net {
+class CookieCryptoDelegate;
 class FtpTransactionFactory;
 class HttpServerProperties;
 class HttpServerPropertiesManager;
@@ -62,7 +62,6 @@ class ProfileImplIOData : public ProfileIOData {
         int media_cache_max_size,
         const base::FilePath& extensions_cookie_path,
         const base::FilePath& profile_path,
-        const base::FilePath& infinite_cache_path,
         chrome_browser_net::Predictor* predictor,
         content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
         storage::SpecialStoragePolicy* special_storage_policy,
@@ -162,7 +161,6 @@ class ProfileImplIOData : public ProfileIOData {
     base::FilePath media_cache_path;
     int media_cache_max_size;
     base::FilePath extensions_cookie_path;
-    base::FilePath infinite_cache_path;
     content::CookieStoreConfig::SessionCookieMode session_cookie_mode;
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy;
   };
@@ -214,6 +212,8 @@ class ProfileImplIOData : public ProfileIOData {
 
   // Lazy initialization params.
   mutable scoped_ptr<LazyParams> lazy_params_;
+
+  mutable scoped_refptr<JsonPrefStore> network_json_store_;
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
   mutable scoped_ptr<net::FtpTransactionFactory> ftp_factory_;

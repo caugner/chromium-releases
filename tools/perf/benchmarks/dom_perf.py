@@ -7,8 +7,8 @@ import math
 import os
 
 from telemetry import benchmark
-from telemetry import page as page_module
 from telemetry.core import util
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import merge_values
@@ -40,8 +40,7 @@ SCORE_TRACE_NAME = 'score'
 
 class _DomPerfMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_DomPerfMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_DomPerfMeasurement, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     try:

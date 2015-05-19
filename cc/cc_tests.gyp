@@ -76,6 +76,7 @@
       'quads/draw_quad_unittest.cc',
       'quads/list_container_unittest.cc',
       'quads/render_pass_unittest.cc',
+      'resources/display_list_recording_source_unittest.cc',
       'resources/display_item_list_unittest.cc',
       'resources/layer_quad_unittest.cc',
       'resources/picture_layer_tiling_set_unittest.cc',
@@ -83,8 +84,10 @@
       'resources/picture_pile_impl_unittest.cc',
       'resources/picture_pile_unittest.cc',
       'resources/picture_unittest.cc',
+      'resources/pixel_ref_map_unittest.cc',
       'resources/platform_color_unittest.cc',
       'resources/prioritized_resource_unittest.cc',
+      'resources/recording_source_unittest.cc',
       'resources/resource_provider_unittest.cc',
       'resources/resource_update_controller_unittest.cc',
       'resources/scoped_gpu_raster_unittest.cc',
@@ -105,7 +108,6 @@
       'test/test_web_graphics_context_3d_unittest.cc',
       'trees/blocking_task_runner_unittest.cc',
       'trees/damage_tracker_unittest.cc',
-      'trees/layer_sorter_unittest.cc',
       'trees/layer_tree_host_common_unittest.cc',
       'trees/layer_tree_host_impl_unittest.cc',
       'trees/layer_tree_host_pixeltest_blending.cc',
@@ -157,6 +159,7 @@
       'test/fake_delegated_renderer_layer.h',
       'test/fake_delegated_renderer_layer_impl.cc',
       'test/fake_delegated_renderer_layer_impl.h',
+      'test/fake_display_list_recording_source.h',
       'test/fake_external_begin_frame_source.cc',
       'test/fake_external_begin_frame_source.h',
       'test/fake_impl_proxy.h',
@@ -260,6 +263,8 @@
       'test/test_occlusion_tracker.h',
       'test/test_shared_bitmap_manager.cc',
       'test/test_shared_bitmap_manager.h',
+      'test/test_task_graph_runner.cc',
+      'test/test_task_graph_runner.h',
       'test/test_texture.cc',
       'test/test_texture.h',
       'test/test_tile_priorities.cc',
@@ -351,6 +356,7 @@
         'resources/picture_layer_tiling_perftest.cc',
         'resources/picture_pile_impl_perftest.cc',
         'resources/task_graph_runner_perftest.cc',
+        'resources/texture_compressor_perftest.cc',
         'resources/tile_manager_perftest.cc',
         'resources/tile_task_worker_pool_perftest.cc',
         'test/cc_test_suite.cc',
@@ -459,6 +465,17 @@
           ],
           'sources': [
             'cc_unittests.isolate',
+          ],
+          'conditions': [
+            # crbug.com/464062 xdisplaycheck is used to run cc_unittests_run on
+            # the linux try bots when using X11.
+            ['OS=="linux" and use_ozone==0',
+              {
+                'dependencies': [
+                  '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+                ],
+              }
+            ],
           ],
         },
       ],

@@ -28,6 +28,7 @@
 #include "base/trace_event/trace_event.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #include "content/browser/accessibility/browser_accessibility_manager_mac.h"
+#include "content/browser/bad_message.h"
 #import "content/browser/cocoa/system_hotkey_helper_mac.h"
 #import "content/browser/cocoa/system_hotkey_map.h"
 #include "content/browser/compositor/resize_lock.h"
@@ -52,7 +53,6 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_view_frame_subscriber.h"
 #import "content/public/browser/render_widget_host_view_mac_delegate.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -530,6 +530,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
       can_compose_inline_(true),
       browser_compositor_state_(BrowserCompositorDestroyed),
       browser_compositor_placeholder_(new BrowserCompositorMacPlaceholder),
+      page_at_minimum_scale_(true),
       is_loading_(false),
       allow_pause_for_resize_or_repaint_(true),
       is_guest_view_hack_(is_guest_view_hack),
@@ -605,6 +606,8 @@ void RenderWidgetHostViewMac::EnsureBrowserCompositorView() {
   if (browser_compositor_state_ == BrowserCompositorDestroyed) {
     browser_compositor_ = BrowserCompositorMac::Create();
     browser_compositor_->compositor()->SetRootLayer(root_layer_.get());
+    browser_compositor_->compositor()->SetHostHasTransparentBackground(
+        !GetBackgroundOpaque());
     browser_compositor_->accelerated_widget_mac()->SetNSView(this);
     browser_compositor_state_ = BrowserCompositorSuspended;
   }
@@ -838,6 +841,7 @@ RenderWidgetHost* RenderWidgetHostViewMac::GetRenderWidgetHost() const {
 }
 
 void RenderWidgetHostViewMac::Show() {
+  ScopedCAActionDisabler disabler;
   [cocoa_view_ setHidden:NO];
   if (!render_widget_host_->is_hidden())
     return;
@@ -857,6 +861,7 @@ void RenderWidgetHostViewMac::Show() {
 }
 
 void RenderWidgetHostViewMac::Hide() {
+  ScopedCAActionDisabler disabler;
   [cocoa_view_ setHidden:YES];
   WasOccluded();
   DestroySuspendedBrowserCompositorViewIfNeeded();
@@ -949,8 +954,7 @@ gfx::NativeViewId RenderWidgetHostViewMac::GetNativeViewId() const {
 }
 
 gfx::NativeViewAccessible RenderWidgetHostViewMac::GetNativeViewAccessible() {
-  NOTIMPLEMENTED();
-  return static_cast<gfx::NativeViewAccessible>(NULL);
+  return cocoa_view_;
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
@@ -1446,6 +1450,10 @@ void RenderWidgetHostViewMac::OnSwapCompositorFrame(
   TRACE_EVENT0("browser", "RenderWidgetHostViewMac::OnSwapCompositorFrame");
 
   last_scroll_offset_ = frame->metadata.root_scroll_offset;
+
+  page_at_minimum_scale_ = frame->metadata.page_scale_factor ==
+                           frame->metadata.min_page_scale_factor;
+
   if (frame->delegated_frame_data) {
     float scale_factor = frame->metadata.device_scale_factor;
 
@@ -1471,9 +1479,8 @@ void RenderWidgetHostViewMac::OnSwapCompositorFrame(
         frame->metadata.latency_info);
   } else {
     DLOG(ERROR) << "Received unexpected frame type.";
-    RecordAction(
-        base::UserMetricsAction("BadMessageTerminate_UnexpectedFrameType"));
-    render_widget_host_->GetProcess()->ReceivedBadMessage();
+    bad_message::ReceivedBadMessage(render_widget_host_->GetProcess(),
+                                    bad_message::RWHVM_UNEXPECTED_FRAME_TYPE);
   }
 }
 
@@ -1598,8 +1605,14 @@ void RenderWidgetHostViewMac::ShowDefinitionForSelection() {
 
 void RenderWidgetHostViewMac::SetBackgroundColor(SkColor color) {
   RenderWidgetHostViewBase::SetBackgroundColor(color);
+  bool opaque = GetBackgroundOpaque();
+
   if (render_widget_host_)
-    render_widget_host_->SetBackgroundOpaque(GetBackgroundOpaque());
+    render_widget_host_->SetBackgroundOpaque(opaque);
+
+  [cocoa_view_ setOpaque:opaque];
+  if (browser_compositor_state_ != BrowserCompositorDestroyed)
+    browser_compositor_->compositor()->SetHostHasTransparentBackground(!opaque);
 
   if (background_layer_) {
     [background_layer_
@@ -1730,6 +1743,7 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     canBeKeyView_ = YES;
     opaque_ = YES;
     focusedPluginIdentifier_ = -1;
+    pinchHasReachedZoomThreshold_ = false;
 
     // OpenGL support:
     if ([self respondsToSelector:
@@ -2261,6 +2275,13 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   [responderDelegate_ beginGestureWithEvent:event];
   gestureBeginEvent_.reset(
       new WebGestureEvent(WebInputEventFactory::gestureEvent(event, self)));
+
+  // If the page is at the minimum zoom level, require a threshold be reached
+  // before the pinch has an effect.
+  if (renderWidgetHostView_->page_at_minimum_scale_) {
+    pinchHasReachedZoomThreshold_ = false;
+    pinchUnusedAmount_ = 1;
+  }
 }
 
 - (void)endGestureWithEvent:(NSEvent*)event {
@@ -2387,6 +2408,12 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   if (!gestureBeginEvent_)
     return;
 
+  if (!pinchHasReachedZoomThreshold_) {
+      pinchUnusedAmount_ *= (1 + [event magnification]);
+      if (pinchUnusedAmount_ < 0.667 || pinchUnusedAmount_ > 1.5)
+          pinchHasReachedZoomThreshold_ = true;
+  }
+
   // Send a GesturePinchBegin event if none has been sent yet.
   if (!gestureBeginPinchSent_) {
     WebGestureEvent beginEvent(*gestureBeginEvent_);
@@ -2396,8 +2423,9 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   }
 
   // Send a GesturePinchUpdate event.
-  const WebGestureEvent& updateEvent =
+  WebGestureEvent updateEvent =
       WebInputEventFactory::gestureEvent(event, self);
+  updateEvent.data.pinchUpdate.zoomDisabled = !pinchHasReachedZoomThreshold_;
   renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(updateEvent);
 }
 

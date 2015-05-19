@@ -450,7 +450,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         Entry currentEntry = mEntryMap.get(id);
         String currentUrl = tab.getUrl();
         boolean canGoBack = tab.canGoBack();
-        boolean isCoveredByChildActivity = mTabDelegate.isTabCoveredByChildActivity(tab);
+        boolean isCoveredByChildActivity = tab.isCoveredByChildActivity();
         TabState state = tab.getState();
         if (currentEntry != null
                 && currentEntry.tabId == id
@@ -874,13 +874,6 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         super.destroy();
         mInitializationObservers.clear();
         mObservers.clear();
-    }
-
-    @Override
-    public void addTab(Tab tab) {
-        int parentIndex = indexOf(tab.getParentId());
-        int index = parentIndex == -1 ? getCount() : parentIndex + 1;
-        addTab(tab, index, tab.getLaunchType());
     }
 
     @Override

@@ -9,12 +9,12 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/history/core/browser/history_service.h"
 
 ChromeAutocompleteProviderClient::ChromeAutocompleteProviderClient(
     Profile* profile)
@@ -66,8 +66,9 @@ void ChromeAutocompleteProviderClient::Classify(
 }
 
 history::URLDatabase* ChromeAutocompleteProviderClient::InMemoryDatabase() {
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   return history_service ? history_service->InMemoryDatabase() : NULL;
 }
 

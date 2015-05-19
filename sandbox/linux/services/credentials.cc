@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
-#include <sys/capability.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -22,8 +21,12 @@
 #include "base/process/launch.h"
 #include "base/template_util.h"
 #include "base/third_party/valgrind/valgrind.h"
+#include "build/build_config.h"
 #include "sandbox/linux/services/namespace_utils.h"
+#include "sandbox/linux/services/proc_util.h"
 #include "sandbox/linux/services/syscall_wrappers.h"
+#include "sandbox/linux/services/thread_helpers.h"
+#include "sandbox/linux/system_headers/capability.h"
 
 namespace sandbox {
 
@@ -31,34 +34,14 @@ namespace {
 
 bool IsRunningOnValgrind() { return RUNNING_ON_VALGRIND; }
 
-struct CapFreeDeleter {
-  inline void operator()(cap_t cap) const {
-    int ret = cap_free(cap);
-    CHECK_EQ(0, ret);
-  }
-};
-
-// Wrapper to manage libcap2's cap_t type.
-typedef scoped_ptr<typeof(*((cap_t)0)), CapFreeDeleter> ScopedCap;
-
-struct CapTextFreeDeleter {
-  inline void operator()(char* cap_text) const {
-    int ret = cap_free(cap_text);
-    CHECK_EQ(0, ret);
-  }
-};
-
-// Wrapper to manage the result from libcap2's cap_from_text().
-typedef scoped_ptr<char, CapTextFreeDeleter> ScopedCapText;
-
 // Checks that the set of RES-uids and the set of RES-gids have
 // one element each and return that element in |resuid| and |resgid|
 // respectively. It's ok to pass NULL as one or both of the ids.
 bool GetRESIds(uid_t* resuid, gid_t* resgid) {
   uid_t ruid, euid, suid;
   gid_t rgid, egid, sgid;
-  PCHECK(getresuid(&ruid, &euid, &suid) == 0);
-  PCHECK(getresgid(&rgid, &egid, &sgid) == 0);
+  PCHECK(sys_getresuid(&ruid, &euid, &suid) == 0);
+  PCHECK(sys_getresgid(&rgid, &egid, &sgid) == 0);
   const bool uids_are_equal = (ruid == euid) && (ruid == suid);
   const bool gids_are_equal = (rgid == egid) && (rgid == sgid);
   if (!uids_are_equal || !gids_are_equal) return false;
@@ -70,7 +53,7 @@ bool GetRESIds(uid_t* resuid, gid_t* resgid) {
 const int kExitSuccess = 0;
 
 int ChrootToSelfFdinfo(void*) {
-  RAW_CHECK(chroot("/proc/self/fdinfo/") == 0);
+  RAW_CHECK(sys_chroot("/proc/self/fdinfo/") == 0);
 
   // CWD is essentially an implicit file descriptor, so be careful to not
   // leave it behind.
@@ -127,31 +110,106 @@ void CheckCloneNewUserErrno(int error) {
          error == ENOSYS);
 }
 
+// Converts a Capability to the corresponding Linux CAP_XXX value.
+int CapabilityToKernelValue(Credentials::Capability cap) {
+  switch (cap) {
+    case Credentials::Capability::SYS_CHROOT:
+      return CAP_SYS_CHROOT;
+    case Credentials::Capability::SYS_ADMIN:
+      return CAP_SYS_ADMIN;
+  }
+
+  LOG(FATAL) << "Invalid Capability: " << static_cast<int>(cap);
+  return 0;
+}
+
 }  // namespace.
 
-bool Credentials::DropAllCapabilities() {
-  ScopedCap cap(cap_init());
-  CHECK(cap);
-  PCHECK(0 == cap_set_proc(cap.get()));
+// static
+bool Credentials::DropAllCapabilities(int proc_fd) {
+  if (!SetCapabilities(proc_fd, std::vector<Capability>())) {
+    return false;
+  }
+
   CHECK(!HasAnyCapability());
-  // We never let this function fail.
   return true;
 }
 
-bool Credentials::HasAnyCapability() {
-  ScopedCap current_cap(cap_get_proc());
-  CHECK(current_cap);
-  ScopedCap empty_cap(cap_init());
-  CHECK(empty_cap);
-  return cap_compare(current_cap.get(), empty_cap.get()) != 0;
+// static
+bool Credentials::DropAllCapabilities() {
+  base::ScopedFD proc_fd(ProcUtil::OpenProc());
+  return Credentials::DropAllCapabilities(proc_fd.get());
 }
 
-scoped_ptr<std::string> Credentials::GetCurrentCapString() {
-  ScopedCap current_cap(cap_get_proc());
-  CHECK(current_cap);
-  ScopedCapText cap_text(cap_to_text(current_cap.get(), NULL));
-  CHECK(cap_text);
-  return scoped_ptr<std::string> (new std::string(cap_text.get()));
+// static
+bool Credentials::DropAllCapabilitiesOnCurrentThread() {
+  return SetCapabilitiesOnCurrentThread(std::vector<Capability>());
+}
+
+// static
+bool Credentials::SetCapabilitiesOnCurrentThread(
+    const std::vector<Capability>& caps) {
+  struct cap_hdr hdr = {};
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  struct cap_data data[_LINUX_CAPABILITY_U32S_3] = {{}};
+
+  // Initially, cap has no capability flags set. Enable the effective and
+  // permitted flags only for the requested capabilities.
+  for (const Capability cap : caps) {
+    const int cap_num = CapabilityToKernelValue(cap);
+    const size_t index = CAP_TO_INDEX(cap_num);
+    const uint32_t mask = CAP_TO_MASK(cap_num);
+    data[index].effective |= mask;
+    data[index].permitted |= mask;
+  }
+
+  return sys_capset(&hdr, data) == 0;
+}
+
+// static
+bool Credentials::SetCapabilities(int proc_fd,
+                                  const std::vector<Capability>& caps) {
+  DCHECK_LE(0, proc_fd);
+
+#if !defined(THREAD_SANITIZER)
+  // With TSAN, accept to break the security model as it is a testing
+  // configuration.
+  CHECK(ThreadHelpers::IsSingleThreaded(proc_fd));
+#endif
+
+  return SetCapabilitiesOnCurrentThread(caps);
+}
+
+bool Credentials::HasAnyCapability() {
+  struct cap_hdr hdr = {};
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  struct cap_data data[_LINUX_CAPABILITY_U32S_3] = {{}};
+
+  PCHECK(sys_capget(&hdr, data) == 0);
+
+  for (size_t i = 0; i < arraysize(data); ++i) {
+    if (data[i].effective || data[i].permitted || data[i].inheritable) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool Credentials::HasCapability(Capability cap) {
+  struct cap_hdr hdr = {};
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  struct cap_data data[_LINUX_CAPABILITY_U32S_3] = {{}};
+
+  PCHECK(sys_capget(&hdr, data) == 0);
+
+  const int cap_num = CapabilityToKernelValue(cap);
+  const size_t index = CAP_TO_INDEX(cap_num);
+  const uint32_t mask = CAP_TO_MASK(cap_num);
+
+  return (data[index].effective | data[index].permitted |
+          data[index].inheritable) &
+         mask;
 }
 
 // static
@@ -161,6 +219,12 @@ bool Credentials::CanCreateProcessInNewUserNS() {
   if (IsRunningOnValgrind()) {
     return false;
   }
+
+#if defined(THREAD_SANITIZER)
+  // With TSAN, processes will always have threads running and can never
+  // enter a new user namespace with MoveToNewUserNS().
+  return false;
+#endif
 
   // This is roughly a fork().
   const pid_t pid = sys_clone(CLONE_NEWUSER | SIGCHLD, 0, 0, 0, 0);
@@ -196,7 +260,7 @@ bool Credentials::MoveToNewUserNS() {
     DVLOG(1) << "uids or gids differ!";
     return false;
   }
-  int ret = unshare(CLONE_NEWUSER);
+  int ret = sys_unshare(CLONE_NEWUSER);
   if (ret) {
     const int unshare_errno = errno;
     VLOG(1) << "Looks like unprivileged CLONE_NEWUSER may not be available "
@@ -220,9 +284,12 @@ bool Credentials::MoveToNewUserNS() {
   return true;
 }
 
-bool Credentials::DropFileSystemAccess() {
+bool Credentials::DropFileSystemAccess(int proc_fd) {
+  CHECK_LE(0, proc_fd);
+
   CHECK(ChrootToSafeEmptyDir());
   CHECK(!base::DirectoryExists(base::FilePath("/proc")));
+  CHECK(!ProcUtil::HasOpenDirectory(proc_fd));
   // We never let this function fail.
   return true;
 }

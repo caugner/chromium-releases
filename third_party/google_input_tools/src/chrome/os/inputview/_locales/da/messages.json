@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "F\u00f8j til personlig ordbog"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Avanceret"
@@ -1704,10 +1715,10 @@
     "message": "ledningsstik"
   },
   "d83d_dd0d": {
-    "message": "forst\u00f8rrelsesglas (venstre)"
+    "message": "lup (venstre)"
   },
   "d83d_dd0e": {
-    "message": "forst\u00f8rrelsesglas (h\u00f8jre)"
+    "message": "lup (h\u00f8jre)"
   },
   "d83d_dd0f": {
     "message": "l\u00e5s med pen"
@@ -2616,7 +2627,7 @@
     "message": "Du kan desv\u00e6rre ikke bruge h\u00e5ndskrift, da netv\u00e6rket ikke er tilg\u00e6ngeligt."
   },
   "handwriting_privacy_info": {
-    "message": "Din indtastning bliver sendt til en Google-server, som sikrer tekstgenkendelse"
+    "message": "Dit input bliver sendt til Google-servere, som udf\u00f8rer tekstgenkendelse."
   },
   "hide_keyboard": {
     "message": "skjul tastaturet"
@@ -2634,7 +2645,7 @@
     "message": "Ignorer rettelsen af"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Ignorer rettelsen"
   },
   "il_heb_settings_page": {
     "message": "Side med indstillinger for hebraisk tastatur"
@@ -3000,10 +3011,10 @@
     "message": "Koreansk tastaturlayout"
   },
   "korean_settings_page": {
-    "message": "Side med indstillinger for koreansk"
+    "message": "Side med indstillinger for koreansk indtastningsmetode"
   },
   "korean_syllable_input": {
-    "message": "Indtast hangul-bogstaver \u00e9t efter \u00e9t"
+    "message": "Indtast en stavelse ad gangen"
   },
   "latam_spa_settings_page": {
     "message": "Side med indstillinger for latinamerikansk (spansk) tastatur"
@@ -3105,7 +3116,7 @@
     "message": "Vis rullemenu med forslag vha. tilbagetasten"
   },
   "show_hangul_candidate": {
-    "message": "Vis forslag p\u00e5 hangul"
+    "message": "Vis emner i hangul-tilstand"
   },
   "shrink_candidates": {
     "message": "g\u00f8r kandidatlisten mindre"
@@ -3147,7 +3158,7 @@
     "message": "tabulator"
   },
   "touch_keyboard": {
-    "message": "Ber\u00f8ringstastatur"
+    "message": "Sk\u00e6rmtastatur"
   },
   "tr_tur_settings_page": {
     "message": "Side med indstillinger for tyrkisk tastatur"
@@ -3300,7 +3311,7 @@
     "message": "Tale"
   },
   "voice_privacy_info": {
-    "message": "Din stemme bliver sendt til en Google-server, som sikrer tekstgenkendelse"
+    "message": "Dit taleinput bliver sendt til Google-servere, som udf\u00f8rer tekstgenkendelse."
   },
   "voice_turn_off": {
     "message": "deaktiver v\u00e6rkt\u00f8j til taleinput"

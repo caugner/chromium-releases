@@ -2,10 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from benchmarks import silk_flags
 from measurements import thread_times
 import page_sets
-from telemetry import benchmark
 
 class _ThreadTimes(benchmark.Benchmark):
   @classmethod
@@ -47,7 +48,7 @@ class ThreadTimesFastPathMobileSites(_ThreadTimes):
   key mobile sites labeled with fast-path tag.
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   page_set = page_sets.KeyMobileSitesSmoothPageSet
-  options = {'page_label_filter' : 'fastpath'}
+  options = {'story_label_filter' : 'fastpath'}
 
   @classmethod
   def Name(cls):

@@ -43,12 +43,10 @@ class ChromePasswordManagerClient
   // PasswordManagerClient implementation.
   bool IsAutomaticPasswordSavingEnabled() const override;
   bool IsPasswordManagerEnabledForCurrentPage() const override;
-  bool ShouldAskUserToSubmitURL(const GURL& url) override;
   bool ShouldFilterAutofillResult(const autofill::PasswordForm& form) override;
   std::string GetSyncUsername() const override;
   bool IsSyncAccountCredential(const std::string& username,
                                const std::string& origin) const override;
-  void AskUserAndMaybeReportURL(const GURL& url) const override;
   void AutofillResultsComputed() override;
   bool PromptUserToSavePassword(
       scoped_ptr<password_manager::PasswordFormManager> form_to_save,
@@ -69,8 +67,6 @@ class ChromePasswordManagerClient
       const autofill::PasswordFormMap& best_matches) const override;
   PrefService* GetPrefs() override;
   password_manager::PasswordStore* GetPasswordStore() const override;
-  base::FieldTrial::Probability GetProbabilityForExperiment(
-      const std::string& experiment_name) const override;
   bool IsPasswordSyncEnabled(
       password_manager::CustomPassphraseState state) const override;
   void OnLogRouterAvailabilityChanged(bool router_can_be_used) override;

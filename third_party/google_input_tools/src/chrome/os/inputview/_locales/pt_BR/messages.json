@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Adicionar ao dicion\u00e1rio pessoal"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Avan\u00e7ado"
@@ -2616,7 +2627,7 @@
     "message": "N\u00e3o \u00e9 poss\u00edvel usar a pesquisa escrita, porque a rede n\u00e3o est\u00e1 dispon\u00edvel."
   },
   "handwriting_privacy_info": {
-    "message": "Seu m\u00e9todo de entrada ser\u00e1 enviado para um servidor do Google para reconhecimento do texto"
+    "message": "Sua entrada ser\u00e1 enviada aos servidores do Google para reconhecimento de texto."
   },
   "hide_keyboard": {
     "message": "ocultar teclado"
@@ -2634,7 +2645,7 @@
     "message": "Ignorar corre\u00e7\u00e3o para"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Ignorar corre\u00e7\u00e3o"
   },
   "il_heb_settings_page": {
     "message": "P\u00e1gina de configura\u00e7\u00f5es do teclado hebraico"
@@ -3000,10 +3011,10 @@
     "message": "Layout de teclado coreano"
   },
   "korean_settings_page": {
-    "message": "P\u00e1gina de configura\u00e7\u00f5es do coreano"
+    "message": "P\u00e1gina de configura\u00e7\u00f5es do m\u00e9todo de entrada coreano"
   },
   "korean_syllable_input": {
-    "message": "M\u00e9todo de entrada hangul um por um"
+    "message": "Insira uma s\u00edlaba por vez"
   },
   "latam_spa_settings_page": {
     "message": "P\u00e1gina de configura\u00e7\u00f5es do teclado da Am\u00e9rica Latina (espanhol)"
@@ -3105,7 +3116,7 @@
     "message": "Mostrar menu suspenso de sugest\u00f5es pressionando a tecla \"backspace\""
   },
   "show_hangul_candidate": {
-    "message": "Mostrar sugest\u00f5es em hangul"
+    "message": "Mostrar candidatos no modo Hangul"
   },
   "shrink_candidates": {
     "message": "encolher lista de candidatos"
@@ -3147,7 +3158,7 @@
     "message": "tab"
   },
   "touch_keyboard": {
-    "message": "Teclado touch"
+    "message": "Teclado na tela"
   },
   "tr_tur_settings_page": {
     "message": "P\u00e1gina de configura\u00e7\u00f5es do teclado turco"
@@ -3300,7 +3311,7 @@
     "message": "Voz"
   },
   "voice_privacy_info": {
-    "message": "Sua voz ser\u00e1 enviada a um servidor do Google para reconhecimento de texto"
+    "message": "Sua entrada de texto por voz ser\u00e1 enviada aos servidores do Google para reconhecimento de texto."
   },
   "voice_turn_off": {
     "message": "desativar ferramenta de entrada de texto por voz"

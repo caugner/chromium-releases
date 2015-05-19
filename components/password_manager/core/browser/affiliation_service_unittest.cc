@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/test/test_mock_time_task_runner.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "components/password_manager/core/browser/fake_affiliation_api.h"
@@ -22,6 +23,8 @@
 namespace password_manager {
 
 namespace {
+
+using StrategyOnCacheMiss = AffiliationService::StrategyOnCacheMiss;
 
 const char kTestFacetURIAlpha1[] = "https://one.alpha.example.com";
 const char kTestFacetURIAlpha2[] = "https://two.alpha.example.com";
@@ -42,8 +45,8 @@ class AffiliationServiceTest : public testing::Test {
  public:
   AffiliationServiceTest()
       : main_task_runner_(new base::TestSimpleTaskRunner),
-        background_task_runner_(new base::TestSimpleTaskRunner),
-        main_task_runner_handle_(main_task_runner_) {}
+        main_task_runner_handle_(main_task_runner_),
+        background_task_runner_(new base::TestMockTimeTaskRunner) {}
   ~AffiliationServiceTest() override {}
 
  protected:
@@ -56,7 +59,7 @@ class AffiliationServiceTest : public testing::Test {
     return main_task_runner_.get();
   }
 
-  base::TestSimpleTaskRunner* background_task_runner() {
+  base::TestMockTimeTaskRunner* background_task_runner() {
     return background_task_runner_.get();
   }
 
@@ -70,7 +73,7 @@ class AffiliationServiceTest : public testing::Test {
     base::FilePath database_path;
     ASSERT_TRUE(CreateTemporaryFile(&database_path));
     service_.reset(new AffiliationService(background_task_runner()));
-    service_->Initialize(NULL, database_path);
+    service_->Initialize(nullptr, database_path);
     // Note: the background task runner is purposely not pumped here, so that
     // the tests also verify that the service can be used synchronously right
     // away after having been constructed.
@@ -85,11 +88,12 @@ class AffiliationServiceTest : public testing::Test {
     background_task_runner_->RunUntilIdle();
   }
 
+  scoped_refptr<base::TestSimpleTaskRunner> main_task_runner_;
+  base::ThreadTaskRunnerHandle main_task_runner_handle_;
+  scoped_refptr<base::TestMockTimeTaskRunner> background_task_runner_;
+
   ScopedFakeAffiliationAPI fake_affiliation_api_;
   MockAffiliationConsumer mock_consumer_;
-  scoped_refptr<base::TestSimpleTaskRunner> main_task_runner_;
-  scoped_refptr<base::TestSimpleTaskRunner> background_task_runner_;
-  base::ThreadTaskRunnerHandle main_task_runner_handle_;
 
   scoped_ptr<AffiliationService> service_;
 
@@ -100,7 +104,7 @@ TEST_F(AffiliationServiceTest, GetAffiliations) {
   // The first request allows on-demand fetching, and should trigger a fetch.
   // Then, it should succeed after the fetch is complete.
   service()->GetAffiliations(FacetURI::FromCanonicalSpec(kTestFacetURIAlpha1),
-                             false /* cached_only */,
+                             StrategyOnCacheMiss::FETCH_OVER_NETWORK,
                              mock_consumer()->GetResultCallback());
 
   background_task_runner()->RunUntilIdle();
@@ -113,7 +117,7 @@ TEST_F(AffiliationServiceTest, GetAffiliations) {
 
   // The second request should be (and can be) served from cache.
   service()->GetAffiliations(FacetURI::FromCanonicalSpec(kTestFacetURIAlpha1),
-                             true /* cached_only */,
+                             StrategyOnCacheMiss::FAIL,
                              mock_consumer()->GetResultCallback());
 
   background_task_runner()->RunUntilIdle();
@@ -126,7 +130,7 @@ TEST_F(AffiliationServiceTest, GetAffiliations) {
   // The third request is also restricted to the cache, but cannot be served
   // from cache, thus it should fail.
   service()->GetAffiliations(FacetURI::FromCanonicalSpec(kTestFacetURIBeta1),
-                             true /* cached_only */,
+                             StrategyOnCacheMiss::FAIL,
                              mock_consumer()->GetResultCallback());
 
   background_task_runner()->RunUntilIdle();
@@ -139,12 +143,12 @@ TEST_F(AffiliationServiceTest, GetAffiliations) {
 
 TEST_F(AffiliationServiceTest, ShutdownWhileTasksArePosted) {
   service()->GetAffiliations(FacetURI::FromCanonicalSpec(kTestFacetURIAlpha1),
-                             false, mock_consumer()->GetResultCallback());
-  DestroyService();
+                             StrategyOnCacheMiss::FETCH_OVER_NETWORK,
+                             mock_consumer()->GetResultCallback());
+  EXPECT_TRUE(background_task_runner()->HasPendingTask());
 
+  DestroyService();
   background_task_runner()->RunUntilIdle();
-  ASSERT_TRUE(fake_affiliation_api()->HasPendingRequest());
-  fake_affiliation_api()->IgnoreNextRequest();
 
   mock_consumer()->ExpectFailure();
   main_task_runner()->RunUntilIdle();

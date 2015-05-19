@@ -49,10 +49,7 @@ var base = base || {};
  */
 base.Ipc = function() {
   base.debug.assert(instance_ === null);
-  /**
-   * @type {!Object<Function>}
-   * @private
-   */
+  /** @private {!Object<Function>} */
   this.handlers_ = {};
   this.onMessageHandler_ = this.onMessage_.bind(this);
   chrome.runtime.onMessage.addListener(this.onMessageHandler_);
@@ -89,7 +86,7 @@ base.Ipc.Request_ = function(methodName, params) {
 
 /**
  * @param {string} methodName
- * @param {function(...?)} handler The handler can be invoked by calling
+ * @param {Function} handler The handler can be invoked by calling
  *   base.Ipc.invoke(|methodName|, arg1, arg2, ...)
  * Async handlers that return promises are currently not supported.
  * @return {boolean} Whether the handler is successfully registered.
@@ -145,8 +142,8 @@ base.Ipc.prototype.onMessage_ = function(message, sender, sendResponse) {
  *
  * @param {string} methodName
  * @param {...} var_args
- * @return A Promise that would resolve to the return value of the handler or
- *   reject if the handler throws an exception.
+ * @return {Promise} A Promise that would resolve to the return value of the
+ *   handler or reject if the handler throws an exception.
  */
 base.Ipc.invoke = function(methodName, var_args) {
   var params = Array.prototype.slice.call(arguments, 1);

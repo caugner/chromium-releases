@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/single_thread_task_runner.h"
 #include "components/cronet/android/cronet_url_request_adapter.h"
@@ -63,8 +64,10 @@ void CronetUploadDataStreamDelegate::Rewind() {
 }
 
 void CronetUploadDataStreamDelegate::OnAdapterDestroyed() {
-  DCHECK(adapter_);
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  // If the CronetUploadDataStreamAdapter was never initialized, |adapter_|
+  // and |network_task_runner_| will be NULL.
+  DCHECK(!network_task_runner_ ||
+         network_task_runner_->BelongsToCurrentThread());
 
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_CronetUploadDataStream_onAdapterDestroyed(env,
@@ -79,9 +82,9 @@ void CronetUploadDataStreamDelegate::OnReadSucceeded(JNIEnv* env,
   DCHECK(bytes_read > 0 || (final_chunk && bytes_read == 0));
 
   buffer_ = nullptr;
-  DCHECK(network_task_runner_->PostTask(
+  network_task_runner_->PostTask(
       FROM_HERE, base::Bind(&CronetUploadDataStreamAdapter::OnReadSuccess,
-                            adapter_, bytes_read, final_chunk)));
+                            adapter_, bytes_read, final_chunk));
 }
 
 void CronetUploadDataStreamDelegate::OnRewindSucceeded(JNIEnv* env,

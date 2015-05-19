@@ -31,10 +31,70 @@ using media::cast::VideoSenderConfig;
 static base::LazyInstance<CastThreads> g_cast_threads =
     LAZY_INSTANCE_INITIALIZER;
 
-CastSessionDelegate::CastSessionDelegate()
+CastSessionDelegateBase::CastSessionDelegateBase()
     : io_message_loop_proxy_(
           content::RenderThread::Get()->GetIOMessageLoopProxy()),
       weak_factory_(this) {
+  DCHECK(io_message_loop_proxy_.get());
+}
+
+CastSessionDelegateBase::~CastSessionDelegateBase() {
+  DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
+}
+
+void CastSessionDelegateBase::StartUDP(
+    const net::IPEndPoint& local_endpoint,
+    const net::IPEndPoint& remote_endpoint,
+    scoped_ptr<base::DictionaryValue> options,
+    const ErrorCallback& error_callback) {
+  DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
+
+  // CastSender uses the renderer's IO thread as the main thread. This reduces
+  // thread hopping for incoming video frames and outgoing network packets.
+  // TODO(hubbe): Create cast environment in ctor instead.
+  cast_environment_ = new CastEnvironment(
+      scoped_ptr<base::TickClock>(new base::DefaultTickClock()).Pass(),
+      base::MessageLoopProxy::current(),
+      g_cast_threads.Get().GetAudioEncodeMessageLoopProxy(),
+      g_cast_threads.Get().GetVideoEncodeMessageLoopProxy());
+
+  // Rationale for using unretained: The callback cannot be called after the
+  // destruction of CastTransportSenderIPC, and they both share the same thread.
+  cast_transport_.reset(new CastTransportSenderIPC(
+      local_endpoint,
+      remote_endpoint,
+      options.Pass(),
+      base::Bind(&CastSessionDelegateBase::ReceivePacket,
+                 base::Unretained(this)),
+      base::Bind(&CastSessionDelegateBase::StatusNotificationCB,
+                 base::Unretained(this), error_callback),
+      base::Bind(&CastSessionDelegateBase::LogRawEvents,
+                 base::Unretained(this))));
+}
+
+void CastSessionDelegateBase::StatusNotificationCB(
+    const ErrorCallback& error_callback,
+    media::cast::CastTransportStatus status) {
+  DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
+  std::string error_message;
+
+  switch (status) {
+    case media::cast::TRANSPORT_AUDIO_UNINITIALIZED:
+    case media::cast::TRANSPORT_VIDEO_UNINITIALIZED:
+    case media::cast::TRANSPORT_AUDIO_INITIALIZED:
+    case media::cast::TRANSPORT_VIDEO_INITIALIZED:
+      return; // Not errors, do nothing.
+    case media::cast::TRANSPORT_INVALID_CRYPTO_CONFIG:
+      error_callback.Run("Invalid encrypt/decrypt configuration.");
+      break;
+    case media::cast::TRANSPORT_SOCKET_ERROR:
+      error_callback.Run("Socket error.");
+      break;
+  }
+}
+
+CastSessionDelegate::CastSessionDelegate()
+    : weak_factory_(this) {
   DCHECK(io_message_loop_proxy_.get());
 }
 
@@ -84,31 +144,19 @@ void CastSessionDelegate::StartVideo(
       create_video_encode_mem_cb);
 }
 
-void CastSessionDelegate::StartUDP(const net::IPEndPoint& remote_endpoint,
-                                   scoped_ptr<base::DictionaryValue> options) {
+
+void CastSessionDelegate::StartUDP(
+    const net::IPEndPoint& local_endpoint,
+    const net::IPEndPoint& remote_endpoint,
+    scoped_ptr<base::DictionaryValue> options,
+    const ErrorCallback& error_callback) {
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
-
-  // CastSender uses the renderer's IO thread as the main thread. This reduces
-  // thread hopping for incoming video frames and outgoing network packets.
-  cast_environment_ = new CastEnvironment(
-      scoped_ptr<base::TickClock>(new base::DefaultTickClock()).Pass(),
-      base::MessageLoopProxy::current(),
-      g_cast_threads.Get().GetAudioEncodeMessageLoopProxy(),
-      g_cast_threads.Get().GetVideoEncodeMessageLoopProxy());
-
+  CastSessionDelegateBase::StartUDP(local_endpoint,
+                                    remote_endpoint,
+                                    options.Pass(),
+                                    error_callback);
   event_subscribers_.reset(
       new media::cast::RawEventSubscriberBundle(cast_environment_));
-
-  // Rationale for using unretained: The callback cannot be called after the
-  // destruction of CastTransportSenderIPC, and they both share the same thread.
-  cast_transport_.reset(new CastTransportSenderIPC(
-      net::IPEndPoint(),
-      remote_endpoint,
-      options.Pass(),
-      media::cast::PacketReceiverCallback(),
-      base::Bind(&CastSessionDelegate::StatusNotificationCB,
-                 base::Unretained(this)),
-      base::Bind(&CastSessionDelegate::LogRawEvents, base::Unretained(this))));
 
   cast_sender_ = CastSender::Create(cast_environment_, cast_transport_.get());
 }
@@ -202,12 +250,6 @@ void CastSessionDelegate::GetStatsAndReset(bool is_audio,
   callback.Run(stats.Pass());
 }
 
-void CastSessionDelegate::StatusNotificationCB(
-    media::cast::CastTransportStatus unused_status) {
-  DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
-  // TODO(hubbe): Call javascript UDPTransport error function.
-}
-
 void CastSessionDelegate::OnOperationalStatusChange(
     bool is_for_audio,
     const ErrorCallback& error_callback,
@@ -255,6 +297,11 @@ void CastSessionDelegate::OnOperationalStatusChange(
                                             is_for_audio ? "Audio" : "Video"));
       break;
   }
+}
+
+void CastSessionDelegate::ReceivePacket(
+    scoped_ptr<media::cast::Packet> packet) {
+  // Do nothing (frees packet)
 }
 
 void CastSessionDelegate::LogRawEvents(

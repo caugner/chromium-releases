@@ -53,17 +53,7 @@ class QuicConnectionPeer {
   static QuicSentPacketManager* GetSentPacketManager(
       QuicConnection* connection);
 
-  static QuicReceivedPacketManager* GetReceivedPacketManager(
-      QuicConnection* connection);
-
   static QuicTime::Delta GetNetworkTimeout(QuicConnection* connection);
-
-  static bool IsSavedForRetransmission(
-      QuicConnection* connection,
-      QuicPacketSequenceNumber sequence_number);
-
-  static bool IsRetransmission(QuicConnection* connection,
-                               QuicPacketSequenceNumber sequence_number);
 
   static QuicPacketEntropyHash GetSentEntropyHash(
       QuicConnection* connection,
@@ -77,9 +67,8 @@ class QuicConnectionPeer {
       QuicConnection* connection,
       QuicPacketSequenceNumber sequence_number);
 
-  static bool IsServer(QuicConnection* connection);
-
-  static void SetIsServer(QuicConnection* connection, bool is_server);
+  static void SetPerspective(QuicConnection* connection,
+                             Perspective perspective);
 
   static void SetSelfAddress(QuicConnection* connection,
                              const IPEndPoint& self_address);
@@ -114,9 +103,6 @@ class QuicConnectionPeer {
   static void CloseConnection(QuicConnection* connection);
   static QuicEncryptedPacket* GetConnectionClosePacket(
       QuicConnection* connection);
-
-  static void SetSupportedVersions(QuicConnection* connection,
-                                   QuicVersionVector versions);
 
   static QuicPacketHeader* GetLastHeader(QuicConnection* connection);
 

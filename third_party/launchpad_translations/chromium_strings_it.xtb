@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="it">
+<translation id="2705212601509139398">Questo sito utilizza il plug-in Chromium Frame che a breve non sarà più supportato. Disinstallalo e scarica un browser compatibile.</translation>
 <translation id="6676384891291319759">Accesso a Internet</translation>
 <translation id="8586442755830160949">Copyright <ph name="YEAR"/> The Chromium Authors. Tutti i diritti riservati.</translation>
 <translation id="6373523479360886564">Vuoi disinstallare Chromium?</translation>
@@ -90,7 +91,6 @@ Se il problema non si risolve, dovresti riselezionare questa opzione per ottener
 <translation id="3296368748942286671">Continua a eseguire applicazioni in background dopo la chiusura di Chromium</translation>
 <translation id="473775607612524610">Aggiorna</translation>
 <translation id="5466153949126434691">Chromium si aggiorna automaticamente per consentirti di avere sempre la versione più recente. Al termine del download, Chromium si riavvierà e potrai procedere.</translation>
-<translation id="7707841053049645517">Questo sito utilizza il plug-in Chromium Frame che a breve non sarà più supportato. Disinstallalo ed esegui l'upgrade a un browser moderno.</translation>
 <translation id="3656661827369545115">Lancia automaticamente Chromium all'avvio del computer</translation>
 <translation id="2241627712206172106">Se condividi un computer, i tuoi amici e la tua famiglia possono navigare separatamente e configurare Chromium in base alle proprie esigenze.</translation>
 <translation id="1763864636252898013">Questo server non è riuscito a dimostrare che si tratta di <ph name="DOMAIN"/>; il relativo certificato di sicurezza non è considerato attendibile dal sistema operativo del dispositivo. Il problema potrebbe essere dovuto a un'errata configurazione o a un malintenzionato che intercetta la connessione.</translation>
@@ -112,6 +112,7 @@ Se il problema non si risolve, dovresti riselezionare questa opzione per ottener
 <translation id="5358375970380395591">Stai per accedere con un account gestito e per dare al relativo amministratore il controllo del tuo profilo Chromium. I tuoi dati di Chromium, come app, Preferiti, cronologia, password e altre impostazioni, verranno collegati definitivamente a <ph name="USER_NAME"/>. Potrai eliminare questi dati tramite la Dashboard di Google Account, ma non potrai associare questi dati a un altro account. <ph name="LEARN_MORE"/></translation>
 <translation id="9036189287518468038">Avvio applicazioni di Chromium</translation>
 <translation id="5563479599352954471">Ricerca con un tocco</translation>
+<translation id="3256316712990552818">Copiata in Chromium</translation>
 <translation id="8493179195440786826">Chromium non è aggiornato</translation>
 <translation id="911206726377975832">Eliminare anche i tuoi dati di navigazione?</translation>
 <translation id="95514773681268843"><ph name="DOMAIN"/> richiede di leggere e accettare i seguenti Termini di servizio prima di utilizzare il dispositivo. Questi termini non ampliano, modificano o limitano i Termini di Chromium OS.</translation>
@@ -126,7 +127,6 @@ Se il problema non si risolve, dovresti riselezionare questa opzione per ottener
 <translation id="4365115785552740256">La realizzazione di Chromium è stata possibile grazie al progetto open source <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> e ad altri <ph name="BEGIN_LINK_OSS"/>software open source<ph name="END_LINK_OSS"/>.</translation>
 <translation id="9190841055450128916">Chromium (mDNS-In)</translation>
 <translation id="4987820182225656817">Gli ospiti possono utilizzare Chromium senza lasciare tracce.</translation>
-<translation id="2216475571518225820">Questo sito utilizza il plug-in Chromium Frame che a breve non sarà più supportato. Disinstallalo e scarica un browser compatibile.</translation>
 <translation id="3487263810738775861">Un'estensione ha cambiato la pagina visualizzata all'avvio di Chromium.</translation>
 <translation id="5877064549588274448">Canale cambiato. Riavvia il dispositivo per applicare le modifiche.</translation>
 <translation id="7549178288319965365">Informazioni su Chromium OS</translation>
@@ -205,6 +205,7 @@ Se il problema non si risolve, dovresti riattivare questa opzione per ottenere p
 <translation id="811857857463334932">Non è più possibile ricevere gli aggiornamenti di Chromium, perché l'hardware del computer in uso non è più supportato.</translation>
 <translation id="2910007522516064972">Informazioni su &amp;Chromium</translation>
 <translation id="8453117565092476964">L'archivio di installazione è danneggiato o non valido. Scarica di nuovo Chromium.</translation>
+<translation id="2558641060352364164">Questo sito utilizza il plug-in Chromium Frame che a breve non sarà più supportato. Disinstallalo ed esegui l'upgrade a un browser recente.</translation>
 <translation id="3889543394854987837">Fai clic sul tuo nome per aprire Chromium e iniziare a navigare.</translation>
 <translation id="3130323860337406239">Chromium sta utilizzando il microfono.</translation>
 <translation id="7196020411877309443">Perché visualizzo questo avviso?</translation>

@@ -4,32 +4,6 @@
 
 part of core;
 
-
-class _MojoDataPipeNatives {
-  static List MojoCreateDataPipe(
-      int elementBytes, int capacityBytes, int flags)
-      native "MojoDataPipe_Create";
-
-  static List MojoWriteData(int handle, ByteData data, int numBytes, int flags)
-      native "MojoDataPipe_WriteData";
-
-  static List MojoBeginWriteData(int handle, int bufferBytes, int flags)
-      native "MojoDataPipe_BeginWriteData";
-
-  static int MojoEndWriteData(int handle, int bytesWritten)
-      native "MojoDataPipe_EndWriteData";
-
-  static List MojoReadData(int handle, ByteData data, int numBytes, int flags)
-      native "MojoDataPipe_ReadData";
-
-  static List MojoBeginReadData(int handle, int bufferBytes, int flags)
-      native "MojoDataPipe_BeginReadData";
-
-  static int MojoEndReadData(int handle, int bytesRead)
-      native "MojoDataPipe_EndReadData";
-}
-
-
 class MojoDataPipeProducer {
   static const int FLAG_NONE = 0;
   static const int FLAG_ALL_OR_NONE = 1 << 0;
@@ -38,21 +12,21 @@ class MojoDataPipeProducer {
   MojoResult status;
   final int elementBytes;
 
-  MojoDataPipeProducer(
-      this.handle, [this.status = MojoResult.OK, this.elementBytes = 1]);
+  MojoDataPipeProducer(this.handle,
+      [this.status = MojoResult.OK, this.elementBytes = 1]);
 
   int write(ByteData data, [int numBytes = -1, int flags = 0]) {
     if (handle == null) {
       status = MojoResult.INVALID_ARGUMENT;
-      return status;
+      return 0;
     }
 
     int data_numBytes = (numBytes == -1) ? data.lengthInBytes : numBytes;
-    List result = _MojoDataPipeNatives.MojoWriteData(
-        handle.h, data, data_numBytes, flags);
+    List result =
+        MojoDataPipeNatives.MojoWriteData(handle.h, data, data_numBytes, flags);
     if (result == null) {
       status = MojoResult.INVALID_ARGUMENT;
-      return status;
+      return 0;
     }
 
     assert((result is List) && (result.length == 2));
@@ -66,8 +40,8 @@ class MojoDataPipeProducer {
       return null;
     }
 
-    List result = _MojoDataPipeNatives.MojoBeginWriteData(
-        handle.h, bufferBytes, flags);
+    List result =
+        MojoDataPipeNatives.MojoBeginWriteData(handle.h, bufferBytes, flags);
     if (result == null) {
       status = MojoResult.INVALID_ARGUMENT;
       return null;
@@ -83,17 +57,18 @@ class MojoDataPipeProducer {
       status = MojoResult.INVALID_ARGUMENT;
       return status;
     }
-    int result = _MojoDataPipeNatives.MojoEndWriteData(handle.h, bytesWritten);
+    int result = MojoDataPipeNatives.MojoEndWriteData(handle.h, bytesWritten);
     status = new MojoResult(result);
     return status;
   }
-}
 
+  String toString() => "MojoDataPipeProducer(handle: $handle, status: $status)";
+}
 
 class MojoDataPipeConsumer {
   static const int FLAG_NONE = 0;
   static const int FLAG_ALL_OR_NONE = 1 << 0;
-  static const int FLAG_MAY_DISCARD = 1 << 1;
+  static const int FLAG_DISCARD = 1 << 1;
   static const int FLAG_QUERY = 1 << 2;
   static const int FLAG_PEEK = 1 << 3;
 
@@ -101,21 +76,21 @@ class MojoDataPipeConsumer {
   MojoResult status;
   final int elementBytes;
 
-  MojoDataPipeConsumer(
-      this.handle, [this.status = MojoResult.OK, this.elementBytes = 1]);
+  MojoDataPipeConsumer(this.handle,
+      [this.status = MojoResult.OK, this.elementBytes = 1]);
 
   int read(ByteData data, [int numBytes = -1, int flags = 0]) {
     if (handle == null) {
       status = MojoResult.INVALID_ARGUMENT;
-      return status;
+      return 0;
     }
 
     int data_numBytes = (numBytes == -1) ? data.lengthInBytes : numBytes;
-    List result = _MojoDataPipeNatives.MojoReadData(
-        handle.h, data, data_numBytes, flags);
+    List result =
+        MojoDataPipeNatives.MojoReadData(handle.h, data, data_numBytes, flags);
     if (result == null) {
       status = MojoResult.INVALID_ARGUMENT;
-      return status;
+      return 0;
     }
     assert((result is List) && (result.length == 2));
     status = new MojoResult(result[0]);
@@ -128,8 +103,8 @@ class MojoDataPipeConsumer {
       return null;
     }
 
-    List result = _MojoDataPipeNatives.MojoBeginReadData(
-        handle.h, bufferBytes, flags);
+    List result =
+        MojoDataPipeNatives.MojoBeginReadData(handle.h, bufferBytes, flags);
     if (result == null) {
       status = MojoResult.INVALID_ARGUMENT;
       return null;
@@ -145,18 +120,19 @@ class MojoDataPipeConsumer {
       status = MojoResult.INVALID_ARGUMENT;
       return status;
     }
-    int result = _MojoDataPipeNatives.MojoEndReadData(handle.h, bytesRead);
+    int result = MojoDataPipeNatives.MojoEndReadData(handle.h, bytesRead);
     status = new MojoResult(result);
     return status;
   }
 
   int query() => read(null, 0, FLAG_QUERY);
-}
 
+  String toString() => "MojoDataPipeConsumer("
+      "handle: $handle, status: $status, available: ${query()})";
+}
 
 class MojoDataPipe {
   static const int FLAG_NONE = 0;
-  static const int FLAG_MAY_DISCARD = 1 << 0;
   static const int DEFAULT_ELEMENT_SIZE = 1;
   static const int DEFAULT_CAPACITY = 0;
 
@@ -171,9 +147,8 @@ class MojoDataPipe {
   }
 
   factory MojoDataPipe([int elementBytes = DEFAULT_ELEMENT_SIZE,
-                        int capacityBytes = DEFAULT_CAPACITY,
-                        int flags = FLAG_NONE]) {
-    List result = _MojoDataPipeNatives.MojoCreateDataPipe(
+      int capacityBytes = DEFAULT_CAPACITY, int flags = FLAG_NONE]) {
+    List result = MojoDataPipeNatives.MojoCreateDataPipe(
         elementBytes, capacityBytes, flags);
     if (result == null) {
       return null;

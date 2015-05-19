@@ -12,7 +12,6 @@
 #include "base/containers/hash_tables.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "cc/animation/scrollbar_animation_controller_thinning.h"
-#include "cc/base/latency_info_swap_promise.h"
 #include "cc/base/math_util.h"
 #include "cc/input/page_scale_animation.h"
 #include "cc/input/top_controls_manager.h"
@@ -34,6 +33,7 @@
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
 #include "cc/output/gl_renderer.h"
+#include "cc/output/latency_info_swap_promise.h"
 #include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
@@ -54,6 +54,7 @@
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/single_thread_proxy.h"
@@ -86,6 +87,7 @@ class LayerTreeHostImplTest : public testing::Test,
         always_main_thread_blocked_(&proxy_),
         shared_bitmap_manager_(new TestSharedBitmapManager),
         gpu_memory_buffer_manager_(new TestGpuMemoryBufferManager),
+        task_graph_runner_(new TestTaskGraphRunner),
         on_can_draw_state_changed_called_(false),
         did_notify_ready_to_activate_(false),
         did_request_commit_(false),
@@ -150,16 +152,17 @@ class LayerTreeHostImplTest : public testing::Test,
   }
   bool IsInsideDraw() override { return false; }
   void RenewTreePriority() override {}
-  void PostDelayedScrollbarFadeOnImplThread(const base::Closure& start_fade,
+  void PostDelayedAnimationTaskOnImplThread(const base::Closure& task,
                                             base::TimeDelta delay) override {
-    scrollbar_fade_start_ = start_fade;
-    requested_scrollbar_animation_delay_ = delay;
+    animation_task_ = task;
+    requested_animation_delay_ = delay;
   }
   void DidActivateSyncTree() override {}
   void DidPrepareTiles() override {}
   void DidCompletePageScaleAnimationOnImplThread() override {
     did_complete_page_scale_animation_ = true;
   }
+  void OnDrawForOutputSurface() override {}
 
   void set_reduce_memory_result(bool reduce_memory_result) {
     reduce_memory_result_ = reduce_memory_result;
@@ -167,13 +170,10 @@ class LayerTreeHostImplTest : public testing::Test,
 
   virtual bool CreateHostImpl(const LayerTreeSettings& settings,
                               scoped_ptr<OutputSurface> output_surface) {
-    host_impl_ = LayerTreeHostImpl::Create(settings,
-                                           this,
-                                           &proxy_,
-                                           &stats_instrumentation_,
-                                           shared_bitmap_manager_.get(),
-                                           gpu_memory_buffer_manager_.get(),
-                                           0);
+    host_impl_ = LayerTreeHostImpl::Create(
+        settings, this, &proxy_, &stats_instrumentation_,
+        shared_bitmap_manager_.get(), gpu_memory_buffer_manager_.get(),
+        task_graph_runner_.get(), 0);
     bool init = host_impl_->InitializeRenderer(output_surface.Pass());
     host_impl_->SetViewportSize(gfx::Size(10, 10));
     return init;
@@ -416,6 +416,7 @@ class LayerTreeHostImplTest : public testing::Test,
 
   scoped_ptr<TestSharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<TestGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  scoped_ptr<TestTaskGraphRunner> task_graph_runner_;
   scoped_ptr<LayerTreeHostImpl> host_impl_;
   FakeRenderingStatsInstrumentation stats_instrumentation_;
   bool on_can_draw_state_changed_called_;
@@ -426,8 +427,8 @@ class LayerTreeHostImplTest : public testing::Test,
   bool did_request_prepare_tiles_;
   bool did_complete_page_scale_animation_;
   bool reduce_memory_result_;
-  base::Closure scrollbar_fade_start_;
-  base::TimeDelta requested_scrollbar_animation_delay_;
+  base::Closure animation_task_;
+  base::TimeDelta requested_animation_delay_;
   size_t current_limit_bytes_;
   int current_priority_cutoff_value_;
 };
@@ -1568,6 +1569,7 @@ class LayerTreeHostImplOverridePhysicalTime : public LayerTreeHostImpl {
                           rendering_stats_instrumentation,
                           manager,
                           NULL,
+                          NULL,
                           0) {}
 
   BeginFrameArgs CurrentBeginFrameArgs() const override {
@@ -1583,168 +1585,160 @@ class LayerTreeHostImplOverridePhysicalTime : public LayerTreeHostImpl {
   base::TimeTicks fake_current_physical_time_;
 };
 
-#define SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST()                            \
-  gfx::Size viewport_size(10, 10);                                             \
-  gfx::Size content_size(100, 100);                                            \
-                                                                               \
-  LayerTreeHostImplOverridePhysicalTime* host_impl_override_time =             \
-      new LayerTreeHostImplOverridePhysicalTime(settings, this, &proxy_,       \
-                                                shared_bitmap_manager_.get(),  \
-                                                &stats_instrumentation_);      \
-  host_impl_ = make_scoped_ptr(host_impl_override_time);                       \
-  host_impl_->InitializeRenderer(CreateOutputSurface());                       \
-  host_impl_->SetViewportSize(viewport_size);                                  \
-                                                                               \
-  scoped_ptr<LayerImpl> root =                                                 \
-      LayerImpl::Create(host_impl_->active_tree(), 1);                         \
-  root->SetBounds(viewport_size);                                              \
-                                                                               \
-  scoped_ptr<LayerImpl> scroll =                                               \
-      LayerImpl::Create(host_impl_->active_tree(), 2);                         \
-  scroll->SetScrollClipLayer(root->id());                                      \
-  scroll->PushScrollOffsetFromMainThread(gfx::ScrollOffset());                 \
-  root->SetBounds(viewport_size);                                              \
-  scroll->SetBounds(content_size);                                             \
-  scroll->SetContentBounds(content_size);                                      \
-  scroll->SetIsContainerForFixedPositionLayers(true);                          \
-                                                                               \
-  scoped_ptr<LayerImpl> contents =                                             \
-      LayerImpl::Create(host_impl_->active_tree(), 3);                         \
-  contents->SetDrawsContent(true);                                             \
-  contents->SetBounds(content_size);                                           \
-  contents->SetContentBounds(content_size);                                    \
-                                                                               \
-  scoped_ptr<SolidColorScrollbarLayerImpl> scrollbar =                         \
-      SolidColorScrollbarLayerImpl::Create(host_impl_->active_tree(), 4,       \
-                                           VERTICAL, 10, 0, false, true);      \
-  EXPECT_FLOAT_EQ(0.f, scrollbar->opacity());                                  \
-                                                                               \
-  scroll->AddChild(contents.Pass());                                           \
-  root->AddChild(scroll.Pass());                                               \
-  root->SetHasRenderSurface(true);                                             \
-  scrollbar->SetScrollLayerAndClipLayerByIds(2, 1);                            \
-  root->AddChild(scrollbar.Pass());                                            \
-                                                                               \
-  host_impl_->active_tree()->SetRootLayer(root.Pass());                        \
-  host_impl_->active_tree()->SetViewportLayersFromIds(Layer::INVALID_ID, 1, 2, \
-                                                      Layer::INVALID_ID);      \
-  host_impl_->active_tree()->DidBecomeActive();                                \
-  DrawFrame();
+class LayerTreeHostImplTestScrollbarAnimation : public LayerTreeHostImplTest {
+ protected:
+  void SetupLayers(LayerTreeSettings settings) {
+    gfx::Size viewport_size(10, 10);
+    gfx::Size content_size(100, 100);
 
-TEST_F(LayerTreeHostImplTest, ScrollbarLinearFadeScheduling) {
-  LayerTreeSettings settings;
-  settings.scrollbar_animator = LayerTreeSettings::LINEAR_FADE;
-  settings.scrollbar_fade_delay_ms = 20;
-  settings.scrollbar_fade_duration_ms = 20;
+    LayerTreeHostImplOverridePhysicalTime* host_impl_override_time =
+        new LayerTreeHostImplOverridePhysicalTime(settings, this, &proxy_,
+                                                  shared_bitmap_manager_.get(),
+                                                  &stats_instrumentation_);
+    host_impl_ = make_scoped_ptr(host_impl_override_time);
+    host_impl_->InitializeRenderer(CreateOutputSurface());
+    host_impl_->SetViewportSize(viewport_size);
 
-  SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST();
+    scoped_ptr<LayerImpl> root =
+        LayerImpl::Create(host_impl_->active_tree(), 1);
+    root->SetBounds(viewport_size);
 
-  base::TimeTicks fake_now = gfx::FrameTime::Now();
+    scoped_ptr<LayerImpl> scroll =
+        LayerImpl::Create(host_impl_->active_tree(), 2);
+    scroll->SetScrollClipLayer(root->id());
+    scroll->PushScrollOffsetFromMainThread(gfx::ScrollOffset());
+    root->SetBounds(viewport_size);
+    scroll->SetBounds(content_size);
+    scroll->SetContentBounds(content_size);
+    scroll->SetIsContainerForFixedPositionLayers(true);
 
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_redraw_);
+    scoped_ptr<LayerImpl> contents =
+        LayerImpl::Create(host_impl_->active_tree(), 3);
+    contents->SetDrawsContent(true);
+    contents->SetBounds(content_size);
+    contents->SetContentBounds(content_size);
 
-  // If no scroll happened during a scroll gesture, it should have no effect.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollEnd();
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_redraw_);
-  EXPECT_TRUE(scrollbar_fade_start_.Equals(base::Closure()));
+    scoped_ptr<SolidColorScrollbarLayerImpl> scrollbar =
+        SolidColorScrollbarLayerImpl::Create(host_impl_->active_tree(), 4,
+                                             VERTICAL, 10, 0, false, true);
+    EXPECT_FLOAT_EQ(0.f, scrollbar->opacity());
 
-  // After a scroll, a fade animation should be scheduled about 20ms from now.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(0, 5));
-  host_impl_->ScrollEnd();
-  did_request_redraw_ = false;
-  did_request_animate_ = false;
-  EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
-            requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_redraw_);
-  EXPECT_FALSE(did_request_animate_);
-  requested_scrollbar_animation_delay_ = base::TimeDelta();
-  scrollbar_fade_start_.Run();
-  host_impl_->Animate(fake_now);
+    scroll->AddChild(contents.Pass());
+    root->AddChild(scroll.Pass());
+    root->SetHasRenderSurface(true);
+    scrollbar->SetScrollLayerAndClipLayerByIds(2, 1);
+    root->AddChild(scrollbar.Pass());
 
-  // After the fade begins, we should start getting redraws instead of a
-  // scheduled animation.
-  fake_now += base::TimeDelta::FromMilliseconds(25);
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_TRUE(did_request_animate_);
-  did_request_animate_ = false;
+    host_impl_->active_tree()->SetRootLayer(root.Pass());
+    host_impl_->active_tree()->SetViewportLayersFromIds(Layer::INVALID_ID, 1, 2,
+                                                        Layer::INVALID_ID);
+    host_impl_->active_tree()->DidBecomeActive();
+    DrawFrame();
+  }
 
-  // Setting the scroll offset outside a scroll should also cause the scrollbar
-  // to appear and to schedule a fade.
-  host_impl_->InnerViewportScrollLayer()->PushScrollOffsetFromMainThread(
-      gfx::ScrollOffset(5, 5));
-  EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
-            requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_redraw_);
-  EXPECT_FALSE(did_request_animate_);
-  requested_scrollbar_animation_delay_ = base::TimeDelta();
+  void RunTest(LayerTreeSettings::ScrollbarAnimator animator) {
+    LayerTreeSettings settings;
+    settings.scrollbar_animator = animator;
+    settings.scrollbar_fade_delay_ms = 20;
+    settings.scrollbar_fade_duration_ms = 20;
 
-  // Unnecessarily Fade animation of solid color scrollbar is not triggered.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
-  host_impl_->ScrollEnd();
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
+    SetupLayers(settings);
+
+    base::TimeTicks fake_now = gfx::FrameTime::Now();
+
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    // If no scroll happened during a scroll gesture, it should have no effect.
+    host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
+    host_impl_->ScrollEnd();
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    // After a scroll, a scrollbar animation should be scheduled about 20ms from
+    // now.
+    host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
+    host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(0, 5));
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_TRUE(did_request_redraw_);
+    did_request_redraw_ = false;
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    host_impl_->ScrollEnd();
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta::FromMilliseconds(20),
+              requested_animation_delay_);
+    EXPECT_FALSE(animation_task_.Equals(base::Closure()));
+
+    fake_now += requested_animation_delay_;
+    requested_animation_delay_ = base::TimeDelta();
+    animation_task_.Run();
+    animation_task_ = base::Closure();
+    EXPECT_TRUE(did_request_animate_);
+    did_request_animate_ = false;
+    EXPECT_FALSE(did_request_redraw_);
+
+    // After the scrollbar animation begins, we should start getting redraws.
+    host_impl_->Animate(fake_now);
+    EXPECT_TRUE(did_request_animate_);
+    did_request_animate_ = false;
+    EXPECT_TRUE(did_request_redraw_);
+    did_request_redraw_ = false;
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    // Setting the scroll offset outside a scroll should also cause the
+    // scrollbar to appear and to schedule a scrollbar animation.
+    host_impl_->InnerViewportScrollLayer()->PushScrollOffsetFromMainThread(
+        gfx::ScrollOffset(5, 5));
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta::FromMilliseconds(20),
+              requested_animation_delay_);
+    EXPECT_FALSE(animation_task_.Equals(base::Closure()));
+    requested_animation_delay_ = base::TimeDelta();
+    animation_task_ = base::Closure();
+
+    // Scrollbar animation is not triggered unnecessarily.
+    host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
+    host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_TRUE(did_request_redraw_);
+    did_request_redraw_ = false;
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    host_impl_->ScrollEnd();
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta(), requested_animation_delay_);
+    EXPECT_TRUE(animation_task_.Equals(base::Closure()));
+
+    // Changing page scale triggers scrollbar animation.
+    host_impl_->active_tree()->PushPageScaleFromMainThread(1.f, 1.f, 4.f);
+    host_impl_->SetPageScaleOnActiveTree(1.1f);
+    EXPECT_FALSE(did_request_animate_);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_EQ(base::TimeDelta::FromMilliseconds(20),
+              requested_animation_delay_);
+    EXPECT_FALSE(animation_task_.Equals(base::Closure()));
+    requested_animation_delay_ = base::TimeDelta();
+    animation_task_ = base::Closure();
+  }
+};
+
+TEST_F(LayerTreeHostImplTestScrollbarAnimation, LinearFade) {
+  RunTest(LayerTreeSettings::LINEAR_FADE);
 }
 
-TEST_F(LayerTreeHostImplTest, ScrollbarFadePinchZoomScrollbars) {
-  LayerTreeSettings settings;
-  settings.scrollbar_animator = LayerTreeSettings::LINEAR_FADE;
-  settings.scrollbar_fade_delay_ms = 20;
-  settings.scrollbar_fade_duration_ms = 20;
-  settings.use_pinch_zoom_scrollbars = true;
-
-  SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST();
-
-  base::TimeTicks fake_now = gfx::FrameTime::Now();
-
-  host_impl_->active_tree()->PushPageScaleFromMainThread(1.f, 1.f, 4.f);
-
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_animate_);
-
-  // If no scroll happened during a scroll gesture, it should have no effect.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollEnd();
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_animate_);
-  EXPECT_TRUE(scrollbar_fade_start_.Equals(base::Closure()));
-
-  // After a scroll, no fade animation should be scheduled.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
-  host_impl_->ScrollEnd();
-  did_request_redraw_ = false;
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_animate_);
-  requested_scrollbar_animation_delay_ = base::TimeDelta();
-
-  // We should not see any draw requests.
-  fake_now += base::TimeDelta::FromMilliseconds(25);
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_animate_);
-
-  // Make page scale > min so that subsequent scrolls will trigger fades.
-  host_impl_->SetPageScaleOnActiveTree(1.1f);
-
-  // After a scroll, a fade animation should be scheduled about 20ms from now.
-  host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL);
-  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
-  host_impl_->ScrollEnd();
-  did_request_redraw_ = false;
-  EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
-            requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_animate_);
-  requested_scrollbar_animation_delay_ = base::TimeDelta();
-  scrollbar_fade_start_.Run();
-
-  // After the fade begins, we should start getting redraws instead of a
-  // scheduled animation.
-  fake_now += base::TimeDelta::FromMilliseconds(25);
-  host_impl_->Animate(fake_now);
-  EXPECT_TRUE(did_request_animate_);
+TEST_F(LayerTreeHostImplTestScrollbarAnimation, Thinning) {
+  RunTest(LayerTreeSettings::THINNING);
 }
 
 void LayerTreeHostImplTest::SetupMouseMoveAtWithDeviceScale(
@@ -1960,6 +1954,16 @@ class DidDrawCheckLayer : public LayerImpl {
     will_draw_called_ = false;
     append_quads_called_ = false;
     did_draw_called_ = false;
+  }
+
+  static void IgnoreResult(scoped_ptr<CopyOutputResult> result) {}
+
+  void AddCopyRequest() {
+    ScopedPtrVector<CopyOutputRequest> requests;
+    requests.push_back(
+        CopyOutputRequest::CreateRequest(base::Bind(&IgnoreResult)));
+    SetHasRenderSurface(true);
+    PassCopyRequests(&requests);
   }
 
  protected:
@@ -2191,60 +2195,186 @@ class MissingTextureAnimatingLayer : public DidDrawCheckLayer {
   bool had_incomplete_tile_;
 };
 
-TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsOnDefault) {
+struct PrepareToDrawSuccessTestCase {
+  struct State {
+    bool has_missing_tile = false;
+    bool has_incomplete_tile = false;
+    bool is_animating = false;
+    bool has_copy_request = false;
+  };
+  bool high_res_required = false;
+  State layer_before;
+  State layer_between;
+  State layer_after;
+  DrawResult expected_result;
+
+  explicit PrepareToDrawSuccessTestCase(DrawResult result)
+      : expected_result(result) {}
+};
+
+TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsAndFails) {
+  std::vector<PrepareToDrawSuccessTestCase> cases;
+
+  // 0. Default case.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  // 1. Animated layer first.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_before.is_animating = true;
+  // 2. Animated layer between.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_between.is_animating = true;
+  // 3. Animated layer last.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_after.is_animating = true;
+  // 4. Missing tile first.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_before.has_missing_tile = true;
+  // 5. Missing tile between.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_between.has_missing_tile = true;
+  // 6. Missing tile last.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_after.has_missing_tile = true;
+  // 7. Incomplete tile first.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_before.has_incomplete_tile = true;
+  // 8. Incomplete tile between.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_between.has_incomplete_tile = true;
+  // 9. Incomplete tile last.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_after.has_incomplete_tile = true;
+  // 10. Animation with missing tile.
+  cases.push_back(
+      PrepareToDrawSuccessTestCase(DRAW_ABORTED_CHECKERBOARD_ANIMATIONS));
+  cases.back().layer_between.has_missing_tile = true;
+  cases.back().layer_between.is_animating = true;
+  // 11. Animation with incomplete tile.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_between.has_incomplete_tile = true;
+  cases.back().layer_between.is_animating = true;
+
+  // 12. High res required.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().high_res_required = true;
+  // 13. High res required with incomplete tile.
+  cases.push_back(
+      PrepareToDrawSuccessTestCase(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_incomplete_tile = true;
+  // 14. High res required with missing tile.
+  cases.push_back(
+      PrepareToDrawSuccessTestCase(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_missing_tile = true;
+
+  // 15. High res required is higher priority than animating missing tiles.
+  cases.push_back(
+      PrepareToDrawSuccessTestCase(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_missing_tile = true;
+  cases.back().layer_after.has_missing_tile = true;
+  cases.back().layer_after.is_animating = true;
+  // 16. High res required is higher priority than animating missing tiles.
+  cases.push_back(
+      PrepareToDrawSuccessTestCase(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_missing_tile = true;
+  cases.back().layer_before.has_missing_tile = true;
+  cases.back().layer_before.is_animating = true;
+
   host_impl_->active_tree()->SetRootLayer(
       DidDrawCheckLayer::Create(host_impl_->active_tree(), 1));
   DidDrawCheckLayer* root =
       static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
   root->SetHasRenderSurface(true);
-  bool tile_missing = false;
-  bool had_incomplete_tile = false;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           2,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
 
   LayerTreeHostImpl::FrameData frame;
-
   EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
   host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
   host_impl_->DidDrawAllLayers(frame);
+  host_impl_->SwapBuffers(frame);
+
+  for (size_t i = 0; i < cases.size(); ++i) {
+    const auto& testcase = cases[i];
+    std::vector<LayerImpl*> to_remove;
+    for (auto* child : root->children())
+      to_remove.push_back(child);
+    for (auto* child : to_remove)
+      root->RemoveChild(child);
+
+    std::ostringstream scope;
+    scope << "Test case: " << i;
+    SCOPED_TRACE(scope.str());
+
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 2, testcase.layer_before.has_missing_tile,
+        testcase.layer_before.has_incomplete_tile,
+        testcase.layer_before.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* before =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_before.has_copy_request)
+      before->AddCopyRequest();
+
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 3, testcase.layer_between.has_missing_tile,
+        testcase.layer_between.has_incomplete_tile,
+        testcase.layer_between.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* between =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_between.has_copy_request)
+      between->AddCopyRequest();
+
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 4, testcase.layer_after.has_missing_tile,
+        testcase.layer_after.has_incomplete_tile,
+        testcase.layer_after.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* after =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_after.has_copy_request)
+      after->AddCopyRequest();
+
+    if (testcase.high_res_required)
+      host_impl_->SetRequiresHighResToDraw();
+
+    LayerTreeHostImpl::FrameData frame;
+    EXPECT_EQ(testcase.expected_result, host_impl_->PrepareToDraw(&frame));
+    host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
+    host_impl_->DidDrawAllLayers(frame);
+    host_impl_->SwapBuffers(frame);
+  }
 }
 
-TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsWithAnimatedLayer) {
+TEST_F(LayerTreeHostImplTest,
+       PrepareToDrawWhenDrawAndSwapFullViewportEveryFrame) {
+  CreateHostImpl(DefaultSettings(),
+                 FakeOutputSurface::CreateAlwaysDrawAndSwap3d());
+  EXPECT_TRUE(host_impl_->output_surface()
+                  ->capabilities()
+                  .draw_and_swap_full_viewport_every_frame);
+
+  std::vector<PrepareToDrawSuccessTestCase> cases;
+
+  // 0. Default case.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  // 1. Animation with missing tile.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().layer_between.has_missing_tile = true;
+  cases.back().layer_between.is_animating = true;
+  // 2. High res required with incomplete tile.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_incomplete_tile = true;
+  // 3. High res required with missing tile.
+  cases.push_back(PrepareToDrawSuccessTestCase(DRAW_SUCCESS));
+  cases.back().high_res_required = true;
+  cases.back().layer_between.has_missing_tile = true;
+
   host_impl_->active_tree()->SetRootLayer(
       DidDrawCheckLayer::Create(host_impl_->active_tree(), 1));
   DidDrawCheckLayer* root =
       static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
   root->SetHasRenderSurface(true);
-  bool tile_missing = false;
-  bool had_incomplete_tile = false;
-  bool is_animating = true;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           2,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-
-  LayerTreeHostImpl::FrameData frame;
-
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-}
-
-TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsWithMissingTiles) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 3));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
 
   LayerTreeHostImpl::FrameData frame;
   EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
@@ -2252,204 +2382,54 @@ TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsWithMissingTiles) {
   host_impl_->DidDrawAllLayers(frame);
   host_impl_->SwapBuffers(frame);
 
-  bool tile_missing = true;
-  bool had_incomplete_tile = false;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           4,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
+  for (size_t i = 0; i < cases.size(); ++i) {
+    const auto& testcase = cases[i];
+    std::vector<LayerImpl*> to_remove;
+    for (auto* child : root->children())
+      to_remove.push_back(child);
+    for (auto* child : to_remove)
+      root->RemoveChild(child);
 
-TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsWithIncompleteTile) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 3));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
+    std::ostringstream scope;
+    scope << "Test case: " << i;
+    SCOPED_TRACE(scope.str());
 
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 2, testcase.layer_before.has_missing_tile,
+        testcase.layer_before.has_incomplete_tile,
+        testcase.layer_before.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* before =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_before.has_copy_request)
+      before->AddCopyRequest();
 
-  bool tile_missing = false;
-  bool had_incomplete_tile = true;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           4,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 3, testcase.layer_between.has_missing_tile,
+        testcase.layer_between.has_incomplete_tile,
+        testcase.layer_between.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* between =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_between.has_copy_request)
+      between->AddCopyRequest();
 
-TEST_F(LayerTreeHostImplTest,
-       PrepareToDrawFailsWithAnimationAndMissingTilesUsesCheckerboard) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 5));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
+    root->AddChild(MissingTextureAnimatingLayer::Create(
+        host_impl_->active_tree(), 4, testcase.layer_after.has_missing_tile,
+        testcase.layer_after.has_incomplete_tile,
+        testcase.layer_after.is_animating, host_impl_->resource_provider()));
+    DidDrawCheckLayer* after =
+        static_cast<DidDrawCheckLayer*>(root->children().back());
+    if (testcase.layer_after.has_copy_request)
+      after->AddCopyRequest();
 
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
+    if (testcase.high_res_required)
+      host_impl_->SetRequiresHighResToDraw();
 
-  bool tile_missing = true;
-  bool had_incomplete_tile = false;
-  bool is_animating = true;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           6,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_ABORTED_CHECKERBOARD_ANIMATIONS,
-            host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
-
-TEST_F(LayerTreeHostImplTest,
-       PrepareToDrawSucceedsWithAnimationAndIncompleteTiles) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 5));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
-
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
-
-  bool tile_missing = false;
-  bool had_incomplete_tile = true;
-  bool is_animating = true;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           6,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
-
-TEST_F(LayerTreeHostImplTest, PrepareToDrawSucceedsWhenHighResRequired) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 7));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
-
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
-
-  bool tile_missing = false;
-  bool had_incomplete_tile = false;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           8,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  host_impl_->SetRequiresHighResToDraw();
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
-
-TEST_F(LayerTreeHostImplTest,
-       PrepareToDrawFailsWhenHighResRequiredAndIncompleteTiles) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 7));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
-
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
-
-  bool tile_missing = false;
-  bool had_incomplete_tile = true;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           8,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  host_impl_->SetRequiresHighResToDraw();
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT,
-            host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
-}
-
-TEST_F(LayerTreeHostImplTest,
-       PrepareToDrawFailsWhenHighResRequiredAndMissingTile) {
-  host_impl_->active_tree()->SetRootLayer(
-      DidDrawCheckLayer::Create(host_impl_->active_tree(), 7));
-  DidDrawCheckLayer* root =
-      static_cast<DidDrawCheckLayer*>(host_impl_->active_tree()->root_layer());
-  root->SetHasRenderSurface(true);
-
-  LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
-  host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame);
-  host_impl_->SwapBuffers(frame);
-
-  bool tile_missing = true;
-  bool had_incomplete_tile = false;
-  bool is_animating = false;
-  root->AddChild(
-      MissingTextureAnimatingLayer::Create(host_impl_->active_tree(),
-                                           8,
-                                           tile_missing,
-                                           had_incomplete_tile,
-                                           is_animating,
-                                           host_impl_->resource_provider()));
-  host_impl_->SetRequiresHighResToDraw();
-  LayerTreeHostImpl::FrameData frame2;
-  EXPECT_EQ(DRAW_ABORTED_MISSING_HIGH_RES_CONTENT,
-            host_impl_->PrepareToDraw(&frame2));
-  host_impl_->DrawLayers(&frame2, gfx::FrameTime::Now());
-  host_impl_->DidDrawAllLayers(frame2);
+    LayerTreeHostImpl::FrameData frame;
+    EXPECT_EQ(testcase.expected_result, host_impl_->PrepareToDraw(&frame));
+    host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
+    host_impl_->DidDrawAllLayers(frame);
+    host_impl_->SwapBuffers(frame);
+  }
 }
 
 TEST_F(LayerTreeHostImplTest, ScrollRootIgnored) {
@@ -5061,16 +5041,10 @@ TEST_F(LayerTreeHostImplTest, PartialSwapReceivesDamageRect) {
   // that we can force partial swap enabled.
   LayerTreeSettings settings;
   settings.renderer_settings.partial_swap_enabled = true;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
-      new TestSharedBitmapManager());
   scoped_ptr<LayerTreeHostImpl> layer_tree_host_impl =
-      LayerTreeHostImpl::Create(settings,
-                                this,
-                                &proxy_,
-                                &stats_instrumentation_,
-                                shared_bitmap_manager.get(),
-                                NULL,
-                                0);
+      LayerTreeHostImpl::Create(
+          settings, this, &proxy_, &stats_instrumentation_,
+          shared_bitmap_manager_.get(), NULL, task_graph_runner_.get(), 0);
   layer_tree_host_impl->InitializeRenderer(output_surface.Pass());
   layer_tree_host_impl->SetViewportSize(gfx::Size(500, 500));
 
@@ -5316,8 +5290,8 @@ TEST_F(LayerTreeHostImplTest, PartialSwap) {
   CreateHostImpl(settings, FakeOutputSurface::Create3d(context_owned.Pass()));
   SetupRootLayerImpl(FakeLayerWithQuads::Create(host_impl_->active_tree(), 1));
 
-  // The first frame is not a partially-swapped one.
-  harness.MustSetScissor(0, 0, 10, 10);
+  // The first frame is not a partially-swapped one. No scissor should be set.
+  harness.MustSetNoScissor();
   harness.MustDrawSolidQuad();
   {
     LayerTreeHostImpl::FrameData frame;
@@ -5358,7 +5332,7 @@ static scoped_ptr<LayerTreeHostImpl> SetupLayersForOpacity(
   LayerTreeSettings settings;
   settings.renderer_settings.partial_swap_enabled = partial_swap;
   scoped_ptr<LayerTreeHostImpl> my_host_impl = LayerTreeHostImpl::Create(
-      settings, client, proxy, stats_instrumentation, manager, NULL, 0);
+      settings, client, proxy, stats_instrumentation, manager, NULL, NULL, 0);
   my_host_impl->InitializeRenderer(output_surface.Pass());
   my_host_impl->SetViewportSize(gfx::Size(100, 100));
 
@@ -6548,9 +6522,10 @@ TEST_F(LayerTreeHostImplTest, ForcedDrawToSoftwareDeviceBasicRender) {
   EXPECT_EQ(1, software_device->frames_began_);
   EXPECT_EQ(1, software_device->frames_ended_);
 
-  // Call other API methods that are likely to hit NULL pointer in this mode.
-  EXPECT_TRUE(host_impl_->AsValue().get());
-  EXPECT_TRUE(host_impl_->ActivationStateAsValue().get());
+  // Call another API method that is likely to hit nullptr in this mode.
+  scoped_refptr<base::trace_event::TracedValue> state =
+      make_scoped_refptr(new base::trace_event::TracedValue());
+  host_impl_->ActivationStateAsValueInto(state.get());
 }
 
 TEST_F(LayerTreeHostImplTest,
@@ -6683,13 +6658,10 @@ TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails) {
 // doesn't support memory management extensions.
 TEST_F(LayerTreeHostImplTest, DefaultMemoryAllocation) {
   LayerTreeSettings settings;
-  host_impl_ = LayerTreeHostImpl::Create(settings,
-                                         this,
-                                         &proxy_,
-                                         &stats_instrumentation_,
-                                         shared_bitmap_manager_.get(),
-                                         gpu_memory_buffer_manager_.get(),
-                                         0);
+  host_impl_ = LayerTreeHostImpl::Create(
+      settings, this, &proxy_, &stats_instrumentation_,
+      shared_bitmap_manager_.get(), gpu_memory_buffer_manager_.get(),
+      task_graph_runner_.get(), 0);
 
   scoped_ptr<OutputSurface> output_surface(
       FakeOutputSurface::Create3d(TestWebGraphicsContext3D::Create()));
@@ -6729,9 +6701,8 @@ TEST_F(LayerTreeHostImplTest, MemoryPolicy) {
   // when visible.
   LayerTreeSettings settings;
   settings.gpu_rasterization_enabled = true;
-  host_impl_ = LayerTreeHostImpl::Create(
-      settings, this, &proxy_, &stats_instrumentation_, NULL, NULL, 0);
-  host_impl_->SetUseGpuRasterization(true);
+  CreateHostImpl(settings, CreateOutputSurface());
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON);
   host_impl_->SetVisible(true);
   host_impl_->SetMemoryPolicy(policy1);
   EXPECT_EQ(policy1.bytes_limit_when_visible, current_limit_bytes_);
@@ -6773,18 +6744,82 @@ TEST_F(LayerTreeHostImplTest, RequireHighResAfterGpuRasterizationToggles) {
 
   host_impl_->ResetRequiresHighResToDraw();
 
-  host_impl_->SetUseGpuRasterization(false);
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_DEVICE);
   EXPECT_FALSE(host_impl_->RequiresHighResToDraw());
-  host_impl_->SetUseGpuRasterization(true);
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON);
   EXPECT_TRUE(host_impl_->RequiresHighResToDraw());
-  host_impl_->SetUseGpuRasterization(false);
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_DEVICE);
   EXPECT_TRUE(host_impl_->RequiresHighResToDraw());
 
   host_impl_->ResetRequiresHighResToDraw();
 
   EXPECT_FALSE(host_impl_->RequiresHighResToDraw());
-  host_impl_->SetUseGpuRasterization(true);
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON);
   EXPECT_TRUE(host_impl_->RequiresHighResToDraw());
+}
+
+TEST_F(LayerTreeHostImplTest, SetGpuRasterizationStatus) {
+  ASSERT_TRUE(host_impl_->active_tree());
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON);
+  EXPECT_TRUE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::ON, host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_DEVICE);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_DEVICE,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON_FORCED);
+  EXPECT_TRUE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::ON_FORCED,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_VIEWPORT);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_VIEWPORT,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_CONTENT);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_CONTENT,
+            host_impl_->gpu_rasterization_status());
+}
+
+TEST_F(LayerTreeHostImplTest, SetGpuRasterizationStatusNoContext) {
+  // Initialize output surface with no worker context privider.
+  scoped_ptr<FakeOutputSurface> output_surface =
+      FakeOutputSurface::Create3d(TestContextProvider::Create(), nullptr);
+  CreateHostImpl(DefaultSettings(), output_surface.Pass());
+
+  ASSERT_TRUE(host_impl_->active_tree());
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_DEVICE,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::ON_FORCED);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_DEVICE,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_DEVICE);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_DEVICE,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_VIEWPORT);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_VIEWPORT,
+            host_impl_->gpu_rasterization_status());
+
+  host_impl_->SetGpuRasterizationStatus(GpuRasterizationStatus::OFF_CONTENT);
+  EXPECT_FALSE(host_impl_->use_gpu_rasterization());
+  EXPECT_EQ(GpuRasterizationStatus::OFF_CONTENT,
+            host_impl_->gpu_rasterization_status());
 }
 
 class LayerTreeHostImplTestPrepareTiles : public LayerTreeHostImplTest {
@@ -6793,8 +6828,9 @@ class LayerTreeHostImplTestPrepareTiles : public LayerTreeHostImplTest {
     LayerTreeSettings settings;
     settings.impl_side_painting = true;
 
-    fake_host_impl_ = new FakeLayerTreeHostImpl(
-        settings, &proxy_, shared_bitmap_manager_.get());
+    fake_host_impl_ = new FakeLayerTreeHostImpl(settings, &proxy_,
+                                                shared_bitmap_manager_.get(),
+                                                task_graph_runner_.get());
     host_impl_.reset(fake_host_impl_);
     host_impl_->InitializeRenderer(CreateOutputSurface());
     host_impl_->SetViewportSize(gfx::Size(10, 10));
@@ -7145,7 +7181,7 @@ TEST_F(LayerTreeHostImplTest, ScrollUnknownScrollAncestorMismatch) {
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL));
 }
 
-TEST_F(LayerTreeHostImplTest, ScrollInvisibleScroller) {
+TEST_F(LayerTreeHostImplTest, NotScrollInvisibleScroller) {
   gfx::Size content_size(100, 100);
   SetupScrollAndContentsLayers(content_size);
 
@@ -7169,11 +7205,48 @@ TEST_F(LayerTreeHostImplTest, ScrollInvisibleScroller) {
   // any layer that is a drawn RSLL member, then we can ignore the hit.
   //
   // Why SCROLL_STARTED? In this case, it's because we've bubbled out and
-  // started overscrolling the inner viewport.
+  // started scrolling the inner viewport.
   EXPECT_EQ(InputHandler::SCROLL_STARTED,
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL));
 
   EXPECT_EQ(2, host_impl_->CurrentlyScrollingLayer()->id());
+}
+
+TEST_F(LayerTreeHostImplTest, ScrollInvisibleScrollerWithVisibleDescendent) {
+  gfx::Size content_size(100, 100);
+  SetupScrollAndContentsLayers(content_size);
+
+  LayerImpl* root = host_impl_->active_tree()->LayerById(1);
+  LayerImpl* root_scroll_layer = host_impl_->active_tree()->LayerById(2);
+
+  scoped_ptr<LayerImpl> invisible_scroll_layer =
+      CreateScrollableLayer(7, content_size, root);
+  invisible_scroll_layer->SetDrawsContent(false);
+
+  scoped_ptr<LayerImpl> child_layer =
+      LayerImpl::Create(host_impl_->active_tree(), 8);
+  child_layer->SetDrawsContent(false);
+
+  scoped_ptr<LayerImpl> grand_child_layer =
+      LayerImpl::Create(host_impl_->active_tree(), 9);
+  grand_child_layer->SetDrawsContent(true);
+  grand_child_layer->SetBounds(content_size);
+  grand_child_layer->SetContentBounds(content_size);
+  // Move the grand child so it's not hit by our test point.
+  grand_child_layer->SetPosition(gfx::PointF(10.f, 10.f));
+
+  child_layer->AddChild(grand_child_layer.Pass());
+  invisible_scroll_layer->AddChild(child_layer.Pass());
+  root_scroll_layer->AddChild(invisible_scroll_layer.Pass());
+
+  DrawFrame();
+
+  // We should have scrolled |invisible_scroll_layer| as it was hit and it has
+  // a descendant which is a drawn RSLL member.
+  EXPECT_EQ(InputHandler::SCROLL_STARTED,
+            host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL));
+
+  EXPECT_EQ(7, host_impl_->CurrentlyScrollingLayer()->id());
 }
 
 TEST_F(LayerTreeHostImplTest, ScrollInvisibleScrollerWithVisibleScrollChild) {
@@ -7221,12 +7294,9 @@ TEST_F(LayerTreeHostImplTest, ScrollInvisibleScrollerWithVisibleScrollChild) {
 
   DrawFrame();
 
-  // We should not have scrolled |child_scroll| even though we technically "hit"
-  // it. The reason for this is that if the scrolling the scroll would not move
-  // any layer that is a drawn RSLL member, then we can ignore the hit.
-  //
-  // Why SCROLL_STARTED? In this case, it's because we've bubbled out and
-  // started overscrolling the inner viewport.
+  // We should have scrolled |child_scroll| even though it is invisible.
+  // The reason for this is that if the scrolling the scroll would move a layer
+  // that is a drawn RSLL member, then we should accept this hit.
   EXPECT_EQ(InputHandler::SCROLL_STARTED,
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::WHEEL));
 
@@ -7523,7 +7593,8 @@ TEST_F(LayerTreeHostImplWithTopControlsTest, ScrollHandledByTopControls) {
   float offset = top_controls_height_ - residue;
   EXPECT_TRUE(
       host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, offset)).did_scroll);
-  EXPECT_EQ(-offset, host_impl_->top_controls_manager()->ControlsTopOffset());
+  EXPECT_FLOAT_EQ(-offset,
+                  host_impl_->top_controls_manager()->ControlsTopOffset());
   EXPECT_EQ(gfx::Vector2dF().ToString(),
             scroll_layer->CurrentScrollOffset().ToString());
 
@@ -7582,7 +7653,8 @@ TEST_F(LayerTreeHostImplWithTopControlsTest, TopControlsAnimationAtOrigin) {
   float offset = top_controls_height_ - residue;
   EXPECT_TRUE(
       host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, offset)).did_scroll);
-  EXPECT_EQ(-offset, host_impl_->top_controls_manager()->ControlsTopOffset());
+  EXPECT_FLOAT_EQ(-offset,
+                  host_impl_->top_controls_manager()->ControlsTopOffset());
   EXPECT_EQ(gfx::Vector2dF().ToString(),
             scroll_layer->CurrentScrollOffset().ToString());
 
@@ -7652,7 +7724,8 @@ TEST_F(LayerTreeHostImplWithTopControlsTest, TopControlsAnimationAfterScroll) {
   float offset = top_controls_height_ - residue;
   EXPECT_TRUE(
       host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, offset)).did_scroll);
-  EXPECT_EQ(-offset, host_impl_->top_controls_manager()->ControlsTopOffset());
+  EXPECT_FLOAT_EQ(-offset,
+                  host_impl_->top_controls_manager()->ControlsTopOffset());
   EXPECT_EQ(gfx::Vector2dF(0, initial_scroll_offset).ToString(),
             scroll_layer->CurrentScrollOffset().ToString());
 
@@ -7689,6 +7762,70 @@ TEST_F(LayerTreeHostImplWithTopControlsTest, TopControlsAnimationAfterScroll) {
     }
   }
   EXPECT_FALSE(host_impl_->top_controls_manager()->animation());
+  EXPECT_EQ(-top_controls_height_,
+            host_impl_->top_controls_manager()->ControlsTopOffset());
+}
+
+TEST_F(LayerTreeHostImplWithTopControlsTest,
+       TopControlsAnimationAfterMainThreadFlingStopped) {
+  LayerImpl* scroll_layer = SetupScrollAndContentsLayers(gfx::Size(100, 200));
+  host_impl_->SetViewportSize(gfx::Size(100, 100));
+  host_impl_->top_controls_manager()->UpdateTopControlsState(BOTH, SHOWN,
+                                                             false);
+  float initial_scroll_offset = 50;
+  scroll_layer->PushScrollOffsetFromMainThread(
+      gfx::ScrollOffset(0, initial_scroll_offset));
+  DrawFrame();
+
+  EXPECT_EQ(InputHandler::SCROLL_STARTED,
+            host_impl_->ScrollBegin(gfx::Point(), InputHandler::GESTURE));
+  EXPECT_EQ(0, host_impl_->top_controls_manager()->ControlsTopOffset());
+  EXPECT_EQ(gfx::Vector2dF(0, initial_scroll_offset).ToString(),
+            scroll_layer->CurrentScrollOffset().ToString());
+
+  // Scroll the top controls partially.
+  const float residue = 15;
+  float offset = top_controls_height_ - residue;
+  EXPECT_TRUE(
+      host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, offset)).did_scroll);
+  EXPECT_FLOAT_EQ(-offset,
+                  host_impl_->top_controls_manager()->ControlsTopOffset());
+  EXPECT_EQ(gfx::Vector2dF(0, initial_scroll_offset).ToString(),
+            scroll_layer->CurrentScrollOffset().ToString());
+
+  did_request_redraw_ = false;
+  did_request_animate_ = false;
+  did_request_commit_ = false;
+
+  // End the fling while the controls are still offset from the limit.
+  host_impl_->MainThreadHasStoppedFlinging();
+  ASSERT_TRUE(host_impl_->top_controls_manager()->animation());
+  EXPECT_TRUE(did_request_animate_);
+  EXPECT_TRUE(did_request_redraw_);
+  EXPECT_FALSE(did_request_commit_);
+
+  // Animate the top controls to the limit.
+  base::TimeTicks animation_time = gfx::FrameTime::Now();
+  while (did_request_animate_) {
+    did_request_redraw_ = false;
+    did_request_animate_ = false;
+    did_request_commit_ = false;
+
+    float old_offset = host_impl_->top_controls_manager()->ControlsTopOffset();
+
+    animation_time += base::TimeDelta::FromMilliseconds(5);
+    host_impl_->Animate(animation_time);
+
+    float new_offset = host_impl_->top_controls_manager()->ControlsTopOffset();
+
+    if (new_offset != old_offset) {
+      EXPECT_TRUE(did_request_redraw_);
+      EXPECT_TRUE(did_request_commit_);
+    }
+  }
+  EXPECT_FALSE(host_impl_->top_controls_manager()->animation());
+  EXPECT_EQ(-top_controls_height_,
+            host_impl_->top_controls_manager()->ControlsTopOffset());
 }
 
 TEST_F(LayerTreeHostImplWithTopControlsTest,
@@ -8102,7 +8239,10 @@ TEST_F(LayerTreeHostImplTest, GetPictureLayerImplPairs) {
       gfx::Size(10, 10), gfx::Size(10, 10)));
   Region empty_invalidation;
   const PictureLayerTilingSet* null_tiling_set = nullptr;
+  layer->set_gpu_raster_max_texture_size(host_impl_->device_viewport_size());
   layer->UpdateRasterSource(pile, &empty_invalidation, null_tiling_set);
+  nondraw_layer->set_gpu_raster_max_texture_size(
+      host_impl_->device_viewport_size());
   nondraw_layer->UpdateRasterSource(pile, &empty_invalidation, null_tiling_set);
 
   layer->AddChild(nondraw_layer.Pass());
@@ -8220,7 +8360,10 @@ TEST_F(LayerTreeHostImplTest, GetPictureLayerImplPairsWithNonRSLLMembers) {
       gfx::Size(10, 10), gfx::Size(10, 10)));
   Region empty_invalidation;
   const PictureLayerTilingSet* null_tiling_set = nullptr;
+  layer->set_gpu_raster_max_texture_size(host_impl_->device_viewport_size());
   layer->UpdateRasterSource(pile, &empty_invalidation, null_tiling_set);
+  nondraw_layer->set_gpu_raster_max_texture_size(
+      host_impl_->device_viewport_size());
   nondraw_layer->UpdateRasterSource(pile, &empty_invalidation, null_tiling_set);
 
   layer->AddChild(nondraw_layer.Pass());

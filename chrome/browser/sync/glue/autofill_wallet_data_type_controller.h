@@ -6,14 +6,11 @@
 #define CHROME_BROWSER_SYNC_GLUE_AUTOFILL_WALLET_DATA_TYPE_CONTROLLER_H_
 
 #include "base/basictypes.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "components/sync_driver/non_ui_data_type_controller.h"
 
 class Profile;
 class ProfileSyncComponentsFactory;
-
-namespace autofill {
-class PersonalDataManager;
-}
 
 namespace browser_sync {
 
@@ -37,12 +34,25 @@ class AutofillWalletDataTypeController
                                const base::Closure& task) override;
   bool StartModels() override;
   void StopModels() override;
+  bool ReadyForStart() const override;
 
   void WebDatabaseLoaded();
 
+  // Callback for changes to the autofill prefs.
+  void OnSyncPrefChanged();
+
+  // Returns true if the prefs are set such that wallet sync should be enabled.
+  bool IsEnabled();
+
   Profile* const profile_;
-  autofill::PersonalDataManager* personal_data_;
   bool callback_registered_;
+
+  // Stores whether we're currently syncing wallet data. This is the last
+  // value computed by IsEnabled.
+  bool currently_enabled_;
+
+  // Registrar for listening to kAutofillWalletSyncExperimentEnabled status.
+  PrefChangeRegistrar pref_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillWalletDataTypeController);
 };

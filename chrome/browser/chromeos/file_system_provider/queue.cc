@@ -26,7 +26,7 @@ Queue::Queue(size_t max_in_parallel)
     : max_in_parallel_(max_in_parallel),
       next_token_(1),
       weak_ptr_factory_(this) {
-  DCHECK_LT(0u, max_in_parallel);
+  CHECK_LT(0u, max_in_parallel);
 }
 
 Queue::~Queue() {
@@ -38,9 +38,9 @@ size_t Queue::NewToken() {
 
 void Queue::Enqueue(size_t token, const AbortableCallback& callback) {
 #if !NDEBUG
-  DCHECK(executed_.find(token) == executed_.end());
+  CHECK(executed_.find(token) == executed_.end());
   for (auto& task : pending_) {
-    DCHECK(token != task.token);
+    CHECK(token != task.token);
   }
 #endif
   pending_.push_back(Task(token, callback));
@@ -51,36 +51,16 @@ void Queue::Enqueue(size_t token, const AbortableCallback& callback) {
 void Queue::Complete(size_t token) {
   const auto it = executed_.find(token);
   DCHECK(it != executed_.end());
-  completed_[token] = it->second;
   executed_.erase(it);
-}
-
-void Queue::Remove(size_t token) {
-  const auto it = completed_.find(token);
-  if (it != completed_.end()) {
-    completed_.erase(it);
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&Queue::MaybeRun, weak_ptr_factory_.GetWeakPtr()));
-    return;
-  }
-
-  // If not completed, then it must have been aborted.
-  const auto aborted_it = aborted_.find(token);
-  DCHECK(aborted_it != aborted_.end());
-  aborted_.erase(aborted_it);
-
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&Queue::MaybeRun, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void Queue::MaybeRun() {
-  if (executed_.size() + completed_.size() == max_in_parallel_ ||
-      !pending_.size()) {
+  if (executed_.size() == max_in_parallel_ || !pending_.size())
     return;
-  }
 
-  DCHECK_GT(max_in_parallel_, executed_.size() + completed_.size());
+  CHECK_GT(max_in_parallel_, executed_.size());
   Task task = pending_.front();
   pending_.pop_front();
 
@@ -95,24 +75,20 @@ void Queue::MaybeRun() {
 }
 
 void Queue::Abort(size_t token) {
-  // Check if it's running.
+  // Check if it's running. If so, then abort and expect a Complete() call soon.
   const auto it = executed_.find(token);
   if (it != executed_.end()) {
-    Task task = it->second;
-    aborted_[token] = task;
-    executed_.erase(it);
-    DCHECK(!task.abort_callback.is_null());
-    task.abort_callback.Run();
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&Queue::MaybeRun, weak_ptr_factory_.GetWeakPtr()));
+    Task& task = it->second;
+    AbortCallback abort_callback = task.abort_callback;
+    task.abort_callback = AbortCallback();
+    DCHECK(!abort_callback.is_null());
+    abort_callback.Run();
     return;
   }
 
   // Aborting not running tasks is linear. TODO(mtomasz): Optimize if feasible.
   for (auto it = pending_.begin(); it != pending_.end(); ++it) {
     if (token == it->token) {
-      aborted_[token] = *it;
       pending_.erase(it);
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
@@ -123,22 +99,6 @@ void Queue::Abort(size_t token) {
 
   // The task is already removed, marked as completed or aborted.
   NOTREACHED();
-}
-
-bool Queue::IsAborted(size_t token) {
-#if !NDEBUG
-  bool in_queue = executed_.find(token) != executed_.end() ||
-                  completed_.find(token) != completed_.end() ||
-                  aborted_.find(token) != aborted_.end();
-  for (auto& task : pending_) {
-    if (token == task.token) {
-      in_queue = true;
-      break;
-    }
-  }
-  DCHECK(in_queue);
-#endif
-  return aborted_.find(token) != aborted_.end();
 }
 
 }  // namespace file_system_provider

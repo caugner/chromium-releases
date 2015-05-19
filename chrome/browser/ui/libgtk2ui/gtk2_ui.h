@@ -25,6 +25,7 @@ typedef struct _GdkColor GdkColor;
 typedef struct _GtkBorder GtkBorder;
 typedef struct _GtkStyle GtkStyle;
 typedef struct _GtkWidget GtkWidget;
+typedef struct _PangoFontDescription PangoFontDescription;
 
 class SkBitmap;
 
@@ -117,6 +118,10 @@ class Gtk2UI : public views::LinuxUI {
   // ui::TextEditKeybindingDelegate:
   bool MatchEvent(const ui::Event& event,
                   std::vector<ui::TextEditCommandAuraLinux>* commands) override;
+
+  // ui::Views::LinuxUI:
+  void UpdateDeviceScaleFactor(float device_scale_factor) override;
+  float GetDeviceScaleFactor() const override;
 
  private:
   typedef std::map<int, SkColor> ColorMap;
@@ -261,6 +266,8 @@ class Gtk2UI : public views::LinuxUI {
   // or the callback returns NULL, Gtk2UI will default to a NativeThemeGtk2
   // instance.
   NativeThemeGetter native_theme_overrider_;
+
+  float device_scale_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(Gtk2UI);
 };

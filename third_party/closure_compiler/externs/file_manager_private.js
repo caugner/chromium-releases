@@ -89,8 +89,8 @@ var MountCompletedEvent;
  *   fileUrl: string,
  *   transferState: string,
  *   transferType: string,
- *   processed: (number|undefined),
- *   total: (number|undefined),
+ *   processed: number,
+ *   total: number,
  *   num_total_jobs: number
  * }}
  */
@@ -270,21 +270,18 @@ chrome.fileManagerPrivate.addFileWatch = function(fileUrl, callback) {};
 chrome.fileManagerPrivate.removeFileWatch = function(fileUrl, callback) {};
 
 /**
- * Requests access to a file system volume. |volumeId| The ID of the file
- * system volume to request. The volume ID is     delivered to JavaScript as
- * part of VolumeMetadata. By specifying     "compatible", this function
- * behaves in the compatible mode, where the     returned FileSystem object
- * gives access to all file system volumes such     as Downloads folder and
- * removal media like SD cards (i.e. all volumes     are provided inside the
- * single FileSystem object). In the new     "per-volume FileSystem object
- * model" crbug.com/322305, a separate     FileSystem object is created for
- * each volume. "compatible" parameter     will be removed once Files.app is
- * switched to the per-volume FileSystem     object model. |callback|
- * @param {string} volumeId
- * @param {Function} callback |fileSystem| A DOMFileSystem instance for local
- * file system access. null if the caller has no appropriate permissions.
+ * Enables the extenal file scheme necessary to initiate drags to the browser
+ * window for files on the external backend.
  */
-chrome.fileManagerPrivate.requestFileSystem = function(volumeId, callback) {};
+chrome.fileManagerPrivate.enableExternalFileScheme = function() {};
+
+/**
+ * Requests R/W access to the specified entries as |entryUrls|. Note, that only
+ * files backed by external file system backend will be granted the access.
+ * @param {!Array<string>} entryUrls
+ * @param {function()} callback Completion callback.
+ */
+chrome.fileManagerPrivate.grantAccess = function(entryUrls, callback) {};
 
 /**
  * Selects multiple files. |selectedPaths| Array of selected paths
@@ -566,6 +563,22 @@ chrome.fileManagerPrivate.getMimeType = function(fileUrl, callback) {};
  * @param {function(boolean)} callback
  */
 chrome.fileManagerPrivate.isUMAEnabled = function(callback) {};
+
+/**
+ * Sets a tag on a file or a directory. Only Drive files are supported.
+ * @param {string} entryURL
+ * @param {string} visibility 'private' or 'public'
+ * @param {string} key
+ * @param {string} value
+ * @param {function()} callback
+ */
+chrome.fileManagerPrivate.setEntryTag = function(entryURL, visibility, key, value, callback) {};
+
+/**
+ * Gets a flag indicating whether PiexLoader is enabled.
+ * @param {function(boolean)} callback
+ */
+chrome.fileManagerPrivate.isPiexLoaderEnabled = function(callback) {};
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onMountCompleted;

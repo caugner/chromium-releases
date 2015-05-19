@@ -71,6 +71,15 @@ class ChromeProxyResponse(network_metrics.HTTPResponse):
         return kvp[1].strip()
     return None
 
+  def HasChromeProxyLoFi(self):
+    if 'Chrome-Proxy' not in self.response.request_headers:
+      return False
+    chrome_proxy_request_header = self.response.request_headers['Chrome-Proxy']
+    values = [v.strip() for v in chrome_proxy_request_header.split(',')]
+    for value in values:
+      if len(value) == 5 and value == 'q=low':
+        return True
+    return False
 
 class ChromeProxyMetric(network_metrics.NetworkMetric):
   """A Chrome proxy timeline metric."""
@@ -103,6 +112,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
       else:
         resources_direct += 1
 
+    if resources_from_cache + resources_via_proxy + resources_direct == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response, but zero responses were received.')
+
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'resources_via_proxy', 'count',
         resources_via_proxy))
@@ -123,10 +136,85 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         raise ChromeProxyMetricException, (
             '%s: Via header (%s) is not valid (refer=%s, status=%d)' % (
                 r.url, r.GetHeader('Via'), r.GetHeader('Referer'), r.status))
+
+    if via_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response through the proxy, but zero such '
+          'responses were received.')
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'checked_via_header', 'count', via_count))
 
+  def AddResultsForLatency(self, tab, results):
+    # TODO(bustamante): This is a hack to workaround crbug.com/467174,
+    #   once fixed just pull down window.performance.timing object and
+    #   reference that everywhere.
+    load_event_start = tab.EvaluateJavaScript(
+        'window.performance.timing.loadEventStart')
+    navigation_start = tab.EvaluateJavaScript(
+        'window.performance.timing.navigationStart')
+    dom_content_loaded_event_start = tab.EvaluateJavaScript(
+        'window.performance.timing.domContentLoadedEventStart')
+    fetch_start = tab.EvaluateJavaScript(
+        'window.performance.timing.fetchStart')
+    request_start = tab.EvaluateJavaScript(
+        'window.performance.timing.requestStart')
+    domain_lookup_end = tab.EvaluateJavaScript(
+        'window.performance.timing.domainLookupEnd')
+    domain_lookup_start = tab.EvaluateJavaScript(
+        'window.performance.timing.domainLookupStart')
+    connect_end = tab.EvaluateJavaScript(
+        'window.performance.timing.connectEnd')
+    connect_start = tab.EvaluateJavaScript(
+        'window.performance.timing.connectStart')
+    response_end = tab.EvaluateJavaScript(
+        'window.performance.timing.responseEnd')
+    response_start = tab.EvaluateJavaScript(
+        'window.performance.timing.responseStart')
+
+    # NavigationStart relative markers in milliseconds.
+    load_start = (float(load_event_start) - navigation_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'load_start', 'ms', load_start))
+
+    dom_content_loaded_start = (
+      float(dom_content_loaded_event_start) - navigation_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'dom_content_loaded_start', 'ms',
+        dom_content_loaded_start))
+
+    fetch_start = (float(fetch_start) - navigation_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'fetch_start', 'ms', fetch_start,
+        important=False))
+
+    request_start = (float(request_start) - navigation_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'request_start', 'ms', request_start,
+        important=False))
+
+    # Phase measurements in milliseconds.
+    domain_lookup_duration = (float(domain_lookup_end) - domain_lookup_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'domain_lookup_duration', 'ms',
+        domain_lookup_duration, important=False))
+
+    connect_duration = (float(connect_end) - connect_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'connect_duration', 'ms', connect_duration,
+        important=False))
+
+    request_duration = (float(response_start) - request_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'request_duration', 'ms', request_duration,
+        important=False))
+
+    response_duration = (float(response_end) - response_start)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'response_duration', 'ms', response_duration,
+        important=False))
+
   def AddResultsForClientVersion(self, tab, results):
+    via_count = 0
     for resp in self.IterResponses(tab):
       r = resp.response
       if resp.response.status != 200:
@@ -135,8 +223,14 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
       if not resp.IsValidByViaHeader():
         raise ChromeProxyMetricException, ('%s: Response missing via header' %
                                            (r.url))
+      via_count += 1
+
+    if via_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response through the proxy, but zero such '
+          'responses were received.')
     results.AddValue(scalar.ScalarValue(
-        results.current_page, 'version_test', 'count', 1))
+        results.current_page, 'responses_via_proxy', 'count', via_count))
 
   def GetClientTypeFromRequests(self, tab):
     """Get the Chrome-Proxy client type value from requests made in this tab.
@@ -175,10 +269,39 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
               'bypass for this page, but this client is "%s".' % (
                   resp.response.url, bypass_for_client_type, client_type))
 
+    if via_count + bypass_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response that was eligible to be proxied, but '
+          'zero such responses were received.')
+
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'via', 'count', via_count))
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'bypass', 'count', bypass_count))
+
+  def AddResultsForLoFi(self, tab, results):
+    lo_fi_count = 0
+
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyLoFi():
+        lo_fi_count += 1
+      else:
+        raise ChromeProxyMetricException, (
+            '%s: LoFi not in request header.' % (resp.response.url))
+
+      if resp.content_length > 100:
+        raise ChromeProxyMetricException, (
+            'Image %s is %d bytes. Expecting less than 100 bytes.' %
+            (resp.response.url, resp.content_length))
+
+    if lo_fi_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one LoFi response, but zero such responses were '
+          'received.')
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'lo_fi', 'count', lo_fi_count))
+    super(ChromeProxyMetric, self).AddResults(tab, results)
 
   def AddResultsForBypass(self, tab, results):
     bypass_count = 0
@@ -191,6 +314,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
                 r.url, r.GetHeader('Via'), r.GetHeader('Referer'), r.status))
       bypass_count += 1
 
+    if bypass_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response to be bypassed, but zero such '
+          'responses were received.')
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'bypass', 'count', bypass_count))
 
@@ -301,6 +428,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
                   r.headers))
         via_fallback_count += 1
 
+    if via_fallback_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response through the fallback proxy, but zero '
+          'such responses were received.')
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'via_fallback', 'count', via_fallback_count))
 
@@ -394,6 +525,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
                 r.url, r.status, r.status_text, r.headers))
       else:
         bypass_count += 1
+    if bypass_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response to be bypassed before the bypass '
+          'expired, but zero such responses were received.')
 
     # Wait until 30 seconds after the bypass should expire, and fetch a page. It
     # should have the via header since the proxy should no longer be bypassed.
@@ -415,6 +550,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
                 r.url, r.status, r.status_text, r.headers))
       else:
         via_count += 1
+    if via_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one response through the proxy after the bypass '
+          'expired, but zero such responses were received.')
 
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'bypass', 'count', bypass_count))

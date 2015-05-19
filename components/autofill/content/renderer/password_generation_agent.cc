@@ -91,6 +91,10 @@ void CopyElementValueToOtherInputElements(
   }
 }
 
+bool AutocompleteAttributesSetForGeneration(const PasswordForm& form) {
+  return form.username_marked_by_site && form.new_password_marked_by_site;
+}
+
 }  // namespace
 
 PasswordGenerationAgent::AccountCreationFormData::AccountCreationFormData(
@@ -114,49 +118,50 @@ PasswordGenerationAgent::PasswordGenerationAgent(
 PasswordGenerationAgent::~PasswordGenerationAgent() {}
 
 void PasswordGenerationAgent::DidFinishDocumentLoad() {
-  if (render_frame()->GetWebFrame()->parent())
-    return;
+  // Update stats for main frame navigation.
+  if (!render_frame()->GetWebFrame()->parent()) {
+    // In every navigation, the IPC message sent by the password autofill
+    // manager to query whether the current form is blacklisted or not happens
+    // when the document load finishes, so we need to clear previous states
+    // here before we hear back from the browser. We only clear this state on
+    // main frame load as we don't want subframe loads to clear state that we
+    // have received from the main frame. Note that we assume there is only one
+    // account creation form, but there could be multiple password forms in
+    // each frame.
+    not_blacklisted_password_form_origins_.clear();
+    generation_enabled_forms_.clear();
+    generation_element_.reset();
+    possible_account_creation_forms_.clear();
 
-  // In every navigation, the IPC message sent by the password autofill manager
-  // to query whether the current form is blacklisted or not happens when the
-  // document load finishes, so we need to clear previous states here before we
-  // hear back from the browser. We only clear this state on main frame load
-  // as we don't want subframe loads to clear state that we have received from
-  // the main frame. Note that we assume there is only one account creation
-  // form, but there could be multiple password forms in each frame.
-  not_blacklisted_password_form_origins_.clear();
-  generation_enabled_forms_.clear();
-  generation_element_.reset();
-  possible_account_creation_forms_.clear();
+    // Log statistics after navigation so that we only log once per page.
+    if (generation_form_data_ &&
+        generation_form_data_->password_elements.empty()) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::NO_SIGN_UP_DETECTED);
+    } else {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::SIGN_UP_DETECTED);
+    }
+    generation_form_data_.reset();
+    password_is_generated_ = false;
+    if (password_edited_) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::PASSWORD_EDITED);
+    }
+    password_edited_ = false;
 
-  // Log statistics after navigation so that we only log once per page.
-  if (generation_form_data_ &&
-      generation_form_data_->password_elements.empty()) {
-    password_generation::LogPasswordGenerationEvent(
-        password_generation::NO_SIGN_UP_DETECTED);
-  } else {
-    password_generation::LogPasswordGenerationEvent(
-        password_generation::SIGN_UP_DETECTED);
-  }
-  generation_form_data_.reset();
-  password_is_generated_ = false;
-  if (password_edited_) {
-    password_generation::LogPasswordGenerationEvent(
-        password_generation::PASSWORD_EDITED);
-  }
-  password_edited_ = false;
+    if (generation_popup_shown_) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::GENERATION_POPUP_SHOWN);
+    }
+    generation_popup_shown_ = false;
 
-  if (generation_popup_shown_) {
-    password_generation::LogPasswordGenerationEvent(
-        password_generation::GENERATION_POPUP_SHOWN);
+    if (editing_popup_shown_) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::EDITING_POPUP_SHOWN);
+    }
+    editing_popup_shown_ = false;
   }
-  generation_popup_shown_ = false;
-
-  if (editing_popup_shown_) {
-    password_generation::LogPasswordGenerationEvent(
-        password_generation::EDITING_POPUP_SHOWN);
-  }
-  editing_popup_shown_ = false;
 
   FindPossibleGenerationForm();
 }
@@ -187,7 +192,7 @@ void PasswordGenerationAgent::FindPossibleGenerationForm() {
     // If we can't get a valid PasswordForm, we skip this form because the
     // the password won't get saved even if we generate it.
     scoped_ptr<PasswordForm> password_form(
-        CreatePasswordForm(forms[i], nullptr));
+        CreatePasswordForm(forms[i], nullptr, nullptr));
     if (!password_form.get()) {
       VLOG(2) << "Skipping form as it would not be saved";
       continue;
@@ -209,7 +214,7 @@ void PasswordGenerationAgent::FindPossibleGenerationForm() {
 
   if (!possible_account_creation_forms_.empty()) {
     VLOG(2) << possible_account_creation_forms_.size()
-             << " possible account creation forms deteceted";
+            << " possible account creation forms deteceted";
     DetermineGenerationElement();
   }
 }
@@ -281,6 +286,8 @@ void PasswordGenerationAgent::DetermineGenerationElement() {
     return;
   }
 
+  // Note that no messages will be sent if this feature is disabled
+  // (e.g. password saving is disabled).
   for (auto& possible_form_data : possible_account_creation_forms_) {
     PasswordForm* possible_password_form = possible_form_data.form.get();
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -293,11 +300,16 @@ void PasswordGenerationAgent::DetermineGenerationElement() {
       continue;
     } else if (!ContainsForm(generation_enabled_forms_,
                              *possible_password_form)) {
-      // Note that this message will never be sent if this feature is disabled
-      // (e.g. Password saving is disabled).
-      VLOG(2) << "Have not received confirmation from Autofill that form is "
-               << "used for account creation";
-      continue;
+      if (AutocompleteAttributesSetForGeneration(*possible_password_form)) {
+        VLOG(2) << "Ignoring lack of Autofill signal due to Autocomplete "
+                << "attributes";
+        password_generation::LogPasswordGenerationEvent(
+            password_generation::AUTOCOMPLETE_ATTRIBUTES_ENABLED_GENERATION);
+      } else {
+        VLOG(2) << "Have not received confirmation from Autofill that form is "
+                << "used for account creation";
+        continue;
+      }
     }
 
     VLOG(2) << "Password generation eligible form found";

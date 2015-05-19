@@ -21,12 +21,13 @@ static_library("renderer") {
     "//base",
     "//components/pdf/common",
     "//components/resources:components_resources",
+    "//components/resources:components_scaled_resources",
     "//components/strings",
     "//content/public/renderer",
     "//gin",
     "//ppapi/shared_impl",
     "//third_party/icu",
     "//v8",
-    "//third_party/WebKit/public:blink_minimal",
+    "//third_party/WebKit/public:blink",
   ]
 }

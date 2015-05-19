@@ -89,6 +89,33 @@ components/rappor/rappor_service.cc.
   </summary>
 </rappor-metric>
 
+<rappor-metric name="Autofill.HighNumberOfHeuristicMismatches"
+    type="ETLD_PLUS_ONE">
+  <owner>mathp@chromium.org</owner>
+  <summary>
+    The eTLD+1 of a URL for which there was a high number of mismatches for the
+    heuristic prediction of the form field types.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="Autofill.HighNumberOfServerMismatches"
+    type="ETLD_PLUS_ONE">
+  <owner>mathp@chromium.org</owner>
+  <summary>
+    The eTLD+1 of a URL for which there was a high number of mismatches for the
+    server prediction of the form field types.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="Autofill.QueryResponseHasNoServerDataForForm"
+    type="ETLD_PLUS_ONE">
+  <owner>mathp@chromium.org</owner>
+  <summary>
+    The eTLD+1 of a URL for which there was a server query response for which
+    the server had no data at all for at least one form.
+  </summary>
+</rappor-metric>
+
 <rappor-metric name="ContentSettings.MixedScript.DisplayedShield"
     type="ETLD_PLUS_ONE">
   <owner>lgarron@chromium.org</owner>
@@ -96,6 +123,124 @@ components/rappor/rappor_service.cc.
     The eTLD+1 of a URL that displayed a mixed script shield. Note: this does
     *not* include pages with mixed scripts where the user has already clicked
     through the shield.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Camera.Revoked.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>jialiul@chromium.org</owner>
+  <summary>
+    The domain for which a camera permission was revoked.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Geolocation.Denied.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Geolocation permission prompt was Denied.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Geolocation.Dismissed.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Geolocation permission prompt was Dismissed.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Geolocation.Granted.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Geolocation permission prompt was accepted.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Geolocation.Ignored.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Geolocation permission prompt was Ignored.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Geolocation.Revoked.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>jialiul@chromium.org</owner>
+  <summary>
+    The domain for which a Geolocation permission was revoked.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionActions_Mic.Revoked.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>jialiul@chromium.org</owner>
+  <summary>
+    The domain for which a microphone permission was revoked.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Notifications.Denied.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Notification permission prompt was Denied.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Notifications.Dismissed.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Notification permission prompt was Dismissed.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Notifications.Granted.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Notification permission prompt was accepted.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Notifications.Ignored.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain for which a Notification permission prompt was Ignored.
+  </summary>
+</rappor-metric>
+
+<rappor-metric
+    name="ContentSettings.PermissionActions_Notifications.Revoked.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>jialiul@chromium.org</owner>
+  <summary>
+    The domain for which a Notification permission was revoked.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionRequested.Geolocation.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain that issues a Geolocation permission prompt.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ContentSettings.PermissionRequested.Notifications.Url"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    The domain that issues a Notification permission prompt.
   </summary>
 </rappor-metric>
 
@@ -155,11 +300,36 @@ components/rappor/rappor_service.cc.
   </summary>
 </rappor-metric>
 
+<rappor-metric name="PushMessaging.GenericNotificationShown.Origin"
+    type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    Number of times the generic (forced) notification was shown per origin.
+    This happens if the site uses the push api but does not generate a
+    notification of their own.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="PushMessaging.MessageReceived.Origin" type="ETLD_PLUS_ONE">
+  <owner>miguelg@chromium.org</owner>
+  <summary>
+    Push Messages received per Origin.
+  </summary>
+</rappor-metric>
+
 <rappor-metric name="Search.DefaultSearchProvider" type="ETLD_PLUS_ONE">
   <owner>holte@chromium.org</owner>
   <summary>
     The domain and registry of the URL for the default search engine.
     Recorded when a profile is opened or after a profile reset.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="ServiceWorker.ControlledPageUrl" type="ETLD_PLUS_ONE">
+  <owner>horo@chromium.org</owner>
+  <summary>
+    The domain and registry of the URL of the page which is controlled by a
+    ServiceWorker. Recorded when the page is loaded.
   </summary>
 </rappor-metric>
 
@@ -185,6 +355,13 @@ components/rappor/rappor_service.cc.
   <summary>
     The domain and registry of the URL chrome://newtab is rewritten to.
     Recorded when a profile is loaded, if the URL is valid.
+  </summary>
+</rappor-metric>
+
+<rappor-metric name="SoftwareReporter.FoundUwS" type="COARSE_RAPPOR_TYPE">
+  <owner>mad@chromium.org</owner>
+  <summary>
+    The IDs of unwanted software found by the software reporter tool.
   </summary>
 </rappor-metric>
 

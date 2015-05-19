@@ -38,6 +38,7 @@ TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
                                          SiteInstance* instance) {
   TestWebContents* test_web_contents = new TestWebContents(browser_context);
   test_web_contents->Init(WebContents::CreateParams(browser_context, instance));
+  test_web_contents->RenderFrameCreated(test_web_contents->GetMainFrame());
   return test_web_contents;
 }
 
@@ -138,7 +139,7 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
 }
 
 void TestWebContents::TestSetIsLoading(bool value) {
-  SetIsLoading(GetRenderViewHost(), value, true, NULL);
+  SetIsLoading(value, true, nullptr);
 }
 
 void TestWebContents::CommitPendingNavigation() {
@@ -157,7 +158,7 @@ void TestWebContents::CommitPendingNavigation() {
   // replaced without a pending frame being created, and we don't get the right
   // values for the RFH to navigate: we try to use the old one that has been
   // deleted in the meantime.
-  GetMainFrame()->PrepareForCommit(entry->GetURL());
+  GetMainFrame()->PrepareForCommit();
 
   TestRenderFrameHost* old_rfh = GetMainFrame();
   TestRenderFrameHost* rfh = GetPendingMainFrame();

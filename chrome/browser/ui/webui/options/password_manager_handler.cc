@@ -202,6 +202,12 @@ void PasswordManagerHandler::SetPasswordList(
       entry->AppendString(
           base::string16(password_list[i]->password_value.length(), ' '));
     }
+    const GURL& federation_url = password_list[i]->federation_url;
+    if (!federation_url.is_empty()) {
+      entry->AppendString(l10n_util::GetStringFUTF16(
+          IDS_PASSWORDS_VIA_FEDERATION,
+          base::UTF8ToUTF16(federation_url.host())));
+    }
     entries.Append(entry);
   }
 
@@ -213,8 +219,8 @@ void PasswordManagerHandler::SetPasswordExceptionList(
     const ScopedVector<autofill::PasswordForm>& password_exception_list) {
   base::ListValue entries;
   for (size_t i = 0; i < password_exception_list.size(); ++i) {
-    entries.Append(new base::StringValue(
-        net::FormatUrl(password_exception_list[i]->origin, languages_)));
+    entries.AppendString(
+        GetHumanReadableOrigin(*password_exception_list[i], languages_));
   }
 
   web_ui()->CallJavascriptFunction("PasswordManager.setPasswordExceptionsList",

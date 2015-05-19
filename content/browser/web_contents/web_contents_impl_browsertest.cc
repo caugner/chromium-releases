@@ -179,7 +179,7 @@ class LoadingStateChangedDelegate : public WebContentsDelegate {
 };
 
 // See: http://crbug.com/298193
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_DidStopLoadingDetails DISABLED_DidStopLoadingDetails
 #else
 #define MAYBE_DidStopLoadingDetails DidStopLoadingDetails
@@ -202,7 +202,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 }
 
 // See: http://crbug.com/298193
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_DidStopLoadingDetailsWithPending \
   DISABLED_DidStopLoadingDetailsWithPending
 #else
@@ -456,7 +456,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   // initial load of push_state.html, and start and stop for the "navigation"
   // triggered by history.pushState(). However, the start notification for the
   // history.pushState() navigation should set to_different_document to false.
-  EXPECT_EQ("pushState", shell()->web_contents()->GetURL().ref());
+  EXPECT_EQ("pushState", shell()->web_contents()->GetLastCommittedURL().ref());
   EXPECT_EQ(4, delegate->loadingStateChangedCount());
   EXPECT_EQ(3, delegate->loadingStateToDifferentDocumentCount());
 }
@@ -497,14 +497,14 @@ struct LoadProgressDelegateAndObserver : public WebContentsDelegate,
   }
 
   // WebContentsObserver:
-  void DidStartLoading(RenderViewHost* render_view_host) override {
+  void DidStartLoading() override {
     EXPECT_FALSE(did_start_loading);
     EXPECT_EQ(0U, progresses.size());
     EXPECT_FALSE(did_stop_loading);
     did_start_loading = true;
   }
 
-  void DidStopLoading(RenderViewHost* render_view_host) override {
+  void DidStopLoading() override {
     EXPECT_TRUE(did_start_loading);
     EXPECT_GE(progresses.size(), 1U);
     EXPECT_FALSE(did_stop_loading);
@@ -642,4 +642,3 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 }
 
 }  // namespace content
-

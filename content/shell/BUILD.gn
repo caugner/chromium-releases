@@ -59,8 +59,12 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_javascript_dialog_manager.h",
     "browser/layout_test/layout_test_message_filter.cc",
     "browser/layout_test/layout_test_message_filter.h",
+    "browser/layout_test/layout_test_navigator_connect_service_factory.cc",
+    "browser/layout_test/layout_test_navigator_connect_service_factory.h",
     "browser/layout_test/layout_test_notification_manager.cc",
     "browser/layout_test/layout_test_notification_manager.h",
+    "browser/layout_test/layout_test_permission_manager.cc",
+    "browser/layout_test/layout_test_permission_manager.h",
     "browser/layout_test/layout_test_push_messaging_service.cc",
     "browser/layout_test/layout_test_push_messaging_service.h",
     "browser/layout_test/layout_test_resource_dispatcher_host_delegate.cc",
@@ -106,6 +110,8 @@ static_library("content_shell_lib") {
     "browser/shell_net_log.h",
     "browser/shell_network_delegate.cc",
     "browser/shell_network_delegate.h",
+    "browser/shell_permission_manager.cc",
+    "browser/shell_permission_manager.h",
     "browser/shell_platform_data_aura.cc",
     "browser/shell_platform_data_aura.h",
     "browser/shell_plugin_service_filter.cc",
@@ -172,10 +178,6 @@ static_library("content_shell_lib") {
     "renderer/test_runner/mock_credential_manager_client.h",
     "renderer/test_runner/mock_grammar_check.cc",
     "renderer/test_runner/mock_grammar_check.h",
-    "renderer/test_runner/mock_presentation_client.cc",
-    "renderer/test_runner/mock_presentation_client.h",
-    "renderer/test_runner/mock_presentation_service.cc",
-    "renderer/test_runner/mock_presentation_service.h",
     "renderer/test_runner/mock_screen_orientation_client.cc",
     "renderer/test_runner/mock_screen_orientation_client.h",
     "renderer/test_runner/mock_spell_check.cc",
@@ -212,9 +214,9 @@ static_library("content_shell_lib") {
     "renderer/test_runner/text_input_controller.h",
     "renderer/test_runner/web_ax_object_proxy.cc",
     "renderer/test_runner/web_ax_object_proxy.h",
+    "renderer/test_runner/web_content_settings.cc",
+    "renderer/test_runner/web_content_settings.h",
     "renderer/test_runner/web_frame_test_proxy.h",
-    "renderer/test_runner/web_permissions.cc",
-    "renderer/test_runner/web_permissions.h",
     "renderer/test_runner/web_task.cc",
     "renderer/test_runner/web_task.h",
     "renderer/test_runner/web_test_delegate.h",
@@ -262,6 +264,7 @@ static_library("content_shell_lib") {
     "//skia",
     "//storage/browser",
     "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//third_party/WebKit/public:test_support",
     "//third_party/icu",
@@ -308,7 +311,7 @@ static_library("content_shell_lib") {
     #deps -= [ "copy_test_netscape_plugin" ]  TODO(GYP)
   }
 
-  if (is_posix && !is_mac && (!is_android || !is_android_webview_build)) {
+  if (is_posix && !is_mac) {
     deps += [ "//components/crash/browser" ]
   }
 
@@ -402,9 +405,9 @@ if (use_x11) {
   copy("copy_x11_fonts") {
     visibility = [ ":*" ]
     sources = [
-      "renderer/test_runner/resources/fonts/fonts.conf",
       "//third_party/gardiner_mod/GardinerModBug.ttf",
       "//third_party/gardiner_mod/GardinerModCat.ttf",
+      "renderer/test_runner/resources/fonts/fonts.conf",
     ]
     outputs = [
       "$root_out_dir/{{source_file_part}}",
@@ -415,8 +418,8 @@ if (is_android) {
   copy("copy_android_fonts") {
     visibility = [ ":*" ]
     sources = [
-      "renderer/test_runner/resources/fonts/android_main_fonts.xml",
       "renderer/test_runner/resources/fonts/android_fallback_fonts.xml",
+      "renderer/test_runner/resources/fonts/android_main_fonts.xml",
     ]
     outputs = [
       "$root_out_dir/{{source_file_part}}",
@@ -454,6 +457,7 @@ group("resources") {
 
 repack("pak") {
   sources = [
+    "$root_gen_dir/blink/public/resources/blink_image_resources_100_percent.pak",
     "$root_gen_dir/blink/public/resources/blink_resources.pak",
     "$root_gen_dir/content/app/resources/content_resources_100_percent.pak",
     "$root_gen_dir/content/app/strings/content_strings_en-US.pak",
@@ -474,6 +478,7 @@ repack("pak") {
     "//content/app/strings",
     "//content/browser/tracing:resources",
     "//net:net_resources",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//ui/resources",
     "//ui/strings",
@@ -486,7 +491,7 @@ repack("pak") {
 
 # TODO(GYP): Figure out what this should be on android
 # and make linking this work on the Mac.
-if (!is_android && !is_mac && (!is_win || link_chrome_on_windows)) {
+if (!is_android && !is_mac) {
   executable("content_shell") {
     testonly = true
 
@@ -517,7 +522,7 @@ if (!is_android && !is_mac && (!is_win || link_chrome_on_windows)) {
       # TODO(GYP) lots of stuff from GYP file here.
     }
 
-    if (is_android && !is_android_webview_build) {
+    if (is_android) {
       # Some tests rely on this tool. It might be nicer if these tests relied on
       # image diff rather than having content shell depend on it.
       datadeps = [

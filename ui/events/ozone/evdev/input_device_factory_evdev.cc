@@ -56,16 +56,6 @@ struct OpenInputDeviceParams {
 };
 
 #if defined(USE_EVDEV_GESTURES)
-bool UseGesturesLibraryForDevice(const EventDeviceInfo& devinfo) {
-  if (devinfo.HasTouchpad())
-    return true;
-
-  if (devinfo.HasRelXY())
-    return true;  // mouse
-
-  return false;
-}
-
 void SetGestureIntProperty(GesturePropertyProvider* provider,
                            int id,
                            const std::string& name,
@@ -98,7 +88,7 @@ scoped_ptr<EventConverterEvdev> CreateConverter(
 #if defined(USE_EVDEV_GESTURES)
   // Touchpad or mouse: use gestures library.
   // EventReaderLibevdevCros -> GestureInterpreterLibevdevCros -> DispatchEvent
-  if (UseGesturesLibraryForDevice(devinfo)) {
+  if (devinfo.HasTouchpad() || devinfo.HasMouse()) {
     scoped_ptr<GestureInterpreterLibevdevCros> gesture_interp =
         make_scoped_ptr(new GestureInterpreterLibevdevCros(
             params.id, params.cursor, params.gesture_property_provider,
@@ -109,15 +99,15 @@ scoped_ptr<EventConverterEvdev> CreateConverter(
 #endif
 
   // Touchscreen: use TouchEventConverterEvdev.
-  if (devinfo.HasMTAbsXY()) {
+  if (devinfo.HasTouchscreen()) {
     scoped_ptr<TouchEventConverterEvdev> converter(new TouchEventConverterEvdev(
-        fd, params.path, params.id, type, params.dispatcher));
+        fd, params.path, params.id, type, devinfo, params.dispatcher));
     converter->Initialize(devinfo);
     return converter.Pass();
   }
 
   // Graphics tablet
-  if (devinfo.HasAbsXY())
+  if (devinfo.HasTablet())
     return make_scoped_ptr<EventConverterEvdev>(new TabletEventConverterEvdev(
         fd, params.path, params.id, type, params.cursor, devinfo,
         params.dispatcher));
@@ -230,7 +220,7 @@ void InputDeviceFactoryEvdev::AddInputDevice(int id,
   base::WorkerPool::PostTask(FROM_HERE,
                              base::Bind(&OpenInputDevice, base::Passed(&params),
                                         task_runner_, reply_callback),
-                             true /* task_is_slow */);
+                             false /* task_is_slow */);
 }
 
 void InputDeviceFactoryEvdev::RemoveInputDevice(const base::FilePath& path) {
@@ -433,8 +423,7 @@ void InputDeviceFactoryEvdev::NotifyTouchscreensUpdated() {
   std::vector<TouchscreenDevice> touchscreens;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasTouchscreen()) {
-      touchscreens.push_back(TouchscreenDevice(
-          it->second->id(), it->second->type(),
+      touchscreens.push_back(TouchscreenDevice(it->second->input_device(),
           it->second->GetTouchscreenSize(), it->second->GetTouchPoints()));
     }
   }
@@ -446,7 +435,7 @@ void InputDeviceFactoryEvdev::NotifyKeyboardsUpdated() {
   std::vector<KeyboardDevice> keyboards;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasKeyboard()) {
-      keyboards.push_back(KeyboardDevice(it->second->id(), it->second->type()));
+      keyboards.push_back(KeyboardDevice(it->second->input_device()));
     }
   }
 
@@ -456,8 +445,9 @@ void InputDeviceFactoryEvdev::NotifyKeyboardsUpdated() {
 void InputDeviceFactoryEvdev::NotifyMouseDevicesUpdated() {
   std::vector<InputDevice> mice;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
-    if (it->second->HasMouse())
-      mice.push_back(InputDevice(it->second->id(), it->second->type()));
+    if (it->second->HasMouse()) {
+      mice.push_back(it->second->input_device());
+    }
   }
 
   dispatcher_->DispatchMouseDevicesUpdated(mice);
@@ -466,8 +456,9 @@ void InputDeviceFactoryEvdev::NotifyMouseDevicesUpdated() {
 void InputDeviceFactoryEvdev::NotifyTouchpadDevicesUpdated() {
   std::vector<InputDevice> touchpads;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
-    if (it->second->HasTouchpad())
-      touchpads.push_back(InputDevice(it->second->id(), it->second->type()));
+    if (it->second->HasTouchpad()) {
+      touchpads.push_back(it->second->input_device());
+    }
   }
 
   dispatcher_->DispatchTouchpadDevicesUpdated(touchpads);

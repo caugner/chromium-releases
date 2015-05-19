@@ -15,7 +15,7 @@ class ToughSchedulingCasesPage(page_module.Page):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage()
     interaction.End()
 
@@ -309,7 +309,7 @@ class Page20(ToughSchedulingCasesPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(
         selector='#card',
         use_touch=True,
@@ -340,12 +340,12 @@ class EmptyTouchHandlerPage(ToughSchedulingCasesPage):
   def RunPageInteractions(self, action_runner):
     if self.bounce:
       interaction = action_runner.BeginGestureInteraction(
-          'ScrollBounceAction', is_smooth=True)
+          'ScrollBounceAction')
       action_runner.ScrollBouncePage()
       interaction.End()
     else:
       interaction = action_runner.BeginGestureInteraction(
-          'ScrollAction', is_smooth=True)
+          'ScrollAction')
       # Speed and distance are tuned to run exactly as long as a scroll
       # bounce.
       action_runner.ScrollPage(use_touch=True, speed_in_pixels_per_second=400,
@@ -364,8 +364,37 @@ class SynchronizedScrollOffsetPage(ToughSchedulingCasesPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollBounceAction', is_smooth=True)
+        'ScrollBounceAction')
     action_runner.ScrollBouncePage()
+    interaction.End()
+
+
+class SecondBatchJsPage(ToughSchedulingCasesPage):
+
+  """Why: For testing dynamically loading a large batch of Javascript and
+          running a part of it in response to user input.
+  """
+
+  def __init__(self, page_set, variant='medium'):
+    super(SecondBatchJsPage, self).__init__(
+        url='file://tough_scheduling_cases/second_batch_js.html?%s' % variant,
+        page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    # Do a dummy tap to warm up the synthetic tap code path.
+    action_runner.TapElement(selector='div[id="spinner"]')
+    # Begin the action immediately because we want the page to update smoothly
+    # even while resources are being loaded.
+    action_runner.WaitForJavaScriptCondition('window.__ready !== undefined')
+
+    interaction = action_runner.BeginGestureInteraction('LoadAction')
+    action_runner.ExecuteJavaScript('kickOffLoading()')
+    action_runner.WaitForJavaScriptCondition('window.__ready')
+    # Click one second after the resources have finished loading.
+    action_runner.Wait(1)
+    action_runner.TapElement(selector='input[id="run"]')
+    # Wait for the test to complete.
+    action_runner.WaitForJavaScriptCondition('window.__finished')
     interaction.End()
 
 
@@ -441,7 +470,7 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
         slow_handler=True,
         bounce=False,
         page_set=self))
-      # Why: Slow handler blocks scroll start until touch ACK timeout
+    # Why: Slow handler blocks scroll start until touch ACK timeout
     self.AddUserStory(EmptyTouchHandlerPage(
         name='desktop_slow_handler',
         desktop=True,
@@ -464,7 +493,7 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
         slow_handler=True,
         bounce=True,
         page_set=self))
-      # Why: Scroll bounce with slow handler on desktop, blocks only once until
+    # Why: Scroll bounce with slow handler on desktop, blocks only once until
     # ACK timeout.
     self.AddUserStory(EmptyTouchHandlerPage(
         name='bounce_desktop_slow_handler',
@@ -472,5 +501,9 @@ class ToughSchedulingCasesPageSet(page_set_module.PageSet):
         slow_handler=True,
         bounce=True,
         page_set=self))
-      # Why: For measuring the latency of scroll-synchronized effects.
+    # Why: For measuring the latency of scroll-synchronized effects.
     self.AddUserStory(SynchronizedScrollOffsetPage(page_set=self))
+    # Why: Test loading a large amount of Javascript.
+    self.AddUserStory(SecondBatchJsPage(page_set=self, variant='light'))
+    self.AddUserStory(SecondBatchJsPage(page_set=self, variant='medium'))
+    self.AddUserStory(SecondBatchJsPage(page_set=self, variant='heavy'))

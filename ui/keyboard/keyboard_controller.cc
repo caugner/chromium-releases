@@ -109,7 +109,7 @@ class KeyboardWindowDelegate : public aura::WindowDelegate {
   }
   bool CanFocus() override { return false; }
   void OnCaptureLost() override {}
-  void OnPaint(gfx::Canvas* canvas) override {}
+  void OnPaint(const ui::PaintContext& context) override {}
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
@@ -156,7 +156,7 @@ namespace keyboard {
 // KeyboardController.
 class CallbackAnimationObserver : public ui::LayerAnimationObserver {
  public:
-  CallbackAnimationObserver(ui::LayerAnimator* animator,
+  CallbackAnimationObserver(const scoped_refptr<ui::LayerAnimator>& animator,
                             base::Callback<void(void)> callback);
   ~CallbackAnimationObserver() override;
 
@@ -166,14 +166,15 @@ class CallbackAnimationObserver : public ui::LayerAnimationObserver {
   void OnLayerAnimationAborted(ui::LayerAnimationSequence* seq) override;
   void OnLayerAnimationScheduled(ui::LayerAnimationSequence* seq) override {}
 
-  ui::LayerAnimator* animator_;
+  scoped_refptr<ui::LayerAnimator> animator_;
   base::Callback<void(void)> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackAnimationObserver);
 };
 
 CallbackAnimationObserver::CallbackAnimationObserver(
-    ui::LayerAnimator* animator, base::Callback<void(void)> callback)
+    const scoped_refptr<ui::LayerAnimator>& animator,
+    base::Callback<void(void)> callback)
     : animator_(animator), callback_(callback) {
 }
 
@@ -244,6 +245,7 @@ KeyboardController::KeyboardController(KeyboardControllerProxy* proxy)
       keyboard_visible_(false),
       show_on_resize_(false),
       lock_keyboard_(false),
+      keyboard_mode_(FULL_WIDTH),
       type_(ui::TEXT_INPUT_TYPE_NONE),
       weak_factory_(this) {
   CHECK(proxy);
@@ -280,7 +282,7 @@ aura::Window* KeyboardController::GetContainerWindow() {
         new KeyboardContainerTargeter(container_.get(), proxy_.get())));
     container_->SetName("KeyboardContainer");
     container_->set_owned_by_parent(false);
-    container_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    container_->Init(ui::LAYER_NOT_DRAWN);
     container_->AddObserver(this);
     container_->SetLayoutManager(new KeyboardLayoutManager(this));
   }
@@ -370,6 +372,10 @@ void KeyboardController::AddObserver(KeyboardControllerObserver* observer) {
 
 void KeyboardController::RemoveObserver(KeyboardControllerObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+void KeyboardController::SetKeyboardMode(KeyboardMode mode) {
+  keyboard_mode_ = mode;
 }
 
 void KeyboardController::ShowKeyboard(bool lock) {

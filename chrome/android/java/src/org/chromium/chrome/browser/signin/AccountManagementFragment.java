@@ -478,8 +478,7 @@ public class AccountManagementFragment extends PreferenceFragment
     }
 
     private static String getSyncStatusSummary(Activity activity) {
-        ChromeSigninController signinController = ChromeSigninController.get(activity);
-        if (!signinController.isSignedIn()) return "";
+        if (!ChromeSigninController.get(activity).isSignedIn()) return "";
 
         AndroidSyncSettings androidSyncSettings = AndroidSyncSettings.get(activity);
         ProfileSyncService profileSyncService = ProfileSyncService.get(activity);
@@ -503,19 +502,11 @@ public class AccountManagementFragment extends PreferenceFragment
             }
 
             if (profileSyncService.isPassphraseRequiredForDecryption()) {
-                switch (profileSyncService.getPassphraseType()) {
-                    case IMPLICIT_PASSPHRASE:
-                        return res.getString(R.string.sync_need_password);
-                    case FROZEN_IMPLICIT_PASSPHRASE: // Falling through intentionally.
-                    case CUSTOM_PASSPHRASE:
-                        return res.getString(R.string.sync_need_passphrase);
-                    default:
-                        break;
-                }
+                return res.getString(R.string.sync_need_passphrase);
             }
         }
 
-        return androidSyncSettings.isSyncEnabled(signinController.getSignedInUser())
+        return androidSyncSettings.isSyncEnabled()
                 ? res.getString(R.string.sync_is_enabled)
                 : res.getString(R.string.sync_is_disabled);
     }

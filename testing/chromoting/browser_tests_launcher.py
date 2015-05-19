@@ -133,23 +133,7 @@ def SetupUserProfileDir(me2me_manifest_file, it2me_manifest_file,
     shutil.copyfile(manifest_file_src, manifest_file_dest)
 
 
-def main():
-  parser = argparse.ArgumentParser()
-  parser.add_argument('-f', '--commands_file',
-                      help='path to file listing commands to be launched.')
-  parser.add_argument('-p', '--prod_dir',
-                      help='path to folder having product and test binaries.')
-  parser.add_argument('-c', '--cfg_file',
-                      help='path to test host config file.')
-  parser.add_argument('--me2me_manifest_file',
-                      help='path to me2me host manifest file.')
-  parser.add_argument('--it2me_manifest_file',
-                      help='path to it2me host manifest file.')
-  parser.add_argument(
-      '-u', '--user_profile_dir',
-      help='path to user-profile-dir, used by connect-to-host tests.')
-
-  args = parser.parse_args()
+def main(args):
 
   InitialiseTestMachineForLinux(args.cfg_file)
 
@@ -164,20 +148,40 @@ def main():
       line = line.replace(PROD_DIR_ID, args.prod_dir)
       LaunchBTCommand(line)
 
+  # All tests completed. Include host-logs in the test results.
+  host_log_contents = ''
+  # There should be only 1 log file, as we delete logs on test completion.
+  # Loop through matching files, just in case there are more.
+  for log_file in glob.glob('/tmp/chrome_remote_desktop_*'):
+    with open(log_file, 'r') as log:
+      host_log_contents += '\nHOST LOG %s\n CONTENTS:\n%s' % (
+          log_file, log.read())
+  print host_log_contents
+
   # Was there any test failure?
   if TEST_FAILURE:
-    # Obtain contents of Chromoting host logs.
-    log_contents = ''
-    # There should be only 1 log file, as we delete logs on test completion.
-    # Loop through matching files, just in case there are more.
-    for log_file in glob.glob('/tmp/chrome_remote_desktop_*'):
-      with open(log_file, 'r') as log:
-        log_contents += '\nHOST LOG %s\n CONTENTS:\n%s' % (log_file, log.read())
-    print log_contents
     raise Exception('At least one test failed.')
 
-  # Now, stop host, and cleanup user-profile-dir
-  TestCleanUp(args.user_profile_dir)
-
 if __name__ == '__main__':
-  main()
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument('-f', '--commands_file',
+                      help='path to file listing commands to be launched.')
+  parser.add_argument('-p', '--prod_dir',
+                      help='path to folder having product and test binaries.')
+  parser.add_argument('-c', '--cfg_file',
+                      help='path to test host config file.')
+  parser.add_argument('--me2me_manifest_file',
+                      help='path to me2me host manifest file.')
+  parser.add_argument('--it2me_manifest_file',
+                      help='path to it2me host manifest file.')
+  parser.add_argument(
+      '-u', '--user_profile_dir',
+      help='path to user-profile-dir, used by connect-to-host tests.')
+  command_line_args = parser.parse_args()
+  try:
+    main(command_line_args)
+  finally:
+    # Stop host and cleanup user-profile-dir.
+    TestCleanUp(command_line_args.user_profile_dir)
+

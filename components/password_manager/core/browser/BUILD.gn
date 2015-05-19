@@ -8,15 +8,10 @@ if (is_android) {
   import("//build/config/android/config.gni")
 }
 
-config("password_manager_config") {
-  # Sync (not supported in Android WebView).
-  if (!is_android || !is_android_webview_build) {
-    defines = [ "PASSWORD_MANAGER_ENABLE_SYNC" ]
-  }
-}
-
 static_library("browser") {
   sources = [
+    "affiliated_match_helper.cc",
+    "affiliated_match_helper.h",
     "affiliation_backend.cc",
     "affiliation_backend.h",
     "affiliation_database.cc",
@@ -33,9 +28,13 @@ static_library("browser") {
     "affiliation_utils.h",
     "browser_save_password_progress_logger.cc",
     "browser_save_password_progress_logger.h",
+    "export/csv_writer.cc",
+    "export/csv_writer.h",
     "facet_manager.cc",
     "facet_manager.h",
     "facet_manager_host.h",
+    "import/csv_reader.cc",
+    "import/csv_reader.h",
     "log_receiver.h",
     "log_router.cc",
     "log_router.h",
@@ -60,8 +59,6 @@ static_library("browser") {
     "password_manager_internals_service.h",
     "password_manager_metrics_util.cc",
     "password_manager_metrics_util.h",
-    "password_manager_url_collection_experiment.cc",
-    "password_manager_url_collection_experiment.h",
     "password_store.cc",
     "password_store.h",
     "password_store_change.h",
@@ -71,6 +68,8 @@ static_library("browser") {
     "password_store_default.h",
     "password_store_sync.cc",
     "password_store_sync.h",
+    "password_syncable_service.cc",
+    "password_syncable_service.h",
     "psl_matching_helper.cc",
     "psl_matching_helper.h",
     "test_affiliation_fetcher_factory.h",
@@ -91,7 +90,9 @@ static_library("browser") {
     "//components/strings",
     "//net",
     "//sql",
+    "//sync",
     "//third_party/protobuf:protobuf_lite",
+    "//third_party/re2",
     "//url",
   ]
 
@@ -103,16 +104,6 @@ static_library("browser") {
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-  public_configs = [ ":password_manager_config" ]
-
-  # Sync (not supported in Android WebView).
-  if (!is_android || !is_android_webview_build) {
-    sources += [
-      "password_syncable_service.cc",
-      "password_syncable_service.h",
-    ]
-    deps += [ "//sync" ]
-  }
 }
 
 proto_library("proto") {

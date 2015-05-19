@@ -1,11 +1,11 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-'''A container for timeline-based events and traces and can handle importing
+"""A container for timeline-based events and traces and can handle importing
 raw event data from different sources. This model closely resembles that in the
 trace_viewer project:
 https://code.google.com/p/trace-viewer/
-'''
+"""
 
 from operator import attrgetter
 
@@ -13,8 +13,8 @@ from telemetry.timeline import async_slice as async_slice_module
 from telemetry.timeline import bounds
 from telemetry.timeline import event_container
 from telemetry.timeline import inspector_importer
-from telemetry.timeline import slice as slice_module
 from telemetry.timeline import process as process_module
+from telemetry.timeline import slice as slice_module
 from telemetry.timeline import surface_flinger_importer
 from telemetry.timeline import tab_id_importer
 from telemetry.timeline import trace_data as trace_data_module

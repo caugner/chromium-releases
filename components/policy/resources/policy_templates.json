@@ -123,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 292
+#   For your editing convenience: highest ID currently used: 301
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -172,7 +172,10 @@
 
           If you enable this setting, users cannot change their home page URL in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>, but they can still can choose the New Tab Page as their home page.
 
-          Leaving this policy not set will allow the user to choose his home page on his own if HomepageIsNewTabPage is not set too.''',
+          Leaving this policy not set will allow the user to choose his home page on his own if HomepageIsNewTabPage is not set too.
+
+          This policy is not available on Windows instances that are not joined
+          to an Active Directory domain.''',
           'label': '''Home page URL''',
         },
         {
@@ -196,7 +199,10 @@
 
           If you enable or disable this setting, users cannot change their homepage type in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-          Leaving this policy not set will allow the user to choose whether the new tab page is his home page on his own.''',
+          Leaving this policy not set will allow the user to choose whether the new tab page is his home page on his own.
+
+          This policy is not available on Windows instances that are not joined
+          to an Active Directory domain.''',
         },
       ],
     },
@@ -968,16 +974,19 @@
       },
       'example_value': True,
       'id': 15,
-      'caption': '''Enable reporting of RAPPOR, usage, and crash-related data''',
-      'desc': '''Enables anonymous reporting of RAPPOR, usage, and crash-related data about <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to Google and prevents users from changing this setting.
+      'caption': '''Enable reporting of usage and crash-related data''',
+      'desc': '''Enables anonymous reporting of usage and crash-related data about <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to Google and prevents users from changing this setting.
 
-      If you enable this setting, anonymous reporting of RAPPOR, usage, and crash-related data is sent to Google.
+      If you enable this setting, anonymous reporting of usage and crash-related data is sent to Google.
 
-      If you disable this setting, anonymous reporting of RAPPOR, usage, and crash-related data is never sent to Google.
+      If you disable this setting, anonymous reporting of usage and crash-related data is never sent to Google.
 
       If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-      If this policy is left not set, RAPPOR will be enabled unless disabled by the user, and the usage and crash reporting setting will be what the user chose upon installation / first run.''',
+      If this policy is left not set the setting will be what the user chose upon installation / first run.
+
+      This policy is not available on Windows instances that are not joined to
+      an Active Directory domain.''',
     },
     {
       'name': 'PasswordManager',
@@ -1195,7 +1204,7 @@
       'name': 'EnableDeprecatedWebBasedSignin',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:35-'],
+      'supported_on': ['chrome.*:35-42'],
       'features': {
         'dynamic_refresh': False,
         'per_profile': False,
@@ -1336,6 +1345,28 @@
       'caption': '''Clear site data on browser shutdown (deprecated)''',
       'desc': '''This policy has been retired as of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> version 29.''',
       'label': '''Clear site data on browser shutdown (deprecated)''',
+    },
+    {
+      'name': 'CaptivePortalAuthenticationIgnoresProxy',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:41-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'default_for_enterprise_users': False,
+      'id': 295,
+      'caption': '''Captive portal authentication ignores proxy''',
+      'desc': '''This policy allows <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> to bypass any proxy for captive portal authentication.
+
+      This policy only takes effect if a proxy is configured (for example through policy, by the user in chrome://settings, or by extensions).
+
+      If you enable this setting, any captive portal authentication pages (i.e. all web pages starting from captive portal signin page until <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> detects succesful internet connection) will be displayed in a separate window ignoring all policy settings and restrictions for the current user.
+
+      If you disable this setting or leave it unset, any captive portal authentication pages will be shown in a (regular) new browser tab, using the current user's proxy settings.''',
     },
     {
       'name': 'Proxy',
@@ -1797,6 +1828,10 @@
           'caption': '''Configure the list of force-installed extensions''',
           'desc': '''Allows you to specify a list of extensions that will be installed silently, without user interaction.
 
+          For Windows instances that are not joined to an Active Directory
+          domain, forced installation is limited to extensions listed in the
+          Chrome Web Store.
+
           Each item of the list is a string that contains an extension ID and an update URL delimited by a semicolon (<ph name="SEMICOLON">;</ph>). The extension ID is the 32-letter string found e.g. on <ph name="CHROME_EXTENSIONS_LINK">chrome://extensions</ph> when in developer mode. The update URL should point to an Update Manifest XML document as described at <ph name="LINK_TO_EXTENSION_DOC1">https://developer.chrome.com/extensions/autoupdate</ph>. Note that the update URL set in this policy is only used for the initial installation; subsequent updates of the extension will use the update URL indicated in the extension's manifest.
 
           For each item, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retrieve the extension specified by the extension ID from the update service at the specified update URL and silently install it.
@@ -1805,7 +1840,11 @@
 
           Users will be unable to uninstall extensions that are specified by this policy. If you remove an extension from this list, then it will be automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Extensions specified in this list are also automatically whitelisted for installation; the ExtensionsInstallBlacklist does not affect them.
 
-          If this policy is left not set the user can uninstall any extension  in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+          Note that the source code of any extension may be altered (potentially
+          rendering the extension dysfunctional) by using Developer Tools. If
+          this is a concern, the DeveloperToolsDisabled policy should be set.
+
+          If this policy is left not set the user can uninstall any extension in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
           'label': '''Extension IDs and update URLs to be silently installed''',
         },
         {
@@ -2095,7 +2134,10 @@
 
           If you enable this setting, users cannot change or override it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-          Disabling this setting is equivalent to leaving it not configured. The user will still be able to change it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+          Disabling this setting is equivalent to leaving it not configured. The user will still be able to change it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+          This policy is not available on Windows instances that are not joined
+          to an Active Directory domain.''',
         },
         {
           'name': 'RestoreOnStartupURLs',
@@ -2115,7 +2157,10 @@
           'caption': '''URLs to open on startup''',
           'desc': '''If 'Open a list of URLs' is selected as the startup action, this allows you to specify the list of URLs that are opened. If left not set no URL will be opened on start up.
 
-          This policy only works if the 'RestoreOnStartup' policy is set to 'RestoreOnStartupIsURLs'.''',
+          This policy only works if the 'RestoreOnStartup' policy is set to 'RestoreOnStartupIsURLs'.
+
+          This policy is not available on Windows instances that are not joined
+          to an Active Directory domain.''',
         },
       ],
     },
@@ -2175,7 +2220,10 @@
 
           If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-          If this policy is left not set, the default search provider is enabled, and the user will be able to set the search provider list.''',
+          If this policy is left not set, the default search provider is enabled, and the user will be able to set the search provider list.
+
+          This policy is not available on Windows instances that are not joined
+          to an Active Directory domain.''',
         },
         {
           'name': 'DefaultSearchProviderName',
@@ -3824,16 +3872,18 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
-      'example_value': ['example.com', 'https://ssl.server.com', 'hosting.com/bad_path', 'http://server:8080/path', '.exact.hostname.com', '*'],
+      'example_value': ['example.com', 'https://ssl.server.com', 'hosting.com/bad_path', 'http://server:8080/path', '.exact.hostname.com', 'file://*', '*'],
       'id': 103,
       'caption': '''Block access to a list of URLs''',
       'desc': '''Blocks access to the listed URLs.
 
-      This policy prevents the user from loading web pages from blacklisted URLs.
+      This policy prevents the user from loading web pages from blacklisted URLs. The blacklist provides a list of URL patterns that specify which URLs will be blacklisted.
 
-      A URL has the format 'scheme://host:port/path'.
-      The optional scheme can be http, https or ftp. Only this scheme will be blocked; if none is specified, all schemes are blocked.
-      The host can be a hostname or an IP address. Subdomains of a hostname will also be blocked. To prevent blocking subdomains, include a '.' before the hostname. The special hostname '*' will block all domains.
+      Each URL pattern can either be a pattern for local files or a generic URL pattern. Local file patterns are of the format 'file://path', where path should be an absolute path to block. All file system locations for which that path is a prefix will be blocked.
+
+      A generic URL pattern has the format 'scheme://host:port/path'.
+      If present, only the specified scheme will be blocked. If the scheme:// prefix is not specified, all schemes are blocked.
+      The host is required and can be a hostname or an IP address. Subdomains of a hostname will also be blocked. To prevent blocking subdomains, include a '.' before the hostname. The special hostname '*' will block all domains.
       The optional port is a valid port number from 1 to 65535. If none is specified, all ports are blocked.
       If the optional path is specified, only paths with that prefix will be blocked.
 
@@ -4289,6 +4339,42 @@
 
       If this policy is unset, the default frequency is 3 hours. The minimum
       allowed frequency is 60 seconds.''',
+    },
+    {
+      'name': 'HeartbeatEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:43-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': False,
+      'id': 293,
+      'caption': '''Send monitoring heartbeats to the management server''',
+      'desc': '''Send monitoring heartbeats to the management server, to allow
+      the server to detect if the device is offline.
+
+      If this policy is set to true, monitoring heartbeats will be sent. If set
+      to false or unset, then no heartbeats will be sent.''',
+    },
+    {
+      'name': 'HeartbeatFrequency',
+      'type': 'int',
+      'schema': { 'type': 'integer', 'minimum': 30000 },
+      'supported_on': ['chrome_os:43-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': 180000,
+      'id': 294,
+      'caption': '''Frequency of monitoring heartbeats''',
+      'desc': '''How frequently monitoring heartbeats are sent, in milliseconds.
+
+      If this policy is unset, the default frequency is 3 minutes. The minimum
+      frequency is 30 seconds and the maximum frequency is 24 hours - values
+      outside of this range will be clamped to this range.''',
     },
     {
       'name': 'DeviceUserWhitelist',
@@ -7190,6 +7276,52 @@
       'desc': '''If this policy is set to false or not configured, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will allow the user to shut down the device.
       If this policy is set to true, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will trigger a reboot when the user shuts down the device. <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> replaces all occurrences of shutdown buttons in the UI by reboot buttons. If the user shuts down the device using the power button, it will not automatically reboot, even if the policy is enabled.''',
     },
+    {
+      'name': 'ExtensionCacheSize',
+      'type': 'int',
+      'schema': { 'type': 'integer' },
+      'supported_on': ['chrome_os:43-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': False,
+      },
+      'example_value': 104857600,
+      'id': 296,
+      'caption': '''Set Apps and Extensions cache size (in bytes)''',
+      'desc': '''<ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> caches Apps and Extensions for installation by multiple users of a single device to avoid re-downloading them for each user.
+      If this policy is not configured or the value is lower than 1 MB, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will use the default cache size.''',
+    },
+    {
+      'name': 'DeviceLoginScreenDomainAutoComplete',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': [ 'chrome_os:44-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': 'students.school.edu',
+      'id': 297,
+      'caption': '''Enable domain name autocomplete during user sign in''',
+      'desc': '''If this policy is set to a blank string or not configured, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will not show an autocomplete option during user sign-in flow.
+      If this policy is set to a string representing a domain name, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will show an autocomplete option during user sign-in allowing the user to type in only his user name without the domain name extension.  The user will be able to overwrite this domain name extension.''',
+    },
+    {
+      'name': 'QuicAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:43-', 'chrome_os:43-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 301,
+      'caption': '''Allows QUIC protocol''',
+      'desc': '''If this policy is set to true or not set usage of QUIC protocol in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is allowed.
+      If this policy is set to false usage of QUIC protocol is disallowed.''',
+    },
+
   ],
   'messages': {
     # Messages that are not associated to any policies.
@@ -7212,6 +7344,10 @@
     'doc_mac_linux_pref_name': {
       'desc': '''Caption text of the field 'mac/linux preference name' in the summary chart of a policy in the generated documentation''',
       'text': '''Mac/Linux preference name:'''
+    },
+    'doc_android_restriction_name': {
+      'desc': '''Caption text of the field 'android restriction name' in the summary chart of a policy in the generated documentation''',
+      'text': '''Android restriction name:'''
     },
     'doc_supported_on': {
       'desc': '''Caption text of the list of 'products, platforms and versions where this policy is supported' in the summary chart of a policy in the generated documentation''',
@@ -7256,12 +7392,9 @@
       name="POLICY_TEMPLATE_DOWNLOAD_URL">http://www.chromium.org/administrators/policy-templates<ex>
       http://www.chromium.org/administrators/policy-templates</ex></ph>.
 
-      Note: Starting with <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>
-      28, policies are loaded directly from the Group Policy API on
-      Windows. Policies manually written to the registry will be ignored. See
-      http://crbug.com/259236 for details.
-
-      Starting with <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> 35, policies are read directly from the registry if the workstation is joined to an Active Directory domain; otherwise the policies are read from GPO.'''
+      The recommended way to configure policy on Windows is via GPO, although
+      provisioning policy via registry is still supported for Windows instances
+      that are joined to an Active Directory domain.'''
     },
     'doc_back_to_top': {
       'desc': '''Text of a link in the generated policy documentation, that takes the user to the top of the page''',

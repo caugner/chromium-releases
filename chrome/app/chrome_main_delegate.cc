@@ -23,6 +23,7 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
@@ -47,7 +48,6 @@
 #include <algorithm>
 #include "chrome/app/close_handle_hook_win.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
 #include "chrome/common/v8_breakpad_support_win.h"
 #include "sandbox/win/src/sandbox.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -170,6 +170,14 @@ void SuppressWindowsErrorDialogs() {
   // Preserve existing error mode.
   UINT existing_flags = SetErrorMode(new_flags);
   SetErrorMode(existing_flags | new_flags);
+}
+
+bool IsSandboxedProcess() {
+  typedef bool (*IsSandboxedProcessFunc)();
+  IsSandboxedProcessFunc is_sandboxed_process_func =
+      reinterpret_cast<IsSandboxedProcessFunc>(
+          GetProcAddress(GetModuleHandle(NULL), "IsSandboxedProcess"));
+  return is_sandboxed_process_func && is_sandboxed_process_func();
 }
 
 #endif  // defined(OS_WIN)
@@ -346,10 +354,8 @@ void InitializeUserDataDir() {
 
   // On Windows, trailing separators leave Chrome in a bad state.
   // See crbug.com/464616.
-  if (user_data_dir.EndsWithSeparator()) {
+  if (user_data_dir.EndsWithSeparator())
     user_data_dir = user_data_dir.StripTrailingSeparators();
-    command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
-  }
 
   const bool specified_directory_was_invalid = !user_data_dir.empty() &&
       !PathService::OverrideAndCreateIfNeeded(chrome::DIR_USER_DATA,
@@ -408,6 +414,16 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
+
+
+#if defined(OS_WIN)
+  // Browser should not be sandboxed.
+  const bool is_browser = !command_line.HasSwitch(switches::kProcessType);
+  if (is_browser && IsSandboxedProcess()) {
+    *exit_code = chrome::RESULT_CODE_INVALID_SANDBOX_STATE;
+    return true;
+  }
+#endif
 
 #if defined(OS_MACOSX)
   // Give the browser process a longer treadmill, since crashes
@@ -920,12 +936,6 @@ void ChromeMainDelegate::ZygoteForked() {
 
 #endif  // OS_MACOSX
 
-#if defined(OS_WIN)
-bool ChromeMainDelegate::ShouldEnableTerminationOnHeapCorruption() {
-  return !ShouldExperimentallyDisableTerminateOnHeapCorruption();
-}
-#endif  // OS_WIN
-
 content::ContentBrowserClient*
 ChromeMainDelegate::CreateContentBrowserClient() {
 #if defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -959,4 +969,18 @@ ChromeMainDelegate::CreateContentUtilityClient() {
 #else
   return g_chrome_content_utility_client.Pointer();
 #endif
+}
+
+bool ChromeMainDelegate::ShouldEnableProfilerRecording() {
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+    case chrome::VersionInfo::CHANNEL_CANARY:
+      return true;
+    case chrome::VersionInfo::CHANNEL_DEV:
+    case chrome::VersionInfo::CHANNEL_BETA:
+    case chrome::VersionInfo::CHANNEL_STABLE:
+    default:
+      // Don't enable instrumentation.
+      return false;
+  }
 }

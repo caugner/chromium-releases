@@ -99,6 +99,10 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabCloser);
 
+content::InterstitialPageDelegate::TypeID
+    SupervisedUserInterstitial::kTypeForTesting =
+        &SupervisedUserInterstitial::kTypeForTesting;
+
 // static
 void SupervisedUserInterstitial::Show(
     WebContents* web_contents,
@@ -311,7 +315,7 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
 
     SupervisedUserService* supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile_);
-    supervised_user_service->AddAccessRequest(
+    supervised_user_service->AddURLAccessRequest(
         url_, base::Bind(&SupervisedUserInterstitial::OnAccessRequestAdded,
                          weak_ptr_factory_.GetWeakPtr()));
     return;
@@ -348,6 +352,11 @@ void SupervisedUserInterstitial::OnProceed() {
 
 void SupervisedUserInterstitial::OnDontProceed() {
   DispatchContinueRequest(false);
+}
+
+content::InterstitialPageDelegate::TypeID
+SupervisedUserInterstitial::GetTypeForTesting() const {
+  return SupervisedUserInterstitial::kTypeForTesting;
 }
 
 void SupervisedUserInterstitial::OnURLFilterChanged() {

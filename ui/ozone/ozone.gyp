@@ -196,9 +196,9 @@
         'platform/caca/caca.gypi',
       ],
     }],
-    ['<(ozone_platform_dri) == 1 or <(ozone_platform_gbm) == 1', {
+    ['<(ozone_platform_dri) == 1 or <(ozone_platform_drm) == 1 or <(ozone_platform_gbm) == 1', {
       'includes': [
-        'platform/dri/dri.gypi',
+        'platform/drm/drm.gypi',
       ],
     }],
     ['<(ozone_platform_egltest) == 1', {
@@ -208,7 +208,7 @@
     }],
     ['<(ozone_platform_gbm) == 1', {
       'includes': [
-        'platform/dri/gbm.gypi',
+        'platform/drm/gbm.gypi',
       ],
     }],
     ['<(ozone_platform_test) == 1', {

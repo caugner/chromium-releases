@@ -102,21 +102,9 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       const base::Callback<void(bool)>& callback,
       content::CertificateRequestResultType* result) override;
   void SelectClientCertificate(
-      int render_process_id,
-      int render_frame_id,
-      net::SSLCertRequestInfo* cert_request_info,
-      const base::Callback<void(net::X509Certificate*)>& callback) override;
-  void RequestPermission(
-      content::PermissionType permission,
       content::WebContents* web_contents,
-      int bridge_id,
-      const GURL& requesting_frame,
-      bool user_gesture,
-      const base::Callback<void(bool)>& result_callback) override;
-  void CancelPermissionRequest(content::PermissionType permission,
-                               content::WebContents* web_contents,
-                               int bridge_id,
-                               const GURL& origin) override;
+      net::SSLCertRequestInfo* cert_request_info,
+      scoped_ptr<content::ClientCertificateDelegate> delegate) override;
   bool CanCreateWindow(const GURL& opener_url,
                        const GURL& opener_top_level_frame_url,
                        const GURL& source_origin,
@@ -135,8 +123,8 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   net::NetLog* GetNetLog() override;
   content::AccessTokenStore* CreateAccessTokenStore() override;
   bool IsFastShutdownPossible() override;
-  void ClearCache(content::RenderViewHost* rvh) override;
-  void ClearCookies(content::RenderViewHost* rvh) override;
+  void ClearCache(content::RenderFrameHost* rfh) override;
+  void ClearCookies(content::RenderFrameHost* rfh) override;
   base::FilePath GetDefaultDownloadDirectory() override;
   std::string GetDefaultDownloadName() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;

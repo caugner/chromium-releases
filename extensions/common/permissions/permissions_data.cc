@@ -13,7 +13,7 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
-#include "extensions/common/permissions/permission_message_provider.h"
+#include "extensions/common/permissions/permission_message_util.h"
 #include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
 #include "url/gurl.h"
@@ -195,29 +195,43 @@ bool PermissionsData::HasEffectiveAccessToAllHosts() const {
   return active_permissions()->HasEffectiveAccessToAllHosts();
 }
 
-PermissionMessages PermissionsData::GetPermissionMessages() const {
+PermissionMessageIDs PermissionsData::GetLegacyPermissionMessageIDs() const {
   if (ShouldSkipPermissionWarnings(extension_id_)) {
-    return PermissionMessages();
+    return PermissionMessageIDs();
   } else {
-    return PermissionMessageProvider::Get()->GetPermissionMessages(
+    return PermissionMessageProvider::Get()->GetLegacyPermissionMessageIDs(
         active_permissions().get(), manifest_type_);
   }
 }
 
-std::vector<base::string16> PermissionsData::GetPermissionMessageStrings()
+PermissionMessageStrings PermissionsData::GetPermissionMessageStrings() const {
+  if (ShouldSkipPermissionWarnings(extension_id_))
+    return PermissionMessageStrings();
+  return PermissionMessageProvider::Get()->GetPermissionMessageStrings(
+      active_permissions().get(), manifest_type_);
+}
+
+std::vector<base::string16> PermissionsData::GetLegacyPermissionMessageStrings()
     const {
   if (ShouldSkipPermissionWarnings(extension_id_))
     return std::vector<base::string16>();
-  return PermissionMessageProvider::Get()->GetWarningMessages(
+  return PermissionMessageProvider::Get()->GetLegacyWarningMessages(
       active_permissions().get(), manifest_type_);
 }
 
 std::vector<base::string16>
-PermissionsData::GetPermissionMessageDetailsStrings() const {
+PermissionsData::GetLegacyPermissionMessageDetailsStrings() const {
   if (ShouldSkipPermissionWarnings(extension_id_))
     return std::vector<base::string16>();
-  return PermissionMessageProvider::Get()->GetWarningMessagesDetails(
+  return PermissionMessageProvider::Get()->GetLegacyWarningMessagesDetails(
       active_permissions().get(), manifest_type_);
+}
+
+CoalescedPermissionMessages PermissionsData::GetCoalescedPermissionMessages()
+    const {
+  return PermissionMessageProvider::Get()->GetCoalescedPermissionMessages(
+      PermissionMessageProvider::Get()->GetAllPermissionIDs(
+          active_permissions().get(), manifest_type_));
 }
 
 bool PermissionsData::HasWithheldImpliedAllHosts() const {

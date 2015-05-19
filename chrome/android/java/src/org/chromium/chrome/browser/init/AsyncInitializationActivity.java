@@ -16,7 +16,15 @@ import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnPreDrawListener;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.TraceEvent;
+import org.chromium.base.library_loader.LoaderErrors;
+import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.chrome.browser.ChromiumApplication;
+import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.metrics.LaunchHistogram;
+import org.chromium.chrome.browser.metrics.MemoryUma;
+import org.chromium.chrome.browser.profiles.Profile;
+
 
 /**
  * An activity that talks with application and activity level delegates for async initialization.
@@ -36,6 +44,7 @@ public abstract class AsyncInitializationActivity extends ActionBarActivity impl
     private Bundle mSavedInstanceState;
     private boolean mDestroyed;
     private NativeInitializationController mNativeInitializationController;
+    private MemoryUma mMemoryUma;
 
     public AsyncInitializationActivity() {
         mHandler = new Handler();
@@ -70,6 +79,18 @@ public abstract class AsyncInitializationActivity extends ActionBarActivity impl
     public void postInflationStartup() { }
 
     @Override
+    public void maybePreconnect() {
+        TraceEvent.begin("maybePreconnect");
+        Intent intent = getIntent();
+        if (intent != null && intent.ACTION_VIEW.equals(intent.getAction())) {
+            final String url = intent.getDataString();
+            WarmupManager.getInstance()
+                .maybePreconnectUrlAndSubResources(Profile.getLastUsedProfile(), url);
+        }
+        TraceEvent.end("maybePreconnect");
+    }
+
+    @Override
     public void initializeCompositor() { }
 
     @Override
@@ -77,12 +98,15 @@ public abstract class AsyncInitializationActivity extends ActionBarActivity impl
 
     @Override
     public void finishNativeInitialization() {
+        mMemoryUma = new MemoryUma();
         mNativeInitializationController.onNativeInitializationComplete();
     }
 
     @Override
     public void onStartupFailure() {
-        finish();
+        ProcessInitException e =
+                new ProcessInitException(LoaderErrors.LOADER_ERROR_NATIVE_STARTUP_FAILED);
+        ChromiumApplication.reportStartupErrorAndExit(e);
     }
 
     /**
@@ -166,6 +190,7 @@ public abstract class AsyncInitializationActivity extends ActionBarActivity impl
     @Override
     public void onStop() {
         super.onStop();
+        if (mMemoryUma != null) mMemoryUma.onStop();
         mNativeInitializationController.onStop();
     }
 
@@ -226,6 +251,19 @@ public abstract class AsyncInitializationActivity extends ActionBarActivity impl
     public boolean onActivityResultWithNative(int requestCode, int resultCode, Intent data) {
         return false;
     }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        if (mMemoryUma != null) mMemoryUma.onLowMemory();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (mMemoryUma != null) mMemoryUma.onTrimMemory(level);
+    }
+
 
     /**
      * Extending classes should implement this and call {@link Activity#setContentView(int)} in it.

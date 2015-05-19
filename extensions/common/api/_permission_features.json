@@ -89,7 +89,7 @@
     }
   ],
   "appview": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "audio": [
@@ -124,7 +124,6 @@
       "whitelist": [
         // http://crbug.com/292856
         "3F50C3A83839D9C76334BCE81CDEC06174F266AF",
-        "09FDCB5851B8F3378DB630D06E316076E89C95A6",
         "39BE69F11F68E4EED080DA3DC2394F7885B7AFF9",
         "FF78670081967CE21DB86A04AD94A0498F01E20A",
         // Hotword component extension
@@ -144,7 +143,8 @@
       "4F25792AF1AA7483936DE29C07806F203C7170A0",  // http://crbug.com/407693
       "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // http://crbug.com/407693
       "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // http://crbug.com/407693
-      "81986D4F846CEDDDB962643FA501D1780DD441BB"   // http://crbug.com/407693
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/407693
+      "89715614FAA2B4C2853802D70261D2A9D0756FC8"   // http://crbug.com/455986
     ]
   },
   "declarativeWebRequest": {
@@ -183,7 +183,8 @@
   ],
   "documentScan": {
     "channel": "dev",
-    "extension_types": ["extension", "platform_app"]
+    "extension_types": ["extension", "platform_app"],
+    "platforms": ["chromeos"]
   },
   "extensionview": {
     "channel": "dev",
@@ -221,7 +222,7 @@
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
   },
   "networking.config": {
-    "channel": "dev",
+    "channel": "stable",
     "platforms": ["chromeos"],
     "extension_types": ["extension"]
   },
@@ -410,13 +411,24 @@
       "extension_types": ["extension"],
       "whitelist": [
         // http://crbug.com/292856
-        "09FDCB5851B8F3378DB630D06E316076E89C95A6",
         "A434B90223C3C52F2B69DB494736B63C612C774D"
       ]
     }
   ],
+  "virtualKeyboardPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension"],
+    "platforms": ["chromeos"],
+    "whitelist": [
+      "3F50C3A83839D9C76334BCE81CDEC06174F266AF",  // System-level virtual kbd
+      "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",  // Official XKB virtual kbd
+      "CFBF7EE448FA48960FFDA7CEB30F7A21B26AA981",  // Official m17n virtual kbd
+      "F94EE6AB36D6C6588670B2B01EB65212D9C64E33",  // Public XKB virtual kbd
+      "3E03D9B67FDD31B2438D1CF5070573415DCB3CBA"   // Public m17n virtual kbd
+    ]
+  },
   "vpnProvider": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "platform_app"],
     "platforms": ["chromeos"]
   },

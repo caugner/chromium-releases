@@ -8,6 +8,9 @@ import("//testing/test.gni")
 if (current_cpu == "arm") {
   import("//build/config/arm.gni")
 }
+if (current_cpu == "mipsel" || current_cpu == "mips64el") {
+  import("//build/config/mips.gni")
+}
 
 skia_support_gpu = !is_ios
 skia_support_pdf = !is_ios && (enable_basic_printing || enable_print_preview)
@@ -48,26 +51,30 @@ gypi_skia_core =
                 [ "//third_party/skia/gyp/core.gypi" ])
 
 # The list of Skia gpu sources that are to be set for chromium.
-gypi_skia_gpu =
-    exec_script("//build/gypi_to_gn.py",
-                [
-                  rebase_path("//third_party/skia/gyp/gpu.gypi"),
-                  "--replace=<(skia_include_path)=//third_party/skia/include",
-                  "--replace=<(skia_src_path)=//third_party/skia/src",
-                ],
-                "scope",
-                [ "//third_party/skia/gyp/gpu.gypi" ])
+if (skia_support_gpu) {
+  gypi_skia_gpu =
+      exec_script("//build/gypi_to_gn.py",
+                  [
+                    rebase_path("//third_party/skia/gyp/gpu.gypi"),
+                    "--replace=<(skia_include_path)=//third_party/skia/include",
+                    "--replace=<(skia_src_path)=//third_party/skia/src",
+                  ],
+                  "scope",
+                  [ "//third_party/skia/gyp/gpu.gypi" ])
+}
 
 # The list of Skia pdf sources that are to be set for chromium.
-gypi_skia_pdf =
-    exec_script("//build/gypi_to_gn.py",
-                [
-                  rebase_path("//third_party/skia/gyp/pdf.gypi"),
-                  "--replace=<(skia_include_path)=//third_party/skia/include",
-                  "--replace=<(skia_src_path)=//third_party/skia/src",
-                ],
-                "scope",
-                [ "//third_party/skia/gyp/pdf.gypi" ])
+if (skia_support_pdf) {
+  gypi_skia_pdf =
+      exec_script("//build/gypi_to_gn.py",
+                  [
+                    rebase_path("//third_party/skia/gyp/pdf.gypi"),
+                    "--replace=<(skia_include_path)=//third_party/skia/include",
+                    "--replace=<(skia_src_path)=//third_party/skia/src",
+                  ],
+                  "scope",
+                  [ "//third_party/skia/gyp/pdf.gypi" ])
+}
 
 # The list of Skia effects that are to be set for chromium.
 gypi_skia_effects =
@@ -128,9 +135,6 @@ config("skia_config") {
     "//third_party/skia/include/pipe",
     "//third_party/skia/include/ports",
     "//third_party/skia/include/utils",
-
-    # need to move this to internal. see crbug.com/457691
-    "//third_party/skia/src/core",
   ]
 
   defines = gypi_blink_skia_defines.blink_skia_defines
@@ -139,7 +143,10 @@ config("skia_config") {
   defines += []
 
   if (component_mode == "shared_library") {
-    defines += [ "SKIA_DLL" ]
+    defines += [
+      "SKIA_DLL",
+      "GR_GL_IGNORE_ES3_MSAA=0",
+    ]
   }
 
   if (skia_support_gpu) {
@@ -170,6 +177,7 @@ config("skia_library_config") {
   # exported to dependents. It's not clear if this is on purpose, but this
   # matches the GYP build.
   include_dirs = [
+    "//third_party/skia/src/core",
     "//third_party/skia/src/image",
     "//third_party/skia/src/opts",
     "//third_party/skia/src/pdf",
@@ -244,7 +252,12 @@ config("skia_library_config") {
       "//third_party/skia/src/utils/win",
     ]
 
-    defines += [ "SK_FONTHOST_USES_FONTMGR" ]
+    defines += [
+      # On windows, GDI handles are a scarse system-wide resource so we have to
+      # keep the glyph cache, which holds up to 4 GDI handles per entry, to a
+      # fairly small size. http://crbug.com/314387
+      "SK_DEFAULT_FONT_CACHE_COUNT_LIMIT=256",
+    ]
 
     cflags = [
       "/wd4244",  # conversion from 'type1( __int64)' to 'type2 (unsigned int)'
@@ -255,6 +268,7 @@ config("skia_library_config") {
       "/wd4554",  # 'operator' : check operator precedence for possible error
       "/wd4748",  # compiler will disable optimizations if a function has inline
                   # assembly code contains flow control(jmp or jcc) statements.
+
       "/wd4800",  # forcing value to bool 'true/false'(assigning int to bool).
     ]
   }
@@ -264,6 +278,9 @@ component("skia") {
   sources = [
     # Chrome sources.
     "config/SkUserConfig.h",
+    "ext/SkDiscardableMemory_chrome.cc",
+    "ext/SkDiscardableMemory_chrome.h",
+    "ext/SkMemory_new_handler.cpp",
     "ext/analysis_canvas.cc",
     "ext/analysis_canvas.h",
     "ext/benchmarking_canvas.cc",
@@ -292,15 +309,12 @@ component("skia") {
     "ext/recursive_gaussian_convolution.cc",
     "ext/recursive_gaussian_convolution.h",
     "ext/refptr.h",
-    "ext/SkDiscardableMemory_chrome.h",
-    "ext/SkDiscardableMemory_chrome.cc",
-    "ext/SkMemory_new_handler.cpp",
     "ext/skia_utils_base.cc",
     "ext/skia_utils_base.h",
-    "ext/skia_utils_ios.mm",
     "ext/skia_utils_ios.h",
-    "ext/skia_utils_mac.mm",
+    "ext/skia_utils_ios.mm",
     "ext/skia_utils_mac.h",
+    "ext/skia_utils_mac.mm",
     "ext/skia_utils_win.cc",
     "ext/skia_utils_win.h",
   ]
@@ -330,7 +344,6 @@ component("skia") {
   # Remove unused util files include in utils.gypi
   sources -= [
     "//third_party/skia/include/utils/SkBoundaryPatch.h",
-    "//third_party/skia/include/utils/SkFrontBufferedStream.h",
     "//third_party/skia/include/utils/SkCamera.h",
     "//third_party/skia/include/utils/SkCanvasStateUtils.h",
     "//third_party/skia/include/utils/SkCubicInterval.h",
@@ -338,24 +351,24 @@ component("skia") {
     "//third_party/skia/include/utils/SkDebugUtils.h",
     "//third_party/skia/include/utils/SkDumpCanvas.h",
     "//third_party/skia/include/utils/SkEventTracer.h",
+    "//third_party/skia/include/utils/SkFrontBufferedStream.h",
     "//third_party/skia/include/utils/SkInterpolator.h",
     "//third_party/skia/include/utils/SkLayer.h",
     "//third_party/skia/include/utils/SkMeshUtils.h",
     "//third_party/skia/include/utils/SkNinePatch.h",
-    "//third_party/skia/include/utils/SkParse.h",
     "//third_party/skia/include/utils/SkParsePaint.h",
     "//third_party/skia/include/utils/SkParsePath.h",
     "//third_party/skia/include/utils/SkRandom.h",
     "//third_party/skia/src/utils/SkBitmapHasher.cpp",
     "//third_party/skia/src/utils/SkBitmapHasher.h",
     "//third_party/skia/src/utils/SkBoundaryPatch.cpp",
-    "//third_party/skia/src/utils/SkFrontBufferedStream.cpp",
     "//third_party/skia/src/utils/SkCamera.cpp",
     "//third_party/skia/src/utils/SkCanvasStack.h",
     "//third_party/skia/src/utils/SkCubicInterval.cpp",
     "//third_party/skia/src/utils/SkCullPoints.cpp",
     "//third_party/skia/src/utils/SkDumpCanvas.cpp",
     "//third_party/skia/src/utils/SkFloatUtils.h",
+    "//third_party/skia/src/utils/SkFrontBufferedStream.cpp",
     "//third_party/skia/src/utils/SkInterpolator.cpp",
     "//third_party/skia/src/utils/SkLayer.cpp",
     "//third_party/skia/src/utils/SkMD5.cpp",
@@ -363,8 +376,6 @@ component("skia") {
     "//third_party/skia/src/utils/SkMeshUtils.cpp",
     "//third_party/skia/src/utils/SkNinePatch.cpp",
     "//third_party/skia/src/utils/SkOSFile.cpp",
-    "//third_party/skia/src/utils/SkParse.cpp",
-    "//third_party/skia/src/utils/SkParseColor.cpp",
     "//third_party/skia/src/utils/SkParsePath.cpp",
     "//third_party/skia/src/utils/SkPathUtils.cpp",
     "//third_party/skia/src/utils/SkSHA1.cpp",
@@ -373,8 +384,8 @@ component("skia") {
     "//third_party/skia/src/utils/SkTLogic.h",
 
     # We don't currently need to change thread affinity, so leave out this complexity for now.
-    "//third_party/skia/src/utils/SkThreadUtils_pthread_mach.cpp",
     "//third_party/skia/src/utils/SkThreadUtils_pthread_linux.cpp",
+    "//third_party/skia/src/utils/SkThreadUtils_pthread_mach.cpp",
 
     #testing
     "//third_party/skia/src/fonts/SkGScalerContext.cpp",
@@ -417,8 +428,8 @@ component("skia") {
   if (is_win) {
     sources -= [
       "//third_party/skia/src/ports/SkOSFile_posix.cpp",
-      "//third_party/skia/src/ports/SkTime_Unix.cpp",
       "//third_party/skia/src/ports/SkTLS_pthread.cpp",
+      "//third_party/skia/src/ports/SkTime_Unix.cpp",
     ]
   } else {
     sources -= [
@@ -445,16 +456,16 @@ component("skia") {
 
   if (!is_linux) {
     sources -= [
-      "//third_party/skia/src/ports/SkFontHost_fontconfig.cpp",
       "//third_party/skia/src/fonts/SkFontMgr_fontconfig.cpp",
       "//third_party/skia/src/ports/SkFontConfigInterface_direct.cpp",
+      "//third_party/skia/src/ports/SkFontHost_fontconfig.cpp",
     ]
   }
 
   if (!is_linux && !is_android) {
     sources -= [
-      "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
       "//third_party/skia/src/ports/SkFontHost_FreeType.cpp",
+      "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
     ]
   }
 
@@ -502,14 +513,6 @@ component("skia") {
     "//third_party/zlib",
   ]
 
-  if (is_win) {
-    configs -= [
-      # Some files define WIN32_LEAN_AND_MEAN and we want to avoid a duplicate
-      # definition warning.
-      "//build/config/win:lean_and_mean",
-    ]
-  }
-
   if (is_linux) {
     configs += [
       "//build/config/linux:fontconfig",
@@ -554,10 +557,13 @@ source_set("skia_opts") {
               [
                 # Chrome-specific.
                 "ext/convolver_SSE2.cc",
+                "ext/convolver_SSE2.h",
               ]
 
     if (is_linux || is_mac) {
       cflags += [ "-msse4.1" ]
+    } else if (is_win) {
+      defines += [ "SK_CPU_SSE_LEVEL=41" ]
     }
   } else if (current_cpu == "arm") {
     # The assembly uses the frame pointer register (r7 in Thumb/r11 in
@@ -581,7 +587,19 @@ source_set("skia_opts") {
     }
   } else if (current_cpu == "mipsel") {
     cflags += [ "-fomit-frame-pointer" ]
-    sources = gypi_skia_opts.none_sources
+
+    if (mips_dsp_rev >= 1) {
+      sources = gypi_skia_opts.mips_dsp_sources
+      if (mips_dsp_rev >= 2) {
+        sources += [
+          # Chrome-specific.
+          "ext/convolver_mips_dspr2.cc",
+          "ext/convolver_mips_dspr2.h",
+        ]
+      }
+    } else {
+      sources = gypi_skia_opts.none_sources
+    }
   } else {
     assert(false, "Need to port cpu specific stuff from skia_library_opts.gyp")
   }
@@ -632,4 +650,29 @@ test("skia_unittests") {
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
+}
+
+if (is_linux && !is_chromeos) {
+  # TODO(GYP): Figure out which of these work and are needed on other platforms.
+  executable("image_operations_bench") {
+    sources = [
+      "ext/image_operations_bench.cc",
+    ]
+
+    deps = [
+      ":skia",
+      "//base",
+    ]
+  }
+
+  executable("filter_fuzz_stub") {
+    sources = [
+      "tools/filter_fuzz_stub/filter_fuzz_stub.cc",
+    ]
+
+    deps = [
+      ":skia",
+      "//base",
+    ]
+  }
 }

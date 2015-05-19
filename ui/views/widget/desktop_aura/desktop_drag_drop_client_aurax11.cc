@@ -101,6 +101,12 @@ int XGetModifiers() {
     modifiers |= ui::EF_ALT_DOWN;
   if (mask & Mod4Mask)
     modifiers |= ui::EF_COMMAND_DOWN;
+  if (mask & Button1Mask)
+    modifiers |= ui::EF_LEFT_MOUSE_BUTTON;
+  if (mask & Button2Mask)
+    modifiers |= ui::EF_MIDDLE_MOUSE_BUTTON;
+  if (mask & Button3Mask)
+    modifiers |= ui::EF_RIGHT_MOUSE_BUTTON;
   return modifiers;
 }
 
@@ -648,7 +654,7 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
     const ui::OSExchangeData& data,
     aura::Window* root_window,
     aura::Window* source_window,
-    const gfx::Point& root_location,
+    const gfx::Point& screen_location,
     int operation,
     ui::DragDropTypes::DragEventSource source) {
   UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Start", source,
@@ -764,7 +770,10 @@ void DesktopDragDropClientAuraX11::OnMouseMovement(
   }
 
   const int kModifiers = ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN |
-                         ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN;
+                         ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN |
+                         ui::EF_LEFT_MOUSE_BUTTON |
+                         ui::EF_MIDDLE_MOUSE_BUTTON |
+                         ui::EF_RIGHT_MOUSE_BUTTON;
   current_modifier_state_ = flags & kModifiers;
 
   repeat_mouse_move_timer_.Stop();

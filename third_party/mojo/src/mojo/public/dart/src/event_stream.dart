@@ -4,7 +4,7 @@
 
 part of core;
 
-class MojoEventStream extends Stream<int> {
+class MojoEventStream extends Stream<List<int>> {
   // The underlying Mojo handle.
   MojoHandle _handle;
 
@@ -27,70 +27,92 @@ class MojoEventStream extends Stream<int> {
   bool _isListening;
 
   MojoEventStream(MojoHandle handle,
-                  [MojoHandleSignals signals = MojoHandleSignals.READABLE]) :
-      _handle = handle,
-      _signals = signals,
-      _isListening = false {
+      [MojoHandleSignals signals = MojoHandleSignals.PEER_CLOSED_READABLE])
+      : _handle = handle,
+        _signals = signals,
+        _isListening = false {
     MojoResult result = MojoHandle.register(this);
     if (!result.isOk) {
       throw "Failed to register the MojoHandle: $result.";
     }
   }
 
-  void close() {
+  Future close() {
     if (_handle != null) {
-      MojoHandleWatcher.close(_handle);
-      _handle = null;
-    }
-    if (_receivePort != null) {
-      _receivePort.close();
-      _receivePort = null;
+      if (_isListening) {
+        return _handleWatcherClose();
+      } else {
+        _localClose();
+        return new Future.value(null);
+      }
     }
   }
 
-  StreamSubscription<List<int>> listen(
-      void onData(List event),
+  StreamSubscription<List<int>> listen(void onData(List event),
       {Function onError, void onDone(), bool cancelOnError}) {
     if (_isListening) {
       throw "Listen has already been called: $_handle.";
     }
     _receivePort = new ReceivePort();
     _sendPort = _receivePort.sendPort;
-    _controller = new StreamController(sync: true,
+    _controller = new StreamController(
+        sync: true,
         onListen: _onSubscriptionStateChange,
         onCancel: _onSubscriptionStateChange,
         onPause: _onPauseStateChange,
         onResume: _onPauseStateChange);
-    _controller.addStream(_receivePort);
+    _controller.addStream(_receivePort).whenComplete(_controller.close);
 
     if (_signals != MojoHandleSignals.NONE) {
-      var res = MojoHandleWatcher.add(_handle, _sendPort, _signals.value);
+      var res = new MojoResult(
+          MojoHandleWatcher.add(_handle.h, _sendPort, _signals.value));
       if (!res.isOk) {
         throw "MojoHandleWatcher add failed: $res";
       }
     }
 
     _isListening = true;
-    return _controller.stream.listen(
-        onData,
-        onError: onError,
-        onDone: onDone,
-        cancelOnError: cancelOnError);
+    return _controller.stream.listen(onData,
+        onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 
   void enableSignals(MojoHandleSignals signals) {
     _signals = signals;
     if (_isListening) {
-      var res = MojoHandleWatcher.add(_handle, _sendPort, signals.value);
+      var res = new MojoResult(
+          MojoHandleWatcher.add(_handle.h, _sendPort, signals.value));
       if (!res.isOk) {
         throw "MojoHandleWatcher add failed: $res";
       }
     }
   }
 
-  void enableReadEvents() => enableSignals(MojoHandleSignals.READABLE);
+  void enableReadEvents() =>
+      enableSignals(MojoHandleSignals.PEER_CLOSED_READABLE);
   void enableWriteEvents() => enableSignals(MojoHandleSignals.WRITABLE);
   void enableAllEvents() => enableSignals(MojoHandleSignals.READWRITE);
+
+  Future _handleWatcherClose() {
+    assert(_handle != null);
+    assert(MojoHandle._removeUnclosedHandle(_handle));
+    return MojoHandleWatcher.close(_handle.h, wait: true).then((r) {
+      if (_receivePort != null) {
+        _receivePort.close();
+        _receivePort = null;
+      }
+      return new MojoResult(r);
+    });
+  }
+
+  void _localClose() {
+    assert(_handle != null);
+    _handle.close();
+    _handle = null;
+    if (_receivePort != null) {
+      _receivePort.close();
+      _receivePort = null;
+    }
+  }
 
   void _onSubscriptionStateChange() {
     if (!_controller.hasListener) {
@@ -100,12 +122,13 @@ class MojoEventStream extends Stream<int> {
 
   void _onPauseStateChange() {
     if (_controller.isPaused) {
-      var res = MojoHandleWatcher.remove(_handle);
+      var res = new MojoResult(MojoHandleWatcher.remove(_handle.h));
       if (!res.isOk) {
         throw "MojoHandleWatcher add failed: $res";
       }
     } else {
-      var res = MojoHandleWatcher.add(_handle, _sendPort, _signals.value);
+      var res = new MojoResult(
+          MojoHandleWatcher.add(_handle.h, _sendPort, _signals.value));
       if (!res.isOk) {
         throw "MojoHandleWatcher add failed: $res";
       }
@@ -118,31 +141,34 @@ class MojoEventStream extends Stream<int> {
   String toString() => "$_handle";
 }
 
-abstract class Listener {
-  StreamSubscription<List<int>> listen();
-}
+typedef void ErrorHandler();
 
-class MojoEventStreamListener implements Listener {
+class MojoEventStreamListener {
   MojoMessagePipeEndpoint _endpoint;
   MojoEventStream _eventStream;
   bool _isOpen = false;
   bool _isInHandler = false;
+  StreamSubscription subscription;
+  ErrorHandler onError;
 
-  MojoEventStreamListener(MojoMessagePipeEndpoint endpoint) :
-      _endpoint = endpoint,
-      _eventStream = new MojoEventStream(endpoint.handle),
-      _isOpen = false;
+  MojoEventStreamListener.fromEndpoint(MojoMessagePipeEndpoint endpoint)
+      : _endpoint = endpoint,
+        _eventStream = new MojoEventStream(endpoint.handle),
+        _isOpen = false {
+    listen();
+  }
 
   MojoEventStreamListener.fromHandle(MojoHandle handle) {
     _endpoint = new MojoMessagePipeEndpoint(handle);
     _eventStream = new MojoEventStream(handle);
     _isOpen = false;
+    listen();
   }
 
-  MojoEventStreamListener.unbound() :
-      _endpoint = null,
-      _eventStream = null,
-      _isOpen = false;
+  MojoEventStreamListener.unbound()
+      : _endpoint = null,
+        _eventStream = null,
+        _isOpen = false;
 
   void bind(MojoMessagePipeEndpoint endpoint) {
     assert(!isBound);
@@ -159,17 +185,17 @@ class MojoEventStreamListener implements Listener {
   }
 
   StreamSubscription<List<int>> listen() {
+    assert(isBound && (subscription == null));
     _isOpen = true;
-    return _eventStream.listen((List<int> event) {
-      var signalsWatched = new MojoHandleSignals(event[0]);
-      var signalsReceived = new MojoHandleSignals(event[1]);
-      if (signalsReceived.isPeerClosed) {
-        handlePeerClosed();
-        // The peer being closed obviates any other signal we might
-        // have received since we won't be able to read or write the handle.
-        // Thus, we just return before invoking other handlers.
+    subscription = _eventStream.listen((List<int> event) {
+      if (!_isOpen) {
+        // The actual close of the underlying stream happens asynchronously
+        // after the call to close. However, we start to ignore incoming events
+        // immediately.
         return;
       }
+      var signalsWatched = new MojoHandleSignals(event[0]);
+      var signalsReceived = new MojoHandleSignals(event[1]);
       _isInHandler = true;
       if (signalsReceived.isReadable) {
         assert(_eventStream.readyRead);
@@ -179,34 +205,44 @@ class MojoEventStreamListener implements Listener {
         assert(_eventStream.readyWrite);
         handleWrite();
       }
-      if (_isOpen) {
-        _eventStream.enableSignals(enableSignals(
-            signalsWatched, signalsReceived));
+      if (!signalsReceived.isPeerClosed) {
+        _eventStream.enableSignals(signalsWatched);
       }
       _isInHandler = false;
-    });
+      if (signalsReceived.isPeerClosed) {
+        // nodefer is true here because there is no need to wait to close until
+        // outstanding messages are sent. The other side is gone.
+        close(nodefer: true).then((_) {
+          if (onError != null) {
+            onError();
+          }
+        });
+      }
+    }, onDone: close);
+    return subscription;
   }
 
-  void close() {
-    if (_isOpen) {
-      _eventStream.close();
-      _isOpen = false;
-      _eventStream = null;
-      _endpoint = null;
+  Future close({bool nodefer: false}) {
+    var result;
+    _isOpen = false;
+    _endpoint = null;
+    subscription = null;
+    if (_eventStream != null) {
+      result = _eventStream.close().then((_) {
+        _eventStream = null;
+      });
     }
+    return result != null ? result : new Future.value(null);
   }
 
   void handleRead() {}
   void handleWrite() {}
-  void handlePeerClosed() {
-    close();
-  }
-
-  MojoHandleSignals enableSignals(MojoHandleSignals watched,
-                                  MojoHandleSignals received) => watched;
 
   MojoMessagePipeEndpoint get endpoint => _endpoint;
   bool get isOpen => _isOpen;
   bool get isInHandler => _isInHandler;
   bool get isBound => _endpoint != null;
+
+  String toString() => "MojoEventStreamListener("
+      "isOpen: $isOpen, isBound: $isBound, endpoint: $_endpoint)";
 }

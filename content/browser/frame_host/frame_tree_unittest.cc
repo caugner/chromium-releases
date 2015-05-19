@@ -70,8 +70,8 @@ class TreeWalkingWebContentsLogger : public WebContentsObserver {
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override {
     if (old_host)
-      LogWhatHappened("RenderFrameChanged(old)", old_host);
-    LogWhatHappened("RenderFrameChanged(new)", new_host);
+      LogWhatHappened("RenderFrameHostChanged(old)", old_host);
+    LogWhatHappened("RenderFrameHostChanged(new)", new_host);
   }
 
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override {
@@ -209,9 +209,15 @@ TEST_F(FrameTreeTest, ObserverWalksTreeDuringFrameCreation) {
 
   // Simulate attaching a series of frames to build the frame tree.
   main_test_rfh()->OnCreateChildFrame(14, std::string(), SandboxFlags::NONE);
-  EXPECT_EQ("RenderFrameCreated(14) -> 1: [14: []]", activity.GetLog());
+  EXPECT_EQ(
+      "RenderFrameHostChanged(new)(14) -> 1: []\n"
+      "RenderFrameCreated(14) -> 1: [14: []]",
+      activity.GetLog());
   main_test_rfh()->OnCreateChildFrame(18, std::string(), SandboxFlags::NONE);
-  EXPECT_EQ("RenderFrameCreated(18) -> 1: [14: [], 18: []]", activity.GetLog());
+  EXPECT_EQ(
+      "RenderFrameHostChanged(new)(18) -> 1: [14: []]\n"
+      "RenderFrameCreated(18) -> 1: [14: [], 18: []]",
+      activity.GetLog());
   frame_tree->RemoveFrame(root->child_at(0));
   EXPECT_EQ("RenderFrameDeleted(14) -> 1: [18: []]", activity.GetLog());
   frame_tree->RemoveFrame(root->child_at(0));
@@ -224,16 +230,24 @@ TEST_F(FrameTreeTest, ObserverWalksTreeAfterCrash) {
   TreeWalkingWebContentsLogger activity(contents());
 
   main_test_rfh()->OnCreateChildFrame(22, std::string(), SandboxFlags::NONE);
-  EXPECT_EQ("RenderFrameCreated(22) -> 1: [22: []]", activity.GetLog());
+  EXPECT_EQ(
+      "RenderFrameHostChanged(new)(22) -> 1: []\n"
+      "RenderFrameCreated(22) -> 1: [22: []]",
+      activity.GetLog());
   main_test_rfh()->OnCreateChildFrame(23, std::string(), SandboxFlags::NONE);
-  EXPECT_EQ("RenderFrameCreated(23) -> 1: [22: [], 23: []]", activity.GetLog());
+  EXPECT_EQ(
+      "RenderFrameHostChanged(new)(23) -> 1: [22: []]\n"
+      "RenderFrameCreated(23) -> 1: [22: [], 23: []]",
+      activity.GetLog());
 
   // Crash the renderer
-  main_rfh()->OnMessageReceived(FrameHostMsg_RenderProcessGone(
-      0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
+  main_test_rfh()->OnMessageReceived(FrameHostMsg_RenderProcessGone(
+      main_test_rfh()->GetRoutingID(), base::TERMINATION_STATUS_PROCESS_CRASHED,
+      -1));
   EXPECT_EQ(
       "RenderFrameDeleted(22) -> 1: []\n"
       "RenderFrameDeleted(23) -> 1: []\n"
+      "RenderFrameDeleted(1) -> 1: []\n"
       "RenderProcessGone -> 1: []",
       activity.GetLog());
 }
@@ -261,19 +275,26 @@ TEST_F(FrameTreeTest, ProcessCrashClearsGlobalMap) {
   main_test_rfh()->OnCreateChildFrame(22, std::string(), SandboxFlags::NONE);
   main_test_rfh()->OnCreateChildFrame(23, std::string(), SandboxFlags::NONE);
 
+  // Add one grandchild frame.
+  RenderFrameHostImpl* child1_rfh = root->child_at(0)->current_frame_host();
+  child1_rfh->OnCreateChildFrame(33, std::string(), SandboxFlags::NONE);
+
   // Ensure they can be found by id.
   int64 id1 = root->child_at(0)->frame_tree_node_id();
   int64 id2 = root->child_at(1)->frame_tree_node_id();
-  EXPECT_TRUE(FrameTree::GloballyFindByID(id1));
-  EXPECT_TRUE(FrameTree::GloballyFindByID(id2));
+  int64 id3 = root->child_at(0)->child_at(0)->frame_tree_node_id();
+  EXPECT_TRUE(FrameTreeNode::GloballyFindByID(id1));
+  EXPECT_TRUE(FrameTreeNode::GloballyFindByID(id2));
+  EXPECT_TRUE(FrameTreeNode::GloballyFindByID(id3));
 
   // Crash the renderer.
   main_test_rfh()->OnMessageReceived(FrameHostMsg_RenderProcessGone(
       0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
 
   // Ensure they cannot be found by id after the process has crashed.
-  EXPECT_FALSE(FrameTree::GloballyFindByID(id1));
-  EXPECT_FALSE(FrameTree::GloballyFindByID(id2));
+  EXPECT_FALSE(FrameTreeNode::GloballyFindByID(id1));
+  EXPECT_FALSE(FrameTreeNode::GloballyFindByID(id2));
+  EXPECT_FALSE(FrameTreeNode::GloballyFindByID(id3));
 }
 
 }  // namespace content

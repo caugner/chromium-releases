@@ -63,6 +63,7 @@
       'udev_device_get_sysname',
       'udev_device_get_syspath',
       'udev_device_new_from_devnum',
+      'udev_device_new_from_subsystem_sysname',
       'udev_device_new_from_syspath',
       'udev_device_unref',
       'udev_enumerate_add_match_subsystem',
@@ -89,6 +90,30 @@
       # Hide GTK and related dependencies for Chrome OS and Ozone, so they won't get
       # added back to Chrome OS and Ozone. Don't try to use GTK on Chrome OS and Ozone.
       'targets': [
+        {
+          'target_name': 'atk',
+          'type': 'none',
+          'conditions': [
+            ['_toolset=="target"', {
+              'direct_dependent_settings': {
+                'cflags': [
+                  '<!@(<(pkg-config) --cflags atk)',
+                ],
+                'defines': [
+                  'ATK_LIB_DIR="<!@(<(pkg-config) --variable=libdir atk)"',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other atk)',
+                ],
+                'libraries': [
+                  '<!@(<(pkg-config) --libs-only-l atk)',
+                ],
+              },
+            }],
+          ],
+        },
         {
           'target_name': 'gdk',
           'type': 'none',
@@ -507,7 +532,7 @@
         },
       ],
     }],
-    ['ozone_platform_dri==1 or ozone_platform_gbm==1', {
+    ['ozone_platform_dri==1 or ozone_platform_drm==1 or ozone_platform_gbm==1', {
       'targets': [
         {
           'target_name': 'libdrm',

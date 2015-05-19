@@ -12,8 +12,10 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/renderer_preferences.h"
 #include "jni/CastWindowAndroid_jni.h"
+#include "ui/gfx/skia_util.h"
 
 namespace chromecast {
 namespace shell {
@@ -40,6 +42,13 @@ CastWindowAndroid* CastWindowAndroid::CreateNewWindow(
 
   if (!url.is_empty())
     window_android->LoadURL(url);
+
+  content::RenderWidgetHostView* rwhv =
+      window_android->web_contents_->GetRenderWidgetHostView();
+  if (rwhv) {
+    rwhv->SetBackgroundColor(SK_ColorBLACK);
+  }
+
   return window_android;
 }
 
@@ -63,8 +72,10 @@ void CastWindowAndroid::Initialize() {
       web_contents_->GetRenderProcessHost()->GetID());
 
   // Enabling hole-punching also requires runtime renderer preference
-  web_contents_->GetMutableRendererPrefs()->
-      use_video_overlay_for_embedded_encrypted_video = true;
+  content::RendererPreferences* prefs =
+      web_contents_->GetMutableRendererPrefs();
+  prefs->use_video_overlay_for_embedded_encrypted_video = true;
+  prefs->use_view_overlay_for_all_video = true;
   web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 }
 

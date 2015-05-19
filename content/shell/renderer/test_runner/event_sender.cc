@@ -417,6 +417,7 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void GestureTwoFingerTap(gin::Arguments* args);
   void ContinuousMouseScrollBy(gin::Arguments* args);
   void MouseMoveTo(gin::Arguments* args);
+  void MouseLeave();
   void TrackpadScrollBegin();
   void TrackpadScroll(gin::Arguments* args);
   void TrackpadScrollEnd();
@@ -554,6 +555,7 @@ EventSenderBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("keyDown", &EventSenderBindings::KeyDown)
       .SetMethod("mouseDown", &EventSenderBindings::MouseDown)
       .SetMethod("mouseMoveTo", &EventSenderBindings::MouseMoveTo)
+      .SetMethod("mouseLeave", &EventSenderBindings::MouseLeave)
       .SetMethod("trackpadScrollBegin",
                  &EventSenderBindings::TrackpadScrollBegin)
       .SetMethod("trackpadScroll", &EventSenderBindings::TrackpadScroll)
@@ -861,6 +863,11 @@ void EventSenderBindings::MouseMoveTo(gin::Arguments* args) {
     sender_->MouseMoveTo(args);
 }
 
+void EventSenderBindings::MouseLeave() {
+  if (sender_)
+    sender_->MouseLeave();
+}
+
 void EventSenderBindings::TrackpadScrollBegin() {
   if (sender_)
     sender_->TrackpadScrollBegin();
@@ -1095,6 +1102,7 @@ void EventSenderBindings::SetWmSysDeadChar(int sys_dead_char) {
 // EventSender -----------------------------------------------------------------
 
 WebMouseEvent::Button EventSender::pressed_button_ = WebMouseEvent::ButtonNone;
+int EventSender::modifiers_ = 0;
 
 WebPoint EventSender::last_mouse_pos_;
 
@@ -1199,14 +1207,18 @@ void EventSender::DoDragDrop(const WebDragData& drag_data,
                  last_mouse_pos_,
                  GetCurrentEventTimeSec(),
                  click_count_,
-                 0,
+                 modifiers_,
                  &event);
   WebPoint client_point(event.x, event.y);
   WebPoint screen_point(event.globalX, event.globalY);
   current_drag_data_ = drag_data;
   current_drag_effects_allowed_ = mask;
   current_drag_effect_ = view_->dragTargetDragEnter(
-      drag_data, client_point, screen_point, current_drag_effects_allowed_, 0);
+      drag_data,
+      client_point,
+      screen_point,
+      current_drag_effects_allowed_,
+      modifiers_);
 
   // Finish processing events.
   ReplaySavedEvents();
@@ -1224,6 +1236,7 @@ void EventSender::MouseDown(int button_number, int modifiers) {
   UpdateClickCountForButton(button_type);
 
   pressed_button_ = button_type;
+  modifiers_ = modifiers;
 
   WebMouseEvent event;
   InitMouseEvent(WebInputEvent::MouseDown,
@@ -1913,6 +1926,22 @@ void EventSender::MouseMoveTo(gin::Arguments* args) {
   }
 }
 
+void EventSender::MouseLeave() {
+  if (force_layout_on_events_)
+    view_->layout();
+
+  WebMouseEvent event;
+  InitMouseEvent(WebInputEvent::MouseLeave,
+                 WebMouseEvent::ButtonNone,
+                 last_mouse_pos_,
+                 GetCurrentEventTimeSec(),
+                 click_count_,
+                 0,
+                 &event);
+   view_->handleInputEvent(event);
+}
+
+
 void EventSender::TrackpadScrollBegin() {
   WebMouseWheelEvent event;
   InitMouseEvent(WebInputEvent::MouseWheel,
@@ -2418,7 +2447,10 @@ void EventSender::DoMouseUp(const WebMouseEvent& e) {
   FinishDragAndDrop(
       e,
       view_->dragTargetDragOver(
-          client_point, screen_point, current_drag_effects_allowed_, 0));
+          client_point,
+          screen_point,
+          current_drag_effects_allowed_,
+          e.modifiers));
 }
 
 void EventSender::DoMouseMove(const WebMouseEvent& e) {
@@ -2434,7 +2466,7 @@ void EventSender::DoMouseMove(const WebMouseEvent& e) {
   WebPoint client_point(e.x, e.y);
   WebPoint screen_point(e.globalX, e.globalY);
   current_drag_effect_ = view_->dragTargetDragOver(
-      client_point, screen_point, current_drag_effects_allowed_, 0);
+      client_point, screen_point, current_drag_effects_allowed_, e.modifiers);
 }
 
 void EventSender::ReplaySavedEvents() {

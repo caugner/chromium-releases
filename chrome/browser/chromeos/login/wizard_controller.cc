@@ -58,6 +58,7 @@
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
@@ -285,18 +286,19 @@ void WizardController::Init(const std::string& first_screen_name) {
 }
 
 ErrorScreen* WizardController::GetErrorScreen() {
-  return static_cast<ErrorScreen*>(GetScreen(kErrorScreenName));
+  return oobe_display_->GetErrorScreen();
+}
+
+BaseScreen* WizardController::GetScreen(const std::string& screen_name) {
+  if (screen_name == kErrorScreenName)
+    return GetErrorScreen();
+  return ScreenManager::GetScreen(screen_name);
 }
 
 BaseScreen* WizardController::CreateScreen(const std::string& screen_name) {
   if (screen_name == kNetworkScreenName) {
     scoped_ptr<NetworkScreen> screen(
         new NetworkScreen(this, this, oobe_display_->GetNetworkView()));
-    screen->Initialize(nullptr /* context */);
-    return screen.release();
-  } else if (screen_name == kErrorScreenName) {
-    scoped_ptr<ErrorScreen> screen(
-        new ErrorScreen(this, oobe_display_->GetNetworkErrorView()));
     screen->Initialize(nullptr /* context */);
     return screen.release();
   } else if (screen_name == kUpdateScreenName) {
@@ -1175,7 +1177,7 @@ PrefService* WizardController::GetLocalState() {
 void WizardController::OnTimezoneResolved(
     scoped_ptr<TimeZoneResponseData> timezone,
     bool server_error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(timezone.get());
   // To check that "this" is not destroyed try to access some member
   // (timezone_provider_) in this case. Expect crash here.
@@ -1227,7 +1229,7 @@ TimeZoneProvider* WizardController::GetTimezoneProvider() {
 void WizardController::OnLocationResolved(const Geoposition& position,
                                           bool server_error,
                                           const base::TimeDelta elapsed) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const base::TimeDelta timeout =
       base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds);

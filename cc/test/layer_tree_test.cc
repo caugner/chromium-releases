@@ -22,6 +22,7 @@
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/test/tiled_layer_test_common.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
@@ -44,11 +45,6 @@ DrawResult TestHooks::PrepareToDrawOnThread(
     LayerTreeHostImpl::FrameData* frame_data,
     DrawResult draw_result) {
   return draw_result;
-}
-
-scoped_ptr<Rasterizer> TestHooks::CreateRasterizer(
-    LayerTreeHostImpl* host_impl) {
-  return host_impl->LayerTreeHostImpl::CreateRasterizer();
 }
 
 void TestHooks::CreateResourceAndTileTaskWorkerPool(
@@ -117,6 +113,11 @@ class ThreadProxyForTest : public ThreadProxy {
   void ScheduledActionPrepareTiles() override {
     ThreadProxy::ScheduledActionPrepareTiles();
     test_hooks_->ScheduledActionPrepareTiles();
+  }
+
+  void ScheduledActionInvalidateOutputSurface() override {
+    ThreadProxy::ScheduledActionInvalidateOutputSurface();
+    test_hooks_->ScheduledActionInvalidateOutputSurface();
   }
 
   ThreadProxyForTest(
@@ -209,15 +210,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
       Proxy* proxy,
       SharedBitmapManager* shared_bitmap_manager,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      TaskGraphRunner* task_graph_runner,
       RenderingStatsInstrumentation* stats_instrumentation) {
-    return make_scoped_ptr(
-        new LayerTreeHostImplForTesting(test_hooks,
-                                        settings,
-                                        host_impl_client,
-                                        proxy,
-                                        shared_bitmap_manager,
-                                        gpu_memory_buffer_manager,
-                                        stats_instrumentation));
+    return make_scoped_ptr(new LayerTreeHostImplForTesting(
+        test_hooks, settings, host_impl_client, proxy, shared_bitmap_manager,
+        gpu_memory_buffer_manager, task_graph_runner, stats_instrumentation));
   }
 
  protected:
@@ -228,6 +225,7 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
       Proxy* proxy,
       SharedBitmapManager* shared_bitmap_manager,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      TaskGraphRunner* task_graph_runner,
       RenderingStatsInstrumentation* stats_instrumentation)
       : LayerTreeHostImpl(settings,
                           host_impl_client,
@@ -235,14 +233,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
                           stats_instrumentation,
                           shared_bitmap_manager,
                           gpu_memory_buffer_manager,
+                          task_graph_runner,
                           0),
         test_hooks_(test_hooks),
         block_notify_ready_to_activate_for_testing_(false),
         notify_ready_to_activate_was_blocked_(false) {}
-
-  scoped_ptr<Rasterizer> CreateRasterizer() override {
-    return test_hooks_->CreateRasterizer(this);
-  }
 
   void CreateResourceAndTileTaskWorkerPool(
       scoped_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
@@ -349,10 +344,9 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
   void UpdateAnimationState(bool start_ready_animations) override {
     LayerTreeHostImpl::UpdateAnimationState(start_ready_animations);
     bool has_unfinished_animation = false;
-    AnimationRegistrar::AnimationControllerMap::const_iterator iter =
-        active_animation_controllers().begin();
-    for (; iter != active_animation_controllers().end(); ++iter) {
-      if (iter->second->HasActiveAnimation()) {
+    for (const auto& it :
+         animation_registrar()->active_animation_controllers_for_testing()) {
+      if (it.second->HasActiveAnimation()) {
         has_unfinished_animation = true;
         break;
       }
@@ -456,12 +450,17 @@ class LayerTreeHostForTesting : public LayerTreeHost {
   static scoped_ptr<LayerTreeHostForTesting> Create(
       TestHooks* test_hooks,
       LayerTreeHostClientForTesting* client,
+      SharedBitmapManager* shared_bitmap_manager,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      TaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
       scoped_ptr<BeginFrameSource> external_begin_frame_source) {
     scoped_ptr<LayerTreeHostForTesting> layer_tree_host(
-        new LayerTreeHostForTesting(test_hooks, client, settings));
+        new LayerTreeHostForTesting(test_hooks, client, shared_bitmap_manager,
+                                    gpu_memory_buffer_manager,
+                                    task_graph_runner, settings));
     if (impl_task_runner.get()) {
       layer_tree_host->InitializeForTesting(
           ThreadProxyForTest::Create(test_hooks,
@@ -484,12 +483,8 @@ class LayerTreeHostForTesting : public LayerTreeHost {
   scoped_ptr<LayerTreeHostImpl> CreateLayerTreeHostImpl(
       LayerTreeHostImplClient* host_impl_client) override {
     return LayerTreeHostImplForTesting::Create(
-        test_hooks_,
-        settings(),
-        host_impl_client,
-        proxy(),
-        shared_bitmap_manager_.get(),
-        gpu_memory_buffer_manager_.get(),
+        test_hooks_, settings(), host_impl_client, proxy(),
+        shared_bitmap_manager_, gpu_memory_buffer_manager_, task_graph_runner_,
         rendering_stats_instrumentation());
   }
 
@@ -502,17 +497,23 @@ class LayerTreeHostForTesting : public LayerTreeHost {
   void set_test_started(bool started) { test_started_ = started; }
 
  private:
-  LayerTreeHostForTesting(TestHooks* test_hooks,
-                          LayerTreeHostClient* client,
-                          const LayerTreeSettings& settings)
-      : LayerTreeHost(client, NULL, NULL, settings),
-        shared_bitmap_manager_(new TestSharedBitmapManager),
-        gpu_memory_buffer_manager_(new TestGpuMemoryBufferManager),
+  LayerTreeHostForTesting(
+      TestHooks* test_hooks,
+      LayerTreeHostClient* client,
+      SharedBitmapManager* shared_bitmap_manager,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+      TaskGraphRunner* task_graph_runner,
+      const LayerTreeSettings& settings)
+      : LayerTreeHost(client, NULL, NULL, NULL, settings),
+        shared_bitmap_manager_(shared_bitmap_manager),
+        gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
+        task_graph_runner_(task_graph_runner),
         test_hooks_(test_hooks),
         test_started_(false) {}
 
-  scoped_ptr<TestSharedBitmapManager> shared_bitmap_manager_;
-  scoped_ptr<TestGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  SharedBitmapManager* shared_bitmap_manager_;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+  TaskGraphRunner* task_graph_runner_;
   TestHooks* test_hooks_;
   bool test_started_;
 };
@@ -664,9 +665,8 @@ void LayerTreeTest::DoBeginTest() {
 
   DCHECK(!impl_thread_ || impl_thread_->message_loop_proxy().get());
   layer_tree_host_ = LayerTreeHostForTesting::Create(
-      this,
-      client_.get(),
-      settings_,
+      this, client_.get(), shared_bitmap_manager_.get(),
+      gpu_memory_buffer_manager_.get(), task_graph_runner_.get(), settings_,
       base::MessageLoopProxy::current(),
       impl_thread_ ? impl_thread_->message_loop_proxy() : NULL,
       external_begin_frame_source.Pass());
@@ -794,6 +794,10 @@ void LayerTreeTest::RunTest(bool threaded,
 
   main_task_runner_ = base::MessageLoopProxy::current();
 
+  shared_bitmap_manager_.reset(new TestSharedBitmapManager);
+  gpu_memory_buffer_manager_.reset(new TestGpuMemoryBufferManager);
+  task_graph_runner_.reset(new TestTaskGraphRunner);
+
   delegating_renderer_ = delegating_renderer;
 
   // Spend less time waiting for BeginFrame because the output is
@@ -877,6 +881,15 @@ void LayerTreeTest::DestroyLayerTreeHost() {
   if (layer_tree_host_ && layer_tree_host_->root_layer())
     layer_tree_host_->root_layer()->SetLayerTreeHost(NULL);
   layer_tree_host_ = nullptr;
+}
+
+LayerTreeHost* LayerTreeTest::layer_tree_host() {
+  // We check for a null proxy here as we sometimes ask for the layer tree host
+  // when the proxy does not exist, often for checking settings after a test has
+  // completed. For example, LTHPixelResourceTest::RunPixelResourceTest. See
+  // elsewhere in this file for other examples.
+  DCHECK(!proxy() || proxy()->IsMainThread() || proxy()->IsMainThreadBlocked());
+  return layer_tree_host_.get();
 }
 
 }  // namespace cc

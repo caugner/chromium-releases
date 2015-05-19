@@ -14,21 +14,16 @@
 #include "media/base/decryptor.h"
 #include "media/base/media_log.h"
 #include "media/base/video_renderer.h"
-#include "media/filters/audio_renderer_impl.h"
-#include "media/filters/renderer_impl.h"
-#include "media/filters/video_renderer_impl.h"
 #include "media/mojo/services/demuxer_stream_provider_shim.h"
 #include "media/mojo/services/renderer_config.h"
+#include "media/renderers/audio_renderer_impl.h"
+#include "media/renderers/renderer_impl.h"
+#include "media/renderers/video_renderer_impl.h"
 
 namespace media {
 
 // Time interval to update media time.
 const int kTimeUpdateIntervalMs = 50;
-
-static void LogMediaSourceError(const scoped_refptr<MediaLog>& media_log,
-                                const std::string& error) {
-  media_log->AddEvent(media_log->CreateMediaSourceErrorEvent(error));
-}
 
 static void PaintNothing(const scoped_refptr<VideoFrame>& frame) {
 }
@@ -48,16 +43,16 @@ MojoRendererService::MojoRendererService()
 
   scoped_ptr<AudioRenderer> audio_renderer(new AudioRendererImpl(
       task_runner, audio_renderer_sink_.get(),
-      renderer_config->GetAudioDecoders(
-                           task_runner,
-                           base::Bind(&LogMediaSourceError, media_log)).Pass(),
+      renderer_config->GetAudioDecoders(task_runner,
+                                        base::Bind(&MediaLog::AddLogEvent,
+                                                   media_log)).Pass(),
       renderer_config->GetAudioHardwareConfig(), media_log));
 
   scoped_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
       task_runner,
-      renderer_config->GetVideoDecoders(
-                           task_runner,
-                           base::Bind(&LogMediaSourceError, media_log)).Pass(),
+      renderer_config->GetVideoDecoders(task_runner,
+                                        base::Bind(&MediaLog::AddLogEvent,
+                                                   media_log)).Pass(),
       true, media_log));
 
   // Create renderer.
@@ -120,7 +115,8 @@ void MojoRendererService::OnStreamReady(const mojo::Closure& callback) {
       base::Bind(&MojoRendererService::OnBufferingStateChanged, weak_this_),
       base::Bind(&PaintNothing),
       base::Bind(&MojoRendererService::OnRendererEnded, weak_this_),
-      base::Bind(&MojoRendererService::OnError, weak_this_));
+      base::Bind(&MojoRendererService::OnError, weak_this_),
+      base::Bind(base::DoNothing));
 }
 
 void MojoRendererService::OnRendererInitializeDone(

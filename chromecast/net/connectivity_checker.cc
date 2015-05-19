@@ -60,15 +60,17 @@ void ConnectivityChecker::Initialize() {
   url_request_context_.reset(builder.Build());
 
   net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
-  if (!net::NetworkChangeNotifier::IsOffline()) {
-    loop_proxy_->PostTask(FROM_HERE,
-                          base::Bind(&ConnectivityChecker::Check, this));
-  }
+  net::NetworkChangeNotifier::AddIPAddressObserver(this);
+  loop_proxy_->PostTask(FROM_HERE,
+                        base::Bind(&ConnectivityChecker::Check, this));
 }
 
 ConnectivityChecker::~ConnectivityChecker() {
   DCHECK(loop_proxy_.get());
+  net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
   loop_proxy_->DeleteSoon(FROM_HERE, url_request_context_.release());
+  loop_proxy_->DeleteSoon(FROM_HERE, url_request_.release());
 }
 
 void ConnectivityChecker::AddConnectivityObserver(
@@ -103,29 +105,38 @@ void ConnectivityChecker::Check() {
   }
   DCHECK(url_request_context_.get());
 
+  // Don't check connectivity if network is offline, because internet could be
+  // accessible via netifs ignored.
+  if (net::NetworkChangeNotifier::IsOffline())
+    return;
+
   // If url_request_ is non-null, there is already a check going on. Don't
   // start another.
   if (url_request_.get())
     return;
 
-  VLOG(2) << "Connectivity check: url=" << *connectivity_check_url_;
+  VLOG(1) << "Connectivity check: url=" << *connectivity_check_url_;
   url_request_ = url_request_context_->CreateRequest(
-      *connectivity_check_url_, net::MAXIMUM_PRIORITY, this, NULL);
+      *connectivity_check_url_, net::MAXIMUM_PRIORITY, this);
   url_request_->set_method("HEAD");
   url_request_->Start();
 }
 
 void ConnectivityChecker::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
-  Cancel();
-
-  // If there is no connection, set connectivity to false. Otherwise retest
-  // connectivity
-  if (type == net::NetworkChangeNotifier::CONNECTION_NONE) {
+  VLOG(2) << "OnConnectionTypeChanged " << type;
+  if (type == net::NetworkChangeNotifier::CONNECTION_NONE)
     SetConnectivity(false);
-  } else {
-    Check();
-  }
+
+  Cancel();
+  Check();
+}
+
+void ConnectivityChecker::OnIPAddressChanged() {
+  VLOG(2) << "OnIPAddressChanged";
+
+  Cancel();
+  Check();
 }
 
 void ConnectivityChecker::OnResponseStarted(net::URLRequest* request) {
@@ -139,11 +150,13 @@ void ConnectivityChecker::OnResponseStarted(net::URLRequest* request) {
   url_request_.reset(NULL);  // URLRequest::Cancel() is called in destructor.
 
   if (http_response_code < 400) {
+    VLOG(1) << "Connectivity check succeeded";
     bad_responses_ = 0;
     SetConnectivity(true);
     return;
   }
 
+  VLOG(1) << "Connectivity check failed: " << http_response_code;
   ++bad_responses_;
   if (bad_responses_ > kNumBadResponses) {
     bad_responses_ = kNumBadResponses;
@@ -151,11 +164,9 @@ void ConnectivityChecker::OnResponseStarted(net::URLRequest* request) {
   }
 
   // Check again
-  if (!net::NetworkChangeNotifier::IsOffline()) {
-    loop_proxy_->PostDelayedTask(
-        FROM_HERE, base::Bind(&ConnectivityChecker::Check, this),
-        base::TimeDelta::FromSeconds(kConnectivityPeriodSeconds));
-  }
+  loop_proxy_->PostDelayedTask(
+      FROM_HERE, base::Bind(&ConnectivityChecker::Check, this),
+      base::TimeDelta::FromSeconds(kConnectivityPeriodSeconds));
 }
 
 void ConnectivityChecker::OnReadCompleted(net::URLRequest* request,

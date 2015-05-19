@@ -69,9 +69,10 @@ void ManagePasswordsTest::SetupAutomaticPassword() {
 }
 
 void ManagePasswordsTest::SetupBlackistedPassword() {
-  base::string16 kTestUsername = base::ASCIIToUTF16("test_username");
+  test_form()->blacklisted_by_user = true;
+  test_form()->username_value.clear();
   autofill::PasswordFormMap map;
-  map[kTestUsername] = test_form();
+  map[test_form()->username_value] = test_form();
   GetController()->OnBlacklistBlockedAutofill(map);
 }
 
@@ -85,6 +86,11 @@ void ManagePasswordsTest::SetupChooseCredentials(
   GetController()->OnChooseCredentials(
       local_credentials.Pass(), federated_credentials.Pass(), origin,
       base::Bind(&ManagePasswordsTest::OnChooseCredential, this));
+}
+
+void ManagePasswordsTest::SetupAutoSignin(
+    ScopedVector<autofill::PasswordForm> local_credentials) {
+  GetController()->OnAutoSignin(local_credentials.Pass());
 }
 
 base::HistogramSamples* ManagePasswordsTest::GetSamples(

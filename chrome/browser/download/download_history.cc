@@ -30,10 +30,10 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/download/download_crx_util.h"
-#include "chrome/browser/history/history_service.h"
 #include "components/history/content/browser/download_constants_utils.h"
 #include "components/history/core/browser/download_database.h"
 #include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -169,19 +169,20 @@ typedef std::vector<history::DownloadRow> InfoVector;
 
 }  // anonymous namespace
 
-DownloadHistory::HistoryAdapter::HistoryAdapter(HistoryService* history)
-  : history_(history) {
+DownloadHistory::HistoryAdapter::HistoryAdapter(
+    history::HistoryService* history)
+    : history_(history) {
 }
 DownloadHistory::HistoryAdapter::~HistoryAdapter() {}
 
 void DownloadHistory::HistoryAdapter::QueryDownloads(
-    const HistoryService::DownloadQueryCallback& callback) {
+    const history::HistoryService::DownloadQueryCallback& callback) {
   history_->QueryDownloads(callback);
 }
 
 void DownloadHistory::HistoryAdapter::CreateDownload(
     const history::DownloadRow& info,
-    const HistoryService::DownloadCreateCallback& callback) {
+    const history::HistoryService::DownloadCreateCallback& callback) {
   history_->CreateDownload(info, callback);
 }
 

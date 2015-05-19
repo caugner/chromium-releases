@@ -7,6 +7,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "mojo/common/common_type_converters.h"
+#include "mojo/common/url_type_converters.h"
 #include "mojo/services/network/net_adapters.h"
 #include "mojo/services/network/network_context.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -100,9 +101,17 @@ URLLoaderImpl::URLLoaderImpl(NetworkContext* context,
       binding_(this, request.Pass()),
       weak_ptr_factory_(this) {
   binding_.set_error_handler(this);
+  context_->RegisterURLLoader(this);
 }
 
 URLLoaderImpl::~URLLoaderImpl() {
+  context_->DeregisterURLLoader(this);
+}
+
+void URLLoaderImpl::Cleanup() {
+  // The associated network context is going away and we have to destroy
+  // net::URLRequest hold by this loader.
+  delete this;
 }
 
 void URLLoaderImpl::Start(URLRequestPtr request,
@@ -118,7 +127,7 @@ void URLLoaderImpl::Start(URLRequestPtr request,
   }
 
   url_request_ = context_->url_request_context()->CreateRequest(
-      GURL(request->url), net::DEFAULT_PRIORITY, this, nullptr);
+      GURL(request->url), net::DEFAULT_PRIORITY, this);
   url_request_->set_method(request->method);
   if (request->headers) {
     net::HttpRequestHeaders headers;

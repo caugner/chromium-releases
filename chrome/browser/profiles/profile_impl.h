@@ -88,6 +88,7 @@ class ProfileImpl : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::PermissionManager* GetPermissionManager() override;
 
   // Profile implementation:
   scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
@@ -252,8 +253,6 @@ class ProfileImpl : public Profile {
   scoped_ptr<chromeos::Preferences> chromeos_preferences_;
 
   scoped_ptr<chromeos::LocaleChangeGuard> locale_change_guard_;
-
-  bool is_login_profile_;
 #endif
 
   scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;

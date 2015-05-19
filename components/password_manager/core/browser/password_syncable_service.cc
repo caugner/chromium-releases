@@ -113,10 +113,10 @@ struct PasswordSyncableService::SyncEntries {
       case syncer::SyncChange::ACTION_DELETE:
         return &deleted_entries;
       case syncer::SyncChange::ACTION_INVALID:
-        return NULL;
+        return nullptr;
     }
     NOTREACHED();
-    return NULL;
+    return nullptr;
   }
 
   // List that contains the entries that are known only to sync.
@@ -230,7 +230,7 @@ syncer::SyncDataList PasswordSyncableService::GetAllSyncData(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(syncer::PASSWORDS, type);
   ScopedVector<autofill::PasswordForm> password_entries;
-  ReadFromPasswordStore(&password_entries, NULL);
+  ReadFromPasswordStore(&password_entries, nullptr);
 
   syncer::SyncDataList sync_data;
   for (PasswordForms::iterator it = password_entries.begin();
@@ -303,8 +303,9 @@ bool PasswordSyncableService::ReadFromPasswordStore(
     ScopedVector<autofill::PasswordForm>* password_entries,
     PasswordEntryMap* passwords_entry_map) const {
   DCHECK(password_entries);
+  ScopedVector<autofill::PasswordForm> blacklist_entries;
   if (!password_store_->FillAutofillableLogins(password_entries) ||
-      !password_store_->FillBlacklistLogins(password_entries)) {
+      !password_store_->FillBlacklistLogins(&blacklist_entries)) {
     // Password store often fails to load passwords. Track failures with UMA.
     // (http://crbug.com/249000)
     UMA_HISTOGRAM_ENUMERATION("Sync.LocalDataFailedToLoad",
@@ -312,6 +313,12 @@ bool PasswordSyncableService::ReadFromPasswordStore(
                               syncer::MODEL_TYPE_COUNT);
     return false;
   }
+  // Move |blacklist_entries| to |password_entries|.
+  password_entries->reserve(password_entries->size() +
+                            blacklist_entries.size());
+  password_entries->insert(password_entries->end(), blacklist_entries.begin(),
+                           blacklist_entries.end());
+  blacklist_entries.weak_clear();
 
   if (!passwords_entry_map)
     return true;

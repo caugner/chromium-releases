@@ -9,6 +9,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/process/process.h"
 #include "base/profiler/scoped_profile.h"
@@ -81,20 +82,26 @@ struct Static {
 base::LazyInstance<Static> g_global_io_data = LAZY_INSTANCE_INITIALIZER;
 
 // Kills the specified process because it sends us a malformed message.
-void KillBadMessageSender(base::ProcessHandle process) {
+// Track the specific function's |histogram_value|, as this may indicate a bug
+// in that API's implementation on the renderer.
+void KillBadMessageSender(const base::Process& process,
+                          functions::HistogramValue histogram_value) {
   NOTREACHED();
   content::RecordAction(base::UserMetricsAction("BadMessageTerminate_EFD"));
-  if (process)
-    base::KillProcess(process, content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
+  UMA_HISTOGRAM_ENUMERATION("Extensions.BadMessageFunctionName",
+                            histogram_value, functions::ENUM_BOUNDARY);
+  if (process.IsValid())
+    process.Terminate(content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
 }
 
 void CommonResponseCallback(IPC::Sender* ipc_sender,
                             int routing_id,
-                            base::ProcessHandle peer_process,
+                            const base::Process& peer_process,
                             int request_id,
                             ExtensionFunction::ResponseType type,
                             const base::ListValue& results,
-                            const std::string& error) {
+                            const std::string& error,
+                            functions::HistogramValue histogram_value) {
   DCHECK(ipc_sender);
 
   if (type == ExtensionFunction::BAD_MESSAGE) {
@@ -108,9 +115,8 @@ void CommonResponseCallback(IPC::Sender* ipc_sender,
       // In single process mode it is better if we don't suicide but just crash.
       CHECK(false);
     } else {
-      KillBadMessageSender(peer_process);
+      KillBadMessageSender(peer_process, histogram_value);
     }
-
     return;
   }
 
@@ -125,17 +131,15 @@ void IOThreadResponseCallback(
     int request_id,
     ExtensionFunction::ResponseType type,
     const base::ListValue& results,
-    const std::string& error) {
+    const std::string& error,
+    functions::HistogramValue histogram_value) {
   if (!ipc_sender.get())
     return;
 
-  CommonResponseCallback(ipc_sender.get(),
-                         routing_id,
-                         ipc_sender->PeerHandle(),
-                         request_id,
-                         type,
-                         results,
-                         error);
+  base::Process peer_process =
+      base::Process::DeprecatedGetProcessFromHandle(ipc_sender->PeerHandle());
+  CommonResponseCallback(ipc_sender.get(), routing_id, peer_process, request_id,
+                         type, results, error, histogram_value);
 }
 
 }  // namespace
@@ -180,11 +184,13 @@ class ExtensionFunctionDispatcher::UIThreadResponseCallbackWrapper
   void OnExtensionFunctionCompleted(int request_id,
                                     ExtensionFunction::ResponseType type,
                                     const base::ListValue& results,
-                                    const std::string& error) {
-    CommonResponseCallback(
-        render_view_host_, render_view_host_->GetRoutingID(),
-        render_view_host_->GetProcess()->GetHandle(), request_id, type,
-        results, error);
+                                    const std::string& error,
+                                    functions::HistogramValue histogram_value) {
+    base::Process process = base::Process::DeprecatedGetProcessFromHandle(
+        render_view_host_->GetProcess()->GetHandle());
+    CommonResponseCallback(render_view_host_, render_view_host_->GetRoutingID(),
+                           process, request_id, type, results, error,
+                           histogram_value);
   }
 
   base::WeakPtr<ExtensionFunctionDispatcher> dispatcher_;
@@ -438,7 +444,7 @@ bool ExtensionFunctionDispatcher::CheckPermissions(
     const ExtensionFunction::ResponseCallback& callback) {
   if (!function->HasPermission()) {
     LOG(ERROR) << "Permission denied for " << params.name;
-    SendAccessDenied(callback);
+    SendAccessDenied(callback, function->histogram_value());
     return false;
   }
   return true;
@@ -457,7 +463,7 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
       ExtensionFunctionRegistry::GetInstance()->NewFunction(params.name);
   if (!function) {
     LOG(ERROR) << "Unknown Extension API - " << params.name;
-    SendAccessDenied(callback);
+    SendAccessDenied(callback, function->histogram_value());
     return NULL;
   }
 
@@ -478,10 +484,11 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
 
 // static
 void ExtensionFunctionDispatcher::SendAccessDenied(
-    const ExtensionFunction::ResponseCallback& callback) {
+    const ExtensionFunction::ResponseCallback& callback,
+    functions::HistogramValue histogram_value) {
   base::ListValue empty_list;
   callback.Run(ExtensionFunction::FAILED, empty_list,
-               "Access to extension API denied.");
+               "Access to extension API denied.", histogram_value);
 }
 
 }  // namespace extensions

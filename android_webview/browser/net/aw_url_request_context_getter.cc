@@ -28,18 +28,18 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/cache_type.h"
-#include "net/base/net_log.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_stream_factory.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/next_proto.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
-#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_interceptor.h"
 
@@ -181,14 +181,14 @@ AwURLRequestContextGetter::AwURLRequestContextGetter(
       net_log_(new net::NetLog()) {
   proxy_config_service_ = config_service.Pass();
   // CreateSystemProxyConfigService for Android must be called on main thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 AwURLRequestContextGetter::~AwURLRequestContextGetter() {
 }
 
 void AwURLRequestContextGetter::InitializeURLRequestContext() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!url_request_context_);
 
   net::URLRequestContextBuilder builder;
@@ -248,7 +248,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
 }
 
 net::URLRequestContext* AwURLRequestContextGetter::GetURLRequestContext() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!url_request_context_)
     InitializeURLRequestContext();
 

@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include <math.h>
+#include <map>
+#include <string>
 
 #include "ash/wm/maximize_mode/maximize_mode_controller.h"
 
@@ -14,7 +16,10 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_system_tray_delegate.h"
 #include "ash/test/test_volume_control_delegate.h"
+#include "ash/wm/overview/window_selector_controller.h"
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/metrics/user_metrics.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
 #include "chromeos/accelerometer/accelerometer_types.h"
@@ -34,21 +39,79 @@ namespace {
 const float kDegreesToRadians = 3.1415926f / 180.0f;
 const float kMeanGravity = 9.8066f;
 
+const char kTouchViewInitiallyDisabled[] = "Touchview_Initially_Disabled";
+const char kTouchViewEnabled[] = "Touchview_Enabled";
+const char kTouchViewDisabled[] = "Touchview_Disabled";
+
+// TODO(bruthig): Move this to base/metrics/ so that it can be reused.
+// This class observes and collects user action notifications that are sent
+// by the tests, so that they can be examined afterwards for correctness.
+class UserActionObserver {
+ public:
+  UserActionObserver();
+  ~UserActionObserver();
+
+  int GetMetricCount(const std::string& name) const;
+
+  void ResetCounts();
+
+ private:
+  typedef std::map<std::string, int> UserActionCountMap;
+
+  void OnUserAction(const std::string& action);
+
+  UserActionCountMap count_map_;
+
+  base::ActionCallback action_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserActionObserver);
+};
+
+UserActionObserver::UserActionObserver()
+    : action_callback_(base::Bind(&UserActionObserver::OnUserAction,
+                                  base::Unretained(this))) {
+  base::AddActionCallback(action_callback_);
+}
+
+UserActionObserver::~UserActionObserver() {
+  base::RemoveActionCallback(action_callback_);
+}
+
+int UserActionObserver::GetMetricCount(const std::string& name) const {
+  UserActionCountMap::const_iterator i = count_map_.find(name);
+  return i == count_map_.end() ? 0 : i->second;
+}
+
+void UserActionObserver::ResetCounts() {
+  count_map_.clear();
+}
+
+void UserActionObserver::OnUserAction(const std::string& action) {
+  ++(count_map_[action]);
+}
+
 }  // namespace
 
 // Test accelerometer data taken with the lid at less than 180 degrees while
 // shaking the device around. The data is to be interpreted in groups of 6 where
-// each 6 values corresponds to the X, Y, and Z readings from the base and lid
-// accelerometers in this order.
+// each 6 values corresponds to the base accelerometer (-y / g, -x / g, -z / g)
+// followed by the lid accelerometer (-y / g , x / g, z / g).
 extern const float kAccelerometerLaptopModeTestData[];
 extern const size_t kAccelerometerLaptopModeTestDataLength;
 
 // Test accelerometer data taken with the lid open 360 degrees while
 // shaking the device around. The data is to be interpreted in groups of 6 where
-// each 6 values corresponds to the X, Y, and Z readings from the base and lid
-// accelerometers in this order.
+// each 6 values corresponds to the base accelerometer (-y / g, -x / g, -z / g)
+// followed by the lid accelerometer (-y / g , x / g, z / g).
 extern const float kAccelerometerFullyOpenTestData[];
 extern const size_t kAccelerometerFullyOpenTestDataLength;
+
+// Test accelerometer data taken with the lid open 360 degrees while the device
+// hinge was nearly vertical, while shaking the device around. The data is to be
+// interpreted in groups of 6 where each 6 values corresponds to the X, Y, and Z
+// readings from the base and lid accelerometers in this order.
+extern const float kAccelerometerVerticalHingeTestData[];
+extern const size_t kAccelerometerVerticalHingeTestDataLength;
 
 class MaximizeModeControllerTest : public test::AshTestBase {
  public:
@@ -77,34 +140,26 @@ class MaximizeModeControllerTest : public test::AshTestBase {
   }
 
   void TriggerLidUpdate(const gfx::Vector3dF& lid) {
-    chromeos::AccelerometerUpdate update;
-    update.Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(),
-               lid.z());
+    scoped_refptr<chromeos::AccelerometerUpdate> update(
+        new chromeos::AccelerometerUpdate());
+    update->Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(),
+                lid.z());
     maximize_mode_controller()->OnAccelerometerUpdated(update);
   }
 
   void TriggerBaseAndLidUpdate(const gfx::Vector3dF& base,
                                const gfx::Vector3dF& lid) {
-    chromeos::AccelerometerUpdate update;
-    update.Set(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, base.x(),
-               base.y(), base.z());
-    update.Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(),
-               lid.z());
+    scoped_refptr<chromeos::AccelerometerUpdate> update(
+        new chromeos::AccelerometerUpdate());
+    update->Set(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, base.x(),
+                base.y(), base.z());
+    update->Set(chromeos::ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(),
+                lid.z());
     maximize_mode_controller()->OnAccelerometerUpdated(update);
   }
 
   bool IsMaximizeModeStarted() {
     return maximize_mode_controller()->IsMaximizeModeWindowManagerEnabled();
-  }
-
-  gfx::Display::Rotation GetInternalDisplayRotation() const {
-    return Shell::GetInstance()->display_manager()->GetDisplayInfo(
-        gfx::Display::InternalDisplayId()).rotation();
-  }
-
-  void SetInternalDisplayRotation(gfx::Display::Rotation rotation) const {
-    Shell::GetInstance()->display_manager()->
-        SetDisplayRotation(gfx::Display::InternalDisplayId(), rotation);
   }
 
   // Attaches a SimpleTestTickClock to the MaximizeModeController with a non
@@ -147,11 +202,40 @@ class MaximizeModeControllerTest : public test::AshTestBase {
     return maximize_mode_controller()->WasLidOpenedRecently();
   }
 
+  UserActionObserver* user_action_observer() { return &user_action_observer_; }
+
  private:
   base::SimpleTestTickClock* test_tick_clock_;
 
+  // Tracks user action counts.
+  UserActionObserver user_action_observer_;
+
   DISALLOW_COPY_AND_ASSIGN(MaximizeModeControllerTest);
 };
+
+// Verify TouchView enabled/disabled user action metrics are recorded.
+TEST_F(MaximizeModeControllerTest, VerifyTouchViewEnabledDisabledCounts) {
+  ASSERT_EQ(
+      1, user_action_observer()->GetMetricCount(kTouchViewInitiallyDisabled));
+  ASSERT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewEnabled));
+  ASSERT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewDisabled));
+
+  user_action_observer()->ResetCounts();
+  maximize_mode_controller()->EnableMaximizeModeWindowManager(true);
+  EXPECT_EQ(1, user_action_observer()->GetMetricCount(kTouchViewEnabled));
+  EXPECT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewDisabled));
+  maximize_mode_controller()->EnableMaximizeModeWindowManager(true);
+  EXPECT_EQ(1, user_action_observer()->GetMetricCount(kTouchViewEnabled));
+  EXPECT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewDisabled));
+
+  user_action_observer()->ResetCounts();
+  maximize_mode_controller()->EnableMaximizeModeWindowManager(false);
+  EXPECT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewEnabled));
+  EXPECT_EQ(1, user_action_observer()->GetMetricCount(kTouchViewDisabled));
+  maximize_mode_controller()->EnableMaximizeModeWindowManager(false);
+  EXPECT_EQ(0, user_action_observer()->GetMetricCount(kTouchViewEnabled));
+  EXPECT_EQ(1, user_action_observer()->GetMetricCount(kTouchViewDisabled));
+}
 
 // Verify that closing the lid will exit maximize mode.
 TEST_F(MaximizeModeControllerTest, CloseLidWhileInMaximizeMode) {
@@ -346,6 +430,26 @@ TEST_F(MaximizeModeControllerTest, MaximizeModeTest) {
   }
 }
 
+TEST_F(MaximizeModeControllerTest, VerticalHingeTest) {
+  // Feeds in sample accelerometer data and verifies that there are no
+  // transitions out of touchview / maximize mode while shaking the device
+  // around, while the hinge is nearly vertical. The data was captured from
+  // maxmimize_mode_controller.cc and does not require conversion.
+  ASSERT_EQ(0u, kAccelerometerVerticalHingeTestDataLength % 6);
+  for (size_t i = 0; i < kAccelerometerVerticalHingeTestDataLength / 6; ++i) {
+    gfx::Vector3dF base(kAccelerometerVerticalHingeTestData[i * 6],
+                        kAccelerometerVerticalHingeTestData[i * 6 + 1],
+                        kAccelerometerVerticalHingeTestData[i * 6 + 2]);
+    gfx::Vector3dF lid(kAccelerometerVerticalHingeTestData[i * 6 + 3],
+                       kAccelerometerVerticalHingeTestData[i * 6 + 4],
+                       kAccelerometerVerticalHingeTestData[i * 6 + 5]);
+    TriggerBaseAndLidUpdate(base, lid);
+    // There are a lot of samples, so ASSERT rather than EXPECT to only generate
+    // one failure rather than potentially hundreds.
+    ASSERT_TRUE(IsMaximizeModeStarted());
+  }
+}
+
 // Tests that CanEnterMaximizeMode returns false until a valid accelerometer
 // event has been received, and that it returns true afterwards.
 TEST_F(MaximizeModeControllerTest,
@@ -363,6 +467,27 @@ TEST_F(MaximizeModeControllerTest,
   ASSERT_FALSE(IsMaximizeModeStarted());
   TriggerLidUpdate(gfx::Vector3dF(0.0f, 0.0f, kMeanGravity));
   ASSERT_TRUE(IsMaximizeModeStarted());
+}
+
+// Test if this case does not crash. See http://crbug.com/462806
+TEST_F(MaximizeModeControllerTest, DisplayDisconnectionDuringOverview) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("800x600,800x600");
+  scoped_ptr<aura::Window> w1(
+      CreateTestWindowInShellWithBounds(gfx::Rect(0, 0, 100, 100)));
+  scoped_ptr<aura::Window> w2(
+      CreateTestWindowInShellWithBounds(gfx::Rect(800, 0, 100, 100)));
+  ASSERT_NE(w1->GetRootWindow(), w2->GetRootWindow());
+
+  maximize_mode_controller()->EnableMaximizeModeWindowManager(true);
+  Shell::GetInstance()->window_selector_controller()->ToggleOverview();
+
+  UpdateDisplay("800x600");
+  EXPECT_FALSE(
+      Shell::GetInstance()->window_selector_controller()->IsSelecting());
+  EXPECT_EQ(w1->GetRootWindow(), w2->GetRootWindow());
 }
 
 class MaximizeModeControllerSwitchesTest : public MaximizeModeControllerTest {

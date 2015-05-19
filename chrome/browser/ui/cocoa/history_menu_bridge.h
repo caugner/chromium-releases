@@ -13,11 +13,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
 #include "base/task/cancelable_task_tracker.h"
-#import "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #import "chrome/browser/ui/cocoa/main_menu_item.h"
+#import "components/favicon/core/favicon_service.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/sessions/session_id.h"
 
@@ -139,7 +139,7 @@ class HistoryMenuBridge : public TabRestoreServiceObserver,
 
   // I wish I has a "friend @class" construct. These are used by the HMCC
   // to access model information when responding to actions.
-  HistoryService* service();
+  history::HistoryService* service();
   Profile* profile();
 
  protected:
@@ -201,24 +201,24 @@ class HistoryMenuBridge : public TabRestoreServiceObserver,
   friend class HistoryMenuCocoaControllerTest;
 
   // history::HistoryServiceObserver:
-  void OnURLVisited(HistoryService* history_service,
+  void OnURLVisited(history::HistoryService* history_service,
                     ui::PageTransition transition,
                     const history::URLRow& row,
                     const history::RedirectList& redirects,
                     base::Time visit_time) override;
-  void OnURLsModified(HistoryService* history_service,
+  void OnURLsModified(history::HistoryService* history_service,
                       const history::URLRows& changed_urls) override;
-  void OnURLsDeleted(HistoryService* history_service,
+  void OnURLsDeleted(history::HistoryService* history_service,
                      bool all_history,
                      bool expired,
                      const history::URLRows& deleted_rows,
                      const std::set<GURL>& favicon_urls) override;
-  void OnHistoryServiceLoaded(HistoryService* service) override;
+  void OnHistoryServiceLoaded(history::HistoryService* service) override;
 
   base::scoped_nsobject<HistoryMenuCocoaController> controller_;  // strong
 
   Profile* profile_;  // weak
-  HistoryService* history_service_;  // weak
+  history::HistoryService* history_service_;  // weak
   TabRestoreService* tab_restore_service_;  // weak
 
   base::CancelableTaskTracker cancelable_task_tracker_;
@@ -237,7 +237,7 @@ class HistoryMenuBridge : public TabRestoreServiceObserver,
   // The default favicon if a HistoryItem does not have one.
   base::scoped_nsobject<NSImage> default_favicon_;
 
-  ScopedObserver<HistoryService, HistoryServiceObserver>
+  ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
       history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryMenuBridge);

@@ -17,10 +17,13 @@
 #include "chrome/common/url_constants.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/common/api/virtual_keyboard_private.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
+
+namespace SetMode = extensions::core_api::virtual_keyboard_private::SetMode;
 
 namespace {
 
@@ -32,6 +35,18 @@ aura::Window* GetKeyboardContainer() {
 
 std::string GenerateFeatureFlag(std::string feature, bool enabled) {
   return feature + (enabled ? "-enabled" : "-disabled");
+}
+
+keyboard::KeyboardMode getKeyboardModeEnum(SetMode::Params::Mode mode) {
+  switch (mode) {
+    case SetMode::Params::MODE_NONE:
+      return keyboard::NONE;
+    case SetMode::Params::MODE_FULL_WIDTH:
+      return keyboard::FULL_WIDTH;
+    case SetMode::Params::MODE_FLOATING:
+      return keyboard::FLOATING;
+  }
+  return keyboard::NONE;
 }
 
 }  // namespace
@@ -49,6 +64,10 @@ bool ChromeVirtualKeyboardDelegate::GetKeyboardConfig(
   scoped_ptr<base::ListValue> features(new base::ListValue());
   features->AppendString(
       GenerateFeatureFlag("gesturetyping", keyboard::IsGestureTypingEnabled()));
+  features->AppendString(GenerateFeatureFlag(
+      "gestureselection", keyboard::IsGestureSelectionEnabled()));
+  features->AppendString(GenerateFeatureFlag(
+      "gesturedeletion", keyboard::IsGestureDeletionEnabled()));
   features->AppendString(GenerateFeatureFlag("experimental",
       keyboard::IsExperimentalInputViewEnabled()));
   // TODO(rsadam): Populate features with more inputview features.
@@ -128,6 +147,18 @@ bool ChromeVirtualKeyboardDelegate::ShowLanguageSettings() {
   content::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
   chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
                                         chrome::kLanguageOptionsSubPage);
+  return true;
+}
+
+bool ChromeVirtualKeyboardDelegate::SetVirtualKeyboardMode(int mode_enum) {
+  keyboard::KeyboardMode keyboard_mode =
+      getKeyboardModeEnum(static_cast<SetMode::Params::Mode>(mode_enum));
+  keyboard::KeyboardController* controller =
+      keyboard::KeyboardController::GetInstance();
+  if (!controller)
+    return false;
+
+  controller->SetKeyboardMode(keyboard_mode);
   return true;
 }
 

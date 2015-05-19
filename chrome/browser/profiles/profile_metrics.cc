@@ -20,7 +20,10 @@
 
 namespace {
 
+#if defined(OS_WIN) || defined(OS_MACOSX)
 const int kMaximumReportedProfileCount = 5;
+#endif
+
 const int kMaximumDaysOfDisuse = 4 * 7;  // Should be integral number of weeks.
 
 size_t number_of_profile_switches_ = 0;
@@ -65,12 +68,6 @@ ProfileMetrics::ProfileType GetProfileType(
     metric = ProfileMetrics::ORIGINAL;
   }
   return metric;
-}
-
-void UpdateReportedOSProfileStatistics(int active, int signedin) {
-#if defined(OS_WIN)
-  GoogleUpdateSettings::UpdateProfileCounts(active, signedin);
-#endif
 }
 
 void LogLockedProfileInformation(ProfileManager* manager) {
@@ -177,10 +174,11 @@ bool ProfileMetrics::CountProfileInformation(ProfileManager* manager,
 }
 
 void ProfileMetrics::UpdateReportedProfilesStatistics(ProfileManager* manager) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
   ProfileCounts counts;
   if (CountProfileInformation(manager, &counts)) {
-    int limited_total = counts.total;
-    int limited_signedin = counts.signedin;
+    size_t limited_total = counts.total;
+    size_t limited_signedin = counts.signedin;
     if (limited_total > kMaximumReportedProfileCount) {
       limited_total = kMaximumReportedProfileCount + 1;
       limited_signedin =
@@ -189,12 +187,21 @@ void ProfileMetrics::UpdateReportedProfilesStatistics(ProfileManager* manager) {
     }
     UpdateReportedOSProfileStatistics(limited_total, limited_signedin);
   }
+#endif
 }
 
 void ProfileMetrics::LogNumberOfProfileSwitches() {
   UMA_HISTOGRAM_COUNTS_100("Profile.NumberOfSwitches",
                            number_of_profile_switches_);
 }
+
+// The OS_MACOSX implementation of this function is in profile_metrics_mac.mm.
+#if defined(OS_WIN)
+void ProfileMetrics::UpdateReportedOSProfileStatistics(
+    size_t active, size_t signedin) {
+  GoogleUpdateSettings::UpdateProfileCounts(active, signedin);
+}
+#endif
 
 void ProfileMetrics::LogNumberOfProfiles(ProfileManager* manager) {
   ProfileCounts counts;
@@ -217,7 +224,10 @@ void ProfileMetrics::LogNumberOfProfiles(ProfileManager* manager) {
                              counts.auth_errors);
 
     LogLockedProfileInformation(manager);
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
     UpdateReportedOSProfileStatistics(counts.total, counts.signedin);
+#endif
   }
 }
 
@@ -329,8 +339,12 @@ void ProfileMetrics::LogProfileDeleteUser(ProfileDelete metric) {
   DCHECK(metric < NUM_DELETE_PROFILE_METRICS);
   UMA_HISTOGRAM_ENUMERATION("Profile.DeleteProfileAction", metric,
                             NUM_DELETE_PROFILE_METRICS);
-  UMA_HISTOGRAM_ENUMERATION("Profile.NetUserCount", PROFILE_DELETED,
-                            NUM_PROFILE_NET_METRICS);
+  if (metric != DELETE_PROFILE_USER_MANAGER_SHOW_WARNING &&
+      metric != DELETE_PROFILE_SETTINGS_SHOW_WARNING) {
+    // If a user was actually deleted, update the net user count.
+    UMA_HISTOGRAM_ENUMERATION("Profile.NetUserCount", PROFILE_DELETED,
+                              NUM_PROFILE_NET_METRICS);
+  }
 }
 
 void ProfileMetrics::LogProfileOpenMethod(ProfileOpen metric) {
@@ -456,6 +470,11 @@ void ProfileMetrics::LogProfileNewAvatarMenuUpgrade(
   DCHECK_LT(metric, NUM_PROFILE_AVATAR_MENU_UPGRADE_METRICS);
   UMA_HISTOGRAM_ENUMERATION("Profile.NewAvatarMenu.Upgrade", metric,
                             NUM_PROFILE_AVATAR_MENU_UPGRADE_METRICS);
+}
+
+void ProfileMetrics::LogTimeToOpenUserManager(
+    const base::TimeDelta& time_to_open) {
+  UMA_HISTOGRAM_TIMES("Profile.TimeToOpenUserManager", time_to_open);
 }
 
 #if defined(OS_ANDROID)

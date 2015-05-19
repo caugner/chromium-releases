@@ -346,7 +346,7 @@ class SigninScreenHandler
   void HandleCancelUserAdding();
   void HandleMigrateUserData(const std::string& password);
   void HandleResyncUserData();
-  void HandleLoginUIStateChanged(const std::string& source, bool new_value);
+  void HandleLoginUIStateChanged(const std::string& source, bool active);
   void HandleUnlockOnLoginSuccess();
   void HandleLoginScreenUpdate();
   void HandleShowLoadingTimeoutError();
@@ -359,7 +359,7 @@ class SigninScreenHandler
                                              const std::string& locale);
   void HandleCancelConsumerManagementEnrollment();
   void HandleGetTouchViewState();
-  void HandleSwitchToEmbeddedSignin();
+  void HandleLogRemoveUserWarningShown();
 
   // Sends the list of |keyboard_layouts| available for the |locale| that is
   // currently selected for the public session identified by |user_id|.
@@ -443,7 +443,6 @@ class SigninScreenHandler
   NetworkErrorModel* network_error_model_;
   CoreOobeActor* core_oobe_actor_;
 
-  bool is_first_update_state_call_ = false;
   bool offline_login_active_ = false;
   NetworkStateInformer::State last_network_state_ =
       NetworkStateInformer::UNKNOWN;
@@ -457,6 +456,10 @@ class SigninScreenHandler
   // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
   // NOTIFICATION_AUTH_CANCELLED.
   bool has_pending_auth_ui_ = false;
+
+  // Used for pending GAIA reloads.
+  NetworkError::ErrorReason gaia_reload_reason_ =
+      NetworkError::ERROR_REASON_NONE;
 
   bool caps_lock_enabled_;
 

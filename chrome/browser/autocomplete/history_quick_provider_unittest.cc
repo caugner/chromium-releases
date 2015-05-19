@@ -18,18 +18,19 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
+#include "chrome/browser/autocomplete/in_memory_url_index.h"
+#include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
+#include "chrome/browser/autocomplete/url_index_private_data.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/in_memory_url_index.h"
-#include "chrome/browser/history/url_index_private_data.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
@@ -111,7 +112,7 @@ class WaitForURLsDeletedObserver : public history::HistoryServiceObserver {
 
  private:
   // history::HistoryServiceObserver:
-  void OnURLsDeleted(HistoryService* service,
+  void OnURLsDeleted(history::HistoryService* service,
                      bool all_history,
                      bool expired,
                      const history::URLRows& deleted_rows,
@@ -131,7 +132,7 @@ WaitForURLsDeletedObserver::~WaitForURLsDeletedObserver() {
 }
 
 void WaitForURLsDeletedObserver::OnURLsDeleted(
-    HistoryService* service,
+    history::HistoryService* service,
     bool all_history,
     bool expired,
     const history::URLRows& deleted_rows,
@@ -139,10 +140,10 @@ void WaitForURLsDeletedObserver::OnURLsDeleted(
   runner_->Quit();
 }
 
-void WaitForURLsDeletedNotification(HistoryService* history_service) {
+void WaitForURLsDeletedNotification(history::HistoryService* history_service) {
   base::RunLoop runner;
   WaitForURLsDeletedObserver observer(&runner);
-  ScopedObserver<HistoryService, history::HistoryServiceObserver>
+  ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
       scoped_observer(&observer);
   scoped_observer.Add(history_service);
   runner.Run();
@@ -215,7 +216,7 @@ class HistoryQuickProviderTest : public testing::Test {
   content::TestBrowserThread file_thread_;
 
   scoped_ptr<TestingProfile> profile_;
-  HistoryService* history_service_;
+  history::HistoryService* history_service_;
 
   ACMatches ac_matches_;  // The resulting matches after running RunTest.
 
@@ -232,11 +233,14 @@ void HistoryQuickProviderTest::SetUp() {
   history_service_ = HistoryServiceFactory::GetForProfile(
       profile_.get(), ServiceAccessType::EXPLICIT_ACCESS);
   EXPECT_TRUE(history_service_);
-  provider_ = new HistoryQuickProvider(profile_.get());
+  InMemoryURLIndex* index =
+      InMemoryURLIndexFactory::GetForProfile(profile_.get());
+  EXPECT_TRUE(index);
+  provider_ = new HistoryQuickProvider(profile_.get(), index);
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       profile_.get(), &HistoryQuickProviderTest::CreateTemplateURLService);
   FillData();
-  provider_->GetIndex()->RebuildFromHistory(history_backend()->db());
+  index->RebuildFromHistory(history_backend()->db());
 }
 
 void HistoryQuickProviderTest::TearDown() {
@@ -551,14 +555,14 @@ TEST_F(HistoryQuickProviderTest, EncodingLimitMatch) {
 
 TEST_F(HistoryQuickProviderTest, Spans) {
   // Test SpansFromTermMatch
-  history::TermMatches matches_a;
+  TermMatches matches_a;
   // Simulates matches: '.xx.xxx..xx...xxxxx..' which will test no match at
   // either beginning or end as well as adjacent matches.
-  matches_a.push_back(history::TermMatch(1, 1, 2));
-  matches_a.push_back(history::TermMatch(2, 4, 3));
-  matches_a.push_back(history::TermMatch(3, 9, 1));
-  matches_a.push_back(history::TermMatch(3, 10, 1));
-  matches_a.push_back(history::TermMatch(4, 14, 5));
+  matches_a.push_back(TermMatch(1, 1, 2));
+  matches_a.push_back(TermMatch(2, 4, 3));
+  matches_a.push_back(TermMatch(3, 9, 1));
+  matches_a.push_back(TermMatch(3, 10, 1));
+  matches_a.push_back(TermMatch(4, 14, 5));
   ACMatchClassifications spans_a =
       HistoryQuickProvider::SpansFromTermMatch(matches_a, 20, false);
   // ACMatch spans should be: 'NM-NM---N-M-N--M----N-'
@@ -583,9 +587,9 @@ TEST_F(HistoryQuickProviderTest, Spans) {
   EXPECT_EQ(ACMatchClassification::NONE, spans_a[8].style);
   // Simulates matches: 'xx.xx' which will test matches at both beginning and
   // end.
-  history::TermMatches matches_b;
-  matches_b.push_back(history::TermMatch(1, 0, 2));
-  matches_b.push_back(history::TermMatch(2, 3, 2));
+  TermMatches matches_b;
+  matches_b.push_back(TermMatch(1, 0, 2));
+  matches_b.push_back(TermMatch(2, 3, 2));
   ACMatchClassifications spans_b =
       HistoryQuickProvider::SpansFromTermMatch(matches_b, 5, true);
   // ACMatch spans should be: 'M-NM-'

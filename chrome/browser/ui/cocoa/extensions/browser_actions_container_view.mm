@@ -17,6 +17,8 @@ NSString* const kBrowserActionGrippyDragFinishedNotification =
     @"BrowserActionGrippyDragFinishedNotification";
 NSString* const kBrowserActionsContainerWillAnimate =
     @"BrowserActionsContainerWillAnimate";
+NSString* const kBrowserActionsContainerMouseEntered =
+    @"BrowserActionsContainerMouseEntered";
 NSString* const kTranslationWithDelta =
     @"TranslationWithDelta";
 
@@ -63,6 +65,29 @@ const CGFloat kMinimumContainerWidth = 3.0;
   return self;
 }
 
+- (void)dealloc {
+  if (trackingArea_.get())
+    [self removeTrackingArea:trackingArea_.get()];
+  [super dealloc];
+}
+
+- (void)setTrackingEnabled:(BOOL)enabled {
+  if (enabled) {
+    trackingArea_.reset(
+        [[CrTrackingArea alloc] initWithRect:NSZeroRect
+                                     options:NSTrackingMouseEnteredAndExited |
+                                             NSTrackingActiveInActiveApp |
+                                             NSTrackingInVisibleRect
+                                       owner:self
+                                    userInfo:nil]);
+    [self addTrackingArea:trackingArea_.get()];
+  } else if (trackingArea_.get()) {
+    [self removeTrackingArea:trackingArea_.get()];
+    [trackingArea_.get() clearOwner];
+    trackingArea_.reset(nil);
+  }
+}
+
 - (void)setResizable:(BOOL)resizable {
   if (resizable == resizable_)
     return;
@@ -80,6 +105,12 @@ const CGFloat kMinimumContainerWidth = 3.0;
 
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+
+- (void)mouseEntered:(NSEvent*)theEvent {
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kBrowserActionsContainerMouseEntered
+                    object:self];
 }
 
 - (void)mouseDown:(NSEvent*)theEvent {

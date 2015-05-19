@@ -22,6 +22,8 @@ goog.provide('i18n.input.chrome.message.Name');
 i18n.input.chrome.message.Name = {
   ALT_KEY: 'altKey',
   ANCHOR: 'anchor',
+  AUXILIARY_TEXT: 'auxiliaryText',
+  AUXILIARY_TEXT_VISIBLE: 'auxiliaryTextVisible',
   CANDIDATE: 'candidate',
   CANDIDATES: 'candidates',
   CANDIDATE_ID: 'candidateID',
@@ -37,7 +39,6 @@ i18n.input.chrome.message.Name = {
   ID: 'id',
   IS_AUTOCORRECT: 'isAutoCorrect',
   IS_EMOJI: 'isEmoji',
-  IS_EXPERIMENTAL: 'IS_EXPERIMENTAL',
   KEY: 'key',
   KEYCODE: 'keyCode',
   KEYSET: 'keyset',

@@ -27,7 +27,9 @@ class VIEWS_EXPORT NativeWidgetMac : public internal::NativeWidgetPrivate {
 
   // Deletes |bridge_| and informs |delegate_| that the native widget is
   // destroyed.
-  void OnWindowWillClose();
+  // This is usually called from the NSWindowDelegate. A derived class can
+  // override this method for an early hook into the native window teardown.
+  virtual void OnWindowWillClose();
 
   // internal::NativeWidgetPrivate:
   void InitNativeWidget(const Widget::InitParams& params) override;
@@ -118,6 +120,10 @@ class VIEWS_EXPORT NativeWidgetMac : public internal::NativeWidgetPrivate {
   void RepostNativeEvent(gfx::NativeEvent native_event) override;
 
  protected:
+  // Creates the NSWindow that will be passed to the BridgedNativeWidget.
+  // Called by InitNativeWidget. The return value will be autoreleased.
+  virtual gfx::NativeWindow CreateNSWindow(const Widget::InitParams& params);
+
   internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:

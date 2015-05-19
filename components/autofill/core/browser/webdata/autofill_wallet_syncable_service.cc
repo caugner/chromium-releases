@@ -100,56 +100,78 @@ AutofillProfile ProfileFromSpecifics(
                      base::UTF8ToUTF16(address.country_code()));
   profile.set_language_code(address.language_code());
 
+  // SetInfo instead of SetRawInfo so the constituent pieces will be parsed
+  // for these data types.
+  profile.SetInfo(AutofillType(NAME_FULL),
+                  base::UTF8ToUTF16(address.recipient_name()),
+                  profile.language_code());
+  profile.SetInfo(AutofillType(PHONE_HOME_WHOLE_NUMBER),
+                  base::UTF8ToUTF16(address.phone_number()),
+                  profile.language_code());
+
   return profile;
 }
-
-// Implements operator< for two objects given their pointers.
-template<class Data> struct AutofillDataPtrLessThan {
-  bool operator()(const Data* a, const Data* b) const {
-    return a->Compare(*b) < 0;
-  }
-};
 
 // This function handles conditionally updating the AutofillTable with either
 // a set of CreditCards or AutocompleteProfiles only when the existing data
 // doesn't match.
 //
 // It's passed the getter and setter function on the AutofillTable for the
-// corresponding data type, and expects the types to implement a server_id()
-// and a Compare function.
+// corresponding data type, and expects the types to implement a Compare
+// function. Note that the guid can't be used here as a key since these are
+// generated locally and will be different each time, and the server ID can't
+// be used because it's empty for addresses (though it could be used for credit
+// cards if we wanted separate implementations).
 //
-// Returns the previous number of items in the table (for sync tracking).
+// Returns true if anything changed. The previous number of items in the table
+// (for sync tracking) will be placed into *prev_item_count.
 template<class Data>
-size_t SetDataIfChanged(
+bool SetDataIfChanged(
     AutofillTable* table,
     const std::vector<Data>& data,
     bool (AutofillTable::*getter)(std::vector<Data*>*),
-    void (AutofillTable::*setter)(const std::vector<Data>&)) {
+    void (AutofillTable::*setter)(const std::vector<Data>&),
+    size_t* prev_item_count) {
   ScopedVector<Data> existing_data;
   (table->*getter)(&existing_data.get());
+  *prev_item_count = existing_data.size();
 
-  bool difference_found = true;
-  if (existing_data.size() == data.size()) {
+  // If the user has a large number of addresses, don't bother verifying
+  // anything changed and just rewrite the data.
+  const size_t kTooBigToCheckThreshold = 8;
+
+  bool difference_found;
+  if (existing_data.size() != data.size() ||
+      data.size() > kTooBigToCheckThreshold) {
+    difference_found = true;
+  } else {
     difference_found = false;
 
-    // Implement this set with pointers using our custom operator that takes
-    // pointers which avoids any copies.
-    std::set<const Data*, AutofillDataPtrLessThan<Data>> existing_data_set;
-    for (const Data* cur : existing_data)
-      existing_data_set.insert(cur);
-
-    for (const Data& new_data : data) {
-      if (existing_data_set.find(&new_data) == existing_data_set.end()) {
+    // Implement brute-force searching. Address and card counts are typically
+    // small, and comparing them is relatively expensive (many string
+    // compares). A std::set only uses operator< requiring multiple calls to
+    // check equality, giving 8 compares for 2 elements and 16 for 3. For these
+    // set sizes, brute force O(n^2) is faster.
+    for (const Data* cur_existing : existing_data) {
+      bool found_match_for_cur_existing = false;
+      for (const Data& cur_new : data) {
+        if (cur_existing->Compare(cur_new) == 0) {
+          found_match_for_cur_existing = true;
+          break;
+        }
+      }
+      if (!found_match_for_cur_existing) {
         difference_found = true;
         break;
       }
     }
   }
 
-  if (difference_found)
+  if (difference_found) {
     (table->*setter)(data);
-
-  return existing_data.size();
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -170,57 +192,20 @@ AutofillWalletSyncableService::MergeDataAndStartSyncing(
     scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
     scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK(thread_checker_.CalledOnValidThread());
-
-  std::vector<CreditCard> wallet_cards;
-  std::vector<AutofillProfile> wallet_addresses;
-
-  for (const syncer::SyncData& data : initial_sync_data) {
-    DCHECK_EQ(syncer::AUTOFILL_WALLET_DATA, data.GetDataType());
-    const sync_pb::AutofillWalletSpecifics& autofill_specifics =
-        data.GetSpecifics().autofill_wallet();
-    if (autofill_specifics.type() ==
-        sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD) {
-      wallet_cards.push_back(
-          CardFromSpecifics(autofill_specifics.masked_card()));
-    } else {
-      DCHECK_EQ(sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS,
-                autofill_specifics.type());
-      wallet_addresses.push_back(
-          ProfileFromSpecifics(autofill_specifics.address()));
-    }
-  }
-
-  // In the common case, the database won't have changed. Committing an update
-  // to the database will require at least one DB page write and will schedule
-  // a fsync. To avoid this I/O, it should be more efficient to do a read and
-  // only do the writes if something changed.
-  AutofillTable* table =
-      AutofillTable::FromWebDatabase(webdata_backend_->GetDatabase());
-  size_t prev_card_count =
-      SetDataIfChanged(table, wallet_cards,
-                       &AutofillTable::GetServerCreditCards,
-                       &AutofillTable::SetServerCreditCards);
-  size_t prev_address_count =
-      SetDataIfChanged(table, wallet_addresses,
-                       &AutofillTable::GetAutofillServerProfiles,
-                       &AutofillTable::SetAutofillServerProfiles);
-
-  syncer::SyncMergeResult merge_result(type);
-  merge_result.set_num_items_before_association(
-      static_cast<int>(prev_card_count + prev_address_count));
-  merge_result.set_num_items_after_association(
-      static_cast<int>(wallet_cards.size() + wallet_addresses.size()));
-  return merge_result;
+  sync_processor_ = sync_processor.Pass();
+  return SetSyncData(initial_sync_data);
 }
 
 void AutofillWalletSyncableService::StopSyncing(syncer::ModelType type) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_EQ(type, syncer::AUTOFILL_WALLET_DATA);
+  sync_processor_.reset();
 }
 
 syncer::SyncDataList AutofillWalletSyncableService::GetAllSyncData(
     syncer::ModelType type) const {
   DCHECK(thread_checker_.CalledOnValidThread());
+  // This data type is never synced "up" so we don't need to implement this.
   syncer::SyncDataList current_data;
   return current_data;
 }
@@ -229,7 +214,9 @@ syncer::SyncError AutofillWalletSyncableService::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // TODO(brettw) handle incremental updates while Chrome is running.
+  // Don't bother handling incremental updates. Wallet data changes very rarely
+  // and has few items. Instead, just get all the current data and save it.
+  SetSyncData(sync_processor_->GetAllSyncData(syncer::AUTOFILL_WALLET_DATA));
   return syncer::SyncError();
 }
 
@@ -256,4 +243,54 @@ void AutofillWalletSyncableService::InjectStartSyncFlare(
   flare_ = flare;
 }
 
-}  // namespace autofill
+syncer::SyncMergeResult AutofillWalletSyncableService::SetSyncData(
+    const syncer::SyncDataList& data_list) {
+  std::vector<CreditCard> wallet_cards;
+  std::vector<AutofillProfile> wallet_addresses;
+
+  for (const syncer::SyncData& data : data_list) {
+    DCHECK_EQ(syncer::AUTOFILL_WALLET_DATA, data.GetDataType());
+    const sync_pb::AutofillWalletSpecifics& autofill_specifics =
+        data.GetSpecifics().autofill_wallet();
+    if (autofill_specifics.type() ==
+        sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD) {
+      wallet_cards.push_back(
+          CardFromSpecifics(autofill_specifics.masked_card()));
+    } else {
+      DCHECK_EQ(sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS,
+                autofill_specifics.type());
+      wallet_addresses.push_back(
+          ProfileFromSpecifics(autofill_specifics.address()));
+    }
+  }
+
+  // In the common case, the database won't have changed. Committing an update
+  // to the database will require at least one DB page write and will schedule
+  // a fsync. To avoid this I/O, it should be more efficient to do a read and
+  // only do the writes if something changed.
+  AutofillTable* table =
+      AutofillTable::FromWebDatabase(webdata_backend_->GetDatabase());
+  size_t prev_card_count = 0;
+  size_t prev_address_count = 0;
+  bool changed_cards = SetDataIfChanged(
+      table, wallet_cards,
+      &AutofillTable::GetServerCreditCards,
+      &AutofillTable::SetServerCreditCards,
+      &prev_card_count);
+  bool changed_addresses = SetDataIfChanged(
+      table, wallet_addresses, &AutofillTable::GetServerProfiles,
+      &AutofillTable::SetServerProfiles, &prev_address_count);
+
+  syncer::SyncMergeResult merge_result(syncer::AUTOFILL_WALLET_DATA);
+  merge_result.set_num_items_before_association(
+      static_cast<int>(prev_card_count + prev_address_count));
+  merge_result.set_num_items_after_association(
+      static_cast<int>(wallet_cards.size() + wallet_addresses.size()));
+
+  if (webdata_backend_ && (changed_cards || changed_addresses))
+    webdata_backend_->NotifyOfMultipleAutofillChanges();
+
+  return merge_result;
+}
+
+}  // namespace autofil

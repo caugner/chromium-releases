@@ -4,6 +4,7 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "net/base/net_util.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -21,12 +22,28 @@ TestDataReductionProxyConfig::TestDataReductionProxyConfig(
     net::NetLog* net_log,
     DataReductionProxyConfigurator* configurator,
     DataReductionProxyEventStore* event_store)
-    : DataReductionProxyConfig(
-        task_runner, task_runner, net_log,
-        make_scoped_ptr(
-            new TestDataReductionProxyParams(params_flags, params_definitions))
-            .Pass(),
-        configurator, event_store) {
+    : TestDataReductionProxyConfig(
+          make_scoped_ptr(
+              new TestDataReductionProxyParams(params_flags,
+                                               params_definitions)).Pass(),
+          task_runner,
+          net_log,
+          configurator,
+          event_store) {
+}
+
+TestDataReductionProxyConfig::TestDataReductionProxyConfig(
+    scoped_ptr<DataReductionProxyConfigValues> config_values,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    net::NetLog* net_log,
+    DataReductionProxyConfigurator* configurator,
+    DataReductionProxyEventStore* event_store)
+    : DataReductionProxyConfig(task_runner,
+                               task_runner,
+                               net_log,
+                               config_values.Pass(),
+                               configurator,
+                               event_store) {
   network_interfaces_.reset(new net::NetworkInterfaceList());
 }
 
@@ -40,8 +57,12 @@ void TestDataReductionProxyConfig::GetNetworkList(
     interfaces->push_back(network_interfaces_->at(i));
 }
 
+void TestDataReductionProxyConfig::EnableQuic(bool enable) {
+  test_params()->EnableQuic(enable);
+}
+
 void TestDataReductionProxyConfig::ResetParamFlagsForTest(int flags) {
-  params_ = make_scoped_ptr(
+  config_values_ = make_scoped_ptr(
                 new TestDataReductionProxyParams(
                     flags,
                     TestDataReductionProxyParams::HAS_EVERYTHING &
@@ -51,31 +72,33 @@ void TestDataReductionProxyConfig::ResetParamFlagsForTest(int flags) {
 }
 
 TestDataReductionProxyParams* TestDataReductionProxyConfig::test_params() {
-  return static_cast<TestDataReductionProxyParams*>(params_.get());
+  return static_cast<TestDataReductionProxyParams*>(config_values_.get());
+}
+
+DataReductionProxyConfigValues* TestDataReductionProxyConfig::config_values() {
+  return config_values_.get();
 }
 
 void TestDataReductionProxyConfig::SetStateForTest(
     bool enabled_by_user,
     bool alternative_enabled_by_user,
-    bool restricted_by_carrier,
-    bool at_startup) {
+    bool restricted_by_carrier) {
   enabled_by_user_ = enabled_by_user;
   alternative_enabled_by_user_ = alternative_enabled_by_user;
   restricted_by_carrier_ = restricted_by_carrier;
-  UpdateConfigurator(enabled_by_user_, alternative_enabled_by_user_,
-                     restricted_by_carrier_, at_startup);
 }
 
 MockDataReductionProxyConfig::MockDataReductionProxyConfig(
-    int params_flags,
-    unsigned int params_definitions,
+    scoped_ptr<DataReductionProxyConfigValues> config_values,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     net::NetLog* net_log,
     DataReductionProxyConfigurator* configurator,
     DataReductionProxyEventStore* event_store)
-    : TestDataReductionProxyConfig(
-        params_flags, params_definitions, task_runner, net_log, configurator,
-        event_store) {
+    : TestDataReductionProxyConfig(config_values.Pass(),
+                                   task_runner,
+                                   net_log,
+                                   configurator,
+                                   event_store) {
 }
 
 MockDataReductionProxyConfig::~MockDataReductionProxyConfig() {
@@ -90,10 +113,9 @@ void MockDataReductionProxyConfig::UpdateConfigurator(bool enabled,
                                                restricted, at_startup);
 }
 
-void MockDataReductionProxyConfig::HandleProbeResponse(
-    const std::string& response,
-    const net::URLRequestStatus& status) {
-  DataReductionProxyConfig::HandleProbeResponse(response, status);
+void MockDataReductionProxyConfig::HandleSecureProxyCheckResponse(
+    const std::string& response, const net::URLRequestStatus& status) {
+  DataReductionProxyConfig::HandleSecureProxyCheckResponse(response, status);
 }
 
 }  // namespace data_reduction_proxy

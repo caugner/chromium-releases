@@ -21,8 +21,8 @@ cr.define('login', function() {
     // Whether guest button should be shown when header bar is in normal mode.
     showGuest_: false,
 
-    // Whehter MinuteMaid flow is active.
-    isMinuteMaid_: false,
+    // Whether new Gaia flow is active.
+    isNewGaiaFlow_: false,
 
     // Whether the reboot button should be shown the when header bar is in
     // normal mode.
@@ -147,6 +147,7 @@ cr.define('login', function() {
 
     handleMoreSettingsClick_: function(e) {
       this.isMoreSettingsActive = !this.isMoreSettingsActive;
+      this.addSupervisedUserMenu.focus();
       e.stopPropagation();
     },
 
@@ -158,6 +159,7 @@ cr.define('login', function() {
       chrome.send('showSupervisedUserCreationScreen');
       e.preventDefault();
     },
+
     /**
      * Cancel add user button click handler.
      *
@@ -239,8 +241,8 @@ cr.define('login', function() {
       this.updateUI_();
     },
 
-    set minuteMaid(value) {
-      this.isMinuteMaid_ = value;
+    set newGaiaFlow(value) {
+      this.isNewGaiaFlow_ = value;
       this.updateUI_();
     },
 
@@ -328,17 +330,17 @@ cr.define('login', function() {
 
       $('add-user-button').hidden =
           !accountPickerIsActive || isMultiProfilesUI || isLockScreen;
-      $('more-settings-header-bar-item').hidden = !this.isMinuteMaid_ ||
-          !gaiaIsActive ||
-          !this.showCreateSupervised_;
+      $('more-settings-header-bar-item').hidden = !this.isNewGaiaFlow_ ||
+          !this.showCreateSupervised_ ||
+          !accountPickerIsActive;
       $('cancel-add-user-button').hidden =
-          (gaiaIsActive && this.isMinuteMaid_) ||
+          (gaiaIsActive && this.isNewGaiaFlow_) ||
           accountPickerIsActive ||
           !this.allowCancel_ ||
           wrongHWIDWarningIsActive ||
           isMultiProfilesUI;
       $('guest-user-header-bar-item').hidden =
-          (gaiaIsActive && !this.isMinuteMaid_) ||
+          (gaiaIsActive && !this.isNewGaiaFlow_) ||
           supervisedUserCreationDialogIsActive ||
           !this.showGuest_ ||
           wrongHWIDWarningIsActive ||

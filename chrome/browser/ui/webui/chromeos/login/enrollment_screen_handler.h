@@ -67,7 +67,8 @@ class EnrollmentScreenHandler
  private:
   // Handlers for WebUI messages.
   void HandleClose(const std::string& reason);
-  void HandleCompleteLogin(const std::string& user);
+  void HandleCompleteLogin(const std::string& user,
+                           const std::string& auth_code);
   void HandleRetry();
   void HandleFrameLoadingCompleted(int status);
 
@@ -110,9 +111,6 @@ class EnrollmentScreenHandler
 
   // The enrollment configuration.
   policy::EnrollmentConfig config_;
-
-  // Whether an enrollment attempt has failed.
-  bool enrollment_failed_once_;
 
   // Latest enrollment frame error.
   net::Error frame_error_;

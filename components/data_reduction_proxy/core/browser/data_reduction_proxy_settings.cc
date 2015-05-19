@@ -11,10 +11,10 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -41,6 +41,13 @@ bool IsEnabledOnCommandLine() {
       *base::CommandLine::ForCurrentProcess();
   return command_line.HasSwitch(
       data_reduction_proxy::switches::kEnableDataReductionProxy);
+}
+
+bool IsLoFiEnabledOnCommandLine() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  return command_line.HasSwitch(
+      data_reduction_proxy::switches::kEnableDataReductionProxyLoFi);
 }
 
 }  // namespace
@@ -82,10 +89,9 @@ void DataReductionProxySettings::InitPrefMembers() {
 
 void DataReductionProxySettings::UpdateConfigValues() {
   DCHECK(config_);
-  allowed_ = config_->params()->allowed();
-  alternative_allowed_ = config_->params()->alternative_allowed();
-  promo_allowed_ = config_->params()->promo_allowed();
-  primary_origin_ = config_->params()->origin().ToURI();
+  allowed_ = config_->allowed();
+  alternative_allowed_ = config_->alternative_allowed();
+  promo_allowed_ = config_->promo_allowed();
 }
 
 void DataReductionProxySettings::InitDataReductionProxySettings(
@@ -107,10 +113,12 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
   RecordDataReductionInit();
 }
 
-void DataReductionProxySettings::SetOnDataReductionEnabledCallback(
-    const base::Callback<void(bool)>& on_data_reduction_proxy_enabled) {
-  on_data_reduction_proxy_enabled_ = on_data_reduction_proxy_enabled;
-  on_data_reduction_proxy_enabled_.Run(IsDataReductionProxyEnabled());
+void DataReductionProxySettings::SetCallbackToRegisterSyntheticFieldTrial(
+    const SyntheticFieldTrialRegistrationCallback&
+        on_data_reduction_proxy_enabled) {
+  register_synthetic_field_trial_ = on_data_reduction_proxy_enabled;
+  RegisterDataReductionProxyFieldTrial();
+  RegisterLoFiFieldTrial();
 }
 
 bool DataReductionProxySettings::IsDataReductionProxyEnabled() const {
@@ -158,9 +166,9 @@ void DataReductionProxySettings::SetDataReductionProxyAlternativeEnabled(
 
 int64 DataReductionProxySettings::GetDataReductionLastUpdateTime() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(data_reduction_proxy_service_->statistics_prefs());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
   int64 last_update_internal =
-      data_reduction_proxy_service_->statistics_prefs()->GetInt64(
+      data_reduction_proxy_service_->compression_stats()->GetInt64(
           prefs::kDailyHttpContentLengthLastUpdateDate);
   base::Time last_update = base::Time::FromInternalValue(last_update_internal);
   return static_cast<int64>(last_update.ToJsTime());
@@ -192,10 +200,28 @@ PrefService* DataReductionProxySettings::GetOriginalProfilePrefs() {
   return prefs_;
 }
 
+bool DataReductionProxySettings::IsLoFiEnabled() const {
+  return IsDataReductionProxyEnabled() && IsLoFiEnabledOnCommandLine();
+}
+
+void DataReductionProxySettings::RegisterDataReductionProxyFieldTrial() {
+  register_synthetic_field_trial_.Run(
+      "SyntheticDataReductionProxySetting",
+      IsDataReductionProxyEnabled() ? "Enabled" : "Disabled");
+}
+
+void DataReductionProxySettings::RegisterLoFiFieldTrial() {
+  register_synthetic_field_trial_.Run(
+      "SyntheticDataReductionProxyLoFiSetting",
+      IsLoFiEnabled() ? "Enabled" : "Disabled");
+}
+
 void DataReductionProxySettings::OnProxyEnabledPrefChange() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!on_data_reduction_proxy_enabled_.is_null())
-    on_data_reduction_proxy_enabled_.Run(IsDataReductionProxyEnabled());
+  if (!register_synthetic_field_trial_.is_null()) {
+    RegisterDataReductionProxyFieldTrial();
+    RegisterLoFiFieldTrial();
+  }
   if (!allowed_)
     return;
   MaybeActivateDataReductionProxy(false);
@@ -210,12 +236,12 @@ void DataReductionProxySettings::OnProxyAlternativeEnabledPrefChange() {
 
 void DataReductionProxySettings::ResetDataReductionStatistics() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(data_reduction_proxy_service_->statistics_prefs());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
   base::ListValue* original_update =
-      data_reduction_proxy_service_->statistics_prefs()->GetList(
+      data_reduction_proxy_service_->compression_stats()->GetList(
           prefs::kDailyHttpOriginalContentLength);
   base::ListValue* received_update =
-      data_reduction_proxy_service_->statistics_prefs()->GetList(
+      data_reduction_proxy_service_->compression_stats()->GetList(
           prefs::kDailyHttpReceivedContentLength);
   original_update->Clear();
   received_update->Clear();
@@ -270,9 +296,9 @@ DataReductionProxySettings::ContentLengthList
 DataReductionProxySettings::GetDailyContentLengths(const char* pref_name) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DataReductionProxySettings::ContentLengthList content_lengths;
-  DCHECK(data_reduction_proxy_service_->statistics_prefs());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
   const base::ListValue* list_value =
-      data_reduction_proxy_service_->statistics_prefs()->GetList(pref_name);
+      data_reduction_proxy_service_->compression_stats()->GetList(pref_name);
   if (list_value->GetSize() == kNumDaysInHistory) {
     for (size_t i = 0; i < kNumDaysInHistory; ++i) {
       content_lengths.push_back(GetInt64PrefValue(*list_value, i));
@@ -288,13 +314,13 @@ void DataReductionProxySettings::GetContentLengths(
     int64* last_update_time) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_LE(days, kNumDaysInHistory);
-  DCHECK(data_reduction_proxy_service_->statistics_prefs());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
 
   const base::ListValue* original_list =
-      data_reduction_proxy_service_->statistics_prefs()->GetList(
+      data_reduction_proxy_service_->compression_stats()->GetList(
           prefs::kDailyHttpOriginalContentLength);
   const base::ListValue* received_list =
-      data_reduction_proxy_service_->statistics_prefs()->GetList(
+      data_reduction_proxy_service_->compression_stats()->GetList(
           prefs::kDailyHttpReceivedContentLength);
 
   if (original_list->GetSize() != kNumDaysInHistory ||
@@ -316,7 +342,7 @@ void DataReductionProxySettings::GetContentLengths(
   *original_content_length = orig;
   *received_content_length = recv;
   *last_update_time =
-      data_reduction_proxy_service_->statistics_prefs()->GetInt64(
+      data_reduction_proxy_service_->compression_stats()->GetInt64(
           prefs::kDailyHttpContentLengthLastUpdateDate);
 }
 

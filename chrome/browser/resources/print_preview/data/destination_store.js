@@ -221,7 +221,7 @@ cr.define('print_preview', function() {
    * @const
    * @private
    */
-  DestinationStore.PRIVET_SEARCH_DURATION_ = 2000;
+  DestinationStore.PRIVET_SEARCH_DURATION_ = 5000;
 
   /**
    * Maximum amount of time spent searching for extension destinations, in
@@ -380,6 +380,7 @@ cr.define('print_preview', function() {
           this.selectedDestination_ =
               print_preview.ExtensionDestinationParser.parse({
                 extensionId: this.appState_.selectedDestinationExtensionId,
+                extensionName: this.appState_.selectedDestinationExtensionName,
                 id: this.appState_.selectedDestinationId,
                 name: this.appState_.selectedDestinationName || ''
               });

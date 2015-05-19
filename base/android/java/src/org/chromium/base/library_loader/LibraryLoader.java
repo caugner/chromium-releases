@@ -5,6 +5,8 @@
 package org.chromium.base.library_loader;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.os.AsyncTask;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -12,7 +14,15 @@ import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.VisibleForTesting;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.HashMap;
 import java.util.Locale;
 
 import javax.annotation.Nullable;
@@ -42,7 +52,7 @@ public class LibraryLoader {
     private static final Object sLock = new Object();
 
     // The singleton instance of LibraryLoader.
-    private static LibraryLoader sInstance;
+    private static volatile LibraryLoader sInstance;
 
     // One-way switch becomes true when the libraries are loaded.
     private boolean mLoaded;
@@ -54,7 +64,9 @@ public class LibraryLoader {
     // One-way switch becomes true when the libraries are initialized (
     // by calling nativeLibraryLoaded, which forwards to LibraryLoaded(...) in
     // library_loader_hooks.cc).
-    private boolean mInitialized;
+    // Note that this member should remain a one-way switch, since it accessed from multiple
+    // threads without a lock.
+    private volatile boolean mInitialized;
 
     // One-way switches recording attempts to use Relro sharing in the browser.
     // The flags are used to report UMA stats later.
@@ -81,7 +93,12 @@ public class LibraryLoader {
     private boolean mLibraryIsMappableInApk = true;
 
     // The type of process the shared library is loaded in.
-    private int mLibraryProcessType;
+    // This member can be accessed from multiple threads simultaneously, so it have to be
+    // final (like now) or be protected in some way (volatile of synchronized).
+    private final int mLibraryProcessType;
+
+    // Library -> Path it has been loaded from.
+    private final HashMap<String, String> mLoadedFrom;
 
     /**
      * @param libraryProcessType the process the shared library is loaded in. refer to
@@ -102,6 +119,7 @@ public class LibraryLoader {
 
     private LibraryLoader(int libraryProcessType) {
         mLibraryProcessType = libraryProcessType;
+        mLoadedFrom = new HashMap<String, String>();
     }
 
     /**
@@ -110,6 +128,7 @@ public class LibraryLoader {
      *
      * @throws ProcessInitException
      */
+    @VisibleForTesting
     public void ensureInitialized() throws ProcessInitException {
         ensureInitialized(null, false);
     }
@@ -141,9 +160,7 @@ public class LibraryLoader {
      * Checks if library is fully loaded and initialized.
      */
     public static boolean isInitialized() {
-        synchronized (sLock) {
-            return sInstance != null && sInstance.mInitialized;
-        }
+        return sInstance != null && sInstance.mInitialized;
     }
 
     /**
@@ -187,6 +204,68 @@ public class LibraryLoader {
         }
     }
 
+    private void prefetchLibraryToMemory(Context context, String library) {
+        String libFilePath = mLoadedFrom.get(library);
+        if (libFilePath == null) {
+            Log.i(TAG, "File path not found for " + library);
+            return;
+        }
+        String apkFilePath = context.getApplicationInfo().sourceDir;
+        if (libFilePath.equals(apkFilePath)) {
+            // TODO(lizeb): Make pre-faulting work with libraries loaded from the APK.
+            return;
+        }
+        try {
+            TraceEvent.begin("LibraryLoader.prefetchLibraryToMemory");
+            File file = new File(libFilePath);
+            int size = (int) file.length();
+            FileChannel channel = new RandomAccessFile(file, "r").getChannel();
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
+            // TODO(lizeb): Figure out whether walking the entire library is really necessary.
+            // Page size is 4096 for all current Android architectures.
+            for (int index = 0; index < size; index += 4096) {
+                // Note: Testing shows that neither the Java compiler nor
+                // Dalvik/ART eliminates this loop.
+                buffer.get(index);
+            }
+        } catch (FileNotFoundException e) {
+            Log.w(TAG, "Library file not found: " + e);
+        } catch (IOException e) {
+            Log.w(TAG, "Impossible to map the file: " + e);
+        } finally {
+            TraceEvent.end("LibraryLoader.prefetchLibraryToMemory");
+        }
+    }
+
+    /** Prefetches the native libraries in a background thread.
+     *
+     * Launches an AsyncTask that maps the native libraries into memory, reads a
+     * part of each page from it, than unmaps it. This is done to warm up the
+     * page cache, turning hard page faults into soft ones.
+     *
+     * This is done this way, as testing shows that fadvise(FADV_WILLNEED) is
+     * detrimental to the startup time.
+     *
+     * @param context the application context.
+     */
+    public void asyncPrefetchLibrariesToMemory(final Context context) {
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... params) {
+                // Note: AsyncTasks are executed in a low priority background
+                // thread, which is the desired behavior here since we don't
+                // want to interfere with the rest of the initialization.
+                for (String library : NativeLibraries.LIBRARIES) {
+                    if (Linker.isChromiumLinkerLibrary(library)) {
+                        continue;
+                    }
+                    prefetchLibraryToMemory(context, library);
+                }
+                return null;
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
     // Invoke System.loadLibrary(...), triggering JNI_OnLoad in native code
     private void loadAlreadyLocked(
             Context context, boolean shouldDeleteFallbackLibraries)
@@ -220,6 +299,9 @@ public class LibraryLoader {
                         apkFilePath = context.getApplicationInfo().sourceDir;
                         if (mProbeMapApkWithExecPermission) {
                             mMapApkWithExecPermission = Linker.checkMapExecSupport(apkFilePath);
+                        } else {
+                            // Assume map executable support on Samsung devices.
+                            mMapApkWithExecPermission = true;
                         }
                         if (!mMapApkWithExecPermission && Linker.isInZipFile()) {
                             Log.w(TAG, "the no map executable support fallback will be used because"
@@ -261,6 +343,7 @@ public class LibraryLoader {
                                                 ? "using no map executable support fallback"
                                                 : "directly")
                                         + " from within " + apkFilePath);
+                                mLoadedFrom.put(library, apkFilePath);
                             } else {
                                 // Unpack library fallback.
                                 Log.i(TAG, "Loading " + library
@@ -270,10 +353,19 @@ public class LibraryLoader {
                                         context, library);
                                 fallbackWasUsed = true;
                                 Log.i(TAG, "Built fallback library " + libFilePath);
+                                mLoadedFrom.put(library, libFilePath);
                             }
                         } else {
                             // The library is in its own file.
                             Log.i(TAG, "Loading " + library);
+                            if (context != null) {
+                                ApplicationInfo applicationInfo = context.getApplicationInfo();
+                                File file = new File(applicationInfo.nativeLibraryDir, libFilePath);
+                                mLoadedFrom.put(library, file.getAbsolutePath());
+                            } else {
+                                Log.i(TAG, "No context, cannot locate the native library file for "
+                                        + library);
+                            }
                         }
 
                         // Load the library.
@@ -377,10 +469,6 @@ public class LibraryLoader {
             Log.e(TAG, "error calling nativeLibraryLoaded");
             throw new ProcessInitException(LoaderErrors.LOADER_ERROR_FAILED_TO_REGISTER_JNI);
         }
-        // From this point on, native code is ready to use and checkIsReady()
-        // shouldn't complain from now on (and in fact, it's used by the
-        // following calls).
-        mInitialized = true;
 
         // The Chrome JNI is registered by now so we can switch the Java
         // command line over to delegating to native if it's necessary.
@@ -391,6 +479,13 @@ public class LibraryLoader {
 
         // From now on, keep tracing in sync with native.
         TraceEvent.registerNativeEnabledObserver();
+
+        // From this point on, native code is ready to use and checkIsReady()
+        // shouldn't complain from now on (and in fact, it's used by the
+        // following calls).
+        // Note that this flag can be accessed asynchronously, so any initialization
+        // must be performed before.
+        mInitialized = true;
     }
 
     // Called after all native initializations are complete.
@@ -455,10 +550,8 @@ public class LibraryLoader {
      */
     @CalledByNative
     public static int getLibraryProcessType() {
-        synchronized (sLock) {
-            if (sInstance == null) return LibraryProcessType.PROCESS_UNINITIALIZED;
-            return sInstance.mLibraryProcessType;
-        }
+        if (sInstance == null) return LibraryProcessType.PROCESS_UNINITIALIZED;
+        return sInstance.mLibraryProcessType;
     }
 
     private native void nativeInitCommandLine(String[] initCommandLine);

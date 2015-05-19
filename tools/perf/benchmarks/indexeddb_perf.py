@@ -22,19 +22,20 @@ Cursors:
 import json
 import os
 
-from metrics import memory
-from metrics import power
 from telemetry import benchmark
-from telemetry import page as page_module
 from telemetry.core import util
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import scalar
 
+from metrics import memory
+from metrics import power
+
+
 class _IndexedDbMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_IndexedDbMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_IndexedDbMeasurement, self).__init__()
     self._memory_metric = None
     self._power_metric = None
 

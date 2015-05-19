@@ -57,7 +57,7 @@ function createLocalOffer(constraints) {
         success_('createOffer');
         setLocalDescription(peerConnection, localOffer);
 
-        returnToTest('ok-' + stringifyDOMObject_(localOffer));
+        returnToTest('ok-' + JSON.stringify(localOffer));
       },
       function(error) { failure_('createOffer', error); },
       constraints);
@@ -89,7 +89,7 @@ function receiveOfferFromPeer(sessionDescJson, constraints) {
       function(answer) {
         success_('createAnswer');
         setLocalDescription(peerConnection, answer);
-        returnToTest('ok-' + stringifyDOMObject_(answer));
+        returnToTest('ok-' + JSON.stringify(answer));
       },
       function(error) { failure_('createAnswer', error); },
       constraints);
@@ -178,7 +178,7 @@ function getAllIceCandidates() {
     return;
   }
 
-  returnToTest(stringifyDOMObject_(gIceCandidates));
+  returnToTest(JSON.stringify(gIceCandidates));
 }
 
 /**
@@ -206,6 +206,22 @@ function receiveIceCandidates(iceCandidatesJson) {
   });
 
   returnToTest('ok-received-candidates');
+}
+
+/**
+ * Sets the mute state of the selected media element.
+ *
+ * Returns ok-muted on success.
+ *
+ * @param elementId The id of the element to mute.
+ * @param muted The mute state to set.
+ */
+function setMediaElementMuted(elementId, muted) {
+  var element = document.getElementById(elementId);
+  if (!element)
+    throw failTest('Cannot mute ' + elementId + '; does not exist.');
+  element.muted = muted;
+  returnToTest('ok-muted');
 }
 
 /**
@@ -245,7 +261,7 @@ function success_(method) {
 
 /** @private */
 function failure_(method, error) {
-  throw failTest(method + '() failed: ' + stringifyDOMObject_(error));
+  throw failTest(method + '() failed: ' + JSON.stringify(error));
 }
 
 /** @private */
@@ -277,28 +293,6 @@ function addStreamCallback_(event) {
 function removeStreamCallback_(event) {
   debug('Call ended.');
   document.getElementById('remote-view').src = '';
-}
-
-/**
- * Stringifies a DOM object.
- *
- * This function stringifies not only own properties but also DOM attributes
- * which are on a prototype chain.  Note that JSON.stringify only stringifies
- * own properties.
- * @private
- */
-function stringifyDOMObject_(object)
-{
-  function deepCopy(src) {
-    if (typeof src != "object")
-      return src;
-    var dst = Array.isArray(src) ? [] : {};
-    for (var property in src) {
-      dst[property] = deepCopy(src[property]);
-    }
-    return dst;
-  }
-  return JSON.stringify(deepCopy(object));
 }
 
 /**

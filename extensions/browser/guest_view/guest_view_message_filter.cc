@@ -40,6 +40,7 @@ void GuestViewMessageFilter::OverrideThreadForMessage(
   switch (message.type()) {
     case GuestViewHostMsg_AttachGuest::ID:
     case GuestViewHostMsg_CreateMimeHandlerViewGuest::ID:
+    case GuestViewHostMsg_ResizeGuest::ID:
       *thread = BrowserThread::UI;
       break;
     default:
@@ -59,6 +60,7 @@ bool GuestViewMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GuestViewHostMsg_AttachGuest, OnAttachGuest)
     IPC_MESSAGE_HANDLER(GuestViewHostMsg_CreateMimeHandlerViewGuest,
                         OnCreateMimeHandlerViewGuest)
+    IPC_MESSAGE_HANDLER(GuestViewHostMsg_ResizeGuest, OnResizeGuest)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -68,7 +70,7 @@ void GuestViewMessageFilter::OnAttachGuest(
     int element_instance_id,
     int guest_instance_id,
     const base::DictionaryValue& params) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto manager = GuestViewManager::FromBrowserContext(browser_context_);
   if (!manager)
     return;
@@ -84,7 +86,7 @@ void GuestViewMessageFilter::OnCreateMimeHandlerViewGuest(
     const std::string& view_id,
     int element_instance_id,
     const gfx::Size& element_size) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto manager = GuestViewManager::FromBrowserContext(browser_context_);
   if (!manager)
     return;
@@ -110,6 +112,25 @@ void GuestViewMessageFilter::OnCreateMimeHandlerViewGuest(
                        embedder_web_contents,
                        create_params,
                        callback);
+}
+
+void GuestViewMessageFilter::OnResizeGuest(int render_frame_id,
+                                           int element_instance_id,
+                                           const gfx::Size& new_size) {
+  auto manager = GuestViewManager::FromBrowserContext(browser_context_);
+  if (!manager)
+    return;
+
+  auto guest_web_contents =
+      manager->GetGuestByInstanceID(render_process_id_, element_instance_id);
+  auto mhvg = MimeHandlerViewGuest::FromWebContents(guest_web_contents);
+  if (!mhvg)
+    return;
+
+  SetSizeParams set_size_params;
+  set_size_params.enable_auto_size.reset(new bool(false));
+  set_size_params.normal_size.reset(new gfx::Size(new_size));
+  mhvg->SetSize(set_size_params);
 }
 
 void GuestViewMessageFilter::MimeHandlerViewGuestCreatedCallback(

@@ -7,7 +7,6 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_vector.h"
-#include "base/metrics/field_trial.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_store.h"
 
@@ -53,11 +52,6 @@ class PasswordManagerClient {
   // always returns true.
   virtual bool IsPasswordManagerEnabledForCurrentPage() const;
 
-  // Return true if "Allow to collect URL?" should be shown.
-  // TODO(vabr): If http://crbug.com/437528 gets fixed, make this a const
-  // method.
-  virtual bool ShouldAskUserToSubmitURL(const GURL& url);
-
   // Return true if |form| should not be available for autofill.
   virtual bool ShouldFilterAutofillResult(
       const autofill::PasswordForm& form) = 0;
@@ -70,11 +64,6 @@ class PasswordManagerClient {
   // syncing.
   virtual bool IsSyncAccountCredential(const std::string& username,
                                        const std::string& origin) const = 0;
-
-  // This should be called if the password manager encounters a problem on
-  // |url|. The implementation should show the "Allow to collect URL?" bubble
-  // and, if the user confirms, report the |url|.
-  virtual void AskUserAndMaybeReportURL(const GURL& url) const;
 
   // Called when all autofill results have been computed. Client can use
   // this signal to report statistics. Default implementation is a noop.
@@ -129,11 +118,6 @@ class PasswordManagerClient {
 
   // Returns the PasswordStore associated with this instance.
   virtual PasswordStore* GetPasswordStore() const = 0;
-
-  // Returns the probability that the experiment identified by |experiment_name|
-  // should be enabled. The default implementation returns 0.
-  virtual base::FieldTrial::Probability GetProbabilityForExperiment(
-      const std::string& experiment_name) const;
 
   // Returns true if password sync is enabled in the embedder. Return value for
   // custom passphrase users depends on |state|. The default implementation

@@ -43,22 +43,6 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         mAccountManagementFragment = accountManagementFragment;
     }
 
-    /**
-     * Deprecated for having unnecessary args; use the first constructor.
-     */
-    @Deprecated
-    public SyncNotificationController(Context context,
-            GoogleServicesNotificationController controller,
-            Class<? extends Activity> passphraseRequestActivity,
-            Class<? extends Fragment> accountManagementFragment) {
-        mApplicationContext = context.getApplicationContext();
-        mNotificationController = controller;
-        mProfileSyncService = ProfileSyncService.get(context);
-        mAndroidSyncSettings = AndroidSyncSettings.get(context);
-        mPassphraseRequestActivity = passphraseRequestActivity;
-        mAccountManagementFragment = accountManagementFragment;
-    }
-
     public void displayAndroidMasterSyncDisabledNotification() {
         String masterSyncDisabled =
                 GoogleServicesNotificationController.formatMessageParts(mApplicationContext,
@@ -88,10 +72,7 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         } else if (mProfileSyncService.isSyncInitialized()
                 && mProfileSyncService.isPassphraseRequiredForDecryption()) {
             switch (mProfileSyncService.getPassphraseType()) {
-                case IMPLICIT_PASSPHRASE:
-                    message = R.string.sync_need_password;
-                    intent = createPasswordIntent();
-                    break;
+                case IMPLICIT_PASSPHRASE: // Falling through intentionally.
                 case FROZEN_IMPLICIT_PASSPHRASE: // Falling through intentionally.
                 case CUSTOM_PASSPHRASE:
                     message = R.string.sync_need_passphrase;

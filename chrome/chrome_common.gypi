@@ -51,8 +51,12 @@
       'common/custom_handlers/protocol_handler.cc',
       'common/custom_handlers/protocol_handler.h',
       'common/descriptors_android.h',
+      'common/favicon/fallback_icon_url_parser.cc',
+      'common/favicon/fallback_icon_url_parser.h',
       'common/favicon/favicon_url_parser.cc',
       'common/favicon/favicon_url_parser.h',
+      'common/favicon/large_icon_url_parser.cc',
+      'common/favicon/large_icon_url_parser.h',
       'common/icon_with_badge_image_source.cc',
       'common/icon_with_badge_image_source.h',
       'common/ini_parser.cc',
@@ -63,8 +67,6 @@
       'common/localized_error.h',
       'common/logging_chrome.cc',
       'common/logging_chrome.h',
-      'common/mac/app_mode_common.h',
-      'common/mac/app_mode_common.mm',
       'common/mac/app_shim_launch.h',
       'common/mac/app_shim_messages.h',
       'common/mac/cfbundle_blocker.h',
@@ -104,8 +106,6 @@
       'common/spellcheck_result.h',
       'common/switch_utils.cc',
       'common/switch_utils.h',
-      'common/terminate_on_heap_corruption_experiment_win.cc',
-      'common/terminate_on_heap_corruption_experiment_win.h',
       'common/tts_messages.h',
       'common/tts_utterance_request.cc',
       'common/tts_utterance_request.h',
@@ -199,14 +199,30 @@
       'common/extensions/permissions/chrome_api_permissions.h',
       'common/extensions/permissions/chrome_permission_message_provider.cc',
       'common/extensions/permissions/chrome_permission_message_provider.h',
+      'common/extensions/permissions/chrome_permission_message_rules.cc',
+      'common/extensions/permissions/chrome_permission_message_rules.h',
       'common/extensions/sync_helper.cc',
       'common/extensions/sync_helper.h',
     ],
     'chrome_common_full_safe_browsing_sources': [
+      'common/safe_browsing/binary_feature_extractor.cc',
+      'common/safe_browsing/binary_feature_extractor.h',
+      'common/safe_browsing/binary_feature_extractor_posix.cc',
+      'common/safe_browsing/binary_feature_extractor_win.cc',
       'common/safe_browsing/download_protection_util.cc',
       'common/safe_browsing/download_protection_util.h',
+      'common/safe_browsing/ipc_protobuf_message_macros.h',
+      'common/safe_browsing/ipc_protobuf_message_null_macros.h',
+      'common/safe_browsing/pe_image_reader_win.cc',
+      'common/safe_browsing/pe_image_reader_win.h',
+      'common/safe_browsing/protobuf_message_log_macros.h',
+      'common/safe_browsing/protobuf_message_param_traits.h',
+      'common/safe_browsing/protobuf_message_read_macros.h',
+      'common/safe_browsing/protobuf_message_write_macros.h',
       'common/safe_browsing/zip_analyzer.cc',
       'common/safe_browsing/zip_analyzer.h',
+      'common/safe_browsing/zip_analyzer_results.cc',
+      'common/safe_browsing/zip_analyzer_results.h',
     ],
     'chrome_common_importer_sources': [
       'common/importer/firefox_importer_utils.cc',
@@ -234,6 +250,10 @@
       'common/importer/profile_import_process_param_traits_macros.h',
       'common/importer/safari_importer_utils.h',
       'common/importer/safari_importer_utils.mm',
+    ],
+    'chrome_common_ipc_fuzzer_sources': [
+      'common/external_ipc_dumper.h',
+      'common/external_ipc_dumper.cc',
     ],
     'chrome_common_service_process_sources': [
       'common/service_messages.h',
@@ -315,6 +335,7 @@
         '<(DEPTH)/crypto/crypto.gyp:crypto',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/skia/skia.gyp:skia_library',
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
         '<(DEPTH)/third_party/libxml/libxml.gyp:libxml',
@@ -357,6 +378,7 @@
         }],
         ['OS=="mac"', {
           'sources': [ '<@(chrome_common_mac_sources)' ],
+          'dependencies': [ 'app_mode_app_support' ],
         }],
         ['OS != "ios"', {
           'dependencies': [
@@ -407,6 +429,9 @@
             '<(DEPTH)/components/nacl.gyp:nacl_common',
           ],
         }],
+        ['enable_ipc_fuzzer==1', {
+          'sources': [ '<@(chrome_common_ipc_fuzzer_sources)' ],
+        }],
         ['enable_plugins==1', {
           'dependencies': [
             '<(DEPTH)/third_party/adobe/flash/flash_player.gyp:flapper_version_h',
@@ -414,6 +439,8 @@
           'sources': [
             'common/pepper_flash.cc',
             'common/pepper_flash.h',
+            'common/ppapi_utils.cc',
+            'common/ppapi_utils.h',
           ],
         }],
         ['enable_plugins==1 and enable_extensions==1', {

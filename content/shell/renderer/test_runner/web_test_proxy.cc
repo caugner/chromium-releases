@@ -18,7 +18,6 @@
 #include "content/shell/renderer/test_runner/event_sender.h"
 #include "content/shell/renderer/test_runner/mock_color_chooser.h"
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
-#include "content/shell/renderer/test_runner/mock_presentation_service.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
 #include "content/shell/renderer/test_runner/mock_web_user_media_client.h"
@@ -235,6 +234,34 @@ const char* WebNavigationTypeToString(blink::WebNavigationType type) {
       return kFormResubmittedString;
     case blink::WebNavigationTypeOther:
       return kOtherString;
+  }
+  return kIllegalString;
+}
+
+const char* kPolicyIgnore = "Ignore";
+const char* kPolicyDownload = "download";
+const char* kPolicyCurrentTab = "current tab";
+const char* kPolicyNewBackgroundTab = "new background tab";
+const char* kPolicyNewForegroundTab = "new foreground tab";
+const char* kPolicyNewWindow = "new window";
+const char* kPolicyNewPopup = "new popup";
+
+const char* WebNavigationPolicyToString(blink::WebNavigationPolicy policy) {
+  switch (policy) {
+    case blink::WebNavigationPolicyIgnore:
+      return kPolicyIgnore;
+    case blink::WebNavigationPolicyDownload:
+      return kPolicyDownload;
+    case blink::WebNavigationPolicyCurrentTab:
+      return kPolicyCurrentTab;
+    case blink::WebNavigationPolicyNewBackgroundTab:
+      return kPolicyNewBackgroundTab;
+    case blink::WebNavigationPolicyNewForegroundTab:
+      return kPolicyNewForegroundTab;
+    case blink::WebNavigationPolicyNewWindow:
+      return kPolicyNewWindow;
+    case blink::WebNavigationPolicyNewPopup:
+      return kPolicyNewPopup;
   }
   return kIllegalString;
 }
@@ -672,12 +699,6 @@ WebTestProxyBase::GetCredentialManagerClientMock() {
   return credential_manager_client_.get();
 }
 
-MockPresentationService* WebTestProxyBase::GetPresentationServiceMock() {
-  if (!presentation_service_.get())
-    presentation_service_.reset(new MockPresentationService());
-  return presentation_service_.get();
-}
-
 void WebTestProxyBase::ScheduleAnimation() {
   if (!test_interfaces_->GetTestRunner()->TestIsRunning())
     return;
@@ -761,6 +782,9 @@ void WebTestProxyBase::PostAccessibilityEvent(const blink::WebAXObject& obj,
       break;
     case blink::WebAXEventMenuListItemSelected:
       event_name = "MenuListItemSelected";
+      break;
+    case blink::WebAXEventMenuListItemUnselected:
+      event_name = "MenuListItemUnselected";
       break;
     case blink::WebAXEventMenuListValueChanged:
       event_name = "MenuListValueChanged";
@@ -1002,8 +1026,10 @@ void WebTestProxyBase::DidReceiveServerRedirectForProvisionalLoad(
   }
 }
 
-bool WebTestProxyBase::DidFailProvisionalLoad(blink::WebLocalFrame* frame,
-                                              const blink::WebURLError& error) {
+bool WebTestProxyBase::DidFailProvisionalLoad(
+    blink::WebLocalFrame* frame,
+    const blink::WebURLError& error,
+    blink::WebHistoryCommitType commit_type) {
   if (test_interfaces_->GetTestRunner()->shouldDumpFrameLoadCallbacks()) {
     PrintFrameDescription(delegate_, frame);
     delegate_->PrintMessage(" - didFailProvisionalLoadWithError\n");
@@ -1068,7 +1094,8 @@ void WebTestProxyBase::DidHandleOnloadEvents(blink::WebLocalFrame* frame) {
 }
 
 void WebTestProxyBase::DidFailLoad(blink::WebLocalFrame* frame,
-                                   const blink::WebURLError& error) {
+                                   const blink::WebURLError& error,
+                                   blink::WebHistoryCommitType commit_type) {
   if (test_interfaces_->GetTestRunner()->shouldDumpFrameLoadCallbacks()) {
     PrintFrameDescription(delegate_, frame);
     delegate_->PrintMessage(" - didFailLoadWithError\n");
@@ -1300,6 +1327,13 @@ void WebTestProxyBase::CheckDone(blink::WebLocalFrame* frame,
 
 blink::WebNavigationPolicy WebTestProxyBase::DecidePolicyForNavigation(
     const blink::WebFrameClient::NavigationPolicyInfo& info) {
+  if (test_interfaces_->GetTestRunner()->shouldDumpNavigationPolicy()) {
+    delegate_->PrintMessage("Default policy for navigation to '" +
+                            URLDescription(info.urlRequest.url()) + "' is '" +
+                            WebNavigationPolicyToString(info.defaultPolicy) +
+                            "'\n");
+  }
+
   blink::WebNavigationPolicy result;
   if (!test_interfaces_->GetTestRunner()->policyDelegateEnabled())
     return info.defaultPolicy;
