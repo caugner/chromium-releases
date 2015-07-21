@@ -12,6 +12,9 @@
     },
     "fileManagerPrivate"
   ],
+  "file_system_provider_capabilities": {
+    "source": "device"
+  },
   "app": {
     "background": {
       "scripts": [

@@ -24,7 +24,10 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/setup/install_worker.h"
 #include "chrome/installer/setup/setup_constants.h"
+#include "chrome/installer/setup/setup_util.h"
+#include "chrome/installer/setup/update_active_setup_version_work_item.h"
 #include "chrome/installer/util/auto_launch_util.h"
+#include "chrome/installer/util/beacons.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
@@ -582,6 +585,13 @@ InstallStatus InstallOrUpdateProduct(
               installer_state.target_path());
         }
       }
+
+      if (!installer_state.system_install()) {
+        DCHECK_EQ(chrome_product->distribution(),
+                  BrowserDistribution::GetDistribution());
+        UpdateDefaultBrowserBeaconForPath(
+            installer_state.target_path().Append(installer::kChromeExe));
+      }
     }
 
     installer_state.UpdateStage(installer::REMOVING_OLD_VERSIONS);
@@ -617,6 +627,25 @@ void HandleOsUpgradeForBrowser(const installer::InstallerState& installer_state,
     CreateOrUpdateShortcuts(
         chrome_exe, chrome, prefs, level, INSTALL_SHORTCUT_REPLACE_EXISTING);
     RegisterChromeOnMachine(installer_state, chrome, false);
+
+    UpdateOsUpgradeBeacon(installer_state.system_install(),
+                          BrowserDistribution::GetDistribution());
+
+    // Update the per-user default browser beacon. For user-level installs this
+    // can be done directly; whereas it requires triggering Active Setup for
+    // each user's subsequent login on system-level installs.
+    if (!installer_state.system_install()) {
+      UpdateDefaultBrowserBeaconForPath(chrome_exe);
+    } else {
+      UpdateActiveSetupVersionWorkItem active_setup_work_item(
+          InstallUtil::GetActiveSetupPath(chrome.distribution()),
+          UpdateActiveSetupVersionWorkItem::
+              UPDATE_AND_BUMP_OS_UPGRADES_COMPONENT);
+      if (active_setup_work_item.Do())
+        VLOG(1) << "Bumped Active Setup Version on-os-upgrade.";
+      else
+        LOG(ERROR) << "Failed to bump Active Setup Version on-os-upgrade.";
+    }
   }
 }
 
@@ -627,6 +656,13 @@ void HandleActiveSetupForBrowser(const base::FilePath& installation_root,
                                  const installer::Product& chrome,
                                  bool force) {
   DCHECK(chrome.is_chrome());
+
+  // If the shortcuts are not being forcefully created we may want to forcefully
+  // create them anyways if this Active Setup trigger is in response to an OS
+  // update.
+  force = force || installer::UpdateLastOSUpgradeHandledByActiveSetup(
+                       chrome.distribution());
+
   // Only create shortcuts on Active Setup if the first run sentinel is not
   // present for this user (as some shortcuts used to be installed on first
   // run and this could otherwise re-install shortcuts for users that have
@@ -644,6 +680,8 @@ void HandleActiveSetupForBrowser(const base::FilePath& installation_root,
   base::FilePath chrome_exe(installation_root.Append(kChromeExe));
   CreateOrUpdateShortcuts(
       chrome_exe, chrome, prefs, CURRENT_USER, install_operation);
+
+  UpdateDefaultBrowserBeaconForPath(chrome_exe);
 }
 
 }  // namespace installer

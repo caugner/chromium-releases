@@ -1582,6 +1582,14 @@
     ]
   },
 
+  "SafeBrowsingExtendedReportingOptInAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "SafeBrowsingExtendedReportingOptInAllowed": true },
+    "pref_mappings": [
+      { "pref": "safebrowsing.extended_reporting_opt_in_allowed" }
+    ]
+  },
+
   "SpellCheckServiceEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "official_only": true,
@@ -2219,6 +2227,22 @@
     "can_be_recommended": true
   },
 
+  "ForceMaximizeOnFirstRun": {
+    "os": ["chromeos"],
+    "test_policy": { "ForceMaximizeOnFirstRun": true },
+    "pref_mappings": [
+      { "pref": "ui.force_maximize_on_first_run" }
+    ]
+  },
+
+  "SSLErrorOverrideAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "SSLErrorOverrideAllowed": true },
+    "pref_mappings": [
+      { "pref": "ssl.error_override_allowed" }
+    ]
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -2290,14 +2314,14 @@
     "test_policy": { "DeviceMetricsReportingEnabled": true },
     "pref_mappings": [
       { "pref": "cros.metrics.reportingEnabled",
-        "indicator_test_setup_js": "Preferences.getInstance().addEventListener('alternate_error_pages.enabled', function(event) { Preferences.prefsChangedCallback(['cros.metrics.reportingEnabled', {value: event.value.value, controlledBy: event.value.controlledBy, disabled: event.value.disabled}]); });",
+        "indicator_test_setup_js": "var controllingPref = 'spellcheck.use_spelling_service'; var testedPref = 'cros.metrics.reportingEnabled'; Preferences.prefsChangedCallback([testedPref, Preferences.getInstance().registeredPreferences_[controllingPref].orig]); Preferences.getInstance().addEventListener(controllingPref, function(event) {Preferences.prefsChangedCallback([testedPref, {value: event.value.value, controlledBy: event.value.controlledBy, disabled: event.value.disabled}]);});",
         "indicator_tests": [
-          { "policy": { "AlternateErrorPagesEnabled": true } }
+          { "policy": { "SpellCheckServiceEnabled": true } }
         ]
       }
     ],
 
-    "note": "TODO(bartfab): The |indicator_test_setup_js| above is a hack that makes |cros.metrics.reportingEnabled| track the status of the entirely unrelated |alternate_error_pages.enabled| pref. This is because cros settings cannot currently be made policy-controlled in browser tests. Remove this hack once that restriction is lifted."
+    "note": "TODO(bartfab): The |indicator_test_setup_js| above is a hack that makes |cros.metrics.reportingEnabled| track the status of the entirely unrelated |spellcheck.use_spelling_service| pref. This is because cros settings cannot currently be made policy-controlled in browser tests. Remove this hack once that restriction is lifted."
   },
 
   "DeviceEphemeralUsersEnabled": {
@@ -2422,7 +2446,7 @@
 
   "ExtensionCacheSize": {
   },
-  
+
   "DeviceLoginScreenDomainAutoComplete": {
   },
 

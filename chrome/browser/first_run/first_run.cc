@@ -376,9 +376,11 @@ void FirstRunBubbleLauncher::Observe(
   }
 
   if (contents && contents->GetURL().SchemeIs(content::kChromeUIScheme)) {
+#if defined(OS_WIN)
     // Suppress the first run bubble if 'make chrome metro' flow is showing.
     if (contents->GetURL().host() == chrome::kChromeUIMetroFlowHost)
       return;
+#endif
 
     // Suppress the first run bubble if the NTP sync promo bubble is showing
     // or if sign in is in progress.
@@ -620,10 +622,7 @@ std::string GetPingDelayPrefName() {
 }
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      GetPingDelayPrefName().c_str(),
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(GetPingDelayPrefName().c_str(), 0);
 }
 
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {

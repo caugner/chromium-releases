@@ -22,6 +22,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_profile.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
@@ -65,6 +66,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/common/switches.h"
 #include "net/base/net_util.h"
 
@@ -272,6 +274,7 @@ bool StartupBrowserCreator::Start(const base::CommandLine& cmd_line,
                                   Profile* last_used_profile,
                                   const Profiles& last_opened_profiles) {
   TRACE_EVENT0("startup", "StartupBrowserCreator::Start");
+  TRACK_SCOPED_REGION("Startup", "StartupBrowserCreator::Start");
   SCOPED_UMA_HISTOGRAM_TIMER("Startup.StartupBrowserCreator_Start");
   return ProcessCmdLineImpl(cmd_line, cur_dir, true, last_used_profile,
                             last_opened_profiles, this);
@@ -513,16 +516,6 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
                                                            command_line)) {
     silent_launch = true;
   }
-
-  // If we are checking the proxy enabled policy, don't open any windows.
-  if (command_line.HasSwitch(switches::kCheckCloudPrintConnectorPolicy)) {
-    silent_launch = true;
-    if (CloudPrintProxyServiceFactory::GetForProfile(last_used_profile)->
-        EnforceCloudPrintConnectorPolicyAndQuit())
-      // Success, nothing more needs to be done, so return false to stop
-      // launching and quit.
-      return false;
-  }
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 
   VLOG(2) << "ProcessCmdLineImpl: PLACE 1";
@@ -689,15 +682,16 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
       bool signin_required = profile_index != std::string::npos &&
           profile_info.ProfileIsSigninRequiredAtIndex(profile_index);
 
-      // Guest or locked profiles cannot be re-opened on startup. The only
-      // exception is if there's already a Guest window open in a separate
+      // Guest, system or locked profiles cannot be re-opened on startup. The
+      // only exception is if there's already a Guest window open in a separate
       // process (for example, launching a new browser after clicking on a
       // downloaded file in Guest mode).
-      bool has_guest_browsers = last_used_profile->IsGuestSession() &&
+      bool guest_or_system = last_used_profile->IsGuestSession() ||
+                             last_used_profile->IsSystemProfile();
+      bool has_guest_browsers = guest_or_system &&
           chrome::GetTotalBrowserCountForProfile(
               last_used_profile->GetOffTheRecordProfile()) > 0;
-      if (signin_required ||
-          (last_used_profile->IsGuestSession() && !has_guest_browsers)) {
+      if (signin_required || (guest_or_system && !has_guest_browsers)) {
         profiles::UserManagerProfileSelected action =
             command_line.HasSwitch(switches::kShowAppList) ?
                 profiles::USER_MANAGER_SELECT_PROFILE_APP_LAUNCHER :

@@ -18,6 +18,9 @@
       "types": ["text/secret-testing-mime-type"]
     }
   },
+  "file_system_provider_capabilities": {
+    "source": "device"
+  },
   "app": {
     "background": {
       "scripts": [

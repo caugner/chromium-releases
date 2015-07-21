@@ -20,6 +20,8 @@
           'installer/util/app_registration_data.h',
           'installer/util/auto_launch_util.cc',
           'installer/util/auto_launch_util.h',
+          'installer/util/beacons.cc',
+          'installer/util/beacons.h',
           'installer/util/browser_distribution.cc',
           'installer/util/browser_distribution.h',
           'installer/util/callback_work_item.cc',
@@ -107,6 +109,7 @@
     ['OS=="win"', {
       'targets': [
         {
+          # GN version: //chrome/installer/util
           'target_name': 'installer_util',
           'type': 'static_library',
           'variables': {

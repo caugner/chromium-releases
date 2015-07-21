@@ -2,10 +2,13 @@
 <html>
  <head>
   <title>Push API Bad Manifest Test</title>
-  <link rel="manifest" href="manifest_without_user_visible_only.json">
+  <link rel="manifest" href="manifest_with_user_visible_false.json">
   <script src="push_test.js"></script>
  </head>
  <body>
-   <h1>Push API Bad Manifest Test</h1>
+   <h1>Push API: gcm_user_visible_only=false in the Manifest</h1>
+   <script>
+     var pushSubscriptionOptions = {};
+   </script>
  </body>
 </html>

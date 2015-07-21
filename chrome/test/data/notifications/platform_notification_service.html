@@ -54,7 +54,18 @@
           body: 'Contents',
           tag: 'replace-id',
           icon: 'icon.png',
-          silent: true
+          silent: true,
+          data: [
+            { property: 'value' }
+          ]
+        });
+      }
+
+      // Displays a persistent notification with vibrate field.
+      function DisplayPersistentNotificationVibrate() {
+        DisplayPersistentNotification('Title', {
+          body: 'Contents',
+          vibrate: [100, 200, 300]
         });
       }
 
