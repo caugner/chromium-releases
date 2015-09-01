@@ -7,17 +7,20 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/chrome_isolated_world_ids.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/web_apps.h"
@@ -363,6 +366,10 @@ void ChromeRenderViewObserver::DidCommitProvisionalLoad(
   if (!is_new_navigation || HasRefreshMetaTag(frame))
     return;
 
+  base::debug::SetCrashKeyValue(
+      crash_keys::kViewCount,
+      base::SizeTToString(content::RenderView::GetRenderViewCount()));
+
   CapturePageInfoLater(
       true,  // preliminary_capture
       base::TimeDelta::FromMilliseconds(kDelayForForcedCaptureMs));
@@ -478,7 +485,7 @@ bool ChromeRenderViewObserver::HasRefreshMetaTag(WebFrame* frame) {
     if (!element.hasHTMLTagName(tag_name))
       continue;
     WebString value = element.getAttribute(attribute_name);
-    if (value.isNull() || !LowerCaseEqualsASCII(value, "refresh"))
+    if (value.isNull() || !base::LowerCaseEqualsASCII(value, "refresh"))
       continue;
     return true;
   }

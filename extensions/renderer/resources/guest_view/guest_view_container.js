@@ -9,6 +9,7 @@ var DocumentNatives = requireNative('document_natives');
 var GuestView = require('guestView').GuestView;
 var GuestViewInternalNatives = requireNative('guest_view_internal');
 var IdGenerator = requireNative('id_generator');
+var MessagingNatives = requireNative('messaging_natives');
 
 function GuestViewContainer(element, viewType) {
   privates(element).internal = this;
@@ -22,10 +23,12 @@ function GuestViewContainer(element, viewType) {
   this.guest = new GuestView(viewType);
   this.setupAttributes();
 
-  privates(this).browserPluginElement = this.createBrowserPluginElement();
+  privates(this).internalElement = this.createInternalElement$();
   this.setupFocusPropagation();
   var shadowRoot = this.element.createShadowRoot();
-  shadowRoot.appendChild(privates(this).browserPluginElement);
+  shadowRoot.appendChild(privates(this).internalElement);
+
+  GuestViewInternalNatives.RegisterView(this.viewInstanceId, this, viewType);
 }
 
 // Forward public API methods from |proto| to their internal implementations.
@@ -49,8 +52,7 @@ GuestViewContainer.registerElement = function(guestViewContainerType) {
     if (document.readyState == 'loading')
       return;
 
-    registerBrowserPluginElement(
-        guestViewContainerType.VIEW_TYPE.toLowerCase());
+    registerInternalElement(guestViewContainerType.VIEW_TYPE.toLowerCase());
     registerGuestViewElement(guestViewContainerType);
     window.removeEventListener(event.type, listener, useCapture);
   }, useCapture);
@@ -82,7 +84,7 @@ GuestViewContainer.prototype.setupGuestProperty = function() {
   });
 };
 
-GuestViewContainer.prototype.createBrowserPluginElement = function() {
+GuestViewContainer.prototype.createInternalElement$ = function() {
   // We create BrowserPlugin as a custom element in order to observe changes
   // to attributes synchronously.
   var browserPluginElement =
@@ -99,17 +101,17 @@ GuestViewContainer.prototype.setupFocusPropagation = function() {
     // See http://crbug.com/231664.
     this.element.setAttribute('tabIndex', -1);
   }
-  this.element.addEventListener('focus', function(e) {
+  this.element.addEventListener('focus', this.weakWrapper(function(e) {
     // Focus the BrowserPlugin when the GuestViewContainer takes focus.
-    privates(this).browserPluginElement.focus();
-  }.bind(this));
-  this.element.addEventListener('blur', function(e) {
+    privates(this).internalElement.focus();
+  }));
+  this.element.addEventListener('blur', this.weakWrapper(function(e) {
     // Blur the BrowserPlugin when the GuestViewContainer loses focus.
-    privates(this).browserPluginElement.blur();
-  }.bind(this));
+    privates(this).internalElement.blur();
+  }));
 };
 
-GuestViewContainer.prototype.attachWindow = function() {
+GuestViewContainer.prototype.attachWindow$ = function() {
   if (!this.internalInstanceId) {
     return true;
   }
@@ -120,22 +122,34 @@ GuestViewContainer.prototype.attachWindow = function() {
   return true;
 };
 
-GuestViewContainer.prototype.handleBrowserPluginAttributeMutation =
+GuestViewContainer.prototype.makeGCOwnContainer = function(internalInstanceId) {
+  MessagingNatives.BindToGC(this, function() {
+    GuestViewInternalNatives.DestroyContainer(internalInstanceId);
+  }, -1);
+};
+
+GuestViewContainer.prototype.onInternalInstanceId = function(
+    internalInstanceId) {
+  this.internalInstanceId = internalInstanceId;
+  this.makeGCOwnContainer(this.internalInstanceId);
+
+  // Track when the element resizes using the element resize callback.
+  GuestViewInternalNatives.RegisterElementResizeCallback(
+      this.internalInstanceId, this.weakWrapper(this.onElementResize));
+
+  if (!this.guest.getId()) {
+    return;
+  }
+  this.guest.attach(this.internalInstanceId,
+                    this.viewInstanceId,
+                    this.buildParams());
+};
+
+GuestViewContainer.prototype.handleInternalElementAttributeMutation =
     function(name, oldValue, newValue) {
   if (name == 'internalinstanceid' && !oldValue && !!newValue) {
-    privates(this).browserPluginElement.removeAttribute('internalinstanceid');
-    this.internalInstanceId = parseInt(newValue);
-
-    // Track when the element resizes using the element resize callback.
-    GuestViewInternalNatives.RegisterElementResizeCallback(
-        this.internalInstanceId, this.onElementResize.bind(this));
-
-    if (!this.guest.getId()) {
-      return;
-    }
-    this.guest.attach(this.internalInstanceId,
-                      this.viewInstanceId,
-                      this.buildParams());
+    privates(this).internalElement.removeAttribute('internalinstanceid');
+    this.onInternalInstanceId(parseInt(newValue));
   }
 };
 
@@ -166,6 +180,17 @@ GuestViewContainer.prototype.dispatchEvent = function(event) {
   return this.element.dispatchEvent(event);
 }
 
+// Returns a wrapper function for |func| with a weak reference to |this|.
+GuestViewContainer.prototype.weakWrapper = function(func) {
+  var viewInstanceId = this.viewInstanceId;
+  return function() {
+    var view = GuestViewInternalNatives.GetViewFromID(viewInstanceId);
+    if (view) {
+      return $Function.apply(func, view, $Array.slice(arguments));
+    }
+  };
+};
+
 // Implemented by the specific view type, if needed.
 GuestViewContainer.prototype.buildContainerParams = function() { return {}; };
 GuestViewContainer.prototype.onElementAttached = function() {};
@@ -174,7 +199,7 @@ GuestViewContainer.prototype.setupAttributes = function() {};
 
 // Registers the browser plugin <object> custom element. |viewType| is the
 // name of the specific guestview container (e.g. 'webview').
-function registerBrowserPluginElement(viewType) {
+function registerInternalElement(viewType) {
   var proto = $Object.create(HTMLElement.prototype);
 
   proto.createdCallback = function() {
@@ -194,7 +219,7 @@ function registerBrowserPluginElement(viewType) {
     if (!internal) {
       return;
     }
-    internal.handleBrowserPluginAttributeMutation(name, oldValue, newValue);
+    internal.handleInternalElementAttributeMutation(name, oldValue, newValue);
   };
 
   GuestViewContainer[viewType + 'BrowserPlugin'] =

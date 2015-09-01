@@ -14,11 +14,12 @@
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/browsing_data/local_data_container.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -74,12 +75,16 @@ static void GetOrigins(JNIEnv* env,
     const char* kHttpPortSuffix = ":80";
     const char* kHttpsPortSuffix = ":443";
     ScopedJavaLocalRef<jstring> jorigin;
-    if (StartsWithASCII(origin, url::kHttpsScheme, false) &&
-        EndsWith(origin, kHttpsPortSuffix, false)) {
+    if (base::StartsWith(origin, url::kHttpsScheme,
+                         base::CompareCase::INSENSITIVE_ASCII) &&
+        base::EndsWith(origin, kHttpsPortSuffix,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
       jorigin = ConvertUTF8ToJavaString(
           env, origin.substr(0, origin.size() - strlen(kHttpsPortSuffix)));
-    } else if (StartsWithASCII(origin, url::kHttpScheme, false) &&
-               EndsWith(origin, kHttpPortSuffix, false)) {
+    } else if (base::StartsWith(origin, url::kHttpScheme,
+                                base::CompareCase::INSENSITIVE_ASCII) &&
+               base::EndsWith(origin, kHttpPortSuffix,
+                              base::CompareCase::INSENSITIVE_ASCII)) {
       jorigin = ConvertUTF8ToJavaString(
           env, origin.substr(0, origin.size() - strlen(kHttpPortSuffix)));
     } else {
@@ -318,9 +323,9 @@ static void SetCameraSettingForOrigin(JNIEnv* env, jclass clazz,
       origin, ContentSettingsPattern::Wildcard(), value);
 }
 
-static scoped_refptr<CookieSettings> GetCookieSettings() {
+static scoped_refptr<content_settings::CookieSettings> GetCookieSettings() {
   Profile* profile = ProfileManager::GetActiveUserProfile();
-  return CookieSettings::Factory::GetForProfile(profile);
+  return CookieSettingsFactory::GetForProfile(profile);
 }
 
 static void GetCookieOrigins(JNIEnv* env,
@@ -616,8 +621,13 @@ class LocalStorageInfoReadyCallback {
     for (i = local_storage_info.begin(); i != local_storage_info.end(); ++i) {
       ScopedJavaLocalRef<jstring> full_origin =
           ConvertUTF8ToJavaString(env_, i->origin_url.spec());
+      // Remove the trailing backslash so the origin is matched correctly in
+      // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
+      std::string origin_str = i->origin_url.GetOrigin().spec();
+      DCHECK(origin_str[origin_str.size() - 1] == '/');
+      origin_str = origin_str.substr(0, origin_str.size() - 1);
       ScopedJavaLocalRef<jstring> origin =
-          ConvertUTF8ToJavaString(env_, i->origin_url.GetOrigin().spec());
+          ConvertUTF8ToJavaString(env_, origin_str);
       Java_WebsitePreferenceBridge_insertLocalStorageInfoIntoMap(
           env_, map.obj(), origin.obj(), full_origin.obj(), i->size);
     }

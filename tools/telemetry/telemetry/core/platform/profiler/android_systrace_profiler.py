@@ -7,11 +7,11 @@ import StringIO
 import subprocess
 import zipfile
 
-from telemetry.core.backends.chrome import android_browser_finder
 from telemetry.core.platform import profiler
-from telemetry.core.platform import tracing_options
 from telemetry.core import util
+from telemetry.internal.backends.chrome import android_browser_finder
 from telemetry.timeline import trace_data as trace_data_module
+from telemetry.timeline import tracing_options
 
 _SYSTRACE_CATEGORIES = [
     'gfx',

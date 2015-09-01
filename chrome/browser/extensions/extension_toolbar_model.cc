@@ -7,11 +7,12 @@
 #include <algorithm>
 #include <string>
 
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
 #include "base/prefs/pref_service.h"
-#include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -136,7 +137,7 @@ void ExtensionToolbarModel::SetVisibleIconCount(size_t count) {
     // overflow menu are considered "hidden". But it so happens that the times
     // we are likely to call SetVisibleIconCount() are also those when we are
     // in flux. So wait for things to cool down before setting the prefs.
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ExtensionToolbarModel::MaybeUpdateVisibilityPrefs,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -420,37 +421,14 @@ void ExtensionToolbarModel::RemoveExtension(const Extension* extension) {
 void ExtensionToolbarModel::InitializeExtensionList() {
   DCHECK(toolbar_items_.empty());  // We shouldn't have any items yet.
 
-  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "463337 ExtensionToolbarModel::InitializeExtensionList1"));
   last_known_positions_ = extension_prefs_->GetToolbarOrder();
-  if (profile_->IsOffTheRecord()) {
-    // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
-    tracked_objects::ScopedTracker tracking_profile2(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "463337 ExtensionToolbarModel::InitializeExtensionList2"));
+  if (profile_->IsOffTheRecord())
     IncognitoPopulate();
-  } else {
-    // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
-    tracked_objects::ScopedTracker tracking_profile3(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "463337 ExtensionToolbarModel::InitializeExtensionList3"));
+  else
     Populate(&last_known_positions_);
-  }
 
   extensions_initialized_ = true;
-
-  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "463337 ExtensionToolbarModel::InitializeExtensionList4"));
   MaybeUpdateVisibilityPrefs();
-
-  // TODO(robliao): Remove ScopedTracker below once crbug.com/463337 is fixed.
-  tracked_objects::ScopedTracker tracking_profile5(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "463337 ExtensionToolbarModel::InitializeExtensionList5"));
   FOR_EACH_OBSERVER(Observer, observers_, OnToolbarModelInitialized());
 }
 
@@ -620,10 +598,9 @@ void ExtensionToolbarModel::OnExtensionToolbarPrefChange() {
   if (last_known_positions_.size() > pref_position_size) {
     // Need to update pref because we have extra icons. But can't call
     // UpdatePrefs() directly within observation closure.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ExtensionToolbarModel::UpdatePrefs,
-                   weak_ptr_factory_.GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ExtensionToolbarModel::UpdatePrefs,
+                              weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -639,7 +616,7 @@ bool ExtensionToolbarModel::ShowExtensionActionPopup(
     const Extension* extension,
     Browser* browser,
     bool grant_active_tab) {
-  ObserverListBase<Observer>::Iterator it(&observers_);
+  base::ObserverListBase<Observer>::Iterator it(&observers_);
   Observer* obs = NULL;
   // Look for the Observer associated with the browser.
   // This would be cleaner if we had an abstract class for the Toolbar UI

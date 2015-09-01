@@ -31,9 +31,9 @@
 #include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
+#include "chrome/browser/ui/webui/app_launcher_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -58,7 +58,6 @@
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/sys_color_change_listener.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -84,7 +83,7 @@ const char kLearnMoreIncognitoUrl[] =
 // The URL for the Learn More page shown on guest session new tab.
 const char kLearnMoreGuestSessionUrl[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=1057090";
+    "https://support.google.com/chromebook/answer/1057090";
 #else
     "https://support.google.com/chrome/?p=ui_guest";
 #endif
@@ -114,7 +113,7 @@ SkColor GetThemeColor(ui::ThemeProvider* tp, int id) {
   SkColor color = tp->GetColor(id);
   // If web contents are being inverted because the system is in high-contrast
   // mode, any system theme colors we use must be inverted too to cancel out.
-  return gfx::IsInvertedColorScheme() ?
+  return color_utils::IsInvertedColorScheme() ?
       color_utils::InvertColor(color) : color;
 }
 
@@ -165,7 +164,6 @@ std::string GetNewTabBackgroundTilingCSS(
 NTPResourceCache::NTPResourceCache(Profile* profile)
     : profile_(profile), is_swipe_tracking_from_scroll_events_enabled_(false),
       should_show_apps_page_(NewTabUI::ShouldShowApps()),
-      should_show_most_visited_page_(true),
       should_show_other_devices_menu_(true) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
@@ -414,27 +412,16 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("hasattribution",
       ThemeServiceFactory::GetForProfile(profile_)->HasCustomImage(
           IDR_THEME_NTP_ATTRIBUTION));
-  load_time_data.SetBoolean("showMostvisited", should_show_most_visited_page_);
   load_time_data.SetBoolean("showAppLauncherPromo",
       ShouldShowAppLauncherPromo());
   load_time_data.SetString("title",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
-  load_time_data.SetString("mostvisited",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
-  load_time_data.SetString("restoreThumbnailsShort",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
   load_time_data.SetString("webStoreTitle",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
   load_time_data.SetString("webStoreTitleShort",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE_SHORT));
   load_time_data.SetString("attributionintro",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_ATTRIBUTION_INTRO));
-  load_time_data.SetString("thumbnailremovednotification",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION));
-  load_time_data.SetString("undothumbnailremove",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE));
-  load_time_data.SetString("removethumbnailtooltip",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP));
   load_time_data.SetString("appuninstall",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
   load_time_data.SetString("appoptions",
@@ -460,13 +447,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetString("syncLinkText",
       l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
   load_time_data.SetBoolean("shouldShowSyncLogin",
-                            NTPLoginHandler::ShouldShow(profile_));
-  load_time_data.SetString("otherSessions",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LABEL));
-  load_time_data.SetString("otherSessionsEmpty",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_EMPTY));
-  load_time_data.SetString("otherSessionsLearnMoreUrl",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LEARN_MORE_URL));
+                            AppLauncherLoginHandler::ShouldShow(profile_));
   load_time_data.SetString("learnMore",
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
@@ -475,12 +456,6 @@ void NTPResourceCache::CreateNewTabHTML() {
           GURL(extension_urls::GetWebstoreLaunchURL()), app_locale).spec());
   load_time_data.SetString("appInstallHintText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
-  load_time_data.SetString("collapseSessionMenuItemText",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_COLLAPSE_SESSION));
-  load_time_data.SetString("expandSessionMenuItemText",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_EXPAND_SESSION));
-  load_time_data.SetString("restoreSessionMenuItemText",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_OPEN_ALL));
   load_time_data.SetString("learn_more",
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   load_time_data.SetString("tile_grid_screenreader_accessible_description",
@@ -513,7 +488,7 @@ void NTPResourceCache::CreateNewTabHTML() {
 #endif
 
   NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
-  NTPLoginHandler::GetLocalizedValues(profile_, &load_time_data);
+  AppLauncherLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
   webui::SetLoadTimeDataDefaults(app_locale, &load_time_data);
 
@@ -549,12 +524,6 @@ void NTPResourceCache::CreateNewTabHTML() {
     }
   }
 
-  // Determine whether to show the menu for accessing tabs on other devices.
-  bool show_other_sessions_menu =
-      should_show_other_devices_menu_ &&
-     !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableNTPOtherSessionsMenu);
-  load_time_data.SetBoolean("showOtherSessionsMenu", show_other_sessions_menu);
   load_time_data.SetBoolean(
       "isUserSignedIn",
       SigninManagerFactory::GetForProfile(profile_)->IsAuthenticated());

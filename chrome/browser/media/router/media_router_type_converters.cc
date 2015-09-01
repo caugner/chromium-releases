@@ -37,6 +37,16 @@ TypeConverter<media_router::MediaRoute, MediaRoutePtr>::Convert(
 }
 
 // static
+scoped_ptr<media_router::MediaRoute>
+TypeConverter<scoped_ptr<media_router::MediaRoute>, MediaRoutePtr>::Convert(
+    const MediaRoutePtr& input) {
+  return make_scoped_ptr(new media_router::MediaRoute(
+      input->media_route_id, media_router::MediaSource(input->media_source),
+      input->media_sink.To<media_router::MediaSink>(), input->description,
+      input->is_local));
+}
+
+// static
 MediaRoutePtr TypeConverter<MediaRoutePtr, media_router::MediaRoute>::Convert(
     const media_router::MediaRoute& input) {
   MediaRoutePtr output(media_router::interfaces::MediaRoute::New());
@@ -70,16 +80,16 @@ media_router::IssueAction::Type IssueActionTypeFromMojo(
     media_router::interfaces::Issue::ActionType action_type) {
   switch (action_type) {
     case media_router::interfaces::Issue::ActionType::ACTION_TYPE_OK:
-      return media_router::IssueAction::OK;
+      return media_router::IssueAction::TYPE_OK;
     case media_router::interfaces::Issue::ActionType::ACTION_TYPE_CANCEL:
-      return media_router::IssueAction::CANCEL;
+      return media_router::IssueAction::TYPE_CANCEL;
     case media_router::interfaces::Issue::ActionType::ACTION_TYPE_DISMISS:
-      return media_router::IssueAction::DISMISS;
+      return media_router::IssueAction::TYPE_DISMISS;
     case media_router::interfaces::Issue::ActionType::ACTION_TYPE_LEARN_MORE:
-      return media_router::IssueAction::LEARN_MORE;
+      return media_router::IssueAction::TYPE_LEARN_MORE;
     default:
       NOTREACHED() << "Unknown issue action type " << action_type;
-      return media_router::IssueAction::DISMISS;
+      return media_router::IssueAction::TYPE_DISMISS;
   }
 }
 

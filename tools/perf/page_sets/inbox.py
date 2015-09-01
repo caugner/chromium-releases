@@ -1,9 +1,9 @@
 # Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 _SCROLL_LIST_ITEM = ('.scroll-list-item .%s')
 _NUM_REPEATS_FOR_EMAIL_OPEN = 40
@@ -18,9 +18,9 @@ class InboxPage(page_module.Page):
         url=('http://localhost/?mark_read_on_open=false&'
              'jsmode=du&preload_anim=True&welcome=0'),
         page_set=page_set,
+        shared_page_state_class=shared_page_state.SharedDesktopPageState,
         credentials_path='data/inbox_credentials.json',
         name='Inbox')
-    self.user_agent_type = 'desktop'
     self.credentials = 'google'
 
   def RunNavigateSteps(self, action_runner):
@@ -73,15 +73,14 @@ class InboxPage(page_module.Page):
     action_runner.Wait(10)
 
 
-class InboxPageSet(page_set_module.PageSet):
+class InboxPageSet(story.StorySet):
 
   """Inbox page set."""
 
   def __init__(self):
     super(InboxPageSet, self).__init__(
-        user_agent_type='desktop',
         archive_data_file='data/inbox_data.json',
-        bucket=page_set_module.INTERNAL_BUCKET
+        cloud_storage_bucket=story.INTERNAL_BUCKET
         )
 
-    self.AddUserStory(InboxPage(self))
+    self.AddStory(InboxPage(self))

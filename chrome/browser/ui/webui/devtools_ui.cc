@@ -49,19 +49,19 @@ const char kFallbackFrontendURL[] =
 
 std::string GetMimeTypeForPath(const std::string& path) {
   std::string filename = PathWithoutParams(path);
-  if (EndsWith(filename, ".html", false)) {
+  if (base::EndsWith(filename, ".html", false)) {
     return "text/html";
-  } else if (EndsWith(filename, ".css", false)) {
+  } else if (base::EndsWith(filename, ".css", false)) {
     return "text/css";
-  } else if (EndsWith(filename, ".js", false)) {
+  } else if (base::EndsWith(filename, ".js", false)) {
     return "application/javascript";
-  } else if (EndsWith(filename, ".png", false)) {
+  } else if (base::EndsWith(filename, ".png", false)) {
     return "image/png";
-  } else if (EndsWith(filename, ".gif", false)) {
+  } else if (base::EndsWith(filename, ".gif", false)) {
     return "image/gif";
-  } else if (EndsWith(filename, ".svg", false)) {
+  } else if (base::EndsWith(filename, ".svg", false)) {
     return "image/svg+xml";
-  } else if (EndsWith(filename, ".manifest", false)) {
+  } else if (base::EndsWith(filename, ".manifest", false)) {
     return "text/cache-manifest";
   }
   return "text/html";
@@ -143,7 +143,8 @@ void DevToolsDataSource::StartDataRequest(
   // Serve request from local bundle.
   std::string bundled_path_prefix(chrome::kChromeUIDevToolsBundledPath);
   bundled_path_prefix += "/";
-  if (StartsWithASCII(path, bundled_path_prefix, false)) {
+  if (base::StartsWith(path, bundled_path_prefix,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
     StartBundledDataRequest(path.substr(bundled_path_prefix.length()),
                             render_process_id, render_frame_id, callback);
     return;
@@ -152,7 +153,8 @@ void DevToolsDataSource::StartDataRequest(
   // Serve request from remote location.
   std::string remote_path_prefix(chrome::kChromeUIDevToolsRemotePath);
   remote_path_prefix += "/";
-  if (StartsWithASCII(path, remote_path_prefix, false)) {
+  if (base::StartsWith(path, remote_path_prefix,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
     StartRemoteDataRequest(path.substr(remote_path_prefix.length()),
                            render_process_id, render_frame_id, callback);
     return;

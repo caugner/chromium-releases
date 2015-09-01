@@ -30,6 +30,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -276,6 +277,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
     return NULL;
   }
 
+  service->component_loader()->set_ignore_whitelist_for_testing(true);
   std::string extension_id = service->component_loader()->Add(manifest, path);
   const Extension* extension =
       registry->enabled_extensions().GetByID(extension_id);
@@ -289,6 +291,22 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponent(
     const base::FilePath& path) {
   return LoadExtensionAsComponentWithManifest(path,
                                               extensions::kManifestFilename);
+}
+
+const Extension* ExtensionBrowserTest::LoadAndLaunchApp(
+    const base::FilePath& path) {
+  const Extension* app = LoadExtension(path);
+  CHECK(app);
+  content::WindowedNotificationObserver app_loaded_observer(
+      content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+      content::NotificationService::AllSources());
+  AppLaunchParams params(profile(), app, extensions::LAUNCH_CONTAINER_NONE,
+                         NEW_WINDOW, extensions::SOURCE_TEST);
+  params.command_line = *base::CommandLine::ForCurrentProcess();
+  OpenApplication(params);
+  app_loaded_observer.Wait();
+
+  return app;
 }
 
 base::FilePath ExtensionBrowserTest::PackExtension(
@@ -617,6 +635,9 @@ void ExtensionBrowserTest::OpenWindow(content::WebContents* contents,
 
 void ExtensionBrowserTest::NavigateInRenderer(content::WebContents* contents,
                                               const GURL& url) {
+  // Ensure any existing navigations complete before trying to navigate anew, to
+  // avoid triggering of the unload event for the wrong navigation.
+  content::WaitForLoadStop(contents);
   bool result = false;
   content::WindowedNotificationObserver windowed_observer(
       content::NOTIFICATION_LOAD_STOP,

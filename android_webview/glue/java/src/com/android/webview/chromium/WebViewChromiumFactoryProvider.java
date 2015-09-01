@@ -37,11 +37,11 @@ import org.chromium.android_webview.AwDevToolsServer;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.R;
 import org.chromium.base.CommandLine;
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.PathService;
 import org.chromium.base.PathUtils;
-import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -49,6 +49,7 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.ContentViewStatics;
+import org.chromium.ui.base.ResourceBundle;
 
 import java.io.File;
 import java.lang.ref.WeakReference;
@@ -128,10 +129,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         AwBrowserProcess.loadLibrary(getWrappedCurrentApplicationContext());
 
         final PackageInfo packageInfo = WebViewFactory.getLoadedPackageInfo();
-
-        // Register the handler that will append the WebView version to logcat in case of a crash.
-        AwContentsStatics.registerCrashHandler(
-                "Version " + packageInfo.versionName + " (code " + packageInfo.versionCode + ")");
 
         // Load glue-layer support library.
         System.loadLibrary("webviewchromium_plat_support");
@@ -234,12 +231,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             return;
         }
 
-        // We don't need to extract any paks because for WebView, they are
-        // in the system image.
-        ResourceExtractor.setMandatoryPaksToExtract("");
-
+        Context context = getWrappedCurrentApplicationContext();
         try {
-            LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW).ensureInitialized();
+            LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW).ensureInitialized(context);
         } catch (ProcessInitException e) {
             throw new RuntimeException("Error initializing WebView library", e);
         }
@@ -248,8 +242,8 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         PathService.override(DIR_RESOURCE_PAKS_ANDROID, "/system/framework/webview/paks");
 
         // Make sure that ResourceProvider is initialized before starting the browser process.
-        Context context = getWrappedCurrentApplicationContext();
         setUpResources(context);
+        ResourceBundle.initializeLocalePaks(context, R.array.locale_paks);
         initPlatSupportLibrary();
         AwBrowserProcess.start(context);
 
@@ -463,7 +457,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             if (mWebViewDatabase == null) {
                 ensureChromiumStartedLocked(true);
                 AwBrowserContext browserContext = getBrowserContextLocked();
-                mWebViewDatabase = new WebViewDatabaseAdapter(browserContext.getFormDatabase(),
+                mWebViewDatabase = new WebViewDatabaseAdapter(
                         browserContext.getHttpAuthDatabase(context));
             }
         }

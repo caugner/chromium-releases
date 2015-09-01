@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
@@ -16,9 +17,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/signin/fake_account_tracker_service.h"
+#include "chrome/browser/signin/fake_account_fetcher_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
@@ -48,16 +50,15 @@
 
 namespace {
 
-KeyedService* SigninManagerBuild(content::BrowserContext* context) {
-  SigninManager* service = NULL;
+scoped_ptr<KeyedService> SigninManagerBuild(content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  service = new SigninManager(
+  scoped_ptr<SigninManager> service(new SigninManager(
       ChromeSigninClientFactory::GetInstance()->GetForProfile(profile),
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
       AccountTrackerServiceFactory::GetForProfile(profile),
-      GaiaCookieManagerServiceFactory::GetForProfile(profile));
+      GaiaCookieManagerServiceFactory::GetForProfile(profile)));
   service->Initialize(NULL);
-  return service;
+  return service.Pass();
 }
 
 class TestSigninManagerObserver : public SigninManagerBase::Observer {
@@ -112,8 +113,8 @@ class SigninManagerTest : public testing::Test {
                               signin::BuildTestSigninClient);
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
                               SigninManagerBuild);
-    builder.AddTestingFactory(AccountTrackerServiceFactory::GetInstance(),
-                              FakeAccountTrackerService::Build);
+    builder.AddTestingFactory(AccountFetcherServiceFactory::GetInstance(),
+                              FakeAccountFetcherService::BuildForTests);
     profile_ = builder.Build();
 
     TestSigninClient* client =
@@ -271,13 +272,12 @@ TEST_F(SigninManagerTest, SignInWithRefreshTokenCallsPostSignout) {
   std::string gaia_id = "12345";
   std::string email = "user@google.com";
 
-  FakeAccountTrackerService* account_tracker_service =
-    static_cast<FakeAccountTrackerService*>(
-        AccountTrackerServiceFactory::GetForProfile(profile()));
-  account_tracker_service->SeedAccountInfo(gaia_id, email);
-  account_tracker_service->EnableNetworkFetches();
-  std::string account_id = account_tracker_service->PickAccountIdForAccount(
-      gaia_id, email);
+  AccountTrackerServiceFactory::GetForProfile(profile())->
+      SeedAccountInfo(gaia_id, email);
+  FakeAccountFetcherService* account_fetcher_service =
+      static_cast<FakeAccountFetcherService*>(
+          AccountFetcherServiceFactory::GetForProfile(profile()));
+  account_fetcher_service->EnableNetworkFetches();
 
   ASSERT_TRUE(signin_client()->get_signed_in_password().empty());
 
@@ -291,8 +291,13 @@ TEST_F(SigninManagerTest, SignInWithRefreshTokenCallsPostSignout) {
   // PostSignedIn is not called until the AccountTrackerService returns.
   ASSERT_EQ("", signin_client()->get_signed_in_password());
 
-  account_tracker_service->FakeUserInfoFetchSuccess(
-      account_id, email, gaia_id, "google.com");
+  account_fetcher_service->FakeUserInfoFetchSuccess(email,
+                                                    gaia_id,
+                                                    "google.com",
+                                                    "full_name",
+                                                    "given_name",
+                                                    "locale",
+                                                    "http://www.google.com");
 
   // AccountTracker and SigninManager are both done and PostSignedIn was called.
   ASSERT_EQ("password", signin_client()->get_signed_in_password());
@@ -440,4 +445,28 @@ TEST_F(SigninManagerTest, UpgradeToNewPrefs) {
       manager_->GetAuthenticatedAccountId());
   EXPECT_EQ("user@gmail.com", info.email);
   EXPECT_EQ("account_id", info.gaia);
+}
+
+TEST_F(SigninManagerTest, CanonicalizesPrefs) {
+  profile()->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
+                                   "user.C@gmail.com");
+  CreateNakedSigninManager();
+  manager_->Initialize(g_browser_process->local_state());
+  EXPECT_EQ("user.C@gmail.com", manager_->GetAuthenticatedUsername());
+
+  // TODO(rogerta): until the migration to gaia id, the account id will remain
+  // the old username.
+  EXPECT_EQ("userc@gmail.com", manager_->GetAuthenticatedAccountId());
+  EXPECT_EQ("userc@gmail.com",
+            profile()->GetPrefs()->GetString(prefs::kGoogleServicesAccountId));
+  EXPECT_EQ("",
+            profile()->GetPrefs()->GetString(prefs::kGoogleServicesUsername));
+
+  // Make sure account tracker has a canonicalized username.
+  AccountTrackerService* service =
+      AccountTrackerServiceFactory::GetForProfile(profile());
+  AccountTrackerService::AccountInfo info = service->GetAccountInfo(
+      manager_->GetAuthenticatedAccountId());
+  EXPECT_EQ("user.C@gmail.com", info.email);
+  EXPECT_EQ("userc@gmail.com", info.account_id);
 }

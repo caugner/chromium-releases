@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/enhanced_bookmarks/enhanced_bookmark_utils.h"
 #include "components/variations/variations_associated_data.h"
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -17,39 +16,25 @@
 
 namespace {
 
+const char kFieldTrialName[] = "EnhancedBookmarks";
+
 bool GetBookmarksExperimentExtensionID(std::string* extension_id) {
   *extension_id = variations::GetVariationParamValue(
-      enhanced_bookmarks::kFieldTrialName, "id");
+      kFieldTrialName, "id");
   if (extension_id->empty())
     return false;
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_IOS) || defined(OS_ANDROID)
   return true;
 #else
   const extensions::FeatureProvider* feature_provider =
       extensions::FeatureProvider::GetPermissionFeatures();
   extensions::Feature* feature = feature_provider->GetFeature("metricsPrivate");
   return feature && feature->IsIdInWhitelist(*extension_id);
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // defined(OS_IOS) || defined(OS_ANDROID)
 }
 
 }  // namespace
-
-#if defined(OS_ANDROID)
-bool IsEnhancedBookmarkImageFetchingEnabled(const PrefService* user_prefs) {
-  if (IsEnhancedBookmarksEnabled())
-    return true;
-
-  // Salient images are collected from visited bookmarked pages even if the
-  // enhanced bookmark feature is turned off. This is to have some images
-  // available so that in the future, when the feature is turned on, the user
-  // experience is not a big list of flat colors. However as a precautionary
-  // measure it is possible to disable this collection of images from finch.
-  std::string disable_fetching = variations::GetVariationParamValue(
-      enhanced_bookmarks::kFieldTrialName, "DisableImagesFetching");
-  return disable_fetching.empty();
-}
-#endif  // defined(OS_ANDROID)
 
 bool IsEnhancedBookmarksEnabled() {
   std::string extension_id;
@@ -83,7 +68,7 @@ bool IsEnableDomDistillerSet() {
           switches::kEnableDomDistiller)) {
     return true;
   }
-  if (variations::GetVariationParamValue(enhanced_bookmarks::kFieldTrialName,
+  if (variations::GetVariationParamValue(kFieldTrialName,
                                          "enable-dom-distiller") == "1")
     return true;
 
@@ -95,7 +80,7 @@ bool IsEnableSyncArticlesSet() {
           switches::kEnableSyncArticles)) {
     return true;
   }
-  if (variations::GetVariationParamValue(enhanced_bookmarks::kFieldTrialName,
+  if (variations::GetVariationParamValue(kFieldTrialName,
                                          "enable-sync-articles") == "1")
     return true;
 

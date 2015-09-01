@@ -103,6 +103,11 @@ class PasswordManager : public LoginModel {
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
 
+  // Handles a manual request to save password.
+  void OnPasswordFormForceSaveRequested(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& password_form);
+
   // Called if |password_form| was filled upon in-page navigation. This often
   // means history.pushState being called from JavaScript. If this causes false
   // positive in password saving, update http://crbug.com/357696.
@@ -188,7 +193,7 @@ class PasswordManager : public LoginModel {
 
   // Observers to be notified of LoginModel events.  This is mutable to allow
   // notification in const member functions.
-  mutable ObserverList<LoginModelObserver> observers_;
+  mutable base::ObserverList<LoginModelObserver> observers_;
 
   // Callbacks to be notified when a password form has been submitted.
   std::vector<PasswordSubmittedCallback> submission_callbacks_;

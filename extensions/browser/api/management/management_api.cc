@@ -541,78 +541,61 @@ ExtensionFunction::ResponseAction ManagementUninstallFunctionBase::Uninstall(
     return RespondNow(Error(keys::kGestureNeededForUninstallError));
 
   if (show_confirm_dialog) {
-    if (auto_confirm_for_test == DO_NOT_SKIP) {
-      // We show the programmatic uninstall ui for extensions uninstalling
-      // other extensions.
-      bool show_programmatic_uninstall_ui = !self_uninstall && extension();
-      AddRef();  // Balanced in ExtensionUninstallAccepted/Canceled
-      // TODO(devlin): A method called "UninstallFunctionDelegate" does not in
-      // any way imply that this actually creates a dialog and runs it.
-      uninstall_dialog_ =
-          delegate->UninstallFunctionDelegate(
-              this,
-              target_extension,
-              show_programmatic_uninstall_ui);
-    } else {
-      // Skip the confirm dialog for testing.
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&ManagementUninstallFunctionBase::Finish,
-                     this,
-                     auto_confirm_for_test == PROCEED));
-    }
+    // We show the programmatic uninstall ui for extensions uninstalling
+    // other extensions.
+    bool show_programmatic_uninstall_ui = !self_uninstall && extension();
+    AddRef();  // Balanced in OnExtensionUninstallDialogClosed.
+    // TODO(devlin): A method called "UninstallFunctionDelegate" does not in
+    // any way imply that this actually creates a dialog and runs it.
+    uninstall_dialog_ = delegate->UninstallFunctionDelegate(
+        this, target_extension, show_programmatic_uninstall_ui);
   } else {  // No confirm dialog.
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(&ManagementUninstallFunctionBase::Finish, this, true));
+        base::Bind(&ManagementUninstallFunctionBase::UninstallExtension, this));
   }
 
   return RespondLater();
 }
 
-// static
-void ManagementUninstallFunctionBase::SetAutoConfirmForTest(
-    bool should_proceed) {
-  auto_confirm_for_test = should_proceed ? PROCEED : ABORT;
+void ManagementUninstallFunctionBase::Finish(bool did_start_uninstall,
+                                             const std::string& error) {
+  Respond(did_start_uninstall ? NoArguments() : Error(error));
 }
 
-void ManagementUninstallFunctionBase::Finish(bool should_uninstall) {
-  if (!should_uninstall) {
-    Respond(Error(keys::kUninstallCanceledError, target_extension_id_));
-    return;
-  }
+void ManagementUninstallFunctionBase::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
+  Finish(did_start_uninstall,
+         ErrorUtils::FormatErrorMessage(keys::kUninstallCanceledError,
+                                        target_extension_id_));
+  Release();  // Balanced in Uninstall().
+}
 
+void ManagementUninstallFunctionBase::UninstallExtension() {
   // The extension can be uninstalled in another window while the UI was
   // showing. Do nothing in that case.
   const Extension* target_extension =
       extensions::ExtensionRegistry::Get(browser_context())
           ->GetExtensionById(target_extension_id_,
                              ExtensionRegistry::EVERYTHING);
-  if (!target_extension) {
-    Respond(Error(keys::kNoExtensionError, target_extension_id_));
-    return;
+  std::string error;
+  bool success = false;
+  if (target_extension) {
+    const ManagementAPIDelegate* delegate = ManagementAPI::GetFactoryInstance()
+                                                ->Get(browser_context())
+                                                ->GetDelegate();
+    base::string16 utf16_error;
+    success = delegate->UninstallExtension(
+        browser_context(), target_extension_id_,
+        extensions::UNINSTALL_REASON_MANAGEMENT_API,
+        base::Bind(&base::DoNothing), &utf16_error);
+    error = base::UTF16ToUTF8(utf16_error);
+  } else {
+    error = ErrorUtils::FormatErrorMessage(keys::kNoExtensionError,
+                                           target_extension_id_);
   }
-
-  const ManagementAPIDelegate* delegate =
-      ManagementAPI::GetFactoryInstance()
-          ->Get(browser_context())
-          ->GetDelegate();
-  base::string16 error;
-  bool success = delegate->UninstallExtension(
-      browser_context(), target_extension_id_,
-      extensions::UNINSTALL_REASON_MANAGEMENT_API,
-      base::Bind(&base::DoNothing), &error);
-  Respond(success ? NoArguments() : Error(base::UTF16ToUTF8(error)));
-}
-
-void ManagementUninstallFunctionBase::ExtensionUninstallAccepted() {
-  Finish(true);
-  Release();
-}
-
-void ManagementUninstallFunctionBase::ExtensionUninstallCanceled() {
-  Finish(false);
-  Release();
+  Finish(success, error);
 }
 
 ManagementUninstallFunction::ManagementUninstallFunction() {
@@ -887,7 +870,8 @@ void ManagementEventRouter::BroadcastEvent(const Extension* extension,
   }
 
   EventRouter::Get(browser_context_)
-      ->BroadcastEvent(scoped_ptr<Event>(new Event(event_name, args.Pass())));
+      ->BroadcastEvent(scoped_ptr<Event>(
+          new Event(events::UNKNOWN, event_name, args.Pass())));
 }
 
 ManagementAPI::ManagementAPI(content::BrowserContext* context)

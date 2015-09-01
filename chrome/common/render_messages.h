@@ -20,12 +20,12 @@
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
-#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_provider.h"
 #include "chrome/common/web_application_info.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/nacl/common/nacl_types.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/top_controls_state.h"
@@ -63,7 +63,7 @@ template <>
 struct ParamTraits<ContentSettingsPattern> {
   typedef ContentSettingsPattern param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -80,8 +80,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusChangeReason,
 IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusState, OMNIBOX_FOCUS_STATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(search_provider::OSDDType,
                           search_provider::OSDD_TYPE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(search_provider::InstallState,
-                          search_provider::INSTALLED_STATE_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(search_provider::InstallState,
+                              search_provider::DENIED,
+                              search_provider::INSTALLED_STATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageAlignment,
                           THEME_BKGRND_IMAGE_ALIGN_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageTiling, THEME_BKGRND_IMAGE_LAST)
@@ -165,21 +166,6 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(logo_alternate)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::ResourceTypeStat)
-  IPC_STRUCT_TRAITS_MEMBER(count)
-  IPC_STRUCT_TRAITS_MEMBER(size)
-  IPC_STRUCT_TRAITS_MEMBER(liveSize)
-  IPC_STRUCT_TRAITS_MEMBER(decodedSize)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::ResourceTypeStats)
-  IPC_STRUCT_TRAITS_MEMBER(images)
-  IPC_STRUCT_TRAITS_MEMBER(cssStyleSheets)
-  IPC_STRUCT_TRAITS_MEMBER(scripts)
-  IPC_STRUCT_TRAITS_MEMBER(xslStyleSheets)
-  IPC_STRUCT_TRAITS_MEMBER(fonts)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::UsageStats)
   IPC_STRUCT_TRAITS_MEMBER(minDeadCapacity)
   IPC_STRUCT_TRAITS_MEMBER(maxDeadCapacity)
@@ -228,18 +214,11 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_WebUIJavaScript,
 IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetContentSettingRules,
                      RendererContentSettingRules /* rules */)
 
-// Asks the renderer to send back stats on the WebCore cache broken down by
-// resource types.
-IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetCacheResourceStats)
-
 // Tells the renderer to create a FieldTrial, and by using a 100% probability
 // for the FieldTrial, forces the FieldTrial to have assigned group name.
 IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
                      std::string /* field trial name */,
                      std::string /* group name that was assigned. */)
-
-// Asks the renderer to send back V8 heap stats.
-IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetV8HeapStats)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetPageSequenceNumber,
                     int /* page_seq_no */)
@@ -291,6 +270,10 @@ IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetIsIncognitoProcess,
 // Sent when the profile changes the kSafeBrowsingEnabled preference.
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetClientSidePhishingDetection,
                     bool /* enable_phishing_detection */)
+
+// Reloads the image selected by the most recently opened context menu
+// (if there indeed is an image at that location).
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_RequestReloadImageForContextNode)
 
 // Asks the renderer for a thumbnail of the image selected by the most
 // recently opened context menu, if there is one. If the image's area
@@ -481,11 +464,6 @@ IPC_SYNC_MESSAGE_ROUTED2_1(ChromeViewHostMsg_GetSearchProviderInstallState,
                            GURL /* inquiry url */,
                            search_provider::InstallState /* install */)
 
-// Sends back stats about the V8 heap.
-IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_V8HeapStats,
-                     int /* size of heap (allocated from the OS) */,
-                     int /* bytes in use */)
-
 // Notifies when a plugin couldn't be loaded because it's outdated.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
                     int /* placeholder ID */,
@@ -496,11 +474,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedUnauthorizedPlugin,
                     base::string16 /* name */,
                     std::string /* plugin group identifier */)
-
-// Provide the browser process with information about the WebCore resource
-// cache and current renderer framerate.
-IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_ResourceTypeStats,
-                     blink::WebCache::ResourceTypeStats)
 
 // Message sent from the renderer to the browser to notify it of a
 // window.print() call which should cancel the prerender. The message is sent
@@ -609,6 +582,10 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_IsCrashReportingEnabled,
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_AppBannerPromptReply,
                     int /* request_id */,
                     blink::WebAppBannerPromptReply /* reply */)
+
+// Tells the browser to restart the app banner display pipeline.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RequestShowAppBanner,
+                    int32_t /* request_id */)
 
 // Sent by the renderer to indicate that a fields trial has been activated.
 IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_FieldTrialActivated,

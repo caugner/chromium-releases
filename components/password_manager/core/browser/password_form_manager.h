@@ -12,7 +12,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
@@ -311,6 +310,12 @@ class PasswordFormManager : public PasswordStoreConsumer {
   bool UpdatePendingCredentialsIfOtherPossibleUsername(
       const base::string16& username);
 
+  // Returns true if |form| is a username update of a credential already in
+  // |best_matches_|. Sets |pending_credentials_| to the appropriate
+  // PasswordForm if it returns true.
+  bool UpdatePendingCredentialsIfUsernameChanged(
+      const autofill::PasswordForm& form);
+
   // Update state to reflect that |credential| was used. This is broken out from
   // UpdateLogin() so that PSL matches can also be properly updated.
   void UpdateMetadataForUsage(const autofill::PasswordForm& credential);
@@ -335,11 +340,7 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // Set of PasswordForms from the DB that best match the form
   // being managed by this. Use a map instead of vector, because we most
   // frequently require lookups by username value in IsNewLogin.
-  // TODO(vabr): Consider using ScopedPtrHashMap instead of the deleter below.
   autofill::PasswordFormMap best_matches_;
-
-  // Cleans up when best_matches_ goes out of scope.
-  STLValueDeleter<autofill::PasswordFormMap> best_matches_deleter_;
 
   // The PasswordForm from the page or dialog managed by |this|.
   const autofill::PasswordForm observed_form_;

@@ -49,7 +49,7 @@ std::string BuildGetFamilyProfileResponse(
   family_dict->SetWithoutPathExpansion("profile", profile_dict);
   dict.SetWithoutPathExpansion("family", family_dict);
   std::string result;
-  base::JSONWriter::Write(&dict, &result);
+  base::JSONWriter::Write(dict, &result);
   return result;
 }
 
@@ -58,7 +58,7 @@ std::string BuildEmptyGetFamilyProfileResponse() {
   base::DictionaryValue* family_dict = new base::DictionaryValue;
   dict.SetWithoutPathExpansion("family", family_dict);
   std::string result;
-  base::JSONWriter::Write(&dict, &result);
+  base::JSONWriter::Write(dict, &result);
   return result;
 }
 
@@ -97,7 +97,7 @@ std::string BuildGetFamilyMembersResponse(
   }
   dict.SetWithoutPathExpansion("members", list);
   std::string result;
-  base::JSONWriter::Write(&dict, &result);
+  base::JSONWriter::Write(dict, &result);
   return result;
 }
 
@@ -281,7 +281,7 @@ TEST_F(FamilyInfoFetcherTest, NoRefreshToken) {
   // After all refresh tokens have been loaded, there is still no token for our
   // user, so we expect a token error.
   EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::TOKEN_ERROR));
-  token_service_.IssueAllRefreshTokensLoaded();
+  token_service_.LoadCredentials("");
 }
 
 TEST_F(FamilyInfoFetcherTest, GetTokenFailure) {

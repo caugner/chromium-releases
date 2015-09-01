@@ -158,9 +158,11 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
 
 // static
 AwBrowserPermissionRequestDelegate* AwBrowserPermissionRequestDelegate::FromID(
-    int render_process_id, int render_view_id) {
-  AwContents* aw_contents = AwContents::FromID(render_process_id,
-                                               render_view_id);
+    int render_process_id, int render_frame_id) {
+  AwContents* aw_contents = AwContents::FromWebContents(
+      content::WebContents::FromRenderFrameHost(
+          content::RenderFrameHost::FromID(render_process_id,
+                                           render_frame_id)));
   return implicit_cast<AwBrowserPermissionRequestDelegate*>(aw_contents);
 }
 
@@ -489,6 +491,8 @@ void AwContents::InvokeGeolocationCallback(JNIEnv* env,
                                            jboolean value,
                                            jstring origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (pending_geolocation_prompts_.empty())
+    return;
 
   GURL callback_origin(base::android::ConvertJavaStringToUTF16(env, origin));
   if (callback_origin.GetOrigin() ==
@@ -614,6 +618,19 @@ void AwContents::CancelGeolocationPermissionRequests(const GURL& origin) {
       origin, AwPermissionRequest::Geolocation);
 }
 
+void AwContents::RequestMIDISysexPermission(
+    const GURL& origin,
+    const base::Callback<void(bool)>& callback) {
+  permission_request_handler_->SendRequest(
+      scoped_ptr<AwPermissionRequestDelegate>(new SimplePermissionRequest(
+          origin, AwPermissionRequest::MIDISysex, callback)));
+}
+
+void AwContents::CancelMIDISysexPermissionRequests(const GURL& origin) {
+  permission_request_handler_->CancelRequest(
+      origin, AwPermissionRequest::AwPermissionRequest::MIDISysex);
+}
+
 void AwContents::FindAllAsync(JNIEnv* env, jobject obj, jstring search_string) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   GetFindHelper()->FindAllAsync(ConvertJavaStringToUTF16(env, search_string));
@@ -676,7 +693,7 @@ void AwContents::OnReceivedIcon(const GURL& icon_url, const SkBitmap& bitmap) {
     return;
 
   content::NavigationEntry* entry =
-      web_contents_->GetController().GetActiveEntry();
+      web_contents_->GetController().GetLastCommittedEntry();
 
   if (entry) {
     entry->GetFavicon().valid = true;
@@ -728,12 +745,12 @@ void AwContents::OnNewPicture() {
   }
 }
 
-base::android::ScopedJavaLocalRef<jbyteArray>
-    AwContents::GetCertificate(JNIEnv* env,
-                               jobject obj) {
+base::android::ScopedJavaLocalRef<jbyteArray> AwContents::GetCertificate(
+    JNIEnv* env,
+    jobject obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NavigationEntry* entry =
-      web_contents_->GetController().GetActiveEntry();
+      web_contents_->GetController().GetLastCommittedEntry();
   if (!entry)
     return ScopedJavaLocalRef<jbyteArray>();
   // Get the certificate
@@ -846,7 +863,7 @@ AwContents::GetOpaqueState(JNIEnv* env, jobject obj) {
   if (!web_contents_->GetController().GetEntryCount())
     return ScopedJavaLocalRef<jbyteArray>();
 
-  Pickle pickle;
+  base::Pickle pickle;
   if (!WriteToPickle(*web_contents_, &pickle)) {
     return ScopedJavaLocalRef<jbyteArray>();
   } else {
@@ -863,9 +880,9 @@ jboolean AwContents::RestoreFromOpaqueState(
   std::vector<uint8> state_vector;
   base::android::JavaByteArrayToByteVector(env, state, &state_vector);
 
-  Pickle pickle(reinterpret_cast<const char*>(state_vector.begin()),
-                state_vector.size());
-  PickleIterator iterator(pickle);
+  base::Pickle pickle(reinterpret_cast<const char*>(state_vector.data()),
+                      state_vector.size());
+  base::PickleIterator iterator(pickle);
 
   return RestoreFromPickle(&iterator, web_contents_.get());
 }
@@ -938,6 +955,15 @@ void AwContents::SetBackgroundColor(JNIEnv* env, jobject obj, jint color) {
   render_view_host_ext_->SetBackgroundColor(color);
 }
 
+void AwContents::OnComputeScroll(JNIEnv* env,
+                                 jobject obj,
+                                 jlong animation_time_millis) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  browser_view_renderer_.OnComputeScroll(
+      base::TimeTicks() +
+      base::TimeDelta::FromMilliseconds(animation_time_millis));
+}
+
 jlong AwContents::ReleasePopupAwContents(JNIEnv* env, jobject obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return reinterpret_cast<intptr_t>(pending_contents_.release());
@@ -967,13 +993,13 @@ void AwContents::ScrollContainerViewTo(gfx::Vector2d new_value) {
       env, obj.obj(), new_value.x(), new_value.y());
 }
 
-bool AwContents::IsFlingActive() const {
+bool AwContents::IsSmoothScrollingActive() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return false;
-  return Java_AwContents_isFlingActive(env, obj.obj());
+  return Java_AwContents_isSmoothScrollingActive(env, obj.obj());
 }
 
 void AwContents::UpdateScrollState(gfx::Vector2d max_scroll_offset,
@@ -997,14 +1023,16 @@ void AwContents::UpdateScrollState(gfx::Vector2d max_scroll_offset,
                                     max_page_scale_factor);
 }
 
-void AwContents::DidOverscroll(gfx::Vector2d overscroll_delta) {
+void AwContents::DidOverscroll(gfx::Vector2d overscroll_delta,
+                               gfx::Vector2dF overscroll_velocity) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_AwContents_didOverscroll(
-      env, obj.obj(), overscroll_delta.x(), overscroll_delta.y());
+  Java_AwContents_didOverscroll(env, obj.obj(), overscroll_delta.x(),
+                                overscroll_delta.y(), overscroll_velocity.x(),
+                                overscroll_velocity.y());
 }
 
 void AwContents::SetDipScale(JNIEnv* env, jobject obj, jfloat dip_scale) {

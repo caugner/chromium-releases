@@ -9,13 +9,14 @@
 #import "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_browser_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#import "testing/gtest_mac.h"
 #import "ui/base/cocoa/fullscreen_window_manager.h"
 
 namespace {
 class MockPermissionBubbleCocoa : public PermissionBubbleCocoa {
  public:
-  MockPermissionBubbleCocoa(NSWindow* parent_window)
-      : PermissionBubbleCocoa(parent_window) {}
+  MockPermissionBubbleCocoa(Browser* browser)
+      : PermissionBubbleCocoa(browser) {}
 
   MOCK_METHOD0(HasLocationBar, bool());
 
@@ -25,7 +26,7 @@ class MockPermissionBubbleCocoa : public PermissionBubbleCocoa {
 }
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest, HasLocationBarByDefault) {
-  PermissionBubbleCocoa bubble(browser()->window()->GetNativeWindow());
+  PermissionBubbleCocoa bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
   EXPECT_TRUE(bubble.HasLocationBar());
@@ -33,7 +34,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest, HasLocationBarByDefault) {
 }
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest, FullscreenHasLocationBar) {
-  PermissionBubbleCocoa bubble(browser()->window()->GetNativeWindow());
+  PermissionBubbleCocoa bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
 
@@ -50,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest, FullscreenHasLocationBar) {
 }
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleAppBrowserTest, AppHasNoLocationBar) {
-  PermissionBubbleCocoa bubble(app_browser()->window()->GetNativeWindow());
+  PermissionBubbleCocoa bubble(app_browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
   EXPECT_FALSE(bubble.HasLocationBar());
@@ -61,7 +62,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleAppBrowserTest, AppHasNoLocationBar) {
 // Kiosk mode on Mac has a location bar but it shouldn't.
 IN_PROC_BROWSER_TEST_F(PermissionBubbleKioskBrowserTest,
                        DISABLED_KioskHasNoLocationBar) {
-  PermissionBubbleCocoa bubble(browser()->window()->GetNativeWindow());
+  PermissionBubbleCocoa bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
   EXPECT_FALSE(bubble.HasLocationBar());
@@ -70,8 +71,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleKioskBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
                        AnchorPositionWithLocationBar) {
-  testing::NiceMock<MockPermissionBubbleCocoa> bubble(
-      browser()->window()->GetNativeWindow());
+  testing::NiceMock<MockPermissionBubbleCocoa> bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
   ON_CALL(bubble, HasLocationBar()).WillByDefault(testing::Return(true));
@@ -85,14 +85,13 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
   LocationBarViewMac* location_bar_bridge = [controller locationBarBridge];
   NSPoint expected = location_bar_bridge->GetPageInfoBubblePoint();
   expected = [window convertBaseToScreen:expected];
-  EXPECT_TRUE(NSEqualPoints(expected, anchor));
+  EXPECT_NSEQ(expected, anchor);
   bubble.Hide();
 }
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
                        AnchorPositionWithoutLocationBar) {
-  testing::NiceMock<MockPermissionBubbleCocoa> bubble(
-      browser()->window()->GetNativeWindow());
+  testing::NiceMock<MockPermissionBubbleCocoa> bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
   ON_CALL(bubble, HasLocationBar()).WillByDefault(testing::Return(false));
@@ -104,14 +103,13 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
   NSRect frame = [window frame];
   NSPoint expected = NSMakePoint(frame.size.width / 2, frame.size.height);
   expected = [window convertBaseToScreen:expected];
-  EXPECT_TRUE(NSEqualPoints(expected, anchor));
+  EXPECT_NSEQ(expected, anchor);
   bubble.Hide();
 }
 
 IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
                        AnchorPositionDifferentWithAndWithoutLocationBar) {
-  testing::NiceMock<MockPermissionBubbleCocoa> bubble(
-      browser()->window()->GetNativeWindow());
+  testing::NiceMock<MockPermissionBubbleCocoa> bubble(browser());
   bubble.SetDelegate(test_delegate());
   bubble.Show(requests(), accept_states());
 
@@ -123,6 +121,6 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleBrowserTest,
 
   // The bubble should be in different places depending if the location bar is
   // available or not.
-  EXPECT_FALSE(NSEqualPoints(withLocationBar, withoutLocationBar));
+  EXPECT_NSNE(withLocationBar, withoutLocationBar);
   bubble.Hide();
 }

@@ -12,12 +12,12 @@
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/escape.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon_stdstring.h"
-#include "url/url_util.h"
 
 namespace password_manager {
 
@@ -43,7 +43,7 @@ base::StringPiece ComponentString(const std::string& uri,
 bool ContainsOnlyAlphanumericAnd(const base::StringPiece& input,
                                  const base::StringPiece& other_characters) {
   for (char c : input) {
-    if (!IsAsciiAlpha(c) && !IsAsciiDigit(c) &&
+    if (!base::IsAsciiAlpha(c) && !base::IsAsciiDigit(c) &&
         other_characters.find(c) == base::StringPiece::npos)
       return false;
   }
@@ -182,11 +182,11 @@ bool ParseAndCanonicalizeFacetURI(const std::string& input_uri,
   url::ParseStandardURL(input_uri.c_str(), input_uri.size(), &input_parsed);
 
   base::StringPiece scheme = ComponentString(input_uri, input_parsed.scheme);
-  if (url::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
-                                url::kHttpsScheme)) {
+  if (base::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
+                                 url::kHttpsScheme)) {
     return CanonicalizeWebFacetURI(input_uri, input_parsed, canonical_uri);
-  } else if (url::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
-                                       kAndroidAppScheme)) {
+  } else if (base::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
+                                        kAndroidAppScheme)) {
     return CanonicalizeAndroidFacetURI(input_uri, input_parsed, canonical_uri);
   }
   return false;
@@ -302,7 +302,7 @@ bool IsAffiliationBasedMatchingEnabled(const base::CommandLine& command_line) {
     return false;
   if (command_line.HasSwitch(switches::kEnableAffiliationBasedMatching))
     return true;
-  return StartsWithASCII(group_name, "Enabled", /*case_sensitive=*/false);
+  return base::StartsWithASCII(group_name, "Enabled", /*case_sensitive=*/false);
 }
 
 bool IsPropagatingPasswordChangesToWebCredentialsEnabled(
@@ -317,7 +317,7 @@ bool IsPropagatingPasswordChangesToWebCredentialsEnabled(
     return false;
   if (command_line.HasSwitch(switches::kEnableAffiliationBasedMatching))
     return true;
-  return LowerCaseEqualsASCII(update_enabled, "enabled");
+  return base::LowerCaseEqualsASCII(update_enabled, "enabled");
 }
 
 bool IsAffiliationRequestsForDummyFacetsEnabled(
@@ -328,7 +328,7 @@ bool IsAffiliationRequestsForDummyFacetsEnabled(
     return false;
   if (command_line.HasSwitch(switches::kEnableAffiliationBasedMatching))
     return true;
-  return LowerCaseEqualsASCII(synthesizing_enabled, "enabled");
+  return base::LowerCaseEqualsASCII(synthesizing_enabled, "enabled");
 }
 
 bool IsValidAndroidFacetURI(const std::string& url) {
@@ -336,4 +336,13 @@ bool IsValidAndroidFacetURI(const std::string& url) {
   return facet.IsValidAndroidFacetURI();
 }
 
+std::string GetHumanReadableOrigin(const autofill::PasswordForm& password_form,
+                                   const std::string& languages) {
+  password_manager::FacetURI facet_uri =
+      password_manager::FacetURI::FromPotentiallyInvalidSpec(
+          password_form.signon_realm);
+  if (facet_uri.IsValidAndroidFacetURI())
+    return facet_uri.scheme() + "://" + facet_uri.android_package_name();
+  return base::UTF16ToUTF8(net::FormatUrl(password_form.origin, languages));
+}
 }  // namespace password_manager

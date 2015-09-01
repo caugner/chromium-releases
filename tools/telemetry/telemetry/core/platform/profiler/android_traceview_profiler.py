@@ -2,11 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
 
-from telemetry.core.backends.chrome import android_browser_finder
 from telemetry.core.platform import profiler
 from telemetry.core import util
+from telemetry.internal.backends.chrome import android_browser_finder
 
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
 try:
@@ -58,8 +59,12 @@ class AndroidTraceviewProfiler(profiler.Profiler):
       # pylint: disable=cell-var-from-loop
       util.WaitFor(lambda: self._FileSize(trace_file) > 0, timeout=10)
       output_files.append(trace_file)
-    self._browser_backend.adb.device().PullFile(
-        self._DEFAULT_DEVICE_DIR, self._output_path)
+    try:
+      self._browser_backend.adb.device().PullFile(
+          self._DEFAULT_DEVICE_DIR, self._output_path)
+    except:
+      logging.exception('New exception caused by DeviceUtils conversion')
+      raise
     self._browser_backend.adb.RunShellCommand(
         'rm ' + os.path.join(self._DEFAULT_DEVICE_DIR, '*'))
     print 'Traceview profiles available in ', self._output_path

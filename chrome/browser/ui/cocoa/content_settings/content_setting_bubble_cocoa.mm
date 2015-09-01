@@ -82,8 +82,7 @@ const int kMIDISysExHostPadding = 4;
 void SetControlSize(NSControl* control, NSControlSize controlSize) {
   CGFloat fontSize = [NSFont systemFontSizeForControlSize:controlSize];
   NSCell* cell = [control cell];
-  NSFont* font = [NSFont fontWithName:[[cell font] fontName] size:fontSize];
-  [cell setFont:font];
+  [cell setFont:[NSFont systemFontOfSize:fontSize]];
   [cell setControlSize:controlSize];
 }
 
@@ -286,6 +285,8 @@ class ContentSettingBubbleWebContentsObserverBridge
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
     case CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS:
     case CONTENT_SETTINGS_TYPE_APP_BANNER:
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
       NOTREACHED();
   }
   if ((self = [super initWithWindowNibPath:nibPath

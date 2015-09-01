@@ -5,6 +5,7 @@
 #ifndef CHROME_RENDERER_CHROME_CONTENT_RENDERER_CLIENT_H_
 #define CHROME_RENDERER_CHROME_CONTENT_RENDERER_CLIENT_H_
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -42,6 +43,7 @@ namespace extensions {
 class Dispatcher;
 class Extension;
 class ExtensionSet;
+class ExtensionsGuestViewContainerDispatcher;
 class RendererPermissionsPolicyDelegate;
 }
 
@@ -107,13 +109,12 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                       const base::Closure& closure) override;
   bool RunIdleHandlerWhenWidgetsHidden() override;
   bool AllowPopup() override;
-  bool ShouldFork(blink::WebFrame* frame,
+  bool ShouldFork(blink::WebLocalFrame* frame,
                   const GURL& url,
                   const std::string& http_method,
                   bool is_initial_navigation,
                   bool is_server_redirect,
                   bool* send_referrer) override;
-  bool ShouldForwardToGuestContainer(const IPC::Message& msg) override;
   bool WillSendRequest(blink::WebFrame* frame,
                        ui::PageTransition transition_type,
                        const GURL& url,
@@ -132,7 +133,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       blink::WebSpeechSynthesizerClient* client) override;
   bool ShouldReportDetailedMessageForSource(
       const base::string16& source) const override;
-  bool ShouldEnableSiteIsolationPolicy() const override;
+  bool ShouldGatherSiteIsolationStats() const override;
   blink::WebWorkerContentSettingsClientProxy*
   CreateWorkerContentSettingsClientProxy(content::RenderFrame* render_frame,
                                          blink::WebFrame* frame) override;
@@ -150,6 +151,9 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void RecordRapporURL(const std::string& metric, const GURL& url) override;
   scoped_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
       content::RenderFrame* render_frame) override;
+  void AddImageContextMenuProperties(
+      const blink::WebURLResponse& response,
+      std::map<std::string, std::string>* properties) override;
 
 #if defined(ENABLE_EXTENSIONS)
   // Takes ownership.
@@ -164,11 +168,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void SetSpellcheck(SpellCheck* spellcheck);
 #endif
 
+#if defined(ENABLE_PLUGINS)
   static blink::WebPlugin* CreatePlugin(
       content::RenderFrame* render_frame,
       blink::WebLocalFrame* frame,
       const blink::WebPluginParams& params,
       const ChromeViewHostMsg_GetPluginInfo_Output& output);
+#endif
 
 #if defined(ENABLE_PLUGINS) && defined(ENABLE_EXTENSIONS)
   static bool IsExtensionOrSharedModuleWhitelisted(
@@ -190,7 +196,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
   // Returns true if the frame is navigating to an URL either into or out of an
   // extension app's extent.
-  bool CrossesExtensionExtents(blink::WebFrame* frame,
+  bool CrossesExtensionExtents(blink::WebLocalFrame* frame,
                                const GURL& new_url,
                                const extensions::ExtensionSet& extensions,
                                bool is_extension_url,
@@ -220,6 +226,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<extensions::Dispatcher> extension_dispatcher_;
   scoped_ptr<extensions::RendererPermissionsPolicyDelegate>
       permissions_policy_delegate_;
+  scoped_ptr<extensions::ExtensionsGuestViewContainerDispatcher>
+      guest_view_container_dispatcher_;
 #endif
 
   scoped_ptr<network_hints::PrescientNetworkingDispatcher>

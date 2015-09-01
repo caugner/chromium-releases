@@ -92,20 +92,11 @@ NetErrorHelper::~NetErrorHelper() {
   RenderThread::Get()->RemoveObserver(this);
 }
 
-void NetErrorHelper::ReloadButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::RELOAD_BUTTON);
-}
-
-void NetErrorHelper::ShowSavedCopyButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::SHOW_SAVED_COPY_BUTTON);
-}
-
-void NetErrorHelper::MoreButtonPressed() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::MORE_BUTTON);
-}
-
-void NetErrorHelper::TrackActivatedEasterEgg() {
-  core_->ExecuteButtonPress(NetErrorHelperCore::EASTER_EGG);
+void NetErrorHelper::ButtonPressed(
+    error_page::NetErrorHelperCore::Button button) {
+  GURL url = render_frame()->GetWebFrame()->document().url();
+  bool is_error_page = (url == GURL(content::kUnreachableWebDataURL));
+  core_->ExecuteButtonPress(is_error_page, button);
 }
 
 void NetErrorHelper::DidStartProvisionalLoad() {
@@ -176,6 +167,8 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     scoped_ptr<ErrorPageParams> params,
     bool* reload_button_shown,
     bool* show_saved_copy_button_shown,
+    bool* show_cached_copy_button_shown,
+    bool* show_cached_page_button_shown,
     std::string* error_html) const {
   error_html->clear();
 
@@ -197,6 +190,19 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     *show_saved_copy_button_shown =
         error_strings.Get("showSavedCopyButton", NULL);
 
+    bool show_cache_copy_button_default_label;
+    bool showing_cache_copy_experiment =
+        error_strings.GetBoolean("cacheButton.defaultLabel",
+        &show_cache_copy_button_default_label);
+    if (showing_cache_copy_experiment) {
+      if (show_cache_copy_button_default_label) {
+        *show_cached_copy_button_shown = false;
+        *show_cached_page_button_shown = true;
+      } else {
+        *show_cached_page_button_shown = false;
+        *show_cached_copy_button_shown = true;
+      }
+    }
     // "t" is the id of the template's root node.
     *error_html = webui::GetTemplatesHtml(template_html, &error_strings, "t");
   }
@@ -230,7 +236,7 @@ void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
                              &error_strings);
 
   std::string json;
-  JSONWriter::Write(&error_strings, &json);
+  JSONWriter::Write(error_strings, &json);
 
   std::string js = "if (window.updateForDnsProbe) "
                    "updateForDnsProbe(" + json + ");";
@@ -262,7 +268,7 @@ void NetErrorHelper::FetchNavigationCorrections(
   correction_fetcher_->Start(
       frame,
       blink::WebURLRequest::RequestContextInternal,
-      blink::WebURLRequest::FrameTypeTopLevel,
+      blink::WebURLRequest::FrameTypeNone,
       content::ResourceFetcher::PLATFORM_LOADER,
       base::Bind(&NetErrorHelper::OnNavigationCorrectionsFetched,
                  base::Unretained(this)));
@@ -304,7 +310,8 @@ void NetErrorHelper::ReloadPage() {
 
 void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
   blink::WebFrame* web_frame = render_frame()->GetWebFrame();
-  DCHECK(!EqualsASCII(web_frame->dataSource()->request().httpMethod(), "POST"));
+  DCHECK(!base::EqualsASCII(web_frame->dataSource()->request().httpMethod(),
+                            "POST"));
 
   blink::WebURLRequest request(page_url);
   request.setCachePolicy(blink::WebURLRequest::ReturnCacheDataDontLoad);

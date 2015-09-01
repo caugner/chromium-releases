@@ -5,10 +5,10 @@ import page_sets
 import trace_test_expectations
 
 from telemetry import benchmark
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.page import page_test
 from telemetry.timeline import model as model_module
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 
 TOPLEVEL_GL_CATEGORY = 'gpu_toplevel'
 TOPLEVEL_SERVICE_CATEGORY = 'disabled-by-default-gpu.service'
@@ -74,12 +74,12 @@ class _DeviceTraceValidator(_TraceValidatorBase):
 
 class _TraceTestBase(benchmark.Benchmark):
   """Base class for the trace tests."""
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     # Utilize pixel tests page set as a set of simple pages to load.
-    page_set = page_sets.PixelTestsPageSet(base_name=self.name)
-    for page in page_set.pages:
-      page.script_to_evaluate_on_commit = test_harness_script
-    return page_set
+    story_set = page_sets.PixelTestsStorySet(base_name=self.name)
+    for story in story_set:
+      story.script_to_evaluate_on_commit = test_harness_script
+    return story_set
 
 
 class TraceTest(_TraceTestBase):

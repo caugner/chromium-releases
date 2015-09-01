@@ -124,11 +124,11 @@ MULTIPROCESS_TEST_MAIN(ChromeWatcherClientTestProcess) {
 class ChromeWatcherClientThread : public base::SimpleThread {
  public:
   ChromeWatcherClientThread()
-      : client_(base::Bind(&ChromeWatcherClientThread::GenerateCommandLine,
+      : SimpleThread("ChromeWatcherClientTest thread"),
+        client_(base::Bind(&ChromeWatcherClientThread::GenerateCommandLine,
                            base::Unretained(this))),
         complete_(false, false),
-        result_(false),
-        SimpleThread("ChromeWatcherClientTest thread") {}
+        result_(false) {}
 
   // Waits up to |timeout| for the call to EnsureInitialized to complete. If it
   // does, sets |result| to the return value of EnsureInitialized and returns
@@ -221,8 +221,7 @@ class ChromeWatcherClientTest : public testing::Test {
   void TearDown() override {
     // Even if we never launched, the following is harmless.
     SignalExit();
-    int exit_code = 0;
-    thread_.client().WaitForExit(&exit_code);
+    thread_.client().WaitForExit(nullptr);
     thread_.Join();
   }
 

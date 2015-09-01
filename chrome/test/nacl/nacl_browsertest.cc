@@ -381,13 +381,28 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnacl,
   RunNaClIntegrationTest(FILE_PATH_LITERAL("pnacl_error_handling.html"));
 }
 
+// NaClBrowserTestPnaclSubzero.PnaclErrorHandling is flaky on Win XP.
+// http://crbug.com/499878
+#if defined(OS_WIN)
+#define MAYBE_PnaclErrorHandling DISABLED_PnaclErrorHandling
+#else
+#define MAYBE_PnaclErrorHandling PnaclErrorHandling
+#endif
+
+// Test Subzero. Subzero is triggered by the O0 option so reuse
+// test harnesses that use "optlevel": 0.
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclSubzero,
+                       MAYBE_PnaclErrorHandling) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("pnacl_error_handling.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnacl,
                        MAYBE_PNACL(PnaclNMFOptionsO0)) {
   RunLoadTest(FILE_PATH_LITERAL("pnacl_options.html?use_nmf=o_0"));
 }
 
-// Test Subzero. Subzero is triggered by the O0 option so reuse that test
-// pexe and test harness.
+// Test Subzero. Subzero is triggered by the O0 option so reuse
+// test harnesses that use "optlevel": 0.
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclSubzero,
                        MAYBE_PNACL(PnaclNMFOptionsO0)) {
   RunLoadTest(FILE_PATH_LITERAL("pnacl_options.html?use_nmf=o_0"));

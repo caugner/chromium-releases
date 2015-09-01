@@ -14,6 +14,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/drive/debug_info_collector.h"
 #include "chrome/browser/chromeos/drive/download_handler.h"
+#include "chrome/browser/chromeos/drive/drive_pref_names.h"
 #include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -259,15 +260,16 @@ DriveIntegrationService::DriveIntegrationService(
   resource_metadata_.reset(new internal::ResourceMetadata(
       metadata_storage_.get(), cache_.get(), blocking_task_runner_));
 
+  file_task_runner_ =
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE);
   file_system_.reset(
-      test_file_system ? test_file_system : new FileSystem(
-          profile_->GetPrefs(),
-          logger_.get(),
-          cache_.get(),
-          scheduler_.get(),
-          resource_metadata_.get(),
-          blocking_task_runner_.get(),
-          cache_root_directory_.Append(kTemporaryFileDirectory)));
+      test_file_system
+          ? test_file_system
+          : new FileSystem(
+                profile_->GetPrefs(), logger_.get(), cache_.get(),
+                scheduler_.get(), resource_metadata_.get(),
+                blocking_task_runner_.get(), file_task_runner_.get(),
+                cache_root_directory_.Append(kTemporaryFileDirectory)));
   download_handler_.reset(new DownloadHandler(file_system()));
   debug_info_collector_.reset(new DebugInfoCollector(
       resource_metadata_.get(), file_system(), blocking_task_runner_.get()));
@@ -553,9 +555,9 @@ void DriveIntegrationService::InitializeAfterMetadataInitialized(
 void DriveIntegrationService::AvoidDriveAsDownloadDirecotryPreference() {
   PrefService* pref_service = profile_->GetPrefs();
   if (util::IsUnderDriveMountPoint(
-          pref_service->GetFilePath(prefs::kDownloadDefaultDirectory))) {
+          pref_service->GetFilePath(::prefs::kDownloadDefaultDirectory))) {
     pref_service->SetFilePath(
-        prefs::kDownloadDefaultDirectory,
+        ::prefs::kDownloadDefaultDirectory,
         file_manager::util::GetDownloadsFolderForProfile(profile_));
   }
 }

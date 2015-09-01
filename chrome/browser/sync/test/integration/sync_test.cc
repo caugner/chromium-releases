@@ -10,9 +10,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -53,11 +55,11 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/google/core/browser/google_url_tracker.h"
-#include "components/invalidation/invalidation_service.h"
-#include "components/invalidation/invalidation_switches.h"
-#include "components/invalidation/p2p_invalidation_service.h"
-#include "components/invalidation/p2p_invalidator.h"
-#include "components/invalidation/profile_invalidation_provider.h"
+#include "components/invalidation/impl/invalidation_switches.h"
+#include "components/invalidation/impl/p2p_invalidation_service.h"
+#include "components/invalidation/impl/p2p_invalidator.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/public/invalidation_service.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/os_crypt/os_crypt.h"
 #include "components/search_engines/template_url_service.h"
@@ -142,34 +144,33 @@ void SetupNetworkCallback(
   done->Signal();
 }
 
-KeyedService* BuildFakeServerProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildFakeServerProfileInvalidationProvider(
     content::BrowserContext* context) {
-  return new invalidation::ProfileInvalidationProvider(
+  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
       scoped_ptr<invalidation::InvalidationService>(
-          new fake_server::FakeServerInvalidationService));
+          new fake_server::FakeServerInvalidationService)));
 }
 
-KeyedService* BuildP2PProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildP2PProfileInvalidationProvider(
     content::BrowserContext* context,
     syncer::P2PNotificationTarget notification_target) {
   Profile* profile = static_cast<Profile*>(context);
-  return new invalidation::ProfileInvalidationProvider(
+  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
       scoped_ptr<invalidation::InvalidationService>(
           new invalidation::P2PInvalidationService(
               scoped_ptr<IdentityProvider>(new ProfileIdentityProvider(
                   SigninManagerFactory::GetForProfile(profile),
                   ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
                   LoginUIServiceFactory::GetForProfile(profile))),
-              profile->GetRequestContext(),
-              notification_target)));
+              profile->GetRequestContext(), notification_target))));
 }
 
-KeyedService* BuildSelfNotifyingP2PProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildSelfNotifyingP2PProfileInvalidationProvider(
     content::BrowserContext* context) {
   return BuildP2PProfileInvalidationProvider(context, syncer::NOTIFY_ALL);
 }
 
-KeyedService* BuildRealisticP2PProfileInvalidationProvider(
+scoped_ptr<KeyedService> BuildRealisticP2PProfileInvalidationProvider(
     content::BrowserContext* context) {
   return BuildP2PProfileInvalidationProvider(context, syncer::NOTIFY_OTHERS);
 }
@@ -462,7 +463,8 @@ void SyncTest::InitializeInstance(int index) {
     // TODO(pvalenzuela): Run the fake server via EmbeddedTestServer.
     profile_sync_service->OverrideNetworkResourcesForTest(
         make_scoped_ptr<syncer::NetworkResources>(
-            new fake_server::FakeServerNetworkResources(fake_server_.get())));
+            new fake_server::FakeServerNetworkResources(
+                fake_server_->AsWeakPtr())));
   }
 
   ProfileSyncServiceHarness::SigninType singin_type = UsingExternalServers()
@@ -579,15 +581,19 @@ bool SyncTest::SetupSync() {
 
 void SyncTest::TearDownOnMainThread() {
   for (size_t i = 0; i < clients_.size(); ++i) {
-    clients_[i]->service()->DisableForUser();
+    clients_[i]->service()->RequestStop(ProfileSyncService::CLEAR_DATA);
   }
 
-  // Some of the pending messages might rely on browser windows still being
-  // around, so run messages both before and after closing all browsers.
-  content::RunAllPendingInMessageLoop();
-  // Close all browser windows.
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::NotificationService::AllSources());
   chrome::CloseAllBrowsers();
-  content::RunAllPendingInMessageLoop();
+
+  // Waiting for a single notification mitigates flakiness (related to not all
+  // browsers being closed). If further flakiness is seen
+  // (GetTotalBrowserCount() > 0 after this call), GetTotalBrowserCount()
+  // notifications should be waited on.
+  observer.Wait();
 
   if (fake_server_.get()) {
     std::vector<fake_server::FakeServerInvalidationService*>::const_iterator it;
@@ -612,6 +618,10 @@ void SyncTest::SetUpInProcessBrowserTestFixture() {
   net::RuleBasedHostResolverProc* resolver =
       new net::RuleBasedHostResolverProc(host_resolver());
   resolver->AllowDirectLookup("*.google.com");
+
+  // Allow connection to googleapis.com for oauth token requests in E2E tests.
+  resolver->AllowDirectLookup("*.googleapis.com");
+
   // On Linux, we use Chromium's NSS implementation which uses the following
   // hosts for certificate verification. Without these overrides, running the
   // integration tests on Linux causes error as we make external DNS lookups.
@@ -636,9 +646,8 @@ void SyncTest::ReadPasswordFile() {
   base::ReadFileToString(password_file_, &file_contents);
   ASSERT_NE(file_contents, "") << "Password file \""
       << password_file_.value() << "\" does not exist.";
-  std::vector<std::string> tokens;
-  std::string delimiters = "\r\n";
-  Tokenize(file_contents, delimiters, &tokens);
+  std::vector<std::string> tokens = base::SplitString(
+      file_contents, "\r\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   ASSERT_EQ(2U, tokens.size()) << "Password file \""
       << password_file_.value()
       << "\" must contain exactly two lines of text.";
@@ -826,9 +835,9 @@ bool SyncTest::SetUpLocalTestServer() {
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   base::CommandLine::StringType server_cmdline_string =
       cl->GetSwitchValueNative(switches::kSyncServerCommandLine);
-  base::CommandLine::StringVector server_cmdline_vector;
-  base::CommandLine::StringType delimiters(FILE_PATH_LITERAL(" "));
-  Tokenize(server_cmdline_string, delimiters, &server_cmdline_vector);
+  base::CommandLine::StringVector server_cmdline_vector = base::SplitString(
+      server_cmdline_string, FILE_PATH_LITERAL(" "),
+      base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   base::CommandLine server_cmdline(server_cmdline_vector);
   base::LaunchOptions options;
 #if defined(OS_WIN)

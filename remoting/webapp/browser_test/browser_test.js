@@ -214,7 +214,8 @@ browserTest.connectMe2Me = function() {
  * @return {Promise}
  */
 browserTest.disconnect = function() {
-  base.debug.assert(remoting.app instanceof remoting.DesktopRemoting);
+  console.assert(remoting.app instanceof remoting.DesktopRemoting,
+                '|remoting.app| is not an instance of DesktopRemoting.');
   var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
   var mode = drApp.getConnectionMode();
 
@@ -273,16 +274,19 @@ browserTest.expectConnectionError = function(connectionMode, errorTags) {
   var AppMode = remoting.AppMode;
   var Timeout = browserTest.Timeout;
 
+  // Timeout if the session is not failed within 30 seconds.
+  var SESSION_CONNECTION_TIMEOUT = 30000;
+
   var finishButton = 'client-finished-me2me-button';
+  var failureMode = AppMode.CLIENT_CONNECT_FAILED_ME2ME;
 
   if (connectionMode == remoting.DesktopRemoting.Mode.IT2ME) {
     finishButton = 'client-finished-it2me-button';
+    failureMode = AppMode.CLIENT_CONNECT_FAILED_IT2ME;
   }
 
   var onConnected = browserTest.onUIMode(AppMode.IN_SESSION, Timeout.NONE);
-  var onFailure = Promise.race([
-      browserTest.onUIMode(AppMode.CLIENT_CONNECT_FAILED_ME2ME),
-      browserTest.onUIMode(AppMode.CLIENT_CONNECT_FAILED_IT2ME)]);
+  var onFailure = browserTest.onUIMode(failureMode, SESSION_CONNECTION_TIMEOUT);
 
   onConnected = onConnected.then(function() {
     return Promise.reject(

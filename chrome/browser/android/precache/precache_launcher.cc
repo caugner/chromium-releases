@@ -12,18 +12,20 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/top_sites_factory.h"
-#include "chrome/browser/precache/most_visited_urls_provider.h"
+#include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/precache/precache_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
-#include "components/history/core/browser/top_sites.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/precache/content/precache_manager.h"
-#include "components/precache/content/precache_manager_factory.h"
 #include "jni/PrecacheLauncher_jni.h"
 
 using base::android::AttachCurrentThread;
 using precache::PrecacheManager;
+
+namespace history {
+class HistoryService;
+}
 
 namespace {
 
@@ -44,14 +46,6 @@ PrecacheManager* GetPrecacheManager(Profile* profile) {
   return precache_manager;
 }
 
-bool IsDataReductionProxyEnabled(Profile* profile) {
-  // TODO(bengr): Use DataReductionProxySettings instead once it is safe to
-  // instantiate from here.
-  PrefService* prefs = profile->GetPrefs();
-  return prefs && prefs->GetBoolean(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled);
-}
-
 }  // namespace
 
 PrecacheLauncher::PrecacheLauncher(JNIEnv* env, jobject obj)
@@ -66,11 +60,13 @@ void PrecacheLauncher::Destroy(JNIEnv* env, jobject obj) {
 void PrecacheLauncher::Start(JNIEnv* env, jobject obj) {
   // TODO(bengr): Add integration tests for the whole feature.
   Profile* profile = GetProfile();
-  PrecacheManager* precache_manager = GetPrecacheManager(profile);
-  scoped_refptr<history::TopSites> ts = TopSitesFactory::GetForProfile(profile);
-  precache::MostVisitedURLsProvider url_list_provider(ts.get());
 
-  if (!IsDataReductionProxyEnabled(profile)) {
+  PrecacheManager* precache_manager = GetPrecacheManager(profile);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      profile, ServiceAccessType::IMPLICIT_ACCESS);
+
+  if (precache_manager == nullptr || hs == nullptr ||
+      !precache_manager->IsPrecachingAllowed()) {
     Java_PrecacheLauncher_onPrecacheCompletedCallback(
         env, weak_java_precache_launcher_.get(env).obj());
     return;
@@ -79,7 +75,7 @@ void PrecacheLauncher::Start(JNIEnv* env, jobject obj) {
   precache_manager->StartPrecaching(
       base::Bind(&PrecacheLauncher::OnPrecacheCompleted,
                  weak_factory_.GetWeakPtr()),
-      &url_list_provider);
+      *hs);
 }
 
 void PrecacheLauncher::Cancel(JNIEnv* env, jobject obj) {

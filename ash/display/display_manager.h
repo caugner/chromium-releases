@@ -25,6 +25,10 @@ namespace aura {
 class Window;
 }
 
+namespace chromeos {
+class DisplayNotificationsTest;
+}
+
 namespace gfx {
 class Display;
 class Insets;
@@ -330,8 +334,10 @@ private:
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest,
                            NativeDisplaysChangedAfterPrimaryChange);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, AutomaticOverscanInsets);
+  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, Rotate);
   friend class AcceleratorControllerTest;
   friend class DisplayManagerTest;
+  friend class chromeos::DisplayNotificationsTest;
   friend class test::AshTestBase;
   friend class test::DisplayManagerTestApi;
   friend class test::SystemGestureEventFilterTest;

@@ -25,7 +25,7 @@ bool IsValidNonEmptyHexString(const std::string& input) {
   if (count == 0 || (count % 2) != 0)
     return false;
   for (const char& c : input)
-    if (!IsHexDigit<char>(c))
+    if (!base::IsHexDigit<char>(c))
       return false;
   return true;
 }
@@ -197,7 +197,8 @@ scoped_ptr<Event> NetworkingConfigService::CreatePortalDetectedEventAndDispatch(
   scoped_ptr<base::ListValue> results =
       extensions::core_api::networking_config::OnCaptivePortalDetected::Create(
           network_info);
-  scoped_ptr<Event> event(new Event(extensions::core_api::networking_config::
+  scoped_ptr<Event> event(new Event(events::UNKNOWN,
+                                    extensions::core_api::networking_config::
                                         OnCaptivePortalDetected::kEventName,
                                     results.Pass()));
   return event.Pass();

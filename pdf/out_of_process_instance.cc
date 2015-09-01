@@ -54,7 +54,7 @@ const char kAccessibleCopyable[] = "copyable";
 
 // PDF background colors.
 const uint32 kBackgroundColor = 0xFFCCCCCC;
-const uint32 kBackgroundColorMaterial = 0xFF424242;
+const uint32 kBackgroundColorMaterial = 0xFF525659;
 
 // Constants used in handling postMessage() messages.
 const char kType[] = "type";
@@ -262,7 +262,6 @@ OutOfProcessInstance::OutOfProcessInstance(PP_Instance instance)
     : pp::Instance(instance),
       pp::Find_Private(this),
       pp::Printing_Dev(this),
-      pp::Selection_Dev(this),
       cursor_(PP_CURSORTYPE_POINTER),
       zoom_(1.0),
       device_scale_(1.0),
@@ -304,23 +303,24 @@ bool OutOfProcessInstance::Init(uint32_t argc,
                                 const char* argn[],
                                 const char* argv[]) {
   // Check if the PDF is being loaded in the PDF chrome extension. We only allow
-  // the plugin to be put into "full frame" mode when it is being loaded in the
-  // extension because this enables some features that we don't want pages
-  // abusing outside of the extension.
+  // the plugin to be loaded in the extension and print preview to avoid
+  // exposing sensitive APIs directly to external websites.
   pp::Var document_url_var = pp::URLUtil_Dev::Get()->GetDocumentURL(this);
-  std::string document_url = document_url_var.is_string() ?
-      document_url_var.AsString() : std::string();
+  if (!document_url_var.is_string())
+    return false;
+  std::string document_url = document_url_var.AsString();
   std::string extension_url = std::string(kChromeExtension);
-  bool in_extension =
-      !document_url.compare(0, extension_url.size(), extension_url);
+  std::string print_preview_url = std::string(kChromePrint);
+  if (!base::StringPiece(document_url).starts_with(kChromeExtension) &&
+      !base::StringPiece(document_url).starts_with(kChromePrint)) {
+    return false;
+  }
 
-  if (in_extension) {
-    // Check if the plugin is full frame. This is passed in from JS.
-    for (uint32_t i = 0; i < argc; ++i) {
-      if (strcmp(argn[i], "full-frame") == 0) {
-        full_ = true;
-        break;
-      }
+  // Check if the plugin is full frame. This is passed in from JS.
+  for (uint32_t i = 0; i < argc; ++i) {
+    if (strcmp(argn[i], "full-frame") == 0) {
+      full_ = true;
+      break;
     }
   }
 
@@ -343,9 +343,9 @@ bool OutOfProcessInstance::Init(uint32_t argc,
 
   text_input_.reset(new pp::TextInput_Dev(this));
 
-  const char* stream_url = NULL;
-  const char* original_url = NULL;
-  const char* headers = NULL;
+  const char* stream_url = nullptr;
+  const char* original_url = nullptr;
+  const char* headers = nullptr;
   bool is_material = false;
   for (uint32_t i = 0; i < argc; ++i) {
     if (strcmp(argn[i], "src") == 0)
@@ -362,12 +362,6 @@ bool OutOfProcessInstance::Init(uint32_t argc,
     background_color_ = kBackgroundColorMaterial;
   else
     background_color_ = kBackgroundColor;
-
-  // TODO(raymes): This is a hack to ensure that if no headers are passed in
-  // then we get the right MIME type. When the in process plugin is removed we
-  // can fix the document loader properly and remove this hack.
-  if (!headers || strcmp(headers, "") == 0)
-    headers = "content-type: application/pdf";
 
   if (!original_url)
     return false;
@@ -444,7 +438,7 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
     preview_engine_.reset();
     engine_.reset(PDFEngine::Create(this));
     engine_->SetGrayscale(dict.Get(pp::Var(kJSPrintPreviewGrayscale)).AsBool());
-    engine_->New(url_.c_str());
+    engine_->New(url_.c_str(), nullptr /* empty header */);
 
     print_preview_page_count_ =
         std::max(dict.Get(pp::Var(kJSPrintPreviewPageCount)).AsInt(), 0);
@@ -472,7 +466,7 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
           engine_->HasPermission(PDFEngine::PERMISSION_COPY_ACCESSIBLE);
       node.SetBoolean(kAccessibleCopyable, has_permissions);
       std::string json;
-      base::JSONWriter::Write(&node, &json);
+      base::JSONWriter::Write(node, &json);
       reply.Set(pp::Var(kJSAccessibilityJSON), pp::Var(json));
     }
     PostMessage(reply);
@@ -625,12 +619,6 @@ pp::Var OutOfProcessInstance::GetLinkAtPosition(
   ScalePoint(device_scale_, &offset_point);
   offset_point.set_x(offset_point.x() - available_area_.x());
   return engine_->GetLinkAtPosition(offset_point);
-}
-
-pp::Var OutOfProcessInstance::GetSelectedText(bool html) {
-  if (html)
-    return pp::Var();
-  return engine_->GetSelectedText();
 }
 
 uint32_t OutOfProcessInstance::QuerySupportedPrintOutputFormats() {
@@ -915,7 +903,7 @@ void OutOfProcessInstance::UpdateCursor(PP_CursorType_Dev cursor) {
   }
 
   cursor_interface->SetCursor(
-      pp_instance(), cursor_, pp::ImageData().pp_resource(), NULL);
+      pp_instance(), cursor_, pp::ImageData().pp_resource(), nullptr);
 }
 
 void OutOfProcessInstance::UpdateTickMarks(
@@ -1177,7 +1165,7 @@ void OutOfProcessInstance::PreviewDocumentLoadComplete() {
   if (print_preview_page_count_ == 0)
     return;
 
-  if (preview_pages_info_.size())
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1210,7 +1198,7 @@ void OutOfProcessInstance::PreviewDocumentLoadFailed() {
   preview_document_load_state_ = LOAD_STATE_FAILED;
   preview_pages_info_.pop();
 
-  if (preview_pages_info_.size())
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1360,7 +1348,7 @@ void OutOfProcessInstance::AppendBlankPrintPreviewPages() {
   if (print_preview_page_count_ == 0)
     return;
   engine_->AppendBlankPages(print_preview_page_count_);
-  if (preview_pages_info_.size() > 0)
+  if (!preview_pages_info_.empty())
     LoadAvailablePreviewPage();
 }
 
@@ -1393,7 +1381,7 @@ void OutOfProcessInstance::ProcessPreviewPageInfo(const std::string& url,
 }
 
 void OutOfProcessInstance::LoadAvailablePreviewPage() {
-  if (preview_pages_info_.size() <= 0 ||
+  if (preview_pages_info_.empty() ||
       document_load_state_ != LOAD_STATE_COMPLETE) {
     return;
   }

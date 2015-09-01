@@ -10,8 +10,6 @@ import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.content_public.common.Referrer;
 
-import java.util.ArrayList;
-
 /**
  * A list of parameters that explain what kind of context menu to show the user.  This data is
  * generated from content/public/common/context_menu_params.h.
@@ -29,21 +27,13 @@ public class ContextMenuParams {
         public static final int MEDIA_TYPE_PLUGIN = 5;
     }
 
-    private static class CustomMenuItem {
-        public final String label;
-        public final int action;
-
-        public CustomMenuItem(String label, int action) {
-            this.label = label;
-            this.action = action;
-        }
-    }
-
     private final String mPageUrl;
     private final String mLinkUrl;
     private final String mLinkText;
+    private final String mTitleText;
     private final String mUnfilteredLinkUrl;
     private final String mSrcUrl;
+    private final boolean mImageWasFetchedLoFi;
     private final boolean mIsEditable;
     private final Referrer mReferrer;
 
@@ -51,42 +41,6 @@ public class ContextMenuParams {
     private final boolean mIsSelectedText;
     private final boolean mIsImage;
     private final boolean mIsVideo;
-
-    private final ArrayList<CustomMenuItem> mCustomMenuItems = new ArrayList<CustomMenuItem>();
-
-    /**
-     * @return Whether or not the context menu should consist of custom items.
-     */
-    public boolean isCustomMenu() {
-        return !mCustomMenuItems.isEmpty();
-    }
-
-    /**
-     * @return The number of custom items in this context menu.
-     */
-    public int getCustomMenuSize() {
-        return mCustomMenuItems.size();
-    }
-
-    /**
-     * The label that should be shown for the custom menu item at {@code index}.
-     * @param index The index of the custom menu item.
-     * @return      The label to show.
-     */
-    public String getCustomLabelAt(int index) {
-        assert index >= 0 && index < mCustomMenuItems.size();
-        return mCustomMenuItems.get(index).label;
-    }
-
-    /**
-     * The action that should be returned for the custom menu item at {@code index}.
-     * @param index The index of the custom menu item.
-     * @return      The action to return.
-     */
-    public int getCustomActionAt(int index) {
-        assert index >= 0 && index < mCustomMenuItems.size();
-        return mCustomMenuItems.get(index).action;
-    }
 
     /**
      * @return The URL associated with the main frame of the page that triggered the context menu.
@@ -110,6 +64,13 @@ public class ContextMenuParams {
     }
 
     /**
+     * @return The title or alt attribute (if title is not available).
+     */
+    public String getTitleText() {
+        return mTitleText;
+    }
+
+    /**
      * @return The unfiltered link URL, if any.
      */
     public String getUnfilteredLinkUrl() {
@@ -121,6 +82,13 @@ public class ContextMenuParams {
      */
     public String getSrcUrl() {
         return mSrcUrl;
+    }
+
+    /**
+     * @return Whether or not an image was fetched using Lo-Fi.
+     */
+    public boolean imageWasFetchedLoFi() {
+        return mImageWasFetchedLoFi;
     }
 
     /**
@@ -166,13 +134,15 @@ public class ContextMenuParams {
     }
 
     private ContextMenuParams(int mediaType, String pageUrl, String linkUrl, String linkText,
-            String unfilteredLinkUrl, String srcUrl, String selectionText, boolean isEditable,
-            Referrer referrer) {
+            String unfilteredLinkUrl, String srcUrl, String selectionText, String titleText,
+            boolean imageWasFetchedLoFi, boolean isEditable, Referrer referrer) {
         mPageUrl = pageUrl;
         mLinkUrl = linkUrl;
         mLinkText = linkText;
+        mTitleText = titleText;
         mUnfilteredLinkUrl = unfilteredLinkUrl;
         mSrcUrl = srcUrl;
+        mImageWasFetchedLoFi = imageWasFetchedLoFi;
         mIsEditable = isEditable;
         mReferrer = referrer;
 
@@ -185,15 +155,11 @@ public class ContextMenuParams {
     @CalledByNative
     private static ContextMenuParams create(int mediaType, String pageUrl, String linkUrl,
             String linkText, String unfilteredLinkUrl, String srcUrl, String selectionText,
-            boolean isEditable, String sanitizedReferrer, int referrerPolicy) {
+            String titleText, boolean imageWasFetchedLoFi, boolean isEditable,
+            String sanitizedReferrer, int referrerPolicy) {
         Referrer referrer = TextUtils.isEmpty(sanitizedReferrer)
                 ? null : new Referrer(sanitizedReferrer, referrerPolicy);
         return new ContextMenuParams(mediaType, pageUrl, linkUrl, linkText, unfilteredLinkUrl,
-                srcUrl, selectionText, isEditable, referrer);
-    }
-
-    @CalledByNative
-    private void addCustomItem(String label, int action) {
-        mCustomMenuItems.add(new CustomMenuItem(label, action));
+                srcUrl, selectionText, titleText, imageWasFetchedLoFi, isEditable, referrer);
     }
 }

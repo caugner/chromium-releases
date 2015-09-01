@@ -11,9 +11,9 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"  // For CHECK macros.
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
 #include "chrome/test/chromedriver/capabilities.h"
@@ -91,6 +91,7 @@ scoped_ptr<base::DictionaryValue> CreateCapabilities(Chrome* chrome) {
   caps->SetBoolean("rotatable", false);
   caps->SetBoolean("acceptSslCerts", true);
   caps->SetBoolean("nativeEvents", true);
+  caps->SetBoolean("hasTouchScreen", chrome->HasTouchScreen());
   scoped_ptr<base::DictionaryValue> chrome_caps(new base::DictionaryValue());
 
   ChromeDesktopImpl* desktop = NULL;
@@ -194,6 +195,40 @@ Status InitSessionHelper(
   return CheckSessionCreated(session);
 }
 
+Status SwitchToWebView(Session* session, const std::string& web_view_id) {
+  if (session->overridden_geoposition) {
+    WebView* web_view;
+    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
+    if (status.IsError())
+      return status;
+    status = web_view->ConnectIfNecessary();
+    if (status.IsError())
+      return status;
+    status = web_view->OverrideGeolocation(*session->overridden_geoposition);
+    if (status.IsError())
+      return status;
+  }
+
+  if (session->overridden_network_conditions) {
+    WebView* web_view;
+    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
+    if (status.IsError())
+      return status;
+    status = web_view->ConnectIfNecessary();
+    if (status.IsError())
+      return status;
+    status = web_view->OverrideNetworkConditions(
+        *session->overridden_network_conditions);
+    if (status.IsError())
+      return status;
+  }
+
+  session->window = web_view_id;
+  session->SwitchToTopFrame();
+  session->mouse_position = WebPoint(0, 0);
+  return Status(kOk);
+}
+
 }  // namespace
 
 Status ExecuteInitSession(
@@ -262,7 +297,17 @@ Status ExecuteLaunchApp(
   if (status.IsError())
     return status;
 
-  return extension->LaunchApp(id);
+  status = extension->LaunchApp(id);
+  if (status.IsError())
+    return status;
+
+  std::string web_view_id;
+  base::TimeDelta timeout = base::TimeDelta::FromSeconds(60);
+  status = desktop->WaitForNewAppWindow(timeout, id, &web_view_id);
+  if (status.IsError())
+    return status;
+
+  return SwitchToWebView(session, web_view_id);
 }
 
 Status ExecuteClose(
@@ -368,38 +413,7 @@ Status ExecuteSwitchToWindow(
 
   if (!found)
     return Status(kNoSuchWindow);
-
-  if (session->overridden_geoposition) {
-    WebView* web_view;
-    status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideGeolocation(*session->overridden_geoposition);
-    if (status.IsError())
-      return status;
-  }
-
-  if (session->overridden_network_conditions) {
-    WebView* web_view;
-    status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideNetworkConditions(
-        *session->overridden_network_conditions);
-    if (status.IsError())
-      return status;
-  }
-
-  session->window = web_view_id;
-  session->SwitchToTopFrame();
-  session->mouse_position = WebPoint(0, 0);
-  return Status(kOk);
+  return SwitchToWebView(session, web_view_id);
 }
 
 Status ExecuteSetTimeout(

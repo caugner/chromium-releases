@@ -19,7 +19,9 @@
 namespace html_viewer {
 
 WebLayerTreeViewImpl::WebLayerTreeViewImpl(
-    scoped_refptr<base::MessageLoopProxy> compositor_message_loop_proxy,
+    scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    cc::TaskGraphRunner* task_graph_runner,
     mojo::SurfacePtr surface,
     mojo::GpuPtr gpu_service)
     : widget_(NULL),
@@ -30,13 +32,20 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
 
   cc::LayerTreeSettings settings;
 
+  // Must match the value of
+  // blink::RuntimeEnabledFeature::slimmingPaintEnabled()
+  settings.use_display_lists = true;
+
+  settings.use_image_texture_target = GL_TEXTURE_2D;
+  settings.use_one_copy = true;
+  // TODO(jam): use multiple compositor raster threads and set gather_pixel_refs
+  // accordingly (see content).
+
   // For web contents, layer transforms should scale up the contents of layers
   // to keep content always crisp when possible.
   settings.layer_transforms_should_scale_layer_contents = true;
 
   cc::SharedBitmapManager* shared_bitmap_manager = nullptr;
-  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = nullptr;
-  cc::TaskGraphRunner* task_graph_runner = nullptr;
 
   cc::LayerTreeHost::InitParams params;
   params.client = this;
@@ -47,7 +56,7 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   params.main_task_runner = main_thread_compositor_task_runner_;
 
   layer_tree_host_ =
-      cc::LayerTreeHost::CreateThreaded(compositor_message_loop_proxy, &params);
+      cc::LayerTreeHost::CreateThreaded(compositor_task_runner, &params);
   DCHECK(layer_tree_host_);
 
   if (surface && gpu_service) {
@@ -99,13 +108,6 @@ void WebLayerTreeViewImpl::ApplyViewportDeltas(
       elastic_overscroll_delta,
       page_scale,
       top_controls_delta);
-}
-
-void WebLayerTreeViewImpl::ApplyViewportDeltas(
-    const gfx::Vector2d& scroll_delta,
-    float page_scale,
-    float top_controls_delta) {
-  widget_->applyViewportDeltas(scroll_delta, page_scale, top_controls_delta);
 }
 
 void WebLayerTreeViewImpl::RequestNewOutputSurface() {
@@ -180,8 +182,7 @@ void WebLayerTreeViewImpl::setPageScaleFactorAndLimits(float page_scale_factor,
 
 void WebLayerTreeViewImpl::registerForAnimations(blink::WebLayer* layer) {
   cc::Layer* cc_layer = static_cast<cc_blink::WebLayerImpl*>(layer)->layer();
-  cc_layer->layer_animation_controller()->SetAnimationRegistrar(
-      layer_tree_host_->animation_registrar());
+  cc_layer->RegisterForAnimations(layer_tree_host_->animation_registrar());
 }
 
 void WebLayerTreeViewImpl::registerViewportLayers(
@@ -230,10 +231,6 @@ void WebLayerTreeViewImpl::startPageScaleAnimation(
 
 void WebLayerTreeViewImpl::setNeedsAnimate() {
   layer_tree_host_->SetNeedsAnimate();
-}
-
-bool WebLayerTreeViewImpl::commitRequested() const {
-  return layer_tree_host_->CommitRequested();
 }
 
 void WebLayerTreeViewImpl::finishAllRendering() {

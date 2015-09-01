@@ -45,14 +45,9 @@ var videoPlayerApp = new RemoteCall(VIDEO_PLAYER_APP_ID);
  * @param {Promise} promise Promise.
  */
 function testPromise(promise) {
-  promise.then(function() {
-    return new Promise(checkIfNoErrorsOccured);
-  }).then(chrome.test.callbackPass(function() {
-    // The callbacPass is necessary to avoid prematurely finishing tests.
-    // Don't put chrome.test.succeed() here to avoid doubled success log.
-  }), function(error) {
-    chrome.test.fail(error.stack || error);
-  });
+  return testPromiseAndApps(
+      promise,
+      [remoteCall, galleryApp, audioPlayerApp, videoPlayerApp]);
 };
 
 /**
@@ -62,7 +57,7 @@ function testPromise(promise) {
 function StepsRunner() {
   /**
    * List of steps.
-   * @type {Array.<function>}
+   * @type {Array<function>}
    * @private
    */
   this.steps_ = [];
@@ -70,10 +65,20 @@ function StepsRunner() {
 
 /**
  * Creates a StepsRunner instance and runs the passed steps.
+ * @param {!Array<function>} steps
  */
 StepsRunner.run = function(steps) {
   var stepsRunner = new StepsRunner();
   stepsRunner.run_(steps);
+};
+
+/**
+ * Creates a StepsRunner instance and runs multiple groups of steps.
+ * @param {!Array<!Array<function>>} groups
+ */
+StepsRunner.runGroups = function(groups) {
+  // Squash all groups into a flat list of steps.
+  StepsRunner.run(Array.prototype.concat.apply([], groups));
 };
 
 StepsRunner.prototype = {
@@ -87,7 +92,7 @@ StepsRunner.prototype = {
 
 /**
  * Runs a sequence of the added test steps.
- * @type {Array.<function>} List of the sequential steps.
+ * @type {Array<function>} List of the sequential steps.
  */
 StepsRunner.prototype.run_ = function(steps) {
   this.steps_ = steps.slice(0);
@@ -98,8 +103,11 @@ StepsRunner.prototype.run_ = function(steps) {
 
   this.steps_ = this.steps_.map(function(f) {
     return chrome.test.callbackPass(function() {
-      this.steps_.shift();
-      f.apply(this, arguments);
+      var args = arguments;
+      return new Promise(function(resolve, reject) {
+        this.steps_.shift();
+        f.apply(this, args);
+      }.bind(this));
     }.bind(this));
   }.bind(this));
 
@@ -108,7 +116,7 @@ StepsRunner.prototype.run_ = function(steps) {
 
 /**
  * Basic entry set for the local volume.
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_LOCAL_ENTRY_SET = [
@@ -125,7 +133,7 @@ var BASIC_LOCAL_ENTRY_SET = [
  * TODO(hirono): Add a case for an entry cached by FileCache. For testing
  *               Drive, create more entries with Drive specific attributes.
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_DRIVE_ENTRY_SET = [
@@ -149,7 +157,7 @@ var NESTED_ENTRY_SET = [
  * Expecetd list of preset entries in fake test volumes. This should be in sync
  * with FakeTestVolume::PrepareTestEntries in the test harness.
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var BASIC_FAKE_ENTRY_SET = [
@@ -161,7 +169,7 @@ var BASIC_FAKE_ENTRY_SET = [
  * Expected files shown in "Recent". Directories (e.g. 'photos') are not in this
  * list as they are not expected in "Recent".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var RECENT_ENTRY_SET = [
@@ -179,7 +187,7 @@ var RECENT_ENTRY_SET = [
  * "available offline". Google Documents, Google Spreadsheets, and the files
  * cached locally are "available offline".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var OFFLINE_ENTRY_SET = [
@@ -191,7 +199,7 @@ var OFFLINE_ENTRY_SET = [
  * Expected files shown in "Shared with me", which should be the entries labeled
  * with "shared-with-me".
  *
- * @type {Array.<TestEntryInfo>}
+ * @type {Array<TestEntryInfo>}
  * @const
  */
 var SHARED_WITH_ME_ENTRY_SET = [
@@ -234,7 +242,7 @@ function openNewWindow(appState, initialRoot, opt_callback) {
  *     fileSystem.chooseEntry() API.
  * @param {string} volumeName Volume name passed to the selectVolume remote
  *     funciton.
- * @param {Array.<TestEntryInfo>} expectedSet Expected set of the entries.
+ * @param {Array<TestEntryInfo>} expectedSet Expected set of the entries.
  * @param {function(windowId:string):Promise} closeDialog Function to close the
  *     dialog.
  * @return {Promise} Promise to be fulfilled with the result entry of the
@@ -290,7 +298,7 @@ function openAndWaitForClosingDialog(
  *     Can be null.
  * @param {?string} initialRoot Root path to be used as a default current
  *     directory during initialization. Can be null, for no default path.
- * @param {function(string, Array.<Array.<string>>)=} opt_callback Callback with
+ * @param {function(string, Array<Array<string>>)=} opt_callback Callback with
  *     the window ID and with the file list.
  * @return {Promise} Promise to be fulfilled with window ID.
  */
@@ -328,15 +336,12 @@ function setupAndWaitUntilReady(appState, initialRoot, opt_callback) {
  * @param {function()} Completion callback.
  */
 function checkIfNoErrorsOccured(callback) {
-  remoteCall.callRemoteTestUtil('getErrorCount', null, [], function(count) {
-    chrome.test.assertEq(0, count, 'The error count is not 0.');
-    callback();
-  });
+  checkIfNoErrorsOccuredOnApp(remoteCall, callback);
 }
 
 /**
  * Returns the name of the given file list entry.
- * @param {Array.<string>} file An entry in a file list.
+ * @param {Array<string>} file An entry in a file list.
  * @return {string} Name of the file.
  */
 function getFileName(fileListEntry) {
@@ -345,7 +350,7 @@ function getFileName(fileListEntry) {
 
 /**
  * Returns the size of the given file list entry.
- * @param {Array.<string>} An entry in a file list.
+ * @param {Array<string>} An entry in a file list.
  * @return {string} Size of the file.
  */
 function getFileSize(fileListEntry) {
@@ -354,7 +359,7 @@ function getFileSize(fileListEntry) {
 
 /**
  * Returns the type of the given file list entry.
- * @param {Array.<string>} An entry in a file list.
+ * @param {Array<string>} An entry in a file list.
  * @return {string} Type of the file.
  */
 function getFileType(fileListEntry) {

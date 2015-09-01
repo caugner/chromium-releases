@@ -34,17 +34,17 @@ var TESTING_BROKEN_FILE = Object.freeze({
  * @param {function(string)} onError Error callback with an error code.
  */
 function onAddWatcherRequested(options, onSuccess, onError) {
-  if (options.fileSystemId != test_util.FILE_SYSTEM_ID) {
+  if (options.fileSystemId !== test_util.FILE_SYSTEM_ID) {
     onError('SECURITY');  // enum ProviderError.
     return;
   }
 
-  if (options.entryPath == '/' + TESTING_FILE.name) {
+  if (options.entryPath === '/' + TESTING_FILE.name) {
     onSuccess();
     return;
   }
 
-  if (options.entryPath == '/' + TESTING_BROKEN_FILE.name) {
+  if (options.entryPath === '/' + TESTING_BROKEN_FILE.name) {
     onError('INVALID_OPERATION');
     return;
   }
@@ -85,26 +85,22 @@ function runTests() {
           {create: false},
           chrome.test.callbackPass(function(fileEntry) {
             chrome.test.assertEq(TESTING_FILE.name, fileEntry.name);
-            test_util.toExternalEntry(fileEntry).then(
-                chrome.test.callbackPass(function(externalEntry) {
-                  chrome.test.assertTrue(!!externalEntry);
-                  chrome.fileManagerPrivate.addFileWatch(
-                      externalEntry.toURL(),
-                      chrome.test.callbackPass(function(result) {
-                        chrome.test.assertTrue(result);
-                        chrome.fileSystemProvider.getAll(
-                            chrome.test.callbackPass(function(fileSystems) {
-                              chrome.test.assertEq(1, fileSystems.length);
-                              chrome.test.assertEq(
-                                  1, fileSystems[0].watchers.length);
-                              var watcher = fileSystems[0].watchers[0];
-                              chrome.test.assertEq(
-                                  '/' + TESTING_FILE.name, watcher.entryPath);
-                              chrome.test.assertFalse(watcher.recursive);
-                              chrome.test.assertEq(undefined, watcher.tag);
-                            }));
+            chrome.fileManagerPrivate.addFileWatch(
+                fileEntry,
+                chrome.test.callbackPass(function(result) {
+                  chrome.test.assertTrue(result);
+                  chrome.fileSystemProvider.getAll(
+                      chrome.test.callbackPass(function(fileSystems) {
+                        chrome.test.assertEq(1, fileSystems.length);
+                        chrome.test.assertEq(
+                            1, fileSystems[0].watchers.length);
+                        var watcher = fileSystems[0].watchers[0];
+                        chrome.test.assertEq(
+                            '/' + TESTING_FILE.name, watcher.entryPath);
+                        chrome.test.assertFalse(watcher.recursive);
+                        chrome.test.assertEq(undefined, watcher.tag);
                       }));
-                })).catch(chrome.test.fail);
+                }));
           }), function(error) {
             chrome.test.fail(error.name);
           });
@@ -118,22 +114,18 @@ function runTests() {
           {create: false},
           chrome.test.callbackPass(function(fileEntry) {
             chrome.test.assertEq(TESTING_FILE.name, fileEntry.name);
-            test_util.toExternalEntry(fileEntry).then(
-                chrome.test.callbackPass(function(externalEntry) {
-                  chrome.test.assertTrue(!!externalEntry);
-                  chrome.fileManagerPrivate.addFileWatch(
-                      fileEntry.toURL(),
-                      chrome.test.callbackFail(
-                          'Unknown error.', function(result) {
-                            chrome.test.assertFalse(!!result);
-                            chrome.fileSystemProvider.getAll(
-                                chrome.test.callbackPass(function(fileSystems) {
-                                  chrome.test.assertEq(1, fileSystems.length);
-                                  chrome.test.assertEq(
-                                      1, fileSystems[0].watchers.length);
-                                }));
-                      }));
-                })).catch(chrome.test.fail);
+            chrome.fileManagerPrivate.addFileWatch(
+                fileEntry,
+                chrome.test.callbackFail(
+                    'Unknown error.', function(result) {
+                      chrome.test.assertFalse(!!result);
+                      chrome.fileSystemProvider.getAll(
+                          chrome.test.callbackPass(function(fileSystems) {
+                            chrome.test.assertEq(1, fileSystems.length);
+                            chrome.test.assertEq(
+                                1, fileSystems[0].watchers.length);
+                          }));
+                }));
           }), function(error) {
             chrome.test.fail(error.name);
           });
@@ -146,22 +138,18 @@ function runTests() {
           {create: false},
           chrome.test.callbackPass(function(fileEntry) {
             chrome.test.assertEq(TESTING_BROKEN_FILE.name, fileEntry.name);
-            test_util.toExternalEntry(fileEntry).then(
-                chrome.test.callbackPass(function(externalEntry) {
-                  chrome.test.assertTrue(!!externalEntry);
-                  chrome.fileManagerPrivate.addFileWatch(
-                      fileEntry.toURL(),
-                      chrome.test.callbackFail(
-                          'Unknown error.', function(result) {
-                            chrome.test.assertFalse(!!result);
-                            chrome.fileSystemProvider.getAll(
-                                chrome.test.callbackPass(function(fileSystems) {
-                                  chrome.test.assertEq(1, fileSystems.length);
-                                  chrome.test.assertEq(
-                                      1, fileSystems[0].watchers.length);
-                                }));
+            chrome.fileManagerPrivate.addFileWatch(
+                fileEntry,
+                chrome.test.callbackFail(
+                    'Unknown error.', function(result) {
+                      chrome.test.assertFalse(!!result);
+                      chrome.fileSystemProvider.getAll(
+                          chrome.test.callbackPass(function(fileSystems) {
+                            chrome.test.assertEq(1, fileSystems.length);
+                            chrome.test.assertEq(
+                                1, fileSystems[0].watchers.length);
                           }));
-                })).catch(chrome.test.fail);
+                    }));
           }), function(error) {
             chrome.test.fail(error.name);
           });

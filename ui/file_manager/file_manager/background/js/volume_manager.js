@@ -42,6 +42,7 @@ function VolumeInfo(
     extensionId,
     hasMedia,
     configurable,
+    watchable,
     source) {
   this.volumeType_ = volumeType;
   this.volumeId_ = volumeId;
@@ -49,7 +50,7 @@ function VolumeInfo(
   this.label_ = label;
   this.displayRoot_ = null;
 
-  /** @type {Object.<string, !FakeEntry>} */
+  /** @type {Object<!FakeEntry>} */
   this.fakeEntries_ = {};
 
   /** @type {Promise.<!DirectoryEntry>} */
@@ -85,6 +86,7 @@ function VolumeInfo(
   this.extensionId_ = extensionId;
   this.hasMedia_ = hasMedia;
   this.configurable_ = configurable;
+  this.watchable_ = watchable;
   this.source_ = source;
 }
 
@@ -115,7 +117,7 @@ VolumeInfo.prototype = /** @struct */ {
     return this.displayRoot_;
   },
   /**
-   * @return {Object.<string, !FakeEntry>} Fake entries.
+   * @return {Object<!FakeEntry>} Fake entries.
    */
   get fakeEntries() {
     return this.fakeEntries_;
@@ -175,6 +177,12 @@ VolumeInfo.prototype = /** @struct */ {
     return this.configurable_;
   },
   /**
+   * @return {boolean} True if the volume is watchable.
+   */
+  get watchable() {
+    return this.watchable_;
+  },
+  /**
    * @return {VolumeManagerCommon.Source} Source of the volume's data.
    */
   get source() {
@@ -189,7 +197,7 @@ VolumeInfo.prototype = /** @struct */ {
  * @param {function(!DirectoryEntry)=} opt_onSuccess Success callback with the
  *     display root directory as an argument.
  * @param {function(*)=} opt_onFailure Failure callback.
- * @return {Promise.<!DirectoryEntry>}
+ * @return {!Promise.<!DirectoryEntry>}
  */
 VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
                                                    opt_onFailure) {
@@ -333,6 +341,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
             volumeMetadata.extensionId,
             volumeMetadata.hasMedia,
             volumeMetadata.configurable,
+            volumeMetadata.watchable,
             /** @type {VolumeManagerCommon.Source} */
             (volumeMetadata.source));
   })
@@ -358,6 +367,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
             volumeMetadata.extensionId,
             volumeMetadata.hasMedia,
             volumeMetadata.configurable,
+            volumeMetadata.watchable,
             /** @type {VolumeManagerCommon.Source} */
             (volumeMetadata.source));
       });
@@ -365,7 +375,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
 
 /**
  * The order of the volume list based on root type.
- * @type {Array.<VolumeManagerCommon.VolumeType>}
+ * @type {Array<VolumeManagerCommon.VolumeType>}
  * @const
  * @private
  */
@@ -574,7 +584,7 @@ function VolumeManager() {
   /**
    * The list of archives requested to mount. We will show contents once
    * archive is mounted, but only for mounts from within this filebrowser tab.
-   * @type {Object.<string, Object>}
+   * @type {Object<Object>}
    * @private
    */
   this.requests_ = {};

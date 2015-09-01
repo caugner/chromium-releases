@@ -277,7 +277,7 @@ class SelectFileDialog implements WindowAndroid.IntentCallback, WindowAndroid.Pe
                 filePathArray[i] = clipData.getItemAt(i).getUri();
             }
             GetDisplayNameTask task = new GetDisplayNameTask(contentResolver, true);
-            task.execute(filePathArray);
+            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, filePathArray);
             return;
         }
 
@@ -289,7 +289,7 @@ class SelectFileDialog implements WindowAndroid.IntentCallback, WindowAndroid.Pe
 
         if (ContentResolver.SCHEME_CONTENT.equals(results.getScheme())) {
             GetDisplayNameTask task = new GetDisplayNameTask(contentResolver, false);
-            task.execute(results.getData());
+            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, results.getData());
             return;
         }
 

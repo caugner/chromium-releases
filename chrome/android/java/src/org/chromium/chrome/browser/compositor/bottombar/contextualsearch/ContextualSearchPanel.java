@@ -23,7 +23,6 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         UNDEFINED,
         CLOSED,
         PEEKED,
-        PROMO,
         EXPANDED,
         MAXIMIZED;
     }
@@ -38,6 +37,7 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         TEXT_SELECT_TAP,
         TEXT_SELECT_LONG_PRESS,
         INVALID_SELECTION,
+        CLEARED_SELECTION,
         BASE_PAGE_TAP,
         BASE_PAGE_SCROLL,
         SEARCH_BAR_TAP,
@@ -47,7 +47,8 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
         SWIPE,
         FLING,
         OPTIN,
-        OPTOUT;
+        OPTOUT,
+        CLOSE_BUTTON;
     }
 
     /**
@@ -146,19 +147,20 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     }
 
     @Override
-    protected boolean isPanelPromoAvailable() {
-        return mManagementDelegate != null && mManagementDelegate.isOptOutPromoAvailable();
+    protected boolean isPromoAvailable() {
+        return mManagementDelegate != null && mManagementDelegate.isPromoAvailable();
     }
 
     @Override
     public void onPromoButtonClick(boolean accepted) {
         super.onPromoButtonClick(accepted);
         mManagementDelegate.logPromoOutcome();
+        setIsPromoActive(false);
     }
 
     @Override
-    protected void onClose() {
-        mManagementDelegate.onCloseContextualSearch();
+    protected void onClose(StateChangeReason reason) {
+        mManagementDelegate.onCloseContextualSearch(reason);
     }
 
     // ============================================================================================
@@ -236,24 +238,18 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
                 if (mManagementDelegate.isRunningInCompatibilityMode()) {
                     mManagementDelegate.openResolvedSearchUrlInNewTab();
                 } else {
-                    // NOTE(pedrosimonetti): If the promo is active and getPromoContentHeight()
-                    // returns -1 that means that the promo page hasn't finished loading, and
-                    // therefore it wasn't possible to calculate the height of the promo contents.
-                    // This will only happen if the user taps on a word that will trigger the
-                    // promo, and then quickly taps on the peeking bar, before the promo page
-                    // (which is local) finishes loading.
-                    //
-                    // TODO(pedrosimonetti): For now, we're simply ignoring the tap action in
-                    // that case. Consider implementing a better approach, where the Panel
-                    // would auto-expand once the height is calculated.
-                    if (!getIsPromoActive() || getPromoContentHeight() != -1) {
-                        expandPanel(StateChangeReason.SEARCH_BAR_TAP);
-                    }
+                    expandPanel(StateChangeReason.SEARCH_BAR_TAP);
                 }
             } else if (isExpanded()) {
                 peekPanel(StateChangeReason.SEARCH_BAR_TAP);
             } else if (isMaximized()) {
-                mManagementDelegate.promoteToTab(true);
+                if (ContextualSearchPanelFeatures.isSearchTermRefiningAvailable()) {
+                    mManagementDelegate.promoteToTab();
+                }
+                if (ContextualSearchPanelFeatures.isCloseButtonAvailable()
+                        && isCoordinateInsideCloseButton(x, y)) {
+                    closePanel(StateChangeReason.CLOSE_BUTTON, true);
+                }
             }
         }
     }
@@ -295,6 +291,17 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     }
 
     /**
+     * @param x The x coordinate in dp.
+     * @param y The y coordinate in dp.
+     * @return Whether the given |x| |y| coordinate is inside the close button.
+     */
+    private boolean isCoordinateInsideCloseButton(float x, float y) {
+        boolean isInY = y >= getCloseIconY() && y <= (getCloseIconY() + getCloseIconDimension());
+        boolean isInX = x >= getCloseIconX() && x <= (getCloseIconX() + getCloseIconDimension());
+        return isInY && isInX;
+    }
+
+    /**
      * @return Whether the Panel is in its expanded state.
      */
     protected boolean isExpanded() {
@@ -325,7 +332,7 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
 
         if (mShouldPromoteToTabAfterMaximizing && getPanelState() == PanelState.MAXIMIZED) {
             mShouldPromoteToTabAfterMaximizing = false;
-            mManagementDelegate.promoteToTab(false);
+            mManagementDelegate.promoteToTab();
         }
     }
 
@@ -395,24 +402,6 @@ public class ContextualSearchPanel extends ContextualSearchPanelAnimation
     public void updateBasePageSelectionYPx(float y) {
         // NOTE(pedrosimonetti): exposing superclass method to the interface.
         super.updateBasePageSelectionYPx(y);
-    }
-
-    @Override
-    public void setPromoContentHeight(float height) {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.setPromoContentHeight(height);
-    }
-
-    @Override
-    public void setShouldHidePromoHeader(boolean shouldHidePromoHeader) {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.setShouldHidePromoHeader(shouldHidePromoHeader);
-    }
-
-    @Override
-    public void animateAfterFirstRunSuccess() {
-        // NOTE(pedrosimonetti): exposing superclass method to the interface.
-        super.animateAfterFirstRunSuccess();
     }
 
     @Override

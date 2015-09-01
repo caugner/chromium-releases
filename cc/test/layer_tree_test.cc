@@ -9,12 +9,12 @@
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "cc/animation/animation.h"
+#include "cc/animation/animation_host.h"
 #include "cc/animation/animation_registrar.h"
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/animation/timing_function.h"
 #include "cc/base/switches.h"
 #include "cc/input/input_handler.h"
-#include "cc/layers/content_layer.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/test/animation_test_common.h"
@@ -26,7 +26,6 @@
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
-#include "cc/test/tiled_layer_test_common.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
@@ -34,7 +33,6 @@
 #include "cc/trees/single_thread_proxy.h"
 #include "cc/trees/thread_proxy.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "ui/gfx/frame_time.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace cc {
@@ -319,8 +317,12 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->NotifyReadyToDrawOnThread(this);
   }
 
+  void NotifyAllTileTasksCompleted() override {
+    LayerTreeHostImpl::NotifyAllTileTasksCompleted();
+    test_hooks_->NotifyAllTileTasksCompleted(this);
+  }
+
   void BlockNotifyReadyToActivateForTesting(bool block) override {
-    CHECK(settings().impl_side_painting);
     CHECK(proxy()->ImplThreadTaskRunner())
         << "Not supported for single-threaded mode.";
     block_notify_ready_to_activate_for_testing_ = block;
@@ -357,8 +359,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
   void UpdateAnimationState(bool start_ready_animations) override {
     LayerTreeHostImpl::UpdateAnimationState(start_ready_animations);
     bool has_unfinished_animation = false;
+    AnimationRegistrar* registrar =
+        animation_registrar() ? animation_registrar()
+                              : animation_host()->animation_registrar();
     for (const auto& it :
-         animation_registrar()->active_animation_controllers_for_testing()) {
+         registrar->active_animation_controllers_for_testing()) {
       if (it.second->HasActiveAnimation()) {
         has_unfinished_animation = true;
         break;
@@ -407,13 +412,6 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
                                      elastic_overscroll_delta, page_scale,
                                      top_controls_delta);
   }
-  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
-                           float scale,
-                           float top_controls_delta) override {
-    test_hooks_->ApplyViewportDeltas(scroll_delta,
-                                     scale,
-                                     top_controls_delta);
-  }
 
   void RequestNewOutputSurface() override {
     test_hooks_->RequestNewOutputSurface();
@@ -449,6 +447,11 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
   void ScheduleComposite() override { test_hooks_->ScheduleComposite(); }
   void DidCompletePageScaleAnimation() override {}
   void BeginMainFrameNotExpectedSoon() override {}
+
+  void RecordFrameTimingEvents(
+      scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
+      scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events)
+      override {}
 
  private:
   explicit LayerTreeHostClientForTesting(TestHooks* test_hooks)
@@ -597,6 +600,33 @@ void LayerTreeTest::PostAddLongAnimationToMainThread(
                  1.0));
 }
 
+void LayerTreeTest::PostAddAnimationToMainThreadPlayer(
+    AnimationPlayer* player_to_receive_animation) {
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                 main_thread_weak_ptr_,
+                 base::Unretained(player_to_receive_animation), 0.000004));
+}
+
+void LayerTreeTest::PostAddInstantAnimationToMainThreadPlayer(
+    AnimationPlayer* player_to_receive_animation) {
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                 main_thread_weak_ptr_,
+                 base::Unretained(player_to_receive_animation), 0.0));
+}
+
+void LayerTreeTest::PostAddLongAnimationToMainThreadPlayer(
+    AnimationPlayer* player_to_receive_animation) {
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                 main_thread_weak_ptr_,
+                 base::Unretained(player_to_receive_animation), 1.0));
+}
+
 void LayerTreeTest::PostSetDeferCommitsToMainThread(bool defer_commits) {
   main_task_runner_->PostTask(
       FROM_HERE,
@@ -695,7 +725,7 @@ void LayerTreeTest::DoBeginTest() {
 
 void LayerTreeTest::SetupTree() {
   if (!layer_tree_host_->root_layer()) {
-    scoped_refptr<Layer> root_layer = Layer::Create();
+    scoped_refptr<Layer> root_layer = Layer::Create(layer_settings_);
     root_layer->SetBounds(gfx::Size(1, 1));
     root_layer->SetIsDrawable(true);
     layer_tree_host_->SetRootLayer(root_layer);
@@ -732,6 +762,17 @@ void LayerTreeTest::DispatchAddAnimation(Layer* layer_to_receive_animation,
   if (layer_to_receive_animation) {
     AddOpacityTransitionToLayer(
         layer_to_receive_animation, animation_duration, 0, 0.5, true);
+  }
+}
+
+void LayerTreeTest::DispatchAddAnimationToPlayer(
+    AnimationPlayer* player_to_receive_animation,
+    double animation_duration) {
+  DCHECK(!proxy() || proxy()->IsMainThread());
+
+  if (player_to_receive_animation) {
+    AddOpacityTransitionToPlayer(player_to_receive_animation,
+                                 animation_duration, 0, 0.5, true);
   }
 }
 
@@ -786,12 +827,10 @@ void LayerTreeTest::DispatchSetNextCommitForcesRedraw() {
 void LayerTreeTest::DispatchCompositeImmediately() {
   DCHECK(!proxy() || proxy()->IsMainThread());
   if (layer_tree_host_)
-    layer_tree_host_->Composite(gfx::FrameTime::Now());
+    layer_tree_host_->Composite(base::TimeTicks::Now());
 }
 
-void LayerTreeTest::RunTest(bool threaded,
-                            bool delegating_renderer,
-                            bool impl_side_painting) {
+void LayerTreeTest::RunTest(bool threaded, bool delegating_renderer) {
   if (threaded) {
     impl_thread_.reset(new base::Thread("Compositor"));
     ASSERT_TRUE(impl_thread_->Start());
@@ -809,9 +848,9 @@ void LayerTreeTest::RunTest(bool threaded,
   // mocked out.
   settings_.renderer_settings.refresh_rate = 200.0;
   settings_.background_animation_rate = 200.0;
-  settings_.impl_side_painting = impl_side_painting;
   settings_.verify_property_trees = verify_property_trees_;
   InitializeSettings(&settings_);
+  InitializeLayerSettings(&layer_settings_);
 
   main_task_runner_->PostTask(
       FROM_HERE,
@@ -837,10 +876,6 @@ void LayerTreeTest::RunTest(bool threaded,
     return;
   }
   AfterTest();
-}
-
-void LayerTreeTest::RunTestWithImplSidePainting() {
-  RunTest(true, false, true);
 }
 
 void LayerTreeTest::RequestNewOutputSurface() {

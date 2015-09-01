@@ -69,7 +69,6 @@ namespace browser_sync {
 class BackendMigrator;
 class FaviconCache;
 class JsController;
-class OpenTabsUIDelegate;
 
 namespace sessions {
 class SyncSessionSnapshot;
@@ -81,6 +80,7 @@ class ChangeProcessor;
 class DataTypeManager;
 class DeviceInfoSyncService;
 class LocalDeviceInfoProvider;
+class OpenTabsUIDelegate;
 }  // namespace sync_driver
 
 namespace syncer {
@@ -275,11 +275,12 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // sync_driver::SyncService implementation
   bool HasSyncSetupCompleted() const override;
-  bool SyncActive() const override;
-  bool IsSyncEnabledAndLoggedIn() override;
-  void DisableForUser() override;
-  void StopAndSuppress() override;
-  void UnsuppressAndStart() override;
+  bool IsSyncAllowed() const override;
+  bool IsSyncActive() const override;
+  void OnDataTypeRequestsSyncStartup(syncer::ModelType type) override;
+  bool CanSyncStart() const override;
+  void RequestStop(SyncStopDataFate data_fate) override;
+  void RequestStart() override;
   syncer::ModelTypeSet GetActiveDataTypes() const override;
   syncer::ModelTypeSet GetPreferredDataTypes() const override;
   void OnUserChoseDatatypes(bool sync_everything,
@@ -292,6 +293,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   const GoogleServiceAuthError& GetAuthError() const override;
   bool HasUnrecoverableError() const override;
   bool backend_initialized() const override;
+  sync_driver::OpenTabsUIDelegate* GetOpenTabsUIDelegate() override;
   bool IsPassphraseRequiredForDecryption() const override;
   base::Time GetExplicitPassphraseTime() const override;
   bool IsUsingSecondaryPassphrase() const override;
@@ -362,10 +364,6 @@ class ProfileSyncService : public sync_driver::SyncService,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       const base::WeakPtr<syncer::ModelTypeSyncProxyImpl>& proxy);
 
-  // Return the active OpenTabsUIDelegate. If sessions is not enabled or not
-  // currently syncing, returns NULL.
-  virtual browser_sync::OpenTabsUIDelegate* GetOpenTabsUIDelegate();
-
   // Returns the SyncedWindowDelegatesGetter from the embedded sessions manager.
   virtual browser_sync::SyncedWindowDelegatesGetter*
   GetSyncedWindowDelegatesGetter() const;
@@ -386,9 +384,6 @@ class ProfileSyncService : public sync_driver::SyncService,
   // sync, as well as their states.
   void GetDataTypeControllerStates(
       sync_driver::DataTypeController::StateMap* state_map) const;
-
-  // Disables sync for the user and prevents it from starting on next restart.
-  virtual void StopSyncingPermanently();
 
   // SyncFrontend implementation.
   void OnBackendInitialized(
@@ -419,6 +414,8 @@ class ProfileSyncService : public sync_driver::SyncService,
   void OnMigrationNeededForTypes(syncer::ModelTypeSet types) override;
   void OnExperimentsChanged(const syncer::Experiments& experiments) override;
   void OnActionableError(const syncer::SyncProtocolError& error) override;
+  void OnLocalSetPassphraseEncryption(
+      const syncer::SyncEncryptionHandler::NigoriState& nigori_state) override;
 
   // DataTypeManagerObserver implementation.
   void OnConfigureDone(
@@ -474,9 +471,12 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Returns a human readable string describing backend initialization state.
   std::string GetBackendInitializationStateString() const;
 
-  // Returns true if startup is suppressed (i.e. user has stopped syncing via
-  // the google dashboard).
-  virtual bool IsStartSuppressed() const;
+  // Returns true if sync is requested to be running by the user.
+  // Note that this does not mean that sync WILL be running; e.g. if
+  // IsSyncAllowed() is false then sync won't start, and if the user
+  // doesn't confirm their settings (HasSyncSetupCompleted), sync will
+  // never become active. Use IsSyncActive to see if sync is running.
+  virtual bool IsSyncRequested() const;
 
   ProfileSyncComponentsFactory* factory() { return factory_.get(); }
 
@@ -490,13 +490,11 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Record stats on various events.
   static void SyncEvent(SyncEventCodes code);
 
-  // Returns whether sync is enabled.  Sync can be enabled/disabled both
-  // at compile time (e.g., on a per-OS basis) or at run time (e.g.,
-  // command-line switches).
-  // Profile::IsSyncAccessible() is probably a better signal than this function.
+  // Returns whether sync is allowed to run based on command-line switches.
+  // Profile::IsSyncAllowed() is probably a better signal than this function.
   // This function can be called from any thread, and the implementation doesn't
   // assume it's running on the UI thread.
-  static bool IsSyncEnabled();
+  static bool IsSyncAllowedByFlag();
 
   // Returns whether sync is managed, i.e. controlled by configuration
   // management. If so, the user is not allowed to configure sync.
@@ -668,12 +666,6 @@ class ProfileSyncService : public sync_driver::SyncService,
   // once (before this object is destroyed).
   void Shutdown() override;
 
-  // Called when a datatype (SyncableService) has a need for sync to start
-  // ASAP, presumably because a local change event has occurred but we're
-  // still in deferred start mode, meaning the SyncableService hasn't been
-  // told to MergeDataAndStartSyncing yet.
-  void OnDataTypeRequestsSyncStartup(syncer::ModelType type);
-
   // Return sync token status.
   SyncTokenStatus GetSyncTokenStatus() const;
 
@@ -712,10 +704,10 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Sometimes we need to wait for tasks on the sync thread in tests.
   base::MessageLoop* GetSyncLoopForTest() const;
 
- protected:
-  // Helper to configure the priority data types.
-  void ConfigurePriorityDataTypes();
+  // Triggers sync cycle with request to update specified |types|.
+  void RefreshTypesForTest(syncer::ModelTypeSet types);
 
+ protected:
   // Helper to install and configure a data type manager.
   void ConfigureDataTypeManager();
 
@@ -782,6 +774,11 @@ class ProfileSyncService : public sync_driver::SyncService,
   friend class SyncTest;
   friend class TestProfileSyncService;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
+
+  // Stops the sync engine. Does NOT set IsSyncRequested to false. Use
+  // RequestStop for that. |data_fate| controls whether the local sync data is
+  // deleted or kept when the engine shuts down.
+  void StopImpl(SyncStopDataFate data_fate);
 
   // Update the last auth error and notify observers of error state.
   void UpdateAuthErrorState(const GoogleServiceAuthError& error);
@@ -866,6 +863,9 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // Various setup following backend initialization, mostly for syncing backend.
   void PostBackendInitialization();
+
+  // Whether sync has been authenticated with an account ID.
+  bool IsSignedIn() const;
 
   // True if a syncing backend exists.
   bool HasSyncingBackend() const;
@@ -952,9 +952,10 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Manager for the non-blocking data types.
   sync_driver::NonBlockingDataTypeManager non_blocking_data_type_manager_;
 
-  ObserverList<sync_driver::SyncServiceObserver> observers_;
-  ObserverList<browser_sync::ProtocolEventObserver> protocol_event_observers_;
-  ObserverList<syncer::TypeDebugInfoObserver> type_debug_info_observers_;
+  base::ObserverList<sync_driver::SyncServiceObserver> observers_;
+  base::ObserverList<browser_sync::ProtocolEventObserver>
+      protocol_event_observers_;
+  base::ObserverList<syncer::TypeDebugInfoObserver> type_debug_info_observers_;
 
   std::set<SyncTypePreferenceProvider*> preference_providers_;
 
@@ -1080,6 +1081,9 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // Listens for the system being under memory pressure.
   scoped_ptr<base::MemoryPressureListener> memory_pressure_listener_;
+
+  // Used to save/restore nigori state across backend instances. May be null.
+  scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state_;
 
   base::WeakPtrFactory<ProfileSyncService> weak_factory_;
 

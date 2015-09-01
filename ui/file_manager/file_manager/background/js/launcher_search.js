@@ -50,22 +50,28 @@ function LauncherSearch() {
  */
 LauncherSearch.prototype.onPreferencesChanged_ = function() {
   chrome.fileManagerPrivate.getPreferences(function(preferences) {
-    this.initializeEventListeners_(preferences.driveEnabled);
+    this.initializeEventListeners_(
+        preferences.driveEnabled, preferences.searchSuggestEnabled);
   }.bind(this));
 };
 
 /**
  * Initialize event listeners of chrome.launcherSearchProvider.
  *
- * When drive is enabled, listen events of chrome.launcherSearchProvider and
- * provide seach resutls. When it is disabled, remove these event listeners and
- * stop providing search results.
+ * When drive and search suggest are enabled, listen events of
+ * chrome.launcherSearchProvider and provide seach resutls. When one of them is
+ * disabled, remove these event listeners and stop providing search results.
  *
  * @param {boolean} isDriveEnabled True if drive is enabled.
+ * @param {boolean} isSearchSuggestEnabled True if search suggest is enabled.
  */
-LauncherSearch.prototype.initializeEventListeners_ = function(isDriveEnabled) {
-  // If this.enabled_ === isDriveEnabled, we don't need to change anything here.
-  if (this.enabled_ === isDriveEnabled)
+LauncherSearch.prototype.initializeEventListeners_ = function(
+    isDriveEnabled, isSearchSuggestEnabled) {
+  var launcherSearchEnabled = isDriveEnabled && isSearchSuggestEnabled;
+
+  // If this.enabled_ === launcherSearchEnabled, we don't need to change
+  // anything here.
+  if (this.enabled_ === launcherSearchEnabled)
     return;
 
   // Remove event listeners if it's already enabled.
@@ -82,8 +88,8 @@ LauncherSearch.prototype.initializeEventListeners_ = function(isDriveEnabled) {
   // results.
   this.queryId_ = null;
 
-  // Add event listeners when drive is enabled.
-  if (isDriveEnabled) {
+  // Add event listeners when launcher search of Drive is enabled.
+  if (launcherSearchEnabled) {
     this.enabled_ = true;
     chrome.launcherSearchProvider.onQueryStarted.addListener(
         this.onQueryStartedBound_);
@@ -118,17 +124,30 @@ LauncherSearch.prototype.onQueryStarted_ = function(queryId, query, limit) {
         chrome.launcherSearchProvider.setSearchResults(
             queryId,
             results.map(function(result) {
-              // Use high-dpi icons since preferred icon size is 24px in the
-              // current implementation.
-              //
               // TODO(yawano): Use filetype_folder_shared.png for a shared
               //     folder.
+              // TODO(yawano): Add archive launcher filetype icon.
+              var icon = FileType.getIcon(result.entry);
+              if (icon === 'UNKNOWN' || icon === 'archive')
+                icon = 'generic';
+
+              var useHighDpiIcon = window.devicePixelRatio > 1.0;
               var iconUrl = chrome.runtime.getURL(
-                  'foreground/images/filetype/2x/filetype_' +
-                  FileType.getIcon(result.entry) + '.png');
+                  'foreground/images/launcher_filetypes/' +
+                  (useHighDpiIcon ? '2x/' : '') + 'launcher_filetype_' +
+                  icon + '.png');
+
+              // Hide extensions for hosted files.
+              var title = FileType.isHosted(result.entry) ?
+                  result.entry.name.substr(
+                      0,
+                      result.entry.name.length -
+                          FileType.getExtension(result.entry).length) :
+                  result.entry.name;
+
               return {
                 itemId: result.entry.toURL(),
-                title: result.entry.name,
+                title: title,
                 iconUrl: iconUrl,
                 // Relevance is set as 2 for all results as a temporary
                 // implementation. 2 is the middle value.

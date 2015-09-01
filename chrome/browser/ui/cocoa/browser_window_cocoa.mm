@@ -29,6 +29,7 @@
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
+#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
@@ -54,13 +55,14 @@
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -706,6 +708,11 @@ void BrowserWindowCocoa::ShowAppMenu() {
 
 bool BrowserWindowCocoa::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+  // Handle ESC to dismiss permission bubbles, but still forward it
+  // to the window afterwards.
+  if (event.windowsKeyCode == ui::VKEY_ESCAPE)
+    [controller_ dismissPermissionBubble];
+
   if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
     return false;
 
@@ -764,7 +771,12 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
 
 web_modal::WebContentsModalDialogHost*
     BrowserWindowCocoa::GetWebContentsModalDialogHost() {
-  return NULL;
+  DCHECK([controller_ window]);
+  ConstrainedWindowSheetController* sheet_controller =
+      [ConstrainedWindowSheetController
+          controllerForParentWindow:[controller_ window]];
+  DCHECK(sheet_controller);
+  return [sheet_controller dialogHost];
 }
 
 extensions::ActiveTabPermissionGranter*

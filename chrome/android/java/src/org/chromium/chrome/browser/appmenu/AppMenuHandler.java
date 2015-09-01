@@ -116,9 +116,8 @@ public class AppMenuHandler {
         int rotation = mActivity.getWindowManager().getDefaultDisplay().getRotation();
         Point pt = new Point();
         mActivity.getWindowManager().getDefaultDisplay().getSize(pt);
-
-        mAppMenu.show(
-                wrapper, anchorView, isByHardwareButton, rotation, appRect, pt.y);
+        mAppMenu.show(wrapper, anchorView, isByHardwareButton,
+                rotation, appRect, pt.y, mDelegate.getFooterResourceId());
         mAppMenuDragHelper.onShow(startDragging);
         RecordUserAction.record("MobileMenuShow");
         return true;
@@ -139,7 +138,7 @@ public class AppMenuHandler {
      * @return The App Menu that the menu handler is interacting with.
      */
     @VisibleForTesting
-    AppMenu getAppMenu() {
+    public AppMenu getAppMenuForTest() {
         return mAppMenu;
     }
 

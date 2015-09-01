@@ -197,7 +197,8 @@ bool CanCLDComplementSubCode(
   // CLD agree that the language is Chinese and Content-Language doesn't know
   // which dialect is used, CLD language has priority.
   // TODO(hajimehoshi): How about the other dialects like zh-MO?
-  return page_language == "zh" && StartsWithASCII(cld_language, "zh-", false);
+  return page_language == "zh" &&
+         base::StartsWithASCII(cld_language, "zh-", false);
 }
 
 }  // namespace
@@ -301,7 +302,7 @@ void CorrectLanguageCodeTypo(std::string* code) {
   size_t dash_index = code->find('-');
   if (dash_index != std::string::npos) {
     *code = base::StringToLowerASCII(code->substr(0, dash_index)) +
-        StringToUpperASCII(code->substr(dash_index));
+        base::StringToUpperASCII(code->substr(dash_index));
   } else {
     *code = base::StringToLowerASCII(*code);
   }
@@ -323,7 +324,7 @@ bool IsValidLanguageCode(const std::string& code) {
 
   for (std::string::const_iterator it = main_code.begin();
        it != main_code.end(); ++it) {
-    if (!IsAsciiAlpha(*it))
+    if (!base::IsAsciiAlpha(*it))
       return false;
   }
 
@@ -337,7 +338,7 @@ bool IsValidLanguageCode(const std::string& code) {
 
   for (std::string::const_iterator it = sub_code.begin();
        it != sub_code.end(); ++it) {
-    if (!IsAsciiAlpha(*it))
+    if (!base::IsAsciiAlpha(*it))
       return false;
   }
 
@@ -380,7 +381,7 @@ bool IsSameOrSimilarLanguages(const std::string& page_language,
 bool MaybeServerWrongConfiguration(const std::string& page_language,
                                    const std::string& cld_language) {
   // If |page_language| is not "en-*", respect it and just return false here.
-  if (!StartsWithASCII(page_language, "en", false))
+  if (!base::StartsWithASCII(page_language, "en", false))
     return false;
 
   // A server provides a language meta information representing "en-*". But it

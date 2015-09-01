@@ -347,7 +347,7 @@ std::string ChromeExtensionsClient::GetWebstoreBaseURL() const {
     gallery_prefix =
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kAppsGalleryURL);
-  if (EndsWith(gallery_prefix, "/", true))
+  if (base::EndsWith(gallery_prefix, "/", true))
     gallery_prefix = gallery_prefix.substr(0, gallery_prefix.length() - 1);
   return gallery_prefix;
 }
@@ -367,8 +367,10 @@ bool ChromeExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
   // ExtensionUpdater ensures that we notice a change. This is the full URL
   // of a blacklist:
   // http://www.gstatic.com/chrome/extensions/blacklist/l_0_0_0_7.txt
-  return StartsWithASCII(url.spec(), kExtensionBlocklistUrlPrefix, true) ||
-         StartsWithASCII(url.spec(), kExtensionBlocklistHttpsUrlPrefix, true);
+  return base::StartsWith(url.spec(), kExtensionBlocklistUrlPrefix,
+                          base::CompareCase::SENSITIVE) ||
+         base::StartsWith(url.spec(), kExtensionBlocklistHttpsUrlPrefix,
+                          base::CompareCase::SENSITIVE);
 }
 
 std::set<base::FilePath> ChromeExtensionsClient::GetBrowserImagePaths(

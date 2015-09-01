@@ -27,8 +27,6 @@ import org.chromium.blink_public.web.WebTextInputFlags;
 import org.chromium.ui.base.ime.TextInputType;
 import org.chromium.ui.picker.InputDialogContainer;
 
-import java.lang.CharSequence;
-
 /**
  * Adapts and plumbs android IME service onto the chrome text input API.
  * ImeAdapter provides an interface in both ways native <-> java:
@@ -63,14 +61,14 @@ public class ImeAdapter {
         void onImeEvent();
 
         /**
-         * Called when a request to hide the keyboard is sent to InputMethodManager.
-         */
-        void onDismissInput();
-
-        /**
          * Called when the keyboard could not be shown due to the hardware keyboard being present.
          */
         void onKeyboardBoundsUnchanged();
+
+        /**
+         * @see BaseInputConnection#performContextMenuAction(int)
+         */
+        boolean performContextMenuAction(int id);
 
         /**
          * @return View that the keyboard should be attached to.
@@ -286,7 +284,6 @@ public class ImeAdapter {
             mInputMethodManagerWrapper.hideSoftInputFromWindow(view.getWindowToken(), 0,
                     unzoomIfNeeded ? mViewEmbedder.getNewShowKeyboardReceiver() : null);
         }
-        mViewEmbedder.onDismissInput();
     }
 
     private boolean hasInputType() {
@@ -351,6 +348,13 @@ public class ImeAdapter {
         }
 
         return null;  // No printing characters were found.
+    }
+
+    /**
+     * @see BaseInputConnection#performContextMenuAction(int)
+     */
+    public boolean performContextMenuAction(int id) {
+        return mViewEmbedder.performContextMenuAction(id);
     }
 
     @VisibleForTesting
@@ -556,56 +560,6 @@ public class ImeAdapter {
         return true;
     }
 
-    /**
-     * Send a request to the native counterpart to unselect text.
-     * @return Whether the native counterpart of ImeAdapter received the call.
-     */
-    public boolean unselect() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        nativeUnselect(mNativeImeAdapterAndroid);
-        return true;
-    }
-
-    /**
-     * Send a request to the native counterpart of ImeAdapter to select all the text.
-     * @return Whether the native counterpart of ImeAdapter received the call.
-     */
-    public boolean selectAll() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        nativeSelectAll(mNativeImeAdapterAndroid);
-        return true;
-    }
-
-    /**
-     * Send a request to the native counterpart of ImeAdapter to cut the selected text.
-     * @return Whether the native counterpart of ImeAdapter received the call.
-     */
-    public boolean cut() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        nativeCut(mNativeImeAdapterAndroid);
-        return true;
-    }
-
-    /**
-     * Send a request to the native counterpart of ImeAdapter to copy the selected text.
-     * @return Whether the native counterpart of ImeAdapter received the call.
-     */
-    public boolean copy() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        nativeCopy(mNativeImeAdapterAndroid);
-        return true;
-    }
-
-    /**
-     * Send a request to the native counterpart of ImeAdapter to paste the text from the clipboard.
-     * @return Whether the native counterpart of ImeAdapter received the call.
-     */
-    public boolean paste() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        nativePaste(mNativeImeAdapterAndroid);
-        return true;
-    }
-
     // Calls from C++ to Java
 
     @CalledByNative
@@ -674,10 +628,5 @@ public class ImeAdapter {
     private native void nativeDeleteSurroundingText(long nativeImeAdapterAndroid,
             int before, int after);
 
-    private native void nativeUnselect(long nativeImeAdapterAndroid);
-    private native void nativeSelectAll(long nativeImeAdapterAndroid);
-    private native void nativeCut(long nativeImeAdapterAndroid);
-    private native void nativeCopy(long nativeImeAdapterAndroid);
-    private native void nativePaste(long nativeImeAdapterAndroid);
     private native void nativeResetImeAdapter(long nativeImeAdapterAndroid);
 }

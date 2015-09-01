@@ -23,15 +23,27 @@
         minimumRequiredFieldsCount:(NSUInteger)requiredFieldsCount
                  completionHandler:(void (^)(NSString*))completionHandler;
 
+// Stores the current active element. This is used to make the element active
+// again in case the web view loses focus when a dialog is presented over it.
+- (void)storeActiveElement;
+
+// Clears the current active element.
+- (void)clearActiveElement;
+
 // Fills the data in JSON string |dataString| into the active form field, then
-// executes the |completionHandler|.
+// executes the |completionHandler|. The active form field is either
+// document.activeElement or the field stored by a call to storeActiveElement.
+// non-null.
 - (void)fillActiveFormField:(NSString*)dataString
           completionHandler:(ProceduralBlock)completionHandler;
 
 // Fills a number of fields in the same named form.
+// Applies Autofill CSS (i.e. yellow background) to filled elements if
+// |styleElements| is true.
 // |completionHandler| is called after the forms are filled. |completionHandler|
 // cannot be nil.
 - (void)fillForm:(NSString*)dataString
+        styleElements:(BOOL)styleElements
     completionHandler:(ProceduralBlock)completionHandler;
 
 // Dispatches the autocomplete event to the form element with the given

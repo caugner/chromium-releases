@@ -16,6 +16,7 @@
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event_impl.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
@@ -30,6 +31,7 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
 #include "chrome/common/switch_utils.h"
+#include "chrome/common/trace_event_args_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
@@ -438,6 +440,9 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 
   Profiling::ProcessStarted();
 
+  base::trace_event::TraceLog::GetInstance()->SetArgumentFilterPredicate(
+      base::Bind(&IsTraceEventArgsWhitelisted));
+
 #if defined(OS_WIN)
   v8_breakpad_support::SetUp();
 #endif
@@ -738,22 +743,22 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // The renderer sandbox prevents us from accessing our .pak files directly.
     // Therefore file descriptors to the .pak files that we need are passed in
     // at process creation time.
-    int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kAndroidLocalePakDescriptor);
-    CHECK(locale_pak_fd != -1);
-    ResourceBundle::InitSharedInstanceWithPakFileRegion(
-        base::File(locale_pak_fd), base::MemoryMappedFile::Region::kWholeFile);
+    auto global_descriptors = base::GlobalDescriptors::GetInstance();
+    int pak_fd = global_descriptors->Get(kAndroidLocalePakDescriptor);
+    base::MemoryMappedFile::Region pak_region =
+        global_descriptors->GetRegion(kAndroidLocalePakDescriptor);
+    ResourceBundle::InitSharedInstanceWithPakFileRegion(base::File(pak_fd),
+                                                        pak_region);
 
     int extra_pak_keys[] = {
       kAndroidChrome100PercentPakDescriptor,
       kAndroidUIResourcesPakDescriptor,
     };
     for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
-      int pak_fd =
-          base::GlobalDescriptors::GetInstance()->MaybeGet(extra_pak_keys[i]);
-      CHECK(pak_fd != -1);
-      ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-          base::File(pak_fd), ui::SCALE_FACTOR_100P);
+      pak_fd = global_descriptors->Get(extra_pak_keys[i]);
+      pak_region = global_descriptors->GetRegion(extra_pak_keys[i]);
+      ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
+          base::File(pak_fd), pak_region, ui::SCALE_FACTOR_100P);
     }
 
     base::i18n::SetICUDefaultLocale(locale);

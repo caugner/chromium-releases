@@ -12,11 +12,9 @@
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/manifest/manifest_icon_selector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
-#include "components/infobars/core/infobar.h"
 #include "components/rappor/rappor_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,12 +30,17 @@ namespace {
 
 base::TimeDelta gTimeDeltaForTesting;
 int gCurrentRequestID = -1;
+const char kPngExtension[] = ".png";
 
 // The requirement for now is an image/png that is at least 144x144.
 const int kIconMinimumSize = 144;
 bool DoesManifestContainRequiredIcon(const content::Manifest& manifest) {
   for (const auto& icon : manifest.icons) {
-    if (!EqualsASCII(icon.type.string(), "image/png"))
+    // The type field is optional. If it isn't present, fall back on checking
+    // the src extension, and allow the icon if the extension ends with png.
+    if (!base::EqualsASCII(icon.type.string(), "image/png") &&
+        !(icon.type.is_null() &&
+          base::EndsWith(icon.src.ExtractFileName(), kPngExtension, false)))
       continue;
 
     for (const auto& size : icon.sizes) {
@@ -73,6 +76,8 @@ AppBannerDataFetcher::AppBannerDataFetcher(
       ideal_icon_size_(ideal_icon_size),
       weak_delegate_(delegate),
       is_active_(false),
+      was_canceled_by_page_(false),
+      page_requested_prompt_(false),
       event_request_id_(-1) {
 }
 
@@ -83,6 +88,8 @@ void AppBannerDataFetcher::Start(const GURL& validated_url) {
   DCHECK(web_contents);
 
   is_active_ = true;
+  was_canceled_by_page_ = false;
+  page_requested_prompt_ = false;
   validated_url_ = validated_url;
   web_contents->GetManifest(
       base::Bind(&AppBannerDataFetcher::OnDidGetManifest, this));
@@ -94,6 +101,8 @@ void AppBannerDataFetcher::Cancel() {
     FOR_EACH_OBSERVER(Observer, observer_list_,
                       OnDecidedWhetherToShow(this, false));
     is_active_ = false;
+    was_canceled_by_page_ = false;
+    page_requested_prompt_ = false;
   }
 }
 
@@ -130,6 +139,8 @@ bool AppBannerDataFetcher::OnMessageReceived(
                                    render_frame_host)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AppBannerPromptReply,
                         OnBannerPromptReply)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RequestShowAppBanner,
+                        OnRequestShowAppBanner)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -148,9 +159,18 @@ void AppBannerDataFetcher::OnBannerPromptReply(
   }
 
   // The renderer might have requested the prompt to be canceled.
-  if (reply == blink::WebAppBannerPromptReply::Cancel) {
+  // They may request that it is redisplayed later, so don't Cancel() here.
+  // However, log that the cancelation was requested, so Cancel() can be
+  // called if a redisplay isn't asked for.
+  //
+  // The redisplay request may be received before the Cancel prompt reply
+  // *after* if it is made before the beforeinstallprompt event handler
+  // concludes (e.g. in the event handler itself), so allow the pipeline
+  // to continue in this case.
+  if (reply == blink::WebAppBannerPromptReply::Cancel &&
+      !page_requested_prompt_) {
+    was_canceled_by_page_ = true;
     OutputDeveloperNotShownMessage(web_contents, kRendererRequestCancel);
-    Cancel();
     return;
   }
 
@@ -158,12 +178,22 @@ void AppBannerDataFetcher::OnBannerPromptReply(
   FOR_EACH_OBSERVER(Observer, observer_list_,
                     OnDecidedWhetherToShow(this, true));
 
-  infobars::InfoBar* infobar = CreateBanner(app_icon_.get(), app_title_);
-  if (infobar) {
-    InfoBarService::FromWebContents(web_contents)->AddInfoBar(
-        make_scoped_ptr(infobar));
-  }
+  ShowBanner(app_icon_.get(), app_title_);
   is_active_ = false;
+}
+
+void AppBannerDataFetcher::OnRequestShowAppBanner(
+    content::RenderFrameHost* render_frame_host,
+    int request_id) {
+  if (was_canceled_by_page_) {
+    // Simulate an "OK" from the website to restart the banner display pipeline.
+    was_canceled_by_page_ = false;
+    OnBannerPromptReply(render_frame_host, request_id,
+                        blink::WebAppBannerPromptReply::None);
+  } else {
+    // Log that the prompt request was made for when we get the prompt reply.
+    page_requested_prompt_ = true;
+  }
 }
 
 AppBannerDataFetcher::~AppBannerDataFetcher() {
@@ -197,24 +227,13 @@ bool AppBannerDataFetcher::FetchIcon(const GURL& image_url) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   bitmap_fetcher_.reset(new chrome::BitmapFetcher(image_url, this));
-  bitmap_fetcher_->Start(
+  bitmap_fetcher_->Init(
       profile->GetRequestContext(),
       std::string(),
       net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
       net::LOAD_NORMAL);
+  bitmap_fetcher_->Start();
   return true;
-}
-
-infobars::InfoBar* AppBannerDataFetcher::CreateBanner(
-    const SkBitmap* icon,
-    const base::string16& title) {
-  content::WebContents* web_contents = GetWebContents();
-  DCHECK(web_contents && !web_app_data_.IsEmpty());
-
-  // TODO(dfalcantara): Desktop doesn't display app banners, yet.  Just pretend
-  //                    that a banner was shown for testing purposes.
-  RecordDidShowBanner("AppBanner.WebApp.Shown");
-  return nullptr;
 }
 
 void AppBannerDataFetcher::RecordDidShowBanner(const std::string& event_name) {
@@ -228,7 +247,6 @@ void AppBannerDataFetcher::RecordDidShowBanner(const std::string& event_name) {
   rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
                                           event_name,
                                           web_contents->GetURL());
-  banners::TrackDisplayEvent(DISPLAY_EVENT_CREATED);
 }
 
 void AppBannerDataFetcher::OnDidGetManifest(
@@ -259,10 +277,17 @@ void AppBannerDataFetcher::OnDidGetManifest(
     return;
   }
 
-  banners::TrackDisplayEvent(DISPLAY_EVENT_BANNER_REQUESTED);
-
   web_app_data_ = manifest;
   app_title_ = web_app_data_.name.string();
+
+  if (IsWebAppInstalled(web_contents->GetBrowserContext(),
+                        manifest.start_url)) {
+    OutputDeveloperNotShownMessage(web_contents, kBannerAlreadyAdded);
+    Cancel();
+    return;
+  }
+
+  banners::TrackDisplayEvent(DISPLAY_EVENT_WEB_APP_BANNER_REQUESTED);
 
   // Check to see if there is a single service worker controlling this page
   // and the manifest's start url.
@@ -310,12 +335,18 @@ void AppBannerDataFetcher::OnDidCheckHasServiceWorker(
 void AppBannerDataFetcher::OnFetchComplete(const GURL& url,
                                            const SkBitmap* icon) {
   if (is_active_)
-    ShowBanner(icon);
+    RequestShowBanner(icon);
 
   Release();
 }
 
-void AppBannerDataFetcher::ShowBanner(const SkBitmap* icon) {
+bool AppBannerDataFetcher::IsWebAppInstalled(
+    content::BrowserContext* browser_context,
+    const GURL& start_url) {
+  return false;
+}
+
+void AppBannerDataFetcher::RequestShowBanner(const SkBitmap* icon) {
   content::WebContents* web_contents = GetWebContents();
   if (!CheckFetcherIsStillAlive(web_contents)) {
     Cancel();

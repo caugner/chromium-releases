@@ -6,6 +6,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
@@ -19,14 +20,14 @@
 #include "extensions/renderer/user_script_injector.h"
 #include "extensions/renderer/web_ui_injection_host.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "url/gurl.h"
 
 namespace extensions {
 
 namespace {
 
-GURL GetDocumentUrlForFrame(blink::WebFrame* frame) {
+GURL GetDocumentUrlForFrame(blink::WebLocalFrame* frame) {
   GURL data_source_url = ScriptContext::GetDataSourceURLForFrame(frame);
   if (!data_source_url.is_empty() && frame->isViewSourceModeEnabled()) {
     data_source_url = GURL(content::kViewSourceScheme + std::string(":") +
@@ -55,34 +56,30 @@ void UserScriptSet::RemoveObserver(Observer* observer) {
 
 void UserScriptSet::GetActiveExtensionIds(
     std::set<std::string>* ids) const {
-  for (ScopedVector<UserScript>::const_iterator iter = scripts_.begin();
-       iter != scripts_.end();
-       ++iter) {
-    if ((*iter)->host_id().type() != HostID::EXTENSIONS)
+  for (const UserScript* script : scripts_) {
+    if (script->host_id().type() != HostID::EXTENSIONS)
       continue;
-    DCHECK(!(*iter)->extension_id().empty());
-    ids->insert((*iter)->extension_id());
+    DCHECK(!script->extension_id().empty());
+    ids->insert(script->extension_id());
   }
 }
 
 void UserScriptSet::GetInjections(
     ScopedVector<ScriptInjection>* injections,
-    blink::WebFrame* web_frame,
+    content::RenderFrame* render_frame,
     int tab_id,
     UserScript::RunLocation run_location) {
-  GURL document_url = GetDocumentUrlForFrame(web_frame);
-  for (ScopedVector<UserScript>::const_iterator iter = scripts_.begin();
-       iter != scripts_.end();
-       ++iter) {
+  GURL document_url = GetDocumentUrlForFrame(render_frame->GetWebFrame());
+  for (const UserScript* script : scripts_) {
     scoped_ptr<ScriptInjection> injection = GetInjectionForScript(
-        *iter,
-        web_frame,
+        script,
+        render_frame,
         tab_id,
         run_location,
         document_url,
         false /* is_declarative */);
     if (injection.get())
-      injections->push_back(injection.release());
+      injections->push_back(injection.Pass());
   }
 }
 
@@ -98,21 +95,22 @@ bool UserScriptSet::UpdateUserScripts(base::SharedMemoryHandle shared_memory,
     return false;
 
   // First get the size of the memory block.
-  if (!shared_memory_->Map(sizeof(Pickle::Header)))
+  if (!shared_memory_->Map(sizeof(base::Pickle::Header)))
     return false;
-  Pickle::Header* pickle_header =
-      reinterpret_cast<Pickle::Header*>(shared_memory_->memory());
+  base::Pickle::Header* pickle_header =
+      reinterpret_cast<base::Pickle::Header*>(shared_memory_->memory());
 
   // Now map in the rest of the block.
-  int pickle_size = sizeof(Pickle::Header) + pickle_header->payload_size;
+  int pickle_size = sizeof(base::Pickle::Header) + pickle_header->payload_size;
   shared_memory_->Unmap();
   if (!shared_memory_->Map(pickle_size))
     return false;
 
   // Unpickle scripts.
   size_t num_scripts = 0;
-  Pickle pickle(reinterpret_cast<char*>(shared_memory_->memory()), pickle_size);
-  PickleIterator iter(pickle);
+  base::Pickle pickle(reinterpret_cast<char*>(shared_memory_->memory()),
+                      pickle_size);
+  base::PickleIterator iter(pickle);
   CHECK(iter.ReadSizeT(&num_scripts));
 
   scripts_.clear();
@@ -149,7 +147,7 @@ bool UserScriptSet::UpdateUserScripts(base::SharedMemoryHandle shared_memory,
       continue;
     }
 
-    scripts_.push_back(script.release());
+    scripts_.push_back(script.Pass());
   }
 
   FOR_EACH_OBSERVER(Observer,
@@ -160,16 +158,14 @@ bool UserScriptSet::UpdateUserScripts(base::SharedMemoryHandle shared_memory,
 
 scoped_ptr<ScriptInjection> UserScriptSet::GetDeclarativeScriptInjection(
     int script_id,
-    blink::WebFrame* web_frame,
+    content::RenderFrame* render_frame,
     int tab_id,
     UserScript::RunLocation run_location,
     const GURL& document_url) {
-  for (ScopedVector<UserScript>::const_iterator it = scripts_.begin();
-       it != scripts_.end();
-       ++it) {
-    if ((*it)->id() == script_id) {
-      return GetInjectionForScript(*it,
-                                   web_frame,
+  for (const UserScript* script : scripts_) {
+    if (script->id() == script_id) {
+      return GetInjectionForScript(script,
+                                   render_frame,
                                    tab_id,
                                    run_location,
                                    document_url,
@@ -179,17 +175,16 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetDeclarativeScriptInjection(
   return scoped_ptr<ScriptInjection>();
 }
 
-// TODO(dcheng): Scripts can't be injected on a remote frame, so this function
-// signature needs to be updated.
 scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
-    UserScript* script,
-    blink::WebFrame* web_frame,
+    const UserScript* script,
+    content::RenderFrame* render_frame,
     int tab_id,
     UserScript::RunLocation run_location,
     const GURL& document_url,
     bool is_declarative) {
   scoped_ptr<ScriptInjection> injection;
   scoped_ptr<const InjectionHost> injection_host;
+  blink::WebLocalFrame* web_frame = render_frame->GetWebFrame();
 
   const HostID& host_id = script->host_id();
   if (host_id.type() == HostID::EXTENSIONS) {
@@ -214,17 +209,10 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
                                                              this,
                                                              is_declarative));
 
-  blink::WebFrame* top_frame = web_frame->top();
-  // It doesn't make sense to do script injection for remote frames, since they
-  // cannot host any documents or content.
-  // TODO(kalman): Fix this properly by moving all security checks into the
-  // browser. See http://crbug.com/466373 for ongoing work here.
-  if (top_frame->isWebRemoteFrame())
-    return injection.Pass();
-
-  if (injector->CanExecuteOnFrame(injection_host.get(), web_frame,
-                                  -1,  // Content scripts are not tab-specific.
-                                  top_frame->document().url()) ==
+  if (injector->CanExecuteOnFrame(
+          injection_host.get(),
+          web_frame,
+          -1 /* Content scripts are not tab-specific. */) ==
       PermissionsData::ACCESS_DENIED) {
     return injection.Pass();
   }
@@ -236,7 +224,7 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
   if (inject_css || inject_js) {
     injection.reset(new ScriptInjection(
         injector.Pass(),
-        web_frame->toWebLocalFrame(),
+        render_frame,
         injection_host.Pass(),
         run_location,
         tab_id));

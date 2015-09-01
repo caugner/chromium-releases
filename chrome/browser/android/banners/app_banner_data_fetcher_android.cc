@@ -4,8 +4,10 @@
 
 #include "chrome/browser/android/banners/app_banner_data_fetcher_android.h"
 
-#include "chrome/browser/android/banners/app_banner_infobar_delegate.h"
-#include "chrome/browser/ui/android/infobars/app_banner_infobar.h"
+#include "chrome/browser/android/banners/app_banner_infobar_delegate_android.h"
+#include "chrome/browser/banners/app_banner_metrics.h"
+#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/ui/android/infobars/app_banner_infobar_android.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace banners {
@@ -41,36 +43,36 @@ std::string AppBannerDataFetcherAndroid::GetAppIdentifier() {
       ? AppBannerDataFetcher::GetAppIdentifier() : native_app_package_;
 }
 
-infobars::InfoBar* AppBannerDataFetcherAndroid::CreateBanner(
-    const SkBitmap* icon,
-    const base::string16& title) {
+void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
+                                             const base::string16& title) {
   content::WebContents* web_contents = GetWebContents();
   DCHECK(web_contents);
 
   infobars::InfoBar* infobar = nullptr;
   if (native_app_data_.is_null()) {
-    scoped_ptr<AppBannerInfoBarDelegate> delegate(
-        new AppBannerInfoBarDelegate(event_request_id(),
-                                     title,
-                                     new SkBitmap(*icon),
-                                     web_app_data()));
+    scoped_ptr<AppBannerInfoBarDelegateAndroid> delegate(
+        new AppBannerInfoBarDelegateAndroid(
+            event_request_id(), title, new SkBitmap(*icon), web_app_data()));
 
-    infobar = new AppBannerInfoBar(delegate.Pass(), web_app_data().start_url);
-    if (infobar)
+    infobar =
+        new AppBannerInfoBarAndroid(delegate.Pass(), web_app_data().start_url);
+    if (infobar) {
       RecordDidShowBanner("AppBanner.WebApp.Shown");
+      TrackDisplayEvent(DISPLAY_EVENT_WEB_APP_BANNER_CREATED);
+    }
   } else {
-    scoped_ptr<AppBannerInfoBarDelegate> delegate(
-        new AppBannerInfoBarDelegate(event_request_id(),
-                                     title,
-                                     new SkBitmap(*icon),
-                                     native_app_data_,
-                                     native_app_package_));
-    infobar = new AppBannerInfoBar(delegate.Pass(), native_app_data_);
-    if (infobar)
+    scoped_ptr<AppBannerInfoBarDelegateAndroid> delegate(
+        new AppBannerInfoBarDelegateAndroid(
+            event_request_id(), title, new SkBitmap(*icon), native_app_data_,
+            native_app_package_));
+    infobar = new AppBannerInfoBarAndroid(delegate.Pass(), native_app_data_);
+    if (infobar) {
       RecordDidShowBanner("AppBanner.NativeApp.Shown");
+      TrackDisplayEvent(DISPLAY_EVENT_NATIVE_APP_BANNER_CREATED);
+    }
   }
-
-  return infobar;
+  InfoBarService::FromWebContents(web_contents)
+      ->AddInfoBar(make_scoped_ptr(infobar));
 }
 
 }  // namespace banners

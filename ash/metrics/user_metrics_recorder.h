@@ -7,9 +7,12 @@
 
 #include "ash/ash_export.h"
 #include "ash/metrics/task_switch_metrics_recorder.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
 
 namespace ash {
+
+class DesktopTaskSwitchMetricRecorder;
 
 namespace test {
 class UserMetricsRecorderTestAPI;
@@ -27,6 +30,7 @@ enum UserMetricsAction {
   UMA_ACCEL_RESTART_POWER_BUTTON,
   UMA_ACCEL_SHUT_DOWN_POWER_BUTTON,
   UMA_CLOSE_THROUGH_CONTEXT_MENU,
+  UMA_DESKTOP_SWITCH_TASK,
   UMA_DRAG_MAXIMIZE_LEFT,
   UMA_DRAG_MAXIMIZE_RIGHT,
   UMA_GESTURE_OVERVIEW,
@@ -59,6 +63,7 @@ enum UserMetricsAction {
   UMA_STATUS_AREA_CAPS_LOCK_DISABLED_BY_CLICK,
   UMA_STATUS_AREA_CAPS_LOCK_ENABLED_BY_CLICK,
   UMA_STATUS_AREA_CAPS_LOCK_POPUP,
+  UMA_STATUS_AREA_CAST_STOP_CAST,
   UMA_STATUS_AREA_CONNECT_TO_CONFIGURED_NETWORK,
   UMA_STATUS_AREA_CONNECT_TO_UNCONFIGURED_NETWORK,
   UMA_STATUS_AREA_CONNECT_TO_VPN,
@@ -69,6 +74,7 @@ enum UserMetricsAction {
   UMA_STATUS_AREA_DETAILED_BLUETOOTH_VIEW,
   UMA_STATUS_AREA_DETAILED_BRIGHTNESS_VIEW,
   UMA_STATUS_AREA_DETAILED_CAST_VIEW,
+  UMA_STATUS_AREA_DETAILED_CAST_VIEW_LAUNCH_CAST,
   UMA_STATUS_AREA_DETAILED_DRIVE_VIEW,
   UMA_STATUS_AREA_DETAILED_NETWORK_VIEW,
   UMA_STATUS_AREA_DETAILED_VPN_VIEW,
@@ -153,6 +159,12 @@ class ASH_EXPORT UserMetricsRecorder {
     return task_switch_metrics_recorder_;
   }
 
+  // Informs |this| that the Shell has been initialized.
+  void OnShellInitialized();
+
+  // Informs |this| that the Shell is going to be shut down.
+  void OnShellShuttingDown();
+
  private:
   friend class test::UserMetricsRecorderTestAPI;
 
@@ -178,6 +190,11 @@ class ASH_EXPORT UserMetricsRecorder {
   base::RepeatingTimer<UserMetricsRecorder> timer_;
 
   TaskSwitchMetricsRecorder task_switch_metrics_recorder_;
+
+  // Metric recorder to track how often task windows are activated by mouse
+  // clicks or touchscreen taps.
+  scoped_ptr<DesktopTaskSwitchMetricRecorder>
+      desktop_task_switch_metric_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(UserMetricsRecorder);
 };

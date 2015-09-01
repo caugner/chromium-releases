@@ -26,8 +26,7 @@ class DisplayInfo;
 // compositor.
 class AshWindowTreeHostUnified : public AshWindowTreeHost,
                                  public aura::WindowTreeHost,
-                                 public aura::WindowObserver,
-                                 public ui::EventSource {
+                                 public aura::WindowObserver {
  public:
   explicit AshWindowTreeHostUnified(const gfx::Rect& initial_bounds);
   ~AshWindowTreeHostUnified() override;
@@ -47,8 +46,8 @@ class AshWindowTreeHostUnified : public AshWindowTreeHost,
   // aura::WindowTreeHost:
   ui::EventSource* GetEventSource() override;
   gfx::AcceleratedWidget GetAcceleratedWidget() override;
-  void Show() override;
-  void Hide() override;
+  void ShowImpl() override;
+  void HideImpl() override;
   gfx::Rect GetBounds() const override;
   void SetBounds(const gfx::Rect& bounds) override;
   gfx::Transform GetRootTransform() const override;
@@ -65,8 +64,11 @@ class AshWindowTreeHostUnified : public AshWindowTreeHost,
   // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
 
+  // ui::internal::InputMethodDelegate:
+  bool DispatchKeyEventPostIME(const ui::KeyEvent& event) override;
+
   // ui::EventSource:
-  ui::EventProcessor* GetEventProcessor() override;
+  ui::EventDispatchDetails DeliverEventToProcessor(ui::Event* event) override;
 
   std::vector<AshWindowTreeHost*> mirroring_hosts_;
 

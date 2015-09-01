@@ -112,21 +112,13 @@ class BookmarksBridge : public bookmarks::BaseBookmarkModelObserver,
                              jobject j_callback_obj,
                              jobject j_result_obj);
 
-  jint GetBookmarkCountForFolder(JNIEnv* env,
-                                 jobject obj,
-                                 jobject j_folder_id_obj);
+  jboolean IsFolderVisible(JNIEnv* env, jobject obj, jlong id, jint type);
 
   void GetCurrentFolderHierarchy(JNIEnv* env,
                                  jobject obj,
                                  jobject j_folder_id_obj,
                                  jobject j_callback_obj,
                                  jobject j_result_obj);
-
-  void SearchBookmarks(JNIEnv* env,
-                       jobject obj,
-                       jobject j_list,
-                       jstring j_query,
-                       jint max_results);
 
   base::android::ScopedJavaLocalRef<jobject> AddFolder(JNIEnv* env,
                                                        jobject obj,

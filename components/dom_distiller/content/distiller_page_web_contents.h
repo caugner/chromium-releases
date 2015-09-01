@@ -68,7 +68,8 @@ class DistillerPageWebContents : public DistillerPage,
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
                    int error_code,
-                   const base::string16& error_description) override;
+                   const base::string16& error_description,
+                   bool was_ignored_by_handler) override;
 
  protected:
   bool StringifyOutput() override;
@@ -113,6 +114,7 @@ class DistillerPageWebContents : public DistillerPage,
 
   content::BrowserContext* browser_context_;
   gfx::Size render_view_size_;
+  base::WeakPtrFactory<DistillerPageWebContents> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(DistillerPageWebContents);
 };
 

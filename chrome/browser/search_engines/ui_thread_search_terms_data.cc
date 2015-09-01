@@ -21,7 +21,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/browser/google_util.h"
-#include "components/omnibox/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/search/search.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/device_form_factor.h"
@@ -118,17 +118,10 @@ std::string UIThreadSearchTermsData::GetSuggestRequestIdentifier() const {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
 #if defined(OS_ANDROID)
-  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
-    return OmniboxFieldTrial::EnableAnswersInSuggest() ?
-        "chrome-mobile-ext-ansg" : "chrome-mobile-ext";
-  }
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE)
+    return "chrome-mobile-ext-ansg";
 #endif
-  return OmniboxFieldTrial::EnableAnswersInSuggest() ?
-      "chrome-ext-ansg" : "chrome-ext";
-}
-
-bool UIThreadSearchTermsData::EnableAnswersInSuggest() const {
-  return OmniboxFieldTrial::EnableAnswersInSuggest();
+  return "chrome-ext-ansg";
 }
 
 bool UIThreadSearchTermsData::IsShowingSearchTermsOnSearchResultsPages() const {

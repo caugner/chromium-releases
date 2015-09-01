@@ -40,10 +40,12 @@ class AppSorting;
 class ComponentExtensionResourceManager;
 class Extension;
 class ExtensionCache;
+class ExtensionError;
 class ExtensionHostDelegate;
 class ExtensionPrefsObserver;
 class ExtensionSystem;
 class ExtensionSystemProvider;
+class ExtensionWebContentsObserver;
 class InfoMap;
 class ProcessManagerDelegate;
 class RuntimeAPIDelegate;
@@ -211,6 +213,18 @@ class ExtensionsBrowserClient {
   // embedders share the same versioning model, so interpretation of the string
   // is left up to the embedder.
   virtual bool IsMinBrowserVersionSupported(const std::string& min_version) = 0;
+
+  // Embedders can override this function to handle extension errors.
+  virtual void ReportError(content::BrowserContext* context,
+                           scoped_ptr<ExtensionError> error);
+
+  // Returns the ExtensionWebContentsObserver for the given |web_contents|.
+  virtual ExtensionWebContentsObserver* GetExtensionWebContentsObserver(
+      content::WebContents* web_contents) = 0;
+
+  // Cleans up browser-side state associated with a WebView that is being
+  // destroyed.
+  virtual void CleanUpWebView(int embedder_process_id, int view_instance_id) {}
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

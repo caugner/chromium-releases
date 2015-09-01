@@ -27,7 +27,6 @@ class WebLocalFrame;
 
 namespace content {
 class RenderFrame;
-class RenderView;
 }
 
 namespace extensions {
@@ -96,10 +95,6 @@ class ScriptContext : public RequestSender::Source {
   // string if there is no such extension.
   const std::string& GetExtensionID() const;
 
-  // Returns the RenderView associated with this context. Can return NULL if the
-  // context is in the process of being destroyed.
-  content::RenderView* GetRenderView() const;
-
   // Returns the RenderFrame associated with this context. Can return NULL if
   // the context is in the process of being destroyed.
   content::RenderFrame* GetRenderFrame() const;
@@ -108,9 +103,11 @@ class ScriptContext : public RequestSender::Source {
   // must do that if they want.
   //
   // USE THIS METHOD RATHER THAN v8::Function::Call WHEREVER POSSIBLE.
-  v8::Local<v8::Value> CallFunction(v8::Local<v8::Function> function,
+  v8::Local<v8::Value> CallFunction(const v8::Local<v8::Function>& function,
                                     int argc,
                                     v8::Local<v8::Value> argv[]) const;
+  v8::Local<v8::Value> CallFunction(
+      const v8::Local<v8::Function>& function) const;
 
   void DispatchEvent(const char* event_name, v8::Local<v8::Array> args) const;
 
@@ -121,10 +118,10 @@ class ScriptContext : public RequestSender::Source {
   Feature::Availability GetAvailability(const std::string& api_name);
 
   // Returns a string description of the type of context this is.
-  std::string GetContextTypeDescription();
+  std::string GetContextTypeDescription() const;
 
   // Returns a string description of the effective type of context this is.
-  std::string GetEffectiveContextTypeDescription();
+  std::string GetEffectiveContextTypeDescription() const;
 
   v8::Isolate* isolate() const { return isolate_; }
 
@@ -177,6 +174,9 @@ class ScriptContext : public RequestSender::Source {
   // not have access to |name|. Returns true if this context has access (i.e.
   // no exception thrown), false if it does not (i.e. an exception was thrown).
   bool HasAccessOrThrowError(const std::string& name);
+
+  // Returns a string representation of this ScriptContext, for debugging.
+  std::string GetDebugString() const;
 
  private:
   class Runner;

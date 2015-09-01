@@ -10,15 +10,19 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/pattern.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
@@ -43,6 +47,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
@@ -60,7 +65,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -342,7 +346,7 @@ bool WindowsGetAllFunction::RunSync() {
   for (WindowControllerList::ControllerList::const_iterator iter =
            windows.begin();
        iter != windows.end(); ++iter) {
-    if (!this->CanOperateOnWindow(*iter))
+    if (!windows_util::CanOperateOnWindow(this, *iter))
       continue;
     if (populate_tabs)
       window_list->Append((*iter)->CreateWindowValueWithTabs(extension()));
@@ -573,7 +577,7 @@ bool WindowsCreateFunction::RunSync() {
           extension());
       AshPanelContents* ash_panel_contents = new AshPanelContents(app_window);
       app_window->Init(urls[0], ash_panel_contents, create_params);
-      SetResult(ash_panel_contents->GetExtensionWindowController()
+      SetResult(ash_panel_contents->GetWindowController()
                     ->CreateWindowValueWithTabs(extension()));
       return true;
     }
@@ -659,21 +663,11 @@ bool WindowsCreateFunction::RunSync() {
 
   WindowController* controller = new_window->extension_window_controller();
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
-  // On Desktop Linux, window managers may ignore hints until the X11 window is
-  // mapped, which happens in the blocking call to Show() above.
-  // DesktopWindowTreeHostX11 currently only checks for an attempt to maximize
-  // once mapped, but not minimize or fullscreen.
+#if defined(OS_CHROMEOS)
   // For ChromeOS, manually Minimize(). Because minimzied window is not
   // considered to create new window. See http://crbug.com/473228.
   if (create_params.initial_show_state == ui::SHOW_STATE_MINIMIZED)
     new_window->window()->Minimize();
-#endif
-#if (defined(OS_LINUX) && !defined(OS_CHROMEOS)) || defined(OS_WIN)
-  // On Desktop Linux and Windows, managers don't handle fullscreen state to
-  // create window for now.
-  if (create_params.initial_show_state == ui::SHOW_STATE_FULLSCREEN)
-    controller->SetFullscreenMode(true, extension()->url());
 #endif
 
   if (new_window->profile()->IsOffTheRecord() &&
@@ -960,8 +954,18 @@ bool TabsQueryFunction::RunSync() {
         continue;
       }
 
-      if (!title.empty() && !MatchPattern(web_contents->GetTitle(),
-                                          base::UTF8ToUTF16(title)))
+      if (!MatchesBool(params->query_info.audible.get(),
+                       chrome::IsPlayingAudio(web_contents))) {
+        continue;
+      }
+
+      if (!MatchesBool(params->query_info.muted.get(),
+                       chrome::IsTabAudioMuted(web_contents))) {
+        continue;
+      }
+
+      if (!title.empty() && !base::MatchPattern(web_contents->GetTitle(),
+                                                base::UTF8ToUTF16(title)))
         continue;
 
       if (!url_patterns.is_empty() &&
@@ -1080,8 +1084,7 @@ bool TabsGetCurrentFunction::RunSync() {
 
   // Return the caller, if it's a tab. If not the result isn't an error but an
   // empty tab (hence returning true).
-  WebContents* caller_contents =
-      WebContents::FromRenderViewHost(render_view_host());
+  WebContents* caller_contents = GetSenderWebContents();
   if (caller_contents && ExtensionTabUtil::GetTabId(caller_contents) >= 0)
     SetResult(ExtensionTabUtil::CreateTabValue(caller_contents, extension()));
 
@@ -1237,6 +1240,27 @@ bool TabsUpdateFunction::RunAsync() {
     tab_index = tab_strip->GetIndexOfWebContents(contents);
   }
 
+  if (params->update_properties.muted.get()) {
+    if (chrome::IsTabAudioMutingFeatureEnabled()) {
+      if (!chrome::CanToggleAudioMute(contents)) {
+        WriteToConsole(
+            content::CONSOLE_MESSAGE_LEVEL_WARNING,
+            base::StringPrintf(
+                "Cannot update mute state for tab %d, tab has audio or video "
+                "currently being captured",
+                tab_id));
+      } else {
+        chrome::SetTabAudioMuted(contents, *params->update_properties.muted,
+                                 extension()->id());
+      }
+    } else {
+      WriteToConsole(content::CONSOLE_MESSAGE_LEVEL_WARNING,
+                     base::StringPrintf(
+                         "Failed to update mute state, --%s must be enabled",
+                         switches::kEnableTabAudioMuting));
+    }
+  }
+
   if (params->update_properties.opener_tab_id.get()) {
     int opener_id = *params->update_properties.opener_tab_id;
 
@@ -1284,7 +1308,6 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
     content::RenderProcessHost* process = web_contents_->GetRenderProcessHost();
     if (!extension()->permissions_data()->CanAccessPage(
             extension(),
-            web_contents_->GetURL(),
             web_contents_->GetURL(),
             tab_id,
             process ? process->GetID() : -1,
@@ -1688,11 +1711,10 @@ bool TabsDetectLanguageFunction::RunAsync() {
            .empty()) {
     // Delay the callback invocation until after the current JS call has
     // returned.
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(
-            &TabsDetectLanguageFunction::GotLanguage,
-            this,
+            &TabsDetectLanguageFunction::GotLanguage, this,
             chrome_translate_client->GetLanguageState().original_language()));
     return true;
   }
@@ -1809,7 +1831,6 @@ bool ExecuteCodeInTabFunction::CanExecuteScriptOnPage() {
   if (!extension()->permissions_data()->CanAccessPage(
           extension(),
           contents->GetURL(),
-          contents->GetURL(),
           execute_tab_id_,
           process ? process->GetID() : -1,
           &error_)) {
@@ -1897,7 +1918,7 @@ bool TabsSetZoomFunction::RunAsync() {
     return false;
 
   GURL url(web_contents->GetVisibleURL());
-  if (PermissionsData::IsRestrictedUrl(url, url, extension(), &error_))
+  if (PermissionsData::IsRestrictedUrl(url, extension(), &error_))
     return false;
 
   ZoomController* zoom_controller =
@@ -1949,7 +1970,7 @@ bool TabsSetZoomSettingsFunction::RunAsync() {
     return false;
 
   GURL url(web_contents->GetVisibleURL());
-  if (PermissionsData::IsRestrictedUrl(url, url, extension(), &error_))
+  if (PermissionsData::IsRestrictedUrl(url, extension(), &error_))
     return false;
 
   // "per-origin" scope is only available in "automatic" mode.

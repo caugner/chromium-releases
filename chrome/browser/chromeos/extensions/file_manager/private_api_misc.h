@@ -12,13 +12,14 @@
 
 #include "base/files/file.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
+#include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "google_apis/drive/drive_api_error_codes.h"
 
 namespace google_apis {
 class AuthServiceInterface;
-}
+}  // namespace google_apis
 
 namespace extensions {
 
@@ -99,20 +100,6 @@ class FileManagerPrivateZoomFunction : public ChromeSyncExtensionFunction {
 
   // AsyncExtensionFunction overrides.
   bool RunSync() override;
-};
-
-// Implements the chrome.fileManagerPrivate.installWebstoreItem method.
-class FileManagerPrivateInstallWebstoreItemFunction
-    : public LoggedAsyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.installWebstoreItem",
-                             FILEMANAGERPRIVATE_INSTALLWEBSTOREITEM);
-
- protected:
-  ~FileManagerPrivateInstallWebstoreItemFunction() override {}
-
-  // AsyncExtensionFunction overrides.
-  bool RunAsync() override;
 };
 
 class FileManagerPrivateRequestWebStoreAccessTokenFunction
@@ -241,6 +228,43 @@ class FileManagerPrivateConfigureVolumeFunction
 
   const ChromeExtensionFunctionDetails chrome_details_;
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateConfigureVolumeFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.getEntryActions method.
+class FileManagerPrivateGetEntryActionsFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateGetEntryActionsFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.getEntryActions",
+                             FILEMANAGERPRIVATE_GETENTRYACTIONS)
+ protected:
+  ~FileManagerPrivateGetEntryActionsFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  void OnCompleted(const chromeos::file_system_provider::Actions& actions,
+                   base::File::Error result);
+
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateGetEntryActionsFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.executeEntryAction method.
+class FileManagerPrivateExecuteEntryActionFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateExecuteEntryActionFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.executeEntryAction",
+                             FILEMANAGERPRIVATE_EXECUTEENTRYACTION)
+ protected:
+  ~FileManagerPrivateExecuteEntryActionFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  void OnCompleted(base::File::Error result);
+
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateExecuteEntryActionFunction);
 };
 
 }  // namespace extensions

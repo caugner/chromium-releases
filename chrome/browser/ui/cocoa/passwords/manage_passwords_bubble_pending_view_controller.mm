@@ -7,9 +7,9 @@
 #import "chrome/browser/ui/cocoa/passwords/manage_passwords_bubble_pending_view_controller.h"
 
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/bubble_combobox.h"
 #import "chrome/browser/ui/cocoa/passwords/manage_password_item_view_controller.h"
-#include "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/save_password_refusal_combobox_model.h"
 #include "chrome/grit/generated_resources.h"
@@ -80,9 +80,7 @@ using namespace password_manager::mac::ui;
 
   // -----------------------------------
   // |  Title                          |
-  // |  -----------------------------  | (1 px border)
-  // |    username   password          |
-  // |  -----------------------------  | (1 px border)
+  // |  username   password            |
   // |                [Save] [Nope v]  |
   // -----------------------------------
 
@@ -129,6 +127,7 @@ using namespace password_manager::mac::ui;
   [titleView_ setFrameSize:NSMakeSize(kDesiredBubbleWidth - 2 * kFramePadding,
                                       MAXFLOAT)];
   [titleView_ sizeToFit];
+  [[titleView_ textContainer] setLineFragmentPadding:0];
 
   [view addSubview:titleView_];
 

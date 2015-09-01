@@ -8,6 +8,7 @@ package org.chromium.sync.signin;
 import android.Manifest;
 import android.accounts.Account;
 import android.accounts.AccountManager;
+import android.accounts.AccountManagerCallback;
 import android.accounts.AccountManagerFuture;
 import android.accounts.AuthenticatorDescription;
 import android.accounts.AuthenticatorException;
@@ -52,6 +53,12 @@ public class AccountManagerHelper {
 
     public static final String GOOGLE_ACCOUNT_TYPE = "com.google";
 
+    /**
+     * An account feature (corresponding to a Gaia service flag) that specifies whether the account
+     * is a child account.
+     */
+    @VisibleForTesting public static final String FEATURE_IS_CHILD_ACCOUNT_KEY = "service_uca";
+
     private static final Object sLock = new Object();
 
     private static final int MAX_TRIES = 3;
@@ -82,8 +89,11 @@ public class AccountManagerHelper {
          * Invoked on the UI thread once a token has been provided by the AccountManager.
          * @param token Auth token, or null if no token is available (bad credentials,
          *      permission denied, etc).
+         * @param isTransientError If the token is null, then this parameter indicates
+         *      if the error is transient or persistent.  If token is non-null, this
+         *      parameter is not used.
          */
-        void tokenAvailable(String token);
+        void tokenAvailable(String token, boolean isTransientError);
     }
 
     /**
@@ -148,8 +158,19 @@ public class AccountManagerHelper {
      * @return an array of accounts.
      */
     public Account[] getGoogleAccounts() {
-        if (!hasGetAccountsPermission()) return new Account[]{};
         return mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
+    }
+
+    /**
+     * Convenience method to get the single Google account on the device. Should only be
+     * called if it has been determined that there is exactly one account.
+     *
+     * @return The single account to sign into.
+     */
+    public Account getSingleGoogleAccount() {
+        Account[] googleAccounts = getGoogleAccounts();
+        assert googleAccounts.length == 1;
+        return googleAccounts[0];
     }
 
     public boolean hasGoogleAccounts() {
@@ -211,8 +232,8 @@ public class AccountManagerHelper {
     public String getAuthTokenFromBackground(Account account, String authTokenType) {
         AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(
                 account, authTokenType, true, null, null);
-        AtomicBoolean errorEncountered = new AtomicBoolean(false);
-        return getAuthTokenInner(future, errorEncountered);
+        AtomicBoolean isTransientError = new AtomicBoolean(false);
+        return getAuthTokenInner(future, isTransientError);
     }
 
     /**
@@ -225,9 +246,9 @@ public class AccountManagerHelper {
     public void getAuthTokenFromForeground(Activity activity, Account account, String authTokenType,
                 GetAuthTokenCallback callback) {
         AtomicInteger numTries = new AtomicInteger(0);
-        AtomicBoolean errorEncountered = new AtomicBoolean(false);
+        AtomicBoolean isTransientError = new AtomicBoolean(false);
         getAuthTokenAsynchronously(activity, account, authTokenType, callback, numTries,
-                errorEncountered, null);
+                isTransientError, null);
     }
 
     private class ConnectionRetry implements NetworkChangeNotifier.ConnectionTypeObserver {
@@ -235,15 +256,15 @@ public class AccountManagerHelper {
         private final String mAuthTokenType;
         private final GetAuthTokenCallback mCallback;
         private final AtomicInteger mNumTries;
-        private final AtomicBoolean mErrorEncountered;
+        private final AtomicBoolean mIsTransientError;
 
         ConnectionRetry(Account account, String authTokenType, GetAuthTokenCallback callback,
-                AtomicInteger numTries, AtomicBoolean errorEncountered) {
+                AtomicInteger numTries, AtomicBoolean isTransientError) {
             mAccount = account;
             mAuthTokenType = authTokenType;
             mCallback = callback;
             mNumTries = numTries;
-            mErrorEncountered = errorEncountered;
+            mIsTransientError = isTransientError;
         }
 
         @Override
@@ -256,7 +277,7 @@ public class AccountManagerHelper {
             if (NetworkChangeNotifier.isOnline()) {
                 NetworkChangeNotifier.removeConnectionTypeObserver(this);
                 getAuthTokenAsynchronously(null, mAccount, mAuthTokenType, mCallback, mNumTries,
-                        mErrorEncountered, this);
+                        mIsTransientError, this);
             }
         }
     }
@@ -274,7 +295,7 @@ public class AccountManagerHelper {
 
     // Gets the auth token synchronously
     private String getAuthTokenInner(AccountManagerFuture<Bundle> future,
-            AtomicBoolean errorEncountered) {
+            AtomicBoolean isTransientError) {
         try {
             Bundle result = future.getResult();
             if (result != null) {
@@ -288,57 +309,54 @@ public class AccountManagerHelper {
             Log.w(TAG, "Auth token - authenticator exception", e);
         } catch (IOException e) {
             Log.w(TAG, "Auth token - IO exception", e);
-            errorEncountered.set(true);
+            isTransientError.set(true);
         }
         return null;
     }
 
     private void getAuthTokenAsynchronously(@Nullable Activity activity, final Account account,
             final String authTokenType, final GetAuthTokenCallback callback,
-            final AtomicInteger numTries, final AtomicBoolean errorEncountered,
+            final AtomicInteger numTries, final AtomicBoolean isTransientError,
             final ConnectionRetry retry) {
         // Return null token for no USE_CREDENTIALS permission.
         if (!hasUseCredentialsPermission()) {
-            callback.tokenAvailable(null);
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    callback.tokenAvailable(null, false);
+                }
+            });
             return;
         }
         final AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(
                 account, authTokenType, true, null, null);
-        errorEncountered.set(false);
+        isTransientError.set(false);
 
-        // On ICS onPostExecute is never called when running an AsyncTask from a different thread
-        // than the UI thread.
-        if (ThreadUtils.runningOnUiThread()) {
-            new AsyncTask<Void, Void, String>() {
-                @Override
-                public String doInBackground(Void... params) {
-                    return getAuthTokenInner(future, errorEncountered);
-                }
-                @Override
-                public void onPostExecute(String authToken) {
-                    onGotAuthTokenResult(account, authTokenType, authToken, callback, numTries,
-                            errorEncountered, retry);
-                }
-            }.execute();
-        } else {
-            String authToken = getAuthTokenInner(future, errorEncountered);
-            onGotAuthTokenResult(account, authTokenType, authToken, callback, numTries,
-                    errorEncountered, retry);
-        }
+        new AsyncTask<Void, Void, String>() {
+            @Override
+            public String doInBackground(Void... params) {
+                return getAuthTokenInner(future, isTransientError);
+            }
+            @Override
+            public void onPostExecute(String authToken) {
+                onGotAuthTokenResult(account, authTokenType, authToken, callback, numTries,
+                        isTransientError, retry);
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     private void onGotAuthTokenResult(Account account, String authTokenType, String authToken,
-            GetAuthTokenCallback callback, AtomicInteger numTries, AtomicBoolean errorEncountered,
+            GetAuthTokenCallback callback, AtomicInteger numTries, AtomicBoolean isTransientError,
             ConnectionRetry retry) {
-        if (authToken != null || !errorEncountered.get()
+        if (authToken != null || !isTransientError.get()
                 || numTries.incrementAndGet() == MAX_TRIES
                 || !NetworkChangeNotifier.isInitialized()) {
-            callback.tokenAvailable(authToken);
+            callback.tokenAvailable(authToken, isTransientError.get());
             return;
         }
         if (retry == null) {
             ConnectionRetry newRetry = new ConnectionRetry(account, authTokenType, callback,
-                    numTries, errorEncountered);
+                    numTries, isTransientError);
             NetworkChangeNotifier.addConnectionTypeObserver(newRetry);
         } else {
             NetworkChangeNotifier.addConnectionTypeObserver(retry);
@@ -354,9 +372,9 @@ public class AccountManagerHelper {
                 String authTokenType, GetAuthTokenCallback callback) {
         invalidateAuthToken(authToken);
         AtomicInteger numTries = new AtomicInteger(0);
-        AtomicBoolean errorEncountered = new AtomicBoolean(false);
+        AtomicBoolean isTransientError = new AtomicBoolean(false);
         getAuthTokenAsynchronously(
-                null, account, authTokenType, callback, numTries, errorEncountered, null);
+                null, account, authTokenType, callback, numTries, isTransientError, null);
     }
 
     /**
@@ -370,5 +388,11 @@ public class AccountManagerHelper {
         if (authToken != null && !authToken.isEmpty()) {
             mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
         }
+    }
+
+    public AccountManagerFuture<Boolean> checkChildAccount(
+            Account account, AccountManagerCallback<Boolean> callback) {
+        String[] features = {FEATURE_IS_CHILD_ACCOUNT_KEY};
+        return mAccountManager.hasFeatures(account, features, callback, null /* handler */);
     }
 }

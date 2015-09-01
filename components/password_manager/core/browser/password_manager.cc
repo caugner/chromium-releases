@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -14,7 +14,10 @@
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/form_data_predictions.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
+#include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
+#include "components/password_manager/core/browser/keychain_migration_status_mac.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -87,6 +90,46 @@ bool IsSignupForm(const PasswordForm& form) {
   return !form.new_password_element.empty() && form.password_element.empty();
 }
 
+bool ServerTypeToPrediction(autofill::ServerFieldType server_field_type,
+                            autofill::PasswordFormFieldPredictionType* type) {
+  switch (server_field_type) {
+    case autofill::USERNAME:
+    case autofill::USERNAME_AND_EMAIL_ADDRESS:
+      *type = autofill::PREDICTION_USERNAME;
+      break;
+
+    case autofill::PASSWORD:
+      *type = autofill::PREDICTION_CURRENT_PASSWORD;
+      break;
+
+    case autofill::ACCOUNT_CREATION_PASSWORD:
+      *type = autofill::PREDICTION_NEW_PASSWORD;
+      break;
+
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool PreferredRealmIsFromAndroid(
+    const autofill::PasswordFormFillData& fill_data) {
+  return FacetURI::FromPotentiallyInvalidSpec(
+             fill_data.preferred_realm).IsValidAndroidFacetURI();
+}
+
+bool ContainsAndroidCredentials(
+    const autofill::PasswordFormFillData& fill_data) {
+  for (const auto& login : fill_data.additional_logins) {
+    if (FacetURI::FromPotentiallyInvalidSpec(
+            login.second.realm).IsValidAndroidFacetURI()) {
+      return true;
+    }
+  }
+
+  return PreferredRealmIsFromAndroid(fill_data);
+}
+
 }  // namespace
 
 // static
@@ -100,6 +143,10 @@ void PasswordManager::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kPasswordManagerAllowShowPasswords,
                                 true);
   registry->RegisterListPref(prefs::kPasswordManagerGroupsForDomains);
+#if defined(OS_MACOSX)
+  registry->RegisterIntegerPref(prefs::kKeychainMigrationStatus,
+                                static_cast<int>(MigrationStatus::NOT_STARTED));
+#endif
 }
 
 #if defined(OS_WIN)
@@ -125,19 +172,49 @@ void PasswordManager::SetHasGeneratedPasswordForForm(
     bool password_is_generated) {
   DCHECK(client_->IsSavingEnabledForCurrentPage());
 
+  ScopedVector<PasswordFormManager>::iterator matched_manager_it =
+      pending_login_managers_.end();
+  PasswordFormManager::MatchResultMask current_match_result =
+      PasswordFormManager::RESULT_NO_MATCH;
+
   for (ScopedVector<PasswordFormManager>::iterator iter =
            pending_login_managers_.begin();
        iter != pending_login_managers_.end(); ++iter) {
-    if ((*iter)->DoesManage(form) ==
-        PasswordFormManager::RESULT_COMPLETE_MATCH) {
-      (*iter)->set_has_generated_password(password_is_generated);
-      return;
+    PasswordFormManager::MatchResultMask result = (*iter)->DoesManage(form);
+
+    if (result == PasswordFormManager::RESULT_NO_MATCH)
+      continue;
+
+    if (result == PasswordFormManager::RESULT_COMPLETE_MATCH) {
+      // If we find a manager that exactly matches the submitted form including
+      // the action URL, exit the loop.
+      matched_manager_it = iter;
+      break;
+    } else if (result == (PasswordFormManager::RESULT_COMPLETE_MATCH &
+                          ~PasswordFormManager::RESULT_ACTION_MATCH) &&
+               result > current_match_result) {
+      // If the current manager matches the submitted form excluding the action
+      // URL, remember it as a candidate and continue searching for an exact
+      // match. See http://crbug.com/27246 for an example where actions can
+      // change.
+      matched_manager_it = iter;
+      current_match_result = result;
+    } else if (result > current_match_result) {
+      matched_manager_it = iter;
+      current_match_result = result;
     }
   }
 
-  if (!password_is_generated) {
+  if (matched_manager_it != pending_login_managers_.end()) {
+    (*matched_manager_it)->set_has_generated_password(password_is_generated);
     return;
   }
+
+  UMA_HISTOGRAM_BOOLEAN("PasswordManager.GeneratedFormHasNoFormManager",
+                        password_is_generated);
+
+  if (!password_is_generated)
+    return;
 
   // If there is no corresponding PasswordFormManager, we create one. This is
   // not the common case, and should only happen when there is a bug in our
@@ -147,7 +224,6 @@ void PasswordManager::SetHasGeneratedPasswordForForm(
       this, client_, driver->AsWeakPtr(), form, ssl_valid);
   pending_login_managers_.push_back(manager);
   manager->set_has_generated_password(true);
-  // TODO(gcasto): Add UMA stats to track this.
 }
 
 void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
@@ -359,6 +435,16 @@ void PasswordManager::OnPasswordFormSubmitted(
   pending_login_managers_.clear();
 }
 
+void PasswordManager::OnPasswordFormForceSaveRequested(
+    password_manager::PasswordManagerDriver* driver,
+    const PasswordForm& password_form) {
+  // TODO(msramek): This is just a sketch. We will need to show a custom bubble,
+  // mark the form as force saved, and recreate the pending login managers,
+  // because the password store might have changed.
+  ProvisionallySavePassword(password_form);
+  AskUserOrSavePassword();
+}
+
 void PasswordManager::OnPasswordFormsParsed(
     password_manager::PasswordManagerDriver* driver,
     const std::vector<PasswordForm>& forms) {
@@ -391,7 +477,7 @@ void PasswordManager::CreatePendingLoginManagers(
        iter != forms.end(); ++iter) {
     // Don't involve the password manager if this form corresponds to
     // SpdyProxy authentication, as indicated by the realm.
-    if (EndsWith(iter->signon_realm, kSpdyProxyRealm, true))
+    if (base::EndsWith(iter->signon_realm, kSpdyProxyRealm, true))
       continue;
     bool old_manager_found = false;
     for (const auto& old_manager : old_login_managers) {
@@ -641,6 +727,11 @@ void PasswordManager::Autofill(password_manager::PasswordManagerDriver* driver,
                                &fill_data);
       if (logger)
         logger->LogBoolean(Logger::STRING_WAIT_FOR_USERNAME, wait_for_username);
+      UMA_HISTOGRAM_BOOLEAN(
+          "PasswordManager.FillSuggestionsIncludeAndroidAppCredentials",
+          ContainsAndroidCredentials(fill_data));
+      metrics_util::LogFilledCredentialIsFromAndroidApp(
+          PreferredRealmIsFromAndroid(fill_data));
       driver->FillPasswordForm(fill_data);
       break;
     }
@@ -664,15 +755,15 @@ void PasswordManager::ProcessAutofillPredictions(
     password_manager::PasswordManagerDriver* driver,
     const std::vector<autofill::FormStructure*>& forms) {
   // Leave only forms that contain fields that are useful for password manager.
-  std::map<autofill::FormData, autofill::FormFieldData> predictions;
+  std::map<autofill::FormData, autofill::PasswordFormFieldPredictionMap>
+      predictions;
   for (autofill::FormStructure* form : forms) {
     for (std::vector<autofill::AutofillField*>::const_iterator field =
              form->begin();
          field != form->end(); ++field) {
-      if ((*field)->server_type() == autofill::USERNAME ||
-          (*field)->server_type() == autofill::USERNAME_AND_EMAIL_ADDRESS) {
-        predictions[form->ToFormData()] = *(*field);
-      }
+      autofill::PasswordFormFieldPredictionType prediction_type;
+      if (ServerTypeToPrediction((*field)->server_type(), &prediction_type))
+        predictions[form->ToFormData()][prediction_type] = *(*field);
     }
   }
   if (predictions.empty())

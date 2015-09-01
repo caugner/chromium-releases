@@ -52,6 +52,8 @@ using extensions::AppWindow;
 
 namespace {
 
+const int kActivateThrottlePeriodSeconds = 2;
+
 NSRect GfxToCocoaBounds(gfx::Rect bounds) {
   typedef AppWindow::BoundsSpecification BoundsSpecification;
 
@@ -362,7 +364,7 @@ bool NativeAppWindowCocoa::IsActive() const {
 }
 
 bool NativeAppWindowCocoa::IsMaximized() const {
-  return is_maximized_;
+  return is_maximized_ && !IsMinimized();
 }
 
 bool NativeAppWindowCocoa::IsMinimized() const {
@@ -466,16 +468,26 @@ gfx::Rect NativeAppWindowCocoa::GetBounds() const {
 
 void NativeAppWindowCocoa::Show() {
   if (is_hidden_with_app_) {
-    // If there is a shim to gently request attention, return here. Otherwise
-    // show the window as usual.
-    if (apps::ExtensionAppShimHandler::ActivateAndRequestUserAttentionForWindow(
-            app_window_)) {
-      return;
-    }
+    apps::ExtensionAppShimHandler::UnhideWithoutActivationForWindow(
+        app_window_);
+    is_hidden_with_app_ = false;
   }
 
-  [window_controller_ showWindow:nil];
-  Activate();
+  // Workaround for http://crbug.com/459306. When requests to change key windows
+  // on Mac overlap, AppKit may attempt to make two windows simultaneously have
+  // key status. This causes key events to go the wrong window, and key status
+  // to get "stuck" until Chrome is deactivated. To reduce the possibility of
+  // this occurring, throttle activation requests. To balance a possible Hide(),
+  // always show the window, but don't make it key.
+  base::Time now = base::Time::Now();
+  if (now - last_activate_ <
+      base::TimeDelta::FromSeconds(kActivateThrottlePeriodSeconds)) {
+    [window() orderFront:window_controller_];
+    return;
+  }
+
+  last_activate_ = now;
+  [BrowserWindowUtils activateWindowForController:window_controller_];
 }
 
 void NativeAppWindowCocoa::ShowInactive() {
@@ -491,7 +503,7 @@ void NativeAppWindowCocoa::Close() {
 }
 
 void NativeAppWindowCocoa::Activate() {
-  [BrowserWindowUtils activateWindowForController:window_controller_];
+  Show();
 }
 
 void NativeAppWindowCocoa::Deactivate() {
@@ -500,9 +512,14 @@ void NativeAppWindowCocoa::Deactivate() {
 }
 
 void NativeAppWindowCocoa::Maximize() {
+  if (is_fullscreen_)
+    return;
+
   UpdateRestoredBounds();
   is_maximized_ = true;  // See top of file NOTE: State Before Update.
   [window() setFrame:[[window() screen] visibleFrame] display:YES animate:YES];
+  if (IsMinimized())
+    [window() deminiaturize:window_controller_];
 }
 
 void NativeAppWindowCocoa::Minimize() {
@@ -512,13 +529,12 @@ void NativeAppWindowCocoa::Minimize() {
 void NativeAppWindowCocoa::Restore() {
   DCHECK(!IsFullscreenOrPending());   // SetFullscreen, not Restore, expected.
 
-  if (IsMaximized()) {
+  if (is_maximized_) {
     is_maximized_ = false;  // See top of file NOTE: State Before Update.
     [window() setFrame:restored_bounds() display:YES animate:YES];
-  } else if (IsMinimized()) {
-    is_maximized_ = false;  // See top of file NOTE: State Before Update.
-    [window() deminiaturize:window_controller_];
   }
+  if (IsMinimized())
+    [window() deminiaturize:window_controller_];
 }
 
 void NativeAppWindowCocoa::SetBounds(const gfx::Rect& bounds) {
@@ -677,8 +693,7 @@ bool NativeAppWindowCocoa::CanHaveAlphaEnabled() const {
 }
 
 gfx::NativeView NativeAppWindowCocoa::GetHostView() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return WebContents()->GetNativeView();
 }
 
 gfx::Point NativeAppWindowCocoa::GetDialogPosition(const gfx::Size& size) {
@@ -767,10 +782,8 @@ void NativeAppWindowCocoa::WindowDidDeminiaturize() {
 }
 
 void NativeAppWindowCocoa::WindowDidEnterFullscreen() {
-  if (!is_fullscreen_) {
-    is_fullscreen_ = true;
-    app_window_->OSFullscreen();
-  }
+  is_maximized_ = false;
+  is_fullscreen_ = true;
   app_window_->OnNativeWindowChanged();
 }
 
@@ -779,7 +792,8 @@ void NativeAppWindowCocoa::WindowDidExitFullscreen() {
   if (!shows_fullscreen_controls_)
     gfx::SetNSWindowCanFullscreen(window(), false);
 
-  app_window_->Restore();
+  WindowDidFinishResize();
+
   app_window_->OnNativeWindowChanged();
 }
 

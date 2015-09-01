@@ -79,11 +79,11 @@ remoting.SignalStrategy.prototype.sendMessage = function(message) {};
 /**
  * Send any messages accumulated during connection set-up.
  *
- * @param {remoting.LogToServer} logToServer The LogToServer instance for the
+ * @param {remoting.Logger} logger The logger instance for the
  *     connection.
  */
 remoting.SignalStrategy.prototype.sendConnectionSetupResults =
-    function(logToServer) {
+    function(logger) {
 };
 
 /** @return {remoting.SignalStrategy.State} Current state */
@@ -106,7 +106,7 @@ remoting.SignalStrategy.create = function() {
   // Only use XMPP when TCP API is available and TLS support is enabled. That's
   // not the case for V1 app (socket API is available only to platform apps)
   // and for Chrome releases before 38.
-  if (chrome.socket && chrome.socket.secure) {
+  if (chrome.sockets && chrome.sockets.tcp && chrome.sockets.tcp.secure) {
     /**
      * @param {remoting.FallbackSignalStrategy.Progress} progress
      */

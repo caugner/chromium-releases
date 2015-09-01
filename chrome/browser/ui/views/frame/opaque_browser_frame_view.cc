@@ -44,6 +44,7 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/frame_background.h"
@@ -75,8 +76,10 @@ const int kResizeAreaCornerSize = 16;
 // The content left/right images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
 
+#if !defined(OS_WIN)
 // The icon never shrinks below 16 px on a side.
 const int kIconMinimumSize = 16;
+#endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 // The number of pixels to move the frame background image upwards when using
@@ -582,10 +585,10 @@ bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
 
   // Do not show caption buttons if the window manager is forcefully providing a
   // title bar (e.g., in Ubuntu Unity, if the window is maximized).
-  if (!views::ViewsDelegate::views_delegate)
+  if (!views::ViewsDelegate::GetInstance())
     return true;
-  return !views::ViewsDelegate::views_delegate->WindowManagerProvidesTitleBar(
-              IsMaximized());
+  return !views::ViewsDelegate::GetInstance()->WindowManagerProvidesTitleBar(
+      IsMaximized());
 }
 
 void OpaqueBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {

@@ -49,7 +49,8 @@ source_set("ui") {
     "//components/app_modal",
     "//components/auto_login_parser",
     "//components/dom_distiller/webui",
-    "//components/invalidation",
+    "//components/invalidation/impl",
+    "//components/omnibox/common",
     "//components/onc",
     "//components/password_manager/core/browser",
     "//components/resources",
@@ -101,7 +102,6 @@ source_set("ui") {
       "//third_party/expat",
       "//third_party/leveldatabase",
       "//third_party/mojo/src/mojo/edk/system",
-      "//third_party/npapi",
       "//third_party/libjingle",
       "//third_party/re2",
       "//ui/base/ime",
@@ -199,6 +199,11 @@ source_set("ui") {
                            ".",
                            "//chrome")
     deps += [ "//components/constrained_window" ]
+
+    if (enable_extensions) {
+      deps += [ "//extensions/components/native_app_window" ]
+    }
+
     if (!is_chromeos) {
       sources +=
           rebase_path(gypi_values.chrome_browser_ui_views_non_chromeos_sources,
@@ -210,7 +215,12 @@ source_set("ui") {
           rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
                       ".",
                       "//chrome")
-      deps += [ "//extensions/components/native_app_window" ]
+      if (enable_extensions) {
+        sources += rebase_path(
+                gypi_values.chrome_browser_ui_views_extensions_non_mac_sources,
+                ".",
+                "//chrome")
+      }
       if (is_chromeos) {
         # TODO(GYP): crbug.com/481629. These files should probably not be
         # a part of ui_views_non_mac_sources at all.
@@ -311,6 +321,10 @@ source_set("ui") {
           rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
                       ".",
                       "//chrome")
+      sources += rebase_path(
+              gypi_values.chrome_browser_ui_views_extensions_non_mac_sources,
+              ".",
+              "//chrome")
       deps += [ "//extensions/components/native_app_window" ]
     } else {
       sources += rebase_path(gypi_values.chrome_browser_ui_cocoa_sources,
@@ -347,6 +361,14 @@ source_set("ui") {
       "//third_party/isimpledom",
       "//ui/app_list",
     ]
+    if (!is_chrome_branded) {
+      deps -= [ "//google_update" ]
+      sources -= [ "webui/help/version_updater_win.cc" ]
+      sources += [
+        "webui/help/version_updater_basic.cc",
+        "webui/help/version_updater_basic.h",
+      ]
+    }
   } else {  # 'OS!="win"
     if (toolkit_views) {
       public_deps += [

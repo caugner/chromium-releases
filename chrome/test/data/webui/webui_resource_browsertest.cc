@@ -59,7 +59,7 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ArrayDataModelTest) {
   RunTest(base::FilePath(FILE_PATH_LITERAL("array_data_model_test.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, PropertyTest) {
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, CrTest) {
   AddLibrary(IDR_WEBUI_JS_CR);
   AddLibrary(IDR_WEBUI_JS_CR_EVENT_TARGET);
   RunTest(base::FilePath(FILE_PATH_LITERAL("cr_test.html")));
@@ -186,4 +186,15 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ContextMenuHandlerTest) {
   AddLibrary(IDR_WEBUI_JS_CR_UI_MENU);
   AddLibrary(IDR_WEBUI_JS_CR_UI_CONTEXT_MENU_HANDLER);
   RunTest(base::FilePath(FILE_PATH_LITERAL("context_menu_handler_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, MenuButtonTest) {
+  AddLibrary(IDR_WEBUI_JS_ASSERT);
+  AddLibrary(IDR_WEBUI_JS_EVENT_TRACKER);
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_UI);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_POSITION_UTIL);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_MENU_BUTTON);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_MENU);
+  RunTest(base::FilePath(FILE_PATH_LITERAL("menu_button_test.html")));
 }

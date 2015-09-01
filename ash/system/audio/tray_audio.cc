@@ -113,14 +113,14 @@ void TrayAudio::OnOutputNodeVolumeChanged(uint64_t /* node_id */,
   PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
 }
 
-void TrayAudio::OnOutputMuteChanged(bool /* mute_on */) {
+void TrayAudio::OnOutputMuteChanged(bool /* mute_on */, bool system_adjust) {
   if (tray_view())
       tray_view()->SetVisible(GetInitialVisibility());
 
   if (volume_view_) {
     volume_view_->Update();
     SetDetailedViewCloseDelay(kTrayPopupAutoCloseDelayInSeconds);
-  } else {
+  } else if (!system_adjust) {
     pop_up_volume_view_ = true;
     PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
   }
@@ -136,6 +136,21 @@ void TrayAudio::OnActiveOutputNodeChanged() {
 
 void TrayAudio::OnActiveInputNodeChanged() {
   Update();
+}
+
+void TrayAudio::ChangeInternalSpeakerChannelMode() {
+  // Swap left/right channel only if it is in Yoga mode.
+  system::TrayAudioDelegate::AudioChannelMode channel_mode =
+      system::TrayAudioDelegate::NORMAL;
+  if (gfx::Display::InternalDisplayId() != gfx::Display::kInvalidDisplayID) {
+    const DisplayInfo& display_info =
+        Shell::GetInstance()->display_manager()->GetDisplayInfo(
+            gfx::Display::InternalDisplayId());
+    if (display_info.GetActiveRotation() == gfx::Display::ROTATE_180)
+      channel_mode = system::TrayAudioDelegate::LEFT_RIGHT_SWAPPED;
+  }
+
+  audio_delegate_->SetInternalSpeakerChannelMode(channel_mode);
 }
 
 void TrayAudio::OnDisplayAdded(const gfx::Display& new_display) {
@@ -157,21 +172,6 @@ void TrayAudio::OnDisplayMetricsChanged(const gfx::Display& display,
 
   if (changed_metrics & gfx::DisplayObserver::DISPLAY_METRIC_ROTATION)
     ChangeInternalSpeakerChannelMode();
-}
-
-void TrayAudio::ChangeInternalSpeakerChannelMode() {
-  // Swap left/right channel only if it is in Yoga mode.
-  system::TrayAudioDelegate::AudioChannelMode channel_mode =
-      system::TrayAudioDelegate::NORMAL;
-  if (gfx::Display::InternalDisplayId() != gfx::Display::kInvalidDisplayID) {
-    const DisplayInfo& display_info =
-        Shell::GetInstance()->display_manager()->GetDisplayInfo(
-            gfx::Display::InternalDisplayId());
-    if (display_info.GetActiveRotation() == gfx::Display::ROTATE_180)
-      channel_mode = system::TrayAudioDelegate::LEFT_RIGHT_SWAPPED;
-  }
-
-  audio_delegate_->SetInternalSpeakerChannelMode(channel_mode);
 }
 
 void TrayAudio::Update() {

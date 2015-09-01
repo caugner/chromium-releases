@@ -27,26 +27,6 @@
   var onLocalDescriptionError = function(error) { failTest(error); };
   var onRemoteDescriptionError = function(error) { failTest(error); };
 
-  // Temporary measure to be able to force iSAC 16K where needed, particularly
-  // on Android. This applies to every test which is why it's implemented like
-  // this.
-  var maybeForceIsac16K = function(sdp) { return sdp; };
-  function forceIsac16KInSdp() {
-    maybeForceIsac16K = function(sdp) {
-      if (sdp.search('m=audio') == -1)
-        return sdp;
-
-      sdp = sdp.replace(/m=audio (\d+) RTP\/SAVPF.*\r\n/g,
-                        'm=audio $1 RTP/SAVPF 103 126\r\n');
-      sdp = sdp.replace('a=fmtp:111 minptime=10', 'a=fmtp:103 minptime=10');
-      if (sdp.search('a=rtpmap:103 ISAC/16000') == -1)
-        failTest('Missing iSAC 16K codec on Android; cannot force codec.');
-
-      return sdp;
-    };
-    sendValueToTest('isac-forced');
-  }
-
   // When using external SDES, the crypto key is chosen by javascript.
   var EXTERNAL_SDES_LINES = {
     'audio': 'a=crypto:1 AES_CM_128_HMAC_SHA1_80 ' +
@@ -135,8 +115,7 @@
 
   // The second set of constraints should request audio (e.g. audio:true) since
   // we expect audio to be playing after the second renegotiation.
-  function callAndRenegotiateToAudio(beLenient, constraints,
-                                     renegotiationConstraints) {
+  function callAndRenegotiateToAudio(constraints, renegotiationConstraints) {
     createConnections(null);
     navigator.webkitGetUserMedia(constraints,
         addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
@@ -149,7 +128,7 @@
           addStreamToTheFirstConnectionAndNegotiate, printGetUserMediaError);
 
       var onCallEstablished = function() {
-        ensureAudioPlaying(gSecondConnection, beLenient);
+        ensureAudioPlaying(gSecondConnection);
       };
 
       waitForConnectionToStabilize(gFirstConnection, onCallEstablished);
@@ -369,7 +348,7 @@
         offerOptions);
   }
 
-  function callAndEnsureAudioIsPlaying(beLenient, constraints) {
+  function callAndEnsureAudioIsPlaying(constraints) {
     createConnections(null);
 
     // Add the local stream to gFirstConnection to play one-way audio.
@@ -377,10 +356,23 @@
       addStreamToTheFirstConnectionAndNegotiate, printGetUserMediaError);
 
     var onCallEstablished = function() {
-      ensureAudioPlaying(gSecondConnection, beLenient);
+      ensureAudioPlaying(gSecondConnection);
     };
 
     waitForConnectionToStabilize(gFirstConnection, onCallEstablished);
+  }
+
+  function callWithIsac16KAndEnsureAudioIsPlaying(constraints) {
+    transformSdp = function(sdp) {
+      sdp = sdp.replace(/m=audio (\d+) RTP\/SAVPF.*\r\n/g,
+                        'm=audio $1 RTP/SAVPF 103 126\r\n');
+      sdp = sdp.replace('a=fmtp:111 minptime=10', 'a=fmtp:103 minptime=10');
+      if (sdp.search('a=rtpmap:103 ISAC/16000') == -1)
+        failTest('Missing iSAC 16K codec on Android; cannot force codec.');
+
+      return sdp;
+    }
+    callAndEnsureAudioIsPlaying(constraints);
   }
 
   function enableRemoteVideo(peerConnection, enabled) {
@@ -403,8 +395,8 @@
     localStream.getAudioTracks()[0].enabled = enabled;
   }
 
-  function callAndEnsureRemoteAudioTrackMutingWorks(beLenient) {
-    callAndEnsureAudioIsPlaying(beLenient, {audio: true, video: true});
+  function callAndEnsureRemoteAudioTrackMutingWorks() {
+    callAndEnsureAudioIsPlaying({audio: true, video: true});
     setAllEventsOccuredHandler(function() {
       setAllEventsOccuredHandler(reportTestSuccess);
 
@@ -415,8 +407,8 @@
     });
   }
 
-  function callAndEnsureLocalAudioTrackMutingWorks(beLenient) {
-    callAndEnsureAudioIsPlaying(beLenient, {audio: true, video: true});
+  function callAndEnsureLocalAudioTrackMutingWorks() {
+    callAndEnsureAudioIsPlaying({audio: true, video: true});
     setAllEventsOccuredHandler(function() {
       setAllEventsOccuredHandler(reportTestSuccess);
 
@@ -427,8 +419,8 @@
     });
   }
 
-  function callAndEnsureAudioTrackUnmutingWorks(beLenient) {
-    callAndEnsureAudioIsPlaying(beLenient, {audio: true, video: true});
+  function callAndEnsureAudioTrackUnmutingWorks() {
+    callAndEnsureAudioIsPlaying({audio: true, video: true});
     setAllEventsOccuredHandler(function() {
       setAllEventsOccuredHandler(reportTestSuccess);
 
@@ -442,26 +434,26 @@
       }, 500);
 
       setTimeout(function() {
-        ensureAudioPlaying(gSecondConnection, beLenient);
+        ensureAudioPlaying(gSecondConnection);
       }, 1500);
     });
   }
 
-  function callAndEnsureLocalVideoMutingDoesntMuteAudio(beLenient) {
-    callAndEnsureAudioIsPlaying(beLenient, {audio: true, video: true});
+  function callAndEnsureLocalVideoMutingDoesntMuteAudio() {
+    callAndEnsureAudioIsPlaying({audio: true, video: true});
     setAllEventsOccuredHandler(function() {
       setAllEventsOccuredHandler(reportTestSuccess);
       enableLocalVideo(gFirstConnection, false);
-      ensureAudioPlaying(gSecondConnection, beLenient);
+      ensureAudioPlaying(gSecondConnection);
     });
   }
 
-  function callAndEnsureRemoteVideoMutingDoesntMuteAudio(beLenient) {
-    callAndEnsureAudioIsPlaying(beLenient, {audio: true, video: true});
+  function callAndEnsureRemoteVideoMutingDoesntMuteAudio() {
+    callAndEnsureAudioIsPlaying({audio: true, video: true});
     setAllEventsOccuredHandler(function() {
       setAllEventsOccuredHandler(reportTestSuccess);
       enableRemoteVideo(gSecondConnection, false);
-      ensureAudioPlaying(gSecondConnection, beLenient);
+      ensureAudioPlaying(gSecondConnection);
     });
   }
 
@@ -556,6 +548,33 @@
       localStream.removeTrack(localStream.getVideoTracks()[0]);
       negotiate();
     });
+  }
+
+  // Loads this page inside itself using an iframe, and ensures we can make a
+  // successful getUserMedia + peerconnection call inside the iframe.
+  function callInsideIframe(constraints) {
+    runInsideIframe(function(iframe) {
+      // Run a regular webrtc call inside the iframe.
+      iframe.contentWindow.call(constraints);
+    });
+  }
+
+  // Func should accept an iframe as its first argument.
+  function runInsideIframe(func) {
+    var iframe = document.createElement('iframe');
+    document.body.appendChild(iframe);
+    iframe.onload = onIframeLoaded;
+    iframe.src = window.location;
+
+    function onIframeLoaded() {
+      var iframe = window.document.querySelector('iframe');
+
+      // Propagate test success out of the iframe.
+      iframe.contentWindow.setAllEventsOccuredHandler(
+          window.parent.reportTestSuccess);
+
+      func(iframe);
+    }
   }
 
   // This function is used for setting up a test that:
@@ -792,7 +811,8 @@
   }
 
   function onOfferCreated(offer, caller, callee) {
-    offer.sdp = maybeForceIsac16K(transformSdp(offer.sdp));
+    offer.sdp = transformSdp(offer.sdp);
+    console.log('Offer:\n' + offer.sdp);
     caller.setLocalDescription(offer, function() {
       assertEquals('have-local-offer', caller.signalingState);
       receiveOffer(offer.sdp, caller, callee);
@@ -868,7 +888,8 @@
   }
 
   function onAnswerCreated(answer, caller, callee) {
-    answer.sdp = maybeForceIsac16K(transformSdp(answer.sdp));
+    answer.sdp = transformSdp(answer.sdp);
+    console.log('Answer:\n' + answer.sdp);
     callee.setLocalDescription(answer,
                                function () {
                                  assertEquals('stable', callee.signalingState);

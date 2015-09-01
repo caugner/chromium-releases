@@ -10,10 +10,10 @@ import android.media.MediaDrm;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Handler;
-import android.util.Log;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -56,8 +56,9 @@ public class MediaDrmBridge {
     //   calls. Indirect calls should not call release() again to avoid
     //   duplication (even though it doesn't hurt to call release() twice).
 
-    private static final String TAG = "MediaDrmBridge";
+    private static final String TAG = "cr.media";
     private static final String SECURITY_LEVEL = "securityLevel";
+    private static final String SERVER_CERTIFICATE = "serviceCertificate";
     private static final String PRIVACY_MODE = "privacyMode";
     private static final String SESSION_SHARING = "sessionSharing";
     private static final String ENABLE = "enable";
@@ -154,7 +155,7 @@ public class MediaDrmBridge {
      *  This is modified from BytesToHexString() in url/url_canon_unittest.cc.
      */
     private static String bytesToHexString(byte[] bytes) {
-        StringBuffer hexString = new StringBuffer();
+        StringBuilder hexString = new StringBuilder();
         for (int i = 0; i < bytes.length; ++i) {
             hexString.append(HEX_CHAR_LOOKUP[bytes[i] >>> 4]);
             hexString.append(HEX_CHAR_LOOKUP[bytes[i] & 0xf]);
@@ -210,7 +211,7 @@ public class MediaDrmBridge {
             Log.e(TAG, "Cannot create MediaCrypto Session.");
             return false;
         }
-        Log.d(TAG, "MediaCrypto Session created: " + bytesToHexString(mMediaCryptoSession));
+        Log.d(TAG, "MediaCrypto Session created: %s", bytesToHexString(mMediaCryptoSession));
 
         // Create MediaCrypto object.
         try {
@@ -321,7 +322,7 @@ public class MediaDrmBridge {
         }
 
         String currentSecurityLevel = mMediaDrm.getPropertyString(SECURITY_LEVEL);
-        Log.e(TAG, "Security level: current " + currentSecurityLevel + ", new " + securityLevel);
+        Log.e(TAG, "Security level: current %s, new %s", currentSecurityLevel, securityLevel);
         if (securityLevel.equals(currentSecurityLevel)) {
             // No need to set the same security level again. This is not just
             // a shortcut! Setting the same security level actually causes an
@@ -333,12 +334,32 @@ public class MediaDrmBridge {
             mMediaDrm.setPropertyString(SECURITY_LEVEL, securityLevel);
             return true;
         } catch (java.lang.IllegalArgumentException e) {
-            Log.e(TAG, "Failed to set security level " + securityLevel, e);
+            Log.e(TAG, "Failed to set security level %s", securityLevel, e);
         } catch (java.lang.IllegalStateException e) {
-            Log.e(TAG, "Failed to set security level " + securityLevel, e);
+            Log.e(TAG, "Failed to set security level %s", securityLevel, e);
         }
 
-        Log.e(TAG, "Security level " + securityLevel + " not supported!");
+        Log.e(TAG, "Security level %s not supported!", securityLevel);
+        return false;
+    }
+
+    /**
+     * Set the server certificate.
+     *
+     * @param certificate Server certificate to be set.
+     * @return whether the server certificate was successfully set.
+     */
+    @CalledByNative
+    private boolean setServerCertificate(byte[] certificate) {
+        try {
+            mMediaDrm.setPropertyByteArray(SERVER_CERTIFICATE, certificate);
+            return true;
+        } catch (java.lang.IllegalArgumentException e) {
+            Log.e(TAG, "Failed to set server certificate", e);
+        } catch (java.lang.IllegalStateException e) {
+            Log.e(TAG, "Failed to set server certificate", e);
+        }
+
         return false;
     }
 
@@ -358,7 +379,7 @@ public class MediaDrmBridge {
         mResetDeviceCredentialsPending = true;
         MediaDrm.ProvisionRequest request = mMediaDrm.getProvisionRequest();
         PostRequestTask postTask = new PostRequestTask(request.getData());
-        postTask.execute(request.getDefaultUrl());
+        postTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, request.getDefaultUrl());
     }
 
     /**
@@ -367,7 +388,9 @@ public class MediaDrmBridge {
     @CalledByNative
     private void destroy() {
         mNativeMediaDrmBridge = INVALID_NATIVE_MEDIA_DRM_BRIDGE;
-        release();
+        if (mMediaDrm != null) {
+            release();
+        }
     }
 
     /**
@@ -430,10 +453,23 @@ public class MediaDrmBridge {
         if (optionalParameters == null) {
             optionalParameters = new HashMap<String, String>();
         }
-        MediaDrm.KeyRequest request = mMediaDrm.getKeyRequest(
-                sessionId, data, mime, MediaDrm.KEY_TYPE_STREAMING, optionalParameters);
+
+        MediaDrm.KeyRequest request = null;
+
+        try {
+            request = mMediaDrm.getKeyRequest(
+                    sessionId, data, mime, MediaDrm.KEY_TYPE_STREAMING, optionalParameters);
+        } catch (IllegalStateException e) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && e
+                    instanceof android.media.MediaDrm.MediaDrmStateException) {
+                // See b/21307186 for details.
+                Log.e(TAG, "MediaDrmStateException fired during getKeyRequest().", e);
+            }
+        }
+
         String result = (request != null) ? "successed" : "failed";
-        Log.d(TAG, "getKeyRequest " + result + "!");
+        Log.d(TAG, "getKeyRequest %s!", result);
+
         return request;
     }
 
@@ -556,7 +592,7 @@ public class MediaDrmBridge {
             }
 
             // Success!
-            Log.d(TAG, "createSession(): Session (" + bytesToHexString(sessionId) + ") created.");
+            Log.d(TAG, "createSession(): Session (%s) created.", bytesToHexString(sessionId));
             onPromiseResolvedWithSession(promiseId, sessionId);
             onSessionMessage(sessionId, request);
             mSessionIds.put(ByteBuffer.wrap(sessionId), mime);
@@ -617,7 +653,7 @@ public class MediaDrmBridge {
         mSessionIds.remove(ByteBuffer.wrap(sessionId));
         onPromiseResolved(promiseId);
         onSessionClosed(sessionId);
-        Log.d(TAG, "Session " + bytesToHexString(sessionId) + " closed.");
+        Log.d(TAG, "Session %s closed", bytesToHexString(sessionId));
     }
 
     /**
@@ -651,7 +687,7 @@ public class MediaDrmBridge {
                 // TODO(qinmin): remove this exception catch when b/10495563 is fixed.
                 Log.e(TAG, "Exception intentionally caught when calling provideKeyResponse()", e);
             }
-            Log.d(TAG, "Key successfully added for session " + bytesToHexString(sessionId));
+            Log.d(TAG, "Key successfully added for session %s", bytesToHexString(sessionId));
             onPromiseResolved(promiseId);
             onSessionKeysChange(sessionId, true, KEY_STATUS_USABLE);
             return;
@@ -684,7 +720,7 @@ public class MediaDrmBridge {
         mProvisioningPending = true;
         MediaDrm.ProvisionRequest request = mMediaDrm.getProvisionRequest();
         PostRequestTask postTask = new PostRequestTask(request.getData());
-        postTask.execute(request.getDefaultUrl());
+        postTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, request.getDefaultUrl());
     }
 
     /**
@@ -772,7 +808,7 @@ public class MediaDrmBridge {
     }
 
     private void onPromiseRejected(final long promiseId, final String errorMessage) {
-        Log.e(TAG, "onPromiseRejected: " + errorMessage);
+        Log.e(TAG, "onPromiseRejected: %s", errorMessage);
         mHandler.post(new Runnable() {
             @Override
             public void run() {
@@ -820,7 +856,7 @@ public class MediaDrmBridge {
     }
 
     private void onLegacySessionError(final byte[] sessionId, final String errorMessage) {
-        Log.e(TAG, "onLegacySessionError: " + errorMessage);
+        Log.e(TAG, "onLegacySessionError: %s", errorMessage);
         mHandler.post(new Runnable() {
             @Override
             public void run() {
@@ -851,7 +887,7 @@ public class MediaDrmBridge {
                 return;
             }
             if (!sessionExists(sessionId)) {
-                Log.e(TAG, "MediaDrmListener: Invalid session " + bytesToHexString(sessionId));
+                Log.e(TAG, "MediaDrmListener: Invalid session %s", bytesToHexString(sessionId));
                 return;
             }
             switch(event) {
@@ -910,7 +946,7 @@ public class MediaDrmBridge {
         protected Void doInBackground(String... urls) {
             mResponseBody = postRequest(urls[0], mDrmRequest);
             if (mResponseBody != null) {
-                Log.d(TAG, "response length=" + mResponseBody.length);
+                Log.d(TAG, "response length=%d", mResponseBody.length);
             }
             return null;
         }
@@ -946,7 +982,7 @@ public class MediaDrmBridge {
                     }
                     return bos.toByteArray();
                 } else {
-                    Log.d(TAG, "Server returned HTTP error code " + responseCode);
+                    Log.d(TAG, "Server returned HTTP error code %d", responseCode);
                     return null;
                 }
             } catch (MalformedURLException e) {

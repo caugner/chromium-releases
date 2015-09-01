@@ -11,9 +11,12 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/leak_tracker.h"
+#include "base/location.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -27,7 +30,6 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "url/url_constants.h"
@@ -750,10 +752,8 @@ SafeBrowsingDatabase* LocalSafeBrowsingDatabaseManager::GetDatabase() {
 
   if (database_)
     return database_;
-  startup_metric_utils::ScopedSlowStartupUMA
-      scoped_timer("Startup.SlowStartupSafeBrowsingGetDatabase");
-  const base::TimeTicks before = base::TimeTicks::Now();
 
+  const base::TimeTicks before = base::TimeTicks::Now();
   SafeBrowsingDatabase* database = SafeBrowsingDatabase::Create(
       safe_browsing_task_runner_, enable_download_protection_,
       enable_csd_whitelist_, enable_download_whitelist_,
@@ -1112,9 +1112,9 @@ void LocalSafeBrowsingDatabaseManager::StartSafeBrowsingCheck(
       safe_browsing_task_runner_.get(), FROM_HERE, task,
       base::Bind(&LocalSafeBrowsingDatabaseManager::OnAsyncCheckDone,
                  check->weak_ptr_factory_->GetWeakPtr(), check));
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
-                 check->weak_ptr_factory_->GetWeakPtr(), check),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
+                            check->weak_ptr_factory_->GetWeakPtr(), check),
       check_timeout_);
 }
 

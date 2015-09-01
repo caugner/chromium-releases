@@ -7,15 +7,15 @@ import logging
 import sys
 
 from telemetry import benchmark
-from telemetry.core import browser_options
+from telemetry import story
 from telemetry.core import discover
 from telemetry.core import util
-from telemetry.core import wpr_modes
+from telemetry.internal.browser import browser_options
+from telemetry.internal.results import results_options
 from telemetry.internal import story_runner
-from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import test_expectations
-from telemetry.results import results_options
+from telemetry.util import wpr_modes
 
 
 class RecorderPageTest(page_test.PageTest):
@@ -44,6 +44,8 @@ class RecorderPageTest(page_test.PageTest):
   def DidNavigateToPage(self, page, tab):
     if self.page_test:
       self.page_test.DidNavigateToPage(page, tab)
+    tab.WaitForDocumentReadyStateToBeComplete()
+    util.WaitFor(tab.HasReachedQuiescence, 30)
 
   def CleanUpAfterPage(self, page, tab):
     if self.page_test:
@@ -52,16 +54,6 @@ class RecorderPageTest(page_test.PageTest):
   def ValidateAndMeasurePage(self, page, tab, results):
     if self.page_test:
       self.page_test.ValidateAndMeasurePage(page, tab, results)
-
-  def RunPage(self, page, tab, results):
-    tab.WaitForDocumentReadyStateToBeComplete()
-    util.WaitFor(tab.HasReachedQuiescence, 30)
-
-    if self.page_test:
-      self.page_test.RunPage(page, tab, results)
-      return
-
-    super(RecorderPageTest, self).RunPage(page, tab, results)
 
   def RunNavigateSteps(self, page, tab):
     if self.page_test:
@@ -100,9 +92,9 @@ def _PrintAllBenchmarks(base_dir, output_stream):
 
 def _PrintAllUserStories(base_dir, output_stream):
   output_stream.write('Available page sets\' names:\n\n')
-  # TODO: actually print all user stories once record_wpr support general
-  # user stories recording.
-  classes = _GetSubclasses(base_dir, page_set.PageSet)
+  # TODO: actually print all stories once record_wpr support general
+  # stories recording.
+  classes = _GetSubclasses(base_dir, story.StorySet)
   for k in classes:
     output_stream.write('%s\n' % k)
 
@@ -128,7 +120,7 @@ class WprRecorder(object):
       page_set_base_dir = self._options.page_set_base_dir
     else:
       page_set_base_dir = base_dir
-    self._page_set = self._GetPageSet(page_set_base_dir, target)
+    self._story_set = self._GetStorySet(page_set_base_dir, target)
 
   @property
   def options(self):
@@ -170,21 +162,21 @@ class WprRecorder(object):
     if self._benchmark is not None:
       self._benchmark.ProcessCommandLineArgs(self._parser, self._options)
 
-  def _GetPageSet(self, base_dir, target):
+  def _GetStorySet(self, base_dir, target):
     if self._benchmark is not None:
-      return self._benchmark.CreatePageSet(self._options)
-    ps = _MaybeGetInstanceOfClass(target, base_dir, page_set.PageSet)
-    if ps is None:
+      return self._benchmark.CreateStorySet(self._options)
+    story_set = _MaybeGetInstanceOfClass(target, base_dir, story.StorySet)
+    if story_set is None:
       self._parser.print_usage()
       sys.exit(1)
-    return ps
+    return story_set
 
   def Record(self, results):
-    assert self._page_set.wpr_archive_info, (
+    assert self._story_set.wpr_archive_info, (
       'Pageset archive_data_file path must be specified.')
-    self._page_set.wpr_archive_info.AddNewTemporaryRecording()
+    self._story_set.wpr_archive_info.AddNewTemporaryRecording()
     self._record_page_test.CustomizeBrowserOptions(self._options)
-    story_runner.Run(self._record_page_test, self._page_set,
+    story_runner.Run(self._record_page_test, self._story_set,
         test_expectations.TestExpectations(), self._options, results)
 
   def HandleResults(self, results, upload_to_cloud_storage):
@@ -192,27 +184,27 @@ class WprRecorder(object):
       logging.warning('Some pages failed and/or were skipped. The recording '
                       'has not been updated for these pages.')
     results.PrintSummary()
-    self._page_set.wpr_archive_info.AddRecordedUserStories(
+    self._story_set.wpr_archive_info.AddRecordedStories(
         results.pages_that_succeeded,
         upload_to_cloud_storage)
 
 
 # TODO(nednguyen): use benchmark.Environment instead of base_dir for discovering
-# benchmark & user story classes.
+# benchmark & story classes.
 def Main(base_dir):
 
   parser = argparse.ArgumentParser(
-      usage='Record a benchmark or a user story (page set).')
+      usage='Record a benchmark or a story (page set).')
   parser.add_argument(
       'benchmark', type=str,
       help=('benchmark name. This argument is optional. If both benchmark name '
-            'and user story name are specified, this takes precedence as the '
+            'and story name are specified, this takes precedence as the '
             'target of the recording.'),
       nargs='?')
   parser.add_argument('--story', dest='story', type=str,
-                      help='user story (page set) name')
+                      help='story (page set) name')
   parser.add_argument('--list-stories', dest='list_stories',
-                      action='store_true', help='list all user story names.')
+                      action='store_true', help='list all story names.')
   parser.add_argument('--list-benchmarks', dest='list_benchmarks',
                       action='store_true', help='list all benchmark names.')
   parser.add_argument('--upload', action='store_true',
@@ -230,7 +222,7 @@ def Main(base_dir):
     return 0
 
   # TODO(nednguyen): update WprRecorder so that it handles the difference
-  # between recording a benchmark vs recording a user story better based on
+  # between recording a benchmark vs recording a story better based on
   # the distinction between args.benchmark & args.story
   wpr_recorder = WprRecorder(base_dir, target, extra_args)
   results = wpr_recorder.CreateResults()

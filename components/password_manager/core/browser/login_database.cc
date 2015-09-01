@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -24,6 +24,7 @@
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
+#include "url/url_constants.h"
 
 using autofill::PasswordForm;
 
@@ -32,19 +33,19 @@ namespace password_manager {
 const int kCurrentVersionNumber = 13;
 static const int kCompatibleVersionNumber = 1;
 
-Pickle SerializeVector(const std::vector<base::string16>& vec) {
-  Pickle p;
+base::Pickle SerializeVector(const std::vector<base::string16>& vec) {
+  base::Pickle p;
   for (size_t i = 0; i < vec.size(); ++i) {
     p.WriteString16(vec[i]);
   }
   return p;
 }
 
-std::vector<base::string16> DeserializeVector(const Pickle& p) {
+std::vector<base::string16> DeserializeVector(const base::Pickle& p) {
   std::vector<base::string16> ret;
   base::string16 str;
 
-  PickleIterator iterator(p);
+  base::PickleIterator iterator(p);
   while (iterator.ReadString16(&str)) {
     ret.push_back(str);
   }
@@ -98,12 +99,13 @@ void BindAddStatement(const PasswordForm& form,
   s->BindInt(COLUMN_BLACKLISTED_BY_USER, form.blacklisted_by_user);
   s->BindInt(COLUMN_SCHEME, form.scheme);
   s->BindInt(COLUMN_PASSWORD_TYPE, form.type);
-  Pickle usernames_pickle = SerializeVector(form.other_possible_usernames);
+  base::Pickle usernames_pickle =
+      SerializeVector(form.other_possible_usernames);
   s->BindBlob(COLUMN_POSSIBLE_USERNAMES,
               usernames_pickle.data(),
               usernames_pickle.size());
   s->BindInt(COLUMN_TIMES_USED, form.times_used);
-  Pickle form_data_pickle;
+  base::Pickle form_data_pickle;
   autofill::SerializeFormData(form.form_data, &form_data_pickle);
   s->BindBlob(COLUMN_FORM_DATA,
               form_data_pickle.data(),
@@ -154,6 +156,11 @@ void LogTimesUsedStat(const std::string& name, int sample) {
   LogDynamicUMAStat(name, sample, 0, 100, 10);
 }
 
+void LogNumberOfAccountsForScheme(const std::string& scheme, int sample) {
+  LogDynamicUMAStat("PasswordManager.TotalAccountsHiRes.WithScheme." + scheme,
+                    sample, 1, 1000, 100);
+}
+
 // Creates a table named |table_name| using our current schema.
 bool CreateNewTable(sql::Connection* db,
                     const char* table_name,
@@ -198,7 +205,7 @@ bool CreateIndexOnSignonRealm(sql::Connection* db, const char* table_name) {
 }  // namespace
 
 LoginDatabase::LoginDatabase(const base::FilePath& db_path)
-    : db_path_(db_path) {
+    : db_path_(db_path), clear_password_values_(false) {
 }
 
 LoginDatabase::~LoginDatabase() {
@@ -526,6 +533,48 @@ void LoginDatabase::ReportMetrics(const std::string& sync_username,
         "PasswordManager.EmptyUsernames.WithoutCorrespondingNonempty",
         num_entries);
   }
+
+  sql::Statement logins_with_schemes_statement(db_.GetUniqueStatement(
+      "SELECT signon_realm, origin_url, ssl_valid, blacklisted_by_user "
+      "FROM logins;"));
+
+  if (!logins_with_schemes_statement.is_valid())
+    return;
+
+  int android_logins = 0;
+  int ftp_logins = 0;
+  int http_logins = 0;
+  int https_logins = 0;
+  int other_logins = 0;
+
+  while (logins_with_schemes_statement.Step()) {
+    std::string signon_realm = logins_with_schemes_statement.ColumnString(0);
+    GURL origin_url = GURL(logins_with_schemes_statement.ColumnString(1));
+    bool ssl_valid = !!logins_with_schemes_statement.ColumnInt(2);
+    bool blacklisted_by_user = !!logins_with_schemes_statement.ColumnInt(3);
+    if (blacklisted_by_user)
+      continue;
+
+    if (IsValidAndroidFacetURI(signon_realm)) {
+      ++android_logins;
+    } else if (origin_url.SchemeIs(url::kHttpsScheme)) {
+      ++https_logins;
+      metrics_util::LogUMAHistogramBoolean(
+          "PasswordManager.UserStoredPasswordWithInvalidSSLCert", !ssl_valid);
+    } else if (origin_url.SchemeIs(url::kHttpScheme)) {
+      ++http_logins;
+    } else if (origin_url.SchemeIs(url::kFtpScheme)) {
+      ++ftp_logins;
+    } else {
+      ++other_logins;
+    }
+  }
+
+  LogNumberOfAccountsForScheme("Android", android_logins);
+  LogNumberOfAccountsForScheme("Ftp", ftp_logins);
+  LogNumberOfAccountsForScheme("Http", http_logins);
+  LogNumberOfAccountsForScheme("Https", https_logins);
+  LogNumberOfAccountsForScheme("Other", other_logins);
 }
 
 PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
@@ -533,8 +582,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
   if (!DoesMatchConstraints(form))
     return list;
   std::string encrypted_password;
-  if (EncryptedString(form.password_value, &encrypted_password) !=
-      ENCRYPTION_RESULT_SUCCESS)
+  if (EncryptedString(
+          clear_password_values_ ? base::string16() : form.password_value,
+          &encrypted_password) != ENCRYPTION_RESULT_SUCCESS)
     return list;
 
   // You *must* change LoginTableColumns if this query changes.
@@ -577,8 +627,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
 
 PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
   std::string encrypted_password;
-  if (EncryptedString(form.password_value, &encrypted_password) !=
-      ENCRYPTION_RESULT_SUCCESS)
+  if (EncryptedString(
+          clear_password_values_ ? base::string16() : form.password_value,
+          &encrypted_password) != ENCRYPTION_RESULT_SUCCESS)
     return PasswordStoreChangeList();
 
   // Replacement is necessary to deal with updating imported credentials. See
@@ -612,7 +663,7 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
              static_cast<int>(encrypted_password.length()));
   s.BindInt(2, form.ssl_valid);
   s.BindInt(3, form.preferred);
-  Pickle pickle = SerializeVector(form.other_possible_usernames);
+  base::Pickle pickle = SerializeVector(form.other_possible_usernames);
   s.BindBlob(4, pickle.data(), pickle.size());
   s.BindInt(5, form.times_used);
   s.BindString16(6, form.submit_element);
@@ -729,17 +780,17 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
   DCHECK(type_int >= 0 && type_int <= PasswordForm::TYPE_GENERATED);
   form->type = static_cast<PasswordForm::Type>(type_int);
   if (s.ColumnByteLength(COLUMN_POSSIBLE_USERNAMES)) {
-    Pickle pickle(
+    base::Pickle pickle(
         static_cast<const char*>(s.ColumnBlob(COLUMN_POSSIBLE_USERNAMES)),
         s.ColumnByteLength(COLUMN_POSSIBLE_USERNAMES));
     form->other_possible_usernames = DeserializeVector(pickle);
   }
   form->times_used = s.ColumnInt(COLUMN_TIMES_USED);
   if (s.ColumnByteLength(COLUMN_FORM_DATA)) {
-    Pickle form_data_pickle(
+    base::Pickle form_data_pickle(
         static_cast<const char*>(s.ColumnBlob(COLUMN_FORM_DATA)),
         s.ColumnByteLength(COLUMN_FORM_DATA));
-    PickleIterator form_data_iter(form_data_pickle);
+    base::PickleIterator form_data_iter(form_data_pickle);
     bool success =
         autofill::DeserializeFormData(&form_data_iter, &form->form_data);
     metrics_util::FormDeserializationStatus status =

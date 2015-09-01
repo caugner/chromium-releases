@@ -55,41 +55,42 @@ void FakeGaiaCookieManagerService::SetListAccountsResponseNoAccounts() {
 }
 
 void FakeGaiaCookieManagerService::SetListAccountsResponseOneAccount(
-    const char* account) {
+    const char* email, const char* gaia_id) {
   DCHECK(url_fetcher_factory_);
   url_fetcher_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->ListAccountsURLWithSource(
           GaiaConstants::kChromeSource),
       base::StringPrintf(
-          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1]]]",
-          account),
+          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1, \"%s\"]]]",
+          email, gaia_id),
       net::HTTP_OK,
       net::URLRequestStatus::SUCCESS);
 }
 
 void FakeGaiaCookieManagerService::SetListAccountsResponseOneAccountWithExpiry(
-    const char* account, bool expired) {
+    const char* email, const char* gaia_id, bool expired) {
   DCHECK(url_fetcher_factory_);
   url_fetcher_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->ListAccountsURLWithSource(
           GaiaConstants::kChromeSource),
       base::StringPrintf(
-          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d]]]",
-          account, expired ? 0 : 1),
+          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d, \"%s\"]]]",
+          email, expired ? 0 : 1, gaia_id),
       net::HTTP_OK,
       net::URLRequestStatus::SUCCESS);
 }
 
 void FakeGaiaCookieManagerService::SetListAccountsResponseTwoAccounts(
-    const char* account1, const char* account2) {
+    const char* email1, const char* gaia_id1,
+    const char* email2, const char* gaia_id2) {
   DCHECK(url_fetcher_factory_);
   url_fetcher_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->ListAccountsURLWithSource(
           GaiaConstants::kChromeSource),
       base::StringPrintf(
-          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1], "
-          "[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1]]]",
-          account1, account2),
+          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1, \"%s\"], "
+          "[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, 1, \"%s\"]]]",
+          email1, gaia_id1, email2, gaia_id2),
       net::HTTP_OK,
       net::URLRequestStatus::SUCCESS);
 }
@@ -102,8 +103,8 @@ void FakeGaiaCookieManagerService::SetListAccountsResponseTwoAccountsWithExpiry(
       GaiaUrls::GetInstance()->ListAccountsURLWithSource(
           GaiaConstants::kChromeSource),
       base::StringPrintf(
-          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d], "
-          "[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d]]]",
+          "[\"f\", [[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d, \"28\"], "
+          "[\"b\", 0, \"n\", \"%s\", \"p\", 0, 0, 0, 0, %d, \"29\"]]]",
           account1, account1_expired ? 0 : 1,
           account2, account2_expired ? 0 : 1),
       net::HTTP_OK,
@@ -111,12 +112,11 @@ void FakeGaiaCookieManagerService::SetListAccountsResponseTwoAccountsWithExpiry(
 }
 
 // static
-KeyedService* FakeGaiaCookieManagerService::Build(
+scoped_ptr<KeyedService> FakeGaiaCookieManagerService::Build(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-  FakeGaiaCookieManagerService* service = new FakeGaiaCookieManagerService(
+  return make_scoped_ptr(new FakeGaiaCookieManagerService(
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
       GaiaConstants::kChromeSource,
-      ChromeSigninClientFactory::GetForProfile(profile));
-  return service;
+      ChromeSigninClientFactory::GetForProfile(profile)));
 }

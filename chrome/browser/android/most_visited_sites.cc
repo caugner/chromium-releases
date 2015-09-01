@@ -111,8 +111,8 @@ SyncState GetSyncState(Profile* profile) {
   if (!sync)
     return SyncState::SYNC_OR_HISTORY_SYNC_DISABLED;
   return suggestions::GetSyncState(
-      sync->IsSyncEnabledAndLoggedIn(),
-      sync->SyncActive() && sync->ConfigurationDone(),
+      sync->CanSyncStart(),
+      sync->IsSyncActive() && sync->ConfigurationDone(),
       sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES));
 }
 
@@ -414,7 +414,8 @@ void MostVisitedSites::RecordUMAMetrics() {
 void MostVisitedSites::TopSitesLoaded(history::TopSites* top_sites) {
 }
 
-void MostVisitedSites::TopSitesChanged(history::TopSites* top_sites) {
+void MostVisitedSites::TopSitesChanged(history::TopSites* top_sites,
+                                       ChangeReason change_reason) {
   if (mv_source_ == TOP_SITES) {
     // The displayed suggestions are invalidated.
     QueryMostVisitedURLs();

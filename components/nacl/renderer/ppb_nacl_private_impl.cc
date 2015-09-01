@@ -16,10 +16,13 @@
 #include "base/files/file.h"
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/nacl/common/nacl_host_messages.h"
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_nonsfi_util.h"
@@ -255,9 +258,8 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
     if (process_type_ != kNativeNaClProcessType &&
         process_type_ != kPNaClTranslatorProcessType) {
       // Return an error.
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(callback, base::Passed(base::File()), 0, 0));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback, base::Passed(base::File()), 0, 0));
       return;
     }
 
@@ -272,9 +274,8 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
     bool is_helper_process = process_type_ == kPNaClTranslatorProcessType;
     if (!ManifestResolveKey(pp_instance_, is_helper_process, key, &url,
                             &pnacl_options)) {
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(callback, base::Passed(base::File()), 0, 0));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback, base::Passed(base::File()), 0, 0));
       return;
     }
 
@@ -609,7 +610,7 @@ std::string PnaclComponentURLToFilename(const std::string& url) {
   // generated from ManifestResolveKey or PnaclResources::ReadResourceInfo.
   // So, it's safe to just use string parsing operations here instead of
   // URL-parsing ones.
-  DCHECK(StartsWithASCII(url, kPNaClTranslatorBaseUrl, true));
+  DCHECK(base::StartsWithASCII(url, kPNaClTranslatorBaseUrl, true));
   std::string r = url.substr(std::string(kPNaClTranslatorBaseUrl).length());
 
   // Use white-listed-chars.
@@ -1190,12 +1191,12 @@ PP_Bool GetPNaClResourceInfo(PP_Instance instance,
   base::JSONReader json_reader;
   int json_read_error_code;
   std::string json_read_error_msg;
-  base::Value* json_data = json_reader.ReadAndReturnError(
+  scoped_ptr<base::Value> json_data(json_reader.ReadAndReturnError(
       buffer.get(),
       base::JSON_PARSE_RFC,
       &json_read_error_code,
-      &json_read_error_msg);
-  if (json_data == NULL) {
+      &json_read_error_msg));
+  if (!json_data) {
     load_manager->ReportLoadError(
         PP_NACL_ERROR_PNACL_RESOURCE_FETCH,
         std::string("Parsing resource info failed: JSON parse error: ") +
@@ -1400,11 +1401,9 @@ void DownloadFile(PP_Instance instance,
   NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback,
-                   static_cast<int32_t>(PP_ERROR_FAILED),
-                   kInvalidNaClFileInfo));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, static_cast<int32_t>(PP_ERROR_FAILED),
+                              kInvalidNaClFileInfo));
     return;
   }
 
@@ -1417,15 +1416,13 @@ void DownloadFile(PP_Instance instance,
                                               &file_info.token_lo,
                                               &file_info.token_hi);
     if (handle == PP_kInvalidFileHandle) {
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(callback,
-                     static_cast<int32_t>(PP_ERROR_FAILED),
-                     kInvalidNaClFileInfo));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback, static_cast<int32_t>(PP_ERROR_FAILED),
+                                kInvalidNaClFileInfo));
       return;
     }
     file_info.handle = handle;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(callback, static_cast<int32_t>(PP_OK), file_info));
     return;
@@ -1435,11 +1432,9 @@ void DownloadFile(PP_Instance instance,
   // before downloading it.
   const GURL& test_gurl = load_manager->plugin_base_url().Resolve(url);
   if (!test_gurl.is_valid()) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback,
-                   static_cast<int32_t>(PP_ERROR_FAILED),
-                   kInvalidNaClFileInfo));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, static_cast<int32_t>(PP_ERROR_FAILED),
+                              kInvalidNaClFileInfo));
     return;
   }
 
@@ -1455,7 +1450,7 @@ void DownloadFile(PP_Instance instance,
     file_info.handle = file_handle;
     file_info.token_lo = file_token_lo;
     file_info.token_hi = file_token_hi;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(callback, static_cast<int32_t>(PP_OK), file_info));
     return;
@@ -1469,11 +1464,9 @@ void DownloadFile(PP_Instance instance,
   content::PepperPluginInstance* plugin_instance =
       content::PepperPluginInstance::Get(instance);
   if (!plugin_instance) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback,
-                   static_cast<int32_t>(PP_ERROR_FAILED),
-                   kInvalidNaClFileInfo));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, static_cast<int32_t>(PP_ERROR_FAILED),
+                              kInvalidNaClFileInfo));
   }
   const blink::WebDocument& document =
       plugin_instance->GetContainer()->element().document();
@@ -1661,11 +1654,9 @@ void StreamPexe(PP_Instance instance,
   content::PepperPluginInstance* plugin_instance =
       content::PepperPluginInstance::Get(instance);
   if (!plugin_instance) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(handler->DidFinishStream,
-                   handler_user_data,
-                   static_cast<int32_t>(PP_ERROR_FAILED)));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(handler->DidFinishStream, handler_user_data,
+                              static_cast<int32_t>(PP_ERROR_FAILED)));
     return;
   }
 

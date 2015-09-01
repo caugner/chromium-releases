@@ -286,6 +286,9 @@ class HostContentSettingsMap
   void AddObserver(content_settings::Observer* observer);
   void RemoveObserver(content_settings::Observer* observer);
 
+  // Schedules any pending lossy website settings to be written to disk.
+  void FlushLossyWebsiteSettings();
+
   // Passes ownership of |clock|.
   void SetPrefClockForTesting(scoped_ptr<base::Clock> clock);
 
@@ -358,7 +361,7 @@ class HostContentSettingsMap
 
   base::ThreadChecker thread_checker_;
 
-  ObserverList<content_settings::Observer> observers_;
+  base::ObserverList<content_settings::Observer> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(HostContentSettingsMap);
 };

@@ -4,6 +4,7 @@
 
 #include "content/public/test/browser_test_utils.h"
 
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
@@ -19,6 +20,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
+#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/histogram_fetcher.h"
@@ -45,6 +47,7 @@
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/events/latency_info.h"
 #include "ui/resources/grit/webui_resources.h"
 
 #if defined(USE_AURA)
@@ -150,8 +153,8 @@ bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
     return true;
 
   base::JSONReader reader(base::JSON_ALLOW_TRAILING_COMMAS);
-  result->reset(reader.ReadToValue(json));
-  if (!result->get()) {
+  *result = reader.ReadToValue(json);
+  if (!*result) {
     DLOG(ERROR) << reader.GetErrorMessage();
     return false;
   }
@@ -231,7 +234,7 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
     const GURL& server_base_url,
     const net::test_server::HttpRequest& request) {
   std::string prefix("/cross-site/");
-  if (!StartsWithASCII(request.relative_url, prefix, true))
+  if (!base::StartsWithASCII(request.relative_url, prefix, true))
     return scoped_ptr<net::test_server::HttpResponse>();
 
   std::string params = request.relative_url.substr(prefix.length());
@@ -427,6 +430,14 @@ void SimulateTapWithModifiersAt(WebContents* web_contents,
   RenderWidgetHostImpl* widget_host =
       RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
   widget_host->ForwardGestureEvent(tap);
+}
+
+void SimulateTouchPressAt(WebContents* web_contents, const gfx::Point& point) {
+  SyntheticWebTouchEvent touch;
+  touch.PressPoint(point.x(), point.y());
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  widget_host->ForwardTouchEventWithLatencyInfo(touch, ui::LatencyInfo());
 }
 
 void SimulateKeyPress(WebContents* web_contents,
@@ -957,6 +968,49 @@ bool WebContentsAddedObserver::RenderViewCreatedCalled() {
            child_observer_->main_frame_created_called_;
   }
   return false;
+}
+
+bool RequestFrame(WebContents* web_contents) {
+  DCHECK(web_contents);
+  return RenderWidgetHostImpl::From(web_contents->GetRenderViewHost())
+      ->ScheduleComposite();
+}
+
+FrameWatcher::FrameWatcher()
+    : BrowserMessageFilter(ViewMsgStart), frames_to_wait_(0) {
+}
+
+FrameWatcher::~FrameWatcher() {
+}
+
+void FrameWatcher::ReceivedFrameSwap() {
+  --frames_to_wait_;
+  if (frames_to_wait_ == 0)
+    quit_.Run();
+}
+
+bool FrameWatcher::OnMessageReceived(const IPC::Message& message) {
+  if (message.type() == ViewHostMsg_SwapCompositorFrame::ID) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&FrameWatcher::ReceivedFrameSwap, this));
+  }
+  return false;
+}
+
+void FrameWatcher::AttachTo(WebContents* web_contents) {
+  DCHECK(web_contents);
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  widget_host->GetProcess()->AddFilter(this);
+}
+
+void FrameWatcher::WaitFrames(int frames_to_wait) {
+  if (frames_to_wait <= 0)
+    return;
+  base::RunLoop run_loop;
+  base::AutoReset<base::Closure> reset_quit(&quit_, run_loop.QuitClosure());
+  base::AutoReset<int> reset_frames_to_wait(&frames_to_wait_, frames_to_wait);
+  run_loop.Run();
 }
 
 }  // namespace content

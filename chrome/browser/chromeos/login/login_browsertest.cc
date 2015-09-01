@@ -144,8 +144,8 @@ class LoginTest : public chromeos::LoginManagerTest {
           "document.getElementsByName('password')[0].value = '$Password';"
           "document.getElementById('submit-button').click();"
         "})();";
-    ReplaceSubstringsAfterOffset(&js, 0, "$Email", user_email);
-    ReplaceSubstringsAfterOffset(&js, 0, "$Password", password);
+    base::ReplaceSubstringsAfterOffset(&js, 0, "$Email", user_email);
+    base::ReplaceSubstringsAfterOffset(&js, 0, "$Password", password);
     ExecuteJsInGaiaAuthFrame(js);
   }
 
@@ -158,38 +158,37 @@ class LoginTest : public chromeos::LoginManagerTest {
         "document.querySelector('#offline-gaia /deep/ #emailInput')";
     const std::string email_next_button =
         "document.querySelector('#offline-gaia /deep/ #emailSection "
-        "/deep/ .blue-button')";
+        "/deep/ #button')";
     const std::string password_input =
         "document.querySelector('#offline-gaia /deep/ "
         "#passwordInput')";
     const std::string password_next_button =
         "document.querySelector('#offline-gaia /deep/ #passwordSection"
-        " /deep/ .blue-button')";
+        " /deep/ #button')";
 
     content::DOMMessageQueue message_queue;
     JSExpect("!document.querySelector('#offline-gaia').hidden");
     JSExpect("document.querySelector('#signin-frame').hidden");
     const std::string js =
         animated_pages +
-        ".addEventListener('core-animated-pages-transition-end',"
+        ".addEventListener('neon-animation-finish',"
         "function() {"
         "window.domAutomationController.setAutomationId(0);"
         "window.domAutomationController.send('switchToPassword');"
         "})";
     ASSERT_TRUE(content::ExecuteScript(web_contents(), js));
     std::string set_email = email_input + ".value = '$Email'";
-    ReplaceSubstringsAfterOffset(&set_email, 0, "$Email", user_email);
+    base::ReplaceSubstringsAfterOffset(&set_email, 0, "$Email", user_email);
     ASSERT_TRUE(content::ExecuteScript(web_contents(), set_email));
     ASSERT_TRUE(content::ExecuteScript(web_contents(),
                                        email_next_button + ".fire('tap')"));
     std::string message;
     do {
       ASSERT_TRUE(message_queue.WaitForMessage(&message));
-      LOG(ERROR) << message;
     } while (message != "\"switchToPassword\"");
 
     std::string set_password = password_input + ".value = '$Password'";
-    ReplaceSubstringsAfterOffset(&set_password, 0, "$Password", password);
+    base::ReplaceSubstringsAfterOffset(&set_password, 0, "$Password", password);
     ASSERT_TRUE(content::ExecuteScript(web_contents(), set_password));
     ASSERT_TRUE(content::ExecuteScript(web_contents(),
                                        password_next_button + ".fire('tap')"));

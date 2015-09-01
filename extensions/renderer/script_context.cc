@@ -13,7 +13,6 @@
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
@@ -96,15 +95,7 @@ ScriptContext::ScriptContext(const v8::Local<v8::Context>& v8_context,
       isolate_(v8_context->GetIsolate()),
       url_(web_frame_ ? GetDataSourceURLForFrame(web_frame_) : GURL()),
       runner_(new Runner(this)) {
-  VLOG(1) << "Created context:\n"
-          << "  extension id: " << GetExtensionID() << "\n"
-          << "  frame:        " << web_frame_ << "\n"
-          << "  URL:          " << GetURL() << "\n"
-          << "  context type: " << GetContextTypeDescription() << "\n"
-          << "  effective extension id: "
-          << (effective_extension_.get() ? effective_extension_->id() : "")
-          << "  effective context type: "
-          << GetEffectiveContextTypeDescription();
+  VLOG(1) << "Created context:\n" << GetDebugString();
   gin::PerContextData* gin_data = gin::PerContextData::From(v8_context);
   CHECK(gin_data);  // may fail if the v8::Context hasn't been registered yet
   gin_data->set_runner(runner_.get());
@@ -163,12 +154,6 @@ const std::string& ScriptContext::GetExtensionID() const {
   return extension_.get() ? extension_->id() : base::EmptyString();
 }
 
-content::RenderView* ScriptContext::GetRenderView() const {
-  if (web_frame_ && web_frame_->view())
-    return content::RenderView::FromWebView(web_frame_->view());
-  return NULL;
-}
-
 content::RenderFrame* ScriptContext::GetRenderFrame() const {
   if (web_frame_)
     return content::RenderFrame::FromWebFrame(web_frame_);
@@ -176,7 +161,7 @@ content::RenderFrame* ScriptContext::GetRenderFrame() const {
 }
 
 v8::Local<v8::Value> ScriptContext::CallFunction(
-    v8::Local<v8::Function> function,
+    const v8::Local<v8::Function>& function,
     int argc,
     v8::Local<v8::Value> argv[]) const {
   v8::EscapableHandleScope handle_scope(isolate());
@@ -194,6 +179,11 @@ v8::Local<v8::Value> ScriptContext::CallFunction(
   return handle_scope.Escape(
       v8::Local<v8::Value>(web_frame_->callFunctionEvenIfScriptDisabled(
           function, global, argc, argv)));
+}
+
+v8::Local<v8::Value> ScriptContext::CallFunction(
+    const v8::Local<v8::Function>& function) const {
+  return CallFunction(function, 0, nullptr);
 }
 
 Feature::Availability ScriptContext::GetAvailability(
@@ -228,11 +218,11 @@ void ScriptContext::DispatchOnUnloadEvent() {
   module_system_->CallModuleMethod("unload_event", "dispatch");
 }
 
-std::string ScriptContext::GetContextTypeDescription() {
+std::string ScriptContext::GetContextTypeDescription() const {
   return GetContextTypeDescriptionString(context_type_);
 }
 
-std::string ScriptContext::GetEffectiveContextTypeDescription() {
+std::string ScriptContext::GetEffectiveContextTypeDescription() const {
   return GetContextTypeDescriptionString(effective_context_type_);
 }
 
@@ -366,6 +356,21 @@ bool ScriptContext::HasAccessOrThrowError(const std::string& name) {
   }
 
   return true;
+}
+
+std::string ScriptContext::GetDebugString() const {
+  return base::StringPrintf(
+      "  extension id:           %s\n"
+      "  frame:                  %p\n"
+      "  URL:                    %s\n"
+      "  context_type:           %s\n"
+      "  effective extension id: %s\n"
+      "  effective context type: %s",
+      extension_.get() ? extension_->id().c_str() : "(none)", web_frame_,
+      GetURL().spec().c_str(), GetContextTypeDescription().c_str(),
+      effective_extension_.get() ? effective_extension_->id().c_str()
+                                 : "(none)",
+      GetEffectiveContextTypeDescription().c_str());
 }
 
 ScriptContext::Runner::Runner(ScriptContext* context) : context_(context) {

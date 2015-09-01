@@ -168,7 +168,12 @@ class AutofillDialogControllerImpl
   void DidSelectSuggestion(const base::string16& value,
                            int identifier) override;
   void DidAcceptSuggestion(const base::string16& value,
-                           int identifier) override;
+                           int identifier,
+                           int position) override;
+  bool GetDeletionConfirmationText(const base::string16& value,
+                                   int identifier,
+                                   base::string16* title,
+                                   base::string16* body) override;
   bool RemoveSuggestion(const base::string16& value, int identifier) override;
   void ClearPreviewedForm() override;
 
@@ -744,7 +749,7 @@ class AutofillDialogControllerImpl
   // The IDs for the currently showing unverified profiles popup. This will
   // be the first section in the list. The rest of the items will be the
   // i18n_validator_suggestions_.
-  std::vector<autofill::SuggestionBackendID> popup_suggestion_ids_;
+  std::vector<std::string> popup_suggestion_ids_;
 
   // The autofill suggestions based on downloaded i18n validation rules.
   std::vector< ::i18n::addressinput::AddressData> i18n_validator_suggestions_;

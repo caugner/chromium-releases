@@ -5,7 +5,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 
 #include "base/basictypes.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -151,6 +151,22 @@ void LogUIDisplayDisposition(UIDisplayDisposition disposition) {
 void LogFormDataDeserializationStatus(FormDeserializationStatus status) {
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.FormDataDeserializationStatus",
                             status, NUM_DESERIALIZATION_STATUSES);
+}
+
+void LogFilledCredentialIsFromAndroidApp(bool from_android) {
+  UMA_HISTOGRAM_BOOLEAN(
+      "PasswordManager.FilledCredentialWasFromAndroidApp",
+      from_android);
+}
+
+void LogPasswordSyncState(PasswordSyncState state) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.PasswordSyncState", state,
+                            NUM_SYNC_STATES);
+}
+
+void LogPasswordGenerationSubmissionEvent(PasswordSubmissionEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordGeneration.SubmissionEvent", event,
+                            SUBMISSION_EVENT_ENUM_COUNT);
 }
 
 }  // namespace metrics_util

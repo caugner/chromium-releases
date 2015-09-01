@@ -24,8 +24,7 @@ class ViewManagerClientImpl : public ViewManager,
  public:
   ViewManagerClientImpl(ViewManagerDelegate* delegate,
                         Shell* shell,
-                        InterfaceRequest<ViewManagerClient> request,
-                        bool delete_on_error);
+                        InterfaceRequest<ViewManagerClient> request);
   ~ViewManagerClientImpl() override;
 
   bool connected() const { return service_; }
@@ -55,11 +54,12 @@ class ViewManagerClientImpl : public ViewManager,
                    const std::vector<uint8_t>& data);
 
   void Embed(const String& url, Id view_id);
-  void Embed(const String& url,
+  void Embed(mojo::URLRequestPtr request,
              Id view_id,
              InterfaceRequest<ServiceProvider> services,
              ServiceProviderPtr exposed_services);
   void Embed(Id view_id, ViewManagerClientPtr client);
+  void EmbedAllowingReembed(mojo::URLRequestPtr request, Id view_id);
 
   void set_change_acked_callback(const Callback<void(void)>& callback) {
     change_acked_callback_ = callback;
@@ -71,30 +71,34 @@ class ViewManagerClientImpl : public ViewManager,
   void AddView(View* view);
   void RemoveView(Id view_id);
 
-  void SetViewManagerService(ViewManagerServicePtr service);
+  bool is_embed_root() const { return is_embed_root_; }
+
+  // Called after the root view's observers have been notified of destruction
+  // (as the last step of ~View). This ordering ensures that the View Manager
+  // is torn down after the root.
+  void OnRootDestroyed(View* root);
 
  private:
-  friend class RootObserver;
-
   typedef std::map<Id, View*> IdToViewMap;
 
   Id CreateViewOnServer();
 
   // Overridden from ViewManager:
-  const std::string& GetEmbedderURL() const override;
   View* GetRoot() override;
   View* GetViewById(Id id) override;
   View* GetFocusedView() override;
   View* CreateView() override;
+  void SetEmbedRoot() override;
 
   // Overridden from ViewManagerClient:
   void OnEmbed(ConnectionSpecificId connection_id,
-               const String& creator_url,
                ViewDataPtr root,
                ViewManagerServicePtr view_manager_service,
-               InterfaceRequest<ServiceProvider> services,
-               ServiceProviderPtr exposed_services,
                Id focused_view_id) override;
+  void OnEmbedForDescendant(
+      Id view,
+      mojo::URLRequestPtr request,
+      const OnEmbedForDescendantCallback& callback) override;
   void OnEmbeddedAppDisconnected(Id view_id) override;
   void OnViewBoundsChanged(Id view_id,
                            RectPtr old_bounds,
@@ -131,8 +135,6 @@ class ViewManagerClientImpl : public ViewManager,
   ConnectionSpecificId connection_id_;
   ConnectionSpecificId next_id_;
 
-  std::string creator_url_;
-
   Callback<void(void)> change_acked_callback_;
 
   ViewManagerDelegate* delegate_;
@@ -147,7 +149,10 @@ class ViewManagerClientImpl : public ViewManager,
 
   Binding<ViewManagerClient> binding_;
   ViewManagerServicePtr service_;
-  const bool delete_on_error_;
+
+  bool is_embed_root_;
+
+  bool in_destructor_;
 
   MOJO_DISALLOW_COPY_AND_ASSIGN(ViewManagerClientImpl);
 };

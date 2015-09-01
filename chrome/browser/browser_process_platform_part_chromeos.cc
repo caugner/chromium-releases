@@ -11,7 +11,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/session/chrome_session_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
-#include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -90,14 +89,6 @@ void BrowserProcessPlatformPart::ShutdownSessionManager() {
 session_manager::SessionManager* BrowserProcessPlatformPart::SessionManager() {
   DCHECK(CalledOnValidThread());
   return session_manager_.get();
-}
-
-chromeos::OomPriorityManager*
-    BrowserProcessPlatformPart::oom_priority_manager() {
-  DCHECK(CalledOnValidThread());
-  if (!oom_priority_manager_.get())
-    oom_priority_manager_.reset(new chromeos::OomPriorityManager());
-  return oom_priority_manager_.get();
 }
 
 chromeos::ProfileHelper* BrowserProcessPlatformPart::profile_helper() {

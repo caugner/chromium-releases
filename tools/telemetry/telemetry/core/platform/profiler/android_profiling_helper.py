@@ -11,11 +11,11 @@ import re
 import shutil
 import subprocess
 
+from catapult_base import support_binaries
 from telemetry.core import platform as telemetry_platform
 from telemetry.core.platform.profiler import android_prebuilt_profiler_helper
 from telemetry.core import util
 from telemetry import decorators
-from telemetry.util import support_binaries
 
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
 from pylib.utils import md5sum  # pylint: disable=F0401
@@ -204,8 +204,19 @@ def CreateSymFs(device, symfs_dir, libraries, use_symlinks=True):
       # the profiler can at least use the public symbols of that library. To
       # speed things up, only pull files that don't match copies we already
       # have in the symfs.
-      if (md5sum.CalculateHostMd5Sums([output_lib])[0] !=
-          md5sum.CalculateDeviceMd5Sums([lib])[0]):
+      if not os.path.exists(output_lib):
+        pull = True
+      else:
+        host_md5sums = md5sum.CalculateHostMd5Sums([output_lib])
+        try:
+          device_md5sums = md5sum.CalculateDeviceMd5Sums([lib], device)
+        except:
+          logging.exception('New exception caused by DeviceUtils conversion')
+          raise
+        pull = (not host_md5sums or not device_md5sums
+                or host_md5sums[0] != device_md5sums[0])
+
+      if pull:
         logging.info('Pulling %s to %s', lib, output_lib)
         device.PullFile(lib, output_lib)
 
@@ -260,10 +271,22 @@ def GetToolchainBinaryPath(library_file, binary_name):
     return None
   toolchain_version = toolchain_version.group(1)
 
-  path = os.path.join(util.GetChromiumSrcDir(), 'third_party', 'android_tools',
-                      'ndk', 'toolchains',
-                      '%s-%s' % (toolchain_config, toolchain_version),
-                      'prebuilt', '%s-%s' % (host_os, host_machine), 'bin',
-                      '%s-%s' % (toolchain_config, binary_name))
-  path = os.path.abspath(path)
-  return path if os.path.exists(path) else None
+  toolchain_path = os.path.abspath(os.path.join(
+      util.GetChromiumSrcDir(), 'third_party', 'android_tools', 'ndk',
+      'toolchains', '%s-%s' % (toolchain_config, toolchain_version)))
+  if not os.path.exists(toolchain_path):
+    logging.warning(
+        'Unable to find toolchain binary %s: toolchain not found at %s',
+        binary_name, toolchain_path)
+    return None
+
+  path = os.path.join(
+      toolchain_path, 'prebuilt', '%s-%s' % (host_os, host_machine), 'bin',
+      '%s-%s' % (toolchain_config, binary_name))
+  if not os.path.exists(path):
+    logging.warning(
+        'Unable to find toolchain binary %s: binary not found at %s',
+        binary_name, path)
+    return None
+
+  return path

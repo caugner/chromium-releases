@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_PUSH_MESSAGING_PUSH_MESSAGING_PERMISSION_CONTEXT_H_
 #define CHROME_BROWSER_PUSH_MESSAGING_PUSH_MESSAGING_PERMISSION_CONTEXT_H_
 
-#include "chrome/browser/content_settings/permission_context_base.h"
+#include "chrome/browser/permissions/permission_context_base.h"
 
 #include "components/content_settings/core/common/content_settings_types.h"
 
@@ -34,6 +34,7 @@ class PushMessagingPermissionContext : public PermissionContextBase {
                         const GURL& embedding_origin,
                         bool user_gesture,
                         const BrowserPermissionCallback& callback) override;
+  bool IsRestrictedToSecureOrigins() const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PushMessagingPermissionContextTest,

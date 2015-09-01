@@ -9,7 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -21,12 +21,14 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
+#include "chrome/browser/ui/elide_url.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -38,7 +40,6 @@
 #include "content/public/common/origin_util.h"
 #include "grit/components_strings.h"
 #include "grit/theme_resources.h"
-#include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -274,12 +275,8 @@ bool ContentSettingSingleRadioGroup::settings_changed() const {
 // content type and setting the default value based on the content setting.
 void ContentSettingSingleRadioGroup::SetRadioGroup() {
   GURL url = web_contents()->GetURL();
-  base::string16 display_host;
-  net::AppendFormattedHost(
-      url,
-      profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      &display_host);
-
+  base::string16 display_host = FormatUrlForSecurityDisplay(
+      url, profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
   if (display_host.empty())
     display_host = base::ASCIIToUTF16(url.spec());
 
@@ -304,8 +301,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
   };
   // Fields as for kBlockedAllowIDs, above.
   static const ContentSettingsTypeIdEntry kAllowedAllowIDs[] = {
-    // TODO(bauerb): The string shouldn't be "unblock" (they weren't blocked).
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_UNBLOCK},
+    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_NO_ACTION},
     {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_NO_ACTION},
     {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, IDS_ALLOWED_DOWNLOAD_NO_ACTION},
   };
@@ -315,9 +311,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
     int resource_id = GetIdForContentType(kAllowedAllowIDs,
                                           arraysize(kAllowedAllowIDs),
                                           content_type());
-    radio_allow_label = (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) ?
-        l10n_util::GetStringFUTF8(resource_id, display_host) :
-        l10n_util::GetStringUTF8(resource_id);
+    radio_allow_label = l10n_util::GetStringUTF8(resource_id);
   } else {
     radio_allow_label = l10n_util::GetStringFUTF8(
         GetIdForContentType(kBlockedAllowIDs, arraysize(kBlockedAllowIDs),
@@ -335,8 +329,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
     {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, IDS_BLOCKED_DOWNLOAD_NO_ACTION},
   };
   static const ContentSettingsTypeIdEntry kAllowedBlockIDs[] = {
-    // TODO(bauerb): The string should say "block".
-    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_NO_ACTION},
+    {CONTENT_SETTINGS_TYPE_COOKIES, IDS_ALLOWED_COOKIES_BLOCK},
     {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_ALLOWED_PPAPI_BROKER_BLOCK},
     {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, IDS_ALLOWED_DOWNLOAD_BLOCK},
   };
@@ -346,9 +339,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
     int resource_id = GetIdForContentType(kAllowedBlockIDs,
                                           arraysize(kAllowedBlockIDs),
                                           content_type());
-    radio_block_label = (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) ?
-        l10n_util::GetStringUTF8(resource_id) :
-        l10n_util::GetStringFUTF8(resource_id, display_host);
+    radio_block_label = l10n_util::GetStringFUTF8(resource_id, display_host);
   } else {
     radio_block_label = l10n_util::GetStringUTF8(
         GetIdForContentType(kBlockedBlockIDs, arraysize(kBlockedBlockIDs),
@@ -362,8 +353,8 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
   bool setting_is_wildcard = false;
 
   if (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) {
-    CookieSettings* cookie_settings =
-        CookieSettings::Factory::GetForProfile(profile()).get();
+    content_settings::CookieSettings* cookie_settings =
+        CookieSettingsFactory::GetForProfile(profile()).get();
     setting = cookie_settings->GetCookieSetting(
         url, url, true, &setting_source);
   } else {
@@ -393,8 +384,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
     block_setting_ = setting;
   }
 
-  set_setting_is_managed(setting_source != SETTING_SOURCE_USER &&
-                         setting != CONTENT_SETTING_ASK);
+  set_setting_is_managed(setting_source != SETTING_SOURCE_USER);
   if (setting_source != SETTING_SOURCE_USER) {
     set_radio_group_enabled(false);
   } else {
@@ -559,7 +549,7 @@ ContentSettingPopupBubbleModel::ContentSettingPopupBubbleModel(
             ->GetBlockedPopupRequests();
     for (const std::pair<int32, GURL>& blocked_popup : blocked_popups) {
       std::string title(blocked_popup.second.spec());
-      // The popup may not have a valid URL.
+      // The pop-up may not have a valid URL.
       if (title.empty())
         title = l10n_util::GetStringUTF8(IDS_TAB_LOADING_TITLE);
       ListItem popup_item(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
@@ -686,11 +676,8 @@ void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
   RadioGroup radio_group;
   radio_group.url = url;
 
-  base::string16 display_host_utf16;
-  net::AppendFormattedHost(
-      url,
-      profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      &display_host_utf16);
+  base::string16 display_host_utf16 = FormatUrlForSecurityDisplay(
+      url, profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
   std::string display_host(base::UTF16ToUTF8(display_host_utf16));
   if (display_host.empty())
     display_host = url.spec();
@@ -997,13 +984,17 @@ ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
 }
 
 void ContentSettingMixedScriptBubbleModel::OnCustomLinkClicked() {
-  content_settings::RecordMixedScriptAction(
-      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
   DCHECK(web_contents());
   web_contents()->SendToAllFrames(
       new ChromeViewMsg_SetAllowRunningInsecureContent(MSG_ROUTING_NONE, true));
   web_contents()->GetMainFrame()->Send(new ChromeViewMsg_ReloadFrame(
       web_contents()->GetMainFrame()->GetRoutingID()));
+
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
+  content_settings::RecordMixedScriptActionWithRAPPOR(
+      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW,
+      web_contents()->GetLastCommittedURL());
 }
 
 ContentSettingRPHBubbleModel::ContentSettingRPHBubbleModel(

@@ -6,7 +6,9 @@
 
 #include <cctype>
 
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
@@ -27,6 +29,7 @@
 #include "content/test/fake_compositor_dependencies.h"
 #include "content/test/mock_render_process.h"
 #include "content/test/test_content_client.h"
+#include "content/test/test_render_frame.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -55,7 +58,6 @@ using blink::WebURLRequest;
 
 namespace {
 
-const int32 kOpenerId = -2;
 const int32 kRouteId = 5;
 const int32 kMainFrameRouteId = 6;
 const int32 kNewWindowRouteId = 7;
@@ -127,13 +129,15 @@ scheduler::RendererScheduler*
 
 RenderViewTest::RenderViewTest()
     : view_(NULL) {
+  RenderFrameImpl::InstallCreateHook(&TestRenderFrame::CreateTestRenderFrame);
 }
 
 RenderViewTest::~RenderViewTest() {
 }
 
 void RenderViewTest::ProcessPendingMessages() {
-  msg_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  msg_loop_.task_runner()->PostTask(FROM_HERE,
+                                    base::MessageLoop::QuitClosure());
   msg_loop_.Run();
 }
 
@@ -232,7 +236,7 @@ void RenderViewTest::SetUp() {
   mock_process_.reset(new MockRenderProcess);
 
   ViewMsg_New_Params view_params;
-  view_params.opener_route_id = kOpenerId;
+  view_params.opener_frame_route_id = MSG_ROUTING_NONE;
   view_params.window_was_created_with_opener = false;
   view_params.renderer_preferences = RendererPreferences();
   view_params.web_preferences = WebPreferences();
@@ -240,7 +244,6 @@ void RenderViewTest::SetUp() {
   view_params.main_frame_routing_id = kMainFrameRouteId;
   view_params.surface_id = kSurfaceId;
   view_params.session_storage_namespace_id = kInvalidSessionStorageNamespaceId;
-  view_params.frame_name = base::string16();
   view_params.swapped_out = false;
   view_params.replicated_frame_state = FrameReplicationState();
   view_params.proxy_routing_id = MSG_ROUTING_NONE;
@@ -383,6 +386,30 @@ void RenderViewTest::SimulatePointClick(const gfx::Point& point) {
       InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
 }
 
+
+bool RenderViewTest::SimulateElementRightClick(const std::string& element_id) {
+  gfx::Rect bounds = GetElementBounds(element_id);
+  if (bounds.IsEmpty())
+    return false;
+  SimulatePointRightClick(bounds.CenterPoint());
+  return true;
+}
+
+void RenderViewTest::SimulatePointRightClick(const gfx::Point& point) {
+  WebMouseEvent mouse_event;
+  mouse_event.type = WebInputEvent::MouseDown;
+  mouse_event.button = WebMouseEvent::ButtonRight;
+  mouse_event.x = point.x();
+  mouse_event.y = point.y();
+  mouse_event.clickCount = 1;
+  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
+  impl->OnMessageReceived(
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+  mouse_event.type = WebInputEvent::MouseUp;
+  impl->OnMessageReceived(
+      InputMsg_HandleInputEvent(0, &mouse_event, ui::LatencyInfo(), false));
+}
+
 void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
   WebGestureEvent gesture_event;
   gesture_event.x = rect.CenterPoint().x();
@@ -408,9 +435,11 @@ void RenderViewTest::Reload(const GURL& url) {
       true, base::TimeTicks(), FrameMsg_UILoadMetricsReportType::NO_REPORT,
       GURL(), GURL());
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->GetMainRenderFrame()->OnNavigate(common_params, StartNavigationParams(),
-                                         RequestNavigationParams());
-  FrameLoadWaiter(impl->GetMainRenderFrame()).Wait();
+  TestRenderFrame* frame =
+      static_cast<TestRenderFrame*>(impl->GetMainRenderFrame());
+  frame->Navigate(common_params, StartNavigationParams(),
+                  RequestNavigationParams());
+  FrameLoadWaiter(frame).Wait();
 }
 
 uint32 RenderViewTest::GetNavigationIPCType() {
@@ -545,12 +574,13 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
   request_params.current_history_list_offset = impl->history_list_offset_;
   request_params.current_history_list_length = history_list_length;
 
-  impl->GetMainRenderFrame()->OnNavigate(common_params, StartNavigationParams(),
-                                         request_params);
+  TestRenderFrame* frame =
+      static_cast<TestRenderFrame*>(impl->GetMainRenderFrame());
+  frame->Navigate(common_params, StartNavigationParams(), request_params);
 
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.
-  FrameLoadWaiter(view_->GetMainRenderFrame()).Wait();
+  FrameLoadWaiter(frame).Wait();
 }
 
 }  // namespace content

@@ -430,6 +430,10 @@ void HostContentSettingsMap::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
+void HostContentSettingsMap::FlushLossyWebsiteSettings() {
+  prefs_->SchedulePendingLossyWrites();
+}
+
 void HostContentSettingsMap::SetPrefClockForTesting(
     scoped_ptr<base::Clock> clock) {
   UsedContentSettingsProviders();
@@ -470,6 +474,7 @@ void HostContentSettingsMap::ClearSettingsForOneType(
        ++provider) {
     provider->second->ClearAllContentSettingsRules(content_type);
   }
+  FlushLossyWebsiteSettings();
 }
 
 bool HostContentSettingsMap::IsValueAllowedForType(
@@ -562,12 +567,13 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
 bool HostContentSettingsMap::ContentTypeHasCompoundValue(
     ContentSettingsType type) {
   // Values for content type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
-  // CONTENT_SETTINGS_TYPE_APP_BANNER, and
+  // CONTENT_SETTINGS_TYPE_APP_BANNER, CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT and
   // CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS are of type dictionary/map.
   // Compound types like dictionaries can't be mapped to the type
   // |ContentSetting|.
   return (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
           type == CONTENT_SETTINGS_TYPE_APP_BANNER ||
+          type == CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT ||
           type == CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS);
 }
 

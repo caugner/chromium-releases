@@ -11,15 +11,13 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -34,11 +32,14 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/omnibox/autocomplete_input.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/omnibox/autocomplete_match_type.h"
-#include "components/omnibox/omnibox_field_trial.h"
-#include "components/omnibox/search_provider.h"
+#include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_log.h"
+#include "components/omnibox/browser/search_provider.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/notification_details.h"
@@ -85,16 +86,17 @@ class ZeroSuggestPrefetcher : public AutocompleteControllerDelegate {
 
 ZeroSuggestPrefetcher::ZeroSuggestPrefetcher(Profile* profile)
     : controller_(new AutocompleteController(
-          profile, TemplateURLServiceFactory::GetForProfile(profile), this,
+          make_scoped_ptr(new ChromeAutocompleteProviderClient(profile)),
+          this,
           AutocompleteProvider::TYPE_ZERO_SUGGEST)) {
   // Creating an arbitrary fake_request_source to avoid passing in an invalid
   // AutocompleteInput object.
   base::string16 fake_request_source(base::ASCIIToUTF16(
       "http://www.foobarbazblah.com"));
-  controller_->OnOmniboxFocused(AutocompleteInput(
+  controller_->Start(AutocompleteInput(
       fake_request_source, base::string16::npos, std::string(),
       GURL(fake_request_source), OmniboxEventProto::INVALID_SPEC, false, false,
-      true, true, ChromeAutocompleteSchemeClassifier(profile)));
+      true, true, true, ChromeAutocompleteSchemeClassifier(profile)));
   // Delete ourselves after 10s. This is enough time to cache results or
   // give up if the results haven't been received.
   expire_timer_.Start(FROM_HERE,
@@ -119,7 +121,8 @@ void ZeroSuggestPrefetcher::OnResultChanged(bool default_match_changed) {
 
 AutocompleteControllerAndroid::AutocompleteControllerAndroid(Profile* profile)
     : autocomplete_controller_(new AutocompleteController(
-          profile, TemplateURLServiceFactory::GetForProfile(profile), this,
+          make_scoped_ptr(new ChromeAutocompleteProviderClient(profile)),
+          this,
           kAndroidAutocompleteProviders)),
       inside_synchronous_start_(false),
       profile_(profile) {
@@ -148,10 +151,11 @@ void AutocompleteControllerAndroid::Start(JNIEnv* env,
   OmniboxEventProto::PageClassification page_classification =
       OmniboxEventProto::OTHER;
   size_t cursor_pos = j_cursor_pos == -1 ? base::string16::npos : j_cursor_pos;
-  input_ = AutocompleteInput(
-      text, cursor_pos, desired_tld, current_url, page_classification,
-      prevent_inline_autocomplete, prefer_keyword, allow_exact_keyword_match,
-      want_asynchronous_matches, ChromeAutocompleteSchemeClassifier(profile_));
+  input_ = AutocompleteInput(text, cursor_pos, desired_tld, current_url,
+                             page_classification, prevent_inline_autocomplete,
+                             prefer_keyword, allow_exact_keyword_match,
+                             want_asynchronous_matches, false,
+                             ChromeAutocompleteSchemeClassifier(profile_));
   autocomplete_controller_->Start(input_);
 }
 
@@ -184,8 +188,9 @@ void AutocompleteControllerAndroid::OnOmniboxFocused(
   input_ = AutocompleteInput(
       omnibox_text, base::string16::npos, std::string(), current_url,
       ClassifyPage(current_url, is_query_in_omnibox, focused_from_fakebox),
-      false, false, true, true, ChromeAutocompleteSchemeClassifier(profile_));
-  autocomplete_controller_->OnOmniboxFocused(input_);
+      false, false, true, true, true,
+      ChromeAutocompleteSchemeClassifier(profile_));
+  autocomplete_controller_->Start(input_);
 }
 
 void AutocompleteControllerAndroid::Stop(JNIEnv* env,

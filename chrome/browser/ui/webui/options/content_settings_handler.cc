@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -322,7 +323,6 @@ void ContentSettingsHandler::GetLocalizedValues(
     {"pluginsTabLabel", IDS_PLUGIN_TAB_LABEL},
     {"pluginsHeader", IDS_PLUGIN_HEADER},
     {"pluginsAllow", IDS_PLUGIN_ALLOW_RADIO},
-    {"pluginsDetect", IDS_PLUGIN_DETECT_RADIO},
     {"pluginsBlock", IDS_PLUGIN_BLOCK_RADIO},
     {"manageIndividualPlugins", IDS_PLUGIN_MANAGE_INDIVIDUAL},
     // Pop-ups filter.
@@ -406,6 +406,21 @@ void ContentSettingsHandler::GetLocalizedValues(
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
+
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  const base::Value* default_pref =
+      prefs->GetDefaultPrefValue(prefs::kDefaultPluginsSetting);
+
+  int default_value = CONTENT_SETTING_DEFAULT;
+  bool success = default_pref->GetAsInteger(&default_value);
+  DCHECK(success);
+  DCHECK_NE(default_value, CONTENT_SETTING_DEFAULT);
+
+  int plugin_ids = default_value == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT ?
+      IDS_PLUGIN_DETECT_RECOMMENDED_RADIO : IDS_PLUGIN_DETECT_RADIO;
+  localized_strings->SetString("pluginsDetect",
+                               l10n_util::GetStringUTF16(plugin_ids));
+
   RegisterTitle(localized_strings, "contentSettingsPage",
                 IDS_CONTENT_SETTINGS_TITLE);
 
@@ -762,6 +777,15 @@ void ContentSettingsHandler::UpdateExceptionsViewFromModel(
       // track whether app banners should be shown or not, and is not a user
       // visible content setting.
       break;
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+      // The content settings type CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT is used
+      // to track engagement with various origins, and is not a user visible
+      // content setting.
+      break;
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
+      // Durable storage is not yet user visible. TODO(dgrogan): Make it so.
+      // https://crbug.com/482814
+      break;
     default:
       UpdateExceptionsViewFromHostContentSettingsMap(type);
       break;
@@ -785,6 +809,8 @@ void ContentSettingsHandler::UpdateOTRExceptionsViewFromModel(
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
     case CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS:
     case CONTENT_SETTINGS_TYPE_APP_BANNER:
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
       break;
     default:
       UpdateExceptionsViewFromOTRHostContentSettingsMap(type);

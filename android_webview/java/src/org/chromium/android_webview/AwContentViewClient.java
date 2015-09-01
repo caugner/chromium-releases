@@ -47,12 +47,14 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
             return;
         }
 
-        AwContentsClient.sendBrowsingIntent(context, contentUrl);
+        // Comes from WebViewImpl::detectContentOnTouch in Blink, so must be user-initiated, and
+        // isn't a redirect.
+        AwContentsClient.sendBrowsingIntent(context, contentUrl, true, false);
     }
 
     @Override
     public void onUpdateTitle(String title) {
-        mAwContentsClient.onReceivedTitle(title);
+        mAwContentsClient.updateTitle(title, true);
     }
 
     @Override
@@ -155,7 +157,7 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
     }
 
     @Override
-    public boolean isExternalFlingActive() {
-        return mAwContents.isFlingActive();
+    public boolean isExternalScrollActive() {
+        return mAwContents.isSmoothScrollingActive();
     }
 }

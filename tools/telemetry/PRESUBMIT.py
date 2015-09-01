@@ -18,14 +18,15 @@ def _CommonChecks(input_api, output_api):
       'Docs are stale. Please run:\n' +
       '$ %s' % os.path.abspath(update_docs_path)))
 
-  results.extend(input_api.canned_checks.RunPylint(
-        input_api, output_api, black_list=[], pylintrc='pylintrc'))
+  pylint_checks = input_api.canned_checks.GetPylint(
+    input_api, output_api, black_list=[], pylintrc='pylintrc')
+
+  results.extend(input_api.RunTests(pylint_checks))
   return results
 
 def GetPathsToPrepend(input_api):
   return [input_api.PresubmitLocalPath(),
-          os.path.join(input_api.PresubmitLocalPath(), os.path.pardir,
-                       os.path.pardir, 'third_party', 'typ')]
+          os.path.join(input_api.PresubmitLocalPath(), 'third_party', 'typ')]
 
 def RunWithPrependedPath(prepended_path, fn, *args):
   old_path = sys.path

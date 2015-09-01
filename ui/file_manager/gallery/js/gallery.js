@@ -280,7 +280,7 @@ Gallery.prototype.initToolbarButton_ = function(className, title) {
 /**
  * Loads the content.
  *
- * @param {!Array.<!Entry>} selectedEntries Array of selected entries.
+ * @param {!Array<!Entry>} selectedEntries Array of selected entries.
  */
 Gallery.prototype.load = function(selectedEntries) {
   GalleryUtil.createEntrySet(selectedEntries).then(function(allEntries) {
@@ -291,8 +291,8 @@ Gallery.prototype.load = function(selectedEntries) {
 /**
  * Loads the content.
  *
- * @param {!Array.<!FileEntry>} entries Array of entries.
- * @param {!Array.<!FileEntry>} selectedEntries Array of selected entries.
+ * @param {!Array<!FileEntry>} entries Array of entries.
+ * @param {!Array<!FileEntry>} selectedEntries Array of selected entries.
  * @private
  */
 Gallery.prototype.loadInternal_ = function(entries, selectedEntries) {
@@ -600,7 +600,7 @@ Gallery.prototype.delete_ = function() {
 };
 
 /**
- * @return {!Array.<Gallery.Item>} Current selection.
+ * @return {!Array<Gallery.Item>} Current selection.
  */
 Gallery.prototype.getSelectedItems = function() {
   return this.selectionModel_.selectedIndexes.map(
@@ -608,7 +608,7 @@ Gallery.prototype.getSelectedItems = function() {
 };
 
 /**
- * @return {!Array.<Entry>} Array of currently selected entries.
+ * @return {!Array<Entry>} Array of currently selected entries.
  */
 Gallery.prototype.getSelectedEntries = function() {
   return this.selectionModel_.selectedIndexes.map(function(index) {
@@ -664,6 +664,24 @@ Gallery.prototype.onContentChange_ = function(event) {
  * @private
  */
 Gallery.prototype.onKeyDown_ = function(event) {
+  var keyString = util.getKeyModifiers(event) + event.keyIdentifier;
+
+  // Handle debug shortcut keys.
+  switch (keyString) {
+    case 'Ctrl-Shift-U+0049': // Ctrl+Shift+I
+      chrome.fileManagerPrivate.openInspector('normal');
+      break;
+    case 'Ctrl-Shift-U+004A': // Ctrl+Shift+J
+      chrome.fileManagerPrivate.openInspector('console');
+      break;
+    case 'Ctrl-Shift-U+0043': // Ctrl+Shift+C
+      chrome.fileManagerPrivate.openInspector('element');
+      break;
+    case 'Ctrl-Shift-U+0042': // Ctrl+Shift+B
+      chrome.fileManagerPrivate.openInspector('background');
+      break;
+  }
+
   // Do not capture keys when share dialog is shown.
   if (this.shareDialog_.isShowing())
     return;
@@ -672,7 +690,8 @@ Gallery.prototype.onKeyDown_ = function(event) {
   if (this.currentMode_.onKeyDown(event))
     return;
 
-  switch (util.getKeyModifiers(event) + event.keyIdentifier) {
+  // Handle application wide shortcut keys.
+  switch (keyString) {
     case 'U+0008': // Backspace.
       // The default handler would call history.back and close the Gallery.
       event.preventDefault();

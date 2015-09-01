@@ -3,10 +3,8 @@
 # found in the LICENSE file.
 
 import("//build/module_args/v8.gni")
-import("//mojo/mojo_application_package.gni")
+import("//mojo/public/mojo_application.gni")
 import("//testing/test.gni")
-import("//third_party/mojo/src/mojo/public/mojo.gni")
-import("//third_party/mojo/src/mojo/public/mojo_application.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 
@@ -69,14 +67,39 @@ source_set("lib") {
     "blink_resource_constants.h",
     "blink_url_request_type_converters.cc",
     "blink_url_request_type_converters.h",
+    "content_handler_impl.cc",
+    "content_handler_impl.h",
+    "devtools_agent_impl.cc",
+    "devtools_agent_impl.h",
     "discardable_memory_allocator.cc",
     "discardable_memory_allocator.h",
+    "document_resource_waiter.cc",
+    "document_resource_waiter.h",
+    "frame.cc",
+    "frame.h",
+    "frame_tree_manager.cc",
+    "frame_tree_manager.h",
+    "frame_tree_manager_delegate.h",
+    "geolocation_client_impl.cc",
+    "geolocation_client_impl.h",
+    "global_state.cc",
+    "global_state.h",
     "html_document.cc",
     "html_document.h",
+    "html_document_application_delegate.cc",
+    "html_document_application_delegate.h",
+    "html_document_oopif.cc",
+    "html_document_oopif.h",
+    "html_viewer.cc",
+    "html_viewer.h",
+    "html_viewer_switches.cc",
+    "html_viewer_switches.h",
+    "media_factory.cc",
+    "media_factory.h",
     "mock_web_blob_registry_impl.cc",
     "mock_web_blob_registry_impl.h",
-    "setup.cc",
-    "setup.h",
+    "test_html_viewer_impl.cc",
+    "test_html_viewer_impl.h",
     "touch_handler.cc",
     "touch_handler.h",
     "web_clipboard_impl.cc",
@@ -85,11 +108,6 @@ source_set("lib") {
     "web_cookie_jar_impl.h",
     "web_layer_tree_view_impl.cc",
     "web_layer_tree_view_impl.h",
-    "web_media_player_factory.cc",
-    "web_media_player_factory.h",
-    "web_media_player_factory.h",
-    "web_message_port_channel_impl.cc",
-    "web_message_port_channel_impl.h",
     "web_mime_registry_impl.cc",
     "web_mime_registry_impl.h",
     "web_notification_manager_impl.cc",
@@ -113,31 +131,33 @@ source_set("lib") {
     "//cc/blink",
     "//cc/surfaces",
     "//components/clipboard/public/interfaces",
-    "//components/gpu/public/interfaces",
+    "//components/devtools_service/public/cpp",
+    "//components/devtools_service/public/interfaces",
+    "//components/html_viewer/public/interfaces",
+    "//components/message_port",
     "//components/mime_util",
     "//components/resource_provider/public/cpp",
     "//components/resource_provider/public/interfaces",
     "//components/scheduler:scheduler",
-    "//components/surfaces/public/interfaces",
+    "//components/view_manager/gles2:lib",
+    "//components/view_manager/public/interfaces",
     "//components/webcrypto",
     "//gin",
     "//mandoline/services/navigation/public/interfaces",
+    "//mandoline/tab/public/interfaces",
     "//media",
     "//media/blink",
     "//media/mojo",
-    "//mojo/application",
-    "//mojo/application/public/interfaces",
+    "//mojo/application/public/cpp",
     "//mojo/cc",
     "//mojo/common",
     "//mojo/converters/surfaces",
+    "//mojo/platform_handle",
     "//mojo/services/network/public/cpp",
     "//mojo/services/network/public/interfaces",
     "//net",
     "//skia",
-    "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
-    "//third_party/mojo/src/mojo/public/cpp/utility",
     "//third_party/mojo_services/src/accessibility/public/interfaces",
-    "//third_party/mojo_services/src/content_handler/public/interfaces",
     "//ui/mojo/events:interfaces",
     "//ui/events",
     "//ui/events:gesture_detection",
@@ -145,6 +165,7 @@ source_set("lib") {
     "//ui/events/gestures/blink",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/mojo/init",
     "//ui/native_theme",
 
     # TODO(sky): we shouldn't be using ui_test_pak.
@@ -165,28 +186,22 @@ source_set("lib") {
 
   data_deps = [
     "//components/clipboard",
-    "//components/native_viewport",
-    "//components/surfaces",
     "//components/view_manager",
+    "//mojo/services/network:network",
   ]
 }
 
-mojo_application_package("html_viewer") {
+mojo_native_application("html_viewer") {
   sources = [
-    "html_viewer.cc",
-    "ui_setup.h",
-    "ui_setup_android.cc",
-    "ui_setup_android.h",
+    "html_viewer_main.cc",
   ]
   deps = [
     ":html_viewer_resources_grit",
     ":lib",
-    "//mojo/common",
-    "//mojo/platform_handle",
     "//third_party/icu:icudata",
+    "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
     "//ui/resources:ui_test_pak",
   ]
-  data_deps = [ "//mojo/services/network:network" ]
   resources = [
     "$root_out_dir/icudtl.dat",
     "$root_out_dir/ui_test.pak",
@@ -198,18 +213,57 @@ mojo_application_package("html_viewer") {
       "$root_build_dir/natives_blob.bin",
       "$root_build_dir/snapshot_blob.bin",
     ]
+    deps += [ "//gin" ]
   }
 }
 
-test("tests") {
-  output_name = "html_viewer_unittests"
+mojo_native_application("layout_test_html_viewer") {
+  testonly = true
+  sources = [
+    "layout_test_content_handler_impl.cc",
+    "layout_test_content_handler_impl.h",
+    "layout_test_html_viewer.cc",
+    "layout_test_html_viewer.h",
+    "layout_test_html_viewer_main.cc",
+    "web_test_delegate_impl.cc",
+    "web_test_delegate_impl.h",
+  ]
+  deps = [
+    ":html_viewer_resources_grit",
+    ":lib",
+    "//components/test_runner",
+    "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public:test_support",
+    "//third_party/icu:icudata",
+    "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
+    "//ui/resources:ui_test_pak",
+    "//url",
+  ]
+  resources = [
+    "$root_out_dir/icudtl.dat",
+    "$root_out_dir/ui_test.pak",
+    "$target_gen_dir/html_viewer_resources.pak",
+  ]
+
+  if (v8_use_external_startup_data) {
+    resources += [
+      "$root_build_dir/natives_blob.bin",
+      "$root_build_dir/snapshot_blob.bin",
+    ]
+    deps += [ "//gin" ]
+  }
+}
+
+test("html_viewer_unittests") {
   sources = [
     "ax_provider_impl_unittest.cc",
     "discardable_memory_allocator_unittest.cc",
+    "run_all_unittests.cc",
   ]
   deps = [
     ":lib",
-    "//base/test:run_all_unittests",
+    "//base/test:test_support",
+    "//third_party/mojo/src/mojo/edk/system",
   ]
 }
 
@@ -219,16 +273,24 @@ mojo_native_application("apptests") {
 
   sources = [
     "ax_provider_apptest.cc",
+    "html_frame_apptest.cc",
   ]
 
   deps = [
     "//base",
-    "//mojo/application",
-    "//mojo/application:test_support",
+    "//components/html_viewer/public/interfaces",
+    "//components/view_manager/public/cpp/tests:test_support",
+    "//mandoline/tab",
+    "//mandoline/tab/public/interfaces",
+    "//mojo/application/public/cpp:test_support",
     "//net:test_support",
     "//testing/gtest",
     "//third_party/mojo_services/src/accessibility/public/interfaces",
+    "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
   ]
 
-  data_deps = [ ":html_viewer" ]
+  data_deps = [
+    ":html_viewer",
+    "//components/view_manager",
+  ]
 }

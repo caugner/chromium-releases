@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from benchmarks import silk_flags
 from measurements import thread_times
 import page_sets
+from telemetry import benchmark
 
-class _ThreadTimes(benchmark.Benchmark):
+class _ThreadTimes(perf_benchmark.PerfBenchmark):
   @classmethod
   def AddBenchmarkCommandLineArgs(cls, parser):
     parser.add_option('--report-silk-details', action='store_true',
@@ -78,7 +79,7 @@ class ThreadTimesCompositorCases(_ThreadTimes):
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   page_set = page_sets.ToughCompositorCasesPageSet
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     silk_flags.CustomizeBrowserOptionsForSoftwareRasterization(options)
 
   @classmethod
@@ -108,3 +109,12 @@ class ThreadTimesKeyIdlePowerCases(_ThreadTimes):
   def ValueCanBeAddedPredicate(cls, value, _):
     # Only report per-second metrics.
     return 'per_frame' not in value.name and 'mean_frame' not in value.name
+
+class ThreadTimesToughScrollingCases(_ThreadTimes):
+  """Measure timeline metrics while performing smoothness action on tough
+  scrolling cases."""
+  page_set = page_sets.ToughScrollingCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'thread_times.tough_scrolling_cases'

@@ -7,6 +7,8 @@ import("//testing/test.gni")
 defines = [ "GN_BUILD" ]
 
 static_library("gn_lib") {
+  configs += [ "//build/config:precompiled_headers" ]
+
   sources = [
     "action_target_generator.cc",
     "action_target_generator.h",
@@ -32,6 +34,7 @@ static_library("gn_lib") {
     "command_gen.cc",
     "command_help.cc",
     "command_ls.cc",
+    "command_path.cc",
     "command_refs.cc",
     "commands.cc",
     "commands.h",
@@ -264,6 +267,7 @@ test("gn_unittests") {
     "scope_per_file_provider_unittest.cc",
     "scope_unittest.cc",
     "source_dir_unittest.cc",
+    "source_file_unittest.cc",
     "string_utils_unittest.cc",
     "substitution_pattern_unittest.cc",
     "substitution_writer_unittest.cc",

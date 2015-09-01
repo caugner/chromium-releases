@@ -17,6 +17,7 @@
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/host/ash_window_tree_host_init_params.h"
 #include "ash/host/root_window_transformer.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/root_window_controller.h"
@@ -26,6 +27,7 @@
 #include "ash/shell_delegate.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/wm/coordinate_conversion.h"
+#include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -38,8 +40,8 @@
 #include "ui/aura/window_property.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/ime/input_method_factory.h"
 #include "ui/compositor/compositor.h"
-#include "ui/compositor/compositor_vsync_manager.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 #include "ui/wm/core/coordinate_conversion.h"
@@ -153,9 +155,9 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
   DisplayMode mode =
       GetDisplayManager()->GetActiveModeForDisplayId(display.id());
   if (mode.refresh_rate > 0.0f) {
-    host->compositor()->vsync_manager()->SetAuthoritativeVSyncInterval(
-        base::TimeDelta::FromMicroseconds(
-            base::Time::kMicrosecondsPerSecond / mode.refresh_rate));
+    host->compositor()->SetAuthoritativeVSyncInterval(
+        base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerSecond /
+                                          mode.refresh_rate));
   }
 
   // Just movnig the display requires the full redraw.
@@ -868,6 +870,16 @@ void DisplayController::PostDisplayConfigurationChange() {
   UpdateMouseLocationAfterDisplayChange();
 }
 
+bool DisplayController::DispatchKeyEventPostIME(const ui::KeyEvent& event) {
+  // Getting the active root window to dispatch the event. This isn't
+  // significant as the event will be sent to the window resolved by
+  // aura::client::FocusClient which is FocusController in ash.
+  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* root_window = active_window ? active_window->GetRootWindow()
+                                            : Shell::GetPrimaryRootWindow();
+  return root_window->GetHost()->DispatchKeyEventPostIME(event);
+}
+
 AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
     const gfx::Display& display,
     const AshWindowTreeHostInitParams& init_params) {
@@ -880,6 +892,14 @@ AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
       display.id() == DisplayManager::kUnifiedDisplayId;
   AshWindowTreeHost* ash_host = AshWindowTreeHost::Create(params_with_bounds);
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
+  if (!input_method_) {  // Singleton input method instance for Ash.
+    input_method_ = ui::CreateInputMethod(this, host->GetAcceleratedWidget());
+    input_method_->OnFocus();
+    input_method_event_handler_.reset(
+        new InputMethodEventHandler(input_method_.get()));
+  }
+  host->SetSharedInputMethod(input_method_.get());
+  ash_host->set_input_method_handler(input_method_event_handler_.get());
 
   host->window()->SetName(base::StringPrintf(
       "%sRootWindow-%d", params_with_bounds.offscreen ? "Offscreen" : "",

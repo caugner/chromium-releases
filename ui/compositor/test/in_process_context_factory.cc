@@ -19,6 +19,7 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "ui/compositor/compositor_switches.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/reflector.h"
 #include "ui/compositor/test/in_process_context_provider.h"
 #include "ui/gl/gl_implementation.h"
@@ -83,6 +84,8 @@ InProcessContextFactory::InProcessContextFactory(
   DCHECK_NE(gfx::GetGLImplementation(), gfx::kGLImplementationNone)
       << "If running tests, ensure that main() is calling "
       << "gfx::GLSurface::InitializeOneOffForTests()";
+
+  Layer::InitializeUILayerSettings();
 }
 
 InProcessContextFactory::~InProcessContextFactory() {
@@ -105,7 +108,9 @@ void InProcessContextFactory::CreateOutputSurface(
   bool lose_context_when_out_of_memory = true;
 
   scoped_refptr<InProcessContextProvider> context_provider =
-      InProcessContextProvider::Create(attribs, lose_context_when_out_of_memory,
+      InProcessContextProvider::Create(attribs, &gpu_memory_buffer_manager_,
+                                       &image_factory_,
+                                       lose_context_when_out_of_memory,
                                        compositor->widget(), "UICompositor");
 
   scoped_ptr<cc::OutputSurface> real_output_surface;
@@ -158,6 +163,7 @@ InProcessContextFactory::SharedMainThreadContextProvider() {
 
   bool lose_context_when_out_of_memory = false;
   shared_main_thread_contexts_ = InProcessContextProvider::CreateOffscreen(
+      &gpu_memory_buffer_manager_, &image_factory_,
       lose_context_when_out_of_memory);
   if (shared_main_thread_contexts_.get() &&
       !shared_main_thread_contexts_->BindToCurrentThread())
@@ -177,7 +183,9 @@ bool InProcessContextFactory::DoesCreateTestContexts() {
   return context_factory_for_test_;
 }
 
-uint32 InProcessContextFactory::GetImageTextureTarget() {
+uint32 InProcessContextFactory::GetImageTextureTarget(
+    gfx::GpuMemoryBuffer::Format format,
+    gfx::GpuMemoryBuffer::Usage usage) {
   return GL_TEXTURE_2D;
 }
 
@@ -196,8 +204,11 @@ cc::TaskGraphRunner* InProcessContextFactory::GetTaskGraphRunner() {
 
 scoped_ptr<cc::SurfaceIdAllocator>
 InProcessContextFactory::CreateSurfaceIdAllocator() {
-  return make_scoped_ptr(
+  scoped_ptr<cc::SurfaceIdAllocator> allocator(
       new cc::SurfaceIdAllocator(next_surface_id_namespace_++));
+  if (surface_manager_)
+    allocator->RegisterSurfaceIdNamespace(surface_manager_);
+  return allocator;
 }
 
 void InProcessContextFactory::ResizeDisplay(ui::Compositor* compositor,

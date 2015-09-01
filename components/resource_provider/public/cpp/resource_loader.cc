@@ -16,7 +16,9 @@ namespace resource_provider {
 ResourceLoader::ResourceLoader(mojo::Shell* shell,
                                const std::set<std::string>& paths)
     : loaded_(false), did_block_(false) {
-  shell->ConnectToApplication("mojo:resource_provider",
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From("mojo:resource_provider");
+  shell->ConnectToApplication(request.Pass(),
                               GetProxy(&resource_provider_service_provider_),
                               nullptr);
   mojo::ConnectToService(resource_provider_service_provider_.get(),
@@ -32,11 +34,11 @@ ResourceLoader::~ResourceLoader() {
 }
 
 bool ResourceLoader::BlockUntilLoaded() {
-  if (did_block_)
+  if (did_block_ || loaded_)
     return loaded_;
 
   did_block_ = true;
-  resource_provider_.WaitForIncomingMethodCall();
+  resource_provider_.WaitForIncomingResponse();
   return loaded_;
 }
 

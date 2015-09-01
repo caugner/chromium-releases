@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/api/instance_id/instance_id_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -11,6 +12,7 @@
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/services/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
 #include "extensions/test/result_catcher.h"
@@ -21,26 +23,33 @@ namespace extensions {
 
 namespace {
 
-KeyedService* BuildFakeGCMProfileService(content::BrowserContext* context) {
-  gcm::FakeGCMProfileService* service =
-      new gcm::FakeGCMProfileService(Profile::FromBrowserContext(context));
+scoped_ptr<KeyedService> BuildFakeGCMProfileService(
+    content::BrowserContext* context) {
+  scoped_ptr<gcm::FakeGCMProfileService> service(
+      new gcm::FakeGCMProfileService(Profile::FromBrowserContext(context)));
   service->SetDriverForTesting(new instance_id::FakeGCMDriverForInstanceID());
-  return service;
+  return service.Pass();
 }
 
 }  // namespace
 
 class InstanceIDApiTest : public ExtensionApiTest {
  public:
-  InstanceIDApiTest() {}
+  InstanceIDApiTest();
 
  protected:
   void SetUpOnMainThread() override;
   void SetUpCommandLine(base::CommandLine* command_line) override;
 
  private:
+  extensions::ScopedCurrentChannel current_channel_;
+
   DISALLOW_COPY_AND_ASSIGN(InstanceIDApiTest);
 };
+
+InstanceIDApiTest::InstanceIDApiTest()
+    : current_channel_(chrome::VersionInfo::CHANNEL_DEV) {
+}
 
 void InstanceIDApiTest::SetUpOnMainThread() {
   gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactory(
@@ -54,7 +63,7 @@ void InstanceIDApiTest::SetUpCommandLine(base::CommandLine* command_line) {
 
   // Makes sure InstanceID is enabled for testing.
   command_line->AppendSwitchASCII(
-      switches::kForceFieldTrials, "InstanceID/Enabled/");
+       switches::kForceFieldTrials, "InstanceID/Enabled/");
 }
 
 IN_PROC_BROWSER_TEST_F(InstanceIDApiTest, GetID) {
@@ -88,6 +97,18 @@ IN_PROC_BROWSER_TEST_F(InstanceIDApiTest, Incognito) {
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
   EXPECT_TRUE(incognito_catcher.GetNextResult()) << incognito_catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(InstanceIDApiTest, BetaChannel) {
+  extensions::ScopedCurrentChannel current_channel_override(
+      chrome::VersionInfo::CHANNEL_BETA);
+  ASSERT_TRUE(RunExtensionTest("instance_id/channel"));
+}
+
+IN_PROC_BROWSER_TEST_F(InstanceIDApiTest, StableChannel) {
+  extensions::ScopedCurrentChannel current_channel_override(
+      chrome::VersionInfo::CHANNEL_STABLE);
+  ASSERT_TRUE(RunExtensionTest("instance_id/channel"));
 }
 
 }  // namespace extensions

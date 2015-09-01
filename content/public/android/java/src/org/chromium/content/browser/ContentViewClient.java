@@ -28,7 +28,7 @@ import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
  */
 public class ContentViewClient {
     // Tag used for logging.
-    private static final String TAG = "ContentViewClient";
+    private static final String TAG = "cr.ContentViewClient";
 
     public void onUpdateTitle(String title) {
     }
@@ -73,12 +73,11 @@ public class ContentViewClient {
     }
 
     /**
-     * Notified when a change to the IME was requested.
+     * Notified when the editability of the focused node changes.
      *
-     * @param requestShow Whether the IME was requested to be shown (may already be showing
-     *                    though).
+     * @param editable Whether the focused node is editable.
      */
-    public void onImeStateChangeRequested(boolean requestShow) {
+    public void onFocusedNodeEditabilityChanged(boolean editable) {
     }
 
     /**
@@ -144,14 +143,14 @@ public class ContentViewClient {
         try {
             intent = Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME);
         } catch (Exception ex) {
-            Log.w(TAG, "Bad URI " + intentUrl, ex);
+            Log.w(TAG, "Bad URI %s", intentUrl, ex);
             return;
         }
 
         try {
             context.startActivity(intent);
         } catch (ActivityNotFoundException ex) {
-            Log.w(TAG, "No application can handle " + intentUrl);
+            Log.w(TAG, "No application can handle %s", intentUrl);
         }
     }
 
@@ -172,7 +171,7 @@ public class ContentViewClient {
      * @return Whether an externally managed (i.e., not compositor-driven) fling
      *         of this ContentView is active.
      */
-    public boolean isExternalFlingActive() {
+    public boolean isExternalScrollActive() {
         return false;
     }
 

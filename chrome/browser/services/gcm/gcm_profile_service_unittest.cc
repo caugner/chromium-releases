@@ -35,14 +35,15 @@ namespace {
 const char kTestAppID[] = "TestApp";
 const char kUserID[] = "user";
 
-KeyedService* BuildGCMProfileService(content::BrowserContext* context) {
-  return new GCMProfileService(
+scoped_ptr<KeyedService> BuildGCMProfileService(
+    content::BrowserContext* context) {
+  return make_scoped_ptr(new GCMProfileService(
       Profile::FromBrowserContext(context),
       scoped_ptr<GCMClientFactory>(new FakeGCMClientFactory(
           content::BrowserThread::GetMessageLoopProxyForThread(
               content::BrowserThread::UI),
           content::BrowserThread::GetMessageLoopProxyForThread(
-              content::BrowserThread::IO))));
+              content::BrowserThread::IO)))));
 }
 
 }  // namespace
@@ -203,7 +204,7 @@ TEST_F(GCMProfileServiceTest, RegisterAndUnregister) {
   RegisterAndWaitForCompletion(sender_ids);
 
   std::string expected_registration_id =
-      GetGCMClient()->GetRegistrationIdFromSenderIds(sender_ids);
+      FakeGCMClient::GenerateGCMRegistrationID(sender_ids);
   EXPECT_EQ(expected_registration_id, registration_id());
   EXPECT_EQ(GCMClient::SUCCESS, registration_result());
 
@@ -217,7 +218,7 @@ TEST_F(GCMProfileServiceTest, Send) {
   GCMClient::OutgoingMessage message;
   message.id = "1";
   message.data["key1"] = "value1";
-  SendAndWaitForCompletion( message);
+  SendAndWaitForCompletion(message);
 
   EXPECT_EQ(message.id, send_message_id());
   EXPECT_EQ(GCMClient::SUCCESS, send_result());

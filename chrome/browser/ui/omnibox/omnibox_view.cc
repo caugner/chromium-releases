@@ -10,14 +10,10 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/search/search.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/omnibox/autocomplete_match.h"
-#include "components/search_engines/template_url.h"
-#include "components/search_engines/template_url_service.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -28,7 +24,8 @@ base::string16 OmniboxView::StripJavascriptSchemas(const base::string16& text) {
   const base::string16 kJsPrefix(
       base::ASCIIToUTF16(url::kJavaScriptScheme) + base::ASCIIToUTF16(":"));
   base::string16 out(text);
-  while (StartsWith(out, kJsPrefix, false)) {
+  while (base::StartsWith(out, kJsPrefix,
+                          base::CompareCase::INSENSITIVE_ASCII)) {
     base::TrimWhitespace(out.substr(kJsPrefix.length()), base::TRIM_LEADING,
                          &out);
   }
@@ -42,7 +39,8 @@ base::string16 OmniboxView::SanitizeTextForPaste(const base::string16& text) {
   // TODO(shess): It may also make sense to ignore leading or
   // trailing whitespace when making this determination.
   for (size_t i = 0; i < text.size(); ++i) {
-    if (IsWhitespace(text[i]) && text[i] != '\n' && text[i] != '\r') {
+    if (base::IsUnicodeWhitespace(text[i]) &&
+        text[i] != '\n' && text[i] != '\r') {
       const base::string16 collapsed = base::CollapseWhitespace(text, false);
       // If the user is pasting all-whitespace, paste a single space
       // rather than nothing, since pasting nothing feels broken.

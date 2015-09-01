@@ -68,6 +68,25 @@ enum FormDeserializationStatus {
   NUM_DESERIALIZATION_STATUSES
 };
 
+// Metrics: "PasswordManager.PasswordSyncState"
+enum PasswordSyncState {
+  SYNCING_OK,
+  NOT_SYNCING_FAILED_READ,
+  NOT_SYNCING_DUPLICATE_TAGS,
+  NOT_SYNCING_SERVER_ERROR,
+  NUM_SYNC_STATES
+};
+
+// Metrics: "PasswordGeneration.SubmissionEvent"
+enum PasswordSubmissionEvent {
+  PASSWORD_SUBMITTED,
+  PASSWORD_SUBMISSION_FAILED,
+  PASSWORD_NOT_SUBMITTED,
+  PASSWORD_OVERRIDDEN,
+  PASSWORD_USED,
+  SUBMISSION_EVENT_ENUM_COUNT
+};
+
 // We monitor the performance of the save password heuristic for a handful of
 // domains. For privacy reasons we are not reporting UMA signals by domain, but
 // by a domain group. A domain group can contain multiple domains, and a domain
@@ -115,6 +134,15 @@ void LogUIDisplayDisposition(UIDisplayDisposition disposition);
 
 // Log if a saved FormData was deserialized correctly.
 void LogFormDataDeserializationStatus(FormDeserializationStatus status);
+
+// When a credential was filled, log whether it came from an Android app.
+void LogFilledCredentialIsFromAndroidApp(bool from_android);
+
+// Log what's preventing passwords from syncing.
+void LogPasswordSyncState(PasswordSyncState state);
+
+// Log submission events related to generation.
+void LogPasswordGenerationSubmissionEvent(PasswordSubmissionEvent event);
 
 }  // namespace metrics_util
 

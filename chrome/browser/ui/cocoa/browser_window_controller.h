@@ -129,9 +129,6 @@ class Command;
   // Fullscreen API is not being used (or not available, before OS 10.7).
   base::scoped_nsobject<NSWindow> fullscreenWindow_;
 
-  // The Cocoa implementation of the PermissionBubbleView.
-  scoped_ptr<PermissionBubbleCocoa> permissionBubbleCocoa_;
-
   // True between |-windowWillEnterFullScreen:| and |-windowDidEnterFullScreen:|
   // to indicate that the window is in the process of transitioning into
   // AppKit fullscreen mode.
@@ -341,6 +338,9 @@ class Command;
                                      step:(translate::TranslateStep)step
                                 errorType:
                                     (translate::TranslateErrors::Type)errorType;
+
+// Dismiss the permission bubble
+- (void)dismissPermissionBubble;
 
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(content::WebContents*)contents;

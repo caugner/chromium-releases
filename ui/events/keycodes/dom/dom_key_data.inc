@@ -64,6 +64,20 @@ DOM_KEY_MAP_DECLARATION {
   DOM_KEY_MAP("Symbol",               SYMBOL),
   DOM_KEY_MAP("SymbolLock",           SYMBOL_LOCK),
 
+  // Non-standard value corresponding to XKB keysym ISO_Level5_Shift,
+  // an additional printable-character modifier like Shift and AltGraph,
+  // used by such layouts as Neo (German) and Multix (French-Canadian).
+  //          Key                     Enum
+  DOM_KEY_MAP("ShiftLevel5",          SHIFT_LEVEL5),
+
+  // Non-standard value representing a latching-modifier key in ui::Keyevent.
+  // This is present on some keyboard layouts (Latvian, Tibetan, Cameroon),
+  // and applies the modifier to the next (non-modifier) key.
+  // These events are consumed internally and not exposed to the web,
+  // either directly or as synthetic modifier up/down events.
+  //          Key                     Enum
+  DOM_KEY_MAP(".AltGraphLatch",       ALT_GRAPH_LATCH),
+
   // ============================================================
   // Whitespace Keys
   // http://www.w3.org/TR/DOM-Level-3-Events-key/#keys-whitespace

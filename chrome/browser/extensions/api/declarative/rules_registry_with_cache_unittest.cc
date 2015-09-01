@@ -49,10 +49,8 @@ class RulesRegistryWithCacheTest : public testing::Test {
                                         kRulesRegistryID)) {}
 
   void SetUp() override {
-    env_.GetExtensionPrefs();  // Force creation before adding extensions.
     // Note that env_.MakeExtension below also forces the creation of
     // ExtensionService.
-
     base::DictionaryValue manifest_extra;
     std::string key;
     CHECK(Extension::ProducePEM("test extension 1", &key));
@@ -220,7 +218,7 @@ TEST_F(RulesRegistryWithCacheTest, OnExtensionUninstalled) {
   EXPECT_EQ("", AddRule(extension2_->id(), kRuleId));
 
   // Check that the correct rules are removed.
-  registry_->OnExtensionUninstalled(extension1_->id());
+  registry_->OnExtensionUninstalled(extension1_.get());
   EXPECT_EQ(0, GetNumberOfRules(extension1_->id()));
   EXPECT_EQ(1, GetNumberOfRules(extension2_->id()));
 }

@@ -15,15 +15,18 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/process_info.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -81,6 +84,7 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -107,7 +111,7 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/exclusive_access/mouse_lock_controller.h"
-#include "chrome/browser/ui/extensions/bookmark_app_browser_controller.h"
+#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/fast_unload_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -177,6 +181,8 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/security_style_explanation.h"
+#include "content/public/browser/security_style_explanations.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -408,8 +414,6 @@ Browser::Browser(const CreateParams& params)
       base::Bind(&Browser::UpdateBookmarkBarState, base::Unretained(this),
                  BOOKMARK_BAR_STATE_CHANGE_PREF_CHANGE));
 
-  BrowserList::AddBrowser(this);
-
   // NOTE: These prefs all need to be explicitly destroyed in the destructor
   // or you'll get a nasty surprise when you run the incognito tests.
   encoding_auto_detect_.Init(prefs::kWebKitUsesUniversalDetector,
@@ -418,9 +422,9 @@ Browser::Browser(const CreateParams& params)
   if (chrome::IsInstantExtendedAPIEnabled() && is_type_tabbed())
     instant_controller_.reset(new BrowserInstantController(this));
 
-  if (extensions::BookmarkAppBrowserController::IsForBookmarkApp(this)) {
-    bookmark_app_controller_.reset(
-        new extensions::BookmarkAppBrowserController(this));
+  if (extensions::HostedAppBrowserController::IsForHostedApp(this)) {
+    hosted_app_controller_.reset(
+        new extensions::HostedAppBrowserController(this));
   }
 
   UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_INIT);
@@ -429,8 +433,8 @@ Browser::Browser(const CreateParams& params)
 
   window_ = params.window ? params.window : CreateBrowserWindow(this);
 
-  if (bookmark_app_controller_)
-    bookmark_app_controller_->UpdateLocationBarVisibility(false);
+  if (hosted_app_controller_)
+    hosted_app_controller_->UpdateLocationBarVisibility(false);
 
   // Create the extension window controller before sending notifications.
   extension_window_controller_.reset(
@@ -440,13 +444,6 @@ Browser::Browser(const CreateParams& params)
       SessionServiceFactory::GetForProfileForSessionRestore(profile_);
   if (session_service)
     session_service->WindowOpened(this);
-
-  // TODO(beng): Move BrowserList::AddBrowser() to the end of this function and
-  //             replace uses of this with BL's notifications.
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_BROWSER_WINDOW_READY,
-      content::Source<Browser>(this),
-      content::NotificationService::NoDetails());
 
   // TODO(beng): move to ChromeBrowserMain:
   if (first_run::ShouldDoPersonalDataManagerFirstRun()) {
@@ -465,6 +462,13 @@ Browser::Browser(const CreateParams& params)
   // without a modal dialog host, so that value may be null.
   popup_manager_.reset(new web_modal::PopupManager(
       GetWebContentsModalDialogHost()));
+
+  // TODO(beng): Move BrowserList::AddBrowser() to the end of this function and
+  //             replace uses of this with BL's notifications.
+  BrowserList::AddBrowser(this);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_BROWSER_WINDOW_READY, content::Source<Browser>(this),
+      content::NotificationService::NoDetails());
 }
 
 Browser::~Browser() {
@@ -1130,8 +1134,7 @@ void Browser::TabReplacedAt(TabStripModel* tab_strip_model,
   if (entry_count > 0) {
     // Send out notification so that observers are updated appropriately.
     new_contents->GetController().NotifyEntryChanged(
-        new_contents->GetController().GetEntryAtIndex(entry_count - 1),
-        entry_count - 1);
+        new_contents->GetController().GetEntryAtIndex(entry_count - 1));
   }
 
   if (session_service) {
@@ -1161,7 +1164,7 @@ void Browser::TabStripEmpty() {
   // Note: This will be called several times if TabStripEmpty is called several
   //       times. This is because it does not close the window if tabs are
   //       still present.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&Browser::CloseFrame, weak_factory_.GetWeakPtr()));
 
   // Instant may have visible WebContents that need to be detached before the
@@ -1302,6 +1305,62 @@ bool Browser::CanDragEnter(content::WebContents* source,
   return true;
 }
 
+content::SecurityStyle Browser::GetSecurityStyle(
+    WebContents* web_contents,
+    content::SecurityStyleExplanations* security_style_explanations) {
+  connection_security::SecurityInfo security_info;
+  connection_security::GetSecurityInfoForWebContents(web_contents,
+                                                     &security_info);
+
+  if (security_info.security_style == content::SECURITY_STYLE_UNKNOWN)
+    return security_info.security_style;
+
+  if (security_info.sha1_deprecation_status ==
+      connection_security::DEPRECATED_SHA1_BROKEN) {
+    security_style_explanations->broken_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_BROKEN_SHA1),
+            l10n_util::GetStringUTF8(IDS_BROKEN_SHA1_DESCRIPTION)));
+  } else if (security_info.sha1_deprecation_status ==
+             connection_security::DEPRECATED_SHA1_WARNING) {
+    security_style_explanations->warning_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_WARNING_SHA1),
+            l10n_util::GetStringUTF8(IDS_WARNING_SHA1_DESCRIPTION)));
+  }
+
+  if (security_info.mixed_content_status ==
+      connection_security::RAN_MIXED_CONTENT) {
+    security_style_explanations->broken_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_ACTIVE_MIXED_CONTENT),
+            l10n_util::GetStringUTF8(IDS_ACTIVE_MIXED_CONTENT_DESCRIPTION)));
+  } else if (security_info.mixed_content_status ==
+             connection_security::DISPLAYED_MIXED_CONTENT) {
+    security_style_explanations->warning_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT),
+            l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT_DESCRIPTION)));
+  }
+
+  if (net::IsCertStatusError(security_info.cert_status)) {
+    base::string16 error_string = base::UTF8ToUTF16(net::ErrorToString(
+        net::MapCertStatusToNetError(security_info.cert_status)));
+
+    content::SecurityStyleExplanation explanation(
+        l10n_util::GetStringUTF8(IDS_CERTIFICATE_CHAIN_ERROR),
+        l10n_util::GetStringFUTF8(
+            IDS_CERTIFICATE_CHAIN_ERROR_DESCRIPTION_FORMAT, error_string));
+
+    if (net::IsCertStatusMinorError(security_info.cert_status))
+      security_style_explanations->warning_explanations.push_back(explanation);
+    else
+      security_style_explanations->broken_explanations.push_back(explanation);
+  }
+
+  return security_info.security_style;
+}
+
 bool Browser::IsMouseLocked() const {
   return exclusive_access_manager_->mouse_lock_controller()->IsMouseLocked();
 }
@@ -1439,8 +1498,8 @@ void Browser::NavigationStateChanged(WebContents* source,
                        content::INVALIDATE_TYPE_LOAD))
     command_controller_->TabStateChanged();
 
-  if (bookmark_app_controller_)
-    bookmark_app_controller_->UpdateLocationBarVisibility(true);
+  if (hosted_app_controller_)
+    hosted_app_controller_->UpdateLocationBarVisibility(true);
 }
 
 void Browser::VisibleSSLStateChanged(const WebContents* source) {
@@ -1604,7 +1663,7 @@ bool Browser::ShouldCreateWebContents(
     int route_id,
     int main_frame_route_id,
     WindowContainerType window_container_type,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {
@@ -1624,7 +1683,7 @@ bool Browser::ShouldCreateWebContents(
 
 void Browser::WebContentsCreated(WebContents* source_contents,
                                  int opener_render_frame_id,
-                                 const base::string16& frame_name,
+                                 const std::string& frame_name,
                                  const GURL& target_url,
                                  WebContents* new_contents) {
   // Adopt the WebContents now, so all observers are in place, as the network
@@ -1632,6 +1691,9 @@ void Browser::WebContentsCreated(WebContents* source_contents,
   // will later be inserted into this browser using Browser::Navigate via
   // AddNewContents.
   TabHelpers::AttachTabHelpers(new_contents);
+
+  // Make the tab show up in the task manager.
+  task_management::WebContentsTags::CreateForTabContents(new_contents);
 
   // Notify.
   RetargetingDetails details;
@@ -2187,10 +2249,9 @@ void Browser::ScheduleUIUpdate(WebContents* source,
 
   if (!chrome_updater_factory_.HasWeakPtrs()) {
     // No task currently scheduled, start another.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&Browser::ProcessPendingUIUpdates,
-                   chrome_updater_factory_.GetWeakPtr()),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&Browser::ProcessPendingUIUpdates,
+                              chrome_updater_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kUIUpdateCoalescingTimeMS));
   }
 }
@@ -2430,8 +2491,8 @@ bool Browser::SupportsLocationBar() const {
   if (!is_app())
     return !is_trusted_source();
 
-  if (bookmark_app_controller_)
-    return bookmark_app_controller_->SupportsLocationBar();
+  if (hosted_app_controller_)
+    return hosted_app_controller_->SupportsLocationBar();
 
   return false;
 }
@@ -2442,8 +2503,8 @@ bool Browser::ShouldUseWebAppFrame() const {
   if (!is_app())
     return false;
 
-  if (bookmark_app_controller_)
-    return bookmark_app_controller_->should_use_web_app_frame();
+  if (hosted_app_controller_)
+    return hosted_app_controller_->should_use_web_app_frame();
 
   return false;
 }
@@ -2543,7 +2604,7 @@ bool Browser::MaybeCreateBackgroundContents(
     int route_id,
     int main_frame_route_id,
     WebContents* opener_web_contents,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {

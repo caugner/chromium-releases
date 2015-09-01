@@ -7,6 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "chrome/browser/android/banners/app_banner_data_fetcher_android.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
 #include "chrome/common/chrome_constants.h"
@@ -54,7 +55,7 @@ bool AppBannerManagerAndroid::HandleNonWebApp(const std::string& platform,
   if (!CheckPlatformAndId(platform, id))
     return false;
 
-  banners::TrackDisplayEvent(DISPLAY_EVENT_BANNER_REQUESTED);
+  banners::TrackDisplayEvent(DISPLAY_EVENT_NATIVE_APP_BANNER_REQUESTED);
 
   // Send the info to the Java side to get info about the app.
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -150,7 +151,7 @@ void DisableSecureSchemeCheckForTesting(JNIEnv* env, jclass clazz) {
 }
 
 jboolean IsEnabled(JNIEnv* env, jclass clazz) {
-  return AppBannerManager::IsEnabled();
+  return base::FieldTrialList::FindFullName("AppBanners") == "Enabled";
 }
 
 }  // namespace banners

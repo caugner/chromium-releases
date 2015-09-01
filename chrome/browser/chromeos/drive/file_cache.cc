@@ -6,27 +6,27 @@
 
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/chromeos/drive/file_system_core_util.h"
 #include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
 #include "chrome/browser/drive/drive_api_util.h"
 #include "chromeos/chromeos_constants.h"
-#include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
 #include "third_party/cros_system_api/constants/cryptohome.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace internal {
@@ -49,7 +49,6 @@ FileCache::FileCache(ResourceMetadataStorage* storage,
       free_disk_space_getter_(free_disk_space_getter),
       weak_ptr_factory_(this) {
   DCHECK(blocking_task_runner_.get());
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 FileCache::~FileCache() {
@@ -294,7 +293,7 @@ FileError FileCache::OpenForWrite(
 
 bool FileCache::IsOpenedForWrite(const std::string& id) {
   AssertOnSequencedWorkerPool();
-  return write_opened_files_.count(id);
+  return write_opened_files_.count(id) != 0;
 }
 
 FileError FileCache::UpdateMd5(const std::string& id) {
@@ -417,7 +416,7 @@ bool FileCache::Initialize() {
 }
 
 void FileCache::Destroy() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   in_shutdown_.Set();
 

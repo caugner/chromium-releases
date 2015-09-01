@@ -18,6 +18,9 @@
 #endif
 
 namespace ui {
+namespace internal {
+class InputMethodDelegate;
+}
 class EventProcessor;
 }
 
@@ -105,8 +108,14 @@ class WidgetTest : public ViewsTestBase {
 
   View* GetGestureHandler(internal::RootView* root_view);
 
-  // Simulate a OS-level destruction of the native widget held by |widget|.
+  // Simulate an OS-level destruction of the native window held by |widget|.
   static void SimulateNativeDestroy(Widget* widget);
+
+  // Simulate an activation of the native window held by |widget|, as if it was
+  // clicked by the user. This is a synchronous method for use in
+  // non-interactive tests that do not spin a RunLoop in the test body (since
+  // that may cause real focus changes to flakily manifest).
+  static void SimulateNativeActivate(Widget* widget);
 
   // Return true if |window| is visible according to the native platform.
   static bool IsNativeWindowVisible(gfx::NativeWindow window);
@@ -123,6 +132,10 @@ class WidgetTest : public ViewsTestBase {
   // aura::WindowEventDispatcher. Otherwise, it is a bridge to the OS event
   // processor.
   static ui::EventProcessor* GetEventProcessor(Widget* widget);
+
+  // Get the InputMethodDelegate, for setting on a Mock InputMethod in tests.
+  static ui::internal::InputMethodDelegate* GetInputMethodDelegateForWidget(
+      Widget* widget);
 
 #if defined(OS_MACOSX)
   static scoped_ptr<FakeActivation> FakeWidgetIsActiveAlways();

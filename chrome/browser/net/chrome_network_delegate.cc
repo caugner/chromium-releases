@@ -25,15 +25,17 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/net/chrome_extensions_network_delegate.h"
 #include "chrome/browser/net/connect_interceptor.h"
+#include "chrome/browser/net/request_source_bandwidth_histograms.h"
 #include "chrome/browser/net/safe_search_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -54,8 +56,8 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/precache/precache_manager_factory.h"
 #include "components/precache/content/precache_manager.h"
-#include "components/precache/content/precache_manager_factory.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -82,12 +84,6 @@ using content::ResourceType;
 bool ChromeNetworkDelegate::g_allow_file_access_ = false;
 #else
 bool ChromeNetworkDelegate::g_allow_file_access_ = true;
-#endif
-
-#if defined(ENABLE_EXTENSIONS)
-// This remains false unless the --disable-extensions-http-throttling
-// flag is passed to the browser.
-bool ChromeNetworkDelegate::g_never_throttle_requests_ = false;
 #endif
 
 namespace {
@@ -179,7 +175,6 @@ bool CanRequestBeDeltaEncoded(const net::URLRequest* request) {
     // XML (application/xml and application/*+xml) is eligible.
     { "application/", "xml" },
   };
-  const bool kCaseSensitive = true;
 
   std::string mime_type;
   request->GetMimeType(&mime_type);
@@ -187,9 +182,11 @@ bool CanRequestBeDeltaEncoded(const net::URLRequest* request) {
   for (size_t i = 0; i < arraysize(kEligibleMasks); i++) {
     const char *prefix = kEligibleMasks[i].prefix;
     const char *suffix = kEligibleMasks[i].suffix;
-    if (prefix && !StartsWithASCII(mime_type, prefix, kCaseSensitive))
+    if (prefix &&
+        !base::StartsWith(mime_type, prefix, base::CompareCase::SENSITIVE))
       continue;
-    if (suffix && !EndsWith(mime_type, suffix, kCaseSensitive))
+    if (suffix &&
+        !base::EndsWith(mime_type, suffix, base::CompareCase::SENSITIVE))
       continue;
     return true;
   }
@@ -313,7 +310,7 @@ void ChromeNetworkDelegate::set_profile(void* profile) {
 }
 
 void ChromeNetworkDelegate::set_cookie_settings(
-    CookieSettings* cookie_settings) {
+    content_settings::CookieSettings* cookie_settings) {
   cookie_settings_ = cookie_settings;
 }
 
@@ -322,13 +319,6 @@ void ChromeNetworkDelegate::set_predictor(
   connect_interceptor_.reset(
       new chrome_browser_net::ConnectInterceptor(predictor));
 }
-
-// static
-#if defined(ENABLE_EXTENSIONS)
-void ChromeNetworkDelegate::NeverThrottleRequests() {
-  g_never_throttle_requests_ = true;
-}
-#endif
 
 // static
 void ChromeNetworkDelegate::InitializePrefsOnUIThread(
@@ -377,9 +367,13 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
   // blocked. However, an extension might redirect the request to another URL,
   // which is not blocked.
+
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
   int error = net::ERR_BLOCKED_BY_ADMINISTRATOR;
-  if (url_blacklist_manager_ &&
-      url_blacklist_manager_->IsRequestBlocked(*request, &error)) {
+  if (info && content::IsResourceTypeFrame(info->GetResourceType()) &&
+      url_blacklist_manager_ &&
+      url_blacklist_manager_->ShouldBlockRequestForFrame(
+          request->url(), &error)) {
     // URL access blocked by policy.
     request->net_log().AddEvent(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
@@ -527,6 +521,7 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
   }
   if (domain_reliability_monitor_)
     domain_reliability_monitor_->OnCompleted(request, started);
+  RecordRequestSourceBandwidth(request, started);
   extensions_delegate_->ForwardProxyErrors(request);
   extensions_delegate_->ForwardDoneRequestStatus(request);
 }
@@ -670,18 +665,6 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   DVLOG(1) << "File access denied - " << path.value().c_str();
   return false;
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
-}
-
-bool ChromeNetworkDelegate::OnCanThrottleRequest(
-    const net::URLRequest& request) const {
-#if defined(ENABLE_EXTENSIONS)
-  if (g_never_throttle_requests_)
-    return false;
-  return request.first_party_for_cookies().scheme() ==
-      extensions::kExtensionScheme;
-#else
-  return false;
-#endif
 }
 
 bool ChromeNetworkDelegate::OnCanEnablePrivacyMode(

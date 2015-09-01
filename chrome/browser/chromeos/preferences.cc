@@ -21,7 +21,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_pref_names.h"
+#include "chrome/browser/chromeos/drive/file_system_core_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
@@ -143,8 +144,11 @@ void Preferences::RegisterProfilePrefs(
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kAccessibilityScreenMagnifierEnabled,
-      false,
+      prefs::kAccessibilityScreenMagnifierCenterFocus,
+      true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityScreenMagnifierEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAccessibilityScreenMagnifierType,
@@ -181,16 +185,13 @@ void Preferences::RegisterProfilePrefs(
       base::GetHourClockType() == base::k24HourClock,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDrive,
-      false,
+      drive::prefs::kDisableDrive, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDriveOverCellular,
-      true,
+      drive::prefs::kDisableDriveOverCellular, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kDisableDriveHostedFiles,
-      false,
+      drive::prefs::kDisableDriveHostedFiles, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // We don't sync prefs::kLanguageCurrentInputMethod and PreviousInputMethod
   // because they're just used to track the logout state of the device.
@@ -243,17 +244,14 @@ void Preferences::RegisterProfilePrefs(
   // We don't sync wake-on-wifi related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kWakeOnWifiSsid, true);
 
-  // Mobile plan notifications default to on.
-  registry->RegisterBooleanPref(
-      prefs::kShowPlanNotifications,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-
   // 3G first-time usage promo will be shown at least once.
   registry->RegisterBooleanPref(prefs::kShow3gPromoNotification, true);
 
   // Number of times Data Saver prompt has been shown on 3G data network.
-  registry->RegisterIntegerPref(prefs::kDataSaverPromptsShown, 0);
+  registry->RegisterIntegerPref(
+      prefs::kDataSaverPromptsShown,
+      0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   // Initially all existing users would see "What's new" for current version
   // after update.

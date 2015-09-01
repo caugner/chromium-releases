@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
+#include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/autofill/core/browser/test_autofill_driver.h"
@@ -19,6 +22,7 @@
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
@@ -42,7 +46,7 @@ namespace {
 
 void RunAllPendingTasks() {
   base::RunLoop run_loop;
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   run_loop.Run();
 }
@@ -136,21 +140,22 @@ class TestPasswordManager : public PasswordManager {
                 const autofill::PasswordFormMap& best_matches,
                 const autofill::PasswordForm& preferred_match,
                 bool wait_for_username) const override {
-    best_matches_ = best_matches;
+    best_matches_ = &best_matches;
     wait_for_username_ = wait_for_username;
   }
 
   const autofill::PasswordFormMap& GetLatestBestMatches() {
-    return best_matches_;
+    return *best_matches_;
   }
 
   bool GetLatestWaitForUsername() { return wait_for_username_; }
 
  private:
+  // Points to a PasswordFormMap owned by PasswordFormManager.
   // Marked mutable to get around constness of Autofill().
   // TODO(vabr): This should be rewritten as a mock of PasswordManager, and the
   // interesting arguments should be saved via GMock actions instead.
-  mutable autofill::PasswordFormMap best_matches_;
+  mutable const autofill::PasswordFormMap* best_matches_;
   mutable bool wait_for_username_;
 };
 
@@ -219,10 +224,10 @@ class PasswordFormManagerTest : public testing::Test {
     if (result == RESULT_NO_MATCH)
       return;
 
-    PasswordForm* match = new PasswordForm(saved_match_);
-    // Heap-allocated form is owned by p.
-    p->best_matches_[match->username_value] = match;
-    p->preferred_match_ = match;
+    scoped_ptr<PasswordForm> match(new PasswordForm(saved_match_));
+    p->preferred_match_ = match.get();
+    base::string16 username = match->username_value;
+    p->best_matches_.insert(username, match.Pass());
   }
 
   void SanitizePossibleUsernames(PasswordFormManager* p, PasswordForm* form) {
@@ -980,8 +985,8 @@ TEST_F(PasswordFormManagerTest, TestUpdateIncompleteCredentials) {
   obsolete_form.times_used = 1;
 
   // Check that PasswordStore receives an update request with the complete form.
-  EXPECT_CALL(*mock_store(), RemoveLogin(obsolete_form));
-  EXPECT_CALL(*mock_store(), AddLogin(complete_form));
+  EXPECT_CALL(*mock_store(),
+              UpdateLoginWithPrimaryKey(complete_form, obsolete_form));
   form_manager.Save();
 }
 
@@ -1540,6 +1545,85 @@ TEST_F(PasswordFormManagerTest, TestSuggestingPasswordChangeForms) {
   EXPECT_EQ(1u, password_manager.GetLatestBestMatches().size());
   // Check that we suggest, not autofill.
   EXPECT_TRUE(password_manager.GetLatestWaitForUsername());
+}
+
+TEST_F(PasswordFormManagerTest, GenerationStatusChangedWithPassword) {
+  TestPasswordManagerClient client_with_store(mock_store());
+
+  TestPasswordManager manager(&client_with_store);
+  PasswordFormManager form_manager(&manager, &client_with_store,
+                                   client_with_store.driver(), *observed_form(),
+                                   false);
+
+  const PasswordStore::AuthorizationPromptPolicy auth_policy =
+      PasswordStore::DISALLOW_PROMPT;
+  EXPECT_CALL(*mock_store(),
+              GetLogins(*observed_form(), auth_policy, &form_manager));
+  form_manager.FetchMatchingLoginsFromPasswordStore(auth_policy);
+
+  scoped_ptr<PasswordForm> generated_form(new PasswordForm(*observed_form()));
+  generated_form->type = PasswordForm::TYPE_GENERATED;
+  generated_form->username_value = ASCIIToUTF16("username");
+  generated_form->password_value = ASCIIToUTF16("password2");
+  generated_form->preferred = true;
+
+  PasswordForm submitted_form(*generated_form);
+  submitted_form.password_value = ASCIIToUTF16("password3");
+
+  ScopedVector<PasswordForm> simulated_results;
+  simulated_results.push_back(generated_form.Pass());
+  form_manager.OnGetPasswordStoreResults(simulated_results.Pass());
+
+  form_manager.ProvisionallySave(
+      submitted_form, PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES);
+
+  PasswordForm new_credentials;
+  EXPECT_CALL(*mock_store(), UpdateLogin(_))
+      .WillOnce(testing::SaveArg<0>(&new_credentials));
+  form_manager.Save();
+
+  EXPECT_EQ(PasswordForm::TYPE_MANUAL, new_credentials.type);
+}
+
+TEST_F(PasswordFormManagerTest, GenerationStatusNotUpdatedIfPasswordUnchanged) {
+  base::HistogramTester histogram_tester;
+
+  TestPasswordManagerClient client_with_store(mock_store());
+
+  TestPasswordManager manager(&client_with_store);
+  PasswordFormManager form_manager(&manager, &client_with_store,
+                                   client_with_store.driver(), *observed_form(),
+                                   false);
+
+  const PasswordStore::AuthorizationPromptPolicy auth_policy =
+      PasswordStore::DISALLOW_PROMPT;
+  EXPECT_CALL(*mock_store(),
+              GetLogins(*observed_form(), auth_policy, &form_manager));
+  form_manager.FetchMatchingLoginsFromPasswordStore(auth_policy);
+
+  scoped_ptr<PasswordForm> generated_form(new PasswordForm(*observed_form()));
+  generated_form->type = PasswordForm::TYPE_GENERATED;
+  generated_form->username_value = ASCIIToUTF16("username");
+  generated_form->password_value = ASCIIToUTF16("password2");
+  generated_form->preferred = true;
+
+  PasswordForm submitted_form(*generated_form);
+
+  ScopedVector<PasswordForm> simulated_results;
+  simulated_results.push_back(generated_form.Pass());
+  form_manager.OnGetPasswordStoreResults(simulated_results.Pass());
+
+  form_manager.ProvisionallySave(
+      submitted_form, PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES);
+
+  PasswordForm new_credentials;
+  EXPECT_CALL(*mock_store(), UpdateLogin(_))
+      .WillOnce(testing::SaveArg<0>(&new_credentials));
+  form_manager.Save();
+
+  EXPECT_EQ(PasswordForm::TYPE_GENERATED, new_credentials.type);
+  histogram_tester.ExpectBucketCount("PasswordGeneration.SubmissionEvent",
+                                     metrics_util::PASSWORD_USED, 1);
 }
 
 }  // namespace password_manager

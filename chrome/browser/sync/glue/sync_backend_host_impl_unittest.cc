@@ -18,9 +18,9 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/invalidation/invalidator_state.h"
-#include "components/invalidation/invalidator_storage.h"
-#include "components/invalidation/profile_invalidation_provider.h"
+#include "components/invalidation/impl/invalidator_storage.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/public/invalidator_state.h"
 #include "components/sync_driver/device_info.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
@@ -106,6 +106,9 @@ class MockSyncFrontend : public sync_driver::SyncFrontend {
   MOCK_METHOD1(OnActionableError,
       void(const syncer::SyncProtocolError& sync_error));
   MOCK_METHOD0(OnSyncConfigureRetry, void());
+  MOCK_METHOD1(
+      OnLocalSetPassphraseEncryption,
+      void(const syncer::SyncEncryptionHandler::NigoriState& nigori_state));
 };
 
 class FakeSyncManagerFactory : public syncer::SyncManagerFactory {
@@ -214,8 +217,9 @@ class SyncBackendHostTest : public testing::Test {
         true,
         fake_manager_factory_.Pass(),
         make_scoped_ptr(new syncer::TestUnrecoverableErrorHandler),
-        NULL,
-        network_resources_.get());
+        base::Closure(),
+        network_resources_.get(),
+        saved_nigori_state_.Pass());
     base::RunLoop run_loop;
     BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
                                    run_loop.QuitClosure(),
@@ -289,6 +293,7 @@ class SyncBackendHostTest : public testing::Test {
   FakeSyncManager* fake_manager_;
   syncer::ModelTypeSet enabled_types_;
   scoped_ptr<syncer::NetworkResources> network_resources_;
+  scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state_;
 };
 
 // Test basic initialization with no initial types (first time initialization).

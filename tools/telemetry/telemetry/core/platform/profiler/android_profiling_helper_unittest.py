@@ -12,8 +12,8 @@ import unittest
 from telemetry.core.platform.profiler import android_profiling_helper
 from telemetry.core import util
 from telemetry import decorators
-from telemetry.unittest_util import simple_mock
-from telemetry.unittest_util import tab_test_case
+from telemetry.testing import simple_mock
+from telemetry.testing import tab_test_case
 
 
 def _GetLibrariesMappedIntoProcesses(device, pids):
@@ -94,11 +94,9 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
     super(TestAndroidProfilingHelperTabTestCase, self).setUp()
     # pylint: disable=W0212
     browser_backend = self._browser._browser_backend
-    self._device = browser_backend._adb.device()
+    self._device = browser_backend.device()
 
-  # Test fails: crbug.com/437081
-  # @decorators.Enabled('android')
-  @decorators.Disabled
+  @decorators.Enabled('android')
   def testCreateSymFs(self):
     # pylint: disable=W0212
     browser_pid = self._browser._browser_backend.pid
@@ -115,7 +113,7 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
       # Check that we have kernel symbols.
       assert os.path.exists(kallsyms)
 
-      is_unstripped = re.compile(r'^/data/app/.*\.so$')
+      is_unstripped = re.compile(r'^/data/app(-lib)?/.*\.so$')
       has_unstripped = False
 
       # Check that all requested libraries are present.
@@ -137,4 +135,4 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
       self._device.PullFile('/system/lib/libc.so', libc.name)
       path = android_profiling_helper.GetToolchainBinaryPath(libc.name,
                                                              'objdump')
-      assert os.path.exists(path)
+      assert path and os.path.exists(path)

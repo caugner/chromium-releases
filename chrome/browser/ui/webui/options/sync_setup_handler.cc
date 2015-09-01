@@ -89,7 +89,7 @@ SyncConfigInfo::SyncConfigInfo()
 SyncConfigInfo::~SyncConfigInfo() {}
 
 bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
-  scoped_ptr<base::Value> parsed_value(base::JSONReader::Read(json));
+  scoped_ptr<base::Value> parsed_value = base::JSONReader::Read(json);
   base::DictionaryValue* result;
   if (!parsed_value || !parsed_value->GetAsDictionary(&result)) {
     DLOG(ERROR) << "GetConfiguration() not passed a Dictionary";
@@ -470,7 +470,7 @@ Profile* SyncSetupHandler::GetProfile() const {
 
 ProfileSyncService* SyncSetupHandler::GetSyncService() const {
   Profile* profile = GetProfile();
-  return profile->IsSyncAccessible() ?
+  return profile->IsSyncAllowed() ?
       ProfileSyncServiceFactory::GetForProfile(GetProfile()) : NULL;
 }
 
@@ -507,13 +507,13 @@ void SyncSetupHandler::HandleConfigure(const base::ListValue* args) {
 
   // Disable sync, but remain signed in if the user selected "Sync nothing" in
   // the advanced settings dialog. Note: In order to disable sync across
-  // restarts on Chrome OS, we must call StopSyncingPermanently(), which
+  // restarts on Chrome OS, we must call RequestStop(CLEAR_DATA), which
   // suppresses sync startup in addition to disabling it.
   if (configuration.sync_nothing) {
     ProfileSyncService::SyncEvent(
         ProfileSyncService::STOP_FROM_ADVANCED_DIALOG);
     CloseUI();
-    service->StopSyncingPermanently();
+    service->RequestStop(ProfileSyncService::CLEAR_DATA);
     service->SetSetupInProgress(false);
     return;
   }
@@ -687,11 +687,11 @@ void SyncSetupHandler::CloseSyncSetup() {
         // because we don't want the sync backend to remain in the
         // first-setup-incomplete state.
         // Note: In order to disable sync across restarts on Chrome OS,
-        // we must call StopSyncingPermanently(), which suppresses sync startup
+        // we must call RequestStop(CLEAR_DATA), which suppresses sync startup
         // in addition to disabling it.
         if (sync_service) {
           DVLOG(1) << "Sync setup aborted by user action";
-          sync_service->StopSyncingPermanently();
+          sync_service->RequestStop(ProfileSyncService::CLEAR_DATA);
   #if !defined(OS_CHROMEOS)
           // Sign out the user on desktop Chrome if they click cancel during
           // initial setup.
@@ -803,7 +803,7 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
   ProfileSyncService* service = GetSyncService();
   DCHECK(service);
   if (!service->backend_initialized()) {
-    service->UnsuppressAndStart();
+    service->RequestStart();
 
     // See if it's even possible to bring up the sync backend - if not
     // (unrecoverable error?), don't bother displaying a spinner that will be

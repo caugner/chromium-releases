@@ -76,7 +76,7 @@ void WebAuthFlow::Start() {
   // Attach a random ID string to the window so we can recoginize it
   // in OnAppWindowAdded.
   std::string random_bytes;
-  crypto::RandBytes(WriteInto(&random_bytes, 33), 32);
+  crypto::RandBytes(base::WriteInto(&random_bytes, 33), 32);
   base::Base64Encode(random_bytes, &app_window_key_);
 
   // identityPrivate.onWebFlowRequest(app_window_key, provider_url_, mode_)
@@ -89,7 +89,8 @@ void WebAuthFlow::Start() {
     args->AppendString("silent");
 
   scoped_ptr<Event> event(
-      new Event(identity_private::OnWebFlowRequest::kEventName, args.Pass()));
+      new Event(events::UNKNOWN, identity_private::OnWebFlowRequest::kEventName,
+                args.Pass()));
   event->restrict_to_browser_context = profile_;
   ExtensionSystem* system = ExtensionSystem::Get(profile_);
 
@@ -101,7 +102,7 @@ void WebAuthFlow::Start() {
         base::FilePath(FILE_PATH_LITERAL("identity_scope_approval_dialog")));
   }
 
-  system->event_router()->DispatchEventWithLazyListener(
+  EventRouter::Get(profile_)->DispatchEventWithLazyListener(
       extension_misc::kIdentityApiUiAppId, event.Pass());
 }
 
@@ -221,7 +222,8 @@ void WebAuthFlow::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   TRACE_EVENT_ASYNC_STEP_PAST1("identity",
                                "WebAuthFlow",
                                this,

@@ -14,8 +14,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
-#include "chrome/browser/infobars/infobar_responder.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +25,8 @@
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -77,7 +77,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   // InProcessBrowserTest:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnablePushMessagePayload);
-
     InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
@@ -143,6 +142,14 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
                                                   result);
   }
 
+  PermissionBubbleManager* GetPermissionBubbleManager() {
+    return PermissionBubbleManager::FromWebContents(
+        GetBrowser()->tab_strip_model()->GetActiveWebContents());
+  }
+
+  void RequestAndAcceptPermission();
+  void RequestAndDenyPermission();
+
   void TryToSubscribeSuccessfully(
       const std::string& expected_push_subscription_id);
 
@@ -192,11 +199,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   virtual Browser* GetBrowser() const { return browser(); }
 
-  InfoBarService* GetInfoBarService() {
-    return InfoBarService::FromWebContents(
-        GetBrowser()->tab_strip_model()->GetActiveWebContents());
-  }
-
  private:
   scoped_ptr<net::SpawnedTestServer> https_server_;
   gcm::FakeGCMProfileService* gcm_service_;
@@ -209,19 +211,6 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(PushMessagingBrowserTest);
 };
 
-class PushMessagingBadManifestBrowserTest : public PushMessagingBrowserTest {
-  std::string GetTestURL() override {
-    return "files/push_messaging/test_bad_manifest.html";
-  }
-};
-
-class PushMessagingManifestUserVisibleOnlyTrueTest
-    : public PushMessagingBrowserTest {
-  std::string GetTestURL() override {
-    return "files/push_messaging/test_user_visible_only_manifest.html";
-  }
-};
-
 class PushMessagingBrowserTestEmptySubscriptionOptions
     : public PushMessagingBrowserTest {
   std::string GetTestURL() override {
@@ -229,15 +218,20 @@ class PushMessagingBrowserTestEmptySubscriptionOptions
   }
 };
 
-IN_PROC_BROWSER_TEST_F(PushMessagingBadManifestBrowserTest,
-                       SubscribeFailsNotVisibleMessages) {
+void PushMessagingBrowserTest::RequestAndAcceptPermission() {
   std::string script_result;
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::ACCEPT_ALL);
+  EXPECT_TRUE(RunScript("requestNotificationPermission();", &script_result));
+  EXPECT_EQ("permission status - granted", script_result);
+}
 
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ("AbortError - Registration failed - permission denied",
-            script_result);
+void PushMessagingBrowserTest::RequestAndDenyPermission() {
+  std::string script_result;
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::DENY_ALL);
+  EXPECT_TRUE(RunScript("requestNotificationPermission();", &script_result));
+  EXPECT_EQ("permission status - denied", script_result);
 }
 
 void PushMessagingBrowserTest::TryToSubscribeSuccessfully(
@@ -247,9 +241,7 @@ void PushMessagingBrowserTest::TryToSubscribeSuccessfully(
   EXPECT_TRUE(RunScript("registerServiceWorker()", &script_result));
   EXPECT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  EXPECT_TRUE(RunScript("requestNotificationPermission()", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   EXPECT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ(GetEndpointForSubscriptionId(expected_push_subscription_id),
@@ -293,10 +285,10 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
+  GetPermissionBubbleManager()->set_auto_response_for_test(
+      PermissionBubbleManager::ACCEPT_ALL);
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"),
-            script_result);
+  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"), script_result);
 
   PushMessagingAppIdentifier app_identifier =
       GetAppIdentifierForServiceWorkerRegistration(0LL);
@@ -311,9 +303,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder cancelling_responder(GetInfoBarService(), false);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - denied", script_result);
+  RequestAndDenyPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",
@@ -326,9 +316,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribeFailureNoManifest) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("removeManifest()", &script_result));
   ASSERT_EQ("manifest removed", script_result);
@@ -347,51 +335,11 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTestEmptySubscriptionOptions,
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  ASSERT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",
             script_result);
-}
-
-IN_PROC_BROWSER_TEST_F(PushMessagingBadManifestBrowserTest,
-                       RegisterFailsNotVisibleMessages) {
-  std::string script_result;
-
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ("AbortError - Registration failed - permission denied",
-            script_result);
-}
-
-IN_PROC_BROWSER_TEST_F(PushMessagingManifestUserVisibleOnlyTrueTest,
-                       ManifestKeyConsidered) {
-  // Chrome 42 introduced the "gcm_user_visible_only" manifest key, but Chrome
-  // 43 supersedes this by the standardized PushSubscriptionOptions.userVisible
-  // option. We maintain support for the manifest key without specifying the
-  // subscription option, so verify that it is still being considered.
-  std::string script_result;
-
-  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
-  ASSERT_EQ("ok - service worker registered", script_result);
-
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
-
-  ASSERT_TRUE(RunScript("subscribePush()", &script_result));
-  EXPECT_EQ(GetEndpointForSubscriptionId("1-0"), script_result);
-
-  // permissionState has been introduced later so it does not
-  // respect the manifest key.
-  ASSERT_TRUE(RunScript("permissionState()", &script_result));
-  EXPECT_EQ(
-      "NotSupportedError - Push subscriptions that don't enable"
-      " userVisibleOnly are not supported.",
-      script_result);
 }
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
@@ -738,9 +686,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysGranted) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder accepting_responder(GetInfoBarService(), true);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - granted", script_result);
+  RequestAndAcceptPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ(GetEndpointForSubscriptionId("1-0"),
@@ -756,9 +702,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysDenied) {
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
-  InfoBarResponder cancelling_responder(GetInfoBarService(), false);
-  ASSERT_TRUE(RunScript("requestNotificationPermission();", &script_result));
-  EXPECT_EQ("permission status - denied", script_result);
+  RequestAndDenyPermission();
 
   ASSERT_TRUE(RunScript("subscribePush()", &script_result));
   EXPECT_EQ("AbortError - Registration failed - permission denied",

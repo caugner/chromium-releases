@@ -15,6 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "google_apis/drive/drive_api_error_codes.h"
@@ -128,13 +129,15 @@ class DirectoryLoader {
   JobScheduler* scheduler_;  // Not owned.
   AboutResourceLoader* about_resource_loader_;  // Not owned.
   LoaderController* loader_controller_;  // Not owned.
-  ObserverList<ChangeListLoaderObserver> observers_;
+  base::ObserverList<ChangeListLoaderObserver> observers_;
   typedef std::map<std::string, std::vector<ReadDirectoryCallbackState> >
       LoadCallbackMap;
   LoadCallbackMap pending_load_callback_;
 
   // Set of the running feed fetcher for the fast fetch.
   std::set<FeedFetcher*> fast_fetch_feed_fetcher_set_;
+
+  base::ThreadChecker thread_checker_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

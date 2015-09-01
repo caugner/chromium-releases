@@ -211,20 +211,20 @@ Status ExecuteWindowCommand(
     return Status(kUnexpectedAlertOpen);
 
   Status nav_status(kOk);
-  for (int attempt = 0; attempt < 2; attempt++) {
-    if (attempt == 1) {
-      if (status.code() == kNoSuchExecutionContext)
-        // Switch to main frame and retry command if subframe no longer exists.
-        session->SwitchToTopFrame();
-      else
-        break;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    if (attempt == 2) {
+      // Switch to main frame and retry command if subframe no longer exists.
+      session->SwitchToTopFrame();
     }
+
     nav_status = web_view->WaitForPendingNavigations(
         session->GetCurrentFrameId(), session->page_load_timeout, true);
     if (nav_status.IsError())
       return nav_status;
 
     status = command.Run(session, web_view, params, value);
+    if (status.code() != kNoSuchExecutionContext)
+      break;
   }
 
   nav_status = web_view->WaitForPendingNavigations(
@@ -246,7 +246,11 @@ Status ExecuteGet(
   std::string url;
   if (!params.GetString("url", &url))
     return Status(kUnknownError, "'url' must be a string");
-  return web_view->Load(url);
+  Status status = web_view->Load(url);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteExecuteScript(
@@ -437,7 +441,11 @@ Status ExecuteGoBack(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->TraverseHistory(-1);
+  Status status = web_view->TraverseHistory(-1);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteGoForward(
@@ -445,7 +453,11 @@ Status ExecuteGoForward(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->TraverseHistory(1);
+  Status status = web_view->TraverseHistory(1);
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteRefresh(
@@ -453,7 +465,11 @@ Status ExecuteRefresh(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->Reload();
+  Status status = web_view->Reload();
+  if (status.IsError())
+    return status;
+  session->SwitchToTopFrame();
+  return Status(kOk);
 }
 
 Status ExecuteMouseMoveTo(

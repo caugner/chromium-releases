@@ -13,11 +13,13 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/drive/drive_pref_names.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/file_manager/zip_file_creator.h"
+#include "chrome/browser/chromeos/file_system_provider/mount_path_util.h"
 #include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -55,14 +57,10 @@ const char kCWSScope[] = "https://www.googleapis.com/auth/chromewebstore";
 
 // Obtains the current app window.
 AppWindow* GetCurrentAppWindow(ChromeSyncExtensionFunction* function) {
-  AppWindowRegistry* const app_window_registry =
-      AppWindowRegistry::Get(function->GetProfile());
-  content::WebContents* const contents = function->GetAssociatedWebContents();
-  content::RenderViewHost* const render_view_host =
-      contents ? contents->GetRenderViewHost() : NULL;
-  return render_view_host ? app_window_registry->GetAppWindowForRenderViewHost(
-                                render_view_host)
-                          : NULL;
+  content::WebContents* const contents = function->GetSenderWebContents();
+  return contents ?
+      AppWindowRegistry::Get(function->GetProfile())->
+          GetAppWindowForWebContents(contents) : nullptr;
 }
 
 std::vector<linked_ptr<api::file_manager_private::ProfileInfo> >
@@ -118,9 +116,11 @@ bool FileManagerPrivateGetPreferencesFunction::RunSync() {
 
   result.drive_enabled = drive::util::IsDriveEnabledForProfile(GetProfile());
   result.cellular_disabled =
-      service->GetBoolean(prefs::kDisableDriveOverCellular);
+      service->GetBoolean(drive::prefs::kDisableDriveOverCellular);
   result.hosted_files_disabled =
-      service->GetBoolean(prefs::kDisableDriveHostedFiles);
+      service->GetBoolean(drive::prefs::kDisableDriveHostedFiles);
+  result.search_suggest_enabled =
+      service->GetBoolean(prefs::kSearchSuggestEnabled);
   result.use24hour_clock = service->GetBoolean(prefs::kUse24HourClock);
   result.allow_redeem_offers = true;
   if (!chromeos::CrosSettings::Get()->GetBoolean(
@@ -145,11 +145,11 @@ bool FileManagerPrivateSetPreferencesFunction::RunSync() {
   PrefService* const service = GetProfile()->GetPrefs();
 
   if (params->change_info.cellular_disabled)
-    service->SetBoolean(prefs::kDisableDriveOverCellular,
+    service->SetBoolean(drive::prefs::kDisableDriveOverCellular,
                         *params->change_info.cellular_disabled);
 
   if (params->change_info.hosted_files_disabled)
-    service->SetBoolean(prefs::kDisableDriveHostedFiles,
+    service->SetBoolean(drive::prefs::kDisableDriveHostedFiles,
                         *params->change_info.hosted_files_disabled);
 
   drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
@@ -174,7 +174,7 @@ bool FileManagerPrivateZipSelectionFunction::RunAsync() {
     return false;
 
   base::FilePath src_dir = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), GetProfile(), GURL(params->dir_url));
+      render_frame_host(), GetProfile(), GURL(params->dir_url));
   if (src_dir.empty())
     return false;
 
@@ -185,7 +185,7 @@ bool FileManagerPrivateZipSelectionFunction::RunAsync() {
   std::vector<base::FilePath> files;
   for (size_t i = 0; i < params->selection_urls.size(); ++i) {
     base::FilePath path = file_manager::util::GetLocalPathFromURL(
-        render_view_host(), GetProfile(), GURL(params->selection_urls[i]));
+        render_frame_host(), GetProfile(), GURL(params->selection_urls[i]));
     if (path.empty())
       return false;
     files.push_back(path);
@@ -245,17 +245,8 @@ bool FileManagerPrivateZoomFunction::RunSync() {
       NOTREACHED();
       return false;
   }
-  render_view_host()->Zoom(zoom_type);
+  render_view_host_do_not_use()->Zoom(zoom_type);
   return true;
-}
-
-bool FileManagerPrivateInstallWebstoreItemFunction::RunAsync() {
-  using extensions::api::file_manager_private::InstallWebstoreItem::Params;
-  const scoped_ptr<Params> params(Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params);
-
-  SetError("Deleted, use chrome.webstoreWidgetPrivate API instead.");
-  return false;
 }
 
 FileManagerPrivateRequestWebStoreAccessTokenFunction::
@@ -354,20 +345,17 @@ bool FileManagerPrivateOpenInspectorFunction::RunSync() {
   switch (params->type) {
     case extensions::api::file_manager_private::INSPECTION_TYPE_NORMAL:
       // Open inspector for foreground page.
-      DevToolsWindow::OpenDevToolsWindow(
-          content::WebContents::FromRenderViewHost(render_view_host()));
+      DevToolsWindow::OpenDevToolsWindow(GetSenderWebContents());
       break;
     case extensions::api::file_manager_private::INSPECTION_TYPE_CONSOLE:
       // Open inspector for foreground page and bring focus to the console.
-      DevToolsWindow::OpenDevToolsWindow(
-          content::WebContents::FromRenderViewHost(render_view_host()),
-          DevToolsToggleAction::ShowConsole());
+      DevToolsWindow::OpenDevToolsWindow(GetSenderWebContents(),
+                                         DevToolsToggleAction::ShowConsole());
       break;
     case extensions::api::file_manager_private::INSPECTION_TYPE_ELEMENT:
       // Open inspector for foreground page in inspect element mode.
-      DevToolsWindow::OpenDevToolsWindow(
-          content::WebContents::FromRenderViewHost(render_view_host()),
-          DevToolsToggleAction::Inspect());
+      DevToolsWindow::OpenDevToolsWindow(GetSenderWebContents(),
+                                         DevToolsToggleAction::Inspect());
       break;
     case extensions::api::file_manager_private::INSPECTION_TYPE_BACKGROUND:
       // Open inspector for background page.
@@ -398,8 +386,8 @@ bool FileManagerPrivateGetMimeTypeFunction::RunAsync() {
 
   // Convert file url to local path.
   const scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   const GURL file_url(params->file_url);
   storage::FileSystemURL file_system_url(
@@ -448,6 +436,7 @@ FileManagerPrivateGetProvidingExtensionsFunction::Run() {
     providing_extension->extension_id = info.extension_id;
     providing_extension->name = info.name;
     providing_extension->configurable = info.capabilities.configurable();
+    providing_extension->watchable = info.capabilities.watchable();
     providing_extension->multiple_mounts = info.capabilities.multiple_mounts();
     switch (info.capabilities.source()) {
       case SOURCE_FILE:
@@ -540,6 +529,97 @@ void FileManagerPrivateConfigureVolumeFunction::OnCompleted(
     base::File::Error result) {
   if (result != base::File::FILE_OK) {
     Respond(Error("Failed to complete configuration."));
+    return;
+  }
+
+  Respond(NoArguments());
+}
+
+FileManagerPrivateGetEntryActionsFunction::
+    FileManagerPrivateGetEntryActionsFunction()
+    : chrome_details_(this) {
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateGetEntryActionsFunction::Run() {
+  using extensions::api::file_manager_private::GetEntryActions::Params;
+  const scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  const scoped_refptr<storage::FileSystemContext> file_system_context =
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          chrome_details_.GetProfile(), render_frame_host());
+
+  const storage::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(params->entry_url)));
+
+  chromeos::file_system_provider::util::FileSystemURLParser parser(
+      file_system_url);
+  if (!parser.Parse())
+    return RespondNow(Error("Related provided file system not found."));
+
+  parser.file_system()->GetActions(
+      parser.file_path(),
+      base::Bind(&FileManagerPrivateGetEntryActionsFunction::OnCompleted,
+                 this));
+  return RespondLater();
+}
+
+void FileManagerPrivateGetEntryActionsFunction::OnCompleted(
+    const chromeos::file_system_provider::Actions& actions,
+    base::File::Error result) {
+  if (result != base::File::FILE_OK) {
+    Respond(Error("Failed to fetch actions."));
+    return;
+  }
+
+  using api::file_system_provider::Action;
+  std::vector<linked_ptr<Action>> items;
+  for (const auto& action : actions) {
+    const linked_ptr<Action> item(new Action);
+    item->id = action.id;
+    item->title.reset(new std::string(action.title));
+    items.push_back(item);
+  }
+
+  Respond(ArgumentList(
+      api::file_manager_private::GetEntryActions::Results::Create(items)));
+}
+
+FileManagerPrivateExecuteEntryActionFunction::
+    FileManagerPrivateExecuteEntryActionFunction()
+    : chrome_details_(this) {
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateExecuteEntryActionFunction::Run() {
+  using extensions::api::file_manager_private::ExecuteEntryAction::Params;
+  const scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  const scoped_refptr<storage::FileSystemContext> file_system_context =
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          chrome_details_.GetProfile(), render_frame_host());
+
+  const storage::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(params->entry_url)));
+
+  chromeos::file_system_provider::util::FileSystemURLParser parser(
+      file_system_url);
+  if (!parser.Parse())
+    return RespondNow(Error("Related provided file system not found."));
+
+  parser.file_system()->ExecuteAction(
+      parser.file_path(), params->action_id,
+      base::Bind(&FileManagerPrivateExecuteEntryActionFunction::OnCompleted,
+                 this));
+  return RespondLater();
+}
+
+void FileManagerPrivateExecuteEntryActionFunction::OnCompleted(
+    base::File::Error result) {
+  if (result != base::File::FILE_OK) {
+    Respond(Error("Failed to execute the action."));
     return;
   }
 

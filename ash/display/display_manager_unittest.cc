@@ -904,6 +904,41 @@ TEST_F(DisplayManagerTest, Rotate) {
 
   UpdateDisplay("200x200/l");
   EXPECT_EQ("1 0 0", GetCountSummary());
+
+  // Having the internal display deactivated should restore user rotation. Newly
+  // set rotations should be applied.
+  UpdateDisplay("200x200, 200x200");
+  const int64 internal_display_id =
+      test::DisplayManagerTestApi(display_manager())
+          .SetFirstDisplayAsInternalDisplay();
+
+  display_manager()->SetDisplayRotation(internal_display_id,
+                                        gfx::Display::ROTATE_90,
+                                        gfx::Display::ROTATION_SOURCE_USER);
+  display_manager()->SetDisplayRotation(internal_display_id,
+                                        gfx::Display::ROTATE_0,
+                                        gfx::Display::ROTATION_SOURCE_ACTIVE);
+
+  const DisplayInfo info = GetDisplayInfoForId(internal_display_id);
+  EXPECT_EQ(gfx::Display::ROTATE_0, info.GetActiveRotation());
+
+  // Deactivate internal display to simulate Docked Mode.
+  vector<DisplayInfo> secondary_only;
+  secondary_only.push_back(GetDisplayInfoAt(1));
+  display_manager()->OnNativeDisplaysChanged(secondary_only);
+
+  const DisplayInfo post_removal_info =
+      display_manager()->display_info_[internal_display_id];
+  EXPECT_NE(info.GetActiveRotation(), post_removal_info.GetActiveRotation());
+  EXPECT_EQ(gfx::Display::ROTATE_90, post_removal_info.GetActiveRotation());
+
+  display_manager()->SetDisplayRotation(internal_display_id,
+                                        gfx::Display::ROTATE_180,
+                                        gfx::Display::ROTATION_SOURCE_ACTIVE);
+  const DisplayInfo post_rotation_info =
+      display_manager()->display_info_[internal_display_id];
+  EXPECT_NE(info.GetActiveRotation(), post_rotation_info.GetActiveRotation());
+  EXPECT_EQ(gfx::Display::ROTATE_180, post_rotation_info.GetActiveRotation());
 }
 
 TEST_F(DisplayManagerTest, UIScale) {
@@ -1538,7 +1573,7 @@ TEST_F(DisplayManagerTest, RotateUnifiedDesktop) {
 }
 
 // Makes sure the transition from unified to single won't crash
-// with docked wnidows.
+// with docked windows.
 TEST_F(DisplayManagerTest, UnifiedWithDockWindows) {
   if (!SupportsMultipleDisplays())
     return;
@@ -1553,11 +1588,12 @@ TEST_F(DisplayManagerTest, UnifiedWithDockWindows) {
       CreateTestWindowInShellWithBounds(gfx::Rect(10, 10, 50, 50)));
   docked->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_DOCKED);
   ASSERT_TRUE(wm::GetWindowState(docked.get())->IsDocked());
+  // 47 pixels reserved for launcher shelf height.
   EXPECT_EQ("0,0 250x453", docked->bounds().ToString());
-  UpdateDisplay("300x200");
+  UpdateDisplay("300x300");
   // Make sure the window is still docked.
   EXPECT_TRUE(wm::GetWindowState(docked.get())->IsDocked());
-  EXPECT_EQ("0,0 250x250", docked->bounds().ToString());
+  EXPECT_EQ("0,0 250x253", docked->bounds().ToString());
 }
 
 class ScreenShutdownTest : public test::AshTestBase {

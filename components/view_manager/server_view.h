@@ -80,12 +80,16 @@ class ServerView {
   }
   void SetProperty(const std::string& name, const std::vector<uint8_t>* value);
 
-  // Returns true if this view is attached to |root| and all ancestors are
+  // Returns true if this view is attached to a root and all ancestors are
   // visible.
-  bool IsDrawn(const ServerView* root) const;
+  bool IsDrawn() const;
 
   void SetSurfaceId(cc::SurfaceId surface_id);
   const cc::SurfaceId& surface_id() const { return surface_id_; }
+
+  // See mojom for for details.
+  void set_allows_reembed(bool value) { allows_reembed_ = value; }
+  bool allows_reembed() const { return allows_reembed_; }
 
 #if !defined(NDEBUG)
   std::string GetDebugWindowHierarchy() const;
@@ -107,10 +111,11 @@ class ServerView {
   cc::SurfaceId surface_id_;
   float opacity_;
   gfx::Transform transform_;
+  bool allows_reembed_;
 
   std::map<std::string, std::vector<uint8_t>> properties_;
 
-  ObserverList<ServerViewObserver> observers_;
+  base::ObserverList<ServerViewObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ServerView);
 };

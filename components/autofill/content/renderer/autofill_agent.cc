@@ -7,10 +7,13 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/i18n/case_conversion.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
@@ -85,18 +88,20 @@ void GetDataListSuggestions(const WebInputElement& element,
   if (!ignore_current_value) {
     prefix = element.editingValue();
     if (element.isMultiple() && element.isEmailField()) {
-      std::vector<base::string16> parts;
-      base::SplitStringDontTrim(prefix, ',', &parts);
+      const base::char16 comma[2] = { ',', 0 };
+      std::vector<base::string16> parts = base::SplitString(
+          prefix, comma, base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
       if (parts.size() > 0) {
         base::TrimWhitespace(parts[parts.size() - 1], base::TRIM_LEADING,
                              &prefix);
       }
     }
   }
+  prefix = base::i18n::ToLower(prefix);
   for (WebOptionElement option = options.firstItem().to<WebOptionElement>();
        !option.isNull(); option = options.nextItem().to<WebOptionElement>()) {
-    if (!StartsWith(option.value(), prefix, false) ||
-        option.value() == prefix ||
+    if (!base::StartsWith(base::i18n::ToLower(base::string16(option.value())),
+                          prefix, base::CompareCase::SENSITIVE) ||
         !element.isValidValue(option.value()))
       continue;
 
@@ -298,8 +303,8 @@ void AutofillAgent::didRequestAutocomplete(
   content::SSLStatus ssl_status =
       render_frame()->GetRenderView()->GetSSLStatusOfFrame(
           form.document().frame());
-  bool is_safe = url.SchemeIs(url::kHttpsScheme) &&
-      !net::IsCertStatusError(ssl_status.cert_status);
+  bool is_safe = url.SchemeIsCryptographic() &&
+                 !net::IsCertStatusError(ssl_status.cert_status);
   bool allow_unsafe = base::CommandLine::ForCurrentProcess()->HasSwitch(
       ::switches::kReduceSecurityForTesting);
   FormData form_data;
@@ -392,18 +397,16 @@ void AutofillAgent::textFieldDidChange(const WebFormControlElement& element) {
   if (ignore_text_changes_)
     return;
 
-  if (!WebUserGestureIndicator::isProcessingUserGesture())
+  if (!IsUserGesture())
     return;
 
   // We post a task for doing the Autofill as the caret position is not set
   // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
   // it is needed to trigger autofill.
   weak_ptr_factory_.InvalidateWeakPtrs();
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&AutofillAgent::TextFieldDidChangeImpl,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 element));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&AutofillAgent::TextFieldDidChangeImpl,
+                            weak_ptr_factory_.GetWeakPtr(), element));
 }
 
 void AutofillAgent::TextFieldDidChangeImpl(
@@ -446,11 +449,6 @@ void AutofillAgent::TextFieldDidChangeImpl(
 
 void AutofillAgent::textFieldDidReceiveKeyDown(const WebInputElement& element,
                                                const WebKeyboardEvent& event) {
-  if (password_autofill_agent_->TextFieldHandlingKeyDown(element, event)) {
-    element_ = element;
-    return;
-  }
-
   if (event.windowsKeyCode == ui::VKEY_DOWN ||
       event.windowsKeyCode == ui::VKEY_UP) {
     ShowSuggestionsOptions options;
@@ -489,14 +487,15 @@ void AutofillAgent::AcceptDataListSuggestion(
   if (input_element->isMultiple() && input_element->isEmailField()) {
     std::vector<base::string16> parts;
 
-    base::SplitStringDontTrim(input_element->editingValue(), ',', &parts);
+    base::SplitStringDontTrim(
+        base::StringPiece16(input_element->editingValue()), ',', &parts);
     if (parts.size() == 0)
       parts.push_back(base::string16());
 
     base::string16 last_part = parts.back();
     // We want to keep just the leading whitespace.
     for (size_t i = 0; i < last_part.size(); ++i) {
-      if (!IsWhitespace(last_part[i])) {
+      if (!base::IsUnicodeWhitespace(last_part[i])) {
         last_part = last_part.substr(0, i);
         break;
       }
@@ -767,6 +766,10 @@ void AutofillAgent::HidePopup() {
   Send(new AutofillHostMsg_HidePopup(routing_id()));
 }
 
+bool AutofillAgent::IsUserGesture() const {
+  return WebUserGestureIndicator::isProcessingUserGesture();
+}
+
 void AutofillAgent::didAssociateFormControls(const WebVector<WebNode>& nodes) {
   for (size_t i = 0; i < nodes.size(); ++i) {
     WebLocalFrame* frame = nodes[i].document().frame();
@@ -784,8 +787,8 @@ void AutofillAgent::didAssociateFormControls(const WebVector<WebNode>& nodes) {
   }
 }
 
-void AutofillAgent::xhrSucceeded() {
-  password_autofill_agent_->XHRSucceeded();
+void AutofillAgent::ajaxSucceeded() {
+  password_autofill_agent_->AJAXSucceeded();
 }
 
 // LegacyAutofillAgent ---------------------------------------------------------

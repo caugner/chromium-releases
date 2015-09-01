@@ -8,11 +8,14 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "chrome/browser/banners/app_banner_data_fetcher.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/rappor/rappor_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/escape.h"
 #include "url/gurl.h"
@@ -91,7 +94,46 @@ void AppBannerSettingsHelper::ClearHistoryForURLs(
     settings->SetWebsiteSetting(pattern, ContentSettingsPattern::Wildcard(),
                                 CONTENT_SETTINGS_TYPE_APP_BANNER, std::string(),
                                 nullptr);
+    settings->FlushLossyWebsiteSettings();
   }
+}
+
+void AppBannerSettingsHelper::RecordBannerInstallEvent(
+    content::WebContents* web_contents,
+    const std::string& package_name_or_start_url,
+    AppBannerRapporMetric rappor_metric) {
+  banners::TrackInstallEvent(banners::INSTALL_EVENT_WEB_APP_INSTALLED);
+
+  AppBannerSettingsHelper::RecordBannerEvent(
+      web_contents, web_contents->GetURL(),
+      package_name_or_start_url,
+      AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
+      banners::AppBannerDataFetcher::GetCurrentTime());
+
+  rappor::SampleDomainAndRegistryFromGURL(
+      g_browser_process->rappor_service(),
+      (rappor_metric == WEB ? "AppBanner.WebApp.Installed"
+                            : "AppBanner.NativeApp.Installed"),
+      web_contents->GetURL());
+}
+
+void AppBannerSettingsHelper::RecordBannerDismissEvent(
+    content::WebContents* web_contents,
+    const std::string& package_name_or_start_url,
+    AppBannerRapporMetric rappor_metric) {
+  banners::TrackDismissEvent(banners::DISMISS_EVENT_CLOSE_BUTTON);
+
+  AppBannerSettingsHelper::RecordBannerEvent(
+      web_contents, web_contents->GetURL(),
+      package_name_or_start_url,
+      AppBannerSettingsHelper::APP_BANNER_EVENT_DID_BLOCK,
+      banners::AppBannerDataFetcher::GetCurrentTime());
+
+  rappor::SampleDomainAndRegistryFromGURL(
+      g_browser_process->rappor_service(),
+      (rappor_metric == WEB ? "AppBanner.WebApp.Dismissed"
+                            : "AppBanner.NativeApp.Dismissed"),
+      web_contents->GetURL());
 }
 
 void AppBannerSettingsHelper::RecordBannerEvent(
@@ -168,6 +210,14 @@ void AppBannerSettingsHelper::RecordBannerEvent(
   settings->SetWebsiteSetting(pattern, ContentSettingsPattern::Wildcard(),
                               CONTENT_SETTINGS_TYPE_APP_BANNER, std::string(),
                               origin_dict.release());
+
+  // App banner content settings are lossy, meaning they will not cause the
+  // prefs to become dirty. This is fine for most events, as if they are lost it
+  // just means the user will have to engage a little bit more. However the
+  // DID_ADD_TO_HOMESCREEN event should always be recorded to prevent
+  // spamminess.
+  if (event == APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN)
+    settings->FlushLossyWebsiteSettings();
 }
 
 bool AppBannerSettingsHelper::ShouldShowBanner(
@@ -175,6 +225,12 @@ bool AppBannerSettingsHelper::ShouldShowBanner(
     const GURL& origin_url,
     const std::string& package_name_or_start_url,
     base::Time time) {
+  // Ignore all checks if the flag to do so is set.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kBypassAppBannerEngagementChecks)) {
+    return true;
+  }
+
   // Don't show if it has been added to the homescreen.
   base::Time added_time =
       GetSingleBannerEvent(web_contents, origin_url, package_name_or_start_url,
@@ -182,12 +238,6 @@ bool AppBannerSettingsHelper::ShouldShowBanner(
   if (!added_time.is_null()) {
     banners::TrackDisplayEvent(banners::DISPLAY_EVENT_INSTALLED_PREVIOUSLY);
     return false;
-  }
-
-  // Otherwise, ignore all checks if the flag to do so is set.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kBypassAppBannerEngagementChecks)) {
-    return true;
   }
 
   base::Time blocked_time =

@@ -4,6 +4,10 @@
 
 #include "components/precache/content/precache_manager.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -11,11 +15,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/time/time.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/precache/core/precache_database.h"
 #include "components/precache/core/precache_switches.h"
-#include "components/precache/core/url_list_provider.h"
-#include "components/user_prefs/user_prefs.h"
+#include "components/sync_driver/sync_service.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/network_change_notifier.h"
@@ -26,13 +30,22 @@ namespace {
 
 const char kPrecacheFieldTrialName[] = "Precache";
 const char kPrecacheFieldTrialEnabledGroup[] = "Enabled";
+const char kManifestURLPrefixParam[] = "manifest_url_prefix";
+const int kNumTopHosts = 100;
 
 }  // namespace
 
 namespace precache {
 
-PrecacheManager::PrecacheManager(content::BrowserContext* browser_context)
+int NumTopHosts() {
+  return kNumTopHosts;
+}
+
+PrecacheManager::PrecacheManager(
+    content::BrowserContext* browser_context,
+    const sync_driver::SyncService* const sync_service)
     : browser_context_(browser_context),
+      sync_service_(sync_service),
       precache_database_(new PrecacheDatabase()),
       is_precaching_(false) {
   base::FilePath db_path(browser_context_->GetPath().Append(
@@ -55,14 +68,14 @@ bool PrecacheManager::IsPrecachingEnabled() {
 }
 
 bool PrecacheManager::IsPrecachingAllowed() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return user_prefs::UserPrefs::Get(browser_context_)->GetBoolean(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled);
+  return sync_service_ &&
+         sync_service_->GetActiveDataTypes().Has(syncer::SESSIONS) &&
+         !sync_service_->GetEncryptedDataTypes().Has(syncer::SESSIONS);
 }
 
 void PrecacheManager::StartPrecaching(
     const PrecacheCompletionCallback& precache_completion_callback,
-    URLListProvider* url_list_provider) {
+    const history::HistoryService& history_service) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (is_precaching_) {
@@ -79,8 +92,12 @@ void PrecacheManager::StartPrecaching(
 
   precache_completion_callback_ = precache_completion_callback;
 
-  url_list_provider->GetURLs(
-      base::Bind(&PrecacheManager::OnURLsReceived, AsWeakPtr()));
+  // Request NumTopHosts() top hosts. Note that PrecacheFetcher is further bound
+  // by the value of PrecacheConfigurationSettings.top_sites_count, as retrieved
+  // from the server.
+  history_service.TopHosts(
+      NumTopHosts(),
+      base::Bind(&PrecacheManager::OnHostsReceived, AsWeakPtr()));
 }
 
 void PrecacheManager::CancelPrecaching() {
@@ -137,6 +154,15 @@ void PrecacheManager::RecordStatsForFetch(const GURL& url,
   }
 }
 
+void PrecacheManager::ClearHistory() {
+  // PrecacheDatabase::ClearHistory must run after PrecacheDatabase::Init has
+  // finished. Using PostNonNestableTask guarantees this, by definition. See
+  // base::SequencedTaskRunner for details.
+  BrowserThread::PostNonNestableTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&PrecacheDatabase::ClearHistory, precache_database_));
+}
+
 void PrecacheManager::Shutdown() {
   CancelPrecaching();
 }
@@ -155,18 +181,26 @@ void PrecacheManager::OnDone() {
   precache_completion_callback_.Reset();
 }
 
-void PrecacheManager::OnURLsReceived(const std::list<GURL>& urls) {
+void PrecacheManager::OnHostsReceived(
+    const history::TopHostsList& host_counts) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!is_precaching_) {
     // Don't start precaching if it was canceled while waiting for the list of
-    // URLs.
+    // hosts.
     return;
   }
 
+  std::vector<std::string> hosts;
+  for (const auto& host_count : host_counts)
+    hosts.push_back(host_count.first);
+
   // Start precaching.
   precache_fetcher_.reset(
-      new PrecacheFetcher(urls, browser_context_->GetRequestContext(), this));
+      new PrecacheFetcher(hosts, browser_context_->GetRequestContext(),
+                          variations::GetVariationParamValue(
+                              kPrecacheFieldTrialName, kManifestURLPrefixParam),
+                          this));
   precache_fetcher_->Start();
 }
 

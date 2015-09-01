@@ -90,11 +90,7 @@ std::string ConnectionStateToString(protocol::ConnectionToHost::State state) {
     case protocol::ConnectionToHost::CONNECTING:
       return "CONNECTING";
     case protocol::ConnectionToHost::AUTHENTICATED:
-      // Report the authenticated state as 'CONNECTING' to avoid changing
-      // the interface between the plugin and webapp.
-      // TODO(garykac) Change to 'AUTHENTICATED' in M44 or once we've switched
-      // the client to NaCl.
-      return "CONNECTING";
+      return "AUTHENTICATED";
     case protocol::ConnectionToHost::CONNECTED:
       return "CONNECTED";
     case protocol::ConnectionToHost::CLOSED:
@@ -301,9 +297,8 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
     return;
   }
 
-  scoped_ptr<base::Value> json(
-      base::JSONReader::Read(message.AsString(),
-                             base::JSON_ALLOW_TRAILING_COMMAS));
+  scoped_ptr<base::Value> json(base::JSONReader::DeprecatedRead(
+      message.AsString(), base::JSON_ALLOW_TRAILING_COMMAS));
   base::DictionaryValue* message_dict = nullptr;
   std::string method;
   base::DictionaryValue* data = nullptr;
@@ -358,7 +353,7 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
   } else if (method == "enableDebugRegion") {
     HandleEnableDebugRegion(*data);
   } else if (method == "enableTouchEvents") {
-    HandleEnableTouchEvents();
+    HandleEnableTouchEvents(*data);
   }
 }
 
@@ -990,8 +985,19 @@ void ChromotingInstance::HandleEnableDebugRegion(
   video_renderer_->EnableDebugDirtyRegion(enable);
 }
 
-void ChromotingInstance::HandleEnableTouchEvents() {
-  RequestInputEvents(PP_INPUTEVENT_CLASS_TOUCH);
+void ChromotingInstance::HandleEnableTouchEvents(
+    const base::DictionaryValue& data) {
+  bool enable = false;
+  if (!data.GetBoolean("enable", &enable)) {
+    LOG(ERROR) << "Invalid handleTouchEvents.";
+    return;
+  }
+
+  if (enable) {
+    RequestInputEvents(PP_INPUTEVENT_CLASS_TOUCH);
+  } else {
+    ClearInputEventRequest(PP_INPUTEVENT_CLASS_TOUCH);
+  }
 }
 
 void ChromotingInstance::Disconnect() {
@@ -1016,12 +1022,12 @@ void ChromotingInstance::PostChromotingMessage(const std::string& method,
 void ChromotingInstance::PostLegacyJsonMessage(
     const std::string& method,
     scoped_ptr<base::DictionaryValue> data) {
-  scoped_ptr<base::DictionaryValue> message(new base::DictionaryValue());
-  message->SetString("method", method);
-  message->Set("data", data.release());
+  base::DictionaryValue message;
+  message.SetString("method", method);
+  message.Set("data", data.release());
 
   std::string message_json;
-  base::JSONWriter::Write(message.get(), &message_json);
+  base::JSONWriter::Write(message, &message_json);
   PostMessage(pp::Var(message_json));
 }
 

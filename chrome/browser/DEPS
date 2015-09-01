@@ -1,7 +1,6 @@
 include_rules = [
   "+apps",
   "+ash",
-  "+athena/content/public",
   "+chrome/app",
   "+chrome/chrome_watcher",
   "+chrome/grit",  # For generated headers
@@ -42,7 +41,7 @@ include_rules = [
   "+components/gcm_driver",
   "+components/google",
   "+components/grit",
-  "+components/guest_view",
+  "+components/guest_view/browser",
   "+components/handoff",
   "+components/history",
   "+components/infobars",
@@ -58,7 +57,7 @@ include_rules = [
   "+components/navigation_metrics",
   "+components/network_hints",
   "+components/network_time",
-  "+components/omnibox",
+  "+components/omnibox/browser",
   "+components/os_crypt",
   "+components/password_manager",
   "+components/pdf/browser",
@@ -69,9 +68,11 @@ include_rules = [
   "+components/pref_registry",
   "+components/printing/common",
   "+components/proximity_auth",
+  "+components/proxy_config",
   "+components/query_parser",
   "+components/rappor",
   "+components/renderer_context_menu",
+  "+components/safe_json",
   "+components/search",
   "+components/search_engines",
   "+components/search_provider_logos",
@@ -103,6 +104,7 @@ include_rules = [
   "+courgette",
   "+device/bluetooth",
   "+device/core",
+  "+device/devices_app/public",
   "+device/hid",
   "+device/usb",
   "+device/media_transfer_protocol",
@@ -120,6 +122,7 @@ include_rules = [
   "+jni",
   "+media/audio", # For media audio hang monitor.
   "+media/base",  # For media switches
+  "+mojo/application/public/cpp",
   "+policy",  # For generated headers and source
   "+ppapi/c",  # For various types.
   "+ppapi/host",
@@ -156,7 +159,6 @@ include_rules = [
   "-chrome/browser/ui/views",
   "+chrome/browser/ui/views/chrome_browser_main_extra_parts_views.h",
   "+chrome/browser/ui/views/ash/chrome_browser_main_extra_parts_ash.h",
-  "+chrome/browser/ui/views/athena/chrome_browser_main_extra_parts_athena.h",
 
   # Other libraries.
   "+libxml",  # For search engine definition parsing.
@@ -175,9 +177,9 @@ include_rules = [
   # header-only types, and some selected common code.
   "-third_party/WebKit",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
-  "+third_party/WebKit/public/platform/WebScreenOrientationLockType.h",
   "+third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h",
   "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
+  "+third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h",
   "+third_party/WebKit/public/web/WebCache.h",
   "+third_party/WebKit/public/web/WebContextMenuData.h",
   "+third_party/WebKit/public/web/WebFindOptions.h",

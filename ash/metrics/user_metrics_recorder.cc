@@ -4,6 +4,7 @@
 
 #include "ash/metrics/user_metrics_recorder.h"
 
+#include "ash/metrics/desktop_task_switch_metric_recorder.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_delegate.h"
 #include "ash/shelf/shelf_item_types.h"
@@ -236,6 +237,11 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_CLOSE_THROUGH_CONTEXT_MENU:
       base::RecordAction(base::UserMetricsAction("CloseFromContextMenu"));
       break;
+    case ash::UMA_DESKTOP_SWITCH_TASK:
+      base::RecordAction(base::UserMetricsAction("Desktop_SwitchTask"));
+      task_switch_metrics_recorder_.OnTaskSwitch(
+          TaskSwitchMetricsRecorder::DESKTOP);
+      break;
     case ash::UMA_DRAG_MAXIMIZE_LEFT:
       base::RecordAction(base::UserMetricsAction("WindowDrag_MaximizeLeft"));
       break;
@@ -263,7 +269,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_LAUNCHER_LAUNCH_TASK:
       base::RecordAction(base::UserMetricsAction("Launcher_LaunchTask"));
       task_switch_metrics_recorder_.OnTaskSwitch(
-          TaskSwitchMetricsRecorder::kShelf);
+          TaskSwitchMetricsRecorder::SHELF);
       break;
     case ash::UMA_LAUNCHER_MINIMIZE_TASK:
       base::RecordAction(base::UserMetricsAction("Launcher_MinimizeTask"));
@@ -271,7 +277,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_LAUNCHER_SWITCH_TASK:
       base::RecordAction(base::UserMetricsAction("Launcher_SwitchTask"));
       task_switch_metrics_recorder_.OnTaskSwitch(
-          TaskSwitchMetricsRecorder::kShelf);
+          TaskSwitchMetricsRecorder::SHELF);
       break;
     case UMA_MAXIMIZE_MODE_DISABLED:
       base::RecordAction(base::UserMetricsAction("Touchview_Disabled"));
@@ -358,6 +364,9 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       base::RecordAction(
           base::UserMetricsAction("StatusArea_CapsLock_Popup"));
       break;
+    case ash::UMA_STATUS_AREA_CAST_STOP_CAST:
+      base::RecordAction(base::UserMetricsAction("StatusArea_Cast_StopCast"));
+      break;
     case ash::UMA_STATUS_AREA_CONNECT_TO_CONFIGURED_NETWORK:
       base::RecordAction(
           base::UserMetricsAction("StatusArea_Network_ConnectConfigured"));
@@ -396,6 +405,10 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       break;
     case ash::UMA_STATUS_AREA_DETAILED_CAST_VIEW:
       base::RecordAction(base::UserMetricsAction("StatusArea_Cast_Detailed"));
+      break;
+    case ash::UMA_STATUS_AREA_DETAILED_CAST_VIEW_LAUNCH_CAST:
+      base::RecordAction(
+          base::UserMetricsAction("StatusArea_Cast_Detailed_Launch_Cast"));
       break;
     case ash::UMA_STATUS_AREA_DETAILED_DRIVE_VIEW:
       base::RecordAction(
@@ -584,6 +597,8 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_WINDOW_OVERVIEW_ACTIVE_WINDOW_CHANGED:
       base::RecordAction(
           base::UserMetricsAction("WindowSelector_ActiveWindowChanged"));
+      task_switch_metrics_recorder_.OnTaskSwitch(
+          TaskSwitchMetricsRecorder::OVERVIEW_MODE);
       break;
     case ash::UMA_WINDOW_OVERVIEW_ENTER_KEY:
       base::RecordAction(
@@ -594,6 +609,19 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
           base::UserMetricsAction("WindowCycleController_Cycle"));
       break;
   }
+}
+
+void UserMetricsRecorder::OnShellInitialized() {
+  // Lazy creation of the DesktopTaskSwitchMetricRecorder because it accesses
+  // Shell::GetInstance() which is not available when |this| is instantiated.
+  if (!desktop_task_switch_metric_recorder_) {
+    desktop_task_switch_metric_recorder_.reset(
+        new DesktopTaskSwitchMetricRecorder());
+  }
+}
+
+void UserMetricsRecorder::OnShellShuttingDown() {
+  desktop_task_switch_metric_recorder_.reset();
 }
 
 void UserMetricsRecorder::RecordPeriodicMetrics() {

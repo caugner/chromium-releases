@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import benchmark
+from core import perf_benchmark
 
 from measurements import page_cycler
 import page_sets
+from telemetry import benchmark
 
 
-class _PageCycler(benchmark.Benchmark):
+class _PageCycler(perf_benchmark.PerfBenchmark):
   options = {'pageset_repeat': 6}
   cold_load_percent = 50  # % of page visits for which a cold load is forced
 
@@ -96,7 +97,7 @@ class PageCyclerIntlJaZh(_PageCycler):
     return 'page_cycler.intl_ja_zh'
 
 
-@benchmark.Disabled('xp')  # crbug.com/434366
+@benchmark.Disabled('xp', 'android')  # crbug.com/434366, crbug.com/506903
 class PageCyclerIntlKoThVi(_PageCycler):
   """Page load time for a variety of pages in Korean, Thai and Vietnamese.
 
@@ -173,7 +174,7 @@ class PageCyclerTop10Mobile(_PageCycler):
   def Name(cls):
     return 'page_cycler.top_10_mobile'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.Top10MobilePageSet(run_no_page_interactions=True)
 
 
@@ -213,7 +214,7 @@ class PageCyclerTypical25(_PageCycler):
   def Name(cls):
     return 'page_cycler.typical_25'
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
 # crbug.com/273986: This test is flakey on Windows.
@@ -226,10 +227,10 @@ class PageCyclerOopifTypical25(_PageCycler):
   def Name(cls):
     return 'page_cycler_oopif.typical_25'
 
-  def CustomizeBrowserOptions(self, options):
+  def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(['--site-per-process'])
 
-  def CreatePageSet(self, options):
+  def CreateStorySet(self, options):
     return page_sets.Typical25PageSet(run_no_page_interactions=True)
 
 

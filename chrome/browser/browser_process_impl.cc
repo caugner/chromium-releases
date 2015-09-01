@@ -147,6 +147,10 @@
 #include "chrome/browser/media/webrtc_log_uploader.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/memory/oom_priority_manager.h"
+#endif
+
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 // How often to check if the persistent instance of Chrome needs to restart
 // to install an update.
@@ -179,7 +183,8 @@ BrowserProcessImpl::BrowserProcessImpl(
       module_ref_count_(0),
       did_start_(false),
       download_status_updater_(new DownloadStatusUpdater),
-      local_state_task_runner_(local_state_task_runner) {
+      local_state_task_runner_(local_state_task_runner),
+      cached_default_web_client_state_(ShellIntegration::UNKNOWN_DEFAULT) {
   g_browser_process = this;
   platform_part_.reset(new BrowserProcessPlatformPart());
 
@@ -259,6 +264,11 @@ void BrowserProcessImpl::StartTearDown() {
   // needs to be shut down before the ProfileManager.
   supervised_user_whitelist_installer_.reset();
 
+#if !defined(OS_ANDROID)
+  // Debugger must be cleaned up before ProfileManager.
+  remote_debugging_server_.reset();
+#endif
+
   // Need to clear profiles (download managers) before the io_thread_.
   {
     TRACE_EVENT0("shutdown",
@@ -275,11 +285,6 @@ void BrowserProcessImpl::StartTearDown() {
   promo_resource_service_.reset();
 
   child_process_watcher_.reset();
-
-#if !defined(OS_ANDROID)
-  // Debugger must be cleaned up before IO thread and NotificationService.
-  remote_debugging_server_.reset();
-#endif
 
 #if defined(ENABLE_EXTENSIONS)
   ExtensionRendererState::GetInstance()->Shutdown();
@@ -767,6 +772,22 @@ gcm::GCMDriver* BrowserProcessImpl::gcm_driver() {
   return gcm_driver_.get();
 }
 
+memory::OomPriorityManager* BrowserProcessImpl::GetOomPriorityManager() {
+  DCHECK(CalledOnValidThread());
+#if defined(OS_CHROMEOS)
+  if (!oom_priority_manager_.get())
+    oom_priority_manager_.reset(new memory::OomPriorityManager());
+  return oom_priority_manager_.get();
+#else
+  return nullptr;
+#endif
+}
+
+ShellIntegration::DefaultWebClientState
+BrowserProcessImpl::CachedDefaultWebClientState() {
+  return cached_default_web_client_state_;
+}
+
 // static
 void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kDefaultBrowserSettingEnabled,
@@ -1066,6 +1087,8 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
   child_process_watcher_.reset(new ChromeChildProcessWatcher());
 
+  CacheDefaultWebClientState();
+
   platform_part_->PreMainMessageLoopRun();
 }
 
@@ -1174,6 +1197,14 @@ void BrowserProcessImpl::ApplyMetricsReportingPolicy() {
       base::Bind(
           base::IgnoreResult(&GoogleUpdateSettings::SetCollectStatsConsent),
           local_state()->GetBoolean(prefs::kMetricsReportingEnabled))));
+#endif
+}
+
+void BrowserProcessImpl::CacheDefaultWebClientState() {
+#if defined(OS_CHROMEOS)
+  cached_default_web_client_state_ = ShellIntegration::IS_DEFAULT;
+#elif !defined(OS_ANDROID) && !defined(OS_IOS)
+  cached_default_web_client_state_ = ShellIntegration::GetDefaultBrowser();
 #endif
 }
 

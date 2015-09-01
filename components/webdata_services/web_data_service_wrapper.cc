@@ -7,10 +7,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
+#include "components/autofill/core/browser/webdata/autofill_wallet_metadata_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/password_manager/core/browser/webdata/logins_table.h"
@@ -28,7 +29,7 @@
 namespace {
 
 void InitSyncableServicesOnDBThread(
-    const scoped_refptr<base::MessageLoopProxy>& db_thread,
+    scoped_refptr<base::SingleThreadTaskRunner> db_thread,
     const syncer::SyncableService::StartSyncFlare& sync_flare,
     const scoped_refptr<autofill::AutofillWebDataService>& autofill_web_data,
     const base::FilePath& context_path,
@@ -47,6 +48,9 @@ void InitSyncableServicesOnDBThread(
       autofill_web_data.get(), autofill_backend, app_locale);
   autofill::AutofillWalletSyncableService::CreateForWebDataServiceAndBackend(
       autofill_web_data.get(), autofill_backend, app_locale);
+  autofill::AutofillWalletMetadataSyncableService::
+      CreateForWebDataServiceAndBackend(autofill_web_data.get(),
+                                        autofill_backend, app_locale);
 
   autofill::AutofillProfileSyncableService::FromWebDataService(
       autofill_web_data.get())->InjectStartSyncFlare(sync_flare);
@@ -62,8 +66,8 @@ WebDataServiceWrapper::WebDataServiceWrapper() {
 WebDataServiceWrapper::WebDataServiceWrapper(
     const base::FilePath& context_path,
     const std::string& application_locale,
-    const scoped_refptr<base::MessageLoopProxy>& ui_thread,
-    const scoped_refptr<base::MessageLoopProxy>& db_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
     const syncer::SyncableService::StartSyncFlare& flare,
     ShowErrorCallback show_error_callback) {
   base::FilePath path = context_path.Append(kWebDataFilename);

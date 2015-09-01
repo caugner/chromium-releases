@@ -7,6 +7,10 @@
 
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 
+namespace media_router {
+class MediaRouterDialogController;
+}  // namespace media_router
+
 // The class for the Media Router component action that will be shown in
 // the toolbar.
 class MediaRouterAction : public ToolbarActionViewController {
@@ -17,8 +21,8 @@ class MediaRouterAction : public ToolbarActionViewController {
   // ToolbarActionViewController implementation.
   const std::string& GetId() const override;
   void SetDelegate(ToolbarActionViewDelegate* delegate) override;
-  gfx::Image GetIcon(content::WebContents* web_contents) override;
-  gfx::ImageSkia GetIconWithBadge() override;
+  gfx::Image GetIcon(content::WebContents* web_contents,
+                     const gfx::Size& size) override;
   base::string16 GetActionName() const override;
   base::string16 GetAccessibleName(content::WebContents* web_contents)
       const override;
@@ -33,8 +37,14 @@ class MediaRouterAction : public ToolbarActionViewController {
   bool CanDrag() const override;
   bool ExecuteAction(bool by_user) override;
   void UpdateState() override;
+  bool DisabledClickOpensMenu() const override;
 
  private:
+  // Returns a reference to the MediaRouterDialogController associated with
+  // |delegate_|'s current WebContents. Guaranteed to be non-null.
+  // |delegate_| and its current WebContents must not be null.
+  media_router::MediaRouterDialogController* GetMediaRouterDialogController();
+
   const std::string id_;
   const base::string16 name_;
 

@@ -68,7 +68,8 @@ class MessageSender : public content::NotificationObserver {
   static scoped_ptr<Event> BuildEvent(scoped_ptr<base::ListValue> event_args,
                                       Profile* profile,
                                       GURL event_url) {
-    scoped_ptr<Event> event(new Event("test.onMessage", event_args.Pass()));
+    scoped_ptr<Event> event(new Event(events::TEST_ON_MESSAGE, "test.onMessage",
+                                      event_args.Pass()));
     event->restrict_to_browser_context = profile;
     event->event_url = event_url;
     return event.Pass();
@@ -577,13 +578,13 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   ui_test_utils::NavigateToURL(browser(), google_com_url());
   // The extension requests the TLS channel ID, but it doesn't get it for a
   // site that can't connect to it, regardless of whether the page asks for it.
-  EXPECT_EQ(base::StringPrintf("%d", NAMESPACE_NOT_DEFINED),
+  EXPECT_EQ(base::IntToString(NAMESPACE_NOT_DEFINED),
             GetTlsChannelIdFromPortConnect(chromium_connectable.get(), false));
-  EXPECT_EQ(base::StringPrintf("%d", NAMESPACE_NOT_DEFINED),
+  EXPECT_EQ(base::IntToString(NAMESPACE_NOT_DEFINED),
             GetTlsChannelIdFromSendMessage(chromium_connectable.get(), true));
-  EXPECT_EQ(base::StringPrintf("%d", NAMESPACE_NOT_DEFINED),
+  EXPECT_EQ(base::IntToString(NAMESPACE_NOT_DEFINED),
             GetTlsChannelIdFromPortConnect(chromium_connectable.get(), false));
-  EXPECT_EQ(base::StringPrintf("%d", NAMESPACE_NOT_DEFINED),
+  EXPECT_EQ(base::IntToString(NAMESPACE_NOT_DEFINED),
             GetTlsChannelIdFromSendMessage(chromium_connectable.get(), true));
 }
 
@@ -973,49 +974,43 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
   std::string CreateTlsChannelId() {
     scoped_refptr<net::URLRequestContextGetter> request_context_getter(
         profile()->GetRequestContext());
-  std::string channel_id_private_key;
-  std::string channel_id_cert;
-  net::ChannelIDService::RequestHandle request_handle;
+    scoped_ptr<crypto::ECPrivateKey> channel_id_key;
+    net::ChannelIDService::Request request;
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(
-            &ExternallyConnectableMessagingWithTlsChannelIdTest::
-                CreateDomainBoundCertOnIOThread,
-            base::Unretained(this),
-            base::Unretained(&channel_id_private_key),
-            base::Unretained(&channel_id_cert),
-            base::Unretained(&request_handle),
-            request_context_getter));
+        content::BrowserThread::IO, FROM_HERE,
+        base::Bind(&ExternallyConnectableMessagingWithTlsChannelIdTest::
+                       CreateDomainBoundCertOnIOThread,
+                   base::Unretained(this), base::Unretained(&channel_id_key),
+                   base::Unretained(&request), request_context_getter));
     tls_channel_id_created_.Wait();
     // Create the expected value.
-    base::StringPiece spki;
-    net::asn1::ExtractSPKIFromDERCert(channel_id_cert, &spki);
+    std::vector<uint8> spki_vector;
+    if (!channel_id_key->ExportPublicKey(&spki_vector))
+      return std::string();
+    base::StringPiece spki(reinterpret_cast<char*>(
+        vector_as_array(&spki_vector)), spki_vector.size());
     base::DictionaryValue jwk_value;
     net::JwkSerializer::ConvertSpkiFromDerToJwk(spki, &jwk_value);
     std::string tls_channel_id_value;
-    base::JSONWriter::Write(&jwk_value, &tls_channel_id_value);
+    base::JSONWriter::Write(jwk_value, &tls_channel_id_value);
     return tls_channel_id_value;
   }
 
  private:
   void CreateDomainBoundCertOnIOThread(
-      std::string* channel_id_private_key,
-      std::string* channel_id_cert,
-      net::ChannelIDService::RequestHandle* request_handle,
+      scoped_ptr<crypto::ECPrivateKey>* channel_id_key,
+      net::ChannelIDService::Request* request,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     net::ChannelIDService* channel_id_service =
         request_context_getter->GetURLRequestContext()->
             channel_id_service();
     int status = channel_id_service->GetOrCreateChannelID(
-        chromium_org_url().host(),
-        channel_id_private_key,
-        channel_id_cert,
+        chromium_org_url().host(), channel_id_key,
         base::Bind(&ExternallyConnectableMessagingWithTlsChannelIdTest::
-                   GotDomainBoundCert,
+                       GotDomainBoundCert,
                    base::Unretained(this)),
-        request_handle);
+        request);
     if (status == net::ERR_IO_PENDING)
       return;
     GotDomainBoundCert(status);

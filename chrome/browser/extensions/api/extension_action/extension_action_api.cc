@@ -5,7 +5,10 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 
 #include "base/lazy_instance.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/active_script_controller.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -302,7 +305,8 @@ void ExtensionActionAPI::DispatchEventToExtension(
   if (!EventRouter::Get(context))
     return;
 
-  scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
+  scoped_ptr<Event> event(
+      new Event(events::UNKNOWN, event_name, event_args.Pass()));
   event->restrict_to_browser_context = context;
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(context)
@@ -373,7 +377,8 @@ ExtensionActionFunction::~ExtensionActionFunction() {
 
 bool ExtensionActionFunction::RunSync() {
   ExtensionActionManager* manager = ExtensionActionManager::Get(GetProfile());
-  if (StartsWithASCII(name(), "systemIndicator.", false)) {
+  if (base::StartsWith(name(), "systemIndicator.",
+                       base::CompareCase::INSENSITIVE_ASCII)) {
     extension_action_ = manager->GetSystemIndicator(*extension());
   } else {
     extension_action_ = manager->GetBrowserAction(*extension());
@@ -644,7 +649,7 @@ bool BrowserActionOpenPopupFunction::RunAsync() {
   // Waiting is required so that the popup view can be retrieved by the custom
   // bindings for the response callback. It's also needed to keep this function
   // instance around until a notification is observed.
-  base::MessageLoopForUI::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&BrowserActionOpenPopupFunction::OpenPopupTimedOut, this),
       base::TimeDelta::FromSeconds(10));

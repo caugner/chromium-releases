@@ -54,6 +54,7 @@ class TestingBrowserProcess : public BrowserProcess {
   // Convenience method to get g_browser_process as a TestingBrowserProcess*.
   static TestingBrowserProcess* GetGlobal();
 
+  // BrowserProcess overrides:
   void ResourceDispatcherHostCreated() override;
   void EndSession() override;
   MetricsServicesManager* GetMetricsServicesManager() override;
@@ -121,6 +122,9 @@ class TestingBrowserProcess : public BrowserProcess {
   network_time::NetworkTimeTracker* network_time_tracker() override;
 
   gcm::GCMDriver* gcm_driver() override;
+  memory::OomPriorityManager* GetOomPriorityManager() override;
+  ShellIntegration::DefaultWebClientState CachedDefaultWebClientState()
+      override;
 
   // Set the local state for tests. Consumer is responsible for cleaning it up
   // afterwards (using ScopedTestingLocalState, for example).
@@ -130,6 +134,8 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetBrowserPolicyConnector(policy::BrowserPolicyConnector* connector);
   void SetSafeBrowsingService(SafeBrowsingService* sb_service);
   void SetSystemRequestContext(net::URLRequestContextGetter* context_getter);
+  void SetNotificationUIManager(
+      scoped_ptr<NotificationUIManager> notification_ui_manager);
 
  private:
   // See CreateInstance() and DestoryInstance() above.

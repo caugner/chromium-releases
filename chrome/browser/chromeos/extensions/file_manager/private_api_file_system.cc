@@ -10,6 +10,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
@@ -34,11 +35,14 @@
 #include "chrome/common/extensions/api/file_manager_private.h"
 #include "chrome/common/extensions/api/file_manager_private_internal.h"
 #include "chromeos/disks/disk_mount_manager.h"
+#include "components/storage_monitor/storage_info.h"
+#include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/url_constants.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "net/base/escape.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
 #include "storage/browser/fileapi/file_system_context.h"
@@ -59,6 +63,8 @@ using storage::FileSystemURL;
 
 namespace extensions {
 namespace {
+
+const char kRootPath[] = "/";
 
 // Retrieves total and remaining available size on |mount_path|.
 void GetSizeStatsOnBlockingPool(const std::string& mount_path,
@@ -178,18 +184,19 @@ storage::FileSystemOperationRunner::OperationID StartCopyOnIOThread(
   // Note: |operation_id| is owned by the callback for
   // FileSystemOperationRunner::Copy(). It is always called in the next message
   // loop or later, so at least during this invocation it should alive.
+  //
+  // TODO(yawano): change ERROR_BEHAVIOR_ABORT to ERROR_BEHAVIOR_SKIP after
+  //     error messages of individual operations become appear in the Files.app
+  //     UI.
   storage::FileSystemOperationRunner::OperationID* operation_id =
       new storage::FileSystemOperationRunner::OperationID;
   *operation_id = file_system_context->operation_runner()->Copy(
-      source_url,
-      destination_url,
+      source_url, destination_url,
       storage::FileSystemOperation::OPTION_PRESERVE_LAST_MODIFIED,
+      storage::FileSystemOperation::ERROR_BEHAVIOR_ABORT,
       base::Bind(&OnCopyProgress, profile_id, base::Unretained(operation_id)),
-      base::Bind(&OnCopyCompleted,
-                 profile_id,
-                 base::Owned(operation_id),
-                 source_url,
-                 destination_url));
+      base::Bind(&OnCopyCompleted, profile_id, base::Owned(operation_id),
+                 source_url, destination_url));
   return *operation_id;
 }
 
@@ -244,7 +251,7 @@ void GetFileMetadataRespondOnUIThread(
 ExtensionFunction::ResponseAction
 FileManagerPrivateEnableExternalFileSchemeFunction::Run() {
   ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
-      render_view_host()->GetProcess()->GetID(), content::kExternalFileScheme);
+      render_frame_host()->GetProcess()->GetID(), content::kExternalFileScheme);
   return RespondNow(NoArguments());
 }
 
@@ -258,8 +265,8 @@ ExtensionFunction::ResponseAction FileManagerPrivateGrantAccessFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          chrome_details_.GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          chrome_details_.GetProfile(), render_frame_host());
 
   storage::ExternalFileSystemBackend* const backend =
       file_system_context->external_backend();
@@ -286,7 +293,7 @@ ExtensionFunction::ResponseAction FileManagerPrivateGrantAccessFunction::Run() {
       backend->GrantFileAccessToExtension(extension_->id(),
                                           file_system_url.virtual_path());
       content::ChildProcessSecurityPolicy::GetInstance()
-          ->GrantCreateReadWriteFile(render_view_host()->GetProcess()->GetID(),
+          ->GrantCreateReadWriteFile(render_frame_host()->GetProcess()->GetID(),
                                      file_system_url.path());
     }
   }
@@ -303,7 +310,7 @@ void FileWatchFunctionBase::Respond(bool success) {
 bool FileWatchFunctionBase::RunAsync() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (!render_view_host() || !render_view_host()->GetProcess())
+  if (!render_frame_host() || !render_frame_host()->GetProcess())
     return false;
 
   // First param is url of a file to watch.
@@ -312,8 +319,8 @@ bool FileWatchFunctionBase::RunAsync() {
     return false;
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   const FileSystemURL file_system_url =
       file_system_context->CrackURL(GURL(url));
@@ -327,7 +334,7 @@ bool FileWatchFunctionBase::RunAsync() {
   return true;
 }
 
-void FileManagerPrivateAddFileWatchFunction::PerformFileWatchOperation(
+void FileManagerPrivateInternalAddFileWatchFunction::PerformFileWatchOperation(
     scoped_refptr<storage::FileSystemContext> file_system_context,
     const storage::FileSystemURL& file_system_url,
     const std::string& extension_id) {
@@ -343,7 +350,8 @@ void FileManagerPrivateAddFileWatchFunction::PerformFileWatchOperation(
         file_system_url, false /* recursive */,
         base::Bind(
             &StatusCallbackToResponseCallback,
-            base::Bind(&FileManagerPrivateAddFileWatchFunction::Respond, this)),
+            base::Bind(&FileManagerPrivateInternalAddFileWatchFunction::Respond,
+                       this)),
         base::Bind(&file_manager::EventRouter::OnWatcherManagerNotification,
                    event_router->GetWeakPtr(), file_system_url, extension_id));
     return;
@@ -352,13 +360,15 @@ void FileManagerPrivateAddFileWatchFunction::PerformFileWatchOperation(
   // Obsolete. Fallback code if storage::WatcherManager is not implemented.
   event_router->AddFileWatch(
       file_system_url.path(), file_system_url.virtual_path(), extension_id,
-      base::Bind(&FileManagerPrivateAddFileWatchFunction::Respond, this));
+      base::Bind(&FileManagerPrivateInternalAddFileWatchFunction::Respond,
+                 this));
 }
 
-void FileManagerPrivateRemoveFileWatchFunction::PerformFileWatchOperation(
-    scoped_refptr<storage::FileSystemContext> file_system_context,
-    const storage::FileSystemURL& file_system_url,
-    const std::string& extension_id) {
+void FileManagerPrivateInternalRemoveFileWatchFunction::
+    PerformFileWatchOperation(
+        scoped_refptr<storage::FileSystemContext> file_system_context,
+        const storage::FileSystemURL& file_system_url,
+        const std::string& extension_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   file_manager::EventRouter* const event_router =
@@ -410,6 +420,23 @@ bool FileManagerPrivateGetSizeStatsFunction::RunAsync() {
         base::Bind(&FileManagerPrivateGetSizeStatsFunction::
                        GetDriveAvailableSpaceCallback,
                    this));
+  } else if (volume->type() == file_manager::VOLUME_TYPE_MTP) {
+    // Resolve storage_name.
+    storage_monitor::StorageMonitor* storage_monitor =
+        storage_monitor::StorageMonitor::GetInstance();
+    storage_monitor::StorageInfo info;
+    storage_monitor->GetStorageInfoForPath(volume->mount_path(), &info);
+    std::string storage_name;
+    base::RemoveChars(info.location(), kRootPath, &storage_name);
+    DCHECK(!storage_name.empty());
+
+    // Get MTP StorageInfo.
+    device::MediaTransferProtocolManager* manager =
+        storage_monitor->media_transfer_protocol_manager();
+    manager->GetStorageInfoFromDevice(
+        storage_name, base::Bind(&FileManagerPrivateGetSizeStatsFunction::
+                                     GetMtpAvailableSpaceCallback,
+                                 this));
   } else {
     uint64* total_size = new uint64(0);
     uint64* remaining_size = new uint64(0);
@@ -430,13 +457,30 @@ void FileManagerPrivateGetSizeStatsFunction::GetDriveAvailableSpaceCallback(
     int64 bytes_used) {
   if (error == drive::FILE_ERROR_OK) {
     const uint64 bytes_total_unsigned = bytes_total;
-    const uint64 bytes_remaining_unsigned = bytes_total - bytes_used;
+    // bytes_used can be larger than bytes_total (over quota).
+    const uint64 bytes_remaining_unsigned =
+        std::max(bytes_total - bytes_used, int64(0));
     GetSizeStatsCallback(&bytes_total_unsigned,
                          &bytes_remaining_unsigned);
   } else {
     // If stats couldn't be gotten for drive, result should be left undefined.
     SendResponse(true);
   }
+}
+
+void FileManagerPrivateGetSizeStatsFunction::GetMtpAvailableSpaceCallback(
+    const MtpStorageInfo& mtp_storage_info,
+    const bool error) {
+  if (error) {
+    // If stats couldn't be gotten from MTP volume, result should be left
+    // undefined same as we do for Drive.
+    SendResponse(true);
+    return;
+  }
+
+  const uint64 max_capacity = mtp_storage_info.max_capacity();
+  const uint64 free_space_in_bytes = mtp_storage_info.free_space_in_bytes();
+  GetSizeStatsCallback(&max_capacity, &free_space_in_bytes);
 }
 
 void FileManagerPrivateGetSizeStatsFunction::GetSizeStatsCallback(
@@ -457,8 +501,8 @@ bool FileManagerPrivateValidatePathNameLengthFunction::RunAsync() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   storage::FileSystemURL filesystem_url(
       file_system_context->CrackURL(GURL(params->parent_directory_url)));
@@ -544,8 +588,8 @@ bool FileManagerPrivateStartCopyFunction::RunAsync() {
   }
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   // |parent| may have a trailing slash if it is a root directory.
   std::string destination_url_string = params->parent;
@@ -625,8 +669,8 @@ void FileManagerPrivateStartCopyFunction::RunAfterFreeDiskSpace(
   }
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
   const bool result = BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&StartCopyOnIOThread, GetProfile(), file_system_context,
@@ -653,8 +697,8 @@ bool FileManagerPrivateCancelCopyFunction::RunAsync() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   // We don't much take care about the result of cancellation.
   BrowserThread::PostTask(
@@ -672,8 +716,8 @@ bool FileManagerPrivateInternalResolveIsolatedEntriesFunction::RunAsync() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
   DCHECK(file_system_context.get());
 
   const storage::ExternalFileSystemBackend* external_backend =
@@ -753,8 +797,8 @@ bool FileManagerPrivateComputeChecksumFunction::RunAsync() {
   }
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
-      file_manager::util::GetFileSystemContextForRenderViewHost(
-          GetProfile(), render_view_host());
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          GetProfile(), render_frame_host());
 
   FileSystemURL file_url(file_system_context->CrackURL(GURL(params->file_url)));
   if (!file_url.is_valid()) {
@@ -862,7 +906,7 @@ ExtensionFunction::ResponseAction FileManagerPrivateSetEntryTagFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const base::FilePath local_path = file_manager::util::GetLocalPathFromURL(
-      render_view_host(), chrome_details_.GetProfile(),
+      render_frame_host(), chrome_details_.GetProfile(),
       GURL(params->entry_url));
   const base::FilePath drive_path = drive::util::ExtractDrivePath(local_path);
   if (drive_path.empty())

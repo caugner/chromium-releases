@@ -6,21 +6,23 @@ static_library("browser") {
   sources = [
     "about_signin_internals.cc",
     "about_signin_internals.h",
+    "account_fetcher_service.cc",
+    "account_fetcher_service.h",
     "account_reconcilor.cc",
     "account_reconcilor.h",
-    "account_service_flag_fetcher.cc",
-    "account_service_flag_fetcher.h",
     "account_tracker_service.cc",
     "account_tracker_service.h",
+    "device_activity_fetcher.cc",
+    "device_activity_fetcher.h",
     "gaia_cookie_manager_service.cc",
     "gaia_cookie_manager_service.h",
-    "mutable_profile_oauth2_token_service.cc",
-    "mutable_profile_oauth2_token_service.h",
     "profile_oauth2_token_service.cc",
     "profile_oauth2_token_service.h",
     "refresh_token_annotation_request.cc",
     "refresh_token_annotation_request.h",
     "signin_client.h",
+    "signin_cookie_changed_subscription.cc",
+    "signin_cookie_changed_subscription.h",
     "signin_error_controller.cc",
     "signin_error_controller.h",
     "signin_internals_util.cc",
@@ -33,8 +35,6 @@ static_library("browser") {
     "signin_manager_cookie_helper.h",
     "signin_metrics.cc",
     "signin_metrics.h",
-    "signin_oauth_helper.cc",
-    "signin_oauth_helper.h",
     "signin_tracker.cc",
     "signin_tracker.h",
     "webdata/token_service_table.cc",
@@ -58,13 +58,6 @@ static_library("browser") {
     "//components/os_crypt",
     "//components/webdata/common",
   ]
-
-  if (is_android) {
-    sources -= [
-      "mutable_profile_oauth2_token_service.cc",
-      "mutable_profile_oauth2_token_service.h",
-    ]
-  }
 
   if (is_chromeos) {
     sources -= [ "signin_manager.cc" ]

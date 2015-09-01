@@ -19,6 +19,7 @@
 #include "extensions/shell/browser/api/generated_api_registration.h"
 #include "extensions/shell/browser/shell_extension_host_delegate.h"
 #include "extensions/shell/browser/shell_extension_system_factory.h"
+#include "extensions/shell/browser/shell_extension_web_contents_observer.h"
 #include "extensions/shell/browser/shell_extensions_api_client.h"
 #include "extensions/shell/browser/shell_runtime_api_delegate.h"
 
@@ -214,7 +215,7 @@ void ShellExtensionsBrowserClient::BroadcastEventToRenderers(
     return;
   }
 
-  scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+  scoped_ptr<Event> event(new Event(events::UNKNOWN, event_name, args.Pass()));
   EventRouter::Get(browser_context_)->BroadcastEvent(event.Pass());
 }
 
@@ -238,6 +239,12 @@ bool ShellExtensionsBrowserClient::IsMinBrowserVersionSupported(
 void ShellExtensionsBrowserClient::SetAPIClientForTest(
     ExtensionsAPIClient* api_client) {
   api_client_.reset(api_client);
+}
+
+ExtensionWebContentsObserver*
+ShellExtensionsBrowserClient::GetExtensionWebContentsObserver(
+    content::WebContents* web_contents) {
+  return ShellExtensionWebContentsObserver::FromWebContents(web_contents);
 }
 
 }  // namespace extensions

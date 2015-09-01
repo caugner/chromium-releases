@@ -169,8 +169,8 @@ public class AdapterInputConnection extends BaseInputConnection {
     public void updateState(String text, int selectionStart, int selectionEnd, int compositionStart,
             int compositionEnd, boolean isNonImeChange) {
         if (DEBUG) {
-            Log.w(TAG, "updateState [" + text + "] [" + selectionStart + " " + selectionEnd + "] ["
-                    + compositionStart + " " + compositionEnd + "] [" + isNonImeChange + "]");
+            Log.w(TAG, "updateState [%s] [%s %s] [%s %s] [%b]", text, selectionStart,
+                    selectionEnd, compositionStart, compositionEnd, isNonImeChange);
         }
         // If this update is from the IME, no further state modification is necessary because the
         // state should have been updated already by the IM framework directly.
@@ -227,8 +227,8 @@ public class AdapterInputConnection extends BaseInputConnection {
             return;
         }
         if (DEBUG) {
-            Log.w(TAG, "updateSelectionIfRequired [" + selectionStart + " " + selectionEnd + "] ["
-                    + compositionStart + " " + compositionEnd + "]");
+            Log.w(TAG, "updateSelectionIfRequired [%d %d] [%d %d]", selectionStart, selectionEnd,
+                    compositionStart, compositionEnd);
         }
         // updateSelection should be called every time the selection or composition changes
         // if it happens not within a batch edit, or at the end of each top level batch edit.
@@ -245,7 +245,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean setComposingText(CharSequence text, int newCursorPosition) {
-        if (DEBUG) Log.w(TAG, "setComposingText [" + text + "] [" + newCursorPosition + "]");
+        if (DEBUG) Log.w(TAG, "setComposingText [%s] [%d]", text, newCursorPosition);
         if (maybePerformEmptyCompositionWorkaround(text)) return true;
         mPendingAccent = 0;
         super.setComposingText(text, newCursorPosition);
@@ -258,7 +258,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean commitText(CharSequence text, int newCursorPosition) {
-        if (DEBUG) Log.w(TAG, "commitText [" + text + "] [" + newCursorPosition + "]");
+        if (DEBUG) Log.w(TAG, "commitText [%s] [%d]", text, newCursorPosition);
         if (maybePerformEmptyCompositionWorkaround(text)) return true;
         mPendingAccent = 0;
         super.commitText(text, newCursorPosition);
@@ -272,7 +272,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean performEditorAction(int actionCode) {
-        if (DEBUG) Log.w(TAG, "performEditorAction [" + actionCode + "]");
+        if (DEBUG) Log.w(TAG, "performEditorAction [%d]", actionCode);
         if (actionCode == EditorInfo.IME_ACTION_NEXT) {
             restartInput();
             // Send TAB key event
@@ -292,19 +292,8 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean performContextMenuAction(int id) {
-        if (DEBUG) Log.w(TAG, "performContextMenuAction [" + id + "]");
-        switch (id) {
-            case android.R.id.selectAll:
-                return mImeAdapter.selectAll();
-            case android.R.id.cut:
-                return mImeAdapter.cut();
-            case android.R.id.copy:
-                return mImeAdapter.copy();
-            case android.R.id.paste:
-                return mImeAdapter.paste();
-            default:
-                return false;
-        }
+        if (DEBUG) Log.w(TAG, "performContextMenuAction [%d]", id);
+        return mImeAdapter.performContextMenuAction(id);
     }
 
     /**
@@ -328,7 +317,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean beginBatchEdit() {
-        if (DEBUG) Log.w(TAG, "beginBatchEdit [" + (mNumNestedBatchEdits == 0) + "]");
+        if (DEBUG) Log.w(TAG, "beginBatchEdit [%b]", (mNumNestedBatchEdits == 0));
         mNumNestedBatchEdits++;
         return true;
     }
@@ -340,7 +329,7 @@ public class AdapterInputConnection extends BaseInputConnection {
     public boolean endBatchEdit() {
         if (mNumNestedBatchEdits == 0) return false;
         --mNumNestedBatchEdits;
-        if (DEBUG) Log.w(TAG, "endBatchEdit [" + (mNumNestedBatchEdits == 0) + "]");
+        if (DEBUG) Log.w(TAG, "endBatchEdit [%b]", (mNumNestedBatchEdits == 0));
         if (mNumNestedBatchEdits == 0) updateSelectionIfRequired();
         return mNumNestedBatchEdits != 0;
     }
@@ -368,8 +357,8 @@ public class AdapterInputConnection extends BaseInputConnection {
     private boolean deleteSurroundingTextImpl(
             int beforeLength, int afterLength, boolean fromPhysicalKey) {
         if (DEBUG) {
-            Log.w(TAG, "deleteSurroundingText [" + beforeLength + " " + afterLength + " "
-                            + fromPhysicalKey + "]");
+            Log.w(TAG, "deleteSurroundingText [%d %d %b]", beforeLength, afterLength,
+                    fromPhysicalKey);
         }
 
         if (mPendingAccent != 0) {
@@ -433,8 +422,8 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean sendKeyEvent(KeyEvent event) {
         if (DEBUG) {
-            Log.w(TAG, "sendKeyEvent [" + event.getAction() + "] [" + event.getKeyCode() + "] ["
-                            + event.getUnicodeChar() + "]");
+            Log.w(TAG, "sendKeyEvent [%d] [%d] [%d]", event.getAction(), event.getKeyCode(),
+                    event.getUnicodeChar());
         }
 
         int action = event.getAction();
@@ -529,7 +518,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean setSelection(int start, int end) {
-        if (DEBUG) Log.w(TAG, "setSelection [" + start + " " + end + "]");
+        if (DEBUG) Log.w(TAG, "setSelection [%d %d]", start, end);
         int textLength = mEditable.length();
         if (start < 0 || end < 0 || start > textLength || end > textLength) return true;
         super.setSelection(start, end);
@@ -553,7 +542,7 @@ public class AdapterInputConnection extends BaseInputConnection {
      */
     @Override
     public boolean setComposingRegion(int start, int end) {
-        if (DEBUG) Log.w(TAG, "setComposingRegion [" + start + " " + end + "]");
+        if (DEBUG) Log.w(TAG, "setComposingRegion [%d %d]", start, end);
         int textLength = mEditable.length();
         int a = Math.min(start, end);
         int b = Math.max(start, end);
@@ -562,17 +551,26 @@ public class AdapterInputConnection extends BaseInputConnection {
         if (a > textLength) a = textLength;
         if (b > textLength) b = textLength;
 
+        CharSequence regionText = null;
         if (a == b) {
             removeComposingSpans(mEditable);
         } else {
+            if (a == 0 && b == mEditable.length()) {
+                regionText = mEditable.subSequence(a, b);
+                // If setting composing region that matches, at least in length, of the entire
+                // editable region then check it for image placeholders.  If any are found,
+                // don't continue this operation.
+                // This fixes the problem where, on Android 4.3, pasting an image is followed
+                // by setting the composing region which then causes the image to be deleted.
+                // http://crbug.com/466755
+                for (int i = a; i < b; ++i) {
+                    if (regionText.charAt(i) == '\uFFFC') return true;
+                }
+            }
             super.setComposingRegion(a, b);
         }
         updateSelectionIfRequired();
 
-        CharSequence regionText = null;
-        if (b > a) {
-            regionText = mEditable.subSequence(a, b);
-        }
         return mImeAdapter.setComposingRegion(regionText, a, b);
     }
 

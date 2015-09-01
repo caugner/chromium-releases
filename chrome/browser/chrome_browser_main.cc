@@ -61,6 +61,7 @@
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/three_d_api_observer.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
+#include "chrome/browser/memory/oom_priority_manager.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
 #include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/metrics/thread_watcher.h"
@@ -76,6 +77,7 @@
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_metrics_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
@@ -84,6 +86,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/tracing/navigation_tracing.h"
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -149,6 +152,7 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/dev_tools_discovery_provider_android.h"
 #include "chrome/browser/metrics/thread_watcher_android.h"
+#include "ui/base/resource/resource_bundle_android.h"
 #else
 #include "chrome/browser/devtools/chrome_devtools_discovery_provider.h"
 #include "chrome/browser/feedback/feedback_profile_observer.h"
@@ -468,11 +472,11 @@ void RegisterComponentsForUpdate() {
   }
 
 #if defined(OS_WIN)
-  RegisterSwReporterComponent(cus, g_browser_process->local_state());
+#if defined(GOOGLE_CHROME_BUILD)
+  RegisterSwReporterComponent(cus);
+#endif  // defined(GOOGLE_CHROME_BUILD)
   RegisterCAPSComponent(cus);
 #endif  // defined(OS_WIN)
-
-  cus->Start();
 }
 
 #if !defined(OS_ANDROID)
@@ -536,31 +540,6 @@ void LaunchDevToolsHandlerIfNeeded(const base::CommandLine& command_line) {
     }
   }
 }
-
-// Heap allocated class that listens for first page load, kicks off stat
-// recording and then deletes itself.
-class LoadCompleteListener : public content::NotificationObserver {
- public:
-  LoadCompleteListener() {
-    registrar_.Add(this,
-                   content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                   content::NotificationService::AllSources());
-  }
-  ~LoadCompleteListener() override {}
-
-  // content::NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK_EQ(content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME, type);
-    startup_metric_utils::OnInitialPageLoadComplete();
-    delete this;
-  }
-
- private:
-  content::NotificationRegistrar registrar_;
-  DISALLOW_COPY_AND_ASSIGN(LoadCompleteListener);
-};
 
 }  // namespace
 
@@ -673,6 +652,12 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // This must be called after |local_state_| is initialized.
   browser_field_trials_.SetupFieldTrials();
 
+  // Enable Navigation Tracing only if a trace upload url is specified.
+  if (command_line->HasSwitch(switches::kEnableNavigationTracing) &&
+      command_line->HasSwitch(switches::kTraceUploadURL)) {
+    tracing::SetupNavigationTracing();
+  }
+
   // Initialize FieldTrialSynchronizer system. This is a singleton and is used
   // for posting tasks via base::Bind. Its deleted when it goes out of scope.
   // Even though base::Bind does AddRef and Release, the object will not be
@@ -749,9 +734,6 @@ void ChromeBrowserMainParts::RecordBrowserStartupTime() {
 
   // Record collected startup metrics.
   startup_metric_utils::OnBrowserStartupComplete(is_first_run);
-
-  // Deletes self.
-  new LoadCompleteListener();
 }
 
 // -----------------------------------------------------------------------------
@@ -945,13 +927,17 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
   browser_process_->SetApplicationLocale(loaded_locale);
 
-  base::FilePath resources_pack_path;
-  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
   {
     TRACE_EVENT0("startup",
         "ChromeBrowserMainParts::PreCreateThreadsImpl:AddDataPack");
+    base::FilePath resources_pack_path;
+    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+#if defined(OS_ANDROID)
+    ui::LoadMainAndroidPackFile("assets/resources.pak", resources_pack_path);
+#else
     ResourceBundle::GetSharedInstance().AddDataPackFromPath(
         resources_pack_path, ui::SCALE_FACTOR_NONE);
+#endif  // defined(OS_ANDROID)
   }
 #endif  // defined(OS_MACOSX)
 
@@ -1009,6 +995,11 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
           prefs::kBrowserSuppressDefaultBrowserPrompt,
           master_prefs_->suppress_default_browser_prompt_for_version);
     }
+
+#if defined(OS_WIN)
+    if (!master_prefs_->welcome_page_on_os_upgrade_enabled)
+      local_state_->SetBoolean(prefs::kWelcomePageOnOSUpgradeEnabled, false);
+#endif
   }
 #endif  // !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 
@@ -1115,6 +1106,13 @@ void ChromeBrowserMainParts::PreBrowserStart() {
     chrome_extra_parts_[i]->PreBrowserStart();
 
   three_d_observer_.reset(new ThreeDAPIObserver());
+
+#if defined(OS_CHROMEOS)
+  // Start the out-of-memory priority manager here so that we give the most
+  // amount of time for the other services to start up before we start
+  // adjusting the oom priority.
+  g_browser_process->GetOomPriorityManager()->Start();
+#endif
 }
 
 void ChromeBrowserMainParts::PostBrowserStart() {
@@ -1150,6 +1148,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   SCOPED_UMA_HISTOGRAM_LONG_TIMER("Startup.PreMainMessageLoopRunImplLongTime");
   const base::TimeTicks start_time_step1 = base::TimeTicks::Now();
+
+#if defined(OS_WIN)
+  // Windows parental controls calls can be slow, so we do an early init here
+  // that calculates this value off of the UI thread.
+  IncognitoModePrefs::InitializePlatformParentalControls();
+#endif
 
 #if defined(ENABLE_EXTENSIONS)
   if (!variations::GetVariationParamValue(
@@ -1715,6 +1719,10 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
   // Android specific MessageLoop
   NOTREACHED();
 #else
+#if defined(OS_CHROMEOS)
+  // TODO(georgesak): Check if this is really needed and remove if possible.
+  g_browser_process->GetOomPriorityManager()->Stop();
+#endif  // defined(OS_CHROMEOS)
 
   // Start watching for jank during shutdown. It gets disarmed when
   // |shutdown_watcher_| object is destructed.

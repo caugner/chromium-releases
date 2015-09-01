@@ -13,6 +13,7 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
+#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebPlugin.h"
 #include "third_party/WebKit/public/web/WebViewClient.h"
 
@@ -23,6 +24,10 @@ class WebMouseEvent;
 namespace content {
 class RenderView;
 struct WebPreferences;
+}
+
+namespace gfx {
+class Size;
 }
 
 // This class implements the WebPlugin interface by forwarding drawing and
@@ -38,10 +43,8 @@ class WebViewPlugin : public blink::WebPlugin,
  public:
   class Delegate {
    public:
-    // Bind |frame| to a Javascript object, enabling the delegate to receive
-    // callback methods from Javascript inside the WebFrame.
-    // This method is called from WebFrameClient::didClearWindowObject.
-    virtual void BindWebFrame(blink::WebFrame* frame) = 0;
+    // Called to get the V8 handle used to bind the lifetime to the frame.
+    virtual v8::Local<v8::Value> GetV8Handle(v8::Isolate*) = 0;
 
     // Called upon a context menu event.
     virtual void ShowContextMenu(const blink::WebMouseEvent&) = 0;
@@ -52,6 +55,9 @@ class WebViewPlugin : public blink::WebPlugin,
     // Called to enable JavaScript pass-through to a throttled plugin, which is
     // loaded but idle. Doesn't work for blocked plugins, which is not loaded.
     virtual v8::Local<v8::Object> GetV8ScriptableObject(v8::Isolate*) const = 0;
+
+    // Called when the unobscured rect of the plugin is updated.
+    virtual void OnUnobscuredRectUpdate(const gfx::Rect& unobscured_rect) {}
   };
 
   // Convenience method to set up a new WebViewPlugin using |preferences|
@@ -127,6 +133,7 @@ class WebViewPlugin : public blink::WebPlugin,
 
   // WebWidgetClient methods:
   virtual void didInvalidateRect(const blink::WebRect&);
+  virtual void didUpdateLayoutSize(const blink::WebSize&);
   virtual void didChangeCursor(const blink::WebCursorInfo& cursor);
   virtual void scheduleAnimation();
 
@@ -163,9 +170,9 @@ class WebViewPlugin : public blink::WebPlugin,
 
   blink::WebURLResponse response_;
   std::list<std::string> data_;
-  bool finished_loading_;
   scoped_ptr<blink::WebURLError> error_;
   blink::WebString old_title_;
+  bool finished_loading_;
   bool focused_;
 };
 

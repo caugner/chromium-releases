@@ -6,7 +6,7 @@
 
 /**
  * Map from a file path to contents of the file.
- * @type {Object.<string, string>}
+ * @type {Object<string, string>}
  */
 var fileContents = {};
 
@@ -50,7 +50,7 @@ var TESTING_CHOCOLATE_FILE_NAME = 'chocolate.txt';
 
 /**
  * List of callbacks to be called when a file write is requested.
- * @type {Array.<function(string)>}
+ * @type {Array<function(string)>}
  */
 var writeFileRequestedCallbacks = [];
 
@@ -68,7 +68,7 @@ function onWriteFileRequested(options, onSuccess, onError) {
     callback(filePath);
   });
 
-  if (options.fileSystemId != test_util.FILE_SYSTEM_ID || !filePath) {
+  if (options.fileSystemId !== test_util.FILE_SYSTEM_ID || !filePath) {
     onError('SECURITY');  // enum ProviderError.
     return;
   }
@@ -80,12 +80,12 @@ function onWriteFileRequested(options, onSuccess, onError) {
 
   var metadata = test_util.defaultMetadata[filePath];
 
-  if (filePath == '/' + TESTING_BROKEN_TIRAMISU_FILE_NAME) {
+  if (filePath === '/' + TESTING_BROKEN_TIRAMISU_FILE_NAME) {
     onError('FAILED');
     return;
   }
 
-  if (filePath == '/' + TESTING_CHOCOLATE_FILE_NAME) {
+  if (filePath === '/' + TESTING_CHOCOLATE_FILE_NAME) {
     // Do not call any callback to simulate a very slow network connection.
     return;
   }
@@ -362,7 +362,7 @@ function runTests() {
               writeFileRequestedCallbacks.push(
                   function(filePath) {
                     // Abort the operation after it's started.
-                    if (filePath == '/' + TESTING_CHOCOLATE_FILE_NAME)
+                    if (filePath === '/' + TESTING_CHOCOLATE_FILE_NAME)
                       fileWriter.abort();
                   });
               var blob = new Blob(['A lot of cherries.'], {type: 'text/plain'});

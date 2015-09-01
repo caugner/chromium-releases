@@ -57,7 +57,7 @@ CYGTAR = os.path.join(BUILD_DIR, 'cygtar.py')
 PKGVER = os.path.join(BUILD_DIR, 'package_version', 'package_version.py')
 
 NACLPORTS_URL = 'https://chromium.googlesource.com/external/naclports.git'
-NACLPORTS_REV = 'e53078c33d99b0b3cbadbbbbb92cccf7a48d5dc1'
+NACLPORTS_REV = '65c71c1524a74ff8415573e5e5ef7c59ce4ac437'
 
 GYPBUILD_DIR = 'gypbuild'
 
@@ -553,7 +553,8 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
   gyp_env['GYP_GENERATORS'] = 'ninja'
   gyp_defines = gyp_defines or []
   gyp_defines.append('nacl_allow_thin_archives=0')
-  gyp_defines.append('use_sysroot=1')
+  if not options.no_use_sysroot:
+    gyp_defines.append('use_sysroot=1')
   if options.mac_sdk:
     gyp_defines.append('mac_sdk=%s' % options.mac_sdk)
 
@@ -561,7 +562,10 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
     gyp_defines.append('target_arch=%s' % arch)
     if arch == 'arm':
       gyp_env['GYP_CROSSCOMPILE'] = '1'
-      gyp_defines.append('arm_float_abi=hard')
+      # The arm glibc toolchain is currently having issues on windows.
+      # TODO(sbc): remove this once we fix the issue
+      # https://code.google.com/p/nativeclient/issues/detail?id=4225
+      gyp_defines.append('disable_glibc=1')
       if options.no_arm_trusted:
         gyp_defines.append('disable_cross_trusted=1')
   if getos.GetPlatform() == 'mac':
@@ -865,18 +869,24 @@ def BuildStepBuildPNaClComponent(version, revision):
   # TODO(sbc): figure out how to compensate for this in some way such that
   # revisions always go forward for a given version.
   buildbot_common.BuildStep('PNaCl Component')
+  # Version numbers must follow the format specified in:
+  # https://developer.chrome.com/extensions/manifest/version
+  # So ensure that rev_major/rev_minor don't overflow and ensure there
+  # are no leading zeros.
   if len(revision) > 4:
-    rev_minor = revision[-4:]
-    rev_major = revision[:-4]
+    rev_minor = int(revision[-4:])
+    rev_major = int(revision[:-4])
     version = "0.%s.%s.%s" % (version, rev_major, rev_minor)
   else:
     version = "0.%s.0.%s" % (version, revision)
-  buildbot_common.Run(['./make_pnacl_component.sh', version], cwd=SCRIPT_DIR)
+  buildbot_common.Run(['./make_pnacl_component.sh',
+                       'pnacl_multicrx_%s.zip' % revision,
+                       version], cwd=SCRIPT_DIR)
 
 
-def BuildStepArchivePNaClComponent():
+def BuildStepArchivePNaClComponent(revision):
   buildbot_common.BuildStep('Archive PNaCl Component')
-  Archive('pnacl_multicrx.zip', OUT_DIR)
+  Archive('pnacl_multicrx_%s.zip' % revision, OUT_DIR)
 
 
 def BuildStepArchiveSDKTools():
@@ -892,23 +902,21 @@ def BuildStepSyncNaClPorts():
   """Pull the pinned revision of naclports from SVN."""
   buildbot_common.BuildStep('Sync naclports')
 
-  # In case a previous svn checkout exists, remove it.
+  # In case a previous non-gclient checkout exists, remove it.
   # TODO(sbc): remove this once all the build machines
   # have removed the old checkout
   if (os.path.exists(NACLPORTS_DIR) and
-      not os.path.exists(os.path.join(NACLPORTS_DIR, '.git'))):
+      not os.path.exists(os.path.join(NACLPORTS_DIR, 'src'))):
     buildbot_common.RemoveDir(NACLPORTS_DIR)
 
   if not os.path.exists(NACLPORTS_DIR):
+    buildbot_common.MakeDir(NACLPORTS_DIR)
     # checkout new copy of naclports
-    cmd = ['git', 'clone', NACLPORTS_URL, 'naclports']
-    buildbot_common.Run(cmd, cwd=os.path.dirname(NACLPORTS_DIR))
-  else:
-    # checkout new copy of naclports
-    buildbot_common.Run(['git', 'fetch'], cwd=NACLPORTS_DIR)
+    cmd = ['gclient', 'config', '--name=src', NACLPORTS_URL]
+    buildbot_common.Run(cmd, cwd=NACLPORTS_DIR)
 
   # sync to required revision
-  cmd = ['git', 'checkout', str(NACLPORTS_REV)]
+  cmd = ['gclient', 'sync', '-R', '-r', 'src@' + str(NACLPORTS_REV)]
   buildbot_common.Run(cmd, cwd=NACLPORTS_DIR)
 
 
@@ -927,20 +935,21 @@ def BuildStepBuildNaClPorts(pepper_ver, pepperdir):
   build_script = 'build_tools/buildbot_sdk_bundle.sh'
   buildbot_common.BuildStep('Build naclports')
 
-  bundle_dir = os.path.join(NACLPORTS_DIR, 'out', 'sdk_bundle')
+  naclports_src = os.path.join(NACLPORTS_DIR, 'src')
+  bundle_dir = os.path.join(naclports_src, 'out', 'sdk_bundle')
   out_dir = os.path.join(bundle_dir, 'pepper_%s' % pepper_ver)
 
   # Remove the sdk_bundle directory to remove stale files from previous builds.
   buildbot_common.RemoveDir(bundle_dir)
 
-  buildbot_common.Run([build_script], env=env, cwd=NACLPORTS_DIR)
+  buildbot_common.Run([build_script], env=env, cwd=naclports_src)
 
   # Some naclports do not include a standalone LICENSE/COPYING file
   # so we explicitly list those here for inclusion.
   extra_licenses = ('tinyxml/readme.txt',
                     'jpeg-8d/README',
                     'zlib-1.2.3/README')
-  src_root = os.path.join(NACLPORTS_DIR, 'out', 'build')
+  src_root = os.path.join(naclports_src, 'out', 'build')
   output_license = os.path.join(out_dir, 'ports', 'LICENSE')
   GenerateNotice(src_root, output_license, extra_licenses)
   readme = os.path.join(out_dir, 'ports', 'README')
@@ -954,7 +963,7 @@ def BuildStepTarNaClPorts(pepper_ver, tarfile):
   pepper_dir = 'pepper_%s' % pepper_ver
   archive_dirs = [os.path.join(pepper_dir, 'ports')]
 
-  ports_out = os.path.join(NACLPORTS_DIR, 'out', 'sdk_bundle')
+  ports_out = os.path.join(NACLPORTS_DIR, 'src', 'out', 'sdk_bundle')
   cmd = [sys.executable, CYGTAR, '-C', ports_out, '-cjf', tarfile]
   cmd += archive_dirs
   buildbot_common.Run(cmd, cwd=NACL_DIR)
@@ -1000,6 +1009,8 @@ def main(args):
       help='Set the mac-sdk (e.g. 10.6) to use when building with ninja.')
   parser.add_argument('--no-arm-trusted', action='store_true',
       help='Disable building of ARM trusted components (sel_ldr, etc).')
+  parser.add_argument('--no-use-sysroot', action='store_true',
+      help='Disable building against sysroot.')
 
   # To setup bash completion for this command first install optcomplete
   # and then add this line to your .bashrc:
@@ -1087,9 +1098,8 @@ def main(args):
 
   if platform == 'linux':
     # Linux-only: make sure the debian/stable sysroot image is installed
-    install_script = os.path.join(SRC_DIR, 'chrome', 'installer', 'linux',
-                                  'sysroot_scripts',
-                                  'install-debian.wheezy.sysroot.py')
+    install_script = os.path.join(SRC_DIR, 'build', 'linux', 'sysroot_scripts',
+                                  'install-sysroot.py')
 
     buildbot_common.Run([sys.executable, install_script, '--arch=arm'])
     buildbot_common.Run([sys.executable, install_script, '--arch=i386'])
@@ -1183,7 +1193,7 @@ def main(args):
         BuildStepArchiveBundle('naclports', pepper_ver, chrome_revision,
                                nacl_revision, ports_tarfile)
       BuildStepArchiveSDKTools()
-      BuildStepArchivePNaClComponent()
+      BuildStepArchivePNaClComponent(chrome_revision)
 
   return 0
 

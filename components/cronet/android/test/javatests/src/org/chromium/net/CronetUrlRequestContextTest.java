@@ -130,16 +130,15 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
                 serverHostPort, "unused.net:9999",
                 NativeTestServer.getFileURL("/secureproxychecksuccess.txt"));
         config.setLibraryName("cronet_tests");
-        mActivity.mUrlRequestContext =
-                mActivity.mUrlRequestContext.createContext(
-                        getInstrumentation().getTargetContext(), config);
+        mActivity.mUrlRequestContext = UrlRequestContext.createContext(
+                getInstrumentation().getTargetContext(), config);
         TestUrlRequestListener listener = new TestUrlRequestListener();
 
         // Construct and start a request that can only be returned by the test
         // server. This request will fail if the configuration logic for the
         // Data Reduction Proxy is not used.
         UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
-                "http://google.com/datareductionproxysuccess.txt",
+                "http://DomainThatDoesnt.Resolve/datareductionproxysuccess.txt",
                 listener, listener.getExecutor());
         urlRequest.start();
         listener.blockForDone();
@@ -148,7 +147,8 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         // Proxy logic configured to use the test server as its proxy.
         assertEquals(200, listener.mResponseInfo.getHttpStatusCode());
         assertEquals(serverHostPort, listener.mResponseInfo.getProxyServer());
-        assertEquals("http://www.google.com/datareductionproxysuccess.txt",
+        assertEquals(
+                "http://DomainThatDoesnt.Resolve/datareductionproxysuccess.txt",
                 listener.mResponseInfo.getUrl());
     }
 

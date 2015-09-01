@@ -28,7 +28,7 @@
 namespace content {
 
 TestWebContents::TestWebContents(BrowserContext* browser_context)
-    : WebContentsImpl(browser_context, NULL),
+    : WebContentsImpl(browser_context),
       delegate_view_override_(NULL),
       expect_set_history_offset_and_length_(false),
       expect_set_history_offset_and_length_history_length_(0) {
@@ -38,7 +38,6 @@ TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
                                          SiteInstance* instance) {
   TestWebContents* test_web_contents = new TestWebContents(browser_context);
   test_web_contents->Init(WebContents::CreateParams(browser_context, instance));
-  test_web_contents->RenderFrameCreated(test_web_contents->GetMainFrame());
   return test_web_contents;
 }
 
@@ -63,6 +62,15 @@ TestRenderFrameHost* TestWebContents::GetPendingMainFrame() const {
   }
   return static_cast<TestRenderFrameHost*>(
       GetRenderManager()->pending_frame_host());
+}
+
+int TestWebContents::DownloadImage(const GURL& url,
+                                   bool is_favicon,
+                                   uint32_t max_bitmap_size,
+                                   bool bypass_cache,
+                                   const ImageDownloadCallback& callback) {
+  static int g_next_image_download_id = 0;
+  return ++g_next_image_download_id;
 }
 
 void TestWebContents::TestDidNavigate(RenderFrameHost* render_frame_host,
@@ -106,9 +114,10 @@ void TestWebContents::TestDidNavigateWithReferrer(
   params.is_post = false;
   params.page_state = PageState::CreateFromURL(url);
 
-  RenderFrameHostImpl* rfhi =
-      static_cast<RenderFrameHostImpl*>(render_frame_host);
-  rfhi->frame_tree_node()->navigator()->DidNavigate(rfhi, params);
+  TestRenderFrameHost* rfh =
+      static_cast<TestRenderFrameHost*>(render_frame_host);
+  rfh->InitializeRenderFrameIfNeeded();
+  rfh->frame_tree_node()->navigator()->DidNavigate(rfh, params);
 }
 
 const std::string& TestWebContents::GetSaveFrameHeaders() {
@@ -128,16 +137,15 @@ bool TestWebContents::CrossProcessNavigationPending() {
 
 bool TestWebContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host,
-    int opener_route_id,
+    int opener_frame_routing_id,
     int proxy_routing_id,
+    const FrameReplicationState& replicated_frame_state,
     bool for_main_frame) {
   UpdateMaxPageIDIfNecessary(render_view_host);
   // This will go to a TestRenderViewHost.
-  static_cast<RenderViewHostImpl*>(
-      render_view_host)->CreateRenderView(base::string16(),
-                                          opener_route_id,
-                                          proxy_routing_id,
-                                          -1, false);
+  static_cast<RenderViewHostImpl*>(render_view_host)
+      ->CreateRenderView(opener_frame_routing_id, proxy_routing_id, -1,
+                         replicated_frame_state, false);
   return true;
 }
 
@@ -181,12 +189,24 @@ void TestWebContents::CommitPendingNavigation() {
   // replaced without a pending frame being created, and we don't get the right
   // values for the RFH to navigate: we try to use the old one that has been
   // deleted in the meantime.
-  GetMainFrame()->PrepareForCommit();
+  // Note that for some synchronous navigations (about:blank, javascript
+  // urls, etc.) there will be no NavigationRequest, and no simulation of the
+  // network stack is required.
+  bool browser_side_navigation =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation);
+  if (!browser_side_navigation ||
+      GetMainFrame()->frame_tree_node()->navigation_request()) {
+    GetMainFrame()->PrepareForCommit();
+  }
 
   TestRenderFrameHost* old_rfh = GetMainFrame();
   TestRenderFrameHost* rfh = GetPendingMainFrame();
   if (!rfh)
     rfh = old_rfh;
+  CHECK_IMPLIES(browser_side_navigation, rfh->is_loading());
+  CHECK_IMPLIES(browser_side_navigation,
+                !rfh->frame_tree_node()->navigation_request());
 
   int page_id = entry->GetPageID();
   if (page_id == -1) {
@@ -216,10 +236,7 @@ RenderViewHostDelegateView* TestWebContents::GetDelegateView() {
 }
 
 void TestWebContents::SetOpener(TestWebContents* opener) {
-  // This is normally only set in the WebContents constructor, which also
-  // registers an observer for when the opener gets closed.
-  opener_ = opener;
-  AddDestructionObserver(opener_);
+  frame_tree_.root()->SetOpener(opener->GetFrameTree()->root());
 }
 
 void TestWebContents::AddPendingContents(TestWebContents* contents) {
@@ -253,9 +270,10 @@ void TestWebContents::TestDidFinishLoad(const GURL& url) {
 void TestWebContents::TestDidFailLoadWithError(
     const GURL& url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   FrameHostMsg_DidFailLoadWithError msg(
-      0, url, error_code, error_description);
+      0, url, error_code, error_description, was_ignored_by_handler);
   frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
 }
 

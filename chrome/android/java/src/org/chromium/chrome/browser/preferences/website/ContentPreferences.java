@@ -24,16 +24,15 @@ import java.util.List;
 public class ContentPreferences extends PreferenceFragment
         implements OnPreferenceClickListener {
     // The keys for each category shown on the Site Settings page.
-    static final String ALL_SITES_KEY = "website_settings";
+    static final String ALL_SITES_KEY = "all_sites";
     static final String CAMERA_KEY = "camera";
     static final String COOKIES_KEY = "cookies";
     static final String FULLSCREEN_KEY = "fullscreen";
-    static final String IMAGES_KEY = "images";
     static final String LOCATION_KEY = "device_location";
     static final String MICROPHONE_KEY = "microphone";
     static final String JAVASCRIPT_KEY = "javascript";
     static final String BLOCK_POPUPS_KEY = "block_popups";
-    static final String PUSH_NOTIFICATIONS_KEY = "push_notifications";
+    static final String NOTIFICATIONS_KEY = "notifications";
     static final String POPUPS_KEY = "popups";
     static final String PROTECTED_CONTENT_KEY = "protected_content";
     static final String TRANSLATE_KEY = "translate";
@@ -63,11 +62,9 @@ public class ContentPreferences extends PreferenceFragment
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION;
         } else if (MICROPHONE_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC;
-        } else if (IMAGES_KEY.equals(key)) {
-            return ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES;
         } else if (JAVASCRIPT_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT;
-        } else if (PUSH_NOTIFICATIONS_KEY.equals(key)) {
+        } else if (NOTIFICATIONS_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
         } else if (POPUPS_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS;
@@ -95,10 +92,9 @@ public class ContentPreferences extends PreferenceFragment
         websitePrefs.add(COOKIES_KEY);
         websitePrefs.add(CAMERA_KEY);
         websitePrefs.add(FULLSCREEN_KEY);
-        websitePrefs.add(IMAGES_KEY);
         websitePrefs.add(JAVASCRIPT_KEY);
         websitePrefs.add(MICROPHONE_KEY);
-        websitePrefs.add(PUSH_NOTIFICATIONS_KEY);
+        websitePrefs.add(NOTIFICATIONS_KEY);
         websitePrefs.add(POPUPS_KEY);
         // Initialize the summary and icon for all preferences that have an
         // associated content settings entry.
@@ -111,15 +107,13 @@ public class ContentPreferences extends PreferenceFragment
                 checked = PrefServiceBridge.getInstance().isCameraEnabled();
             } else if (JAVASCRIPT_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().javaScriptEnabled();
-            } else if (IMAGES_KEY.equals(prefName)) {
-                checked = PrefServiceBridge.getInstance().imagesEnabled();
             } else if (MICROPHONE_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isMicEnabled();
             } else if (PROTECTED_CONTENT_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isProtectedMediaIdentifierEnabled();
             } else if (COOKIES_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isAcceptCookiesEnabled();
-            } else if (PUSH_NOTIFICATIONS_KEY.equals(prefName)) {
+            } else if (NOTIFICATIONS_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isPushNotificationsEnabled();
             } else if (POPUPS_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().popupsEnabled();
@@ -158,10 +152,8 @@ public class ContentPreferences extends PreferenceFragment
 
     @Override
     public boolean onPreferenceClick(Preference preference) {
-        if (!ALL_SITES_KEY.equals(preference.getKey())) {
-            preference.getExtras().putString(
-                    WebsitePreferences.EXTRA_CATEGORY, preference.getKey());
-        }
+        preference.getExtras().putString(
+                WebsitePreferences.EXTRA_CATEGORY, preference.getKey());
         preference.getExtras().putString(WebsitePreferences.EXTRA_TITLE,
                 preference.getTitle().toString());
         return false;

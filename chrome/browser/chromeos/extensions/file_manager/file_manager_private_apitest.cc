@@ -317,7 +317,8 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Mount) {
   // |source| flags properly down to Files app.
   chromeos::file_system_provider::ProvidedFileSystemInfo info(
       "testing-extension-id", chromeos::file_system_provider::MountOptions(),
-      base::FilePath(), true /* configurable */, extensions::SOURCE_NETWORK);
+      base::FilePath(), true /* configurable */, false /* watchable */,
+      extensions::SOURCE_NETWORK);
 
   file_manager::VolumeManager::Get(browser()->profile())
       ->AddVolumeForTesting(
@@ -387,7 +388,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange first_change;
   first_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(first_change);
   EXPECT_EQ(2, counter);
 
@@ -395,7 +396,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange second_change;
   second_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/b/c")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(second_change);
   EXPECT_EQ(3, counter);
 
@@ -403,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
   FileChange third_change;
   third_change.Update(
       base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/z/y")),
-      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::CHANGE_TYPE_DELETE);
   event_router_->OnFileChanged(third_change);
   EXPECT_EQ(3, counter);
 

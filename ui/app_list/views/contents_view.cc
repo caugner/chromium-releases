@@ -220,6 +220,8 @@ void ContentsView::ShowSearchResults(bool show) {
   int search_page = GetPageIndexForState(AppListModel::STATE_SEARCH_RESULTS);
   DCHECK_GE(search_page, 0);
 
+  search_results_page_view_->ClearSelectedIndex();
+
   SetActiveStateInternal(show ? search_page : page_before_search_, show, true);
 }
 
@@ -440,8 +442,7 @@ void ContentsView::Layout() {
   }
 
   // The search box is contained in a widget so set the bounds of the widget
-  // rather than the SearchBoxView. In athena, the search box widget will be the
-  // same as the app list widget so don't move it.
+  // rather than the SearchBoxView.
   views::Widget* search_box_widget = GetSearchBoxView()->GetWidget();
   if (search_box_widget && search_box_widget != GetWidget()) {
     gfx::Rect search_box_bounds = GetSearchBoxBoundsForState(GetActiveState());

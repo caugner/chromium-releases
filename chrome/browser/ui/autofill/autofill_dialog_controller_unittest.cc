@@ -26,7 +26,7 @@
 #include "chrome/browser/ui/autofill/mock_address_validator.h"
 #include "chrome/browser/ui/autofill/mock_new_credit_card_bubble_controller.h"
 #include "chrome/browser/ui/autofill/test_generated_credit_card_bubble_controller.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -1124,30 +1124,6 @@ TEST_F(AutofillDialogControllerTest, NewAutofillProfileIsDefault) {
   EXPECT_EQ(2, GetMenuModelForSection(SECTION_SHIPPING)->checked_item());
 }
 
-TEST_F(AutofillDialogControllerTest, AutofillProfileVariants) {
-  SwitchToAutofill();
-  EXPECT_CALL(*controller()->GetView(), ModelChanged());
-  ui::MenuModel* shipping_model =
-      controller()->MenuModelForSection(SECTION_SHIPPING);
-  ASSERT_TRUE(shipping_model);
-  EXPECT_EQ(3, shipping_model->GetItemCount());
-
-  // Set up some variant data.
-  AutofillProfile full_profile(test::GetVerifiedProfile());
-  std::vector<base::string16> names;
-  names.push_back(ASCIIToUTF16("John Doe"));
-  names.push_back(ASCIIToUTF16("Jane Doe"));
-  full_profile.SetRawMultiInfo(NAME_FULL, names);
-  std::vector<base::string16> emails;
-  emails.push_back(ASCIIToUTF16(kFakeEmail));
-  emails.push_back(ASCIIToUTF16("admin@example.com"));
-  full_profile.SetRawMultiInfo(EMAIL_ADDRESS, emails);
-
-  // Non-default variants are ignored by the dialog.
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  EXPECT_EQ(4, shipping_model->GetItemCount());
-}
-
 TEST_F(AutofillDialogControllerTest, SuggestValidEmail) {
   SwitchToAutofill();
   AutofillProfile profile(test::GetVerifiedProfile());
@@ -1422,18 +1398,18 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingStreetAddress) {
   EXPECT_EQ(ADDRESS_BILLING, form_structure()->field(1)->Type().group());
   // Inexact matching; single-line inputs get the address data concatenated but
   // separated by commas.
-  EXPECT_TRUE(StartsWith(form_structure()->field(0)->value,
-                         shipping_profile.GetRawInfo(ADDRESS_HOME_LINE1),
-                         true));
-  EXPECT_TRUE(EndsWith(form_structure()->field(0)->value,
-                       shipping_profile.GetRawInfo(ADDRESS_HOME_LINE2),
-                       true));
-  EXPECT_TRUE(StartsWith(form_structure()->field(1)->value,
-                         billing_profile.GetRawInfo(ADDRESS_HOME_LINE1),
-                         true));
-  EXPECT_TRUE(EndsWith(form_structure()->field(1)->value,
-                       billing_profile.GetRawInfo(ADDRESS_HOME_LINE2),
-                       true));
+  EXPECT_TRUE(base::StartsWith(form_structure()->field(0)->value,
+                               shipping_profile.GetRawInfo(ADDRESS_HOME_LINE1),
+                               true));
+  EXPECT_TRUE(base::EndsWith(form_structure()->field(0)->value,
+                             shipping_profile.GetRawInfo(ADDRESS_HOME_LINE2),
+                             true));
+  EXPECT_TRUE(base::StartsWith(form_structure()->field(1)->value,
+                               billing_profile.GetRawInfo(ADDRESS_HOME_LINE1),
+                               true));
+  EXPECT_TRUE(base::EndsWith(form_structure()->field(1)->value,
+                             billing_profile.GetRawInfo(ADDRESS_HOME_LINE2),
+                             true));
   // The textareas should be an exact match.
   EXPECT_EQ(shipping_profile.GetRawInfo(ADDRESS_HOME_STREET_ADDRESS),
             form_structure()->field(2)->value);

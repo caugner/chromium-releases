@@ -93,7 +93,6 @@ class SystemTrayDelegateChromeOS
   void ShowDateSettings() override;
   void ShowSetTimeDialog() override;
   void ShowNetworkSettingsForGuid(const std::string& guid) override;
-  void ShowBluetoothSettings() override;
   void ShowDisplaySettings() override;
   void ShowChromeSlow() override;
   bool ShouldShowDisplayNotification() override;
@@ -125,6 +124,7 @@ class SystemTrayDelegateChromeOS
   bool GetBluetoothEnabled() override;
   bool GetBluetoothDiscovering() override;
   void ChangeProxySettings() override;
+  ash::CastConfigDelegate* GetCastConfigDelegate() const override;
   ash::NetworkingConfigDelegate* GetNetworkingConfigDelegate() const override;
   ash::VolumeControlDelegate* GetVolumeControlDelegate() const override;
   void SetVolumeControlDelegate(
@@ -222,7 +222,7 @@ class SystemTrayDelegateChromeOS
 
   // Overridden from CrasAudioHandler::AudioObserver.
   void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
-  void OnOutputMuteChanged(bool mute_on) override;
+  void OnOutputMuteChanged(bool mute_on, bool system_adjust) override;
   void OnInputNodeGainChanged(uint64_t node_id, int gain) override;
   void OnInputMuteChanged(bool mute_on) override;
   void OnAudioNodesChanged() override;
@@ -292,6 +292,7 @@ class SystemTrayDelegateChromeOS
 
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
   scoped_ptr<device::BluetoothDiscoverySession> bluetooth_discovery_session_;
+  scoped_ptr<ash::CastConfigDelegate> cast_config_delegate_;
   scoped_ptr<ash::NetworkingConfigDelegate> networking_config_delegate_;
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
   scoped_ptr<CrosSettingsObserverSubscription> device_settings_observer_;
@@ -302,10 +303,10 @@ class SystemTrayDelegateChromeOS
   scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
   scoped_ptr<ash::VPNDelegate> vpn_delegate_;
 
-  ObserverList<ash::CustodianInfoTrayObserver>
+  base::ObserverList<ash::CustodianInfoTrayObserver>
       custodian_info_changed_observers_;
 
-  ObserverList<ash::ShutdownPolicyObserver> shutdown_policy_observers_;
+  base::ObserverList<ash::ShutdownPolicyObserver> shutdown_policy_observers_;
 
   base::WeakPtrFactory<SystemTrayDelegateChromeOS> weak_ptr_factory_;
 

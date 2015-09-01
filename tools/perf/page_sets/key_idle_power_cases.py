@@ -4,18 +4,19 @@
 from page_sets import android_screen_restoration_shared_state
 
 from telemetry.page import page as page_module
-from telemetry.page import page_set as page_set_module
+from telemetry.page import shared_page_state
+from telemetry import story
 
 
 class KeyIdlePowerPage(page_module.Page):
 
-  def __init__(self, url, page_set, turn_screen_off):
+  def __init__(self, url, page_set, turn_screen_off,
+               shared_page_state_class=shared_page_state.SharedMobilePageState):
     super(KeyIdlePowerPage, self).__init__(
         url=url,
         page_set=page_set,
         shared_page_state_class=(android_screen_restoration_shared_state
             .AndroidScreenRestorationSharedState))
-    self.user_agent_type = 'mobile'
     self._turn_screen_off = turn_screen_off
 
   def RunNavigateSteps(self, action_runner):
@@ -33,15 +34,16 @@ class KeyIdlePowerPage(page_module.Page):
 
   def RunPageInteractions(self, action_runner):
     # The page interaction is simply waiting in an idle state.
-    action_runner.Wait(20)
+    with action_runner.CreateInteraction('IdleWaiting'):
+      action_runner.Wait(20)
 
 
-class KeyIdlePowerCasesPageSet(page_set_module.PageSet):
+class KeyIdlePowerCasesPageSet(story.StorySet):
 
   """ Key idle power cases """
 
   def __init__(self):
-    super(KeyIdlePowerCasesPageSet, self).__init__(user_agent_type='mobile')
+    super(KeyIdlePowerCasesPageSet, self).__init__()
 
     foreground_urls_list = [
       # Why: Ensure minimal activity for static, empty pages in the foreground.
@@ -49,7 +51,7 @@ class KeyIdlePowerCasesPageSet(page_set_module.PageSet):
     ]
 
     for url in foreground_urls_list:
-      self.AddUserStory(KeyIdlePowerPage(url, self, False))
+      self.AddStory(KeyIdlePowerPage(url, self, False))
 
     background_urls_list = [
       # Why: Ensure animated GIFs aren't processed when Chrome is backgrounded.
@@ -63,4 +65,4 @@ class KeyIdlePowerCasesPageSet(page_set_module.PageSet):
     ]
 
     for url in background_urls_list:
-      self.AddUserStory(KeyIdlePowerPage(url, self, True))
+      self.AddStory(KeyIdlePowerPage(url, self, True))

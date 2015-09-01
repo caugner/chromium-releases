@@ -5,7 +5,10 @@
 package org.chromium.chrome.browser.sync;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.FragmentTransaction;
+import android.content.Context;
 import android.os.Bundle;
 import android.preference.CheckBoxPreference;
 import android.preference.Preference;
@@ -13,14 +16,21 @@ import android.preference.SwitchPreference;
 import android.preference.TwoStatePreference;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ListView;
+import android.widget.TextView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.sync.ui.PassphraseCreationDialogFragment;
+import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
 import org.chromium.chrome.browser.sync.ui.PassphraseTypeDialogFragment;
 import org.chromium.chrome.browser.sync.ui.SyncCustomizationFragment;
 import org.chromium.chrome.shell.R;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
+import org.chromium.content.browser.test.util.Criteria;
+import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.internal_api.pub.PassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
@@ -30,13 +40,34 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * Tests for SyncCustomizationFragment.
  */
 public class SyncCustomizationFragmentTest extends SyncTestBase {
     private static final String TAG = "SyncCustomizationFragmentTest";
-    private static final String TEST_ACCOUNT = "test@gmail.com";
+
+    /**
+     * Fake ProfileSyncService for test to control the value returned from
+     * isPassphraseRequiredForDecryption.
+     */
+    private static class FakeProfileSyncService extends ProfileSyncService {
+        private boolean mPassphraseRequiredForDecryption;
+
+        public FakeProfileSyncService(Context context) {
+            super(context);
+        }
+
+        @Override
+        public boolean isPassphraseRequiredForDecryption() {
+            return mPassphraseRequiredForDecryption;
+        }
+
+        public void setPassphraseRequiredForDecryption(boolean passphraseRequiredForDecryption) {
+            mPassphraseRequiredForDecryption = passphraseRequiredForDecryption;
+        }
+    }
 
     /**
      * Maps ModelTypes to their UI element IDs.
@@ -51,15 +82,15 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         UI_DATATYPES.put(ModelType.PASSWORD, SyncCustomizationFragment.PREFERENCE_SYNC_PASSWORDS);
         UI_DATATYPES.put(ModelType.PROXY_TABS,
                 SyncCustomizationFragment.PREFERENCE_SYNC_RECENT_TABS);
+        UI_DATATYPES.put(ModelType.PREFERENCE,
+                SyncCustomizationFragment.PREFERENCE_SYNC_SETTINGS);
     }
 
     private Activity mActivity;
-    private AndroidSyncSettings mAndroidSyncSettings;
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mAndroidSyncSettings = AndroidSyncSettings.get(mContext);
         mActivity = getActivity();
     }
 
@@ -67,18 +98,18 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @Feature({"Sync"})
     public void testSyncSwitch() throws Exception {
         setupTestAccountAndSignInToSync(CLIENT_ID);
-        startSync();
+        SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         final SwitchPreference syncSwitch = getSyncSwitch(fragment);
 
         assertTrue(syncSwitch.isChecked());
-        assertTrue(mAndroidSyncSettings.isChromeSyncEnabled());
+        assertTrue(AndroidSyncSettings.isChromeSyncEnabled(mContext));
         togglePreference(syncSwitch);
         assertFalse(syncSwitch.isChecked());
-        assertFalse(mAndroidSyncSettings.isChromeSyncEnabled());
+        assertFalse(AndroidSyncSettings.isChromeSyncEnabled(mContext));
         togglePreference(syncSwitch);
         assertTrue(syncSwitch.isChecked());
-        assertTrue(mAndroidSyncSettings.isChromeSyncEnabled());
+        assertTrue(AndroidSyncSettings.isChromeSyncEnabled(mContext));
     }
 
     /**
@@ -91,7 +122,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         stopSync();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         closeFragment(fragment);
-        assertFalse(mAndroidSyncSettings.isChromeSyncEnabled());
+        assertFalse(AndroidSyncSettings.isChromeSyncEnabled(mContext));
     }
 
     @SmallTest
@@ -102,7 +133,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         assertDefaultSyncOffState(fragment);
         togglePreference(getSyncSwitch(fragment));
-        waitForSyncInitialized();
+        waitForBackendInitialized();
         assertDefaultSyncOnState(fragment);
     }
 
@@ -110,7 +141,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @Feature({"Sync"})
     public void testDefaultControlStatesWithSyncOnThenOff() throws Exception {
         setupTestAccountAndSignInToSync(CLIENT_ID);
-        startSync();
+        SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         assertDefaultSyncOnState(fragment);
         togglePreference(getSyncSwitch(fragment));
@@ -121,7 +152,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @Feature({"Sync"})
     public void testSyncEverythingAndDataTypes() throws Exception {
         setupTestAccountAndSignInToSync(CLIENT_ID);
-        startSync();
+        SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         SwitchPreference syncEverything = getSyncEverything(fragment);
         Collection<CheckBoxPreference> dataTypes = getDataTypes(fragment).values();
@@ -139,20 +170,14 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         }
         getInstrumentation().waitForIdleSync();
         assertDefaultSyncOffState(fragment);
-        assertFalse(mAndroidSyncSettings.isChromeSyncEnabled());
+        assertFalse(AndroidSyncSettings.isChromeSyncEnabled(mContext));
     }
 
-    /**
-     * Make sure that the encryption UI presents the correct options.
-     *
-     * By default it should show the CUSTOM and KEYSTORE options, in that order.
-     * KEYSTORE should be selected but both should be enabled.
-     */
     @SmallTest
     @Feature({"Sync"})
     public void testSettingDataTypes() throws Exception {
         setupTestAccountAndSignInToSync(CLIENT_ID);
-        startSync();
+        SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         SwitchPreference syncEverything = getSyncEverything(fragment);
         Map<ModelType, CheckBoxPreference> dataTypes = getDataTypes(fragment);
@@ -165,6 +190,9 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         }
 
         Set<ModelType> expectedTypes = EnumSet.copyOf(dataTypes.keySet());
+        // TODO(zea): update this once preferences are supported.
+        expectedTypes.remove(ModelType.PREFERENCE);
+        expectedTypes.add(ModelType.PRIORITY_PREFERENCE);
         assertDataTypesAre(expectedTypes);
         togglePreference(dataTypes.get(ModelType.AUTOFILL));
         togglePreference(dataTypes.get(ModelType.PASSWORD));
@@ -177,11 +205,17 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         assertDataTypesAre(expectedTypes);
     }
 
+    /**
+     * Make sure that the encryption UI presents the correct options.
+     *
+     * By default it should show the CUSTOM and KEYSTORE options, in that order.
+     * KEYSTORE should be selected but both should be enabled.
+     */
     @SmallTest
     @Feature({"Sync"})
     public void testDefaultEncryptionOptions() throws Exception {
         setupTestAccountAndSignInToSync(CLIENT_ID);
-        startSync();
+        SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         Preference encryption = getEncryption(fragment);
         clickPreference(encryption);
@@ -202,6 +236,111 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         assertTrue(customView.isEnabled());
         assertTrue(keystoreView.isEnabled());
         assertEquals(keystoreView, listView.getSelectedView());
+    }
+
+    /**
+     * Test that triggering OnPassphraseAccepted dismisses PassphraseDialogFragment.
+     */
+    @SmallTest
+    @Feature({"Sync"})
+    public void testPassphraseDialogDismissed() throws Exception {
+        final FakeProfileSyncService pss = overrideProfileSyncService(mContext);
+
+        setupTestAccountAndSignInToSync(CLIENT_ID);
+        SyncTestUtil.waitForSyncActive(mContext);
+        // Trigger PassphraseDialogFragment to be shown when taping on Encryption.
+        pss.setPassphraseRequiredForDecryption(true);
+
+        final SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        Preference encryption = getEncryption(fragment);
+        clickPreference(encryption);
+
+        final PassphraseDialogFragment passphraseFragment = getPassphraseDialogFragment();
+        assertTrue(passphraseFragment.isAdded());
+
+        // Simulate OnPassphraseAccepted from external event by setting PassphraseRequired to false
+        // and triggering syncStateChanged().
+        // PassphraseDialogFragment should be dismissed.
+        pss.setPassphraseRequiredForDecryption(false);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                pss.syncStateChanged();
+                fragment.getFragmentManager().executePendingTransactions();
+                PassphraseDialogFragment passphraseFragment = getPassphraseDialogFragment();
+                assertNull(passphraseFragment);
+            }
+        });
+    }
+
+    @SmallTest
+    @Feature({"Sync"})
+    public void testPassphraseCreation() throws Exception {
+        setupTestAccountAndSignInToSync(CLIENT_ID);
+        SyncTestUtil.waitForSyncActive(mContext);
+        final SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                fragment.onPassphraseTypeSelected(PassphraseType.CUSTOM_PASSPHRASE);
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+        PassphraseCreationDialogFragment pcdf = getPassphraseCreationDialogFragment();
+        AlertDialog dialog = (AlertDialog) pcdf.getDialog();
+        Button okButton = dialog.getButton(Dialog.BUTTON_POSITIVE);
+        EditText enterPassphrase = (EditText) dialog.findViewById(R.id.passphrase);
+        EditText confirmPassphrase = (EditText) dialog.findViewById(R.id.confirm_passphrase);
+
+        // Error if you try to submit empty passphrase.
+        assertNull(confirmPassphrase.getError());
+        clickButton(okButton);
+        assertTrue(pcdf.isResumed());
+        assertNotNull(confirmPassphrase.getError());
+
+        // Error if you try to submit with only the first box filled.
+        clearError(confirmPassphrase);
+        setText(enterPassphrase, "foo");
+        clickButton(okButton);
+        assertTrue(pcdf.isResumed());
+        assertNotNull(confirmPassphrase.getError());
+
+        // Error if you try to submit with only the second box filled.
+        setText(enterPassphrase, "");
+        clearError(confirmPassphrase);
+        setText(confirmPassphrase, "foo");
+        clickButton(okButton);
+        assertTrue(pcdf.isResumed());
+        assertNotNull(confirmPassphrase.getError());
+
+        // No error if text doesn't match without button press.
+        setText(enterPassphrase, "foo");
+        clearError(confirmPassphrase);
+        setText(confirmPassphrase, "bar");
+        assertNull(confirmPassphrase.getError());
+
+        // Error if you try to submit unmatching text.
+        clearError(confirmPassphrase);
+        clickButton(okButton);
+        assertTrue(pcdf.isResumed());
+        assertNotNull(confirmPassphrase.getError());
+
+        // Success if text matches.
+        setText(confirmPassphrase, "foo");
+        clickButton(okButton);
+        assertFalse(pcdf.isResumed());
+    }
+
+    private FakeProfileSyncService overrideProfileSyncService(final Context context) {
+        return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<FakeProfileSyncService>() {
+            @Override
+            public FakeProfileSyncService call() {
+                // PSS has to be constructed on the UI thread.
+                FakeProfileSyncService fakeProfileSyncService = new FakeProfileSyncService(context);
+                ProfileSyncService.overrideForTests(fakeProfileSyncService);
+                return fakeProfileSyncService;
+            }
+        });
     }
 
     private SyncCustomizationFragment startSyncCustomizationFragment() {
@@ -254,9 +393,19 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
                 SyncCustomizationFragment.PREFERENCE_SYNC_MANAGE_DATA);
     }
 
+    private PassphraseDialogFragment getPassphraseDialogFragment() {
+        return (PassphraseDialogFragment) mActivity.getFragmentManager().findFragmentByTag(
+                SyncCustomizationFragment.FRAGMENT_ENTER_PASSWORD);
+    }
+
     private PassphraseTypeDialogFragment getPassphraseTypeDialogFragment() {
         return (PassphraseTypeDialogFragment) mActivity.getFragmentManager()
                 .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_PASSWORD_TYPE);
+    }
+
+    private PassphraseCreationDialogFragment getPassphraseCreationDialogFragment() {
+        return (PassphraseCreationDialogFragment) mActivity.getFragmentManager()
+                .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_CUSTOM_PASSWORD);
     }
 
     private void assertDefaultSyncOnState(SyncCustomizationFragment fragment) {
@@ -309,6 +458,23 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         });
     }
 
+    private void waitForBackendInitialized() throws InterruptedException {
+        boolean success = CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Boolean>() {
+                    @Override
+                    public Boolean call() throws Exception {
+                        return mProfileSyncService.isSyncInitialized();
+                    }
+                });
+            }
+        }, SyncTestUtil.UI_TIMEOUT_MS, SyncTestUtil.CHECK_INTERVAL_MS);
+        assertTrue("Timed out waiting for sync's backend to be initialized.", success);
+    }
+
+    // UI interaction convenience methods.
+
     private void togglePreference(final TwoStatePreference pref) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -327,6 +493,36 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
             @Override
             public void run() {
                 pref.getOnPreferenceClickListener().onPreferenceClick(pref);
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+    }
+
+    private void clickButton(final Button button) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                button.performClick();
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+    }
+
+    private void setText(final TextView textView, final String text) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                textView.setText(text);
+            }
+        });
+        getInstrumentation().waitForIdleSync();
+    }
+
+    private void clearError(final TextView textView) {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                textView.setError(null);
             }
         });
         getInstrumentation().waitForIdleSync();

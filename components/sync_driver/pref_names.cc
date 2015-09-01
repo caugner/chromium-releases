@@ -34,6 +34,7 @@ const char kSyncApps[] = "sync.apps";
 const char kSyncArticles[] = "sync.articles";
 const char kSyncAutofillProfile[] = "sync.autofill_profile";
 const char kSyncAutofillWallet[] = "sync.autofill_wallet";
+const char kSyncAutofillWalletMetadata[] = "sync.autofill_wallet_metadata";
 const char kSyncAutofill[] = "sync.autofill";
 const char kSyncBookmarks[] = "sync.bookmarks";
 const char kSyncDeviceInfo[] = "sync.device_info";
@@ -78,10 +79,6 @@ const char kSyncEncryptionBootstrapToken[] = "sync.encryption_bootstrap_token";
 // so we don't have to do a GetKey command at restart.
 const char kSyncKeystoreEncryptionBootstrapToken[] =
     "sync.keystore_encryption_bootstrap_token";
-
-// Boolean tracking whether the user chose to specify a secondary encryption
-// passphrase.
-const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
 
 // The GUID session sync will use to identify this client, even across sync
 // disable/enable events.

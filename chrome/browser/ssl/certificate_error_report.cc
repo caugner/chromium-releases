@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/ssl/cert_logger.pb.h"
 #include "net/cert/cert_status_flags.h"
@@ -48,6 +49,17 @@ void AddCertStatusToReportErrors(net::CertStatus cert_status,
   if (cert_status & net::CERT_STATUS_NO_REVOCATION_MECHANISM)
     report->add_cert_error(CertLoggerRequest::ERR_CERT_NO_REVOCATION_MECHANISM);
 }
+
+bool CertificateChainToString(scoped_refptr<net::X509Certificate> cert,
+                              std::string* result) {
+  std::vector<std::string> pem_encoded_chain;
+  if (!cert->GetPEMEncodedChain(&pem_encoded_chain))
+    return false;
+
+  *result = JoinString(pem_encoded_chain, std::string());
+  return true;
+}
+
 }  // namespace
 
 CertificateErrorReport::CertificateErrorReport()
@@ -61,14 +73,17 @@ CertificateErrorReport::CertificateErrorReport(const std::string& hostname,
   cert_report_->set_time_usec(now.ToInternalValue());
   cert_report_->set_hostname(hostname);
 
-  std::vector<std::string> pem_encoded_chain;
-  if (!ssl_info.cert->GetPEMEncodedChain(&pem_encoded_chain)) {
+  if (!CertificateChainToString(ssl_info.cert,
+                                cert_report_->mutable_cert_chain())) {
     LOG(ERROR) << "Could not get PEM encoded chain.";
   }
 
-  std::string* cert_chain = cert_report_->mutable_cert_chain();
-  for (size_t i = 0; i < pem_encoded_chain.size(); ++i)
-    cert_chain->append(pem_encoded_chain[i]);
+  if (ssl_info.unverified_cert &&
+      !CertificateChainToString(
+          ssl_info.unverified_cert,
+          cert_report_->mutable_unverified_cert_chain())) {
+    LOG(ERROR) << "Could not get PEM encoded unverified certificate chain.";
+  }
 
   cert_report_->add_pin(ssl_info.pinning_failure_log);
 
@@ -85,6 +100,32 @@ bool CertificateErrorReport::InitializeFromString(
 
 bool CertificateErrorReport::Serialize(std::string* output) const {
   return cert_report_->SerializeToString(output);
+}
+
+void CertificateErrorReport::SetInterstitialInfo(
+    const InterstitialReason& interstitial_reason,
+    const ProceedDecision& proceed_decision,
+    const Overridable& overridable) {
+  CertLoggerInterstitialInfo* interstitial_info =
+      cert_report_->mutable_interstitial_info();
+
+  switch (interstitial_reason) {
+    case INTERSTITIAL_SSL:
+      interstitial_info->set_interstitial_reason(
+          CertLoggerInterstitialInfo::INTERSTITIAL_SSL);
+      break;
+    case INTERSTITIAL_CAPTIVE_PORTAL:
+      interstitial_info->set_interstitial_reason(
+          CertLoggerInterstitialInfo::INTERSTITIAL_CAPTIVE_PORTAL);
+      break;
+    case INTERSTITIAL_CLOCK:
+      interstitial_info->set_interstitial_reason(
+          CertLoggerInterstitialInfo::INTERSTITIAL_CLOCK);
+      break;
+  }
+
+  interstitial_info->set_user_proceeded(proceed_decision == USER_PROCEEDED);
+  interstitial_info->set_overridable(overridable == INTERSTITIAL_OVERRIDABLE);
 }
 
 const std::string& CertificateErrorReport::hostname() const {

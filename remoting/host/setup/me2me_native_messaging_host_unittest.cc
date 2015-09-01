@@ -292,7 +292,7 @@ void Me2MeNativeMessagingHostTest::SetUp() {
 
   // Arrange to run |test_message_loop_| until no components depend on it.
   host_task_runner_ = new AutoThreadTaskRunner(
-      host_thread_->message_loop_proxy(),
+      host_thread_->task_runner(),
       base::Bind(&Me2MeNativeMessagingHostTest::ExitTest,
                  base::Unretained(this)));
 
@@ -336,7 +336,7 @@ void Me2MeNativeMessagingHostTest::StartHost() {
                           base::Unretained(this)));
 
   // Notify the test that the host has finished starting up.
-  test_message_loop_->message_loop_proxy()->PostTask(
+  test_message_loop_->task_runner()->PostTask(
       FROM_HERE, test_run_loop_->QuitClosure());
 }
 
@@ -353,8 +353,8 @@ void Me2MeNativeMessagingHostTest::StopHost() {
 }
 
 void Me2MeNativeMessagingHostTest::ExitTest() {
-  if (!test_message_loop_->message_loop_proxy()->RunsTasksOnCurrentThread()) {
-    test_message_loop_->message_loop_proxy()->PostTask(
+  if (!test_message_loop_->task_runner()->RunsTasksOnCurrentThread()) {
+    test_message_loop_->task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&Me2MeNativeMessagingHostTest::ExitTest,
                    base::Unretained(this)));
@@ -397,7 +397,7 @@ Me2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
     return nullptr;
   }
 
-  scoped_ptr<base::Value> message(base::JSONReader::Read(message_json));
+  scoped_ptr<base::Value> message = base::JSONReader::Read(message_json);
   if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
     return nullptr;
   }
@@ -409,7 +409,7 @@ Me2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
 void Me2MeNativeMessagingHostTest::WriteMessageToInputPipe(
     const base::Value& message) {
   std::string message_json;
-  base::JSONWriter::Write(&message, &message_json);
+  base::JSONWriter::Write(message, &message_json);
 
   uint32 length = message_json.length();
   input_write_file_.WriteAtCurrentPos(reinterpret_cast<char*>(&length),

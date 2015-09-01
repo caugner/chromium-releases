@@ -6,6 +6,10 @@
 
 namespace prefs {
 
+// Boolean that is true if we should unconditionally block third-party cookies,
+// regardless of other content settings.
+const char kBlockThirdPartyCookies[] = "profile.block_third_party_cookies";
+
 // Version of the pattern format used to define content settings.
 const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
 
@@ -79,6 +83,10 @@ const char kDefaultProtectedMediaIdentifierSetting[] =
 #endif
 const char kDefaultAppBannerSetting[] =
     "profile.default_content_setting_values.app_banner";
+const char kDefaultSiteEngagementSetting[] =
+    "profile.default_content_setting_values.site_engagement";
+const char kDefaultDurableStorageSetting[] =
+    "profile.default_content_setting_values.durable_storage";
 
 // Boolean indicating whether the media stream default setting had been
 // migrated into two separate microphone and camera settings.
@@ -140,6 +148,10 @@ const char kContentSettingsProtectedMediaIdentifierPatternPairs[] =
 #endif
 const char kContentSettingsAppBannerPatternPairs[] =
     "profile.content_settings.exceptions.app_banner";
+const char kContentSettingsSiteEngagementPatternPairs[] =
+    "profile.content_settings.exceptions.site_engagement";
+const char kContentSettingsDurableStoragePatternPairs[] =
+    "profile.content_settings.exceptions.durable_storage";
 
 // Whether the patern pairs have been migrated from the deprecated aggregate
 // preference |kContentSettingsPatternPairs| to the separate preferences

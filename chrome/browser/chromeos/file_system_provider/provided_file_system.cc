@@ -17,6 +17,8 @@
 #include "chrome/browser/chromeos/file_system_provider/operations/create_directory.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/create_file.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/delete_entry.h"
+#include "chrome/browser/chromeos/file_system_provider/operations/execute_action.h"
+#include "chrome/browser/chromeos/file_system_provider/operations/get_actions.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/get_metadata.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/move_entry.h"
 #include "chrome/browser/chromeos/file_system_provider/operations/open_file.h"
@@ -136,7 +138,9 @@ ProvidedFileSystem::ProvidedFileSystem(
       file_system_info_(file_system_info),
       notification_manager_(
           new NotificationManager(profile_, file_system_info_)),
-      request_manager_(new RequestManager(notification_manager_.get())),
+      request_manager_(new RequestManager(profile,
+                                          file_system_info.extension_id(),
+                                          notification_manager_.get())),
       watcher_queue_(1),
       weak_ptr_factory_(this) {
 }
@@ -156,7 +160,8 @@ void ProvidedFileSystem::SetEventRouterForTesting(
 void ProvidedFileSystem::SetNotificationManagerForTesting(
     scoped_ptr<NotificationManagerInterface> notification_manager) {
   notification_manager_ = notification_manager.Pass();
-  request_manager_.reset(new RequestManager(notification_manager_.get()));
+  request_manager_.reset(new RequestManager(
+      profile_, file_system_info_.extension_id(), notification_manager_.get()));
 }
 
 AbortCallback ProvidedFileSystem::RequestUnmount(
@@ -190,6 +195,40 @@ AbortCallback ProvidedFileSystem::GetMetadata(
 
   return base::Bind(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
+}
+
+AbortCallback ProvidedFileSystem::GetActions(
+    const base::FilePath& entry_path,
+    const GetActionsCallback& callback) {
+  const int request_id = request_manager_->CreateRequest(
+      GET_ACTIONS,
+      scoped_ptr<RequestManager::HandlerInterface>(new operations::GetActions(
+          event_router_, file_system_info_, entry_path, callback)));
+  if (!request_id) {
+    callback.Run(Actions(), base::File::FILE_ERROR_SECURITY);
+    return AbortCallback();
+  }
+
+  return base::Bind(&ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(),
+                    request_id);
+}
+
+AbortCallback ProvidedFileSystem::ExecuteAction(
+    const base::FilePath& entry_path,
+    const std::string& action_id,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
+  const int request_id = request_manager_->CreateRequest(
+      EXECUTE_ACTION,
+      scoped_ptr<RequestManager::HandlerInterface>(
+          new operations::ExecuteAction(event_router_, file_system_info_,
+                                        entry_path, action_id, callback)));
+  if (!request_id) {
+    callback.Run(base::File::FILE_ERROR_SECURITY);
+    return AbortCallback();
+  }
+
+  return base::Bind(&ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(),
+                    request_id);
 }
 
 AbortCallback ProvidedFileSystem::ReadDirectory(

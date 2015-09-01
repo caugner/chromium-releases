@@ -64,6 +64,7 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
  protected:
   // Makes a ctor available in tests.
   SavePasswordInfoBarDelegate(
+      content::WebContents* web_contents,
       scoped_ptr<password_manager::PasswordFormManager> form_to_save,
       const std::string& uma_histogram_suffix,
       password_manager::CredentialSourceType source_type,
@@ -99,5 +100,10 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(SavePasswordInfoBarDelegate);
 };
+
+// Creates the platform-specific SavePassword InfoBar. This function is defined
+// in platform-specific .cc (or .mm) files.
+scoped_ptr<infobars::InfoBar> CreateSavePasswordInfoBar(
+    scoped_ptr<SavePasswordInfoBarDelegate> delegate);
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_SAVE_PASSWORD_INFOBAR_DELEGATE_H_

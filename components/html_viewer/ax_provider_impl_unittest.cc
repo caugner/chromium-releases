@@ -47,18 +47,24 @@ class TestWebViewClient : public WebViewClient {
 class AxProviderImplTest : public testing::Test {
  public:
   AxProviderImplTest()
-      : renderer_scheduler_(scheduler::RendererScheduler::Create()) {
+      : message_loop_(new base::MessageLoopForUI()),
+        renderer_scheduler_(scheduler::RendererScheduler::Create()) {
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
     gin::V8Initializer::LoadV8Snapshot();
+    gin::V8Initializer::LoadV8Natives();
 #endif
     blink::initialize(
         new html_viewer::BlinkPlatformImpl(nullptr, renderer_scheduler_.get()));
   }
 
-  ~AxProviderImplTest() override { blink::shutdown(); }
+  ~AxProviderImplTest() override {
+    renderer_scheduler_->Shutdown();
+    message_loop_.reset();
+    blink::shutdown();
+  }
 
  private:
-  base::MessageLoopForUI message_loop;
+  scoped_ptr<base::MessageLoopForUI> message_loop_;
   scoped_ptr<scheduler::RendererScheduler> renderer_scheduler_;
 };
 
@@ -103,7 +109,8 @@ TEST_F(AxProviderImplTest, MAYBE_Basic) {
   TestWebViewClient web_view_client;
   TestWebFrameClient web_frame_client;
   WebView* view = WebView::create(&web_view_client);
-  view->setMainFrame(WebLocalFrame::create(&web_frame_client));
+  view->setMainFrame(WebLocalFrame::create(blink::WebTreeScopeType::Document,
+                                           &web_frame_client));
   view->mainFrame()->loadHTMLString(
       WebData(
           "<html><body>foo<a "
@@ -111,7 +118,9 @@ TEST_F(AxProviderImplTest, MAYBE_Basic) {
       WebURL(GURL("http://someplace.net")));
   base::MessageLoop::current()->Run();
 
-  html_viewer::AxProviderImpl ax_provider_impl(view);
+  mojo::AxProviderPtr service_ptr;
+  html_viewer::AxProviderImpl ax_provider_impl(view,
+                                               mojo::GetProxy(&service_ptr));
   NodeCatcher catcher;
   ax_provider_impl.GetTree(
       base::Bind(&NodeCatcher::OnNodes, base::Unretained(&catcher)));

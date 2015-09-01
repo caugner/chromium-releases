@@ -9,14 +9,14 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.TextUtils;
 import android.util.Base64;
-import android.util.Log;
 import android.widget.Toast;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CalledByNative;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.webapps.WebappLauncherActivity;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.ScreenOrientationConstants;
 
@@ -33,6 +33,10 @@ public class ShortcutHelper {
     public static final String EXTRA_TITLE = "org.chromium.chrome.browser.webapp_title";
     public static final String EXTRA_URL = "org.chromium.chrome.browser.webapp_url";
     public static final String EXTRA_ORIENTATION = ScreenOrientationConstants.EXTRA_ORIENTATION;
+    public static final String EXTRA_SOURCE = "org.chromium.chrome.browser.webapp_source";
+
+    // This value is equal to SOURCE_UNKNOWN in the C++ ShortcutInfo struct.
+    public static final int SOURCE_UNKNOWN = 0;
 
     /** Observes the data fetching pipeline. */
     public interface ShortcutHelperObserver {
@@ -43,15 +47,26 @@ public class ShortcutHelper {
         void onIconAvailable(Bitmap icon);
     }
 
-    private static String sFullScreenAction;
+    /** Broadcasts Intents out Android for adding the shortcut. */
+    public static class Delegate {
+        /**
+         * Broadcasts an intent to all interested BroadcastReceivers.
+         * @param context The Context to use.
+         * @param intent The intent to broadcast.
+         */
+        public void sendBroadcast(Context context, Intent intent) {
+            context.sendBroadcast(intent);
+        }
 
-    /**
-     * Sets the class name used when launching the shortcuts.
-     * @param fullScreenAction Class name of the fullscreen Activity.
-     */
-    public static void setFullScreenAction(String fullScreenAction) {
-        sFullScreenAction = fullScreenAction;
+        /**
+         * Returns the name of the fullscreen Activity to use when launching shortcuts.
+         */
+        public String getFullscreenAction() {
+            return WebappLauncherActivity.ACTION_START_WEBAPP;
+        }
     }
+
+    private static Delegate sDelegate = new Delegate();
 
     private final Context mAppContext;
     private final Tab mTab;
@@ -94,6 +109,14 @@ public class ShortcutHelper {
         mNativeShortcutHelper = 0;
     }
 
+    /**
+     * Sets the delegate to use.
+     */
+    @VisibleForTesting
+    public static void setDelegateForTests(Delegate delegate) {
+        sDelegate = delegate;
+    }
+
     @CalledByNative
     private void onTitleAvailable(String title) {
         mObserver.onTitleAvailable(title);
@@ -110,11 +133,6 @@ public class ShortcutHelper {
      * @param userRequestedTitle Updated title for the shortcut.
      */
     public void addShortcut(String userRequestedTitle) {
-        if (TextUtils.isEmpty(sFullScreenAction)) {
-            Log.e("ShortcutHelper", "ShortcutHelper is uninitialized.  Aborting.");
-            return;
-        }
-
         nativeAddShortcut(mNativeShortcutHelper, userRequestedTitle);
     }
 
@@ -137,9 +155,7 @@ public class ShortcutHelper {
     @SuppressWarnings("unused")
     @CalledByNative
     private static void addShortcut(Context context, String url, String title, Bitmap icon,
-            boolean isWebappCapable, int orientation) {
-        assert sFullScreenAction != null;
-
+            boolean isWebappCapable, int orientation, int source) {
         Intent shortcutIntent;
         if (isWebappCapable) {
             // Encode the icon as a base64 string (Launcher drops Bitmaps in the Intent).
@@ -153,7 +169,7 @@ public class ShortcutHelper {
 
             // Add the shortcut as a launcher icon for a full-screen Activity.
             shortcutIntent = new Intent();
-            shortcutIntent.setAction(sFullScreenAction);
+            shortcutIntent.setAction(sDelegate.getFullscreenAction());
             shortcutIntent.putExtra(EXTRA_ICON, encodedIcon);
             shortcutIntent.putExtra(EXTRA_ID, UUID.randomUUID().toString());
             shortcutIntent.putExtra(EXTRA_TITLE, title);
@@ -165,9 +181,12 @@ public class ShortcutHelper {
             shortcutIntent = BookmarkUtils.createShortcutIntent(url);
         }
 
+        // Always attach a source (one of add to homescreen menu item, app banner, or unknown) to
+        // the intent. This allows us to distinguish where a shortcut was added from in metrics.
+        shortcutIntent.putExtra(EXTRA_SOURCE, source);
         shortcutIntent.setPackage(context.getPackageName());
-        context.sendBroadcast(
-                BookmarkUtils.createAddToHomeIntent(shortcutIntent, title, icon, url));
+        sDelegate.sendBroadcast(
+                context, BookmarkUtils.createAddToHomeIntent(shortcutIntent, title, icon, url));
 
         // Alert the user about adding the shortcut.
         final String shortUrl = UrlUtilities.getDomainAndRegistry(url, true);

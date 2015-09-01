@@ -563,6 +563,12 @@
       <message desc="Button to allow the user to indicate that they are no longer using the service." name="IDS_IDLE_DISCONNECT">
         Disconnect now
       </message>
+      <message desc="Button to restart the app after the connection is dropped." name="IDS_RESTART_BUTTON">
+        Restart now
+      </message>
+      <message desc="Message show to the user when the connection is dropped." name="IDS_ERROR_CONNECTION_DROPPED">
+        A network error occurred. We will restart the app when your device is on-line again.
+      </message>
 
       <if expr="is_android or is_ios">
         <message desc="Button to show or hide the on-screen keyboard." name="IDS_SHOW_HIDE_KEYBOARD" formatter_data="android_java">
@@ -640,7 +646,8 @@ Remote computers with non US-English keyboards may receive incorrect text input.
 For information about privacy, please see the Google Privacy Policy (http://goo.gl/SyrVzj) and the Chrome Privacy Policy (http://goo.gl/0uXE5d).
         </message>
         <message name="IDS_PLAY_STORE_CHANGES" desc="List of what's changed in this release of Chrome Remote Desktop for Android. [CHAR-LIMIT=500] [NAME=play_store_changes]">
-• Fixed large memory leak on disconnection from remote desktop.
+• Added Credits screen.
+• Fixed a problem when going full-screen with the keyboard visible.
         </message>
       </if>  <!-- is_android or is_ios -->
 
@@ -778,6 +785,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Help link, displayed in the top-left (assuming ltr layout) corner of the main screen. Clicking this takes the user to our FAQ." name="IDS_HELP">
         Help
+      </message>
+      <message desc="Credits link, displayed in the top-left (assuming ltr layout) corner of the main screen. Clicking this takes the user to our acknowledgements screen." name="IDS_CREDITS" formatter_data="android_java">
+        Credits
       </message>
       <message desc="Clicking this button starts the desktop access process." name="IDS_HOME_ACCESS_BUTTON">
         Access
@@ -993,6 +1003,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Label for the client-side menu button that sends a PrtScn key press to the host. The 'PrtScn' abbreviation (as typically printed on the keycap on English keyboards) is preferred over 'Print Screen', to make it clearer that this refers to the physical PrtScn key, and not the OS-specific keyboard shortcut for the screen capture functionality." name="IDS_SEND_PRINT_SCREEN">
         Send PrtScn
       </message>
+      <message desc="Label for the client-side menu button that toggles whether or not the right-hand Ctrl key is used to send the Windows/Command key." name="IDS_MAP_RIGHT_CTRL_TO_META">
+        Use right Ctrl for Win key (⌘ on Mac)
+      </message>
       <message desc="Menu option for enabling shrink-to-fit. When clicked, the remote desktop will be scaled down so that it fits in the browser window." name="IDS_SHRINK_TO_FIT">
         Shrink to fit
       </message>
@@ -1100,9 +1113,6 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Text shown while a background operation is in progress." name="IDS_WORKING">
         Working…
-      </message>
-      <message desc="Menu option to open a new connection." name="IDS_NEW_CONNECTION">
-        New connection
       </message>
       <message desc="Menu option to toggle the visibility of connection statistics." name="IDS_TOGGLE_STATS">
         Show statistics

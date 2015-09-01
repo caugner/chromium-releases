@@ -9,12 +9,14 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -167,8 +169,8 @@ class ExtensionDisabledGlobalError
   bool ShouldCloseOnDeactivate() const override;
 
   // ExtensionUninstallDialog::Delegate implementation.
-  void ExtensionUninstallAccepted() override;
-  void ExtensionUninstallCanceled() override;
+  void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
+                                        const base::string16& error) override;
 
   // content::NotificationObserver implementation.
   void Observe(int type,
@@ -328,7 +330,9 @@ base::string16 ExtensionDisabledGlobalError::GetBubbleViewAcceptButtonLabel() {
   }
   if (is_remote_install_) {
     return l10n_util::GetStringUTF16(
-        IDS_EXTENSION_PROMPT_REMOTE_INSTALL_BUTTON);
+        extension_->is_app()
+            ? IDS_EXTENSION_PROMPT_REMOTE_INSTALL_BUTTON_APP
+            : IDS_EXTENSION_PROMPT_REMOTE_INSTALL_BUTTON_EXTENSION);
   }
   return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON);
 }
@@ -351,7 +355,8 @@ void ExtensionDisabledGlobalError::BubbleViewAcceptButtonPressed(
   if (extensions::util::IsExtensionSupervised(extension_, service_->profile()))
     return;
   // Delay extension reenabling so this bubble closes properly.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
       base::Bind(&ExtensionService::GrantPermissionsAndEnableExtension,
                  service_->AsWeakPtr(), extension_));
 }
@@ -367,11 +372,11 @@ void ExtensionDisabledGlobalError::BubbleViewCancelButtonPressed(
       service_->profile(), browser->window()->GetNativeWindow(), this));
   // Delay showing the uninstall dialog, so that this function returns
   // immediately, to close the bubble properly. See crbug.com/121544.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&extensions::ExtensionUninstallDialog::ConfirmUninstall,
-                 uninstall_dialog_->AsWeakPtr(),
-                 extension_));
+                 uninstall_dialog_->AsWeakPtr(), extension_,
+                 extensions::UNINSTALL_REASON_EXTENSION_DISABLED));
 }
 
 bool ExtensionDisabledGlobalError::ShouldCloseOnDeactivate() const {
@@ -381,15 +386,10 @@ bool ExtensionDisabledGlobalError::ShouldCloseOnDeactivate() const {
   return false;
 }
 
-void ExtensionDisabledGlobalError::ExtensionUninstallAccepted() {
-  service_->UninstallExtension(extension_->id(),
-                               extensions::UNINSTALL_REASON_EXTENSION_DISABLED,
-                               base::Bind(&base::DoNothing),
-                               NULL);
-}
-
-void ExtensionDisabledGlobalError::ExtensionUninstallCanceled() {
-  // Nothing happens, and the error is still there.
+void ExtensionDisabledGlobalError::OnExtensionUninstallDialogClosed(
+    bool did_start_uninstall,
+    const base::string16& error) {
+  // No need to do anything.
 }
 
 void ExtensionDisabledGlobalError::Observe(
@@ -405,11 +405,17 @@ void ExtensionDisabledGlobalError::Observe(
   GlobalErrorServiceFactory::GetForProfile(service_->profile())->
       RemoveGlobalError(this);
 
+  // Make sure we don't call RemoveGlobalError again.
+  registrar_.RemoveAll();
+
   if (type == extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED)
     user_response_ = REENABLE;
   else if (type == extensions::NOTIFICATION_EXTENSION_REMOVED)
     user_response_ = UNINSTALL;
-  delete this;
+
+  // Delete this object after any running tasks, so that the extension dialog
+  // still has it as a delegate to finish the current tasks.
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 // Globals --------------------------------------------------------------------

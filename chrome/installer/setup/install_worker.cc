@@ -712,7 +712,7 @@ void AddVersionKeyWorkItems(HKEY root,
     // languages is a superset of Chrome's set of translations with this one
     // exception: what Chrome calls "en-us", Omaha calls "en".  sigh.
     base::string16 language(GetCurrentTranslation());
-    if (LowerCaseEqualsASCII(language, "en-us"))
+    if (base::LowerCaseEqualsASCII(language, "en-us"))
       language.resize(2);
     list->AddSetRegValueWorkItem(root,
                                  version_key,
@@ -1236,7 +1236,7 @@ void AddInstallWorkItems(const InstallationState& original_state,
     AddDelegateExecuteWorkItems(installer_state, target_path, new_version,
                                 product, install_list);
 
-    AddActiveSetupWorkItems(installer_state, setup_path, new_version, product,
+    AddActiveSetupWorkItems(installer_state, new_version, product,
                             install_list);
   }
 
@@ -1394,7 +1394,6 @@ void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
 }
 
 void AddActiveSetupWorkItems(const InstallerState& installer_state,
-                             const base::FilePath& setup_path,
                              const Version& new_version,
                              const Product& product,
                              WorkItemList* list) {

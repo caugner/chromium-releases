@@ -6,12 +6,17 @@ package org.chromium.android_webview.test;
 
 import android.graphics.Picture;
 import android.net.http.SslError;
+import android.view.ActionMode;
+import android.view.View;
 import android.webkit.ConsoleMessage;
 import android.webkit.ValueCallback;
 
 import org.chromium.android_webview.AwContentsClient.AwWebResourceRequest;
 import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.base.ThreadUtils;
+import org.chromium.content.browser.SelectActionMode;
+import org.chromium.content.browser.SelectActionModeCallback;
+import org.chromium.content.browser.SelectActionModeCallback.ActionHandler;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageCommitVisibleHelper;
@@ -26,7 +31,6 @@ import java.util.List;
  * AwContentsClient subclass used for testing.
  */
 public class TestAwContentsClient extends NullContentsClient {
-    private String mUpdatedTitle;
     private boolean mAllowSslError;
     private final OnPageStartedHelper mOnPageStartedHelper;
     private final OnPageFinishedHelper mOnPageFinishedHelper;
@@ -40,6 +44,7 @@ public class TestAwContentsClient extends NullContentsClient {
     private final OnEvaluateJavaScriptResultHelper mOnEvaluateJavaScriptResultHelper;
     private final AddMessageToConsoleHelper mAddMessageToConsoleHelper;
     private final OnScaleChangedHelper mOnScaleChangedHelper;
+    private final OnReceivedTitleHelper mOnReceivedTitleHelper;
     private final PictureListenerHelper mPictureListenerHelper;
     private final ShouldOverrideUrlLoadingHelper mShouldOverrideUrlLoadingHelper;
     private final DoUpdateVisitedHistoryHelper mDoUpdateVisitedHistoryHelper;
@@ -59,6 +64,7 @@ public class TestAwContentsClient extends NullContentsClient {
         mOnEvaluateJavaScriptResultHelper = new OnEvaluateJavaScriptResultHelper();
         mAddMessageToConsoleHelper = new AddMessageToConsoleHelper();
         mOnScaleChangedHelper = new OnScaleChangedHelper();
+        mOnReceivedTitleHelper = new OnReceivedTitleHelper();
         mPictureListenerHelper = new PictureListenerHelper();
         mShouldOverrideUrlLoadingHelper = new ShouldOverrideUrlLoadingHelper();
         mDoUpdateVisitedHistoryHelper = new DoUpdateVisitedHistoryHelper();
@@ -156,13 +162,32 @@ public class TestAwContentsClient extends NullContentsClient {
         return mPictureListenerHelper;
     }
 
+    /**
+     * Callback helper for onReceivedTitle.
+     */
+    public static class OnReceivedTitleHelper extends CallbackHelper {
+        private String mTitle;
+
+        public void notifyCalled(String title) {
+            mTitle = title;
+            super.notifyCalled();
+        }
+        public String getTitle() {
+            return mTitle;
+        }
+    }
+
+    public OnReceivedTitleHelper getOnReceivedTitleHelper() {
+        return mOnReceivedTitleHelper;
+    }
+
     @Override
     public void onReceivedTitle(String title) {
-        mUpdatedTitle = title;
+        mOnReceivedTitleHelper.notifyCalled(title);
     }
 
     public String getUpdatedTitle() {
-        return mUpdatedTitle;
+        return mOnReceivedTitleHelper.getTitle();
     }
 
     @Override
@@ -194,6 +219,16 @@ public class TestAwContentsClient extends NullContentsClient {
     public void onReceivedSslError(ValueCallback<Boolean> callback, SslError error) {
         callback.onReceiveValue(mAllowSslError);
         mOnReceivedSslErrorHelper.notifyCalled();
+    }
+
+    @Override
+    public SelectActionMode startActionMode(
+            View view, ActionHandler actionHandler, boolean floating) {
+        if (floating) return null;
+        ActionMode.Callback callback =
+                new SelectActionModeCallback(view.getContext(), actionHandler);
+        ActionMode actionMode = view.startActionMode(callback);
+        return actionMode != null ? new SelectActionMode(actionMode) : null;
     }
 
     public void setAllowSslError(boolean allow) {

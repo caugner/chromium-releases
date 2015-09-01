@@ -52,7 +52,6 @@
 #include "chromeos/dbus/fake_gsm_sms_client.h"
 #include "chromeos/dbus/fake_image_burner_client.h"
 #include "chromeos/dbus/fake_introspectable_client.h"
-#include "chromeos/dbus/fake_leadership_daemon_manager_client.h"
 #include "chromeos/dbus/fake_lorgnette_manager_client.h"
 #include "chromeos/dbus/fake_modem_messaging_client.h"
 #include "chromeos/dbus/fake_nfc_adapter_client.h"
@@ -74,9 +73,7 @@
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
-#include "chromeos/dbus/leadership_daemon_manager_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
-#include "chromeos/dbus/metronome_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
 #include "chromeos/dbus/nfc_device_client.h"
@@ -117,9 +114,7 @@ const struct {
     { "cryptohome",  DBusClientBundle::CRYPTOHOME },
     { "debug_daemon",  DBusClientBundle::DEBUG_DAEMON },
     { "easy_unlock",  DBusClientBundle::EASY_UNLOCK },
-    { "leadership_daemon",  DBusClientBundle::LEADERSHIP_DAEMON },
     { "lorgnette_manager",  DBusClientBundle::LORGNETTE_MANAGER },
-    { "metronome",  DBusClientBundle::METRONOME },
     { "shill",  DBusClientBundle::SHILL },
     { "gsm_sms",  DBusClientBundle::GSM_SMS },
     { "image_burner",  DBusClientBundle::IMAGE_BURNER },
@@ -141,7 +136,8 @@ const struct {
 DBusClientBundle::DBusClientType GetDBusClientType(
     const std::string& client_type_name) {
   for (size_t i = 0; i < arraysize(client_type_map); i++) {
-    if (LowerCaseEqualsASCII(client_type_name, client_type_map[i].param_name))
+    if (base::LowerCaseEqualsASCII(client_type_name,
+                                   client_type_map[i].param_name))
       return client_type_map[i].client_type;
   }
   return DBusClientBundle::NO_CLIENT;
@@ -231,10 +227,6 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
   else
     lorgnette_manager_client_.reset(new FakeLorgnetteManagerClient);
 
-  metronome_client_.reset(MetronomeClient::Create(
-      IsUsingStub(METRONOME) ? STUB_DBUS_CLIENT_IMPLEMENTATION
-                             : REAL_DBUS_CLIENT_IMPLEMENTATION));
-
   if (!IsUsingStub(SHILL)) {
     shill_manager_client_.reset(ShillManagerClient::Create());
     shill_device_client_.reset(ShillDeviceClient::Create());
@@ -310,14 +302,6 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     privet_daemon_manager_client_.reset(PrivetDaemonManagerClient::Create());
   else
     privet_daemon_manager_client_.reset(new FakePrivetDaemonManagerClient);
-
-  if (!IsUsingStub(LEADERSHIP_DAEMON)) {
-    leadership_daemon_manager_client_.reset(
-        LeadershipDaemonManagerClient::Create());
-  } else {
-    leadership_daemon_manager_client_.reset(
-        new FakeLeadershipDaemonManagerClient);
-  }
 
   if (!IsUsingStub(AP_MANAGER))
     ap_manager_client_.reset(ApManagerClient::Create());

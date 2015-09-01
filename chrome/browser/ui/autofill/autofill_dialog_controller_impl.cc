@@ -12,14 +12,17 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/risk_util.h"
@@ -2116,7 +2119,7 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
     // Filter out ones we don't want.
     for (int i = 0; i < static_cast<int>(popup_suggestions.size()); i++) {
       const autofill::AutofillProfile* profile =
-          GetManager()->GetProfileByGUID(popup_suggestions[i].backend_id.guid);
+          GetManager()->GetProfileByGUID(popup_suggestions[i].backend_id);
       if (!profile || !ShouldSuggestProfile(section, *profile)) {
         popup_suggestions.erase(popup_suggestions.begin() + i);
         i--;
@@ -2380,7 +2383,8 @@ void AutofillDialogControllerImpl::DidSelectSuggestion(
 
 void AutofillDialogControllerImpl::DidAcceptSuggestion(
     const base::string16& value,
-    int identifier) {
+    int identifier,
+    int position) {
   DCHECK_NE(UNKNOWN_TYPE, popup_input_type_);
   // Because |HidePopup()| can be called from |UpdateSection()|, remember the
   // type of the input for later here.
@@ -2390,15 +2394,13 @@ void AutofillDialogControllerImpl::DidAcceptSuggestion(
   scoped_ptr<DataModelWrapper> wrapper;
 
   if (static_cast<size_t>(identifier) < popup_suggestion_ids_.size()) {
-    const SuggestionBackendID& sid = popup_suggestion_ids_[identifier];
+    const std::string& guid = popup_suggestion_ids_[identifier];
     if (IsCreditCardType(popup_input_type)) {
       wrapper.reset(new AutofillCreditCardWrapper(
-          GetManager()->GetCreditCardByGUID(sid.guid)));
+          GetManager()->GetCreditCardByGUID(guid)));
     } else {
       wrapper.reset(new AutofillProfileWrapper(
-          GetManager()->GetProfileByGUID(sid.guid),
-          AutofillType(popup_input_type),
-          sid.variant));
+          GetManager()->GetProfileByGUID(guid)));
     }
   } else {
     wrapper.reset(new I18nAddressDataWrapper(
@@ -2448,6 +2450,14 @@ void AutofillDialogControllerImpl::DidAcceptSuggestion(
   HidePopup();
 }
 
+bool AutofillDialogControllerImpl::GetDeletionConfirmationText(
+    const base::string16& value,
+    int identifier,
+    base::string16* title,
+    base::string16* body) {
+  return false;
+}
+
 bool AutofillDialogControllerImpl::RemoveSuggestion(
     const base::string16& value,
     int identifier) {
@@ -2476,9 +2486,9 @@ void AutofillDialogControllerImpl::Observe(
 
     // NOTE: |HideSignIn()| may delete the WebContents which doesn't expect to
     // be deleted while committing a nav entry. Just call |HideSignIn()| later.
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(&AutofillDialogControllerImpl::HideSignIn,
-                   base::Unretained(this)));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&AutofillDialogControllerImpl::HideSignIn,
+                              base::Unretained(this)));
   }
 }
 
@@ -3048,8 +3058,6 @@ void AutofillDialogControllerImpl::SuggestionsUpdated() {
           continue;
         }
 
-        // Don't add variants for addresses: name is part of credit card and
-        // we'll just ignore email and phone number variants.
         suggested_shipping_.AddKeyedItem(profile.guid(), labels[i]);
         suggested_shipping_.SetEnabled(
             profile.guid(),
@@ -3278,7 +3286,7 @@ bool AutofillDialogControllerImpl::CanAcceptCountry(
   DCHECK_EQ(2U, country_code.size());
 
   if (section == SECTION_CC_BILLING)
-    return LowerCaseEqualsASCII(country_code, "us");
+    return base::LowerCaseEqualsASCII(country_code, "us");
 
   CountryComboboxModel* model = CountryComboboxModelForSection(section);
   const std::vector<AutofillCountry*>& countries = model->countries();

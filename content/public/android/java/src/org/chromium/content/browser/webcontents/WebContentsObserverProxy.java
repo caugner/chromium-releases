@@ -94,10 +94,10 @@ class WebContentsObserverProxy extends WebContentsObserver {
     @Override
     @CalledByNative
     public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
-            String description, String failingUrl) {
+            String description, String failingUrl, boolean wasIgnoredByHandler) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
-            mObserversIterator.next().didFailLoad(
-                    isProvisionalLoad, isMainFrame, errorCode, description, failingUrl);
+            mObserversIterator.next().didFailLoad(isProvisionalLoad, isMainFrame, errorCode,
+                    description, failingUrl, wasIgnoredByHandler);
         }
     }
 
@@ -208,6 +208,14 @@ class WebContentsObserverProxy extends WebContentsObserver {
     public void didStartNavigationToPendingEntry(String url) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().didStartNavigationToPendingEntry(url);
+        }
+    }
+
+    @Override
+    @CalledByNative
+    public void mediaSessionStateChanged(boolean isControllable, boolean isSuspended) {
+        for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
+            mObserversIterator.next().mediaSessionStateChanged(isControllable, isSuspended);
         }
     }
 

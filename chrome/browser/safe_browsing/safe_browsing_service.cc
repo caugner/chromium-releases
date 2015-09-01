@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/debug/leak_tracker.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
@@ -38,7 +37,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
@@ -119,14 +117,16 @@ class SafeBrowsingURLRequestContextGetter
   scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
       const override;
 
+  // Shuts down any pending requests using the getter, and nulls out
+  // |sb_service_|.
+  void SafeBrowsingServiceShuttingDown();
+
  protected:
   ~SafeBrowsingURLRequestContextGetter() override;
 
  private:
-  SafeBrowsingService* const sb_service_;  // Owned by BrowserProcess.
+  SafeBrowsingService* sb_service_;  // Owned by BrowserProcess.
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-
-  base::debug::LeakTracker<SafeBrowsingURLRequestContextGetter> leak_tracker_;
 };
 
 SafeBrowsingURLRequestContextGetter::SafeBrowsingURLRequestContextGetter(
@@ -136,13 +136,15 @@ SafeBrowsingURLRequestContextGetter::SafeBrowsingURLRequestContextGetter(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)) {
 }
 
-SafeBrowsingURLRequestContextGetter::~SafeBrowsingURLRequestContextGetter() {}
-
 net::URLRequestContext*
 SafeBrowsingURLRequestContextGetter::GetURLRequestContext() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(sb_service_->url_request_context_.get());
 
+  // Check if the service has been shut down.
+  if (!sb_service_)
+    return nullptr;
+
+  DCHECK(sb_service_->url_request_context_.get());
   return sb_service_->url_request_context_.get();
 }
 
@@ -150,6 +152,13 @@ scoped_refptr<base::SingleThreadTaskRunner>
 SafeBrowsingURLRequestContextGetter::GetNetworkTaskRunner() const {
   return network_task_runner_;
 }
+
+void SafeBrowsingURLRequestContextGetter::SafeBrowsingServiceShuttingDown() {
+  sb_service_ = nullptr;
+  URLRequestContextGetter::NotifyContextShuttingDown();
+}
+
+SafeBrowsingURLRequestContextGetter::~SafeBrowsingURLRequestContextGetter() {}
 
 // static
 SafeBrowsingServiceFactory* SafeBrowsingService::factory_ = NULL;
@@ -198,7 +207,8 @@ SafeBrowsingService* SafeBrowsingService::CreateSafeBrowsingService() {
 SafeBrowsingService::SafeBrowsingService()
     : protocol_manager_(NULL),
       ping_manager_(NULL),
-      enabled_(false) {
+      enabled_(false),
+      enabled_by_prefs_(false) {
 }
 
 SafeBrowsingService::~SafeBrowsingService() {
@@ -208,9 +218,6 @@ SafeBrowsingService::~SafeBrowsingService() {
 }
 
 void SafeBrowsingService::Initialize() {
-  startup_metric_utils::ScopedSlowStartupUMA
-      scoped_timer("Startup.SlowStartupSafeBrowsingServiceInitialize");
-
   url_request_context_getter_ =
       new SafeBrowsingURLRequestContextGetter(this);
 
@@ -298,11 +305,16 @@ void SafeBrowsingService::ShutDown() {
 
   download_service_.reset();
 
-  url_request_context_getter_ = NULL;
   BrowserThread::PostNonNestableTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&SafeBrowsingService::DestroyURLRequestContextOnIOThread,
-                 this));
+                 this, url_request_context_getter_));
+
+  // Release the URLRequestContextGetter after passing it to the IOThread.  It
+  // has to be released now rather than in the destructor because it can only
+  // be deleted on the IOThread, and the SafeBrowsingService outlives the IO
+  // thread.
+  url_request_context_getter_ = nullptr;
 }
 
 // Binhash verification is only enabled for UMA users for now.
@@ -425,17 +437,11 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
   url_request_context_->set_cookie_store(cookie_store.get());
 }
 
-void SafeBrowsingService::DestroyURLRequestContextOnIOThread() {
+void SafeBrowsingService::DestroyURLRequestContextOnIOThread(
+    scoped_refptr<SafeBrowsingURLRequestContextGetter> context_getter) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  url_request_context_->AssertNoURLRequests();
-
-  // Need to do the CheckForLeaks on IOThread instead of in ShutDown where
-  // url_request_context_getter_ is cleared,  since the URLRequestContextGetter
-  // will PostTask to IOTread to delete itself.
-  using base::debug::LeakTracker;
-  LeakTracker<SafeBrowsingURLRequestContextGetter>::CheckForLeaks();
-
+  context_getter->SafeBrowsingServiceShuttingDown();
   url_request_context_.reset();
 }
 
@@ -586,6 +592,11 @@ void SafeBrowsingService::AddPrefService(PrefService* pref_service) {
   registrar->Add(prefs::kSafeBrowsingEnabled,
                  base::Bind(&SafeBrowsingService::RefreshState,
                             base::Unretained(this)));
+  // ClientSideDetectionService will need to be refresh the models
+  // renderers have if extended-reporting changes.
+  registrar->Add(prefs::kSafeBrowsingExtendedReportingEnabled,
+                 base::Bind(&SafeBrowsingService::RefreshState,
+                            base::Unretained(this)));
   prefs_map_[pref_service] = registrar;
   RefreshState();
 }
@@ -600,7 +611,15 @@ void SafeBrowsingService::RemovePrefService(PrefService* pref_service) {
   }
 }
 
+scoped_ptr<SafeBrowsingService::StateSubscription>
+SafeBrowsingService::RegisterStateCallback(
+      const base::Callback<void(void)>& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return state_callback_list_.Add(callback);
+}
+
 void SafeBrowsingService::RefreshState() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Check if any profile requires the service to be active.
   bool enable = false;
   std::map<PrefService*, PrefChangeRegistrar*>::iterator iter;
@@ -611,10 +630,14 @@ void SafeBrowsingService::RefreshState() {
     }
   }
 
+  enabled_by_prefs_ = enable;
+
   if (enable)
     Start();
   else
     Stop(false);
+
+  state_callback_list_.Notify();
 
 #if defined(FULL_SAFE_BROWSING)
   if (csd_service_)

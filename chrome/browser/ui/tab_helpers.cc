@@ -24,6 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/tab_contents/navigation_metrics_recorder.h"
+#include "chrome/browser/tracing/navigation_tracing.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
@@ -48,10 +49,10 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/voice_search_tab_helper.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
-#include "chrome/browser/enhanced_bookmarks/android/enhanced_bookmark_tab_helper.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #else
+#include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/plugins/plugin_observer.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
@@ -147,6 +148,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       autofill::ChromeAutofillClient::FromWebContents(web_contents));
   ChromeTranslateClient::CreateForWebContents(web_contents);
   CoreTabHelper::CreateForWebContents(web_contents);
+  ExternalProtocolObserver::CreateForWebContents(web_contents);
   favicon::CreateContentFaviconDriverForWebContents(web_contents);
   FindTabHelper::CreateForWebContents(web_contents);
   history::WebContentsTopSitesObserver::CreateForWebContents(
@@ -172,7 +174,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 
 #if defined(OS_ANDROID)
   ContextMenuHelper::CreateForWebContents(web_contents);
-  EnhancedBookmarkTabHelper::CreateForWebContents(web_contents);
   SingleTabModeTabHelper::CreateForWebContents(web_contents);
   VoiceSearchTabHelper::CreateForWebContents(web_contents);
   WindowAndroidHelper::CreateForWebContents(web_contents);
@@ -194,8 +195,11 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   TabDialogs::CreateForWebContents(web_contents);
   ThumbnailTabHelper::CreateForWebContents(web_contents);
   web_modal::WebContentsModalDialogManager::CreateForWebContents(web_contents);
+
+  if (banners::AppBannerManagerDesktop::IsEnabled()) {
+    banners::AppBannerManagerDesktop::CreateForWebContents(web_contents);
+  }
 #endif
-  ExternalProtocolObserver::CreateForWebContents(web_contents);
 
 #if defined(OS_WIN)
   MetroPinTabHelper::CreateForWebContents(web_contents);
@@ -234,5 +238,12 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       web_contents->GetBrowserContext())) {
     predictors::ResourcePrefetchPredictorTabHelper::CreateForWebContents(
         web_contents);
+  }
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableNavigationTracing) &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kTraceUploadURL)) {
+    tracing::NavigationTracingObserver::CreateForWebContents(web_contents);
   }
 }

@@ -1714,15 +1714,22 @@
   },
 
   "SSLVersionMin": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "SSLVersionMin": "tls1.2" },
-    "pref_mappings": []
   },
 
   "SSLVersionFallbackMin": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "SSLVersionFallbackMin": "tls1.2" },
     "pref_mappings": []
+  },
+
+  "WelcomePageOnOSUpgradeEnabled": {
+    "os": ["win"],
+    "test_policy": { "WelcomePageOnOSUpgradeEnabled": false },
+    "pref_mappings": [
+      { "pref": "browser.welcome_page_on_os_upgrade_enabled",
+        "local_state": true
+      }
+    ]
   },
 
   "----- Chrome OS policies ------------------------------------------------": {},
@@ -2241,6 +2248,9 @@
     "pref_mappings": [
       { "pref": "ssl.error_override_allowed" }
     ]
+  },
+
+  "KeyPermissions": {
   },
 
   "----- Chrome OS device policies ---------------------------------------": {},

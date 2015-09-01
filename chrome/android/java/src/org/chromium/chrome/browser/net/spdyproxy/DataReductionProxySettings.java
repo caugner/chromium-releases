@@ -137,9 +137,50 @@ public class DataReductionProxySettings {
         nativeSetDataReductionProxyEnabled(mNativeDataReductionProxySettings, enabled);
     }
 
-    /** Returns true if the SPDY proxy is enabled. */
+    /** Returns true if the Data Reduction Proxy proxy is enabled. */
     public boolean isDataReductionProxyEnabled() {
         return nativeIsDataReductionProxyEnabled(mNativeDataReductionProxySettings);
+    }
+
+    /**
+     * Returns true if the Data Reduction Proxy proxy can be used for the given url. This method
+     * does not take into account the proxy config or proxy retry list, so it can return true even
+     * when the proxy will not be used.
+     */
+    public boolean canUseDataReductionProxy(String url) {
+        return nativeCanUseDataReductionProxy(mNativeDataReductionProxySettings, url);
+    }
+
+    /**
+     * Returns true if the Data Reduction Proxy's Lo-Fi mode was enabled on the last main frame
+     * request.
+     */
+    public boolean wasLoFiModeActiveOnMainFrame() {
+        return nativeWasLoFiModeActiveOnMainFrame(mNativeDataReductionProxySettings);
+    }
+
+    /**
+     * Returns true if a "Load image" context menu request has not been made since the last main
+     * frame request.
+     */
+    public boolean wasLoFiLoadImageRequestedBefore() {
+        return nativeWasLoFiLoadImageRequestedBefore(mNativeDataReductionProxySettings);
+    }
+
+    /**
+     * Records that a "Load image" context menu request has been made.
+     */
+    public void setLoFiLoadImageRequested() {
+        nativeSetLoFiLoadImageRequested(mNativeDataReductionProxySettings);
+    }
+
+    /**
+     * Counts the number of requests to reload the page with images from the Lo-Fi snackbar. If the
+     * user requests the page with images a certain number of times, then Lo-Fi is disabled for the
+     * session.
+     *  */
+    public void incrementLoFiUserRequestsForImages() {
+        nativeIncrementLoFiUserRequestsForImages(mNativeDataReductionProxySettings);
     }
 
     /** Returns true if the SPDY proxy is managed by an administrator's policy. */
@@ -211,6 +252,16 @@ public class DataReductionProxySettings {
     private native boolean nativeIsIncludedInAltFieldTrial(
             long nativeDataReductionProxySettingsAndroid);
     private native boolean nativeIsDataReductionProxyEnabled(
+            long nativeDataReductionProxySettingsAndroid);
+    private native boolean nativeCanUseDataReductionProxy(
+            long nativeDataReductionProxySettingsAndroid, String url);
+    private native boolean nativeWasLoFiModeActiveOnMainFrame(
+            long nativeDataReductionProxySettingsAndroid);
+    private native boolean nativeWasLoFiLoadImageRequestedBefore(
+            long nativeDataReductionProxySettingsAndroid);
+    private native void nativeSetLoFiLoadImageRequested(
+            long nativeDataReductionProxySettingsAndroid);
+    private native void nativeIncrementLoFiUserRequestsForImages(
             long nativeDataReductionProxySettingsAndroid);
     private native boolean nativeIsDataReductionProxyManaged(
             long nativeDataReductionProxySettingsAndroid);

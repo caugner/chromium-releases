@@ -6,7 +6,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_frame.h"
 #include "extensions/common/extension.h"
 #include "extensions/renderer/extension_groups.h"
 #include "extensions/renderer/script_context.h"
@@ -17,12 +17,20 @@
 
 namespace extensions {
 
+namespace {
+// There is only ever one instance of the ScriptContextSet.
+ScriptContextSet* g_context_set = nullptr;
+}
+
 ScriptContextSet::ScriptContextSet(ExtensionSet* extensions,
                                    ExtensionIdSet* active_extension_ids)
     : extensions_(extensions), active_extension_ids_(active_extension_ids) {
+  DCHECK(!g_context_set);
+  g_context_set = this;
 }
 
 ScriptContextSet::~ScriptContextSet() {
+  g_context_set = nullptr;
 }
 
 ScriptContext* ScriptContextSet::Register(
@@ -79,9 +87,15 @@ ScriptContext* ScriptContextSet::GetByV8Context(
   return nullptr;
 }
 
+ScriptContext* ScriptContextSet::GetContextByV8Context(
+    const v8::Local<v8::Context>& v8_context) {
+  // g_context_set can be null in unittests.
+  return g_context_set ? g_context_set->GetByV8Context(v8_context) : nullptr;
+}
+
 void ScriptContextSet::ForEach(
     const std::string& extension_id,
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     const base::Callback<void(ScriptContext*)>& callback) const {
   // We copy the context list, because calling into javascript may modify it
   // out from under us.
@@ -98,11 +112,11 @@ void ScriptContextSet::ForEach(
         continue;
     }
 
-    content::RenderView* context_render_view = context->GetRenderView();
-    if (!context_render_view)
+    content::RenderFrame* context_render_frame = context->GetRenderFrame();
+    if (!context_render_frame)
       continue;
 
-    if (render_view && render_view != context_render_view)
+    if (render_frame && render_frame != context_render_frame)
       continue;
 
     callback.Run(context);

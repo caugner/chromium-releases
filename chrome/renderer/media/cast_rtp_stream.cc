@@ -4,7 +4,10 @@
 
 #include "chrome/renderer/media/cast_rtp_stream.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
@@ -130,16 +133,10 @@ bool IsHardwareH264EncodingSupported() {
 }
 
 int NumberOfEncodeThreads() {
-  // We want to give CPU cycles for capturing and not to saturate the system
-  // just for encoding. So on a lower end system with only 1 or 2 cores we
-  // use only one thread for encoding.
-  if (base::SysInfo::NumberOfProcessors() <= 2)
-    return 1;
-
-  // On higher end we want to use 2 threads for encoding to reduce latency.
-  // In theory a physical CPU core has maximum 2 hyperthreads. Having 3 or
-  // more logical processors means the system has at least 2 physical cores.
-  return 2;
+  // Do not saturate CPU utilization just for encoding. On a lower-end system
+  // with only 1 or 2 cores, use only one thread for encoding. On systems with
+  // more cores, allow half of the cores to be used for encoding.
+  return std::min(8, (base::SysInfo::NumberOfProcessors() + 1) / 2);
 }
 
 std::vector<CastRtpParams> SupportedAudioParams() {
@@ -478,7 +475,9 @@ CastRtpStream::CastRtpStream(const blink::WebMediaStreamTrack& track,
                              const scoped_refptr<CastSession>& session)
     : track_(track), cast_session_(session), weak_factory_(this) {}
 
-CastRtpStream::~CastRtpStream() {}
+CastRtpStream::~CastRtpStream() {
+  Stop();
+}
 
 std::vector<CastRtpParams> CastRtpStream::GetSupportedParams() {
   if (IsAudio())
@@ -493,6 +492,10 @@ void CastRtpStream::Start(const CastRtpParams& params,
                           const base::Closure& start_callback,
                           const base::Closure& stop_callback,
                           const ErrorCallback& error_callback) {
+  DCHECK(!start_callback.is_null());
+  DCHECK(!stop_callback.is_null());
+  DCHECK(!error_callback.is_null());
+
   DVLOG(1) << "CastRtpStream::Start = " << (IsAudio() ? "audio" : "video");
   stop_callback_ = stop_callback;
   error_callback_ = error_callback;
@@ -538,10 +541,13 @@ void CastRtpStream::Start(const CastRtpParams& params,
 
 void CastRtpStream::Stop() {
   DVLOG(1) << "CastRtpStream::Stop = " << (IsAudio() ? "audio" : "video");
+  if (stop_callback_.is_null())
+    return;  // Already stopped.
+  weak_factory_.InvalidateWeakPtrs();
+  error_callback_.Reset();
   audio_sink_.reset();
   video_sink_.reset();
-  if (!stop_callback_.is_null())
-    stop_callback_.Run();
+  base::ResetAndReturn(&stop_callback_).Run();
 }
 
 void CastRtpStream::ToggleLogging(bool enable) {

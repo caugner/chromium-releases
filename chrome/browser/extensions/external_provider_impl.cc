@@ -20,13 +20,17 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_management.h"
+#include "chrome/browser/extensions/extension_migrator.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/external_component_loader.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/extensions/external_pref_loader.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
+#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -70,6 +74,8 @@ const char ExternalProviderImpl::kSupportedLocales[] = "supported_locales";
 const char ExternalProviderImpl::kMayBeUntrusted[] = "may_be_untrusted";
 const char ExternalProviderImpl::kMinProfileCreatedByVersion[] =
     "min_profile_created_by_version";
+const char ExternalProviderImpl::kDoNotInstallForEnterprise[] =
+    "do_not_install_for_enterprise";
 
 ExternalProviderImpl::ExternalProviderImpl(
     VisitorInterface* service,
@@ -240,9 +246,15 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
       creation_flags |= Extension::MAY_BE_UNTRUSTED;
     }
 
-    if (!ExternalProviderImpl::HandleMinProfileVersion(extension, extension_id,
-                                                       &unsupported_extensions))
+    if (!HandleMinProfileVersion(extension, extension_id,
+                                 &unsupported_extensions)) {
       continue;
+    }
+
+    if (!HandleDoNotInstallForEnterprise(extension, extension_id,
+                                         &unsupported_extensions)) {
+      continue;
+    }
 
     std::string install_parameter;
     extension->GetString(kInstallParam, &install_parameter);
@@ -387,6 +399,26 @@ bool ExternalProviderImpl::HandleMinProfileVersion(
               << " profile.created_by_version: " << profile_version.GetString()
               << " min_profile_created_by_version: "
               << min_profile_created_by_version;
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ExternalProviderImpl::HandleDoNotInstallForEnterprise(
+    const base::DictionaryValue* extension,
+    const std::string& extension_id,
+    std::set<std::string>* unsupported_extensions) {
+  bool do_not_install_for_enterprise = false;
+  if (extension->GetBoolean(kDoNotInstallForEnterprise,
+                            &do_not_install_for_enterprise) &&
+      do_not_install_for_enterprise) {
+    const policy::ProfilePolicyConnector* const connector =
+        policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile_);
+    if (connector->IsManaged()) {
+      unsupported_extensions->insert(extension_id);
+      VLOG(1) << "Skip installing (or uninstall) external extension "
+              << extension_id << " restricted for managed user";
       return false;
     }
   }
@@ -610,6 +642,21 @@ void ExternalProviderImpl::CreateExternalProviders(
                 Extension::FROM_WEBSTORE |
                     Extension::WAS_INSTALLED_BY_DEFAULT)));
 #endif
+
+    scoped_ptr<ExternalProviderImpl> drive_migration_provider(
+        new ExternalProviderImpl(
+            service,
+            new ExtensionMigrator(profile,
+                                  extension_misc::kDriveHostedAppId,
+                                  extension_misc::kDriveExtensionId),
+            profile,
+            Manifest::EXTERNAL_PREF,
+            Manifest::EXTERNAL_PREF_DOWNLOAD,
+            Extension::FROM_WEBSTORE |
+                Extension::WAS_INSTALLED_BY_DEFAULT));
+    drive_migration_provider->set_auto_acknowledge(true);
+    provider_list->push_back(linked_ptr<ExternalProviderInterface>(
+        drive_migration_provider.release()));
   }
 
   provider_list->push_back(

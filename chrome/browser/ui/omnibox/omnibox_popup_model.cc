@@ -12,10 +12,10 @@
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_model_observer.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/omnibox/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_popup_model_observer.h"
+#include "components/omnibox/browser/omnibox_popup_view.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "third_party/icu/source/common/unicode/ubidi.h"
@@ -141,7 +141,7 @@ void OmniboxPopupModel::SetSelectedLine(size_t line,
     manually_selected_match_.destination_url = match.destination_url;
     manually_selected_match_.provider_affinity = match.provider;
     manually_selected_match_.is_history_what_you_typed_match =
-        match.is_history_what_you_typed_match;
+        match.type == AutocompleteMatchType::URL_WHAT_YOU_TYPED;
   }
 
   if (line == selected_line_ && !force)
@@ -272,6 +272,7 @@ bool OmniboxPopupModel::IsStarredMatch(const AutocompleteMatch& match) const {
 }
 
 void OmniboxPopupModel::OnResultChanged() {
+  answer_bitmap_ = SkBitmap();
   const AutocompleteResult& result = this->result();
   selected_line_ = result.default_match() == result.end() ?
       kNoMatch : static_cast<size_t>(result.default_match() - result.begin());
@@ -300,4 +301,9 @@ void OmniboxPopupModel::AddObserver(OmniboxPopupModelObserver* observer) {
 
 void OmniboxPopupModel::RemoveObserver(OmniboxPopupModelObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void OmniboxPopupModel::SetAnswerBitmap(const SkBitmap& bitmap) {
+  answer_bitmap_ = bitmap;
+  view_->UpdatePopupAppearance();
 }

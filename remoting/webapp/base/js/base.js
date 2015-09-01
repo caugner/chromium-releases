@@ -17,30 +17,6 @@ var base = base || {};
 base.debug = function() {};
 
 /**
- * Whether to break in debugger and alert when an assertion fails.
- * Set it to true for debugging.
- * @type {boolean}
- */
-base.debug.throwOnAssert = false;
-
-/**
- * Assert that |expr| is true else print the |opt_msg|.
- * @param {boolean} expr
- * @param {string=} opt_msg
- */
-base.debug.assert = function(expr, opt_msg) {
-  if (!expr) {
-    if (!opt_msg) {
-      opt_msg = 'Assertion Failed.';
-    }
-    console.error(opt_msg);
-    if (base.debug.throwOnAssert) {
-      throw new Error(opt_msg);
-    }
-  }
-};
-
-/**
  * @return {string} The callstack of the current method.
  */
 base.debug.callstack = function() {
@@ -65,6 +41,7 @@ base.Disposable.prototype.dispose = function() {};
  * @constructor
  * @param {...base.Disposable} var_args
  * @implements {base.Disposable}
+ * @suppress {reportUnknownTypes}
  */
 base.Disposables = function(var_args) {
   /**
@@ -76,6 +53,7 @@ base.Disposables = function(var_args) {
 
 /**
  * @param {...base.Disposable} var_args
+ * @suppress {reportUnknownTypes}
  */
 base.Disposables.prototype.add = function(var_args) {
   var disposables = Array.prototype.slice.call(arguments, 0);
@@ -90,6 +68,7 @@ base.Disposables.prototype.add = function(var_args) {
 /**
  * @param {...base.Disposable} var_args  Dispose |var_args| and remove
  *    them from the current object.
+ * @suppress {reportUnknownTypes}
  */
 base.Disposables.prototype.remove = function(var_args) {
   var disposables = Array.prototype.slice.call(arguments, 0);
@@ -116,7 +95,9 @@ base.Disposables.prototype.dispose = function() {
  */
 base.dispose = function(obj) {
   if (obj) {
-    base.debug.assert(typeof obj.dispose == 'function');
+    console.assert(typeof obj.dispose == 'function',
+                   'dispose() should have type function, not ' +
+                   typeof obj.dispose + '.');
     obj.dispose();
   }
 };
@@ -169,8 +150,8 @@ base.extend = function(dest, src) {
  * @suppress {checkTypes|reportUnknownTypes}
  */
 base.inherits = function(childObject, parentCtor, parentCtorArgs) {
-  base.debug.assert(parentCtor && parentCtor.prototype,
-                    'Invalid parent constructor.');
+  console.assert(parentCtor && parentCtor.prototype,
+                 'Invalid parent constructor.');
   var parentArgs = Array.prototype.slice.call(arguments, 2);
 
   // Mix in the parent's prototypes so that they're available during the parent
@@ -184,7 +165,8 @@ base.inherits = function(childObject, parentCtor, parentCtorArgs) {
   // It is used so that childObject instanceof parentCtor will
   // return true.
   childObject.__proto__.__proto__ = parentCtor.prototype;
-  base.debug.assert(childObject instanceof parentCtor);
+  console.assert(childObject instanceof parentCtor,
+                 'child is not an instance of parent.');
 };
 
 base.doNothing = function() {};
@@ -218,8 +200,8 @@ base.deepCopy = function(value) {
  * Returns a copy of the input object with all null/undefined fields
  * removed.  Returns an empty object for a null/undefined input.
  *
- * @param {Object<string,?T>|undefined} input
- * @return {!Object<string,T>}
+ * @param {Object<?T>|undefined} input
+ * @return {!Object<T>}
  * @template T
  */
 base.copyWithoutNullFields = function(input) {
@@ -234,6 +216,14 @@ base.copyWithoutNullFields = function(input) {
     }
   }
   return result;
+};
+
+/**
+ * @param {!Object} object
+ * @return {boolean} True if the object is empty (equal to {}); false otherwise.
+ */
+base.isEmptyObject = function(object) {
+  return Object.keys(object).length === 0;
 };
 
 /**
@@ -275,7 +265,7 @@ base.urlJoin = function(url, opt_params) {
 
 
 /**
- * @return {Object<string, string>} The URL parameters.
+ * @return {Object<string>} The URL parameters.
  */
 base.getUrlParameters = function() {
   var result = {};
@@ -485,19 +475,20 @@ base.EventSource.prototype.removeEventListener = function(type, fn) {};
   * @implements {base.EventSource}
   */
 base.EventSourceImpl = function() {
-  /** @type {Object<string, base.EventEntry>} */
+  /** @type {Object<base.EventEntry>} */
   this.eventMap_;
 };
 
 /**
   * @param {base.EventSourceImpl} obj
   * @param {string} type
+  * @private
   */
-base.EventSourceImpl.isDefined = function(obj, type) {
-  base.debug.assert(Boolean(obj.eventMap_),
-                   "The object doesn't support events");
-  base.debug.assert(Boolean(obj.eventMap_[type]), 'Event <' + type +
-    '> is undefined for the current object');
+base.EventSourceImpl.assertHasEvent_ = function(obj, type) {
+  console.assert(Boolean(obj.eventMap_),
+                 "The object doesn't support events.");
+  console.assert(Boolean(obj.eventMap_[type]),
+                 'Event <' + type +'> is undefined for the current object.');
 };
 
 base.EventSourceImpl.prototype = {
@@ -506,8 +497,8 @@ base.EventSourceImpl.prototype = {
     * @param {Array<string>} events
     */
   defineEvents: function(events) {
-    base.debug.assert(!Boolean(this.eventMap_),
-                     'defineEvents can only be called once.');
+    console.assert(!Boolean(this.eventMap_),
+                   'defineEvents() can only be called once.');
     this.eventMap_ = {};
     events.forEach(
       /**
@@ -515,7 +506,8 @@ base.EventSourceImpl.prototype = {
         * @param {string} type
         */
       function(type) {
-        base.debug.assert(typeof type == 'string');
+        console.assert(typeof type == 'string',
+                       'Event name must be a string; found ' + type + '.');
         this.eventMap_[type] = new base.EventEntry();
     }, this);
   },
@@ -525,8 +517,10 @@ base.EventSourceImpl.prototype = {
     * @param {Function} fn
     */
   addEventListener: function(type, fn) {
-    base.debug.assert(typeof fn == 'function');
-    base.EventSourceImpl.isDefined(this, type);
+    console.assert(typeof fn == 'function',
+                   'addEventListener(): event listener for ' + type +
+                   ' must be function, not ' + typeof fn + '.');
+    base.EventSourceImpl.assertHasEvent_(this, type);
 
     var listeners = this.eventMap_[type].listeners;
     listeners.push(fn);
@@ -537,8 +531,10 @@ base.EventSourceImpl.prototype = {
     * @param {Function} fn
     */
   removeEventListener: function(type, fn) {
-    base.debug.assert(typeof fn == 'function');
-    base.EventSourceImpl.isDefined(this, type);
+    console.assert(typeof fn == 'function',
+                   'removeEventListener(): event listener for ' + type +
+                   ' must be function, not ' + typeof fn + '.');
+    base.EventSourceImpl.assertHasEvent_(this, type);
 
     var listeners = this.eventMap_[type].listeners;
     // find the listener to remove.
@@ -560,7 +556,7 @@ base.EventSourceImpl.prototype = {
     *     As a hack, we set the type to *=.
     */
   raiseEvent: function(type, opt_details) {
-    base.EventSourceImpl.isDefined(this, type);
+    base.EventSourceImpl.assertHasEvent_(this, type);
 
     var entry = this.eventMap_[type];
     var listeners = entry.listeners.slice(0); // Make a copy of the listeners.
@@ -641,8 +637,10 @@ base.DomEventHook.prototype.dispose = function() {
 /**
   * An event hook implementation for Chrome Events.
   *
-  * @param {chrome.Event} src
-  * @param {Function} listener
+  * @param {ChromeEvent|
+  *         chrome.contextMenus.ClickedEvent|
+  *         chrome.app.runtime.LaunchEvent} src
+  * @param {!Function} listener
   *
   * @constructor
   * @implements {base.Disposable}
@@ -780,6 +778,15 @@ base.jsonParseSafe = function(jsonString) {
  */
 base.timestamp = function() {
   return '[' + new Date().toISOString() + ']';
+};
+
+
+/**
+ * A online function that can be stubbed by unit tests.
+ * @return {boolean}
+ */
+base.isOnline = function() {
+  return navigator.onLine;
 };
 
 /**
