@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "components/proximity_auth/connection_observer.h"
 #include "components/proximity_auth/cryptauth/cryptauth_client.h"
 #include "components/proximity_auth/screenlock_bridge.h"
@@ -27,6 +28,7 @@ namespace proximity_auth {
 class BluetoothLowEnergyConnection;
 class BluetoothLowEnergyConnectionFinder;
 class BluetoothLowEnergyDeviceWhitelist;
+class BluetoothThrottler;
 class Connection;
 class ConnectionFinder;
 class ProximityAuthClient;
@@ -62,28 +64,11 @@ class ProximityAuthBleSystem : public ScreenlockBridge::Observer,
   void OnMessageReceived(const Connection& connection,
                          const WireMessage& message) override;
 
+  // Called by EasyUnlockService when the user clicks their user pod and
+  // initiates an auth attempt.
+  void OnAuthAttempted(const std::string& user_id);
+
  protected:
-  class ScreenlockBridgeAdapter {
-   public:
-    ScreenlockBridgeAdapter(ScreenlockBridge* screenlock_bridge);
-    virtual ~ScreenlockBridgeAdapter();
-
-    virtual void AddObserver(ScreenlockBridge::Observer* observer);
-    virtual void RemoveObserver(ScreenlockBridge::Observer* observer);
-    virtual void Unlock(ProximityAuthClient* client);
-
-   protected:
-    ScreenlockBridgeAdapter();
-
-   private:
-    // Not owned. Must outlive this object.
-    ScreenlockBridge* screenlock_bridge_;
-  };
-
-  // Used for testing.
-  ProximityAuthBleSystem(scoped_ptr<ScreenlockBridgeAdapter> screenlock_bridge,
-                         ProximityAuthClient* proximity_auth_client);
-
   // Virtual for testing.
   virtual ConnectionFinder* CreateConnectionFinder();
 
@@ -113,7 +98,15 @@ class ProximityAuthBleSystem : public ScreenlockBridge::Observer,
   // |unlock_keys_|). If so, returns the public key in |out_public_key|.
   bool HasUnlockKey(const std::string& message, std::string* out_public_key);
 
-  scoped_ptr<ScreenlockBridgeAdapter> screenlock_bridge_;
+  // Called when |spinner_timer_| is fired to stop showing the spinner on the
+  // user pod.
+  void OnSpinnerTimerFired();
+
+  // Called to update the lock screen's UI for the current authentication state
+  // with the remote device.
+  void UpdateLockScreenUI();
+
+  ScreenlockBridge* screenlock_bridge_;
 
   // Not owned. Must outlive this object.
   ProximityAuthClient* proximity_auth_client_;
@@ -133,11 +126,41 @@ class ProximityAuthBleSystem : public ScreenlockBridge::Observer,
 
   scoped_ptr<BluetoothLowEnergyDeviceWhitelist> device_whitelist_;
 
+  scoped_ptr<BluetoothThrottler> bluetooth_throttler_;
+
   const base::TimeDelta polling_interval_;
 
+  // True if the remote device sent public key contained in |unlock_keyes_| or
+  // |device_whitelist_|.
   bool device_authenticated_;
 
+  // True if |this| instance is currently polling the phone for the phone's
+  // screenlock state.
   bool is_polling_screen_state_;
+
+  // True if a call to |GetUnlockKeys()| was already made.
+  bool unlock_keys_requested_;
+
+  // The user id or email of the last focused user on the lock screen.
+  std::string last_focused_user_;
+
+  // True if the the last status update from the phone reports that the phone's
+  // screen is locked. If no status update has been received, this value is true
+  // by default.
+  bool is_remote_screen_locked_;
+
+  // The timer controlling the time the spinner for the user pod icon is shown
+  // right after the screen is locked.
+  base::OneShotTimer<ProximityAuthBleSystem> spinner_timer_;
+
+  // The different UI states that the lock screen can be in.
+  enum class ScreenlockUIState {
+    NO_SCREENLOCK,
+    SPINNER,
+    UNAUTHENTICATED,
+    AUTHENTICATED
+  };
+  ScreenlockUIState screenlock_ui_state_;
 
   base::WeakPtrFactory<ProximityAuthBleSystem> weak_ptr_factory_;
 

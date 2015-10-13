@@ -80,7 +80,6 @@ source_set("base") {
     "channel_mixer.h",
     "channel_mixing_matrix.cc",
     "channel_mixing_matrix.h",
-    "clock.h",
     "data_buffer.cc",
     "data_buffer.h",
     "data_source.cc",
@@ -130,6 +129,7 @@ source_set("base") {
     "multi_channel_resampler.h",
     "null_video_sink.cc",
     "null_video_sink.h",
+    "output_device.h",
     "pipeline.cc",
     "pipeline.h",
     "pipeline_status.h",
@@ -190,6 +190,8 @@ source_set("base") {
     "video_renderer.cc",
     "video_renderer.h",
     "video_rotation.h",
+    "video_types.cc",
+    "video_types.h",
     "video_util.cc",
     "video_util.h",
     "wall_clock_time_source.cc",
@@ -207,6 +209,9 @@ source_set("base") {
   ]
   libs = []
   configs += [
+    # This target uses the ALLOCATOR_SHIM define.
+    "//base/allocator:allocator_shim_define",
+    "//build/config:precompiled_headers",
     "//media:media_config",
     "//media:media_implementation",
   ]
@@ -307,6 +312,8 @@ if (is_ios) {
       "video_frame.h",
       "video_frame_metadata.cc",
       "video_frame_metadata.h",
+      "video_types.cc",
+      "video_types.h",
       "video_util.cc",
       "video_util.h",
       "yuv_convert.cc",
@@ -329,6 +336,8 @@ source_set("test_support") {
     "fake_audio_renderer_sink.h",
     "fake_demuxer_stream.cc",
     "fake_demuxer_stream.h",
+    "fake_output_device.cc",
+    "fake_output_device.h",
     "fake_text_track_stream.cc",
     "fake_text_track_stream.h",
     "gmock_callback_support.h",
@@ -338,6 +347,8 @@ source_set("test_support") {
     "mock_demuxer_host.h",
     "mock_filters.cc",
     "mock_filters.h",
+    "mock_media_log.cc",
+    "mock_media_log.h",
     "test_data_util.cc",
     "test_data_util.h",
     "test_helpers.cc",

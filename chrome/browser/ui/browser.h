@@ -30,10 +30,10 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/sessions/session_id.h"
+#include "components/toolbar/toolbar_model.h"
 #include "components/translate/content/browser/content_translate_driver.h"
 #include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/notification_observer.h"
@@ -98,7 +98,6 @@ class WebDialogDelegate;
 }
 
 namespace web_modal {
-class PopupManager;
 class WebContentsModalDialogHost;
 }
 
@@ -255,9 +254,6 @@ class Browser : public TabStripModelObserver,
     toolbar_model->swap(toolbar_model_);
   }
 #endif
-  web_modal::PopupManager* popup_manager() {
-    return popup_manager_.get();
-  }
   TabStripModel* tab_strip_model() const { return tab_strip_model_.get(); }
   chrome::BrowserCommandController* command_controller() {
     return command_controller_.get();
@@ -481,9 +477,6 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
-  // Show a download on the download shelf.
-  void ShowDownload(content::DownloadItem* download);
-
   ExclusiveAccessManager* exclusive_access_manager() {
     return exclusive_access_manager_.get();
   }
@@ -601,7 +594,6 @@ class Browser : public TabStripModelObserver,
                           content::WebContents* new_contents) override;
   void RendererUnresponsive(content::WebContents* source) override;
   void RendererResponsive(content::WebContents* source) override;
-  void WorkerCrashed(content::WebContents* source) override;
   void DidNavigateMainFramePostCommit(
       content::WebContents* web_contents) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
@@ -860,10 +852,6 @@ class Browser : public TabStripModelObserver,
 
   // This Browser's window.
   BrowserWindow* window_;
-
-  // Manages popup windows (bubbles, tab-modals) visible overlapping this
-  // window. JS alerts are not handled by this manager.
-  scoped_ptr<web_modal::PopupManager> popup_manager_;
 
   scoped_ptr<TabStripModelDelegate> tab_strip_model_delegate_;
   scoped_ptr<TabStripModel> tab_strip_model_;

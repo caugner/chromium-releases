@@ -192,6 +192,8 @@
       'dbus/fake_peer_daemon_manager_client.h',
       'dbus/fake_permission_broker_client.cc',
       'dbus/fake_permission_broker_client.h',
+      'dbus/fake_power_manager_client.cc',
+      'dbus/fake_power_manager_client.h',
       'dbus/fake_privet_daemon_manager_client.cc',
       'dbus/fake_privet_daemon_manager_client.h',
       'dbus/fake_shill_device_client.cc',
@@ -308,10 +310,6 @@
       'login/auth/key.h',
       'login/auth/login_performer.cc',
       'login/auth/login_performer.h',
-      'login/auth/online_attempt.cc',
-      'login/auth/online_attempt.h',
-      'login/auth/online_attempt_host.cc',
-      'login/auth/online_attempt_host.h',
       'login/auth/stub_authenticator.cc',
       'login/auth/stub_authenticator.h',
       'login/auth/test_attempt_state.cc',
@@ -472,6 +470,7 @@
       'dbus/cros_disks_client_unittest.cc',
       'dbus/dbus_client_bundle_unittest.cc',
       'dbus/fake_easy_unlock_client_unittest.cc',
+      'dbus/fake_power_manager_client_unittest.cc',
       'dbus/gsm_sms_client_unittest.cc',
       'dbus/introspectable_client_unittest.cc',
       'dbus/modem_messaging_client_unittest.cc',
@@ -631,7 +630,6 @@
       'target_name': 'chromeos_test_support_without_gmock',
       'type': 'static_library',
       'export_dependent_settings': [
-        # fake_power_manager_client.h includes pb.h files.
         'power_manager_proto',
       ],
       'dependencies': [
@@ -644,8 +642,6 @@
       ],
       # If you edit the file list of this target, please edit BUILD.gn as well.
       'sources': [
-        'dbus/fake_power_manager_client.cc',
-        'dbus/fake_power_manager_client.h',
         'dbus/fake_session_manager_client.cc',
         'dbus/fake_session_manager_client.h',
         'dbus/fake_shill_manager_client.cc',

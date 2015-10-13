@@ -16,12 +16,13 @@ _EXCLUDED_PATHS = (
     r"^native_client_sdk[\\\/]src[\\\/]tools[\\\/].*.mk",
     r"^net[\\\/]tools[\\\/]spdyshark[\\\/].*",
     r"^skia[\\\/].*",
+    r"^third_party[\\\/]WebKit[\\\/].*",
     r"^v8[\\\/].*",
     r".*MakeFile$",
     r".+_autogen\.h$",
     r".+[\\\/]pnacl_shim\.c$",
     r"^gpu[\\\/]config[\\\/].*_list_json\.cc$",
-    r"^chrome[\\\/]browser[\\\/]resources[\\\/]pdf[\\\/]index.js"
+    r"^chrome[\\\/]browser[\\\/]resources[\\\/]pdf[\\\/]index.js",
 )
 
 # The NetscapePlugIn library is excluded from pan-project as it will soon
@@ -302,7 +303,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   # calls to such functions without a proper C++ parser.
   file_inclusion_pattern = r'.+%s' % _IMPLEMENTATION_EXTENSIONS
 
-  base_function_pattern = r'[ :]test::[^\s]+|ForTest(ing)?|for_test(ing)?'
+  base_function_pattern = r'[ :]test::[^\s]+|ForTest(s|ing)?|for_test(s|ing)?'
   inclusion_pattern = input_api.re.compile(r'(%s)\s*\(' % base_function_pattern)
   comment_pattern = input_api.re.compile(r'//.*(%s)' % base_function_pattern)
   exclusion_pattern = input_api.re.compile(
@@ -1198,15 +1199,16 @@ def _GetJSONParseError(input_api, filename, eat_comments=True):
   try:
     contents = input_api.ReadFile(filename)
     if eat_comments:
-      json_comment_eater = input_api.os_path.join(
-          input_api.PresubmitLocalPath(),
-          'tools', 'json_comment_eater', 'json_comment_eater.py')
-      process = input_api.subprocess.Popen(
-          [input_api.python_executable, json_comment_eater],
-          stdin=input_api.subprocess.PIPE,
-          stdout=input_api.subprocess.PIPE,
-          universal_newlines=True)
-      (contents, _) = process.communicate(input=contents)
+      import sys
+      original_sys_path = sys.path
+      try:
+        sys.path = sys.path + [input_api.os_path.join(
+            input_api.PresubmitLocalPath(),
+            'tools', 'json_comment_eater')]
+        import json_comment_eater
+      finally:
+        sys.path = original_sys_path
+      contents = json_comment_eater.Nom(contents)
 
     input_api.json.loads(contents)
   except ValueError as e:
@@ -1309,6 +1311,43 @@ def _CheckJavaStyle(input_api, output_api):
   return checkstyle.RunCheckstyle(
       input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml',
       black_list=_EXCLUDED_PATHS + input_api.DEFAULT_BLACK_LIST)
+
+
+def _CheckAndroidToastUsage(input_api, output_api):
+  """Checks that code uses org.chromium.ui.widget.Toast instead of
+     android.widget.Toast (Chromium Toast doesn't force hardware
+     acceleration on low-end devices, saving memory).
+  """
+  toast_import_pattern = input_api.re.compile(
+      r'^import android\.widget\.Toast;$')
+
+  errors = []
+
+  sources = lambda affected_file: input_api.FilterSourceFile(
+      affected_file,
+      black_list=(_EXCLUDED_PATHS +
+                  _TEST_CODE_EXCLUDED_PATHS +
+                  input_api.DEFAULT_BLACK_LIST +
+                  (r'^chromecast[\\\/].*',
+                   r'^remoting[\\\/].*')),
+      white_list=(r'.*\.java$',))
+
+  for f in input_api.AffectedSourceFiles(sources):
+    for line_num, line in f.ChangedContents():
+      if toast_import_pattern.search(line):
+        errors.append("%s:%d" % (f.LocalPath(), line_num))
+
+  results = []
+
+  if errors:
+    results.append(output_api.PresubmitError(
+        'android.widget.Toast usage is detected. Android toasts use hardware'
+        ' acceleration, and can be\ncostly on low-end devices. Please use'
+        ' org.chromium.ui.widget.Toast instead.\n'
+        'Contact dskiba@chromium.org if you have any questions.',
+        errors))
+
+  return results
 
 
 def _CheckAndroidCrLogUsage(input_api, output_api):
@@ -1529,6 +1568,7 @@ def _AndroidSpecificOnUploadChecks(input_api, output_api):
   """Groups checks that target android code."""
   results = []
   results.extend(_CheckAndroidCrLogUsage(input_api, output_api))
+  results.extend(_CheckAndroidToastUsage(input_api, output_api))
   return results
 
 

@@ -37,6 +37,7 @@
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_process_type.h"
 #include "components/nacl/common/nacl_switches.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/child_process_data.h"
@@ -50,7 +51,6 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
 #include "native_client/src/shared/imc/nacl_imc_c.h"
-#include "net/base/net_util.h"
 #include "net/socket/socket_descriptor.h"
 #include "ppapi/host/host_factory.h"
 #include "ppapi/host/ppapi_host.h"
@@ -109,12 +109,9 @@ void FindAddressSpace(base::ProcessHandle process,
 #ifdef _DLL
 
 bool IsInPath(const std::string& path_env_var, const std::string& dir) {
-  std::vector<std::string> split;
-  base::SplitString(path_env_var, ';', &split);
-  for (std::vector<std::string>::const_iterator i(split.begin());
-       i != split.end();
-       ++i) {
-    if (*i == dir)
+  for (const base::StringPiece& cur : base::SplitStringPiece(
+           path_env_var, ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+    if (cur == dir)
       return true;
   }
   return false;
@@ -313,7 +310,7 @@ NaClProcessHost::NaClProcessHost(
   // We aren't on the UI thread so getting the pref locale for language
   // formatting isn't possible, so IDN will be lost, but this is probably OK
   // for this use case.
-  process_->SetName(net::FormatUrl(manifest_url_, std::string()));
+  process_->SetName(url_formatter::FormatUrl(manifest_url_, std::string()));
 
   enable_debug_stub_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNaClDebug);
@@ -558,11 +555,10 @@ void NaClProcessHost::LaunchNaClGdb() {
 #else
   base::CommandLine::StringType nacl_gdb =
       command_line.GetSwitchValueNative(switches::kNaClGdb);
-  base::CommandLine::StringVector argv;
   // We don't support spaces inside arguments in --nacl-gdb switch.
-  base::SplitString(nacl_gdb, static_cast<base::CommandLine::CharType>(' '),
-                    &argv);
-  base::CommandLine cmd_line(argv);
+  base::CommandLine cmd_line(base::SplitString(
+      nacl_gdb, base::CommandLine::StringType(1, ' '),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL));
 #endif
   cmd_line.AppendArg("--eval-command");
   base::FilePath::StringType irt_path(

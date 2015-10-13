@@ -91,7 +91,8 @@ class BlinkTestRunner : public RenderViewObserver,
   void EvaluateInWebInspector(long call_id, const std::string& script) override;
   void ClearAllDatabases() override;
   void SetDatabaseQuota(int quota) override;
-  void SimulateWebNotificationClick(const std::string& title) override;
+  void SimulateWebNotificationClick(const std::string& title,
+                                    int action_index) override;
   void SetDeviceScaleFactor(float factor) override;
   void SetDeviceColorProfile(const std::string& name) override;
   void SetBluetoothMockDataSet(const std::string& name) override;
@@ -138,6 +139,7 @@ class BlinkTestRunner : public RenderViewObserver,
   blink::WebPlugin* CreatePluginPlaceholder(
     blink::WebLocalFrame* frame,
     const blink::WebPluginParams& params) override;
+  void OnWebTestProxyBaseDestroy(test_runner::WebTestProxyBase* proxy) override;
 
   void Reset();
 

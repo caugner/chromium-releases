@@ -16,7 +16,9 @@
           '../../../../ui/webui/resources/js/util.js',
           '../downloads/constants.js',
           '../downloads/throttled_icon_loader.js',
-          'item_view.js',
+          'action_service.js',
+          'item.js',
+          'toolbar.js',
         ],
         'externs': [
           '<(EXTERNS_DIR)/chrome_send.js',

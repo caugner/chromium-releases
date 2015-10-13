@@ -8,9 +8,11 @@
 
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
+#include "components/omnibox/browser/omnibox_view.h"
+#include "grit/theme_resources.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/compositor/clip_transform_recorder.h"
 #include "ui/compositor/paint_recorder.h"
@@ -23,14 +25,6 @@
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
-
-namespace {
-
-// This is the number of pixels in the border image interior to the actual
-// border.
-const int kBorderInterior = 6;
-
-}  // namespace
 
 class OmniboxPopupContentsView::AutocompletePopupWidget
     : public views::Widget,
@@ -75,7 +69,9 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
   set_owned_by_client();
 
   ui::ThemeProvider* theme = location_bar_view_->GetThemeProvider();
-  bottom_shadow_ = theme->GetImageSkiaNamed(IDR_BUBBLE_B);
+  int bottom_shadow_asset = ui::MaterialDesignController::IsModeMaterial() ?
+      IDR_OMNIBOX_DROPDOWN_SHADOW_BOTTOM : IDR_BUBBLE_B;
+  bottom_shadow_ = theme->GetImageSkiaNamed(bottom_shadow_asset);
 
   SetEventTargeter(
       scoped_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
@@ -115,12 +111,17 @@ gfx::Rect OmniboxPopupContentsView::GetPopupBounds() const {
 }
 
 void OmniboxPopupContentsView::LayoutChildren() {
+  ui::ThemeProvider* theme_provider = location_bar_view_->GetThemeProvider();
+  const int min_vertical_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_TEXT_VERTICAL_PADDING);
+
   gfx::Rect contents_rect = GetContentsBounds();
 
   contents_rect.Inset(
-      left_margin_, views::NonClientFrameView::kClientEdgeThickness +
-                        OmniboxResultView::kMinimumTextVerticalPadding,
-      right_margin_, OmniboxResultView::kMinimumTextVerticalPadding);
+      left_margin_,
+      views::NonClientFrameView::kClientEdgeThickness + min_vertical_padding,
+      right_margin_,
+      min_vertical_padding);
   int top = contents_rect.y();
   for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
     View* v = child_at(i);
@@ -392,6 +393,12 @@ int OmniboxPopupContentsView::CalculatePopupHeight() {
   for (size_t i = 0; i < model_->result().size(); ++i)
     popup_height += child_at(i)->GetPreferredSize().height();
 
+  ui::ThemeProvider* theme_provider = location_bar_view_->GetThemeProvider();
+  const int min_text_vertical_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_TEXT_VERTICAL_PADDING);
+  const int border_interior = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_BORDER_INTERIOR);
+
   // Add enough space on the top and bottom so it looks like there is the same
   // amount of space between the text and the popup border as there is in the
   // interior between each row of text.
@@ -399,8 +406,8 @@ int OmniboxPopupContentsView::CalculatePopupHeight() {
   // The * 2 accounts for vertical padding used at the top and bottom.
   return popup_height +
          views::NonClientFrameView::kClientEdgeThickness +     // Top border.
-         OmniboxResultView::kMinimumTextVerticalPadding * 2 +  // Padding.
-         bottom_shadow_->height() - kBorderInterior;           // Bottom border.
+         min_text_vertical_padding * 2 +                       // Padding.
+         bottom_shadow_->height() - border_interior;           // Bottom border.
 }
 
 OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
@@ -431,8 +438,12 @@ void OmniboxPopupContentsView::OnPaint(gfx::Canvas* canvas) {
 
 void OmniboxPopupContentsView::PaintChildren(const ui::PaintContext& context) {
   gfx::Rect contents_bounds = GetContentsBounds();
+  ui::ThemeProvider* theme_provider = location_bar_view_->GetThemeProvider();
+  const int border_interior = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_BORDER_INTERIOR);
+
   contents_bounds.Inset(0, views::NonClientFrameView::kClientEdgeThickness, 0,
-                        bottom_shadow_->height() - kBorderInterior);
+                        bottom_shadow_->height() - border_interior);
 
   ui::ClipTransformRecorder clip_transform_recorder(context);
   clip_transform_recorder.ClipRect(contents_bounds);

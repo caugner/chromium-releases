@@ -5,9 +5,13 @@
 #include "components/view_manager/view_manager_app.h"
 
 #include "base/command_line.h"
+#include "base/stl_util.h"
 #include "components/view_manager/client_connection.h"
 #include "components/view_manager/connection_manager.h"
+#include "components/view_manager/gles2/gpu_impl.h"
 #include "components/view_manager/public/cpp/args.h"
+#include "components/view_manager/surfaces/surfaces_impl.h"
+#include "components/view_manager/surfaces/surfaces_scheduler.h"
 #include "components/view_manager/view_manager_root_connection.h"
 #include "components/view_manager/view_manager_root_impl.h"
 #include "components/view_manager/view_manager_service_impl.h"
@@ -19,6 +23,7 @@
 #include "ui/events/event_switches.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 
 using mojo::ApplicationConnection;
 using mojo::ApplicationImpl;
@@ -29,14 +34,24 @@ using mojo::ViewManagerService;
 
 namespace view_manager {
 
-ViewManagerApp::ViewManagerApp() : app_impl_(nullptr), is_headless_(false) {
+ViewManagerApp::ViewManagerApp()
+    : app_impl_(nullptr),
+      is_headless_(false) {
 }
 
-ViewManagerApp::~ViewManagerApp() {}
+ViewManagerApp::~ViewManagerApp() {
+  if (gpu_state_)
+    gpu_state_->StopControlThread();
+
+  auto surfaces = surfaces_;
+  for (auto& surface : surfaces)
+    surface->CloseConnection();
+}
 
 void ViewManagerApp::Initialize(ApplicationImpl* app) {
   app_impl_ = app;
   tracing_.Initialize(app);
+  surfaces_state_ = new surfaces::SurfacesState;
 
 #if !defined(OS_ANDROID)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -44,7 +59,7 @@ void ViewManagerApp::Initialize(ApplicationImpl* app) {
   if (!is_headless_) {
     event_source_ = ui::PlatformEventSource::CreateDefault();
     if (command_line->HasSwitch(mojo::kUseTestConfig))
-      gfx::GLSurface::InitializeOneOffForTests();
+      gfx::GLSurfaceTestSupport::InitializeOneOff();
     else
       gfx::GLSurface::InitializeOneOff();
   }
@@ -57,14 +72,18 @@ void ViewManagerApp::Initialize(ApplicationImpl* app) {
 
 bool ViewManagerApp::ConfigureIncomingConnection(
     ApplicationConnection* connection) {
+  // ViewManager
   connection->AddService<ViewManagerRoot>(this);
+  // Surfaces
+  // TODO(fsamuel): This should go away soon.
+  connection->AddService<mojo::Surface>(this);
+  // GPU
   connection->AddService<Gpu>(this);
-
   return true;
 }
 
 void ViewManagerApp::OnNoMoreRootConnections() {
-  app_impl_->Terminate();
+  app_impl_->Quit();
 }
 
 ClientConnection* ViewManagerApp::CreateClientConnectionForEmbedAtView(
@@ -100,21 +119,17 @@ void ViewManagerApp::Create(ApplicationConnection* connection,
   DCHECK(connection_manager_.get());
   // TODO(fsamuel): We need to make sure that only the window manager can create
   // new roots.
-  scoped_ptr<ViewManagerRootImpl> view_manager_root(
-      new ViewManagerRootImpl(
-          connection_manager_.get(),
-          is_headless_,
-          app_impl_,
-          gpu_state_));
+  ViewManagerRootImpl* view_manager_root = new ViewManagerRootImpl(
+      connection_manager_.get(), is_headless_, app_impl_, gpu_state_,
+      surfaces_state_);
 
   mojo::ViewManagerClientPtr client;
   connection->ConnectToService(&client);
 
   // ViewManagerRootConnection manages its own lifetime.
-  new ViewManagerRootConnectionImpl(request.Pass(),
-                                    view_manager_root.Pass(),
-                                    client.Pass(),
-                                    connection_manager_.get());
+  view_manager_root->Init(new ViewManagerRootConnectionImpl(
+      request.Pass(), make_scoped_ptr(view_manager_root), client.Pass(),
+      connection_manager_.get()));
 }
 
 void ViewManagerApp::Create(
@@ -125,8 +140,16 @@ void ViewManagerApp::Create(
   new gles2::GpuImpl(request.Pass(), gpu_state_);
 }
 
-void ViewManagerApp::OnConnectionError() {
-  app_impl_->Terminate();
+void ViewManagerApp::Create(
+    mojo::ApplicationConnection* connection,
+    mojo::InterfaceRequest<mojo::Surface> request) {
+  surfaces_.insert(
+      new surfaces::SurfacesImpl(this, surfaces_state_, request.Pass()));
+}
+
+void ViewManagerApp::OnSurfaceConnectionClosed(
+    surfaces::SurfacesImpl* surface) {
+  surfaces_.erase(surface);
 }
 
 }  // namespace view_manager

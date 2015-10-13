@@ -14,7 +14,7 @@
 #include "extensions/browser/process_manager_factory.h"
 #include "extensions/common/api/webcam_private.h"
 
-namespace webcam_private = extensions::core_api::webcam_private;
+namespace webcam_private = extensions::api::webcam_private;
 
 namespace content {
 class BrowserContext;
@@ -68,7 +68,7 @@ bool WebcamPrivateAPI::OpenSerialWebcam(
   const std::string& webcam_id = GetWebcamId(extension_id, device_path);
   WebcamResource* webcam_resource = FindWebcamResource(extension_id, webcam_id);
   if (webcam_resource)
-    return webcam_resource->GetWebcam();
+    return false;
 
   ViscaWebcam* visca_webcam(new ViscaWebcam(device_path, extension_id));
   visca_webcam->Open(base::Bind(

@@ -25,6 +25,10 @@ namespace base {
 class DictionaryValue;
 }
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 // AccountTrackerService is a KeyedService that retrieves and caches GAIA
 // information about Google Accounts.
 class AccountTrackerService : public KeyedService,
@@ -42,6 +46,11 @@ class AccountTrackerService : public KeyedService,
   // Value representing no picture URL associated with an account.
   static const char kNoPictureURLFound[];
 
+  // TODO(knn): Move to ChildAccountInfoFetcher once deprecated service flags
+  // have been migrated from preferences.
+  // Child account service flag name.
+  static const char kChildAccountServiceFlag[];
+
   // Information about a specific account.
   struct AccountInfo {
     AccountInfo();
@@ -55,7 +64,7 @@ class AccountTrackerService : public KeyedService,
     std::string hosted_domain;
     std::string locale;
     std::string picture_url;
-    std::vector<std::string> service_flags;
+    bool is_child_account;
 
     bool IsValid() const;
   };
@@ -79,6 +88,9 @@ class AccountTrackerService : public KeyedService,
 
   AccountTrackerService();
   ~AccountTrackerService() override;
+
+  // Registers the preferences used by AccountTrackerService.
+  static void RegisterPrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // KeyedService implementation.
   void Shutdown() override;
@@ -114,14 +126,15 @@ class AccountTrackerService : public KeyedService,
   void SeedAccountInfo(AccountInfo info);
 
   AccountIdMigrationState GetMigrationState();
+  void SetMigrationDone();
   static AccountIdMigrationState GetMigrationState(PrefService* pref_service);
 
  protected:
   // Available to be called in tests.
-  void SetAccountStateFromUserInfo(
-      const std::string& account_id,
-      const base::DictionaryValue* user_info,
-      const std::vector<std::string>* service_flags);
+  void SetAccountStateFromUserInfo(const std::string& account_id,
+                                   const base::DictionaryValue* user_info);
+  void SetIsChildAccount(const std::string& account_id,
+                         const bool& is_child_account);
 
  private:
   friend class AccountFetcherService;
@@ -141,6 +154,11 @@ class AccountTrackerService : public KeyedService,
   void LoadFromPrefs();
   void SaveToPrefs(const AccountState& account);
   void RemoveFromPrefs(const AccountState& account);
+
+  // Gaia id migration.
+  bool IsMigratable();
+  void MigrateToGaiaId();
+  void SetMigrationState(AccountIdMigrationState state);
 
   SigninClient* signin_client_;  // Not owned.
   std::map<std::string, AccountState> accounts_;

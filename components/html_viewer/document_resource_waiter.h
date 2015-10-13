@@ -34,7 +34,9 @@ class DocumentResourceWaiter : public mandoline::FrameTreeClient {
                    frame_tree_client_request,
                mandoline::FrameTreeServerPtr* frame_tree_server,
                mojo::Array<mandoline::FrameDataPtr>* frame_data,
-               mojo::URLResponsePtr* response);
+               uint32_t* change_id);
+
+  mojo::URLResponsePtr ReleaseURLResponse();
 
   // See class description.
   bool IsReady() const;
@@ -47,9 +49,19 @@ class DocumentResourceWaiter : public mandoline::FrameTreeClient {
  private:
   // mandoline::FrameTreeClient:
   void OnConnect(mandoline::FrameTreeServerPtr server,
+                 uint32_t change_id,
                  mojo::Array<mandoline::FrameDataPtr> frame_data) override;
-  void OnFrameAdded(mandoline::FrameDataPtr frame_data) override;
-  void OnFrameRemoved(uint32_t frame_id) override;
+  void OnFrameAdded(uint32_t change_id,
+                    mandoline::FrameDataPtr frame_data) override;
+  void OnFrameRemoved(uint32_t change_id, uint32_t frame_id) override;
+  void OnFrameClientPropertyChanged(uint32_t frame_id,
+                                    const mojo::String& name,
+                                    mojo::Array<uint8_t> new_value) override;
+  void OnPostMessageEvent(uint32_t source_frame_id,
+                          uint32_t target_frame_id,
+                          mandoline::HTMLMessageEventPtr event) override;
+  void OnWillNavigate(uint32_t target_frame_id,
+                      const OnWillNavigateCallback& callback) override;
 
   GlobalState* global_state_;
   HTMLDocumentOOPIF* document_;
@@ -57,6 +69,7 @@ class DocumentResourceWaiter : public mandoline::FrameTreeClient {
   mojo::View* root_;
   mandoline::FrameTreeServerPtr server_;
   mojo::Array<mandoline::FrameDataPtr> frame_data_;
+  uint32_t change_id_;
 
   // Once we get OnConnect() we unbind |frame_tree_client_binding_| and put it
   // here.

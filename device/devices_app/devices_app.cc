@@ -17,7 +17,6 @@
 #include "device/usb/usb_service.h"
 #include "mojo/application/public/cpp/application_connection.h"
 #include "mojo/application/public/cpp/application_impl.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/error_handler.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
 #include "url/gurl.h"
 
@@ -136,7 +135,8 @@ void DevicesApp::Create(mojo::ApplicationConnection* connection,
   // Owned by its message pipe.
   usb::DeviceManagerImpl* device_manager = new usb::DeviceManagerImpl(
       request.Pass(), delegate.Pass(), service_task_runner_);
-  device_manager->set_error_handler(this);
+  device_manager->set_connection_error_handler(
+      base::Bind(&DevicesApp::OnConnectionError, base::Unretained(this)));
 
   active_device_manager_count_++;
   idle_timeout_callback_.Cancel();
@@ -156,7 +156,7 @@ void DevicesApp::StartIdleTimer() {
   // Passing unretained |app_impl_| is safe here because |app_impl_| is
   // guaranteed to outlive |this|, and the callback is canceled if |this| is
   // destroyed.
-  idle_timeout_callback_.Reset(base::Bind(&mojo::ApplicationImpl::Terminate,
+  idle_timeout_callback_.Reset(base::Bind(&mojo::ApplicationImpl::Quit,
                                           base::Unretained(app_impl_)));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, idle_timeout_callback_.callback(),

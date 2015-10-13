@@ -219,9 +219,11 @@ message ClientDownloadRequest {
     // True if the signature was trusted on the client.
     optional bool trusted = 2;
 
-    // PKCS#7 SignedData blobs extracted from a portable executable image's
-    // attribute certificate table. The presence of these does not imply that
-    // the signatures were deemed trusted by the client.
+    // On Windows, PKCS#7 SignedData blobs extracted from a portable executable
+    // image's attribute certificate table. The presence of these does not imply
+    // that the signatures were deemed trusted by the client.
+    // On Mac, this is the code signature blob referenced by the
+    // LC_CODE_SIGNATURE load command.
     repeated bytes signed_data = 3;
   }
 
@@ -298,7 +300,7 @@ message ClientDownloadRequest {
     optional PEImageHeaders pe_headers = 1;
 
     // OS X Mach-O image headers.
-    optional MachOHeaders mach_o_headers = 2;
+    repeated MachOHeaders mach_o_headers = 2;
   };
 
   // Fields 12-17 are reserved for server-side use and are never sent by the
@@ -468,6 +470,20 @@ message ClientIncidentReport {
     message OS {
       optional string os_name = 1;
       optional string os_version = 2;
+
+      message RegistryValue {
+        optional string name = 1;
+        optional uint32 type = 2;
+        optional bytes data = 3;
+      }
+
+      message RegistryKey {
+        optional string name = 1;
+        repeated RegistryValue value = 2;
+        repeated RegistryKey key = 3;
+      }
+
+      repeated RegistryKey registry_key = 3;
     }
     optional OS os = 1;
     message Machine {

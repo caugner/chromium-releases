@@ -24,7 +24,7 @@ import java.util.List;
  * Utilities dealing with extracting information from intents.
  */
 public class IntentUtils {
-    private static final String TAG = "IntentUtils";
+    private static final String TAG = "cr_IntentUtils";
 
     /**
      * Retrieves a list of components that would handle the given intent.
@@ -120,6 +120,19 @@ public class IntentUtils {
     }
 
     /**
+     * Just like {@link Bundle#getBundle(String)} but doesn't throw exceptions.
+     */
+    public static Bundle safeGetBundle(Bundle bundle, String name) {
+        try {
+            return bundle.getBundle(name);
+        } catch (Throwable t) {
+            // Catches un-parceling exceptions.
+            Log.e(TAG, "getBundle failed on bundle " + bundle);
+            return null;
+        }
+    }
+
+    /**
      * Just like {@link Bundle#getParcelable(String)} but doesn't throw exceptions.
      */
     public static <T extends Parcelable> T safeGetParcelable(Bundle bundle, String name) {
@@ -168,6 +181,19 @@ public class IntentUtils {
         } catch (Throwable t) {
             // Catches un-parceling exceptions.
             Log.e(TAG, "getStringArrayListExtra failed on intent " + intent);
+            return null;
+        }
+    }
+
+    /**
+     * Just like {@link Intent#getByteArrayExtra(String)} but doesn't throw exceptions.
+     */
+    public static byte[] safeGetByteArrayExtra(Intent intent, String name) {
+        try {
+            return intent.getByteArrayExtra(name);
+        } catch (Throwable t) {
+            // Catches un-parceling exceptions.
+            Log.e(TAG, "getByteArrayExtra failed on intent " + intent);
             return null;
         }
     }

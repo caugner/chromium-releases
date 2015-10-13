@@ -23,11 +23,11 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "components/error_page/common/error_page_params.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/common/url_constants.h"
 #include "grit/components_strings.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -146,7 +146,7 @@ GURL SanitizeURL(const GURL& url) {
 
 // Sanitizes and formats a URL for upload to the error correction service.
 std::string PrepareUrlForUpload(const GURL& url) {
-  // TODO(yuusuke): Change to net::FormatUrl when Link Doctor becomes
+  // TODO(yuusuke): Change to url_formatter::FormatUrl when Link Doctor becomes
   // unicode-capable.
   std::string spec_to_send = SanitizeURL(url).spec();
 
@@ -265,9 +265,9 @@ std::string CreateClickTrackingUrlRequestBody(
 base::string16 FormatURLForDisplay(const GURL& url, bool is_rtl,
                                    const std::string accept_languages) {
   // Translate punycode into UTF8, unescape UTF8 URLs.
-  base::string16 url_for_display(net::FormatUrl(
-      url, accept_languages, net::kFormatUrlOmitNothing,
-      net::UnescapeRule::NORMAL, NULL, NULL, NULL));
+  base::string16 url_for_display(url_formatter::FormatUrl(
+      url, accept_languages, url_formatter::kFormatUrlOmitNothing,
+      net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
   // URLs are always LTR.
   if (is_rtl)
     base::i18n::WrapStringWithLTRFormatting(&url_for_display);
@@ -391,7 +391,6 @@ struct NetErrorHelperCore::ErrorPageInfo {
         needs_load_navigation_corrections(false),
         reload_button_in_page(false),
         show_saved_copy_button_in_page(false),
-        show_cached_page_button_in_page(false),
         show_cached_copy_button_in_page(false),
         is_finished_loading(false),
         auto_reload_triggered(false) {
@@ -426,7 +425,6 @@ struct NetErrorHelperCore::ErrorPageInfo {
   // Track if specific buttons are included in an error page, for statistics.
   bool reload_button_in_page;
   bool show_saved_copy_button_in_page;
-  bool show_cached_page_button_in_page;
   bool show_cached_copy_button_in_page;
 
   // True if a page has completed loading, at which point it can receive
@@ -470,7 +468,8 @@ NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
                                        bool auto_reload_visible_only,
                                        bool is_visible)
     : delegate_(delegate),
-      last_probe_status_(chrome_common_net::DNS_PROBE_POSSIBLE),
+      last_probe_status_(DNS_PROBE_POSSIBLE),
+      can_show_network_diagnostics_dialog_(false),
       auto_reload_enabled_(auto_reload_enabled),
       auto_reload_visible_only_(auto_reload_visible_only),
       auto_reload_timer_(new base::Timer(false, false)),
@@ -569,10 +568,9 @@ void NetErrorHelperCore::OnCommitLoad(FrameType frame_type, const GURL& url) {
           pending_error_page_info_->error.unreachableURL) {
     DCHECK(navigation_from_button_ == RELOAD_BUTTON ||
            navigation_from_button_ == SHOW_SAVED_COPY_BUTTON);
-    chrome_common_net::RecordEvent(
-        navigation_from_button_ == RELOAD_BUTTON ?
-            chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_ERROR :
-            chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_ERROR);
+    RecordEvent(navigation_from_button_ == RELOAD_BUTTON ?
+        NETWORK_ERROR_PAGE_RELOAD_BUTTON_ERROR :
+        NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_ERROR);
   }
   navigation_from_button_ = NO_BUTTON;
 
@@ -600,26 +598,19 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
 
   committed_error_page_info_->is_finished_loading = true;
 
-  chrome_common_net::RecordEvent(chrome_common_net::NETWORK_ERROR_PAGE_SHOWN);
+  RecordEvent(NETWORK_ERROR_PAGE_SHOWN);
   if (committed_error_page_info_->reload_button_in_page) {
-    chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_SHOWN);
+    RecordEvent(NETWORK_ERROR_PAGE_RELOAD_BUTTON_SHOWN);
   }
   if (committed_error_page_info_->show_saved_copy_button_in_page) {
-    chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_SHOWN);
+    RecordEvent(NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_SHOWN);
   }
   if (committed_error_page_info_->reload_button_in_page &&
       committed_error_page_info_->show_saved_copy_button_in_page) {
-    chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN);
+    RecordEvent(NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN);
   }
   if (committed_error_page_info_->show_cached_copy_button_in_page) {
-    chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_CACHED_COPY_BUTTON_SHOWN);
-  } else if (committed_error_page_info_->show_cached_page_button_in_page) {
-    chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_CACHED_PAGE_BUTTON_SHOWN);
+    RecordEvent(NETWORK_ERROR_PAGE_CACHED_COPY_BUTTON_SHOWN);
   }
 
   delegate_->EnablePageHelperFunctions();
@@ -640,7 +631,7 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
   }
 
   if (!committed_error_page_info_->needs_dns_updates ||
-      last_probe_status_ == chrome_common_net::DNS_PROBE_POSSIBLE) {
+      last_probe_status_ == DNS_PROBE_POSSIBLE) {
     return;
   }
   DVLOG(1) << "Error page finished loading; sending saved status.";
@@ -667,19 +658,18 @@ void NetErrorHelperCore::GetErrorHTML(
     bool reload_button_in_page;
     bool show_saved_copy_button_in_page;
     bool show_cached_copy_button_in_page;
-    bool show_cached_page_button_in_page;
 
     delegate_->GenerateLocalizedErrorPage(
-        error, is_failed_post, scoped_ptr<ErrorPageParams>(),
-        &reload_button_in_page, &show_saved_copy_button_in_page,
-        &show_cached_copy_button_in_page, &show_cached_page_button_in_page,
+        error, is_failed_post,
+        false /* No diagnostics dialogs allowed for subframes. */,
+        scoped_ptr<ErrorPageParams>(), &reload_button_in_page,
+        &show_saved_copy_button_in_page, &show_cached_copy_button_in_page,
         error_html);
   }
 }
 
-void NetErrorHelperCore::OnNetErrorInfo(
-    chrome_common_net::DnsProbeStatus status) {
-  DCHECK_NE(chrome_common_net::DNS_PROBE_POSSIBLE, status);
+void NetErrorHelperCore::OnNetErrorInfo(DnsProbeStatus status) {
+  DCHECK_NE(DNS_PROBE_POSSIBLE, status);
 
   last_probe_status_ = status;
 
@@ -690,6 +680,11 @@ void NetErrorHelperCore::OnNetErrorInfo(
   }
 
   UpdateErrorPage();
+}
+
+void NetErrorHelperCore::OnSetCanShowNetworkDiagnosticsDialog(
+    bool can_show_network_diagnostics_dialog) {
+  can_show_network_diagnostics_dialog_ = can_show_network_diagnostics_dialog;
 }
 
 void NetErrorHelperCore::OnSetNavigationCorrectionInfo(
@@ -724,33 +719,33 @@ void NetErrorHelperCore::GetErrorHtmlForMainFrame(
     // loading, a DNS probe status scheduled to be sent to it may be thrown
     // out, but since the new error page should trigger a new DNS probe, it
     // will just get the results for the next page load.
-    last_probe_status_ = chrome_common_net::DNS_PROBE_POSSIBLE;
+    last_probe_status_ = DNS_PROBE_POSSIBLE;
     pending_error_page_info->needs_dns_updates = true;
     error = GetUpdatedError(error);
   }
 
   delegate_->GenerateLocalizedErrorPage(
       error, pending_error_page_info->was_failed_post,
+      can_show_network_diagnostics_dialog_,
       scoped_ptr<ErrorPageParams>(),
       &pending_error_page_info->reload_button_in_page,
       &pending_error_page_info->show_saved_copy_button_in_page,
       &pending_error_page_info->show_cached_copy_button_in_page,
-      &pending_error_page_info->show_cached_page_button_in_page,
       error_html);
 }
 
 void NetErrorHelperCore::UpdateErrorPage() {
   DCHECK(committed_error_page_info_->needs_dns_updates);
   DCHECK(committed_error_page_info_->is_finished_loading);
-  DCHECK_NE(chrome_common_net::DNS_PROBE_POSSIBLE, last_probe_status_);
+  DCHECK_NE(DNS_PROBE_POSSIBLE, last_probe_status_);
 
   UMA_HISTOGRAM_ENUMERATION("DnsProbe.ErrorPageUpdateStatus",
                             last_probe_status_,
-                            chrome_common_net::DNS_PROBE_MAX);
+                            DNS_PROBE_MAX);
   // Every status other than DNS_PROBE_POSSIBLE and DNS_PROBE_STARTED is a
   // final status code.  Once one is reached, the page does not need further
   // updates.
-  if (last_probe_status_ != chrome_common_net::DNS_PROBE_STARTED)
+  if (last_probe_status_ != DNS_PROBE_STARTED)
     committed_error_page_info_->needs_dns_updates = false;
 
   // There is no need to worry about the button display statistics here because
@@ -758,7 +753,8 @@ void NetErrorHelperCore::UpdateErrorPage() {
   // by a DNS error update.
   delegate_->UpdateErrorPage(
       GetUpdatedError(committed_error_page_info_->error),
-      committed_error_page_info_->was_failed_post);
+      committed_error_page_info_->was_failed_post,
+      can_show_network_diagnostics_dialog_);
 }
 
 void NetErrorHelperCore::OnNavigationCorrectionsFetched(
@@ -794,11 +790,11 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
     delegate_->GenerateLocalizedErrorPage(
         pending_error_page_info_->error,
         pending_error_page_info_->was_failed_post,
+        can_show_network_diagnostics_dialog_,
         params.Pass(),
         &pending_error_page_info_->reload_button_in_page,
         &pending_error_page_info_->show_saved_copy_button_in_page,
         &pending_error_page_info_->show_cached_copy_button_in_page,
-        &pending_error_page_info_->show_cached_page_button_in_page,
         &error_html);
   } else {
     // Since |navigation_correction_params| in |pending_error_page_info_| is
@@ -817,15 +813,13 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
 blink::WebURLError NetErrorHelperCore::GetUpdatedError(
     const blink::WebURLError& error) const {
   // If a probe didn't run or wasn't conclusive, restore the original error.
-  if (last_probe_status_ == chrome_common_net::DNS_PROBE_NOT_RUN ||
-      last_probe_status_ ==
-          chrome_common_net::DNS_PROBE_FINISHED_INCONCLUSIVE) {
+  if (last_probe_status_ == DNS_PROBE_NOT_RUN ||
+      last_probe_status_ == DNS_PROBE_FINISHED_INCONCLUSIVE) {
     return error;
   }
 
   blink::WebURLError updated_error;
-  updated_error.domain = blink::WebString::fromUTF8(
-      chrome_common_net::kDnsProbeErrorDomain);
+  updated_error.domain = blink::WebString::fromUTF8(kDnsProbeErrorDomain);
   updated_error.reason = last_probe_status_;
   updated_error.unreachableURL = error.unreachableURL;
   updated_error.staleCopyInCache = error.staleCopyInCache;
@@ -953,42 +947,36 @@ void NetErrorHelperCore::ExecuteButtonPress(bool is_error_page, Button button) {
 
   switch (button) {
     case RELOAD_BUTTON:
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_CLICKED);
+      RecordEvent(NETWORK_ERROR_PAGE_RELOAD_BUTTON_CLICKED);
       if (committed_error_page_info_->show_saved_copy_button_in_page) {
-        chrome_common_net::RecordEvent(
-            chrome_common_net::NETWORK_ERROR_PAGE_BOTH_BUTTONS_RELOAD_CLICKED);
+        RecordEvent(NETWORK_ERROR_PAGE_BOTH_BUTTONS_RELOAD_CLICKED);
       }
       navigation_from_button_ = RELOAD_BUTTON;
       Reload();
       return;
     case SHOW_SAVED_COPY_BUTTON:
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_CLICKED);
+      RecordEvent(NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_CLICKED);
       navigation_from_button_ = SHOW_SAVED_COPY_BUTTON;
       if (committed_error_page_info_->reload_button_in_page) {
-        chrome_common_net::RecordEvent(chrome_common_net::
-            NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN_SAVED_COPY_CLICKED);
+        RecordEvent(NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN_SAVED_COPY_CLICKED);
       }
       delegate_->LoadPageFromCache(
           committed_error_page_info_->error.unreachableURL);
       return;
     case MORE_BUTTON:
       // Visual effects on page are handled in Javascript code.
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_MORE_BUTTON_CLICKED);
+      RecordEvent(NETWORK_ERROR_PAGE_MORE_BUTTON_CLICKED);
       return;
     case EASTER_EGG:
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_EASTER_EGG_ACTIVATED);
+      RecordEvent(NETWORK_ERROR_EASTER_EGG_ACTIVATED);
       return;
     case SHOW_CACHED_COPY_BUTTON:
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_CACHED_COPY_BUTTON_CLICKED);
+      RecordEvent(NETWORK_ERROR_PAGE_CACHED_COPY_BUTTON_CLICKED);
       return;
-    case SHOW_CACHED_PAGE_BUTTON:
-      chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_CACHED_PAGE_BUTTON_CLICKED);
+    case DIAGNOSE_ERROR:
+      RecordEvent(NETWORK_ERROR_DIAGNOSE_BUTTON_CLICKED);
+      delegate_->DiagnoseError(
+          committed_error_page_info_->error.unreachableURL);
       return;
     case BUTTON_MAX:
     case NO_BUTTON:

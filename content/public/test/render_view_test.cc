@@ -10,6 +10,7 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
+#include "content/app/mojo/mojo_init.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input_messages.h"
@@ -145,7 +146,7 @@ WebLocalFrame* RenderViewTest::GetMainFrame() {
   return view_->GetWebView()->mainFrame()->toWebLocalFrame();
 }
 
-void RenderViewTest::ExecuteJavaScript(const char* js) {
+void RenderViewTest::ExecuteJavaScriptForTests(const char* js) {
   GetMainFrame()->executeScript(WebScriptSource(WebString::fromUTF8(js)));
 }
 
@@ -190,6 +191,10 @@ void RenderViewTest::GoForward(const PageState& state) {
 }
 
 void RenderViewTest::SetUp() {
+  // Blink needs to be initialized before calling CreateContentRendererClient()
+  // because it uses blink internally.
+  blink::initialize(blink_platform_impl_.Get());
+
   content_client_.reset(CreateContentClient());
   content_browser_client_.reset(CreateContentBrowserClient());
   content_renderer_client_.reset(CreateContentRendererClient());
@@ -218,7 +223,6 @@ void RenderViewTest::SetUp() {
   // hacky, but this is the world we live in...
   std::string flags("--expose-gc");
   v8::V8::SetFlagsFromString(flags.c_str(), static_cast<int>(flags.size()));
-  blink::initialize(blink_platform_impl_.Get());
 
   // Ensure that we register any necessary schemes when initializing WebKit,
   // since we are using a MockRenderThread.
@@ -255,9 +259,13 @@ void RenderViewTest::SetUp() {
   view_params.min_size = gfx::Size();
   view_params.max_size = gfx::Size();
 
+#if !defined(OS_IOS)
+  InitializeMojo();
+#endif
+
   // This needs to pass the mock render thread to the view.
   RenderViewImpl* view =
-      RenderViewImpl::Create(view_params, compositor_deps_.get(), false);
+      RenderViewImpl::Create(compositor_deps_.get(), view_params, false);
   view_ = view;
 }
 
@@ -340,7 +348,7 @@ gfx::Rect RenderViewTest::GetElementBounds(const std::string& element_id) {
   std::vector<std::string> params;
   params.push_back(element_id);
   std::string script =
-      ReplaceStringPlaceholders(kGetCoordinatesScript, params, NULL);
+      base::ReplaceStringPlaceholders(kGetCoordinatesScript, params, NULL);
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
@@ -432,8 +440,8 @@ void RenderViewTest::SetFocused(const blink::WebNode& node) {
 void RenderViewTest::Reload(const GURL& url) {
   CommonNavigationParams common_params(
       url, Referrer(), ui::PAGE_TRANSITION_LINK, FrameMsg_Navigate_Type::RELOAD,
-      true, base::TimeTicks(), FrameMsg_UILoadMetricsReportType::NO_REPORT,
-      GURL(), GURL());
+      true, false, base::TimeTicks(),
+      FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL());
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   TestRenderFrame* frame =
       static_cast<TestRenderFrame*>(impl->GetMainRenderFrame());
@@ -564,7 +572,7 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
 
   CommonNavigationParams common_params(
       GURL(), Referrer(), ui::PAGE_TRANSITION_FORWARD_BACK,
-      FrameMsg_Navigate_Type::NORMAL, true, base::TimeTicks(),
+      FrameMsg_Navigate_Type::NORMAL, true, false, base::TimeTicks(),
       FrameMsg_UILoadMetricsReportType::NO_REPORT, GURL(), GURL());
   RequestNavigationParams request_params;
   request_params.page_state = state;

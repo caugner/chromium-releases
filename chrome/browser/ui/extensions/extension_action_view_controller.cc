@@ -61,7 +61,7 @@ ExtensionActionViewController::~ExtensionActionViewController() {
   DCHECK(!is_showing_popup());
 }
 
-const std::string& ExtensionActionViewController::GetId() const {
+std::string ExtensionActionViewController::GetId() const {
   return extension_->id();
 }
 
@@ -142,9 +142,10 @@ void ExtensionActionViewController::HidePopup() {
     popup_host_->Close();
     // We need to do these actions synchronously (instead of closing and then
     // performing the rest of the cleanup in OnExtensionHostDestroyed()) because
-    // the extension host can close asynchronously, and we need to keep the view
+    // the extension host may close asynchronously, and we need to keep the view
     // delegate up-to-date.
-    OnPopupClosed();
+    if (popup_host_)
+      OnPopupClosed();
   }
 }
 
@@ -161,7 +162,7 @@ ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
   if (toolbar_actions_bar_) {
     if (toolbar_actions_bar_->popped_out_action() == this)
       visibility = ExtensionContextMenuModel::TRANSITIVELY_VISIBLE;
-    else if (!toolbar_actions_bar_->IsActionVisible(this))
+    else if (!toolbar_actions_bar_->IsActionVisibleOnMainBar(this))
       visibility = ExtensionContextMenuModel::OVERFLOWED;
     // Else, VISIBLE is correct.
   }
@@ -318,7 +319,7 @@ bool ExtensionActionViewController::TriggerPopupWithUrl(
     toolbar_actions_bar_->SetPopupOwner(this);
 
   if (toolbar_actions_bar_ &&
-      !toolbar_actions_bar_->IsActionVisible(this) &&
+      !toolbar_actions_bar_->IsActionVisibleOnMainBar(this) &&
       extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()) {
     platform_delegate_->CloseOverflowMenu();
     toolbar_actions_bar_->PopOutAction(

@@ -17,6 +17,7 @@
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -39,6 +40,8 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
+#include "net/base/test_data_directory.h"
+#include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -455,7 +458,21 @@ TEST_F(WebContentsImplTest, NavigateToExcessivelyLongURL) {
 
   controller().LoadURL(
       url, Referrer(), ui::PAGE_TRANSITION_GENERATED, std::string());
-  EXPECT_EQ(nullptr, controller().GetVisibleEntry());
+  EXPECT_EQ(nullptr, controller().GetPendingEntry());
+}
+
+// Test that we reject NavigateToEntry if the url is invalid.
+TEST_F(WebContentsImplTest, NavigateToInvalidURL) {
+  // Invalid URLs should not trigger a navigation.
+  const GURL invalid_url("view-source:http://example.org/%00");
+  controller().LoadURL(
+      invalid_url, Referrer(), ui::PAGE_TRANSITION_GENERATED, std::string());
+  EXPECT_EQ(nullptr, controller().GetPendingEntry());
+
+  // Empty URLs are supported and should start a navigation.
+  controller().LoadURL(
+      GURL(), Referrer(), ui::PAGE_TRANSITION_GENERATED, std::string());
+  EXPECT_NE(nullptr, controller().GetPendingEntry());
 }
 
 // Test that navigating across a site boundary creates a new RenderViewHost
@@ -540,7 +557,7 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
     contents()->GetMainFrame()->PrepareForCommit();
   }
   TestRenderFrameHost* goback_rfh = contents()->GetPendingMainFrame();
-  if (!RenderFrameHostManager::IsSwappedOutStateForbidden()) {
+  if (!SiteIsolationPolicy::IsSwappedOutStateForbidden()) {
     // Recycling the rfh is a behavior specific to swappedout://
     EXPECT_EQ(orig_rfh, goback_rfh);
   }
@@ -930,7 +947,7 @@ TEST_F(WebContentsImplTest, FindOpenerRVHWhenPending) {
       popup->GetRenderManager()->GetOpenerRoutingID(instance);
   RenderFrameProxyHost* proxy =
       contents()->GetRenderManager()->GetRenderFrameProxyHost(instance);
-  if (RenderFrameHostManager::IsSwappedOutStateForbidden()) {
+  if (SiteIsolationPolicy::IsSwappedOutStateForbidden()) {
     EXPECT_TRUE(proxy);
     EXPECT_EQ(proxy->GetRoutingID(), opener_frame_routing_id);
 
@@ -1095,25 +1112,30 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationPreempted) {
   EXPECT_EQ(nullptr, contents()->GetPendingMainFrame());
 }
 
+// Tests that if we go back twice (same-site then cross-site), and the same-site
+// RFH commits first, the cross-site RFH's navigation is canceled.
+// TODO(avi,creis): Consider changing this behavior to better match the user's
+// intent.
 TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   // Start with a web ui page, which gets a new RVH with WebUI bindings.
-  const GURL url1("chrome://gpu");
+  GURL url1(std::string(kChromeUIScheme) + "://" +
+            std::string(kChromeUIGpuHost));
   controller().LoadURL(
       url1, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   int entry_id = controller().GetPendingEntry()->GetUniqueID();
-  TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
-  ntp_rfh->PrepareForCommit();
-  contents()->TestDidNavigate(ntp_rfh, 1, entry_id, true, url1,
+  TestRenderFrameHost* webui_rfh = contents()->GetMainFrame();
+  webui_rfh->PrepareForCommit();
+  contents()->TestDidNavigate(webui_rfh, 1, entry_id, true, url1,
                               ui::PAGE_TRANSITION_TYPED);
   NavigationEntry* entry1 = controller().GetLastCommittedEntry();
   SiteInstance* instance1 = contents()->GetSiteInstance();
 
   EXPECT_FALSE(contents()->CrossProcessNavigationPending());
-  EXPECT_EQ(ntp_rfh, contents()->GetMainFrame());
+  EXPECT_EQ(webui_rfh, contents()->GetMainFrame());
   EXPECT_EQ(url1, entry1->GetURL());
   EXPECT_EQ(instance1,
             NavigationEntryImpl::FromNavigationEntry(entry1)->site_instance());
-  EXPECT_TRUE(ntp_rfh->GetRenderViewHost()->GetEnabledBindings() &
+  EXPECT_TRUE(webui_rfh->GetRenderViewHost()->GetEnabledBindings() &
               BINDINGS_POLICY_WEB_UI);
 
   // Navigate to new site.
@@ -1125,9 +1147,8 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   TestRenderFrameHost* google_rfh = contents()->GetPendingMainFrame();
 
   // Simulate beforeunload approval.
-  EXPECT_TRUE(ntp_rfh->is_waiting_for_beforeunload_ack());
-  base::TimeTicks now = base::TimeTicks::Now();
-  ntp_rfh->PrepareForCommit();
+  EXPECT_TRUE(webui_rfh->is_waiting_for_beforeunload_ack());
+  webui_rfh->PrepareForCommit();
 
   // DidNavigate from the pending page.
   contents()->TestDidNavigate(google_rfh, 1, entry_id, true, url2,
@@ -1179,7 +1200,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
 
   // Simulate beforeunload approval.
   EXPECT_TRUE(google_rfh->is_waiting_for_beforeunload_ack());
-  now = base::TimeTicks::Now();
+  base::TimeTicks now = base::TimeTicks::Now();
   google_rfh->PrepareForCommit();
   google_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
@@ -1202,6 +1223,103 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   EXPECT_EQ(instance1,
             NavigationEntryImpl::FromNavigationEntry(entry1)->site_instance());
   EXPECT_EQ(url1, entry1->GetURL());
+}
+
+// Tests that if we go back twice (same-site then cross-site), and the cross-
+// site RFH commits first, we ignore the now-swapped-out RFH's commit.
+TEST_F(WebContentsImplTest, CrossSiteNavigationBackOldNavigationIgnored) {
+  // Start with a web ui page, which gets a new RVH with WebUI bindings.
+  GURL url1(std::string(kChromeUIScheme) + "://" +
+            std::string(kChromeUIGpuHost));
+  controller().LoadURL(url1, Referrer(), ui::PAGE_TRANSITION_TYPED,
+                       std::string());
+  int entry_id = controller().GetPendingEntry()->GetUniqueID();
+  TestRenderFrameHost* webui_rfh = contents()->GetMainFrame();
+  webui_rfh->PrepareForCommit();
+  contents()->TestDidNavigate(webui_rfh, 1, entry_id, true, url1,
+                              ui::PAGE_TRANSITION_TYPED);
+  NavigationEntry* entry1 = controller().GetLastCommittedEntry();
+  SiteInstance* instance1 = contents()->GetSiteInstance();
+
+  EXPECT_FALSE(contents()->CrossProcessNavigationPending());
+  EXPECT_EQ(webui_rfh, contents()->GetMainFrame());
+  EXPECT_EQ(url1, entry1->GetURL());
+  EXPECT_EQ(instance1,
+            NavigationEntryImpl::FromNavigationEntry(entry1)->site_instance());
+  EXPECT_TRUE(webui_rfh->GetRenderViewHost()->GetEnabledBindings() &
+              BINDINGS_POLICY_WEB_UI);
+
+  // Navigate to new site.
+  const GURL url2("http://www.google.com");
+  controller().LoadURL(url2, Referrer(), ui::PAGE_TRANSITION_TYPED,
+                       std::string());
+  entry_id = controller().GetPendingEntry()->GetUniqueID();
+  EXPECT_TRUE(contents()->CrossProcessNavigationPending());
+  TestRenderFrameHost* google_rfh = contents()->GetPendingMainFrame();
+
+  // Simulate beforeunload approval.
+  EXPECT_TRUE(webui_rfh->is_waiting_for_beforeunload_ack());
+  webui_rfh->PrepareForCommit();
+
+  // DidNavigate from the pending page.
+  contents()->TestDidNavigate(google_rfh, 1, entry_id, true, url2,
+                              ui::PAGE_TRANSITION_TYPED);
+  NavigationEntry* entry2 = controller().GetLastCommittedEntry();
+  SiteInstance* instance2 = contents()->GetSiteInstance();
+
+  EXPECT_FALSE(contents()->CrossProcessNavigationPending());
+  EXPECT_EQ(google_rfh, contents()->GetMainFrame());
+  EXPECT_NE(instance1, instance2);
+  EXPECT_FALSE(contents()->GetPendingMainFrame());
+  EXPECT_EQ(url2, entry2->GetURL());
+  EXPECT_EQ(instance2,
+            NavigationEntryImpl::FromNavigationEntry(entry2)->site_instance());
+  EXPECT_FALSE(google_rfh->GetRenderViewHost()->GetEnabledBindings() &
+               BINDINGS_POLICY_WEB_UI);
+
+  // Navigate to third page on same site.
+  const GURL url3("http://news.google.com");
+  controller().LoadURL(url3, Referrer(), ui::PAGE_TRANSITION_TYPED,
+                       std::string());
+  entry_id = controller().GetPendingEntry()->GetUniqueID();
+  EXPECT_FALSE(contents()->CrossProcessNavigationPending());
+  contents()->GetMainFrame()->PrepareForCommit();
+  contents()->TestDidNavigate(google_rfh, 2, entry_id, true, url3,
+                              ui::PAGE_TRANSITION_TYPED);
+  NavigationEntry* entry3 = controller().GetLastCommittedEntry();
+  SiteInstance* instance3 = contents()->GetSiteInstance();
+
+  EXPECT_FALSE(contents()->CrossProcessNavigationPending());
+  EXPECT_EQ(google_rfh, contents()->GetMainFrame());
+  EXPECT_EQ(instance2, instance3);
+  EXPECT_FALSE(contents()->GetPendingMainFrame());
+  EXPECT_EQ(url3, entry3->GetURL());
+  EXPECT_EQ(instance3,
+            NavigationEntryImpl::FromNavigationEntry(entry3)->site_instance());
+
+  // Go back within the site.
+  controller().GoBack();
+  EXPECT_FALSE(contents()->CrossProcessNavigationPending());
+  EXPECT_EQ(entry2, controller().GetPendingEntry());
+
+  // Before that commits, go back again.
+  controller().GoBack();
+  EXPECT_TRUE(contents()->CrossProcessNavigationPending());
+  EXPECT_TRUE(contents()->GetPendingMainFrame());
+  EXPECT_EQ(entry1, controller().GetPendingEntry());
+  webui_rfh = contents()->GetPendingMainFrame();
+
+  // DidNavigate from the second back.
+  contents()->TestDidNavigate(webui_rfh, 1, entry1->GetUniqueID(), false, url1,
+                              ui::PAGE_TRANSITION_TYPED);
+
+  // That should have landed us on the first entry.
+  EXPECT_EQ(entry1, controller().GetLastCommittedEntry());
+
+  // When the second back commits, it should be ignored.
+  contents()->TestDidNavigate(google_rfh, 1, entry2->GetUniqueID(), false, url2,
+                              ui::PAGE_TRANSITION_TYPED);
+  EXPECT_EQ(entry1, controller().GetLastCommittedEntry());
 }
 
 // Test that during a slow cross-site navigation, a sub-frame navigation in the
@@ -1471,6 +1589,7 @@ TEST_F(WebContentsImplTest, HistoryNavigationExitsFullscreen) {
     EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
     contents()->TestDidNavigate(orig_rfh, i + 1, entry_id, false, url,
                                 ui::PAGE_TRANSITION_FORWARD_BACK);
+    orig_rfh->SimulateNavigationStop();
 
     // Confirm fullscreen has exited.
     EXPECT_FALSE(orig_rvh->IsFullscreenGranted());
@@ -2886,8 +3005,7 @@ TEST_F(WebContentsImplTest, StartStopEventsBalance) {
   // The bug manifests itself in regular mode as well, but browser-initiated
   // navigation of subframes is only possible in --site-per-process mode within
   // unit tests.
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kSitePerProcess);
+  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
   const GURL initial_url("about:blank");
   const GURL main_url("http://www.chromium.org");
   const GURL foo_url("http://foo.chromium.org");
@@ -3209,6 +3327,37 @@ TEST_F(WebContentsImplTest, ThemeColorChangeDependingOnFirstVisiblePaint) {
 
   EXPECT_EQ(SK_ColorGREEN, contents()->GetThemeColor());
   EXPECT_EQ(SK_ColorGREEN, observer.last_theme_color());
+}
+
+// Test that if a renderer reports that it has loaded a resource from
+// memory cache with bad security info (i.e. can't be deserialized), the
+// renderer gets killed.
+TEST_F(WebContentsImplTest, LoadResourceFromMemoryCacheWithBadSecurityInfo) {
+  MockRenderProcessHost* rph = contents()->GetMainFrame()->GetProcess();
+  EXPECT_EQ(0, rph->bad_msg_count());
+
+  contents()->OnDidLoadResourceFromMemoryCache(
+      GURL("http://example.test"), "not valid security info", "GET",
+      "mime type", RESOURCE_TYPE_MAIN_FRAME);
+  EXPECT_EQ(1, rph->bad_msg_count());
+}
+
+// Test that if a resource is loaded with empty security info, the SSLManager
+// does not mistakenly think it has seen a good certificate and thus forget any
+// user exceptions for that host. See https://crbug.com/516808.
+TEST_F(WebContentsImplTest, LoadResourceFromMemoryCacheWithEmptySecurityInfo) {
+  scoped_refptr<net::X509Certificate> cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
+  SSLPolicyBackend* backend = contents()->controller_.ssl_manager()->backend();
+  const GURL test_url("https://example.test");
+
+  backend->AllowCertForHost(*cert, test_url.host(), 1);
+  EXPECT_TRUE(backend->HasAllowException(test_url.host()));
+
+  contents()->OnDidLoadResourceFromMemoryCache(test_url, "", "GET", "mime type",
+                                               RESOURCE_TYPE_MAIN_FRAME);
+
+  EXPECT_TRUE(backend->HasAllowException(test_url.host()));
 }
 
 }  // namespace content

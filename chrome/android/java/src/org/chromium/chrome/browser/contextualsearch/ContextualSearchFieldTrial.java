@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import android.content.Context;
 import android.text.TextUtils;
 
 import org.chromium.base.CommandLine;
@@ -38,9 +37,10 @@ public class ContextualSearchFieldTrial {
     static final String TAP_RESOLVE_LIMIT_FOR_UNDECIDED = "tap_resolve_limit_for_undecided";
     static final String TAP_PREFETCH_LIMIT_FOR_UNDECIDED = "tap_prefetch_limit_for_undecided";
 
-    static final String ARROW_ICON_ENABLED = "contextual_search_arrow_icon_enabled";
-    static final String SIDE_SEARCH_PROVIDER_ICON_ENABLED =
-            "contextual_search_side_search_provider_icon_enabled";
+    static final String SELECTION_EXPANSION_DISABLED =
+            "contextual_search_selection_expansion_disabled";
+
+    static final String NARROW_PANEL_SUPPORTED = "contextual_search_narrow_panel_supported";
 
     private static final String CHINESE_LANGUAGE_CODE = "zh";
     private static final String JAPANESE_LANGUAGE_CODE = "ja";
@@ -60,8 +60,8 @@ public class ContextualSearchFieldTrial {
 
     // Cached value to avoid repeated and redundant JNI operations.
     private static Boolean sEnabled;
-    private static Boolean sArrowIconEnabled;
-    private static Boolean sSideSearchProviderIconEnabled;
+    private static Boolean sSelectionExpansionDisabled;
+    private static Boolean sNarrowPanelSupported;
 
     /**
      * Don't instantiate.
@@ -73,14 +73,14 @@ public class ContextualSearchFieldTrial {
      * Chrome preference to determine if the service is enabled.
      * @return Whether Contextual Search is enabled or not.
      */
-    public static boolean isEnabled(Context context) {
+    public static boolean isEnabled() {
         if (sEnabled == null) {
-            sEnabled = detectEnabled(context);
+            sEnabled = detectEnabled();
         }
         return sEnabled.booleanValue();
     }
 
-    private static boolean detectEnabled(Context context) {
+    private static boolean detectEnabled() {
         if (SysUtils.isLowEndDevice()) {
             return false;
         }
@@ -239,23 +239,23 @@ public class ContextualSearchFieldTrial {
     // --------------------------------------------------------------------------------------------
 
     /**
-     * @return {@code true} Whether the arrow icon should be displayed.
+     * @return Whether the base page selection expansion after server response is disabled.
      */
-    public static boolean isArrowIconEnabled() {
-        if (sArrowIconEnabled == null) {
-            sArrowIconEnabled = getBooleanParam(ARROW_ICON_ENABLED);
+    public static boolean isSelectionExpansionDisabled() {
+        if (sSelectionExpansionDisabled == null) {
+            sSelectionExpansionDisabled = getBooleanParam(SELECTION_EXPANSION_DISABLED);
         }
-        return sArrowIconEnabled.booleanValue();
+        return sSelectionExpansionDisabled.booleanValue();
     }
 
     /**
-     * @return {@code true} Whether the search provider icon should be displayed on the side.
+     * @return Whether the narrow version of the Search Panel is supported.
      */
-    public static boolean isSideSearchProviderIconEnabled() {
-        if (sSideSearchProviderIconEnabled == null) {
-            sSideSearchProviderIconEnabled = getBooleanParam(SIDE_SEARCH_PROVIDER_ICON_ENABLED);
+    public static boolean isNarrowPanelSupported() {
+        if (sNarrowPanelSupported == null) {
+            sNarrowPanelSupported = getBooleanParam(NARROW_PANEL_SUPPORTED);
         }
-        return sSideSearchProviderIconEnabled.booleanValue();
+        return sNarrowPanelSupported.booleanValue();
     }
 
     // --------------------------------------------------------------------------------------------

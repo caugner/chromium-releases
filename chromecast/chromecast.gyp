@@ -11,7 +11,7 @@
     # Refers to enum CastProductType in components/metrics/proto/cast_logs.proto
     'cast_product_type%': 0,  # CAST_PRODUCT_TYPE_UNKNOWN
     'chromium_code': 1,
-    'chromecast_branding%': 'Chromium',
+    'chromecast_branding%': 'public',
     'disable_display%': 0,
     'enable_default_cast_graphics%': 1,
     'ozone_platform_cast%': 0,
@@ -43,13 +43,30 @@
         'public/chromecast_export.h',
         'public/graphics_properties_shlib.h',
         'public/graphics_types.h',
+        'public/media_codec_support.h',
+        'public/media/audio_pipeline_device.h',
+        'public/media/cast_decoder_buffer.h',
+        'public/media/cast_decrypt_config.h',
+        'public/media/cast_key_system.h',
         'public/media/decoder_config.h',
+        'public/media/decrypt_context.h',
+        'public/media/media_clock_device.h',
+        'public/media/media_component_device.h',
+        'public/media/media_pipeline_backend.h',
+        'public/media/media_pipeline_device_params.h',
         'public/media/stream_id.h',
+        'public/media/video_pipeline_device.h',
         'public/osd_plane.h',
         'public/osd_plane_shlib.h',
         'public/osd_surface.h',
+        'public/task_runner.h',
         'public/video_plane.h',
       ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          'public/',
+        ],
+      },
     },
     {
       'target_name': 'cast_base',
@@ -58,8 +75,14 @@
         '../base/base.gyp:base',
       ],
       'sources': [
+        'base/android/dumpstate_writer.cc',
+        'base/android/dumpstate_writer.h',
+        'base/android/system_time_change_notifier_android.cc',
+        'base/android/system_time_change_notifier_android.h',
         'base/cast_paths.cc',
         'base/cast_paths.h',
+        'base/chromecast_config_android.cc',
+        'base/chromecast_config_android.h',
         'base/chromecast_switches.cc',
         'base/chromecast_switches.h',
         'base/error_codes.cc',
@@ -71,10 +94,23 @@
         'base/metrics/grouped_histogram.h',
         'base/path_utils.cc',
         'base/path_utils.h',
+        'base/pref_names.cc',
+        'base/pref_names.h',
         'base/process_utils.cc',
         'base/process_utils.h',
         'base/serializers.cc',
-        'base/serializers.h'
+        'base/serializers.h',
+        'base/system_time_change_notifier.cc',
+        'base/system_time_change_notifier.h',
+        'base/task_runner_impl.cc',
+        'base/task_runner_impl.h',
+      ],
+      'conditions': [
+        ['OS=="android"', {
+          'dependencies': [
+            'cast_jni_headers',
+          ],
+        }],
       ],
     },  # end of target 'cast_base'
     {
@@ -118,13 +154,27 @@
       'type': '<(component)',
       'dependencies': [
         'cast_crash',
+        '../breakpad/breakpad.gyp:breakpad_client',
         '../components/components.gyp:crash_component',
         '../content/content.gyp:content_common',
       ],
+      'include_dirs': [
+        '../breakpad/src',
+      ],
       'sources' : [
-        # TODO(slan): Move android crash_client here as well.
+        'app/android/crash_handler.cc',
+        'app/android/crash_handler.h',
+        'app/android/cast_crash_reporter_client_android.cc',
+        'app/android/cast_crash_reporter_client_android.h',
         'app/linux/cast_crash_reporter_client.cc',
         'app/linux/cast_crash_reporter_client.h',
+      ],
+      'conditions': [
+        ['OS=="android"', {
+          'dependencies': [
+            'cast_jni_headers',
+          ],
+        }],
       ],
     },  # end of target 'cast_crash_client'
     {
@@ -199,10 +249,15 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/strings/ui_strings_en-US.pak',
             ],
             'conditions': [
-              ['chromecast_branding=="Chrome" and use_chromecast_webui==1', {
+              ['chromecast_branding!="public" and use_chromecast_webui==1', {
                 'pak_inputs': [
                   '<(SHARED_INTERMEDIATE_DIR)/chromecast/app_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/chromecast/cast_webui_resources.pak',
+                ],
+              }],
+              ['chromecast_branding!="public"', {
+                'pak_inputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/chromecast/sound_resources.pak',
                 ],
               }],
             ],
@@ -212,10 +267,15 @@
         },
       ],
       'conditions': [
-        ['chromecast_branding=="Chrome" and use_chromecast_webui==1', {
+        ['chromecast_branding!="public" and use_chromecast_webui==1', {
           'dependencies': [
             'internal/chromecast_resources.gyp:chromecast_app_resources',
             'internal/chromecast_resources.gyp:chromecast_webui_resources',
+          ],
+        }],
+        ['chromecast_branding!="public"', {
+          'dependencies': [
+            'internal/chromecast_resources.gyp:chromecast_sound_resources',
           ],
         }],
       ],
@@ -259,6 +319,10 @@
       'sources': [
         'app/cast_main_delegate.cc',
         'app/cast_main_delegate.h',
+        'browser/android/cast_window_android.cc',
+        'browser/android/cast_window_android.h',
+        'browser/android/cast_window_manager.cc',
+        'browser/android/cast_window_manager.h',
         'browser/cast_browser_context.cc',
         'browser/cast_browser_context.h',
         'browser/cast_browser_main_parts.cc',
@@ -297,7 +361,6 @@
         'browser/metrics/cast_metrics_service_client.h',
         'browser/metrics/cast_stability_metrics_provider.cc',
         'browser/metrics/cast_stability_metrics_provider.h',
-        'browser/metrics/platform_metrics_providers.h',
         'browser/pref_service_helper.cc',
         'browser/pref_service_helper.h',
         'browser/service/cast_service.cc',
@@ -312,8 +375,6 @@
         'common/media/cast_message_generator.cc',
         'common/media/cast_message_generator.h',
         'common/platform_client_auth.h',
-        'common/pref_names.cc',
-        'common/pref_names.h',
         'renderer/cast_content_renderer_client.cc',
         'renderer/cast_content_renderer_client.h',
         'renderer/cast_media_load_deferrer.cc',
@@ -326,7 +387,7 @@
         'renderer/media/capabilities_message_filter.h',
       ],
       'conditions': [
-        ['chromecast_branding=="Chrome"', {
+        ['chromecast_branding!="public"', {
           'dependencies': [
             'internal/chromecast_internal.gyp:cast_shell_internal',
           ],
@@ -335,18 +396,14 @@
             'browser/cast_content_browser_client_simple.cc',
             'browser/cast_network_delegate_simple.cc',
             'browser/devtools/remote_debugging_server_simple.cc',
-            'browser/metrics/platform_metrics_providers_simple.cc',
             'browser/pref_service_helper_simple.cc',
+            'browser/service/cast_service_android.cc',
+            'browser/service/cast_service_android.h',
             'common/platform_client_auth_simple.cc',
             'renderer/cast_content_renderer_client_simple.cc',
           ],
           'conditions': [
-            ['OS=="android"', {
-              'sources': [
-                'browser/service/cast_service_android.cc',
-                'browser/service/cast_service_android.h',
-              ],
-            }, {
+            ['OS!="android"', {
               'sources': [
                 'browser/media/cast_browser_cdm_factory_simple.cc',
                 'browser/service/cast_service_simple.cc',
@@ -367,12 +424,13 @@
           ],
           'dependencies': [
             '../components/components.gyp:metrics_serialization',
-            '../ui/aura/aura.gyp:aura_test_support',
           ],
         }],
         ['OS=="android"', {
           'dependencies': [
             '../components/components.gyp:cdm_browser',
+            '../components/components.gyp:external_video_surface',
+            'cast_jni_headers',
           ],
         }],
       ],
@@ -388,9 +446,16 @@
         'base/cast_sys_info_util.h',
         'base/cast_sys_info_dummy.cc',
         'base/cast_sys_info_dummy.h',
+        'base/cast_sys_info_android.cc',
+        'base/cast_sys_info_android.h',
       ],
       'conditions': [
-        ['chromecast_branding!="Chrome" and OS!="android"', {
+        ['OS=="android"', {
+          'dependencies': [
+            'cast_jni_headers',
+          ],
+        }],
+        ['chromecast_branding=="public" and OS!="android"', {
           'sources': [
             'base/cast_sys_info_util_simple.cc',
           ],
@@ -469,17 +534,11 @@
             'cast_shell_pak',
             'cast_version_header',
             '../base/base.gyp:base',
-            '../breakpad/breakpad.gyp:breakpad_client',
             '../components/components.gyp:breakpad_host',
-            '../components/components.gyp:crash_component',
-            '../components/components.gyp:external_video_surface',
             '../content/content.gyp:content',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gl/gl.gyp:gl',
-          ],
-          'include_dirs': [
-            '../breakpad/src',
           ],
           'sources': [
             'android/cast_jni_registrar.cc',
@@ -487,22 +546,10 @@
             'android/cast_metrics_helper_android.cc',
             'android/cast_metrics_helper_android.h',
             'android/platform_jni_loader.h',
-            'app/android/cast_crash_reporter_client_android.cc',
-            'app/android/cast_crash_reporter_client_android.h',
             'app/android/cast_jni_loader.cc',
-            'app/android/crash_handler.cc',
-            'app/android/crash_handler.h',
-            'base/cast_sys_info_android.cc',
-            'base/cast_sys_info_android.h',
-            'base/chromecast_config_android.cc',
-            'base/chromecast_config_android.h',
-            'browser/android/cast_window_android.cc',
-            'browser/android/cast_window_android.h',
-            'browser/android/cast_window_manager.cc',
-            'browser/android/cast_window_manager.h',
           ],
           'conditions': [
-            ['chromecast_branding=="Chrome"', {
+            ['chromecast_branding!="public"', {
               'dependencies': [
                 'internal/chromecast_internal.gyp:cast_shell_android_internal'
               ],
@@ -587,6 +634,8 @@
           'type': 'none',
           'sources': [
             'base/java/src/org/chromium/chromecast/base/ChromecastConfigAndroid.java',
+            'base/java/src/org/chromium/chromecast/base/DumpstateWriter.java',
+            'base/java/src/org/chromium/chromecast/base/SystemTimeChangeNotifierAndroid.java',
             'browser/android/apk/src/org/chromium/chromecast/shell/CastCrashHandler.java',
             'browser/android/apk/src/org/chromium/chromecast/shell/CastMetricsHelper.java',
             'browser/android/apk/src/org/chromium/chromecast/shell/CastSysInfoAndroid.java',
@@ -610,6 +659,7 @@
           'target_name': 'cast_shell_media',
           'type': '<(component)',
           'dependencies': [
+            'cast_public_api',
             'media/media.gyp:cast_media',
             '../content/content.gyp:content',
             '../ipc/ipc.gyp:ipc',

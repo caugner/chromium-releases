@@ -16,6 +16,8 @@ class DownloadNotificationManagerForProfile;
 
 class DownloadGroupNotification : public DownloadNotification {
  public:
+  static base::string16 TruncateFileName(const content::DownloadItem* download);
+
   DownloadGroupNotification(
       Profile* profile, DownloadNotificationManagerForProfile* manager);
   ~DownloadGroupNotification() override;
@@ -34,6 +36,18 @@ class DownloadGroupNotification : public DownloadNotification {
   bool visible() const { return visible_; }
 
  private:
+  struct DownloadItemIdCompare {
+    bool operator()(const content::DownloadItem* a,
+                    const content::DownloadItem* b) const {
+      return b->GetId() < a->GetId();  // descending order
+    }
+  };
+
+  struct FilenameCache {
+    base::FilePath original_filename;
+    base::string16 truncated_filename;
+  };
+
   void Update();
   void UpdateNotificationData();
 
@@ -51,7 +65,9 @@ class DownloadGroupNotification : public DownloadNotification {
   bool visible_ = false;
 
   scoped_ptr<Notification> notification_;
-  std::set<content::DownloadItem*> items_;
+  std::set<content::DownloadItem*,
+           DownloadGroupNotification::DownloadItemIdCompare> items_;
+  std::map<content::DownloadItem*, FilenameCache> truncated_filename_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadGroupNotification);
 };

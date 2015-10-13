@@ -9,10 +9,17 @@
 
 #include "base/callback.h"
 #include "base/memory/linked_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_condition_tracker_delegate.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/common/extension.h"
+
+namespace base {
+class Value;
+}
 
 namespace content {
 class BrowserContext;
@@ -23,6 +30,31 @@ class WebContents;
 
 namespace extensions {
 
+// Tests the bookmarked state of the page.
+class DeclarativeContentIsBookmarkedPredicate {
+ public:
+  ~DeclarativeContentIsBookmarkedPredicate();
+
+  bool IsIgnored() const;
+
+  bool is_bookmarked() const { return is_bookmarked_; }
+
+  static scoped_ptr<DeclarativeContentIsBookmarkedPredicate> Create(
+      const Extension* extension,
+      const base::Value& value,
+      std::string* error);
+
+ private:
+  DeclarativeContentIsBookmarkedPredicate(
+      scoped_refptr<const Extension> extension,
+      bool is_bookmarked);
+
+  scoped_refptr<const Extension> extension_;
+  bool is_bookmarked_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeclarativeContentIsBookmarkedPredicate);
+};
+
 // Supports tracking of URL matches across tab contents in a browser context,
 // and querying for the matching condition sets.
 class DeclarativeContentIsBookmarkedConditionTracker
@@ -32,6 +64,13 @@ class DeclarativeContentIsBookmarkedConditionTracker
       content::BrowserContext* context,
       DeclarativeContentConditionTrackerDelegate* delegate);
   ~DeclarativeContentIsBookmarkedConditionTracker() override;
+
+  // Creates a new DeclarativeContentIsBookmarkedPredicate from |value|. Sets
+  // *|error| and returns null if creation failed for any reason.
+  scoped_ptr<DeclarativeContentIsBookmarkedPredicate> CreatePredicate(
+      const Extension* extension,
+      const base::Value& value,
+      std::string* error);
 
   // Requests that URL matches be tracked for |contents|.
   void TrackForWebContents(content::WebContents* contents);
@@ -47,8 +86,11 @@ class DeclarativeContentIsBookmarkedConditionTracker
                                const content::LoadCommittedDetails& details,
                                const content::FrameNavigateParams& params);
 
-  // Returns true if |contents| current URL is bookmarked.
-  bool IsUrlBookmarked(content::WebContents* contents);
+  // Returns the result of evaluating |predicate| on the per-tab state
+  // associated with |contents|.
+  bool EvaluatePredicate(
+      const DeclarativeContentIsBookmarkedPredicate* predicate,
+      content::WebContents* contents) const;
 
  private:
   class PerWebContentsTracker : public content::WebContentsObserver {

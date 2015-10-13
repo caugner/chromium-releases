@@ -24,6 +24,7 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -43,10 +44,12 @@
 #include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/omnibox_pref_names.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/mock_download_manager.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -60,6 +63,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/favicon_size.h"
+#include "url/origin.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
@@ -85,7 +89,13 @@ using domain_reliability::DomainReliabilityMonitor;
 using domain_reliability::DomainReliabilityService;
 using domain_reliability::DomainReliabilityServiceFactory;
 using testing::_;
+using testing::ByRef;
 using testing::Invoke;
+using testing::Matcher;
+using testing::MakeMatcher;
+using testing::MatcherInterface;
+using testing::MatchResultListener;
+using testing::Return;
 using testing::WithArgs;
 
 namespace {
@@ -127,15 +137,14 @@ void FakeDBusCall(const chromeos::BoolDBusMethodCallback& callback) {
 #endif
 
 struct StoragePartitionRemovalData {
-  uint32 remove_mask;
-  uint32 quota_storage_remove_mask;
+  uint32 remove_mask = 0;
+  uint32 quota_storage_remove_mask = 0;
   GURL remove_origin;
   base::Time remove_begin;
   base::Time remove_end;
   StoragePartition::OriginMatcherFunction origin_matcher;
 
-  StoragePartitionRemovalData() : remove_mask(0),
-                                  quota_storage_remove_mask(0) {}
+  StoragePartitionRemovalData() {}
 };
 
 class TestStoragePartition : public StoragePartition {
@@ -145,20 +154,28 @@ class TestStoragePartition : public StoragePartition {
 
   // content::StoragePartition implementation.
   base::FilePath GetPath() override { return base::FilePath(); }
-  net::URLRequestContextGetter* GetURLRequestContext() override { return NULL; }
+  net::URLRequestContextGetter* GetURLRequestContext() override {
+    return nullptr;
+  }
   net::URLRequestContextGetter* GetMediaURLRequestContext() override {
-    return NULL;
+    return nullptr;
   }
-  storage::QuotaManager* GetQuotaManager() override { return NULL; }
-  content::AppCacheService* GetAppCacheService() override { return NULL; }
-  storage::FileSystemContext* GetFileSystemContext() override { return NULL; }
-  storage::DatabaseTracker* GetDatabaseTracker() override { return NULL; }
-  content::DOMStorageContext* GetDOMStorageContext() override { return NULL; }
-  content::IndexedDBContext* GetIndexedDBContext() override { return NULL; }
+  storage::QuotaManager* GetQuotaManager() override { return nullptr; }
+  content::AppCacheService* GetAppCacheService() override { return nullptr; }
+  storage::FileSystemContext* GetFileSystemContext() override {
+    return nullptr;
+  }
+  storage::DatabaseTracker* GetDatabaseTracker() override { return nullptr; }
+  content::DOMStorageContext* GetDOMStorageContext() override {
+    return nullptr;
+  }
+  content::IndexedDBContext* GetIndexedDBContext() override { return nullptr; }
   content::ServiceWorkerContext* GetServiceWorkerContext() override {
-    return NULL;
+    return nullptr;
   }
-  content::GeofencingManager* GetGeofencingManager() override { return NULL; }
+  content::GeofencingManager* GetGeofencingManager() override {
+    return nullptr;
+  }
   content::NavigatorConnectContext* GetNavigatorConnectContext() override {
     return nullptr;
   }
@@ -168,11 +185,17 @@ class TestStoragePartition : public StoragePartition {
     return nullptr;
   }
 
-  content::HostZoomMap* GetHostZoomMap() override { return NULL; }
-  content::HostZoomLevelContext* GetHostZoomLevelContext() override {
-    return NULL;
+  content::BackgroundSyncContext* GetBackgroundSyncContext() override {
+    return nullptr;
   }
-  content::ZoomLevelDelegate* GetZoomLevelDelegate() override { return NULL; }
+
+  content::HostZoomMap* GetHostZoomMap() override { return nullptr; }
+  content::HostZoomLevelContext* GetHostZoomLevelContext() override {
+    return nullptr;
+  }
+  content::ZoomLevelDelegate* GetZoomLevelDelegate() override {
+    return nullptr;
+  }
 
   void ClearDataForOrigin(uint32 remove_mask,
                           uint32 quota_storage_remove_mask,
@@ -225,14 +248,43 @@ class TestStoragePartition : public StoragePartition {
   DISALLOW_COPY_AND_ASSIGN(TestStoragePartition);
 };
 
+// Custom matcher to verify is-same-origin relationship to given reference
+// origin.
+// (We cannot use equality-based matching because operator== is not defined for
+// Origin, and we in fact want to rely on IsSameOrigin for matching purposes.)
+class SameOriginMatcher : public MatcherInterface<const url::Origin&> {
+ public:
+  explicit SameOriginMatcher(const url::Origin& reference)
+      : reference_(reference) {}
+
+  virtual bool MatchAndExplain(const url::Origin& origin,
+                               MatchResultListener* listener) const {
+    return reference_.IsSameOriginWith(origin);
+  }
+
+  virtual void DescribeTo(::std::ostream* os) const {
+    *os << "is same origin with " << reference_;
+  }
+
+  virtual void DescribeNegationTo(::std::ostream* os) const {
+    *os << "is not same origin with " << reference_;
+  }
+
+ private:
+  const url::Origin& reference_;
+};
+
+inline Matcher<const url::Origin&> SameOrigin(const url::Origin& reference) {
+  return MakeMatcher(new SameOriginMatcher(reference));
+}
+
 }  // namespace
 
 // Testers -------------------------------------------------------------------
 
 class RemoveCookieTester {
  public:
-  RemoveCookieTester() : get_cookie_success_(false), cookie_store_(NULL) {
-  }
+  RemoveCookieTester() {}
 
   // Returns true, if the given cookie exists in the cookie store.
   bool ContainsCookie() {
@@ -280,9 +332,9 @@ class RemoveCookieTester {
     quit_closure_.Run();
   }
 
-  bool get_cookie_success_;
+  bool get_cookie_success_ = false;
   base::Closure quit_closure_;
-  net::CookieStore* cookie_store_;
+  net::CookieStore* cookie_store_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveCookieTester);
 };
@@ -310,7 +362,7 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
   virtual ~RemoveSafeBrowsingCookieTester() {
     browser_process_->safe_browsing_service()->ShutDown();
     base::MessageLoop::current()->RunUntilIdle();
-    browser_process_->SetSafeBrowsingService(NULL);
+    browser_process_->SetSafeBrowsingService(nullptr);
   }
 
  private:
@@ -322,8 +374,7 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
 
 class RemoveChannelIDTester : public net::SSLConfigService::Observer {
  public:
-  explicit RemoveChannelIDTester(TestingProfile* profile)
-      : ssl_config_changed_count_(0) {
+  explicit RemoveChannelIDTester(TestingProfile* profile) {
     channel_id_service_ = profile->GetRequestContext()->
         GetURLRequestContext()->channel_id_service();
     ssl_config_service_ = profile->GetSSLConfigService();
@@ -379,14 +430,14 @@ class RemoveChannelIDTester : public net::SSLConfigService::Observer {
 
   net::ChannelIDService* channel_id_service_;
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
-  int ssl_config_changed_count_;
+  int ssl_config_changed_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveChannelIDTester);
 };
 
 class RemoveHistoryTester {
  public:
-  RemoveHistoryTester() : query_url_success_(false), history_service_(NULL) {}
+  RemoveHistoryTester() {}
 
   bool Init(TestingProfile* profile) WARN_UNUSED_RESULT {
     if (!profile->CreateHistoryService(true, false))
@@ -412,9 +463,9 @@ class RemoveHistoryTester {
   }
 
   void AddHistory(const GURL& url, base::Time time) {
-    history_service_->AddPage(url, time, NULL, 0, GURL(),
-        history::RedirectList(), ui::PAGE_TRANSITION_LINK,
-        history::SOURCE_BROWSED, false);
+    history_service_->AddPage(url, time, nullptr, 0, GURL(),
+                              history::RedirectList(), ui::PAGE_TRANSITION_LINK,
+                              history::SOURCE_BROWSED, false);
   }
 
  private:
@@ -428,22 +479,18 @@ class RemoveHistoryTester {
 
   // For History requests.
   base::CancelableTaskTracker tracker_;
-  bool query_url_success_;
+  bool query_url_success_ = false;
   base::Closure quit_closure_;
 
   // TestingProfile owns the history service; we shouldn't delete it.
-  history::HistoryService* history_service_;
+  history::HistoryService* history_service_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveHistoryTester);
 };
 
 class RemoveFaviconTester {
  public:
-  RemoveFaviconTester()
-      : got_favicon_(false),
-        got_expired_favicon_(false),
-        history_service_(nullptr),
-        favicon_service_(nullptr) {}
+  RemoveFaviconTester() {}
 
   bool Init(TestingProfile* profile) WARN_UNUSED_RESULT {
     // Create the history service if it has not been created yet.
@@ -516,13 +563,13 @@ class RemoveFaviconTester {
 
   // For favicon requests.
   base::CancelableTaskTracker tracker_;
-  bool got_favicon_;
-  bool got_expired_favicon_;
+  bool got_favicon_ = false;
+  bool got_expired_favicon_ = false;
   base::Closure quit_closure_;
 
   // Owned by TestingProfile.
-  history::HistoryService* history_service_;
-  favicon::FaviconService* favicon_service_;
+  history::HistoryService* history_service_ = nullptr;
+  favicon::FaviconService* favicon_service_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveFaviconTester);
 };
@@ -549,19 +596,15 @@ class RemoveAutofillTester : public autofill::PersonalDataManagerObserver {
   bool HasOrigin(const std::string& origin) {
     const std::vector<autofill::AutofillProfile*>& profiles =
         personal_data_manager_->GetProfiles();
-    for (std::vector<autofill::AutofillProfile*>::const_iterator it =
-             profiles.begin();
-         it != profiles.end(); ++it) {
-      if ((*it)->origin() == origin)
+    for (const autofill::AutofillProfile* profile : profiles) {
+      if (profile->origin() == origin)
         return true;
     }
 
     const std::vector<autofill::CreditCard*>& credit_cards =
         personal_data_manager_->GetCreditCards();
-    for (std::vector<autofill::CreditCard*>::const_iterator it =
-             credit_cards.begin();
-         it != credit_cards.end(); ++it) {
-      if ((*it)->origin() == origin)
+    for (const autofill::CreditCard* credit_card : credit_cards) {
+      if (credit_card->origin() == origin)
         return true;
     }
 
@@ -618,7 +661,7 @@ class RemoveAutofillTester : public autofill::PersonalDataManagerObserver {
 class RemoveLocalStorageTester {
  public:
   explicit RemoveLocalStorageTester(TestingProfile* profile)
-      : profile_(profile), dom_storage_context_(NULL) {
+      : profile_(profile) {
     dom_storage_context_ =
         content::BrowserContext::GetDefaultStoragePartition(profile)->
             GetDOMStorageContext();
@@ -646,10 +689,10 @@ class RemoveLocalStorageTester {
     base::CreateDirectory(storage_path);
 
     // Write some files.
-    base::WriteFile(storage_path.Append(kDomStorageOrigin1), NULL, 0);
-    base::WriteFile(storage_path.Append(kDomStorageOrigin2), NULL, 0);
-    base::WriteFile(storage_path.Append(kDomStorageOrigin3), NULL, 0);
-    base::WriteFile(storage_path.Append(kDomStorageExt), NULL, 0);
+    base::WriteFile(storage_path.Append(kDomStorageOrigin1), nullptr, 0);
+    base::WriteFile(storage_path.Append(kDomStorageOrigin2), nullptr, 0);
+    base::WriteFile(storage_path.Append(kDomStorageOrigin3), nullptr, 0);
+    base::WriteFile(storage_path.Append(kDomStorageExt), nullptr, 0);
 
     // Tweak their dates.
     base::Time now = base::Time::Now();
@@ -680,7 +723,7 @@ class RemoveLocalStorageTester {
 
   // We don't own these pointers.
   TestingProfile* profile_;
-  content::DOMStorageContext* dom_storage_context_;
+  content::DOMStorageContext* dom_storage_context_ = nullptr;
 
   std::vector<content::LocalStorageUsageInfo> infos_;
   base::Closure quit_closure_;
@@ -690,7 +733,7 @@ class RemoveLocalStorageTester {
 
 class MockDomainReliabilityService : public DomainReliabilityService {
  public:
-  MockDomainReliabilityService() : clear_count_(0) {}
+  MockDomainReliabilityService() {}
 
   ~MockDomainReliabilityService() override {}
 
@@ -720,7 +763,7 @@ class MockDomainReliabilityService : public DomainReliabilityService {
   }
 
  private:
-  unsigned clear_count_;
+  unsigned clear_count_ = 0;
   DomainReliabilityClearMode last_clear_mode_;
 };
 
@@ -800,6 +843,32 @@ class ClearDomainReliabilityTester {
   MockDomainReliabilityService* mock_service_;
 };
 
+class RemoveDownloadsTester {
+ public:
+  explicit RemoveDownloadsTester(TestingProfile* testing_profile)
+      : download_manager_(new content::MockDownloadManager()),
+        chrome_download_manager_delegate_(testing_profile) {
+    content::BrowserContext::SetDownloadManagerForTesting(testing_profile,
+                                                          download_manager_);
+    EXPECT_EQ(download_manager_,
+              content::BrowserContext::GetDownloadManager(testing_profile));
+
+    EXPECT_CALL(*download_manager_, GetDelegate())
+        .WillOnce(Return(&chrome_download_manager_delegate_));
+    EXPECT_CALL(*download_manager_, Shutdown());
+  }
+
+  ~RemoveDownloadsTester() { chrome_download_manager_delegate_.Shutdown(); }
+
+  content::MockDownloadManager* download_manager() { return download_manager_; }
+
+ private:
+  content::MockDownloadManager* download_manager_;
+  ChromeDownloadManagerDelegate chrome_download_manager_delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(RemoveDownloadsTester);
+};
+
 // Test Class ----------------------------------------------------------------
 
 class BrowsingDataRemoverTest : public testing::Test {
@@ -817,7 +886,7 @@ class BrowsingDataRemoverTest : public testing::Test {
 
   void TearDown() override {
 #if defined(ENABLE_EXTENSIONS)
-    mock_policy_ = NULL;
+    mock_policy_ = nullptr;
 #endif
 
     // TestingProfile contains a DOMStorageContext.  BrowserContext's destructor
@@ -828,7 +897,7 @@ class BrowsingDataRemoverTest : public testing::Test {
     profile_.reset();
     base::MessageLoop::current()->RunUntilIdle();
 
-    TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
+    TestingBrowserProcess::GetGlobal()->SetLocalState(nullptr);
   }
 
   void BlockUntilBrowsingDataRemoved(BrowsingDataRemover::TimePeriod period,
@@ -914,7 +983,7 @@ class BrowsingDataRemoverTest : public testing::Test {
     return mock_policy_.get();
 #else
     NOTREACHED();
-    return NULL;
+    return nullptr;
 #endif
   }
 
@@ -922,7 +991,7 @@ class BrowsingDataRemoverTest : public testing::Test {
 #if defined(ENABLE_EXTENSIONS)
     return mock_policy_.get();
 #else
-    return NULL;
+    return nullptr;
 #endif
   }
 
@@ -1985,4 +2054,15 @@ TEST_F(BrowsingDataRemoverTest, DISABLED_DomainReliability_NoMonitor) {
       BrowsingDataRemover::EVERYTHING,
       BrowsingDataRemover::REMOVE_HISTORY |
       BrowsingDataRemover::REMOVE_COOKIES, false);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemoveSameOriginDownloads) {
+  RemoveDownloadsTester tester(GetProfile());
+  const url::Origin expectedOrigin(kOrigin1);
+
+  EXPECT_CALL(*tester.download_manager(),
+              RemoveDownloadsByOriginAndTime(SameOrigin(expectedOrigin), _, _));
+
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
+                              BrowsingDataRemover::REMOVE_DOWNLOADS, kOrigin1);
 }

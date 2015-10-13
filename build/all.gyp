@@ -494,14 +494,6 @@
             '../components/nacl.gyp:nacl_helper_nonsfi_unittests',
           ],
         }],
-        ['disable_nacl==0 and disable_nacl_untrusted==0', {
-          'dependencies': [
-            '../mojo/mojo_nacl_untrusted.gyp:libmojo',
-            '../mojo/mojo_nacl.gyp:monacl_codegen',
-            '../mojo/mojo_nacl.gyp:monacl_sel',
-            '../mojo/mojo_nacl.gyp:monacl_shell',
-          ],
-        }],
       ],
     }, # target_name: chromium_builder_tests
   ],
@@ -526,10 +518,12 @@
                 '../content/content_shell_and_tests.gyp:content_shell_apk',
                 '../breakpad/breakpad.gyp:dump_syms#host',
                 '../breakpad/breakpad.gyp:minidump_stackwalk#host',
+                '../tools/imagediff/image_diff.gyp:image_diff#host',
               ],
             }, {  # OS!="android"
               'dependencies': [
                 '../content/content_shell_and_tests.gyp:content_shell',
+                '../tools/imagediff/image_diff.gyp:image_diff',
               ],
             }],
             ['OS=="win"', {
@@ -884,10 +878,10 @@
                 '../chrome/chrome.gyp:chrome_junit_tests',
                 '../chrome/chrome.gyp:chrome_shell_test_apk',
                 '../chrome/chrome.gyp:chrome_sync_shell_test_apk',
-                '../chrome/chrome.gyp:chrome_shell_uiautomator_tests',
+                '../chrome/chrome.gyp:chrome_uiautomator_tests',
                 '../chrome/chrome.gyp:chromedriver_webview_shell_apk',
                 '../chrome/chrome.gyp:unit_tests_apk',
-                '../third_party/custom_tabs_client/src/custom_tabs_client.gyp:custom_tabs_client_example_apk',
+                '../third_party/custom_tabs_client/custom_tabs_client.gyp:custom_tabs_client_example_apk',
               ],
             }],
           ],
@@ -1155,7 +1149,6 @@
           'target_name': 'chromium_builder_dbg_drmemory_win',
           'type': 'none',
           'dependencies': [
-            '../ash/ash.gyp:ash_shell_unittests',
             '../ash/ash.gyp:ash_unittests',
             '../base/base.gyp:base_unittests',
             '../cc/blink/cc_blink_tests.gyp:cc_blink_unittests',
@@ -1275,6 +1268,36 @@
         }], # branding=="Chrome"
        ], # conditions
     }], # OS="win"
+    ['chromeos==1', {
+      'targets': [
+        {
+          'target_name': 'chromiumos_preflight',
+          'type': 'none',
+          'dependencies': [
+            '../breakpad/breakpad.gyp:minidump_stackwalk',
+            '../chrome/chrome.gyp:chrome',
+            '../chrome/chrome.gyp:chromedriver',
+            '../content/content_shell_and_tests.gyp:video_decode_accelerator_unittest',
+            '../content/content_shell_and_tests.gyp:video_encode_accelerator_unittest',
+            '../media/media.gyp:media_unittests',
+            '../ppapi/ppapi_internal.gyp:ppapi_example_video_decode',
+            '../sandbox/sandbox.gyp:chrome_sandbox',
+            '../sandbox/sandbox.gyp:sandbox_linux_unittests',
+            '../third_party/mesa/mesa.gyp:osmesa',
+            '../tools/telemetry/telemetry.gyp:bitmaptools#host',
+            '../tools/perf/clear_system_cache/clear_system_cache.gyp:clear_system_cache',
+          ],
+          'conditions': [
+            ['disable_nacl==0', {
+              'dependencies': [
+                '../components/nacl.gyp:nacl_helper',
+                '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
+              ],
+            }],
+          ],
+        },
+      ],  # targets
+    }], # "chromeos==1"
     ['use_aura==1', {
       'targets': [
         {
@@ -1393,6 +1416,17 @@
             '../testing/chromoting/integration_tests.gyp:*',
           ],
         }, # target_name: chromoting_swarm_tests
+      ]
+    }],
+    ['archive_media_router_tests==1', {
+      'targets': [
+        {
+          'target_name': 'media_router_swarming_tests',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/test/media_router/e2e_tests.gyp:media_router_e2e_tests_run',
+          ],
+        }, # target_name: media_router_swarming_tests
       ]
     }],
     ['OS=="mac" and toolkit_views==1', {

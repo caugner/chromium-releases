@@ -90,7 +90,8 @@ IFrameLoader::IFrameLoader(Browser* browser, int iframe_id, const GURL& url)
       "window.domAutomationController.setAutomationId(0);"
       "window.domAutomationController.send(addIFrame(%d, \"%s\"));",
       iframe_id, url.spec().c_str()));
-  web_contents->GetMainFrame()->ExecuteJavaScript(base::UTF8ToUTF16(script));
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::UTF8ToUTF16(script));
   content::RunMessageLoop();
 
   EXPECT_EQ(base::StringPrintf("\"%d\"", iframe_id), javascript_response_);
@@ -291,8 +292,7 @@ bool GeolocationBrowserTest::Initialize(InitializationOptions options) {
 
   current_url_ = embedded_test_server()->GetURL(html_for_tests_);
   if (options == INITIALIZATION_OFFTHERECORD) {
-    current_browser_ = ui_test_utils::OpenURLOffTheRecord(
-        browser()->profile(), current_url_);
+    current_browser_ = OpenURLOffTheRecord(browser()->profile(), current_url_);
   } else {
     current_browser_ = browser();
     if (options == INITIALIZATION_NEWTAB)
@@ -503,7 +503,9 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoPromptForOffTheRecord) {
   CheckGeoposition(fake_latitude(), fake_longitude());
 }
 
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoLeakFromOffTheRecord) {
+// http://crbug.com/523387
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
+                       DISABLED_NoLeakFromOffTheRecord) {
   // Check prompt will be created for incognito profile.
   ASSERT_TRUE(Initialize(INITIALIZATION_OFFTHERECORD));
   SetFrameHost("");
@@ -570,7 +572,9 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithCachedPosition) {
   CheckGeoposition(cached_position_latitude, cached_position_lognitude);
 }
 
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
+// http://crbug.com/523387
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
+                       DISABLED_CancelPermissionForFrame) {
   set_html_for_tests("/geolocation/two_iframes.html");
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LoadIFrames(2);

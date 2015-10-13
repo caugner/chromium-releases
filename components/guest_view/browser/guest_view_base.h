@@ -65,7 +65,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // potentially be created and destroyed in JavaScript before getting a
   // GuestViewBase instance. This method can be hidden by a CleanUp() method in
   // a derived class, in which case the derived method should call this one.
-  static void CleanUp(int embedder_process_id, int view_instance_id);
+  static void CleanUp(content::BrowserContext* browser_context,
+                      int embedder_process_id,
+                      int view_instance_id);
 
   static GuestViewBase* FromWebContents(
       const content::WebContents* web_contents);
@@ -275,6 +277,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void DidAttach(int guest_proxy_routing_id) final;
   void DidDetach() final;
   content::WebContents* GetOwnerWebContents() const final;
+  bool Find(int request_id,
+            const base::string16& search_text,
+            const blink::WebFindOptions& options) final;
+  bool StopFinding(content::StopFindAction action) final;
   void GuestSizeChanged(const gfx::Size& new_size) final;
   void SetGuestHost(content::GuestHost* guest_host) final;
   void WillAttach(content::WebContents* embedder_web_contents,
@@ -344,6 +350,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                            const gfx::Size& pref_size) final;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
   bool ShouldResumeRequestsForCreatedWindow() override;
+  void FindReply(content::WebContents* source,
+                 int request_id,
+                 int number_of_matches,
+                 const gfx::Rect& selection_rect,
+                 int active_match_ordinal,
+                 bool final_update) override;
 
   void SetGuestZoomLevelToMatchEmbedder();
 
@@ -351,6 +363,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // immediately, but derived class can override this if they need to do
   // asynchronous setup.
   virtual void SignalWhenReady(const base::Closure& callback);
+
+  // Returns true if this guest should handle find requests for its
+  // embedder. This should generally be true for guests that make up the
+  // entirety of the embedder's content.
+  virtual bool ShouldHandleFindRequestsForEmbedder() const;
 
  private:
   class OwnerContentsObserver;

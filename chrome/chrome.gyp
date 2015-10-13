@@ -52,11 +52,6 @@
               '<(DEPTH)/components/nacl/renderer/plugin/plugin.gyp:nacl_trusted_plugin',
             ],
           }],
-          ['remoting==1', {
-            'chromium_child_dependencies': [
-              '../remoting/remoting.gyp:remoting_client_plugin',
-            ],
-          }],
         ],
       }],
       ['enable_basic_printing==1 or enable_print_preview==1', {
@@ -586,9 +581,9 @@
             'content_setting_java',
             'content_settings_type_java',
             'page_info_connection_type_java',
-            'profile_sync_service_model_type_selection_java',
             'resource_id_java',
             'tab_load_status_java',
+            'shortcut_source_java',
             '../base/base.gyp:base',
             '../chrome/android/chrome_apk.gyp:custom_tabs_service_aidl',
             '../components/components.gyp:app_restrictions_resources',
@@ -598,9 +593,12 @@
             '../components/components.gyp:gcm_driver_java',
             '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
-            '../components/components.gyp:service_tab_launcher_java',
+            '../components/components.gyp:offline_pages_enums_java',
             '../components/components.gyp:policy_java',
             '../components/components.gyp:precache_java',
+            '../components/components.gyp:safe_json_java',
+            '../components/components.gyp:service_tab_launcher_java',
+            '../components/components.gyp:signin_core_browser_java',
             '../components/components.gyp:variations_java',
             '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
@@ -611,6 +609,7 @@
             '../third_party/android_media/android_media.gyp:android_media_java',
             '../third_party/android_protobuf/android_protobuf.gyp:protobuf_nano_javalib',
             '../third_party/android_swipe_refresh/android_swipe_refresh.gyp:android_swipe_refresh_java',
+            '../third_party/android_tools/android_tools.gyp:android_support_design_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_mediarouter_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_recyclerview_javalib',
@@ -621,19 +620,21 @@
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
+            'variables': {
+              'android_branding_res_dirs%': ['<(java_in_dir)/res_chromium'],
+            },
             'java_in_dir': '../chrome/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',
             'R_package_relpath': 'org/chromium/chrome',
             # Include channel-specific resources and xml string files generated
             # from generated_resources.grd
-            'res_channel_dir': '<(java_in_dir)/res_default',
             'res_extra_dirs': [
-              '<(res_channel_dir)',
+              '<@(android_branding_res_dirs)',
               '<(SHARED_INTERMEDIATE_DIR)/chrome/java/res',
             ],
             'res_extra_files': [
-              '<!@(find <(res_channel_dir) -type f)',
+              '<!@(find <(android_branding_res_dirs) -type f)',
               '<!@pymod_do_main(grit_info <@(grit_defines) --outputs "<(SHARED_INTERMEDIATE_DIR)/chrome" app/generated_resources.grd)',
             ],
           },
@@ -721,7 +722,6 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             'common',
-            'common_net',
             '../base/base.gyp:base',
             '../components/components.gyp:cloud_devices_common',
             '../google_apis/google_apis.gyp:google_apis',
@@ -738,6 +738,8 @@
             'service/cloud_print/cloud_print_auth.h',
             'service/cloud_print/cloud_print_connector.cc',
             'service/cloud_print/cloud_print_connector.h',
+            'service/cloud_print/cloud_print_message_handler.cc',
+            'service/cloud_print/cloud_print_message_handler.h',
             'service/cloud_print/cloud_print_proxy.cc',
             'service/cloud_print/cloud_print_proxy.h',
             'service/cloud_print/cloud_print_proxy_backend.cc',

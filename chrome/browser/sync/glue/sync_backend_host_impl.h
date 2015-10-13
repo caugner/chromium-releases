@@ -24,7 +24,6 @@
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 #include "sync/internal_api/public/sessions/type_debug_info_observer.h"
 #include "sync/internal_api/public/sync_manager.h"
-#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync_protocol_error.h"
@@ -44,6 +43,7 @@ class InvalidationService;
 namespace syncer {
 class NetworkResources;
 class SyncManagerFactory;
+class UnrecoverableErrorHandler;
 }
 
 namespace sync_driver {
@@ -83,10 +83,12 @@ class SyncBackendHostImpl
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       const syncer::SyncCredentials& credentials,
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
       const base::Closure& report_unrecoverable_error_function,
       syncer::NetworkResources* network_resources,
       scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state)
@@ -113,7 +115,7 @@ class SyncBackendHostImpl
   void DeactivateDataType(syncer::ModelType type) override;
   void EnableEncryptEverything() override;
   syncer::UserShare* GetUserShare() const override;
-  scoped_ptr<syncer::SyncContextProxy> GetSyncContextProxy() override;
+  scoped_ptr<syncer_v2::SyncContextProxy> GetSyncContextProxy() override;
   Status GetDetailedStatus() override;
   syncer::sessions::SyncSessionSnapshot GetLastSessionSnapshot() const override;
   bool HasUnsyncedItems() const override;
@@ -135,6 +137,14 @@ class SyncBackendHostImpl
                           ScopedVector<base::ListValue>)> type) override;
   base::MessageLoop* GetSyncLoopForTesting() override;
   void RefreshTypesForTest(syncer::ModelTypeSet types) override;
+  void ClearServerData(
+      const syncer::SyncManager::ClearServerDataCallback& callback) override;
+
+  // InvalidationHandler implementation.
+  void OnInvalidatorStateChange(syncer::InvalidatorState state) override;
+  void OnIncomingInvalidation(
+      const syncer::ObjectIdInvalidationMap& invalidation_map) override;
+  std::string GetOwnerName() const override;
 
  protected:
   // The types and functions below are protected so that test
@@ -175,7 +185,7 @@ class SyncBackendHostImpl
       const syncer::WeakHandle<syncer::JsBackend> js_backend,
       const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>
           debug_info_listener,
-      syncer::SyncContextProxy* sync_context_proxy,
+      syncer_v2::SyncContextProxy* sync_context_proxy,
       const std::string& cache_guid);
 
   // Forwards a ProtocolEvent to the frontend.  Will not be called unless a
@@ -204,7 +214,14 @@ class SyncBackendHostImpl
       syncer::ModelType type,
       const syncer::StatusCounters& counters);
 
-  sync_driver::SyncFrontend* frontend() { return frontend_; }
+  // Overwrites the kSyncInvalidationVersions preference with the most recent
+  // set of invalidation versions for each type.
+  void UpdateInvalidationVersions(
+      const std::map<syncer::ModelType, int64>& invalidation_versions);
+
+  sync_driver::SyncFrontend* frontend() {
+    return frontend_;
+  }
 
  private:
   friend class SyncBackendHostCore;
@@ -295,11 +312,8 @@ class SyncBackendHostImpl
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // InvalidationHandler implementation.
-  void OnInvalidatorStateChange(syncer::InvalidatorState state) override;
-  void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map) override;
-  std::string GetOwnerName() const override;
+  void ClearServerDataDoneOnFrontendLoop(
+      const syncer::SyncManager::ClearServerDataCallback& frontend_callback);
 
   content::NotificationRegistrar notification_registrar_;
 
@@ -318,7 +332,7 @@ class SyncBackendHostImpl
   scoped_refptr<SyncBackendHostCore> core_;
 
   // A handle referencing the main interface for non-blocking sync types.
-  scoped_ptr<syncer::SyncContextProxy> sync_context_proxy_;
+  scoped_ptr<syncer_v2::SyncContextProxy> sync_context_proxy_;
 
   bool initialized_;
 

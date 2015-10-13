@@ -6,7 +6,6 @@
 
 #include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_connection.h"
-#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/quic_write_blocked_list.h"
 #include "net/quic/spdy_utils.h"
@@ -28,7 +27,6 @@ using testing::CreateFunctor;
 using testing::InSequence;
 using testing::Invoke;
 using testing::Return;
-using testing::SaveArg;
 using testing::StrictMock;
 using testing::WithArgs;
 using testing::_;
@@ -51,7 +49,9 @@ class TestStream : public ReliableQuicStream {
       : ReliableQuicStream(id, session),
         should_process_data_(should_process_data) {}
 
-  uint32 ProcessRawData(const char* data, uint32 data_len) override {
+  void OnDataAvailable() override {}
+
+  uint32 ProcessRawData(const char* data, uint32 data_len) {
     EXPECT_NE(0u, data_len);
     DVLOG(1) << "ProcessData data_len: " << data_len;
     data_ += string(data, data_len);
@@ -698,8 +698,6 @@ TEST_F(ReliableQuicStreamTest, SetDrainingOutgoingIncoming) {
 }
 
 TEST_F(ReliableQuicStreamTest, FecSendPolicyReceivedConnectionOption) {
-  ValueRestore<bool> old_flag(&FLAGS_quic_send_fec_packet_only_on_fec_alarm,
-                              true);
   Initialize(kShouldProcessData);
 
   // Test ReceivedConnectionOptions.

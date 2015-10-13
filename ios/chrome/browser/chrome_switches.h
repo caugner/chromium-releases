@@ -9,10 +9,11 @@
 
 namespace switches {
 
+extern const char kDisableIOSBlockUnpromptedExternalURLs[];
 extern const char kDisableIOSWKWebView[];
+extern const char kEnableIOSBlockUnpromptedExternalURLs[];
 extern const char kEnableIOSWKWebView[];
 extern const char kEnableReaderModeToolbarIcon[];
-extern const char kIOSMemoryWedgeSize[];
 
 }  // namespace switches
 

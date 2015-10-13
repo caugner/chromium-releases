@@ -68,6 +68,8 @@ class AwContents : public FindHelper::Listener,
   // render_process_id and render_view_id, or NULL.
   static AwContents* FromID(int render_process_id, int render_view_id);
 
+  static std::string GetLocale();
+
   AwContents(scoped_ptr<content::WebContents> web_contents);
   ~AwContents() override;
 
@@ -134,7 +136,7 @@ class AwContents : public FindHelper::Listener,
   void EnableOnNewPicture(JNIEnv* env, jobject obj, jboolean enabled);
   void InsertVisualStateCallback(JNIEnv* env,
                         jobject obj,
-                        long request_id,
+                        jlong request_id,
                         jobject callback);
   void ClearView(JNIEnv* env, jobject obj);
   void SetExtraHeadersForUrl(JNIEnv* env, jobject obj,
@@ -234,6 +236,8 @@ class AwContents : public FindHelper::Listener,
   void PostMessageToFrame(JNIEnv* env, jobject obj, jstring frame_id,
       jstring message, jstring target_origin, jintArray sent_ports);
   void CreateMessageChannel(JNIEnv* env, jobject obj, jobjectArray ports);
+
+  void GrantFileSchemeAccesstoChildProcess(JNIEnv* env, jobject obj);
 
  private:
   void InitDataReductionProxyIfNecessary();

@@ -5,8 +5,6 @@
 #ifndef IOS_CHROME_BROWSER_EXPERIMENTAL_FLAGS_H_
 #define IOS_CHROME_BROWSER_EXPERIMENTAL_FLAGS_H_
 
-#include <stdlib.h>
-
 // This file can be empty. Its purpose is to contain the relatively short lived
 // declarations required for experimental flags.
 
@@ -14,6 +12,9 @@ namespace experimental_flags {
 
 // Whether background crash report upload should generate a local notification.
 bool IsAlertOnBackgroundUploadEnabled();
+
+// Whether external URL request blocking from subframes is enabled.
+bool IsExternalURLBlockingEnabled();
 
 // Whether the new bookmark collection experience is enabled.
 bool IsBookmarkCollectionEnabled();
@@ -24,9 +25,8 @@ bool IsBookmarkImageFetchingOnVisitEnabled();
 // Whether the app uses WKWebView instead of UIWebView.
 bool IsWKWebViewEnabled();
 
-// Returns the size in MB of the memory wedge to insert during a cold start.
-// If 0, no memory wedge should be inserted.
-size_t MemoryWedgeSizeInMB();
+// Whether viewing and copying passwords is enabled.
+bool IsViewCopyPasswordsEnabled();
 
 }  // namespace experimental_flags
 

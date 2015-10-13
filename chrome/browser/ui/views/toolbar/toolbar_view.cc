@@ -23,12 +23,10 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -50,6 +48,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -58,6 +57,7 @@
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/compositor/layer.h"
@@ -392,11 +392,6 @@ const ToolbarModel* ToolbarView::GetToolbarModel() const {
   return browser_->toolbar_model();
 }
 
-InstantController* ToolbarView::GetInstant() {
-  return browser_->instant_controller() ?
-      browser_->instant_controller()->instant() : NULL;
-}
-
 ContentSettingBubbleModelDelegate*
 ToolbarView::GetContentSettingBubbleModelDelegate() {
   return browser_->content_setting_bubble_model_delegate();
@@ -488,14 +483,25 @@ gfx::Size ToolbarView::GetPreferredSize() const {
   gfx::Size size(location_bar_->GetPreferredSize());
   ui::ThemeProvider* theme_provider = GetThemeProvider();
   if (is_display_mode_normal()) {
-    int content_width =
+    const int element_padding = theme_provider->GetDisplayProperty(
+        ThemeProperties::PROPERTY_TOOLBAR_VIEW_ELEMENT_PADDING);
+    const int browser_actions_width =
+        browser_actions_->GetPreferredSize().width();
+    const int content_width =
         theme_provider->GetDisplayProperty(
             ThemeProperties::PROPERTY_TOOLBAR_VIEW_LEFT_EDGE_SPACING) +
-        back_->GetPreferredSize().width() +
-        forward_->GetPreferredSize().width() +
+        back_->GetPreferredSize().width() + element_padding +
+        forward_->GetPreferredSize().width() + element_padding +
         reload_->GetPreferredSize().width() +
-        (show_home_button_.GetValue() ? home_->GetPreferredSize().width() : 0) +
-        kStandardSpacing + browser_actions_->GetPreferredSize().width() +
+        (show_home_button_.GetValue()
+             ? element_padding + home_->GetPreferredSize().width()
+             : 0) +
+        theme_provider->GetDisplayProperty(
+            ThemeProperties::PROPERTY_TOOLBAR_VIEW_STANDARD_SPACING) +
+        theme_provider->GetDisplayProperty(
+            ThemeProperties::PROPERTY_TOOLBAR_VIEW_LOCATION_BAR_RIGHT_PADDING) +
+        browser_actions_width +
+        (browser_actions_width > 0 ? element_padding : 0) +
         app_menu_->GetPreferredSize().width() +
         theme_provider->GetDisplayProperty(
             ThemeProperties::PROPERTY_TOOLBAR_VIEW_RIGHT_EDGE_SPACING);
@@ -508,13 +514,25 @@ gfx::Size ToolbarView::GetMinimumSize() const {
   gfx::Size size(location_bar_->GetMinimumSize());
   ui::ThemeProvider* theme_provider = GetThemeProvider();
   if (is_display_mode_normal()) {
-    int content_width =
+    const int element_padding = theme_provider->GetDisplayProperty(
+        ThemeProperties::PROPERTY_TOOLBAR_VIEW_ELEMENT_PADDING);
+    const int browser_actions_width =
+        browser_actions_->GetMinimumSize().width();
+    const int content_width =
         theme_provider->GetDisplayProperty(
             ThemeProperties::PROPERTY_TOOLBAR_VIEW_LEFT_EDGE_SPACING) +
-        back_->GetMinimumSize().width() + forward_->GetMinimumSize().width() +
+        back_->GetMinimumSize().width() + element_padding +
+        forward_->GetMinimumSize().width() + element_padding +
         reload_->GetMinimumSize().width() +
-        (show_home_button_.GetValue() ? home_->GetMinimumSize().width() : 0) +
-        kStandardSpacing + browser_actions_->GetMinimumSize().width() +
+        (show_home_button_.GetValue()
+             ? element_padding + home_->GetMinimumSize().width()
+             : 0) +
+        theme_provider->GetDisplayProperty(
+            ThemeProperties::PROPERTY_TOOLBAR_VIEW_STANDARD_SPACING) +
+        theme_provider->GetDisplayProperty(
+            ThemeProperties::PROPERTY_TOOLBAR_VIEW_LOCATION_BAR_RIGHT_PADDING) +
+        browser_actions_width +
+        (browser_actions_width > 0 ? element_padding : 0) +
         app_menu_->GetMinimumSize().width() +
         theme_provider->GetDisplayProperty(
             ThemeProperties::PROPERTY_TOOLBAR_VIEW_RIGHT_EDGE_SPACING);
@@ -560,11 +578,13 @@ void ToolbarView::Layout() {
     back_->SetBounds(left_edge_spacing, child_y, back_width, child_height);
     back_->SetLeadingMargin(0);
   }
-  int next_element_x = back_->bounds().right();
+  const int element_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_TOOLBAR_VIEW_ELEMENT_PADDING);
+  int next_element_x = back_->bounds().right() + element_padding;
 
   forward_->SetBounds(next_element_x, child_y,
                       forward_->GetPreferredSize().width(), child_height);
-  next_element_x = forward_->bounds().right();
+  next_element_x = forward_->bounds().right() + element_padding;
 
   reload_->SetBounds(next_element_x, child_y,
                      reload_->GetPreferredSize().width(), child_height);
@@ -572,6 +592,7 @@ void ToolbarView::Layout() {
 
   if (show_home_button_.GetValue() ||
       (browser_->is_app() && extensions::util::IsNewBookmarkAppsEnabled())) {
+    next_element_x += element_padding;
     home_->SetVisible(true);
     home_->SetBounds(next_element_x, child_y,
                      home_->GetPreferredSize().width(), child_height);
@@ -579,25 +600,32 @@ void ToolbarView::Layout() {
     home_->SetVisible(false);
     home_->SetBounds(next_element_x, child_y, 0, child_height);
   }
-  next_element_x = home_->bounds().right() + kStandardSpacing;
+  next_element_x = home_->bounds().right() +
+                   theme_provider->GetDisplayProperty(
+                       ThemeProperties::PROPERTY_TOOLBAR_VIEW_STANDARD_SPACING);
 
   int browser_actions_width = browser_actions_->GetPreferredSize().width();
   int app_menu_width = app_menu_->GetPreferredSize().width();
   const int right_edge_spacing = theme_provider->GetDisplayProperty(
       ThemeProperties::PROPERTY_TOOLBAR_VIEW_RIGHT_EDGE_SPACING);
-  int available_width =
-      std::max(0, width() - right_edge_spacing - app_menu_width -
-                      browser_actions_width - next_element_x);
+  const int location_bar_right_padding = theme_provider->GetDisplayProperty(
+      ThemeProperties::PROPERTY_TOOLBAR_VIEW_LOCATION_BAR_RIGHT_PADDING);
+  int available_width = std::max(
+      0, width() - right_edge_spacing - app_menu_width - browser_actions_width -
+             (browser_actions_width > 0 ? element_padding : 0) -
+             location_bar_right_padding - next_element_x);
 
   int location_height = location_bar_->GetPreferredSize().height();
   int location_y = (height() - location_height + 1) / 2;
   location_bar_->SetBounds(next_element_x, location_y,
                            std::max(available_width, 0), location_height);
-  next_element_x = location_bar_->bounds().right();
+  next_element_x = location_bar_->bounds().right() + location_bar_right_padding;
 
   browser_actions_->SetBounds(
       next_element_x, child_y, browser_actions_width, child_height);
   next_element_x = browser_actions_->bounds().right();
+  if (browser_actions_width > 0)
+    next_element_x += element_padding;
 
   // The browser actions need to do a layout explicitly, because when an
   // extension is loaded/unloaded/changed, BrowserActionContainer removes and
@@ -735,10 +763,21 @@ int ToolbarView::PopupTopSpacing() const {
 
 gfx::Size ToolbarView::SizeForContentSize(gfx::Size size) const {
   if (is_display_mode_normal()) {
-    gfx::ImageSkia* normal_background =
-        GetThemeProvider()->GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
-    size.SetToMax(
-        gfx::Size(0, normal_background->height() - content_shadow_height()));
+    // For Material Design the size of ToolbarView is encoded as a constant in
+    // ThemeProperties. For non-material the size is based on the provided
+    // assets.
+    if (ui::MaterialDesignController::IsModeMaterial()) {
+      int content_height = std::max(back_->GetPreferredSize().height(),
+                                    location_bar_->GetPreferredSize().height());
+      int padding = GetThemeProvider()->GetDisplayProperty(
+          ThemeProperties::PROPERTY_TOOLBAR_VIEW_VERTICAL_PADDING);
+      size.SetToMax(gfx::Size(0, content_height + (padding * 2)));
+    } else {
+      gfx::ImageSkia* normal_background =
+          GetThemeProvider()->GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
+      size.SetToMax(
+          gfx::Size(0, normal_background->height() - content_shadow_height()));
+    }
   } else if (size.height() == 0) {
     // Location mode with a 0 height location bar. If on ash, expand by one
     // pixel to show a border in the title bar, otherwise leave the size as zero
@@ -774,6 +813,11 @@ void ToolbarView::LoadImages() {
 
   home_->SetImage(views::Button::STATE_NORMAL,
                   *(tp->GetImageSkiaNamed(IDR_HOME)));
+
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    app_menu_->SetImage(views::Button::STATE_NORMAL,
+                        *(tp->GetImageSkiaNamed(IDR_TOOLS)));
+  }
 }
 
 void ToolbarView::ShowCriticalNotification() {

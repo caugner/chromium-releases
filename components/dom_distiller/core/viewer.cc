@@ -113,15 +113,12 @@ std::string ReplaceHtmlTemplateValues(
   std::vector<std::string> substitutions;
 
   std::ostringstream css;
-  std::ostringstream script;
 #if defined(OS_IOS)
   // On iOS the content is inlined as there is no API to detect those requests
   // and return the local data once a page is loaded.
   css << "<style>" << viewer::GetCss() << viewer::GetIOSCss() << "</style>";
-  script << "<script>\n" << viewer::GetJavaScript() << "\n</script>";
 #else
   css << "<link rel=\"stylesheet\" href=\"/" << kViewerCssPath << "\">";
-  script << "<script src=\"" << kViewerJsPath << "\"></script>";
 #endif  // defined(OS_IOS)
 
   substitutions.push_back(
@@ -142,9 +139,7 @@ std::string ReplaceHtmlTemplateValues(
       l10n_util::GetStringUTF8(
           IDS_DOM_DISTILLER_VIEWER_CLOSE_READER_VIEW));                   // $7
 
-  substitutions.push_back(script.str());                                  // $8
-
-  return ReplaceStringPlaceholders(html_template, substitutions, NULL);
+  return base::ReplaceStringPlaceholders(html_template, substitutions, NULL);
 }
 
 }  // namespace
@@ -265,7 +260,7 @@ scoped_ptr<ViewerHandle> CreateViewRequest(
   std::string entry_id =
       url_utils::GetValueForKeyInUrlPathQuery(path, kEntryIdKey);
   bool has_valid_entry_id = !entry_id.empty();
-  entry_id = base::StringToUpperASCII(entry_id);
+  entry_id = base::ToUpperASCII(entry_id);
 
   std::string requested_url_str =
       url_utils::GetValueForKeyInUrlPathQuery(path, kUrlKey);

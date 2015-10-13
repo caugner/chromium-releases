@@ -31,11 +31,12 @@ class RenderFrame;
 
 namespace extensions {
 class Extension;
-class ExtensionSet;
 
 // Extensions wrapper for a v8 context.
 class ScriptContext : public RequestSender::Source {
  public:
+  using RunScriptExceptionHandler = base::Callback<void(const v8::TryCatch&)>;
+
   ScriptContext(const v8::Local<v8::Context>& context,
                 blink::WebLocalFrame* frame,
                 const Extension* extension,
@@ -48,8 +49,7 @@ class ScriptContext : public RequestSender::Source {
   // as declared in each Extension's manifest.
   // TODO(kalman): Delete this when crbug.com/466373 is fixed.
   // See comment in HasAccessOrThrowError.
-  static bool IsSandboxedPage(const ExtensionSet& extension_set,
-                              const GURL& url);
+  static bool IsSandboxedPage(const GURL& url);
 
   // Clears the WebFrame for this contexts and invalidates the associated
   // ModuleSystem.
@@ -110,9 +110,6 @@ class ScriptContext : public RequestSender::Source {
       const v8::Local<v8::Function>& function) const;
 
   void DispatchEvent(const char* event_name, v8::Local<v8::Array> args) const;
-
-  // Fires the onunload event on the unload_event module.
-  void DispatchOnUnloadEvent();
 
   // Returns the availability of the API |api_name|.
   Feature::Availability GetAvailability(const std::string& api_name);
@@ -177,6 +174,17 @@ class ScriptContext : public RequestSender::Source {
 
   // Returns a string representation of this ScriptContext, for debugging.
   std::string GetDebugString() const;
+
+  // Gets the current stack trace as a multi-line string to be logged.
+  std::string GetStackTraceAsString() const;
+
+  // Runs |code|, labelling the script that gets created as |name| (the name is
+  // used in the devtools and stack traces). |exception_handler| will be called
+  // re-entrantly if an exception is thrown during the script's execution.
+  v8::Local<v8::Value> RunScript(
+      v8::Local<v8::String> name,
+      v8::Local<v8::String> code,
+      const RunScriptExceptionHandler& exception_handler);
 
  private:
   class Runner;

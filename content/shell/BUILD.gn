@@ -4,6 +4,7 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//build/config/win/manifest.gni")
 import("//tools/grit/repack.gni")
 import("//tools/grit/grit_rule.gni")
 if (is_android) {
@@ -172,8 +173,12 @@ static_library("content_shell_lib") {
     "utility/shell_content_utility_client.h",
   ]
 
-  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  configs += [
+    "//build/config:precompiled_headers",
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
 
@@ -198,6 +203,7 @@ static_library("content_shell_lib") {
     "//components/devtools_http_handler",
     "//components/plugins/renderer",
     "//components/test_runner:test_runner",
+    "//components/url_formatter",
     "//components/web_cache/renderer",
     "//content:resources",
     "//content/app/resources",
@@ -325,7 +331,6 @@ grit("content_shell_resources_grit") {
   outputs = [
     "grit/shell_resources.h",
     "shell_resources.pak",
-    "shell_resources.rc",
   ]
 }
 
@@ -394,12 +399,13 @@ repack("pak") {
 # TODO(GYP): Figure out what this should be on android
 # and make linking this work on the Mac.
 if (!is_android && !is_mac) {
+  # TODO(brettw) when GYP is no longer necessary, delete
+  # content/shell/app/shell.exe.manifest. This file is not used in GN.
   executable("content_shell") {
     testonly = true
 
     # TODO(GYP) mac resource bundle stuff for this target.
     # TODO(GYP) Windows content shell settings:
-    #  - Manifest.
     #  - RC file.
     #  - 'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
     sources = [
@@ -410,6 +416,7 @@ if (!is_android && !is_mac) {
       ":content_shell_lib",
       ":pak",
       "//base/allocator",
+      "//build/win:default_exe_manifest",
     ]
 
     if (is_win) {

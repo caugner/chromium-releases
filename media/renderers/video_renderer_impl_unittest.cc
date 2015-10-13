@@ -61,11 +61,11 @@ class VideoRendererImplTest
         base::Bind(&MockCB::FrameReceived, base::Unretained(&mock_cb_)),
         message_loop_.task_runner()));
 
-    renderer_.reset(new VideoRendererImpl(message_loop_.task_runner(),
-                                          null_video_sink_.get(),
-                                          decoders.Pass(), true,
-                                          nullptr,  // gpu_factories
-                                          new MediaLog()));
+    renderer_.reset(new VideoRendererImpl(
+        message_loop_.task_runner(), message_loop_.task_runner().get(),
+        null_video_sink_.get(), decoders.Pass(), true,
+        nullptr,  // gpu_factories
+        new MediaLog()));
     if (!GetParam())
       renderer_->disable_new_video_renderer_for_testing();
     renderer_->SetTickClockForTesting(scoped_ptr<base::TickClock>(tick_clock_));
@@ -166,17 +166,17 @@ class VideoRendererImplTest
   //   A clip that is four frames long: "0 10 20 30"
   //   A clip that has a decode error: "60 70 error"
   void QueueFrames(const std::string& str) {
-    std::vector<std::string> tokens;
-    base::SplitString(str, ' ', &tokens);
-    for (size_t i = 0; i < tokens.size(); ++i) {
-      if (tokens[i] == "abort") {
+    for (const std::string& token :
+         base::SplitString(str, " ", base::TRIM_WHITESPACE,
+                           base::SPLIT_WANT_ALL)) {
+      if (token == "abort") {
         scoped_refptr<VideoFrame> null_frame;
         decode_results_.push_back(
             std::make_pair(VideoDecoder::kAborted, null_frame));
         continue;
       }
 
-      if (tokens[i] == "error") {
+      if (token == "error") {
         scoped_refptr<VideoFrame> null_frame;
         decode_results_.push_back(
             std::make_pair(VideoDecoder::kDecodeError, null_frame));
@@ -184,19 +184,16 @@ class VideoRendererImplTest
       }
 
       int timestamp_in_ms = 0;
-      if (base::StringToInt(tokens[i], &timestamp_in_ms)) {
+      if (base::StringToInt(token, &timestamp_in_ms)) {
         gfx::Size natural_size = TestVideoConfig::NormalCodedSize();
         scoped_refptr<VideoFrame> frame = VideoFrame::CreateFrame(
-            VideoFrame::YV12,
-            natural_size,
-            gfx::Rect(natural_size),
-            natural_size,
-            base::TimeDelta::FromMilliseconds(timestamp_in_ms));
+            PIXEL_FORMAT_YV12, natural_size, gfx::Rect(natural_size),
+            natural_size, base::TimeDelta::FromMilliseconds(timestamp_in_ms));
         decode_results_.push_back(std::make_pair(VideoDecoder::kOk, frame));
         continue;
       }
 
-      CHECK(false) << "Unrecognized decoder buffer token: " << tokens[i];
+      CHECK(false) << "Unrecognized decoder buffer token: " << token;
     }
   }
 
@@ -304,6 +301,8 @@ class VideoRendererImplTest
 
   WallClockTimeSource time_source_;
 
+  base::MessageLoop message_loop_;
+
  private:
   void DecodeRequested(const scoped_refptr<DecoderBuffer>& buffer,
                        const VideoDecoder::DecodeCB& decode_cb) {
@@ -337,8 +336,6 @@ class VideoRendererImplTest
   }
 
   MOCK_METHOD0(OnWaitingForDecryptionKey, void(void));
-
-  base::MessageLoop message_loop_;
 
   // Used to protect |time_|.
   base::Lock lock_;
@@ -755,6 +752,64 @@ INSTANTIATE_TEST_CASE_P(OldVideoRenderer,
                         testing::Values(false));
 INSTANTIATE_TEST_CASE_P(NewVideoRenderer,
                         VideoRendererImplTest,
+                        testing::Values(true));
+
+namespace {
+class MockGpuMemoryBufferVideoFramePool : public GpuMemoryBufferVideoFramePool {
+ public:
+  MockGpuMemoryBufferVideoFramePool(std::vector<base::Closure>* frame_ready_cbs)
+      : frame_ready_cbs_(frame_ready_cbs) {}
+  void MaybeCreateHardwareFrame(const scoped_refptr<VideoFrame>& video_frame,
+                                const FrameReadyCB& frame_ready_cb) override {
+    frame_ready_cbs_->push_back(base::Bind(frame_ready_cb, video_frame));
+  }
+
+ private:
+  std::vector<base::Closure>* frame_ready_cbs_;
+};
+}
+
+class VideoRendererImplAsyncAddFrameReadyTest : public VideoRendererImplTest {
+ public:
+  VideoRendererImplAsyncAddFrameReadyTest() {
+    scoped_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool(
+        new MockGpuMemoryBufferVideoFramePool(&frame_ready_cbs_));
+    renderer_->SetGpuMemoryBufferVideoForTesting(gpu_memory_buffer_pool.Pass());
+  }
+
+ protected:
+  std::vector<base::Closure> frame_ready_cbs_;
+};
+
+TEST_P(VideoRendererImplAsyncAddFrameReadyTest, InitializeAndStartPlayingFrom) {
+  Initialize();
+  QueueFrames("0 10 20 30");
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, BufferingStateChange(BUFFERING_HAVE_ENOUGH));
+  StartPlayingFrom(0);
+  ASSERT_EQ(1u, frame_ready_cbs_.size());
+
+  uint32_t frame_ready_index = 0;
+  while (frame_ready_index < frame_ready_cbs_.size()) {
+    frame_ready_cbs_[frame_ready_index++].Run();
+    message_loop_.RunUntilIdle();
+  }
+  Destroy();
+}
+
+TEST_P(VideoRendererImplAsyncAddFrameReadyTest, SequenceTokenDiscardOneFrame) {
+  Initialize();
+  QueueFrames("0 10 20 30");
+  StartPlayingFrom(0);
+  Flush();
+  ASSERT_EQ(1u, frame_ready_cbs_.size());
+  // This frame will be discarded.
+  frame_ready_cbs_.front().Run();
+  Destroy();
+}
+
+INSTANTIATE_TEST_CASE_P(NewVideoRenderer,
+                        VideoRendererImplAsyncAddFrameReadyTest,
                         testing::Values(true));
 
 }  // namespace media

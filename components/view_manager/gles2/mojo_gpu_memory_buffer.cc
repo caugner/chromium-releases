@@ -7,46 +7,27 @@
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
 #include "base/numerics/safe_conversions.h"
+#include "ui/gfx/buffer_format_util.h"
 
 namespace gles2 {
 
 namespace {
 
-int NumberOfPlanesForGpuMemoryBufferFormat(
-    gfx::GpuMemoryBuffer::Format format) {
+size_t SubsamplingFactor(gfx::BufferFormat format, int plane) {
   switch (format) {
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::DXT5:
-    case gfx::GpuMemoryBuffer::ETC1:
-    case gfx::GpuMemoryBuffer::R_8:
-    case gfx::GpuMemoryBuffer::RGBA_4444:
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::RGBX_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::UYVY_422:
       return 1;
-    case gfx::GpuMemoryBuffer::YUV_420:
-      return 3;
-  }
-  NOTREACHED();
-  return 0;
-}
-
-size_t SubsamplingFactor(gfx::GpuMemoryBuffer::Format format, int plane) {
-  switch (format) {
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::DXT5:
-    case gfx::GpuMemoryBuffer::ETC1:
-    case gfx::GpuMemoryBuffer::R_8:
-    case gfx::GpuMemoryBuffer::RGBA_4444:
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::RGBX_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
-      return 1;
-    case gfx::GpuMemoryBuffer::YUV_420: {
+    case gfx::BufferFormat::YUV_420: {
       static size_t factor[] = {1, 2, 2};
       DCHECK_LT(static_cast<size_t>(plane), arraysize(factor));
       return factor[plane];
@@ -56,41 +37,39 @@ size_t SubsamplingFactor(gfx::GpuMemoryBuffer::Format format, int plane) {
   return 0;
 }
 
-size_t StrideInBytes(size_t width,
-                     gfx::GpuMemoryBuffer::Format format,
-                     int plane) {
+size_t StrideInBytes(size_t width, gfx::BufferFormat format, int plane) {
   switch (format) {
-    case gfx::GpuMemoryBuffer::ATCIA:
-    case gfx::GpuMemoryBuffer::DXT5:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT5:
       DCHECK_EQ(plane, 0);
       return width;
-    case gfx::GpuMemoryBuffer::ATC:
-    case gfx::GpuMemoryBuffer::DXT1:
-    case gfx::GpuMemoryBuffer::ETC1:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::ETC1:
       DCHECK_EQ(plane, 0);
       DCHECK_EQ(width % 2, 0u);
       return width / 2;
-    case gfx::GpuMemoryBuffer::R_8:
+    case gfx::BufferFormat::R_8:
       return (width + 3) & ~0x3;
-    case gfx::GpuMemoryBuffer::RGBA_4444:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::UYVY_422:
       DCHECK_EQ(plane, 0);
       return width * 2;
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-    case gfx::GpuMemoryBuffer::RGBX_8888:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
       DCHECK_EQ(plane, 0);
       return width * 4;
-    case gfx::GpuMemoryBuffer::YUV_420:
+    case gfx::BufferFormat::YUV_420:
       return width / SubsamplingFactor(format, plane);
   }
   NOTREACHED();
   return 0;
 }
 
-size_t BufferSizeInBytes(const gfx::Size& size,
-                         gfx::GpuMemoryBuffer::Format format) {
+size_t BufferSizeInBytes(const gfx::Size& size, gfx::BufferFormat format) {
   size_t size_in_bytes = 0;
-  int num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format);
+  int num_planes = static_cast<int>(gfx::NumberOfPlanesForBufferFormat(format));
   for (int i = 0; i < num_planes; ++i) {
     size_in_bytes += StrideInBytes(size.width(), format, i) *
                      (size.height() / SubsamplingFactor(format, i));
@@ -102,21 +81,20 @@ size_t BufferSizeInBytes(const gfx::Size& size,
 
 MojoGpuMemoryBufferImpl::MojoGpuMemoryBufferImpl(
     const gfx::Size& size,
-    Format format,
+    gfx::BufferFormat format,
     scoped_ptr<base::SharedMemory> shared_memory)
     : size_(size),
       format_(format),
       shared_memory_(shared_memory.Pass()),
-      mapped_(false) {
-}
+      mapped_(false) {}
 
 MojoGpuMemoryBufferImpl::~MojoGpuMemoryBufferImpl() {
 }
 
 scoped_ptr<gfx::GpuMemoryBuffer> MojoGpuMemoryBufferImpl::Create(
     const gfx::Size& size,
-    Format format,
-    Usage usage) {
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage) {
   size_t bytes = BufferSizeInBytes(size, format);
   scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory);
   if (!shared_memory->CreateAnonymous(bytes))
@@ -130,13 +108,18 @@ MojoGpuMemoryBufferImpl* MojoGpuMemoryBufferImpl::FromClientBuffer(
   return reinterpret_cast<MojoGpuMemoryBufferImpl*>(buffer);
 }
 
+const unsigned char* MojoGpuMemoryBufferImpl::GetMemory() const {
+  return static_cast<const unsigned char*>(shared_memory_->memory());
+}
+
 bool MojoGpuMemoryBufferImpl::Map(void** data) {
   DCHECK(!mapped_);
   if (!shared_memory_->Map(BufferSizeInBytes(size_, format_)))
     return false;
   mapped_ = true;
   size_t offset = 0;
-  int num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format_);
+  int num_planes = static_cast<int>(
+      gfx::NumberOfPlanesForBufferFormat(format_));
   for (int i = 0; i < num_planes; ++i) {
     data[i] = reinterpret_cast<uint8*>(shared_memory_->memory()) + offset;
     offset += StrideInBytes(size_.width(), format_, i) *
@@ -155,15 +138,20 @@ bool MojoGpuMemoryBufferImpl::IsMapped() const {
   return mapped_;
 }
 
-gfx::GpuMemoryBuffer::Format MojoGpuMemoryBufferImpl::GetFormat() const {
+gfx::BufferFormat MojoGpuMemoryBufferImpl::GetFormat() const {
   return format_;
 }
 
 void MojoGpuMemoryBufferImpl::GetStride(int* stride) const {
-  int num_planes = NumberOfPlanesForGpuMemoryBufferFormat(format_);
+  int num_planes = static_cast<int>(
+      gfx::NumberOfPlanesForBufferFormat(format_));
   for (int i = 0; i < num_planes; ++i)
     stride[i] =
         base::checked_cast<int>(StrideInBytes(size_.width(), format_, i));
+}
+
+gfx::GpuMemoryBufferId MojoGpuMemoryBufferImpl::GetId() const {
+  return gfx::GpuMemoryBufferId(0);
 }
 
 gfx::GpuMemoryBufferHandle MojoGpuMemoryBufferImpl::GetHandle() const {

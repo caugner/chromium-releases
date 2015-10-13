@@ -33,6 +33,7 @@
             'installer_util',
             '../base/base.gyp:base',
             '../chrome/chrome.gyp:launcher_support',
+            '../components/components.gyp:variations',
             '../google_update/google_update.gyp:google_update',
           ],
           'include_dirs': [
@@ -59,6 +60,7 @@
             'installer_util',
             '../base/base.gyp:base',
             '../base/base.gyp:test_support_base',
+            '../components/components.gyp:variations',
             '../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -87,6 +89,7 @@
             '../base/base.gyp:base_i18n',
             '../base/base.gyp:test_support_base',
             '../chrome/chrome.gyp:chrome_version_resources',
+            '../components/components.gyp:variations',
             '../content/content.gyp:content_common',
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
@@ -130,7 +133,6 @@
             'installer/util/move_tree_work_item_unittest.cc',
             'installer/util/product_state_unittest.cc',
             'installer/util/product_unittest.cc',
-            'installer/util/product_unittest.h',
             'installer/util/registry_key_backup_unittest.cc',
             'installer/util/registry_test_data.cc',
             'installer/util/registry_test_data.h',
@@ -208,6 +210,7 @@
           ],
         },
         {
+          # GN version: //chrome/installer/setup
           'target_name': 'setup',
           'type': 'executable',
           'dependencies': [
@@ -267,8 +270,6 @@
               ],
             },
           },
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
           'rules': [
             {
               'rule_name': 'setup_version',
@@ -339,9 +340,13 @@
             'installer/mini_installer/decompress.cc',
             'installer/mini_installer/decompress.h',
             'installer/mini_installer/decompress_test.cc',
+            'installer/mini_installer/mini_installer_constants.cc',
+            'installer/mini_installer/mini_installer_constants.h',
             'installer/mini_installer/mini_string.cc',
             'installer/mini_installer/mini_string.h',
             'installer/mini_installer/mini_string_test.cc',
+            'installer/mini_installer/regkey.cc',
+            'installer/mini_installer/regkey.h',
             'installer/setup/app_launcher_installer.cc',  # Move to lib
             'installer/setup/app_launcher_installer.h',  # Move to lib
             'installer/setup/archive_patch_helper.cc',  # Move to lib
@@ -531,6 +536,7 @@
             {
               'destination': '<(PRODUCT_DIR)/installer/theme/',
               'files': [
+                '<(branding_dir)/linux/product_logo_32.xpm',
                 '<(branding_dir_100)/product_logo_16.png',
                 '<(branding_dir)/product_logo_22.png',
                 '<(branding_dir)/product_logo_24.png',
@@ -539,7 +545,6 @@
                 '<(branding_dir)/product_logo_64.png',
                 '<(branding_dir)/product_logo_128.png',
                 '<(branding_dir)/product_logo_256.png',
-                '<(branding_dir)/product_logo_32.xpm',
                 '<(branding_dir)/BRANDING',
               ],
             },
@@ -1074,5 +1079,35 @@
         },
       ],  # targets
     }],  # OS=="mac"
+    ['OS=="win" and test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'installer_util_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'installer_util_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'installer_util_unittests.isolate',
+          ],
+        },
+        {
+          'target_name': 'setup_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'setup_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'setup_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

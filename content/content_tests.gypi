@@ -110,8 +110,6 @@
       'test/browser_side_navigation_test_utils.h',
       'test/content_browser_sanity_checker.cc',
       'test/content_browser_sanity_checker.h',
-      'test/content_browser_test_utils_internal.cc',
-      'test/content_browser_test_utils_internal.h',
       'test/content_test_suite.cc',
       'test/content_test_suite.h',
       'test/fake_compositor_dependencies.cc',
@@ -128,6 +126,8 @@
       'test/mock_keyboard_driver_win.h',
       'test/mock_render_process.cc',
       'test/mock_render_process.h',
+      'test/mock_ssl_host_state_delegate.cc',
+      'test/mock_ssl_host_state_delegate.h',
       'test/mock_webblob_registry_impl.cc',
       'test/mock_webblob_registry_impl.h',
       'test/mock_webclipboard_impl.cc',
@@ -192,6 +192,7 @@
       'browser/accessibility/dump_accessibility_tree_browsertest.cc',
       'browser/accessibility/site_per_process_accessibility_browsertest.cc',
       'browser/accessibility/snapshot_ax_tree_browsertest.cc',
+      'browser/background_sync/background_sync_browsertest.cc',
       'browser/battery_status/battery_monitor_impl_browsertest.cc',
       'browser/battery_status/battery_monitor_integration_browsertest.cc',
       'browser/bookmarklet_browsertest.cc',
@@ -234,6 +235,7 @@
       'browser/net_info_browsertest.cc',
       'browser/renderer_host/input/touch_action_browsertest.cc',
       'browser/renderer_host/input/touch_input_browsertest.cc',
+      'browser/renderer_host/input/touch_selection_controller_client_aura_browsertest.cc',
       'browser/renderer_host/render_message_filter_browsertest.cc',
       'browser/renderer_host/render_process_host_browsertest.cc',
       'browser/renderer_host/render_view_host_browsertest.cc',
@@ -248,7 +250,6 @@
       'browser/tracing/background_tracing_manager_browsertest.cc',
       'browser/tracing/tracing_controller_browsertest.cc',
       'browser/web_contents/opened_by_dom_browsertest.cc',
-      'browser/web_contents/touch_editable_impl_aura_browsertest.cc',
       'browser/web_contents/web_contents_impl_browsertest.cc',
       'browser/web_contents/web_contents_view_aura_browsertest.cc',
       'browser/webkit_browsertest.cc',
@@ -508,6 +509,7 @@
       'browser/quota/usage_tracker_unittest.cc',
       'browser/renderer_host/begin_frame_observer_proxy_unittest.cc',
       'browser/renderer_host/clipboard_message_filter_unittest.cc',
+      'browser/renderer_host/event_with_latency_info_unittest.cc',
       'browser/renderer_host/input/gesture_event_queue_unittest.cc',
       'browser/renderer_host/input/input_router_impl_unittest.cc',
       'browser/renderer_host/input/mock_input_ack_handler.cc',
@@ -531,6 +533,7 @@
       'browser/renderer_host/media/media_stream_ui_proxy_unittest.cc',
       'browser/renderer_host/media/video_capture_buffer_pool_unittest.cc',
       'browser/renderer_host/media/video_capture_controller_unittest.cc',
+      'browser/renderer_host/media/video_capture_device_client_unittest.cc',
       'browser/renderer_host/media/video_capture_host_unittest.cc',
       'browser/renderer_host/media/video_capture_manager_unittest.cc',
       'browser/renderer_host/render_process_host_unittest.cc',
@@ -561,7 +564,6 @@
       'browser/service_worker/service_worker_request_handler_unittest.cc',
       'browser/service_worker/service_worker_storage_unittest.cc',
       'browser/service_worker/service_worker_url_request_job_unittest.cc',
-      'browser/service_worker/service_worker_utils_unittest.cc',
       'browser/service_worker/service_worker_version_unittest.cc',
       'browser/service_worker/service_worker_write_to_cache_job_unittest.cc',
       'browser/shareable_file_reference_unittest.cc',
@@ -639,11 +641,14 @@
       'common/page_state_serialization_unittest.cc',
       'common/page_zoom_unittest.cc',
       'common/plugin_list_unittest.cc',
+      'common/sandbox_mac_compiler_unittest.mm',
       'common/sandbox_mac_diraccess_unittest.mm',
       'common/sandbox_mac_fontloading_unittest.mm',
       'common/sandbox_mac_system_access_unittest.mm',
       'common/sandbox_mac_unittest_helper.h',
       'common/sandbox_mac_unittest_helper.mm',
+      'common/service_worker/service_worker_utils_unittest.cc',
+      'common/ssl_status_serialization_unittest.cc',
       'common/webplugininfo_unittest.cc',
       'renderer/android/email_detector_unittest.cc',
       'renderer/android/phone_number_detector_unittest.cc',
@@ -672,6 +677,7 @@
       'renderer/media/video_capture_impl_manager_unittest.cc',
       'renderer/media/video_capture_impl_unittest.cc',
       'renderer/media/video_capture_message_filter_unittest.cc',
+      'renderer/raster_worker_pool_unittest.cc',
       'renderer/render_thread_impl_unittest.cc',
       'renderer/render_widget_unittest.cc',
       'renderer/scheduler/resource_dispatch_throttler_unittest.cc',
@@ -1058,6 +1064,7 @@
             '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
             '../third_party/libjingle/libjingle.gyp:libjingle',
             '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
           ],
         }],
         ['OS != "win"', {
@@ -1255,6 +1262,7 @@
         ['archive_gpu_tests==1', {
           'targets': [
             {
+              # GN: content/test:content_gl_tests_run
               'target_name': 'content_gl_tests_run',
               'type': 'none',
               'dependencies': [
@@ -1323,6 +1331,9 @@
             '../ui/accessibility/accessibility.gyp:ax_gen',
             '../ui/base/ime/ui_base_ime.gyp:ui_base_ime',
           ],
+          'export_dependent_settings': [
+            '../skia/skia.gyp:skia',
+          ],
           'sources': [
             # Source list duplicated in GN build.
             'public/test/content_browser_test.cc',
@@ -1330,6 +1341,8 @@
             'public/test/content_browser_test_utils.cc',
             'public/test/content_browser_test_utils.h',
             'public/test/content_browser_test_utils_mac.mm',
+            'test/content_browser_test_utils_internal.cc',
+            'test/content_browser_test_utils_internal.h',
             'test/content_test_launcher.cc',
           ],
           'include_dirs': [
@@ -1376,6 +1389,7 @@
           'target_name': 'content_browsertests',
           'type': '<(gtest_target_type)',
           'dependencies': [
+            'browser/background_sync/background_sync_proto.gyp:background_sync_proto',
             'content.gyp:content_common',
             'content.gyp:content_gpu',
             'content.gyp:content_plugin',
@@ -1419,6 +1433,7 @@
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gfx/gfx.gyp:gfx_geometry',
             '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
             '../ui/resources/ui_resources.gyp:ui_resources',
             '../ui/shell_dialogs/shell_dialogs.gyp:shell_dialogs',
             '../ui/snapshot/snapshot.gyp:snapshot',
@@ -1436,25 +1451,12 @@
           ],
           'sources': [ '<@(content_browsertests_sources)' ],
           'conditions': [
-            ['chromeos==0', {
-              'sources!': [
-                'browser/web_contents/touch_editable_impl_aura_browsertest.cc',
-              ],
-            }],
             ['OS=="win"', {
               'resource_include_dirs': [
                 '<(SHARED_INTERMEDIATE_DIR)/webkit',
               ],
               'sources': [
                 '<@(content_browsertests_win_sources)',
-                # TODO:  It would be nice to have these pulled in
-                # automatically from direct_dependent_settings in
-                # their various targets (net.gyp:net_resources, etc.),
-                # but that causes errors in other targets when
-                # resulting .res files get referenced multiple times.
-                '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/content/app/strings/content_strings_en-US.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 'shell/app/resource.h',
                 'shell/app/shell.rc',
               ],
@@ -1516,6 +1518,15 @@
                 'browser/compositor/image_transport_factory_browsertest.cc',
               ],
             }],
+            ['use_aura==1', {
+              'dependencies': [
+                '../ui/touch_selection/ui_touch_selection.gyp:ui_touch_selection',
+                '../ui/touch_selection/ui_touch_selection.gyp:ui_touch_selection_test_support',
+              ]}, {
+              'sources!': [
+                'browser/renderer_host/input/touch_selection_controller_client_aura_browsertest.cc',
+              ],
+            }],
             ['enable_webrtc==1', {
               'sources': [ '<@(content_browsertests_webrtc_sources)' ],
               'dependencies': [
@@ -1552,6 +1563,7 @@
             '../ui/gfx/gfx.gyp:gfx_geometry',
             '../ui/gfx/gfx.gyp:gfx_test_support',
             '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
             '../v8/tools/gyp/v8.gyp:v8',
           ],
           'include_dirs': [
@@ -1594,6 +1606,7 @@
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gfx/gfx.gyp:gfx_geometry',
             '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
           ],
           'include_dirs': [
             '..',
@@ -1625,6 +1638,7 @@
               '../ui/gfx/gfx.gyp:gfx_test_support',
               '../ui/gfx/gfx.gyp:gfx_geometry',
               '../ui/gl/gl.gyp:gl',
+              '../ui/gl/gl.gyp:gl_test_support',
               'content.gyp:content',
             ],
             'include_dirs': [
@@ -1738,6 +1752,7 @@
             '../ui/gfx/gfx.gyp:gfx_geometry',
             '../ui/gfx/gfx.gyp:gfx_test_support',
             '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
             'content.gyp:content',
           ],
           'sources': [
@@ -1761,6 +1776,29 @@
             }],
           ],
         },
+        {
+          'target_name': 'jpeg_decode_accelerator_unittest',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../media/media.gyp:media',
+            '../media/media.gyp:media_test_support',
+            '../testing/gtest.gyp:gtest',
+            '../third_party/libyuv/libyuv.gyp:libyuv',
+            '../ui/gfx/gfx.gyp:gfx',
+            '../ui/gfx/gfx.gyp:gfx_geometry',
+            '../ui/gl/gl.gyp:gl',
+            '../ui/gl/gl.gyp:gl_test_support',
+            'content.gyp:content',
+          ],
+          'sources': [
+            'common/gpu/media/jpeg_decode_accelerator_unittest.cc',
+          ],
+          'include_dirs': [
+            '<(DEPTH)/third_party/libva',
+            '<(DEPTH)/third_party/libyuv',
+          ],
+        }
       ]
     }],
     ['OS == "android"', {

@@ -133,6 +133,7 @@ class BlueYellowClient : public ContentLayerClient {
   }
 
   bool FillsBoundsCompletely() const override { return true; }
+  size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
 
   void set_blue_top(bool b) { blue_top_ = b; }
 
@@ -160,6 +161,7 @@ class LayerTreeHostTilesTestPartialInvalidation
         // only re-raster the stuff in the rect. If it doesn't do partial raster
         // it would re-raster the whole thing instead.
         client_.set_blue_top(false);
+        Finish();
         picture_layer_->SetNeedsDisplayRect(gfx::Rect(50, 50, 100, 100));
 
         // Add a copy request to see what happened!
@@ -185,6 +187,13 @@ TEST_F(LayerTreeHostTilesTestPartialInvalidation,
   RunRasterPixelTest(
       false, FULL_ONE_COPY, picture_layer_,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_flipped.png")));
+}
+
+TEST_F(LayerTreeHostTilesTestPartialInvalidation,
+       PartialRaster_MultiThread_OneCopy) {
+  RunRasterPixelTest(
+      true, PARTIAL_ONE_COPY, picture_layer_,
+      base::FilePath(FILE_PATH_LITERAL("blue_yellow_partial_flipped.png")));
 }
 
 TEST_F(LayerTreeHostTilesTestPartialInvalidation,

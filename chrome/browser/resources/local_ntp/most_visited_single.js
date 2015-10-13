@@ -230,8 +230,6 @@ var removeAllOldTiles = function() {
  * we are ready to show the new tiles and drop the old ones.
  */
 var showTiles = function() {
-  removeAllOldTiles();
-
   // Store the tiles on the current closure.
   var cur = tiles;
 
@@ -247,6 +245,7 @@ var showTiles = function() {
   if (old) {
     old.removeAttribute('id');
     old.classList.add('mv-tiles-old');
+    old.style.opacity = 0.0;
     cur.addEventListener('webkitTransitionEnd', function(ev) {
       if (ev.target === cur) {
         removeAllOldTiles();
@@ -278,9 +277,13 @@ var addTile = function(args) {
   if (args.rid) {
     var data = chrome.embeddedSearch.searchBox.getMostVisitedItemData(args.rid);
     data.tid = data.rid;
-    data.thumbnailUrls = [data.thumbnailUrl];
-    data.faviconUrl = 'chrome-search://favicon/size/16@' +
-        window.devicePixelRatio + 'x/' + data.renderViewId + '/' + data.tid;
+    if (!data.thumbnailUrls) {
+      data.thumbnailUrls = [data.thumbnailUrl];
+    }
+    if (!data.faviconUrl) {
+      data.faviconUrl = 'chrome-search://favicon/size/16@' +
+          window.devicePixelRatio + 'x/' + data.renderViewId + '/' + data.tid;
+    }
     tiles.appendChild(renderTile(data));
     logEvent(LOG_TYPE.NTP_CLIENT_SIDE_SUGGESTION);
   } else if (args.id) {
@@ -351,6 +354,20 @@ var renderTile = function(data) {
       }
     });
   }
+  // For local suggestions, we use navigateContentWindow instead of the default
+  // action, since it includes support for file:// urls.
+  if (data.rid) {
+    tile.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      var disp = chrome.embeddedSearch.newTabPage.getDispositionFromClick(
+        ev.button == 1,  // MIDDLE BUTTON
+        ev.altKey, ev.ctrlKey, ev.metaKey, ev.shiftKey);
+
+      window.chrome.embeddedSearch.newTabPage.navigateContentWindow(this.href,
+                                                                    disp);
+    });
+  }
+
   tile.addEventListener('keydown', function(event) {
     if (event.keyCode == 46 /* DELETE */ ||
         event.keyCode == 8 /* BACKSPACE */) {

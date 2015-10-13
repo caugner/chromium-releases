@@ -5,7 +5,6 @@
 #include "components/password_manager/content/browser/credential_manager_dispatcher.h"
 
 #include "base/bind.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
@@ -40,8 +39,7 @@ bool CredentialManagerDispatcher::OnMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(CredentialManagerDispatcher, message)
-    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_NotifySignedIn,
-                        OnNotifySignedIn);
+    IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_Store, OnStore);
     IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_RequireUserMediation,
                         OnRequireUserMediation);
     IPC_MESSAGE_HANDLER(CredentialManagerHostMsg_RequestCredential,
@@ -51,13 +49,13 @@ bool CredentialManagerDispatcher::OnMessageReceived(
   return handled;
 }
 
-void CredentialManagerDispatcher::OnNotifySignedIn(
+void CredentialManagerDispatcher::OnStore(
     int request_id,
     const password_manager::CredentialInfo& credential) {
   DCHECK(credential.type != CredentialType::CREDENTIAL_TYPE_EMPTY);
   DCHECK(request_id);
   web_contents()->GetRenderViewHost()->Send(
-      new CredentialManagerMsg_AcknowledgeSignedIn(
+      new CredentialManagerMsg_AcknowledgeStore(
           web_contents()->GetRenderViewHost()->GetRoutingID(), request_id));
 
   if (!client_->IsSavingEnabledForCurrentPage())
@@ -76,10 +74,10 @@ void CredentialManagerDispatcher::OnNotifySignedIn(
 
 void CredentialManagerDispatcher::OnProvisionalSaveComplete() {
   DCHECK(form_manager_);
-  if (client_->IsSavingEnabledForCurrentPage() &&
-      !form_manager_->IsBlacklisted()) {
-    client_->PromptUserToSavePassword(
-        form_manager_.Pass(), CredentialSourceType::CREDENTIAL_SOURCE_API);
+  if (client_->IsSavingEnabledForCurrentPage()) {
+    client_->PromptUserToSaveOrUpdatePassword(
+        form_manager_.Pass(), CredentialSourceType::CREDENTIAL_SOURCE_API,
+        false);
   }
 }
 

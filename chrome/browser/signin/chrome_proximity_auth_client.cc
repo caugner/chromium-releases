@@ -2,12 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/signin/chrome_proximity_auth_client.h"
+
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_window.h"
-#include "chrome/browser/signin/chrome_proximity_auth_client.h"
+#include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager_base.h"
+
+using proximity_auth::ScreenlockState;
 
 ChromeProximityAuthClient::ChromeProximityAuthClient(Profile* profile)
     : profile_(profile) {
@@ -23,4 +27,22 @@ std::string ChromeProximityAuthClient::GetAuthenticatedUsername() const {
   // created. Otherwise, just crash to collect stack.
   DCHECK(signin_manager);
   return signin_manager->GetAuthenticatedUsername();
+}
+
+void ChromeProximityAuthClient::UpdateScreenlockState(ScreenlockState state) {
+  EasyUnlockService* service = EasyUnlockService::Get(profile_);
+  if (service)
+    service->UpdateScreenlockState(state);
+}
+
+void ChromeProximityAuthClient::FinalizeUnlock(bool success) {
+  EasyUnlockService* service = EasyUnlockService::Get(profile_);
+  if (service)
+    service->FinalizeUnlock(success);
+}
+
+void ChromeProximityAuthClient::FinalizeSignin(const std::string& secret) {
+  EasyUnlockService* service = EasyUnlockService::Get(profile_);
+  if (service)
+    service->FinalizeSignin(secret);
 }

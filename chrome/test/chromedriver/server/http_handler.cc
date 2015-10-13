@@ -722,14 +722,14 @@ namespace internal {
 const char kNewSessionPathPattern[] = "session";
 
 bool MatchesMethod(HttpMethod command_method, const std::string& method) {
-  std::string lower_method = base::StringToLowerASCII(method);
+  std::string lower_method = base::ToLowerASCII(method);
   switch (command_method) {
-  case kGet:
-    return lower_method == "get";
-  case kPost:
-    return lower_method == "post" || lower_method == "put";
-  case kDelete:
-    return lower_method == "delete";
+    case kGet:
+      return lower_method == "get";
+    case kPost:
+      return lower_method == "post" || lower_method == "put";
+    case kDelete:
+      return lower_method == "delete";
   }
   return false;
 }
@@ -742,10 +742,10 @@ bool MatchesCommand(const std::string& method,
   if (!MatchesMethod(command.method, method))
     return false;
 
-  std::vector<std::string> path_parts;
-  base::SplitString(path, '/', &path_parts);
-  std::vector<std::string> command_path_parts;
-  base::SplitString(command.path_pattern, '/', &command_path_parts);
+  std::vector<std::string> path_parts = base::SplitString(
+      path, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  std::vector<std::string> command_path_parts = base::SplitString(
+      command.path_pattern, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (path_parts.size() != command_path_parts.size())
     return false;
 

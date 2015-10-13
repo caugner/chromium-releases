@@ -477,6 +477,11 @@ void MojoGLES2Impl::GetBooleanv(GLenum pname, GLboolean* params) {
   MojoGLES2MakeCurrent(context_);
   glGetBooleanv(pname, params);
 }
+void MojoGLES2Impl::GetBufferParameteri64v(GLenum target,
+                                           GLenum pname,
+                                           GLint64* params) {
+  NOTREACHED() << "Unimplemented GetBufferParameteri64v.";
+}
 void MojoGLES2Impl::GetBufferParameteriv(GLenum target,
                                          GLenum pname,
                                          GLint* params) {
@@ -1255,6 +1260,9 @@ void MojoGLES2Impl::DeleteQueriesEXT(GLsizei n, const GLuint* queries) {
   MojoGLES2MakeCurrent(context_);
   glDeleteQueriesEXT(n, queries);
 }
+void MojoGLES2Impl::QueryCounterEXT(GLuint id, GLenum target) {
+  NOTREACHED() << "Unimplemented QueryCounterEXT.";
+}
 GLboolean MojoGLES2Impl::IsQueryEXT(GLuint id) {
   MojoGLES2MakeCurrent(context_);
   return glIsQueryEXT(id);
@@ -1277,16 +1285,29 @@ void MojoGLES2Impl::GetQueryivEXT(GLenum target, GLenum pname, GLint* params) {
   MojoGLES2MakeCurrent(context_);
   glGetQueryivEXT(target, pname, params);
 }
+void MojoGLES2Impl::GetQueryObjectivEXT(GLuint id,
+                                        GLenum pname,
+                                        GLint* params) {
+  NOTREACHED() << "Unimplemented GetQueryObjectivEXT.";
+}
 void MojoGLES2Impl::GetQueryObjectuivEXT(GLuint id,
                                          GLenum pname,
                                          GLuint* params) {
   MojoGLES2MakeCurrent(context_);
   glGetQueryObjectuivEXT(id, pname, params);
 }
+void MojoGLES2Impl::GetQueryObjecti64vEXT(GLuint id,
+                                          GLenum pname,
+                                          GLint64* params) {
+  NOTREACHED() << "Unimplemented GetQueryObjecti64vEXT.";
+}
 void MojoGLES2Impl::GetQueryObjectui64vEXT(GLuint id,
                                            GLenum pname,
                                            GLuint64* params) {
   NOTREACHED() << "Unimplemented GetQueryObjectui64vEXT.";
+}
+void MojoGLES2Impl::SetDisjointValueSyncCHROMIUM() {
+  NOTREACHED() << "Unimplemented SetDisjointValueSyncCHROMIUM.";
 }
 void MojoGLES2Impl::InsertEventMarkerEXT(GLsizei length, const GLchar* marker) {
   NOTREACHED() << "Unimplemented InsertEventMarkerEXT.";
@@ -1486,6 +1507,17 @@ void MojoGLES2Impl::CompressedCopyTextureCHROMIUM(GLenum target,
                                                   GLenum dest_id) {
   NOTREACHED() << "Unimplemented CompressedCopyTextureCHROMIUM.";
 }
+void MojoGLES2Impl::CompressedCopySubTextureCHROMIUM(GLenum target,
+                                                     GLenum source_id,
+                                                     GLenum dest_id,
+                                                     GLint xoffset,
+                                                     GLint yoffset,
+                                                     GLint x,
+                                                     GLint y,
+                                                     GLsizei width,
+                                                     GLsizei height) {
+  NOTREACHED() << "Unimplemented CompressedCopySubTextureCHROMIUM.";
+}
 void MojoGLES2Impl::DrawArraysInstancedANGLE(GLenum mode,
                                              GLint first,
                                              GLsizei count,
@@ -1646,6 +1678,68 @@ void MojoGLES2Impl::MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) {
 }
 void MojoGLES2Impl::MatrixLoadIdentityCHROMIUM(GLenum matrixMode) {
   NOTREACHED() << "Unimplemented MatrixLoadIdentityCHROMIUM.";
+}
+GLuint MojoGLES2Impl::GenPathsCHROMIUM(GLsizei range) {
+  NOTREACHED() << "Unimplemented GenPathsCHROMIUM.";
+  return 0;
+}
+void MojoGLES2Impl::DeletePathsCHROMIUM(GLuint path, GLsizei range) {
+  NOTREACHED() << "Unimplemented DeletePathsCHROMIUM.";
+}
+GLboolean MojoGLES2Impl::IsPathCHROMIUM(GLuint path) {
+  NOTREACHED() << "Unimplemented IsPathCHROMIUM.";
+  return 0;
+}
+void MojoGLES2Impl::PathCommandsCHROMIUM(GLuint path,
+                                         GLsizei numCommands,
+                                         const GLubyte* commands,
+                                         GLsizei numCoords,
+                                         GLenum coordType,
+                                         const GLvoid* coords) {
+  NOTREACHED() << "Unimplemented PathCommandsCHROMIUM.";
+}
+void MojoGLES2Impl::PathParameterfCHROMIUM(GLuint path,
+                                           GLenum pname,
+                                           GLfloat value) {
+  NOTREACHED() << "Unimplemented PathParameterfCHROMIUM.";
+}
+void MojoGLES2Impl::PathParameteriCHROMIUM(GLuint path,
+                                           GLenum pname,
+                                           GLint value) {
+  NOTREACHED() << "Unimplemented PathParameteriCHROMIUM.";
+}
+void MojoGLES2Impl::PathStencilFuncCHROMIUM(GLenum func,
+                                            GLint ref,
+                                            GLuint mask) {
+  NOTREACHED() << "Unimplemented PathStencilFuncCHROMIUM.";
+}
+void MojoGLES2Impl::StencilFillPathCHROMIUM(GLuint path,
+                                            GLenum fillMode,
+                                            GLuint mask) {
+  NOTREACHED() << "Unimplemented StencilFillPathCHROMIUM.";
+}
+void MojoGLES2Impl::StencilStrokePathCHROMIUM(GLuint path,
+                                              GLint reference,
+                                              GLuint mask) {
+  NOTREACHED() << "Unimplemented StencilStrokePathCHROMIUM.";
+}
+void MojoGLES2Impl::CoverFillPathCHROMIUM(GLuint path, GLenum coverMode) {
+  NOTREACHED() << "Unimplemented CoverFillPathCHROMIUM.";
+}
+void MojoGLES2Impl::CoverStrokePathCHROMIUM(GLuint path, GLenum coverMode) {
+  NOTREACHED() << "Unimplemented CoverStrokePathCHROMIUM.";
+}
+void MojoGLES2Impl::StencilThenCoverFillPathCHROMIUM(GLuint path,
+                                                     GLenum fillMode,
+                                                     GLuint mask,
+                                                     GLenum coverMode) {
+  NOTREACHED() << "Unimplemented StencilThenCoverFillPathCHROMIUM.";
+}
+void MojoGLES2Impl::StencilThenCoverStrokePathCHROMIUM(GLuint path,
+                                                       GLint reference,
+                                                       GLuint mask,
+                                                       GLenum coverMode) {
+  NOTREACHED() << "Unimplemented StencilThenCoverStrokePathCHROMIUM.";
 }
 GLenum MojoGLES2Impl::GetGraphicsResetStatusKHR() {
   NOTREACHED() << "Unimplemented GetGraphicsResetStatusKHR.";

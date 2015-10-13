@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
+#include "components/url_formatter/url_formatter.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/escape.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -182,11 +183,9 @@ bool ParseAndCanonicalizeFacetURI(const std::string& input_uri,
   url::ParseStandardURL(input_uri.c_str(), input_uri.size(), &input_parsed);
 
   base::StringPiece scheme = ComponentString(input_uri, input_parsed.scheme);
-  if (base::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
-                                 url::kHttpsScheme)) {
+  if (base::LowerCaseEqualsASCII(scheme, url::kHttpsScheme)) {
     return CanonicalizeWebFacetURI(input_uri, input_parsed, canonical_uri);
-  } else if (base::LowerCaseEqualsASCII(scheme.begin(), scheme.end(),
-                                        kAndroidAppScheme)) {
+  } else if (base::LowerCaseEqualsASCII(scheme, kAndroidAppScheme)) {
     return CanonicalizeAndroidFacetURI(input_uri, input_parsed, canonical_uri);
   }
   return false;
@@ -302,7 +301,8 @@ bool IsAffiliationBasedMatchingEnabled(const base::CommandLine& command_line) {
     return false;
   if (command_line.HasSwitch(switches::kEnableAffiliationBasedMatching))
     return true;
-  return base::StartsWithASCII(group_name, "Enabled", /*case_sensitive=*/false);
+  return base::StartsWith(group_name, "Enabled",
+                          base::CompareCase::INSENSITIVE_ASCII);
 }
 
 bool IsPropagatingPasswordChangesToWebCredentialsEnabled(
@@ -343,6 +343,8 @@ std::string GetHumanReadableOrigin(const autofill::PasswordForm& password_form,
           password_form.signon_realm);
   if (facet_uri.IsValidAndroidFacetURI())
     return facet_uri.scheme() + "://" + facet_uri.android_package_name();
-  return base::UTF16ToUTF8(net::FormatUrl(password_form.origin, languages));
+  return base::UTF16ToUTF8(
+      url_formatter::FormatUrl(password_form.origin, languages));
 }
+
 }  // namespace password_manager

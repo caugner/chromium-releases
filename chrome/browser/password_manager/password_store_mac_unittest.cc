@@ -163,7 +163,7 @@ void CheckFormsAgainstExpectations(
         created + base::TimeDelta::FromDays(
                       password_manager::kTestingDaysAfterPasswordsAreSynced),
         form->date_synced);
-    EXPECT_EQ(GURL(password_manager::kTestingAvatarUrlSpec), form->avatar_url);
+    EXPECT_EQ(GURL(password_manager::kTestingIconUrlSpec), form->icon_url);
   }
 }
 
@@ -1204,10 +1204,7 @@ class PasswordStoreMacTest : public testing::Test {
     // OSCrypt shouldn't call the Keychain. The histogram doesn't cover the
     // internet passwords.
     if (histogram_tester_) {
-      scoped_ptr<base::HistogramSamples> samples =
-          histogram_tester_->GetHistogramSamplesSinceCreation(
-              "OSX.Keychain.Access");
-      EXPECT_TRUE(!samples || samples->TotalCount() == 0);
+      histogram_tester_->ExpectTotalCount("OSX.Keychain.Access", 0);
     }
   }
 

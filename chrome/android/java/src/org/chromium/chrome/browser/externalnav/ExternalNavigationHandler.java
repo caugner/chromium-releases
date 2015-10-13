@@ -8,7 +8,9 @@ import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.StrictMode;
 import android.provider.Browser;
+import android.text.TextUtils;
 import android.webkit.WebView;
 
 import org.chromium.base.CommandLine;
@@ -167,7 +169,7 @@ public class ExternalNavigationHandler {
         // http://crbug/331571 : Do not override a navigation started from user typing.
         // http://crbug/424029 : Need to stay in Chrome for an intent heading explicitly to Chrome.
         if (params.getRedirectHandler() != null) {
-            if (params.getRedirectHandler().shouldStayInChrome()
+            if (params.getRedirectHandler().shouldStayInChrome(isExternalProtocol)
                     || params.getRedirectHandler().shouldNotOverrideUrlLoading()) {
                 return OverrideUrlLoadingResult.NO_OVERRIDE;
             }
@@ -249,9 +251,19 @@ public class ExternalNavigationHandler {
             return OverrideUrlLoadingResult.NO_OVERRIDE;
         }
 
+        boolean canResolveActivity = false;
+        // Temporarily allowing disk access while fixing. TODO: http://crbug.com/527415
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        StrictMode.allowThreadDiskWrites();
+        try {
+            canResolveActivity = mDelegate.canResolveActivity(intent);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
+
         // check whether the intent can be resolved. If not, we will see
         // whether we can download it from the Market.
-        if (!mDelegate.canResolveActivity(intent)) {
+        if (!canResolveActivity) {
             if (hasBrowserFallbackUrl) {
                 return clobberCurrentTabWithFallbackUrl(browserFallbackUrl, params);
             }
@@ -322,7 +334,7 @@ public class ExternalNavigationHandler {
                 }
 
                 if (currentUri != null && previousUri != null
-                        && currentUri.getHost().equals(previousUri.getHost())) {
+                        && TextUtils.equals(currentUri.getHost(), previousUri.getHost())) {
 
                     Intent previousIntent;
                     try {
@@ -359,6 +371,11 @@ public class ExternalNavigationHandler {
                     if (!params.getRedirectHandler().hasNewResolver(intent)) {
                         return OverrideUrlLoadingResult.NO_OVERRIDE;
                     }
+                }
+                // The intent can be used to launch Chrome itself, record the user
+                // gesture here so that it can be used later.
+                if (params.hasUserGesture()) {
+                    IntentWithGesturesHandler.getInstance().onNewIntentWithGesture(intent);
                 }
                 if (mDelegate.startActivityIfNeeded(intent)) {
                     return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;

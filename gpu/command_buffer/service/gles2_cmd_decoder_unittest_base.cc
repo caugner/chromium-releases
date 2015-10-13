@@ -23,7 +23,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_mock.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -63,7 +63,8 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
       return;
     if (!init->extensions.empty())
       init->extensions += " ";
-    if (base::StartsWithASCII(init->gl_version, "opengl es", false)) {
+    if (base::StartsWith(init->gl_version, "opengl es",
+                         base::CompareCase::INSENSITIVE_ASCII)) {
       init->extensions += kVAOExtensions[0];
     } else {
 #if !defined(OS_MACOSX)
@@ -173,10 +174,8 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   // For easier substring/extension matching
   DCHECK(normalized_init.extensions.empty() ||
          *normalized_init.extensions.rbegin() == ' ');
-  Framebuffer::ClearFramebufferCompleteComboMap();
-
   gfx::SetGLGetProcAddressProc(gfx::MockGLInterface::GetGLProcAddress);
-  gfx::GLSurface::InitializeOneOffWithMockBindingsForTests();
+  gfx::GLSurfaceTestSupport::InitializeOneOffWithMockBindings();
 
   gl_.reset(new StrictMock<MockGLInterface>());
   ::gfx::MockGLInterface::SetGLInterface(gl_.get());
@@ -187,12 +186,9 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   if (command_line)
     feature_info = new FeatureInfo(*command_line);
   group_ = scoped_refptr<ContextGroup>(
-      new ContextGroup(NULL,
-                       memory_tracker_,
-                       new ShaderTranslatorCache,
-                       feature_info.get(),
-                       new SubscriptionRefSet,
-                       new ValueStateMap,
+      new ContextGroup(NULL, memory_tracker_, new ShaderTranslatorCache,
+                       new FramebufferCompletenessCache, feature_info.get(),
+                       new SubscriptionRefSet, new ValueStateMap,
                        normalized_init.bind_generates_resource));
   bool use_default_textures = normalized_init.bind_generates_resource;
 
@@ -209,7 +205,7 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   context_->SetGLVersionString(normalized_init.gl_version.c_str());
 
   context_->GLContextStubWithExtensions::MakeCurrent(surface_.get());
-  gfx::GLSurface::InitializeDynamicMockBindingsForTests(context_.get());
+  gfx::GLSurfaceTestSupport::InitializeDynamicMockBindings(context_.get());
 
   TestHelper::SetupContextGroupInitExpectations(
       gl_.get(),

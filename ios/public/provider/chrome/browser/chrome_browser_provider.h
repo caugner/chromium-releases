@@ -11,6 +11,7 @@
 
 class InfoBarViewDelegate;
 class PrefService;
+class ProfileOAuth2TokenServiceIOSProvider;
 
 namespace autofill {
 class CardUnmaskPromptController;
@@ -23,6 +24,10 @@ class MetricsService;
 
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace rappor {
+class RapporService;
 }
 
 // TODO(ios): Determine the best way to interface with Obj-C code through
@@ -41,8 +46,8 @@ namespace ios {
 
 class ChromeBrowserProvider;
 class ChromeBrowserStateManager;
+class ChromeIdentityService;
 class GeolocationUpdaterProvider;
-class ProfileOAuth2TokenServiceIOSProvider;
 class StringProvider;
 class UpdatableResourceProvider;
 
@@ -74,13 +79,13 @@ class ChromeBrowserProvider {
   virtual InfoBarViewPlaceholder CreateInfoBarView(
       CGRect frame,
       InfoBarViewDelegate* delegate);
+  // Returns an instance of a Chrome identity service.
+  virtual ChromeIdentityService* GetChromeIdentityService();
   // Returns an instance of a string provider.
   virtual StringProvider* GetStringProvider();
   virtual GeolocationUpdaterProvider* GetGeolocationUpdaterProvider();
-  // Displays the Translate settings screen.
-  virtual void ShowTranslateSettings();
-  // Returns whether the new bookmark collection experience is enabled.
-  virtual bool IsBookmarkCollectionEnabled();
+  // Returns the distribution brand code.
+  virtual std::string GetDistributionBrandCode();
   // Returns the chrome UI scheme.
   // TODO(droger): Remove this method once chrome no longer needs to match
   // content.
@@ -95,12 +100,8 @@ class ChromeBrowserProvider {
       autofill::CardUnmaskPromptController* controller);
   // Returns risk data used in Wallet requests.
   virtual std::string GetRiskData();
-  // Returns product version with prefix.
-  virtual std::string GetProductVersionWithPrefix(const std::string& prefix);
-  // Returns a version string to be displayed in "About Chromium" dialog.
-  virtual std::string GetVersionString();
-  // Version number, e.g. "6.0.490.1".
-  virtual std::string GetVersionNumber();
+  // Returns the RapporService. May be null.
+  virtual rappor::RapporService* GetRapporService();
 };
 
 }  // namespace ios

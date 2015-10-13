@@ -5,7 +5,6 @@
 from core import perf_benchmark
 
 from benchmarks import silk_flags
-from benchmarks import webgl_expectations
 from measurements import smoothness
 import page_sets
 import page_sets.key_silk_cases
@@ -69,10 +68,6 @@ class SmoothnessToughWebGLCases(perf_benchmark.PerfBenchmark):
   page_set = page_sets.ToughWebglCasesPageSet
 
   @classmethod
-  def CreateExpectations(cls):
-    return webgl_expectations.WebGLExpectations()
-
-  @classmethod
   def Name(cls):
     return 'smoothness.tough_webgl_cases'
 
@@ -80,10 +75,6 @@ class SmoothnessToughWebGLCases(perf_benchmark.PerfBenchmark):
 @benchmark.Enabled('android')
 class SmoothnessMaps(perf_benchmark.PerfBenchmark):
   page_set = page_sets.MapsPageSet
-
-  @classmethod
-  def CreateExpectations(cls):
-    return webgl_expectations.MapsExpectations()
 
   @classmethod
   def Name(cls):
@@ -318,7 +309,15 @@ class SmoothnessToughScrollingCases(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'smoothness.tough_scrolling_cases'
 
+class SmoothnessToughImageDecodeCases(perf_benchmark.PerfBenchmark):
+  test = smoothness.Smoothness
+  page_set = page_sets.ToughImageDecodeCasesPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'smoothness.tough_image_decode_cases'
+
+@benchmark.Disabled('android')  # http://crbug.com/513699
 class SmoothnessImageDecodingCases(perf_benchmark.PerfBenchmark):
   """Measures decoding statistics for jpeg images.
   """
@@ -334,6 +333,7 @@ class SmoothnessImageDecodingCases(perf_benchmark.PerfBenchmark):
     return 'smoothness.image_decoding_cases'
 
 
+@benchmark.Disabled('android')  # http://crbug.com/513699
 class SmoothnessGpuImageDecodingCases(perf_benchmark.PerfBenchmark):
   """Measures decoding statistics for jpeg images with GPU rasterization.
   """
@@ -363,22 +363,6 @@ class SmoothnessPathologicalMobileSites(perf_benchmark.PerfBenchmark):
     return 'smoothness.pathological_mobile_sites'
 
 
-@benchmark.Enabled('android')
-class SmoothnessSyncScrollPathologicalMobileSites(perf_benchmark.PerfBenchmark):
-  """Measures task execution statistics while sync-scrolling pathological sites.
-  """
-  tag = 'sync_scroll'
-  page_set = page_sets.PathologicalMobileSitesPageSet
-  test = smoothness.Smoothness
-
-  def SetExtraBrowserOptions(self, options):
-    silk_flags.CustomizeBrowserOptionsForSyncScrolling(options)
-
-  @classmethod
-  def Name(cls):
-    return 'smoothness.sync_scroll.pathological_mobile_sites'
-
-
 class SmoothnessToughAnimatedImageCases(perf_benchmark.PerfBenchmark):
   test = smoothness.Smoothness
   page_set = page_sets.ToughAnimatedImageCasesPageSet
@@ -388,6 +372,7 @@ class SmoothnessToughAnimatedImageCases(perf_benchmark.PerfBenchmark):
     return 'smoothness.tough_animated_image_cases'
 
 
+@benchmark.Disabled('reference')  # http://crbug.com/499489
 class SmoothnessToughTextureUploadCases(perf_benchmark.PerfBenchmark):
   test = smoothness.Smoothness
   page_set = page_sets.ToughTextureUploadCasesPageSet
@@ -406,3 +391,27 @@ class SmoothnessToughAdCases(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'smoothness.tough_ad_cases'
+
+
+# http://crbug.com/496684 (reference)
+# http://crbug.com/522619 (mac/win)
+@benchmark.Disabled('reference', 'win', 'mac')
+class SmoothnessScrollingToughAdCases(perf_benchmark.PerfBenchmark):
+  """Measures rendering statistics while scrolling advertisements."""
+  test = smoothness.Smoothness
+  page_set = page_sets.ScrollingToughAdCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.scrolling_tough_ad_cases'
+
+
+@benchmark.Disabled('reference')  # http://crbug.com/496684
+class SmoothnessToughWebGLAdCases(perf_benchmark.PerfBenchmark):
+  """Measures rendering statistics while scrolling advertisements."""
+  test = smoothness.Smoothness
+  page_set = page_sets.ToughWebglAdCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'smoothness.tough_webgl_ad_cases'

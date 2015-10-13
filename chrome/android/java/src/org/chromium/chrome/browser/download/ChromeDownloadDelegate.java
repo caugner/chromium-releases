@@ -4,8 +4,10 @@
 
 package org.chromium.chrome.browser.download;
 
+import android.Manifest.permission;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Environment;
@@ -13,19 +15,21 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
-import android.widget.Toast;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.infobar.ConfirmInfoBar;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.infobar.InfoBarListeners;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.content.browser.ContentViewDownloadDelegate;
 import org.chromium.content.browser.DownloadInfo;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid.PermissionCallback;
+import org.chromium.ui.widget.Toast;
 
 import java.io.File;
 
@@ -503,8 +507,24 @@ public class ChromeDownloadDelegate
         // OMA downloads have extension "dm" or "dd". For the latter, it
         // can be handled when native download completes.
         if (path != null && (path.endsWith(".dm"))) {
-            DownloadInfo downloadInfo = new DownloadInfo.Builder().setUrl(url).build();
-            onDownloadStartNoStream(downloadInfo);
+            final DownloadInfo downloadInfo = new DownloadInfo.Builder().setUrl(url).build();
+            if (mTab == null) return true;
+            WindowAndroid window = mTab.getWindowAndroid();
+            if (window.hasPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+                onDownloadStartNoStream(downloadInfo);
+            } else if (window.canRequestPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+                PermissionCallback permissionCallback = new PermissionCallback() {
+                    @Override
+                    public void onRequestPermissionsResult(
+                            String[] permissions, int[] grantResults) {
+                        if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                            onDownloadStartNoStream(downloadInfo);
+                        }
+                    }
+                };
+                window.requestPermissions(
+                        new String[] {permission.WRITE_EXTERNAL_STORAGE}, permissionCallback);
+            }
             return true;
         }
         return false;

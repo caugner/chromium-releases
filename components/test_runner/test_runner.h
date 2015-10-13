@@ -37,7 +37,6 @@ namespace test_runner {
 
 class InvokeCallbackTask;
 class TestInterfaces;
-class TestPageOverlay;
 class WebContentSettings;
 class WebTestDelegate;
 class WebTestProxyBase;
@@ -561,7 +560,7 @@ class TestRunner : public WebTestRunner,
   void SetMIDIAccessorResult(bool result);
 
   // Simulates a click on a Web Notification.
-  void SimulateWebNotificationClick(const std::string& title);
+  void SimulateWebNotificationClick(const std::string& title, int action_index);
 
   // Speech recognition related functions.
   void AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -801,7 +800,6 @@ class TestRunner : public WebTestRunner,
   TestInterfaces* test_interfaces_;
   WebTestDelegate* delegate_;
   blink::WebView* web_view_;
-  TestPageOverlay* page_overlay_;
   WebTestProxyBase* proxy_;
 
   // This is non-0 IFF a load is in progress.

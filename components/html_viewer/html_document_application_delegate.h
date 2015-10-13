@@ -10,10 +10,10 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "components/html_viewer/html_document.h"
+#include "base/memory/weak_ptr.h"
+#include "components/html_viewer/html_frame.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/services/network/public/interfaces/network_service.mojom.h"
 #include "mojo/services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
 
@@ -31,11 +31,10 @@ class HTMLDocumentApplicationDelegate : public mojo::ApplicationDelegate {
       GlobalState* global_state,
       scoped_ptr<mojo::AppRefCount> parent_app_refcount);
 
-  typedef base::Callback<HTMLDocument*(HTMLDocument::CreateParams*)>
-      HTMLDocumentCreationCallback;
+  using HTMLFrameCreationCallback =
+      base::Callback<HTMLFrame*(HTMLFrame::CreateParams*)>;
 
-  void SetHTMLDocumentCreationCallback(
-      const HTMLDocumentCreationCallback& callback);
+  void SetHTMLFrameCreationCallback(const HTMLFrameCreationCallback& callback);
 
  private:
   class ServiceConnectorQueue;
@@ -53,7 +52,6 @@ class HTMLDocumentApplicationDelegate : public mojo::ApplicationDelegate {
   bool ConfigureIncomingConnection(
       mojo::ApplicationConnection* connection) override;
 
-  void OnHTMLDocumentDeleted(HTMLDocument* document);
   void OnHTMLDocumentDeleted2(HTMLDocumentOOPIF* document);
   void OnResponseReceived(mojo::URLLoaderPtr loader,
                           mojo::ApplicationConnection* connection,
@@ -64,20 +62,17 @@ class HTMLDocumentApplicationDelegate : public mojo::ApplicationDelegate {
   // AppRefCount of the parent (HTMLViewer).
   scoped_ptr<mojo::AppRefCount> parent_app_refcount_;
   const mojo::String url_;
-  mojo::NetworkServicePtr network_service_;
   mojo::URLLoaderFactoryPtr url_loader_factory_;
   mojo::URLResponsePtr initial_response_;
   GlobalState* global_state_;
 
   // As we create HTMLDocuments they are added here. They are removed when the
   // HTMLDocument is deleted.
-  std::set<HTMLDocument*> documents_;
-
-  // As we create HTMLDocuments they are added here. They are removed when the
-  // HTMLDocument is deleted.
   std::set<HTMLDocumentOOPIF*> documents2_;
 
-  HTMLDocumentCreationCallback html_document_creation_callback_;
+  HTMLFrameCreationCallback html_frame_creation_callback_;
+
+  base::WeakPtrFactory<HTMLDocumentApplicationDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HTMLDocumentApplicationDelegate);
 };

@@ -14,6 +14,7 @@
 @class CRWSessionController;
 namespace web {
 struct FrameInfo;
+class NavigationItem;
 }  // namespace web
 
 namespace web {
@@ -131,6 +132,12 @@ struct NewWindowInfo {
 // Called before loading current URL in WebView.
 - (void)willLoadCurrentURLInWebView;
 
+// Loads request for the URL of the current navigation item. Subclasses may
+// choose to build a new NSURLRequest and call |loadRequest| on the underlying
+// web view, or use native web view navigation where possible (for example,
+// going back and forward through the history stack).
+- (void)loadRequestForCurrentNavigationItem;
+
 // Indicates whether or not there's an indication that the page is probably
 // about to change. This is called as a hint to the UIWebView-based subclass to
 // change polling behavior.
@@ -160,9 +167,8 @@ struct NewWindowInfo {
 - (void)applyWebViewScrollZoomScaleFromZoomState:
     (const web::PageZoomState&)zoomState;
 
-// Used to decide whether a load that generates errors with the
-// NSURLErrorCancelled code should be cancelled.
-- (BOOL)shouldAbortLoadForCancelledError:(NSError*)cancelledError;
+// Handles cancelled load in WKWebView (error with NSURLErrorCancelled code).
+- (void)handleCancelledError:(NSError*)error;
 
 #pragma mark - Optional methods for subclasses
 // Subclasses may overwrite methods in this section.
@@ -190,6 +196,15 @@ struct NewWindowInfo {
 
 // Clears WebUI, if one exists.
 - (void)clearWebUI;
+
+// Returns a NSMutableURLRequest that represents the current NavigationItem.
+- (NSMutableURLRequest*)requestForCurrentNavigationItem;
+
+// Compares the two URLs being navigated between during a history navigation to
+// determine if a # needs to be appended to the URL of |toItem| to trigger a
+// hashchange event. If so, also saves the modified URL into |toItem|.
+- (GURL)URLForHistoryNavigationFromItem:(web::NavigationItem*)fromItem
+                                 toItem:(web::NavigationItem*)toItem;
 
 #pragma mark - Internal methods for use by subclasses
 
@@ -251,6 +266,9 @@ struct NewWindowInfo {
 // Updates the internal state and informs the delegate that any outstanding load
 // operations are cancelled.
 - (void)loadCancelled;
+
+// Aborts any load for both the web view and web controller.
+- (void)abortLoad;
 
 // Returns the URL that the navigation system believes should be currently
 // active.
@@ -359,11 +377,31 @@ struct NewWindowInfo {
 // Tries to open a popup with the given new window information.
 - (void)openPopupWithInfo:(const web::NewWindowInfo&)windowInfo;
 
+// Returns the current entry from the underlying session controller.
+// TODO(stuartmorgan): Audit all calls to these methods; these are just wrappers
+// around the same logic as GetActiveEntry, so should probably not be used for
+// the same reason that GetActiveEntry is deprecated. (E.g., page operations
+// should generally be dealing with the last commited entry, not a pending
+// entry).
+- (CRWSessionEntry*)currentSessionEntry;
+// Returns the navigation item for the current page.
+- (web::NavigationItem*)currentNavItem;
+
+// The HTTP headers associated with the current navigation item. These are nil
+// unless the request was a POST.
+- (NSDictionary*)currentHTTPHeaders;
+
 // Returns the referrer for the current page.
 - (web::Referrer)currentReferrer;
 
+// Returns the referrer for current navigation item. May be empty.
+- (web::Referrer)currentSessionEntryReferrer;
+
 // Returns the current transition type.
 - (ui::PageTransition)currentTransition;
+
+// Returns the current entry from the underlying session controller.
+- (CRWSessionEntry*)currentSessionEntry;
 
 // Resets pending external request information.
 - (void)resetExternalRequest;

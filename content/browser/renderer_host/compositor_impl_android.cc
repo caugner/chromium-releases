@@ -70,13 +70,16 @@ namespace {
 const unsigned int kMaxSwapBuffers = 2U;
 
 // Used to override capabilities_.adjust_deadline_for_parent to false
-class OutputSurfaceWithoutParent : public cc::OutputSurface {
+class OutputSurfaceWithoutParent : public cc::OutputSurface,
+                                   public CompositorImpl::VSyncObserver {
  public:
   OutputSurfaceWithoutParent(
+      CompositorImpl* compositor,
       const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
       const base::Callback<void(gpu::Capabilities)>&
           populate_gpu_capabilities_callback)
       : cc::OutputSurface(context_provider),
+        compositor_(compositor),
         populate_gpu_capabilities_callback_(populate_gpu_capabilities_callback),
         swap_buffers_completion_callback_(
             base::Bind(&OutputSurfaceWithoutParent::OnSwapBuffersCompleted,
@@ -84,6 +87,8 @@ class OutputSurfaceWithoutParent : public cc::OutputSurface {
     capabilities_.adjust_deadline_for_parent = false;
     capabilities_.max_frames_pending = 2;
   }
+
+  ~OutputSurfaceWithoutParent() override { compositor_->RemoveObserver(this); }
 
   void SwapBuffers(cc::CompositorFrame* frame) override {
     GetCommandBufferProxy()->SetLatencyInfo(frame->metadata.latency_info);
@@ -102,6 +107,7 @@ class OutputSurfaceWithoutParent : public cc::OutputSurface {
 
     populate_gpu_capabilities_callback_.Run(
         context_provider_->ContextCapabilities().gpu);
+    compositor_->AddObserver(this);
 
     return true;
   }
@@ -123,6 +129,12 @@ class OutputSurfaceWithoutParent : public cc::OutputSurface {
     OutputSurface::OnSwapBuffersComplete();
   }
 
+  void OnUpdateVSyncParameters(base::TimeTicks timebase,
+                               base::TimeDelta interval) override {
+    CommitVSyncParameters(timebase, interval);
+  }
+
+  CompositorImpl* compositor_;
   base::Callback<void(gpu::Capabilities)> populate_gpu_capabilities_callback_;
   base::CancelableCallback<void(const std::vector<ui::LatencyInfo>&,
                                 gfx::SwapResult)>
@@ -379,11 +391,12 @@ void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
   GpuSurfaceTracker* tracker = GpuSurfaceTracker::Get();
 
   if (window_) {
+    // Shut down GL context before unregistering surface.
+    SetVisible(false);
     tracker->RemoveSurface(surface_id_);
     ANativeWindow_release(window_);
     window_ = NULL;
     surface_id_ = 0;
-    SetVisible(false);
   }
 
   if (window) {
@@ -401,10 +414,12 @@ void CompositorImpl::SetSurface(jobject surface) {
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
 
-  // First, cleanup any existing surface references.
-  if (surface_id_)
-    UnregisterViewSurface(surface_id_);
+  // First, shut down the GL context.
+  int surface_id = surface_id_;
   SetWindowSurface(NULL);
+  // Then, cleanup any existing surface references.
+  if (surface_id)
+    UnregisterViewSurface(surface_id);
 
   // Now, set the new surface if we have one.
   ANativeWindow* window = NULL;
@@ -645,8 +660,9 @@ void CompositorImpl::CreateOutputSurface() {
 
   scoped_ptr<cc::OutputSurface> real_output_surface(
       new OutputSurfaceWithoutParent(
-          context_provider, base::Bind(&CompositorImpl::PopulateGpuCapabilities,
-                                       base::Unretained(this))));
+          this, context_provider,
+          base::Bind(&CompositorImpl::PopulateGpuCapabilities,
+                     base::Unretained(this))));
 
   cc::SurfaceManager* manager = GetSurfaceManager();
   if (manager) {
@@ -657,7 +673,7 @@ void CompositorImpl::CreateOutputSurface() {
         base::ThreadTaskRunnerHandle::Get()));
     scoped_ptr<cc::SurfaceDisplayOutputSurface> surface_output_surface(
         new cc::SurfaceDisplayOutputSurface(
-            manager, surface_id_allocator_.get(), context_provider));
+            manager, surface_id_allocator_.get(), context_provider, nullptr));
 
     display_client_->set_surface_output_surface(surface_output_surface.get());
     surface_output_surface->set_display_client(display_client_.get());
@@ -672,6 +688,14 @@ void CompositorImpl::PopulateGpuCapabilities(
     gpu::Capabilities gpu_capabilities) {
   ui_resource_provider_.SetSupportsETC1NonPowerOfTwo(
       gpu_capabilities.texture_format_etc1_npot);
+}
+
+void CompositorImpl::AddObserver(VSyncObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void CompositorImpl::RemoveObserver(VSyncObserver* observer) {
+  observer_list_.RemoveObserver(observer);
 }
 
 void CompositorImpl::ScheduleComposite() {
@@ -754,6 +778,9 @@ void CompositorImpl::OnVSync(base::TimeTicks frame_time,
     composite_on_vsync_trigger_ = DO_NOT_COMPOSITE;
     PostComposite(trigger);
   }
+
+  FOR_EACH_OBSERVER(VSyncObserver, observer_list_,
+                    OnUpdateVSyncParameters(frame_time, vsync_period));
 }
 
 void CompositorImpl::SetNeedsAnimate() {

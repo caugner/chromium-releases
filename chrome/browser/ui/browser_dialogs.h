@@ -10,17 +10,29 @@
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
+class GURL;
+class LoginHandler;
 class Profile;
 class SkBitmap;
 
 namespace content {
 class BrowserContext;
 class ColorChooser;
+struct SSLStatus;
 class WebContents;
 }
 
 namespace extensions {
 class Extension;
+}
+
+namespace gfx {
+class Point;
+}
+
+namespace net {
+class AuthChallengeInfo;
+class URLRequest;
 }
 
 namespace ui {
@@ -68,6 +80,29 @@ void ShowCreateChromeAppShortcutsDialog(
 // Shows a color chooser that reports to the given WebContents.
 content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
                                         SkColor initial_color);
+
+#if defined(OS_MACOSX)
+
+// For Mac, returns true if Chrome should show an equivalent toolkit-views based
+// dialog using one of the functions below, rather than showing a Cocoa dialog.
+bool ToolkitViewsDialogsEnabled();
+
+// Shows a Views website settings bubble at the given anchor point.
+void ShowWebsiteSettingsBubbleViewsAtPoint(const gfx::Point& anchor_point,
+                                           Profile* profile,
+                                           content::WebContents* web_contents,
+                                           const GURL& url,
+                                           const content::SSLStatus& ssl);
+
+#endif  // OS_MACOSX
+
+#if defined(TOOLKIT_VIEWS)
+
+// Creates a toolkit-views based LoginHandler (e.g. HTTP-Auth dialog).
+LoginHandler* CreateLoginHandlerViews(net::AuthChallengeInfo* auth_info,
+                                      net::URLRequest* request);
+
+#endif  // TOOLKIT_VIEWS
 
 }  // namespace chrome
 

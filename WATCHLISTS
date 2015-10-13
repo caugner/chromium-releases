@@ -219,8 +219,10 @@
     },
     'chromeos_net': {
       'filepath': 'chromeos/network/|'\
-                  'chrome/browser/chromeos/cros/|'\
-                  'chrome/browser/chromeos/net/',
+                  'chrome/browser/chromeos/net/|'\
+                  'chrome/browser/extensions/api/networking_private/|'\
+                  'extensions/browser/api/networking_private/|'\
+                  'ui/chromeos/network/',
     },
     'chromeos_power': {
       'filepath': 'ash/system/chromeos/power/|'\
@@ -240,6 +242,9 @@
     'closure': {
       'filepath': 'third_party/closure_(compiler|linter)/|'
                   'compiled_resources.gyp',
+    },
+    'components_deps': {
+      'filepath': 'components/([^/]*/)*DEPS',
     },
     'content': {
       'filepath': 'content/',
@@ -542,6 +547,9 @@
     'netinfo': {
       'filepath': 'netinfo',
     },
+    'network_quality': {
+      'filepath': 'net/base/network_quality*',
+    },
     'notifications': {
       'filepath': 'chrome/browser/extensions/api/notifications/|' \
         'chrome/browser/notifications/|' \
@@ -841,10 +849,6 @@
     'windows_sandboxing': {
       'filepath': 'sandbox/win/',
     },
-    'worker': {
-      'filepath': 'chrome/browser/worker_host/|chrome/worker/|'\
-        'chrome/common/worker_messages',
-    },
     'x11': {
       'filepath': 'content/browser/renderer_host/backing_store_x\.' \
                   '|chrome/browser/chromeos/input_method/xkeyboard\.' \
@@ -903,15 +907,13 @@
                  'rouslan+autofillwatch@chromium.org'],
     'automation': ['robertshield@chromium.org'],
     'background_sync': ['jkarlin+watch@chromium.org'],
-    'base': ['erikwright+watch@chromium.org'],
     'base_allocator': ['dmikurube@chromium.org',
                        'wfh+watch@chromium.org'],
     'base_memory': ['gavinp+memory@chromium.org'],
     'base_win': ['grt+watch@chromium.org', 'wfh+watch@chromium.org'],
     'battery_status': ['timvolodine@chromium.org'],
     'bookmarks': ['noyau+watch@chromium.org', 'tfarina@chromium.org'],
-    'browser_chromeos': ['davemoore+watch@chromium.org',
-                         'stevenjb+watch@chromium.org'],
+    'browser_chromeos': ['davemoore+watch@chromium.org'],
     'browser_components': ['browser-components-watch@chromium.org'],
     'browser_compositor': ['vollick@chromium.org',
                            'piman+watch@chromium.org'],
@@ -931,8 +933,7 @@
     'chrome_views': ['tfarina@chromium.org'],
     'chromecast': ['gunsch+watch@chromium.org', 'lcwu+watch@chromium.org'],
     'chromedriver': ['samuong+watch@chromium.org'],
-    'chromeos' : ['oshima+watch@chromium.org',
-                  'stevenjb+watch@chromium.org'],
+    'chromeos' : ['oshima+watch@chromium.org'],
     'chromeos_attestation' : ['dkrahn+watch@chromium.org'],
     'chromeos_calculator' : ['dharcourt@chromium.org'],
     'chromeos_dbus': ['hashimoto+watch@chromium.org'],
@@ -947,6 +948,9 @@
     'closure': ['dbeam+watch-closure@chromium.org',
                 'vitalyp+closure@chromium.org',
                 'jlklein+watch-closure@chromium.org'],
+    'components_deps': ['blundell+watchlist@chromium.org',
+                        'droger+watchlist@chromium.org',
+                        'sdefresne+watchlist@chromium.org'],
     'content': ['jam@chromium.org',
                 'darin-cc@chromium.org' ],
     'content_bluetooth': ['scheib+watch@chromium.org'],
@@ -956,8 +960,8 @@
     'content_shell': ['jochen+watch@chromium.org',
                       'mkwst+moarreviews-shell@chromium.org',
                       'mlamouri+watch-content@chromium.org'],
-    'content_worker': ['kinuko+watch@chromium.org'],
-    'cookie_monster': ['erikwright@chromium.org'],
+    'content_worker': ['blink-worker-reviews@chromium.org',
+                       'kinuko+watch@chromium.org'],
     'custom_handlers': ['vabr+watchlist@chromium.org'],
     'custom_tabs': ['ianwen+watch@chromium.org'],
     'deep_memory_profiler': ['dmikurube@chromium.org'],
@@ -1017,7 +1021,8 @@
     'linux_sandboxing': ['jln+watch@chromium.org'],
     'linux_seccomp_bpf': ['jln+watch@chromium.org'],
     'supervised_users': ['pam+watch@chromium.org'],
-    'mandoline': ['yzshen+watch@chromium.org'],
+    'mandoline': ['yzshen+watch@chromium.org',
+                  'penghuang+watch-mandoline@chromium.org'],
     'manifest': ['mlamouri+watch-manifest@chromium.org'],
     'md_settings': ['jhawkins+watch-md-settings@chromium.org',
                     'jlklein+watch-md-settings@chromium.org',
@@ -1047,6 +1052,7 @@
     'net_error_list': ['mmenke@chromium.org'],
     'netinfo': ['jkarlin+watch@chromium.org'],
     'net_log': ['mmenke@chromium.org', 'eroman@chromium.org'],
+    'network_quality': ['rdsmith@chromium.org'],
     'notifications': ['peter+watch@chromium.org',
                       'mlamouri+watch-notifications@chromium.org'],
     'npapi_headers': ['stuartmorgan@chromium.org'],
@@ -1081,7 +1087,6 @@
                'dennisjeffrey@chromium.org'],
     'remoting': ['chromoting-reviews@chromium.org'],
     'rlz_id': ['gab+watch@chromium.org',
-               'erikwright+watch@chromium.org',
                'robertshield+watch@chromium.org'],
     'safe_browsing': ['grt+watch@chromium.org'],
     'sandbox': ['rickyz+watch@chromium.org'],
@@ -1101,7 +1106,6 @@
                    'rouslan+spellwatch@chromium.org'],
     'streams': ['zork+watch@chromium.org'],
     'sync': ['tim+watch@chromium.org',
-             'maniscalco+watch@chromium.org',
              'maxbogue+watch@chromium.org',
              'plaree+watch@chromium.org',
              'pvalenzuela+watch@chromium.org',
@@ -1117,8 +1121,7 @@
     'tcmalloc': ['dmikurube@chromium.org'],
     'telemetry': ['telemetry-reviews@chromium.org'],
     'tests': [],
-    'textinput': ['penghuang+watch@chromium.org',
-                  'suzhe@chromium.org',
+    'textinput': ['suzhe@chromium.org',
                   'yusukes+watch@chromium.org',
                   'nona+watch@chromium.org',
                   'shuchen+watch@chromium.org'],
@@ -1146,7 +1149,6 @@
     'website_settings': ['markusheintz@chromium.org',
                          'raymes+watch@chromium.org'],
     'windows_sandboxing': ['wfh+watch@chromium.org'],
-    'worker': ['jam@chromium.org'],
     'x11': ['derat+watch@chromium.org',
             'sadrul@chromium.org',
             'yusukes+watch@chromium.org'],

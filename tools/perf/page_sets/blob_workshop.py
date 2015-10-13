@@ -32,7 +32,7 @@ class BlobCreateThenRead(page_module.Page):
 
     errors = action_runner.EvaluateJavaScript('errors')
     if errors:
-      raise page_test.Failure('Errors on page: ' + ', '.join(self.errors))
+      raise page_test.Failure('Errors on page: ' + ', '.join(errors))
 
 
 class BlobMassCreate(page_module.Page):
@@ -62,7 +62,7 @@ class BlobMassCreate(page_module.Page):
 
     errors = action_runner.EvaluateJavaScript('errors')
     if errors:
-      raise page_test.Failure('Errors on page: ' + ', '.join(self.errors))
+      raise page_test.Failure('Errors on page: ' + ', '.join(errors))
 
 
 class BlobWorkshopPageSet(story.StorySet):
@@ -80,8 +80,9 @@ class BlobWorkshopPageSet(story.StorySet):
         BlobMassCreate('1MBx200', [1024 * 1024] * 200, self))
     self.AddStory(
         BlobMassCreate('10MBx30', [10 * 1024 * 1024] * 30, self))
-    self.AddStory(
-        BlobMassCreate('80MBx5', [80 * 1024 * 1024] * 5, self))
+    # http://crbug.com/510815
+    #self.AddStory(
+    #    BlobMassCreate('80MBx5', [80 * 1024 * 1024] * 5, self))
 
     self.AddStory(BlobCreateThenRead('2Bx200', [2] * 200, self))
     self.AddStory(BlobCreateThenRead('1KBx200', [1024] * 200, self))

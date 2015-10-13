@@ -76,10 +76,11 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
     return;
 
   if (nextState != TAB_MEDIA_STATE_NONE) {
-    [self setImage:chrome::GetTabMediaIndicatorImage(nextState).ToNSImage()];
+    [self
+        setImage:chrome::GetTabMediaIndicatorImage(nextState, nil).ToNSImage()];
     affordanceImage_.reset(
-        [chrome::GetTabMediaIndicatorAffordanceImage(nextState).ToNSImage()
-               retain]);
+        [chrome::GetTabMediaIndicatorAffordanceImage(nextState, nil)
+                .ToNSImage() retain]);
   }
 
   if ((mediaState_ == TAB_MEDIA_STATE_AUDIO_PLAYING &&
@@ -218,7 +219,7 @@ class FadeAnimationDelegate : public gfx::AnimationDelegate {
 }
 
 - (void)updateEnabledForMuteToggle {
-  BOOL enable = chrome::IsTabAudioMutingFeatureEnabled() &&
+  BOOL enable = chrome::AreExperimentalMuteControlsEnabled() &&
       (mediaState_ == TAB_MEDIA_STATE_AUDIO_PLAYING ||
        mediaState_ == TAB_MEDIA_STATE_AUDIO_MUTING);
 

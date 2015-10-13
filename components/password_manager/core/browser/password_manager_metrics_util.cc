@@ -127,7 +127,7 @@ void LogUIDismissalReason(ResponseType type) {
       reason = CLICKED_NEVER;
       break;
     case INFOBAR_DISMISSED:
-      reason = CLICKED_NOPE;
+      reason = CLICKED_CANCEL;
       break;
     case NUM_RESPONSE_TYPES:
       NOTREACHED();
@@ -167,6 +167,18 @@ void LogPasswordSyncState(PasswordSyncState state) {
 void LogPasswordGenerationSubmissionEvent(PasswordSubmissionEvent event) {
   UMA_HISTOGRAM_ENUMERATION("PasswordGeneration.SubmissionEvent", event,
                             SUBMISSION_EVENT_ENUM_COUNT);
+}
+
+void LogPasswordGenerationAvailableSubmissionEvent(
+    PasswordSubmissionEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordGeneration.SubmissionAvailableEvent",
+                            event, SUBMISSION_EVENT_ENUM_COUNT);
+}
+
+void LogUpdatePasswordSubmissionEvent(UpdatePasswordSubmissionEvent event) {
+  DCHECK_LT(event, UPDATE_PASSWORD_EVENT_COUNT);
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.UpdatePasswordSubmissionEvent",
+                            event, UPDATE_PASSWORD_EVENT_COUNT);
 }
 
 }  // namespace metrics_util

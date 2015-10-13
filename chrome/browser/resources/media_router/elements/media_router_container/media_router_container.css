@@ -6,13 +6,25 @@
   color: rgb(33, 150, 243);
 }
 
-#container-header.cast-mode {
-  /* TODO(kdresner): Update this when we get a real color. */
-  background-color: rgb(244, 67, 54);
+.cast-mode-icon,
+.sink-icon {
+  -webkit-padding-end: 16px;
+  -webkit-padding-start: 20px;
+  height: 16px;
+  width: 16px;
+}
+
+#cast-mode-list {
+  padding-bottom: 8px;
+  padding-top: 8px;
+}
+
+#container-header.cast-mode-list {
+  background-color: rgb(0, 150, 136);
 }
 
 #container-header.filter {
-  background-color: rgb(57, 73, 171);
+  background-color: rgb(103, 58, 183);
 }
 
 #container-header.route-details {
@@ -34,12 +46,8 @@
 #header-text {
   -webkit-padding-start: 5px;
   flex-grow: 1;
-  font-size: 1.4em;
+  font-size: 1.25em;
   margin: 0;
-}
-
-.route {
-  color: rgb(150, 150, 150);
 }
 
 paper-item {
@@ -47,19 +55,12 @@ paper-item {
   font-size: 1.0em;
   line-height: 0;
   min-height: 0;
-  padding: 14px 0;
+  padding: 12px 0;
 }
 
 paper-item:hover {
   background-color: rgb(238, 238, 238);
   border: 0;
-}
-
-paper-item iron-icon {
-  -webkit-padding-end: 16px;
-  -webkit-padding-start: 20px;
-  height: 16px;
-  width: 16px;
 }
 
 paper-menu {
@@ -68,13 +69,31 @@ paper-menu {
   padding: 0;
 }
 
+.route {
+  color: rgb(150, 150, 150);
+}
+
+#searching-devices-spinner {
+  height: 30px;
+  width: 30px;
+}
+
+#share-screen-text {
+  -webkit-padding-start: 20px;
+  color: rgb(150, 150, 150);
+  padding-bottom: 8px;
+  padding-top: 8px;
+}
+
 .sink-content {
   display: flex;
   flex-direction: row;
+  font-weight: normal;
 }
 
 #sink-list {
-  max-height: 275px;
+  max-height: 200px;
+  overflow-x: hidden;
   overflow-y: scroll;
 }
 

@@ -59,7 +59,7 @@ void GenerateExamplePasswordForm(PasswordForm* form) {
   form->form_data.name = ASCIIToUTF16("form_name");
   form->date_synced = base::Time::Now();
   form->display_name = ASCIIToUTF16("Mr. Smith");
-  form->avatar_url = GURL("https://accounts.google.com/Avatar");
+  form->icon_url = GURL("https://accounts.google.com/Icon");
   form->federation_url = GURL("https://accounts.google.com/federation");
   form->skip_zero_click = true;
 }
@@ -609,7 +609,7 @@ static bool AddTimestampedLogin(LoginDatabase* db,
   form.submit_element = ASCIIToUTF16("signIn");
   form.signon_realm = url;
   form.display_name = ASCIIToUTF16(unique_string);
-  form.avatar_url = GURL("https://accounts.google.com/Avatar");
+  form.icon_url = GURL("https://accounts.google.com/Icon");
   form.federation_url = GURL("https://accounts.google.com/federation");
   form.skip_zero_click = true;
 
@@ -733,7 +733,7 @@ TEST_F(LoginDatabaseTest, BlacklistedLogins) {
   form.scheme = PasswordForm::SCHEME_HTML;
   form.date_synced = base::Time::Now();
   form.display_name = ASCIIToUTF16("Mr. Smith");
-  form.avatar_url = GURL("https://accounts.google.com/Avatar");
+  form.icon_url = GURL("https://accounts.google.com/Icon");
   form.federation_url = GURL("https://accounts.google.com/federation");
   form.skip_zero_click = true;
   EXPECT_EQ(AddChangeForForm(form), db().AddLogin(form));
@@ -957,7 +957,7 @@ TEST_F(LoginDatabaseTest, UpdateLogin) {
   form.scheme = PasswordForm::SCHEME_BASIC;
   form.type = PasswordForm::TYPE_GENERATED;
   form.display_name = ASCIIToUTF16("Mr. Smith");
-  form.avatar_url = GURL("https://accounts.google.com/Avatar");
+  form.icon_url = GURL("https://accounts.google.com/Icon");
   form.federation_url = GURL("https://accounts.google.com/federation");
   form.skip_zero_click = true;
   EXPECT_EQ(UpdateChangeForForm(form), db().UpdateLogin(form));
@@ -1113,6 +1113,165 @@ TEST_F(LoginDatabaseTest, ReportMetricsTest) {
       1);
 }
 
+TEST_F(LoginDatabaseTest, PasswordReuseMetrics) {
+  // -- Group of accounts that are reusing password #1.
+  //
+  //                                     Destination account
+  // +-----------------+-------+-------+-------+-------+-------+-------+-------+
+  // |                 |   1   |   2   |   3   |   4   |   5   |   6   |   7   |
+  // +-----------------+-------+-------+-------+-------+-------+-------+-------+
+  // | Scheme?         | HTTP  | HTTP  | HTTP  | HTTP  | HTTPS | HTTPS | HTTPS |
+  // +-----------------+-------+-------+-------+-------+-------+-------+-------+
+  // |           |  1  |   -   | Same  |  PSL  | Diff. | Same  | Diff. | Diff. |
+  // |           |  2  | Same  |   -   |  PSL  | Diff. | Same  | Diff. | Diff. |
+  // | Relation  |  3  |  PSL  |  PSL  |   -   | Diff. | Diff. | Same  | Diff. |
+  // | to host   |  4  | Diff. | Diff. | Diff. |   -   | Diff. | Diff. | Same  |
+  // | of source |  5  | Same  | Same  | Diff. | Diff. |   -   |  PSL  | Diff. |
+  // | account:  |  6  | Diff. | Diff. | Same  | Diff. |  PSL  |   -   | Diff. |
+  // |           |  7  | Diff. | Diff. | Diff. | Same  | Diff. | Diff. |   -   |
+  // +-----------------+-------+-------+-------+-------+-------+-------+-------+
+
+  PasswordForm password_form;
+  password_form.signon_realm = "http://example.com/";
+  password_form.origin = GURL("http://example.com/");
+  password_form.username_value = ASCIIToUTF16("username_1");
+  password_form.password_value = ASCIIToUTF16("password_1");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.origin = GURL("http://example.com/");
+  password_form.username_value = ASCIIToUTF16("username_2");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  // Note: This PSL matches http://example.com, but not https://example.com.
+  password_form.signon_realm = "http://www.example.com/";
+  password_form.origin = GURL("http://www.example.com/");
+  password_form.username_value = ASCIIToUTF16("username_3");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.signon_realm = "http://not-example.com/";
+  password_form.origin = GURL("http://not-example.com/");
+  password_form.username_value = ASCIIToUTF16("username_4");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.signon_realm = "https://example.com/";
+  password_form.origin = GURL("https://example.com/");
+  password_form.username_value = ASCIIToUTF16("username_5");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  // Note: This PSL matches https://example.com, but not http://example.com.
+  password_form.signon_realm = "https://www.example.com/";
+  password_form.origin = GURL("https://www.example.com/");
+  password_form.username_value = ASCIIToUTF16("username_6");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.signon_realm = "https://not-example.com/";
+  password_form.origin = GURL("https://not-example.com/");
+  password_form.username_value = ASCIIToUTF16("username_7");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  // -- Group of accounts that are reusing password #2.
+  // Both HTTP, different host.
+  password_form.signon_realm = "http://example.com/";
+  password_form.origin = GURL("http://example.com/");
+  password_form.username_value = ASCIIToUTF16("username_8");
+  password_form.password_value = ASCIIToUTF16("password_2");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.signon_realm = "http://not-example.com/";
+  password_form.origin = GURL("http://not-example.com/");
+  password_form.username_value = ASCIIToUTF16("username_9");
+  password_form.password_value = ASCIIToUTF16("password_2");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  // -- Group of accounts that are reusing password #3.
+  // HTTP sites identified by different IP addresses, so they should not be
+  // considered a public suffix match.
+  password_form.signon_realm = "http://1.2.3.4/";
+  password_form.origin = GURL("http://1.2.3.4/");
+  password_form.username_value = ASCIIToUTF16("username_10");
+  password_form.password_value = ASCIIToUTF16("password_3");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  password_form.signon_realm = "http://2.2.3.4/";
+  password_form.origin = GURL("http://2.2.3.4/");
+  password_form.username_value = ASCIIToUTF16("username_11");
+  password_form.password_value = ASCIIToUTF16("password_3");
+  EXPECT_EQ(AddChangeForForm(password_form), db().AddLogin(password_form));
+
+  // -- Not HTML form based logins or blacklisted logins. Should be ignored.
+  PasswordForm ignored_form;
+  ignored_form.scheme = PasswordForm::SCHEME_HTML;
+  ignored_form.signon_realm = "http://example.org/";
+  ignored_form.origin = GURL("http://example.org/blacklist");
+  ignored_form.blacklisted_by_user = true;
+  ignored_form.username_value = ASCIIToUTF16("username_x");
+  ignored_form.password_value = ASCIIToUTF16("password_y");
+  EXPECT_EQ(AddChangeForForm(ignored_form), db().AddLogin(ignored_form));
+
+  ignored_form.scheme = PasswordForm::SCHEME_BASIC;
+  ignored_form.signon_realm = "http://example.org/HTTP Auth Realm";
+  ignored_form.origin = GURL("http://example.org/");
+  ignored_form.blacklisted_by_user = false;
+  EXPECT_EQ(AddChangeForForm(ignored_form), db().AddLogin(ignored_form));
+
+  ignored_form.scheme = PasswordForm::SCHEME_HTML;
+  ignored_form.signon_realm = "android://hash@com.example/";
+  ignored_form.origin = GURL();
+  ignored_form.blacklisted_by_user = false;
+  EXPECT_EQ(AddChangeForForm(ignored_form), db().AddLogin(ignored_form));
+
+  ignored_form.scheme = PasswordForm::SCHEME_HTML;
+  ignored_form.signon_realm = "federation://example.com/federation.com";
+  ignored_form.origin = GURL("https://example.com/");
+  ignored_form.blacklisted_by_user = false;
+  EXPECT_EQ(AddChangeForForm(ignored_form), db().AddLogin(ignored_form));
+
+  base::HistogramTester histogram_tester;
+  db().ReportMetrics("", false);
+
+  const std::string kPrefix("PasswordManager.AccountsReusingPassword.");
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnHttpRealmWithSameHost"),
+              testing::ElementsAre(base::Bucket(0, 6), base::Bucket(1, 2)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnHttpsRealmWithSameHost"),
+              testing::ElementsAre(base::Bucket(0, 4), base::Bucket(1, 4)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnPSLMatchingRealm"),
+              testing::ElementsAre(base::Bucket(0, 5), base::Bucket(1, 2),
+                                   base::Bucket(2, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnHttpsRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(0, 4), base::Bucket(2, 4)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnHttpRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(1, 7), base::Bucket(3, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpRealm.OnAnyRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(1, 4), base::Bucket(3, 3),
+                                   base::Bucket(5, 1)));
+
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnHttpRealmWithSameHost"),
+              testing::ElementsAre(base::Bucket(1, 2), base::Bucket(2, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnHttpsRealmWithSameHost"),
+              testing::ElementsAre(base::Bucket(0, 3)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnPSLMatchingRealm"),
+              testing::ElementsAre(base::Bucket(0, 1), base::Bucket(1, 2)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnHttpRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(2, 1), base::Bucket(3, 2)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnHttpsRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(1, 2), base::Bucket(2, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  kPrefix + "FromHttpsRealm.OnAnyRealmWithDifferentHost"),
+              testing::ElementsAre(base::Bucket(3, 1), base::Bucket(4, 1),
+                                   base::Bucket(5, 1)));
+}
+
 TEST_F(LoginDatabaseTest, ClearPasswordValues) {
   db().set_clear_password_values(true);
 
@@ -1141,9 +1300,7 @@ TEST_F(LoginDatabaseTest, ClearPasswordValues) {
 
   // Encrypting/decrypting shouldn't happen. Thus there should be no keychain
   // access on Mac.
-  scoped_ptr<base::HistogramSamples> samples =
-      histogram_tester.GetHistogramSamplesSinceCreation("OSX.Keychain.Access");
-  EXPECT_TRUE(!samples || samples->TotalCount() == 0);
+  histogram_tester.ExpectTotalCount("OSX.Keychain.Access", 0);
 }
 
 #if defined(OS_POSIX)

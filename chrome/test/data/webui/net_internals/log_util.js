@@ -262,8 +262,7 @@ TEST_F('NetInternalsTest',
  * Same as above, but it truncates the log to simulate the case of a crash when
  * creating a log.
  */
-TEST_F('NetInternalsTest',
-    'netInternalsLogUtilImportNetLogFileTruncated',
+TEST_F('NetInternalsTest', 'netInternalsLogUtilImportNetLogFileTruncated',
     function() {
   var taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new GetNetLogFileContentsAndLoadLogTask(20));

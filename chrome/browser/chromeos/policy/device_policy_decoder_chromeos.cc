@@ -289,30 +289,6 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
 
 void DecodeNetworkPolicies(const em::ChromeDeviceSettingsProto& policy,
                            PolicyMap* policies) {
-  // TODO(bartfab): Once the retail mode removal CL lands, remove this policy
-  // completely since it was only used from retail mode.
-  // http://crbug.com/442466
-  if (policy.has_device_proxy_settings()) {
-    const em::DeviceProxySettingsProto& container(
-        policy.device_proxy_settings());
-    scoped_ptr<base::DictionaryValue> proxy_settings(new base::DictionaryValue);
-    if (container.has_proxy_mode())
-      proxy_settings->SetString(key::kProxyMode, container.proxy_mode());
-    if (container.has_proxy_server())
-      proxy_settings->SetString(key::kProxyServer, container.proxy_server());
-    if (container.has_proxy_pac_url())
-      proxy_settings->SetString(key::kProxyPacUrl, container.proxy_pac_url());
-    if (container.has_proxy_bypass_list()) {
-      proxy_settings->SetString(key::kProxyBypassList,
-                                container.proxy_bypass_list());
-    }
-
-    if (!proxy_settings->empty()) {
-      policies->Set(key::kProxySettings, POLICY_LEVEL_RECOMMENDED,
-                    POLICY_SCOPE_MACHINE, proxy_settings.release(), nullptr);
-    }
-  }
-
   if (policy.has_data_roaming_enabled()) {
     const em::DataRoamingEnabledProto& container(policy.data_roaming_enabled());
     if (container.has_data_roaming_enabled()) {
@@ -432,6 +408,16 @@ void DecodeReportingPolicies(const em::ChromeDeviceSettingsProto& policy,
                     DecodeIntegerValue(
                         container.heartbeat_frequency()).release(),
                     NULL);
+    }
+  }
+
+  if (policy.has_device_log_upload_settings()) {
+    const em::DeviceLogUploadSettingsProto& container(
+        policy.device_log_upload_settings());
+    if (container.has_log_upload_enabled()) {
+      policies->Set(
+          key::kLogUploadEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
+          new base::FundamentalValue(container.log_upload_enabled()), NULL);
     }
   }
 }

@@ -21,10 +21,13 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.ShortcutSource;
 import org.chromium.chrome.browser.document.DocumentActivity;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
 import org.chromium.chrome.test.MultiActivityTestBase;
 import org.chromium.chrome.test.util.ActivityUtils;
+import org.chromium.chrome.test.util.ApplicationTestUtils;
 import org.chromium.chrome.test.util.DisableInTabbedMode;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
 import org.chromium.content.browser.test.util.Criteria;
@@ -66,7 +69,7 @@ public class WebappModeTest extends MultiActivityTestBase {
             public boolean isSatisfied() {
                 Context context = getInstrumentation().getTargetContext();
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                        && MultiActivityTestBase.getNumChromeTasks(context) != numActivities) {
+                        && ApplicationTestUtils.getNumChromeTasks(context) != numActivities) {
                     return false;
                 }
 
@@ -86,12 +89,6 @@ public class WebappModeTest extends MultiActivityTestBase {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.setPackage(getInstrumentation().getTargetContext().getPackageName());
         intent.setAction(WebappLauncherActivity.ACTION_START_WEBAPP);
-        intent.putExtra(ShortcutHelper.EXTRA_ID, id);
-        intent.putExtra(ShortcutHelper.EXTRA_URL, url);
-        intent.putExtra(ShortcutHelper.EXTRA_TITLE, title);
-        intent.putExtra(ShortcutHelper.EXTRA_ICON, icon);
-        intent.putExtra(ShortcutHelper.EXTRA_ORIENTATION, ScreenOrientationValues.PORTRAIT);
-        intent.putExtra(ShortcutHelper.EXTRA_SOURCE, ShortcutHelper.SOURCE_UNKNOWN);
         if (addMac) {
             // Needed for security reasons.  If the MAC is excluded, the URL of the webapp is opened
             // in a browser window, instead.
@@ -99,9 +96,15 @@ public class WebappModeTest extends MultiActivityTestBase {
             intent.putExtra(ShortcutHelper.EXTRA_MAC, mac);
         }
 
+        WebappInfo webappInfo = WebappInfo.create(id, url, icon, title, null,
+                ScreenOrientationValues.PORTRAIT, ShortcutSource.UNKNOWN,
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING,
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING);
+        webappInfo.setWebappIntentExtras(intent);
+
         getInstrumentation().getTargetContext().startActivity(intent);
         getInstrumentation().waitForIdleSync();
-        MultiActivityTestBase.waitUntilChromeInForeground();
+        ApplicationTestUtils.waitUntilChromeInForeground();
     }
 
     /**
@@ -109,19 +112,9 @@ public class WebappModeTest extends MultiActivityTestBase {
      */
     @MediumTest
     public void testWebappLaunches() throws Exception {
-        // Start the WebappActivity.  We can't use ActivityUtils.waitForActivity() because
-        // of the way WebappActivity is instanced on pre-L devices.
-        fireWebappIntent(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON, true);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
-            }
-        }));
+        final Activity firstActivity =
+                startWebappActivity(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON);
         assertTrue(isNumberOfRunningActivitiesCorrect(1));
-        final Activity firstActivity = ApplicationStatus.getLastTrackedFocusedActivity();
 
         // Firing a different Intent should start a new WebappActivity instance.
         fireWebappIntent(WEBAPP_2_ID, WEBAPP_2_URL, WEBAPP_2_TITLE, WEBAPP_ICON, true);
@@ -129,8 +122,7 @@ public class WebappModeTest extends MultiActivityTestBase {
             @Override
             public boolean isSatisfied() {
                 Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity && lastActivity != firstActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
+                return isWebappActivityReady(lastActivity) && lastActivity != firstActivity;
             }
         }));
         assertTrue(isNumberOfRunningActivitiesCorrect(2));
@@ -141,15 +133,14 @@ public class WebappModeTest extends MultiActivityTestBase {
             @Override
             public boolean isSatisfied() {
                 Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity && lastActivity == firstActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
+                return isWebappActivityReady(lastActivity) && lastActivity == firstActivity;
             }
         }));
         assertTrue(isNumberOfRunningActivitiesCorrect(2));
     }
 
     /**
-     * Tests that the WebappActivity actually gets a legitimate Tab ID instead of 0.
+     * Tests that the WebappActivity gets the next available Tab ID instead of 0.
      */
     @MediumTest
     public void testWebappTabIdsProperlyAssigned() throws Exception {
@@ -159,29 +150,10 @@ public class WebappModeTest extends MultiActivityTestBase {
         editor.putInt(TabIdManager.PREF_NEXT_ID, 11684);
         editor.apply();
 
-        // Start the WebappActivity.  We can't use ActivityUtils.waitForActivity() because
-        // of the way WebappActivity is instanced on pre-L devices.
-        fireWebappIntent(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON, true);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
-            }
-        }));
-        assertTrue(isNumberOfRunningActivitiesCorrect(1));
         final WebappActivity webappActivity =
-                (WebappActivity) ApplicationStatus.getLastTrackedFocusedActivity();
-
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return webappActivity.getActivityTab() != null;
-            }
-        }));
-
-        assertTrue("Smaller Tab ID was used", 11684 <= webappActivity.getActivityTab().getId());
+                startWebappActivity(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON);
+        assertTrue(isNumberOfRunningActivitiesCorrect(1));
+        assertEquals("Wrong Tab ID was used", 11684, webappActivity.getActivityTab().getId());
     }
 
     /**
@@ -190,30 +162,43 @@ public class WebappModeTest extends MultiActivityTestBase {
      */
     @MediumTest
     public void testActivateContents() throws Exception {
-        final Context context = getInstrumentation().getTargetContext();
+        runForegroundingTest(false);
+    }
 
+    /**
+     * Tests that a WebappActivity can be brought forward by firing an Intent with
+     * TabOpenType.BRING_TAB_TO_FRONT.
+     */
+    @MediumTest
+    public void testBringTabToFront() throws Exception {
+        runForegroundingTest(false);
+    }
+
+    private void runForegroundingTest(boolean viaActivateContents) throws Exception {
         // Start the WebappActivity.
-        fireWebappIntent(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON, true);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                View rootView = lastActivity.findViewById(android.R.id.content);
-                return lastActivity instanceof WebappActivity && rootView.hasWindowFocus();
-            }
-        }));
+        final WebappActivity activity =
+                startWebappActivity(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON);
         assertTrue(isNumberOfRunningActivitiesCorrect(1));
 
         // Return home.
-        final WebappActivity activity =
-                (WebappActivity) ApplicationStatus.getLastTrackedFocusedActivity();
-        MultiActivityTestBase.launchHomescreenIntent(context);
+        final Context context = getInstrumentation().getTargetContext();
+        ApplicationTestUtils.fireHomeScreenIntent(context);
         getInstrumentation().waitForIdleSync();
 
-        // Bring it back via the Tab.
-        activity.getActivityTab().getChromeWebContentsDelegateAndroid().activateContents();
+        if (viaActivateContents) {
+            // Bring it back via the Tab.
+            activity.getActivityTab().getChromeWebContentsDelegateAndroid().activateContents();
+        } else {
+            // Bring the WebappActivity back via an Intent.
+            int webappTabId = activity.getActivityTab().getId();
+            Intent intent = Tab.createBringTabToFrontIntent(webappTabId);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        }
+
+        // When Chrome is back in the foreground, confirm that the original Activity was restored.
         getInstrumentation().waitForIdleSync();
-        MultiActivityTestBase.waitUntilChromeInForeground();
+        ApplicationTestUtils.waitUntilChromeInForeground();
         assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -248,8 +233,7 @@ public class WebappModeTest extends MultiActivityTestBase {
             @Override
             public boolean isSatisfied() {
                 Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity && lastActivity != firstActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
+                return isWebappActivityReady(lastActivity) && lastActivity != firstActivity;
             }
         }));
     }
@@ -292,28 +276,11 @@ public class WebappModeTest extends MultiActivityTestBase {
 
     private <T extends ChromeActivity> void triggerWindowOpenAndWaitForLoad(
             Class<T> classToWaitFor, String linkHtml, boolean checkContents) throws Exception {
-        // Start the WebappActivity.  We can't use ActivityUtils.waitForActivity() because
-        // of the way WebappActivity is instanced on pre-L devices.
-        fireWebappIntent(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON, true);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof WebappActivity
-                        && lastActivity.findViewById(android.R.id.content).hasWindowFocus();
-            }
-        }));
-        assertTrue(isNumberOfRunningActivitiesCorrect(1));
         final WebappActivity webappActivity =
-                (WebappActivity) ApplicationStatus.getLastTrackedFocusedActivity();
+                startWebappActivity(WEBAPP_1_ID, WEBAPP_1_URL, WEBAPP_1_TITLE, WEBAPP_ICON);
+        assertTrue(isNumberOfRunningActivitiesCorrect(1));
 
         // Load up the test page.
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return webappActivity.getActivityTab() != null;
-            }
-        }));
         assertTrue(CriteriaHelper.pollForCriteria(
                 new TabLoadObserver(webappActivity.getActivityTab(), linkHtml)));
 
@@ -351,6 +318,37 @@ public class WebappModeTest extends MultiActivityTestBase {
                 return webappActivity == ApplicationStatus.getLastTrackedFocusedActivity();
             }
         }));
-        MultiActivityTestBase.waitUntilChromeInForeground();
+        ApplicationTestUtils.waitUntilChromeInForeground();
+    }
+
+    /**
+     * Starts a WebappActivity for the given data and waits for it to be initialized.  We can't use
+     * ActivityUtils.waitForActivity() because of the way WebappActivity is instanced on pre-L
+     * devices.
+     */
+    private WebappActivity startWebappActivity(String id, String url, String title, String icon)
+            throws Exception {
+        fireWebappIntent(id, url, title, icon, true);
+        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
+                return isWebappActivityReady(lastActivity);
+            }
+        }));
+        return (WebappActivity) ApplicationStatus.getLastTrackedFocusedActivity();
+    }
+
+    /** Returns true when the last Activity is a WebappActivity and is ready for testing .*/
+    private boolean isWebappActivityReady(Activity lastActivity) {
+        if (!(lastActivity instanceof WebappActivity)) return false;
+
+        WebappActivity webappActivity = (WebappActivity) lastActivity;
+        if (webappActivity.getActivityTab() == null) return false;
+
+        View rootView = webappActivity.findViewById(android.R.id.content);
+        if (!rootView.hasWindowFocus()) return false;
+
+        return true;
     }
 }

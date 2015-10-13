@@ -19,6 +19,7 @@
 #include "base/time/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
+#include "chrome/renderer/searchbox/search_bouncer.h"
 #include "components/data_reduction_proxy/content/common/data_reduction_proxy_messages.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/document_state.h"
@@ -164,9 +165,9 @@ bool ViaHeaderContains(WebFrame* frame, const std::string& via_value) {
   // separated by a comma corresponds to a proxy. The value added by a proxy is
   // not expected to contain any commas.
   // Example., Via: 1.0 Compression proxy, 1.1 Google Instant Proxy Preview
-  base::SplitString(
+  values = base::SplitString(
       frame->dataSource()->response().httpHeaderField(kViaHeaderName).utf8(),
-      ',', &values);
+      ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   return std::find(values.begin(), values.end(), via_value) != values.end();
 }
 
@@ -853,6 +854,12 @@ bool PageLoadHistograms::ShouldDump(WebFrame* frame) {
   if (scheme_type == 0)
     return false;
 
+  // Don't dump stats for the NTP, as PageLoadHistograms should only be recorded
+  // for pages visited due to an explicit user navigation.
+  if (SearchBouncer::GetInstance()->IsNewTabPage(frame->document().url())) {
+    return false;
+  }
+
   // Ignore multipart requests.
   if (frame->dataSource()->response().isMultipartPayload())
     return false;
@@ -874,9 +881,13 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
   data_reduction_proxy::LoFiStatus lofi_status =
       data_reduction_proxy::LOFI_STATUS_TEMPORARILY_OFF;
   if (!document_state->proxy_server().IsEmpty()) {
-    Send(new DataReductionProxyViewHostMsg_DataReductionProxyStatus(
-        document_state->proxy_server(), &data_reduction_proxy_was_used,
-        &lofi_status));
+    bool handled =
+        Send(new DataReductionProxyViewHostMsg_DataReductionProxyStatus(
+            document_state->proxy_server(), &data_reduction_proxy_was_used,
+            &lofi_status));
+    // If the IPC call is not handled, then |data_reduction_proxy_was_used|
+    // should remain |false|.
+    DCHECK(handled || !data_reduction_proxy_was_used);
   }
 
   bool came_from_websearch =
@@ -958,6 +969,7 @@ void PageLoadHistograms::ClosePage() {
 }
 
 void PageLoadHistograms::DidUpdateLayout() {
+  DCHECK(content::RenderThread::Get());
   // Normally, PageLoadHistograms dumps all histograms in the FrameWillClose or
   // ClosePage callbacks, which happen as a page is being torn down. However,
   // renderers that are killed by fast shutdown (for example, renderers closed
@@ -993,7 +1005,7 @@ void PageLoadHistograms::DidUpdateLayout() {
   // blink will not record firstLayout during those layouts, so firstLayout may
   // not be populated during the layout associated with the first
   // DidUpdateLayout callback.
-  content::RenderThread::Get()->GetTaskRunner()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&PageLoadHistograms::MaybeDumpFirstLayoutHistograms,
                  weak_factory_.GetWeakPtr()));

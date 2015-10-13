@@ -16,20 +16,16 @@
 #include "base/location.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
 #include "chrome/browser/sync/backup_rollback_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/protocol_event_observer.h"
 #include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/sync/startup_controller.h"
-#include "chrome/browser/sync/sync_stopped_reporter.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync_driver/data_type_controller.h"
@@ -39,9 +35,11 @@
 #include "components/sync_driver/device_info_sync_service.h"
 #include "components/sync_driver/local_device_info_provider.h"
 #include "components/sync_driver/non_blocking_data_type_manager.h"
+#include "components/sync_driver/protocol_event_observer.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "components/sync_driver/sync_service.h"
+#include "components/sync_driver/sync_stopped_reporter.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/base/backoff_entry.h"
@@ -49,6 +47,7 @@
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/internal_api/public/shutdown_reason.h"
 #include "sync/internal_api/public/sync_manager_factory.h"
+#include "sync/internal_api/public/user_share.h"
 #include "sync/internal_api/public/util/experiments.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/js/sync_js_controller.h"
@@ -255,11 +254,6 @@ class ProfileSyncService : public sync_driver::SyncService,
     ROLLBACK    // Backend for rollback.
   };
 
-  // Default sync server URL.
-  static const char* kSyncServerUrl;
-  // Sync server URL for dev channel users
-  static const char* kDevServerUrl;
-
   // Takes ownership of |factory| and |signin_wrapper|.
   ProfileSyncService(
       scoped_ptr<ProfileSyncComponentsFactory> factory,
@@ -302,6 +296,9 @@ class ProfileSyncService : public sync_driver::SyncService,
                                PassphraseType type) override;
   bool SetDecryptionPassphrase(const std::string& passphrase) override
       WARN_UNUSED_RESULT;
+  bool IsCryptographerReady(
+      const syncer::BaseTransaction* trans) const override;
+  syncer::UserShare* GetUserShare() const override;
   void AddObserver(sync_driver::SyncServiceObserver* observer) override;
   void RemoveObserver(sync_driver::SyncServiceObserver* observer) override;
   bool HasObserver(
@@ -362,7 +359,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   void InitializeNonBlockingType(
       syncer::ModelType type,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      const base::WeakPtr<syncer::ModelTypeSyncProxyImpl>& proxy);
+      const base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl>& proxy);
 
   // Returns the SyncedWindowDelegatesGetter from the embedded sessions manager.
   virtual browser_sync::SyncedWindowDelegatesGetter*
@@ -512,12 +509,6 @@ class ProfileSyncService : public sync_driver::SyncService,
   // The functions below (until ActivateDataType()) should only be
   // called if backend_initialized() is true.
 
-  // TODO(akalin): This is called mostly by ModelAssociators and
-  // tests.  Figure out how to pass the handle to the ModelAssociators
-  // directly, figure out how to expose this to tests, and remove this
-  // function.
-  virtual syncer::UserShare* GetUserShare() const;
-
   // TODO(akalin): These two functions are used only by
   // ProfileSyncServiceHarness.  Figure out a different way to expose
   // this info to that class, and remove these functions.
@@ -590,12 +581,6 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // Gets the set of off-thread types which could be allowed.
   virtual syncer::ModelTypeSet GetRegisteredNonBlockingDataTypes() const;
-
-  // Checks whether the Cryptographer is ready to encrypt and decrypt updates
-  // for sensitive data types. Caller must be holding a
-  // syncapi::BaseTransaction to ensure thread safety.
-  virtual bool IsCryptographerReady(
-      const syncer::BaseTransaction* trans) const;
 
   // Returns the actual passphrase type being used for encryption.
   virtual syncer::PassphraseType GetPassphraseType() const;
@@ -687,9 +672,6 @@ class ProfileSyncService : public sync_driver::SyncService,
   void SetClearingBrowseringDataForTesting(base::Callback<
       void(BrowsingDataRemover::Observer*, Profile*, base::Time, base::Time)>
                                                c);
-
-  // Return the base URL of the Sync Server.
-  static GURL GetSyncServiceURL(const base::CommandLine& command_line);
 
   base::Time GetDeviceBackupTimeForTesting() const;
 
@@ -1084,6 +1066,12 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // Used to save/restore nigori state across backend instances. May be null.
   scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state_;
+
+  // Whether the major version has changed since the last time Chrome ran,
+  // and therefore a passphrase required state should result in prompting
+  // the user. This logic is only enabled on platforms that consume the
+  // IsPassphrasePrompted sync preference.
+  bool passphrase_prompt_triggered_by_version_;
 
   base::WeakPtrFactory<ProfileSyncService> weak_factory_;
 

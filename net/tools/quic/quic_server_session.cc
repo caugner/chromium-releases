@@ -61,8 +61,15 @@ void QuicServerSession::OnConfigNegotiated() {
       last_bandwidth_resumption || max_bandwidth_resumption;
   if (cached_network_params != nullptr && bandwidth_resumption_enabled_ &&
       cached_network_params->serving_region() == serving_region_) {
-    connection()->ResumeConnectionState(*cached_network_params,
-                                        max_bandwidth_resumption);
+    int64 seconds_since_estimate =
+        connection()->clock()->WallNow().ToUNIXSeconds() -
+        cached_network_params->timestamp();
+    bool estimate_within_last_hour =
+        seconds_since_estimate <= kNumSecondsPerHour;
+    if (estimate_within_last_hour) {
+      connection()->ResumeConnectionState(*cached_network_params,
+                                          max_bandwidth_resumption);
+    }
   }
 
   if (FLAGS_enable_quic_fec &&
@@ -188,12 +195,14 @@ bool QuicServerSession::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
     connection()->SendConnectionClose(QUIC_INVALID_STREAM_ID);
     return false;
   }
-  if (GetNumOpenStreams() >= get_max_open_streams()) {
-    DVLOG(1) << "Failed to create a new incoming stream with id:" << id
-             << " Already " << GetNumOpenStreams() << " streams open (max "
-             << get_max_open_streams() << ").";
-    connection()->SendConnectionClose(QUIC_TOO_MANY_OPEN_STREAMS);
-    return false;
+  if (!FLAGS_exact_stream_id_delta) {
+    if (GetNumOpenStreams() >= get_max_open_streams()) {
+      DVLOG(1) << "Failed to create a new incoming stream with id:" << id
+               << " Already " << GetNumOpenStreams() << " streams open (max "
+               << get_max_open_streams() << ").";
+      connection()->SendConnectionClose(QUIC_TOO_MANY_OPEN_STREAMS);
+      return false;
+    }
   }
   return true;
 }

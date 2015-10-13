@@ -210,9 +210,13 @@ void AwPermissionManager::RequestPermission(
       break;
     case PermissionType::NOTIFICATIONS:
     case PermissionType::PUSH_MESSAGING:
+    case PermissionType::DURABLE_STORAGE:
       NOTIMPLEMENTED() << "RequestPermission is not implemented for "
                        << static_cast<int>(permission);
       callback.Run(content::PERMISSION_STATUS_DENIED);
+      break;
+    case PermissionType::MIDI:
+      callback.Run(content::PERMISSION_STATUS_GRANTED);
       break;
     case PermissionType::NUM:
       NOTREACHED() << "PermissionType::NUM was not expected here.";
@@ -254,8 +258,12 @@ void AwPermissionManager::CancelPermissionRequest(
       break;
     case PermissionType::NOTIFICATIONS:
     case PermissionType::PUSH_MESSAGING:
+    case PermissionType::DURABLE_STORAGE:
       NOTIMPLEMENTED() << "CancelPermission not implemented for "
                        << static_cast<int>(permission);
+      break;
+    case PermissionType::MIDI:
+      // There is nothing to cancel so this is simply ignored.
       break;
     case PermissionType::NUM:
       NOTREACHED() << "PermissionType::NUM was not expected here.";
@@ -277,6 +285,8 @@ PermissionStatus AwPermissionManager::GetPermissionStatus(
   if (permission == PermissionType::PROTECTED_MEDIA_IDENTIFIER) {
     return result_cache_->GetResult(permission, requesting_origin,
                                     embedding_origin);
+  } else if (permission == PermissionType::MIDI) {
+    return content::PERMISSION_STATUS_GRANTED;
   }
 
   return content::PERMISSION_STATUS_DENIED;

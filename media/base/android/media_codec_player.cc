@@ -58,9 +58,10 @@ MediaCodecPlayer::MediaCodecPlayer(
                          frame_url),
       ui_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       demuxer_(demuxer.Pass()),
-      state_(STATE_PAUSED),
+      state_(kStatePaused),
       interpolator_(&default_tick_clock_),
       pending_start_(false),
+      pending_seek_(kNoTimestamp()),
       media_weak_factory_(this) {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
 
@@ -70,6 +71,9 @@ MediaCodecPlayer::MediaCodecPlayer(
 
   completion_cb_ =
       base::Bind(&MediaPlayerManager::OnPlaybackComplete, manager, player_id);
+  seek_done_cb_ =
+      base::Bind(&MediaPlayerManager::OnSeekComplete, manager, player_id);
+  error_cb_ = base::Bind(&MediaPlayerManager::OnError, manager, player_id);
   attach_listener_cb_ = base::Bind(&MediaPlayerAndroid::AttachListener,
                                    WeakPtrForUIThread(), nullptr);
   detach_listener_cb_ =
@@ -127,16 +131,62 @@ void MediaCodecPlayer::SetVideoSurface(gfx::ScopedJavaSurface surface) {
 
   DVLOG(1) << __FUNCTION__ << (surface.IsEmpty() ? " empty" : " non-empty");
 
-  // I assume that if video decoder already has the surface,
-  // there will be two calls:
-  // (1) SetVideoSurface(0)
-  // (2) SetVideoSurface(new_surface)
-  video_decoder_->SetPendingSurface(surface.Pass());
+  // Save the empty-ness before we pass the surface to the decoder.
+  bool surface_is_empty = surface.IsEmpty();
 
-  if (video_decoder_->HasPendingSurface() &&
-      state_ == STATE_WAITING_FOR_SURFACE) {
-    SetState(STATE_PLAYING);
-    StartPlaybackDecoders();
+  // Apparently RemoveVideoSurface() can be called several times in a row,
+  // ignore the second and subsequent calls.
+  if (surface_is_empty && !video_decoder_->HasVideoSurface()) {
+    DVLOG(1) << __FUNCTION__ << ": surface already removed, ignoring";
+    return;
+  }
+
+  video_decoder_->SetVideoSurface(surface.Pass());
+
+  if (surface_is_empty) {
+    // Remove video surface.
+    switch (state_) {
+      case kStatePlaying:
+        if (VideoFinished())
+          break;
+
+        DVLOG(1) << __FUNCTION__ << ": stopping and restarting";
+        // Stop decoders as quickly as possible.
+        StopDecoders();  // synchronous stop
+
+        // Prefetch or wait for initial configuration.
+        if (HasAudio() || HasVideo()) {
+          SetState(kStatePrefetching);
+          StartPrefetchDecoders();
+        } else {
+          SetState(kStateWaitingForConfig);
+        }
+        break;
+
+      default:
+        break;  // ignore
+    }
+  } else {
+    // Replace video surface.
+    switch (state_) {
+      case kStateWaitingForSurface:
+        SetState(kStatePlaying);
+        StartPlaybackOrBrowserSeek();
+        break;
+
+      case kStatePlaying:
+        if (VideoFinished())
+          break;
+
+        DVLOG(1) << __FUNCTION__ << ": requesting to stop and restart";
+        SetState(kStateStopping);
+        RequestToStopDecoders();
+        SetPendingStart(true);
+        break;
+
+      default:
+        break;  // ignore
+    }
   }
 }
 
@@ -146,19 +196,27 @@ void MediaCodecPlayer::Start() {
   DVLOG(1) << __FUNCTION__;
 
   switch (state_) {
-    case STATE_PAUSED:
+    case kStatePaused:
+      // Prefetch or wait for initial configuration.
       if (HasAudio() || HasVideo()) {
-        SetState(STATE_PREFETCHING);
+        SetState(kStatePrefetching);
         StartPrefetchDecoders();
       } else {
-        SetState(STATE_WAITING_FOR_CONFIG);
+        SetState(kStateWaitingForConfig);
       }
       break;
-    case STATE_STOPPING:
+    case kStateStopping:
+    case kStateWaitingForSeek:
       SetPendingStart(true);
       break;
+    case kStateWaitingForConfig:
+    case kStatePrefetching:
+    case kStatePlaying:
+    case kStateWaitingForSurface:
+    case kStateError:
+      break;  // Ignore
     default:
-      // Ignore
+      NOTREACHED();
       break;
   }
 }
@@ -168,21 +226,26 @@ void MediaCodecPlayer::Pause(bool is_media_related_action) {
 
   DVLOG(1) << __FUNCTION__;
 
+  SetPendingStart(false);
+
   switch (state_) {
-    case STATE_PREFETCHING:
-      SetState(STATE_PAUSED);
+    case kStateWaitingForConfig:
+    case kStatePrefetching:
+    case kStateWaitingForSurface:
+      SetState(kStatePaused);
       StopDecoders();
       break;
-    case STATE_WAITING_FOR_SURFACE:
-      SetState(STATE_PAUSED);
-      StopDecoders();
-      break;
-    case STATE_PLAYING:
-      SetState(STATE_STOPPING);
+    case kStatePlaying:
+      SetState(kStateStopping);
       RequestToStopDecoders();
       break;
+    case kStatePaused:
+    case kStateStopping:
+    case kStateWaitingForSeek:
+    case kStateError:
+      break;  // Ignore
     default:
-      // Ignore
+      NOTREACHED();
       break;
   }
 }
@@ -191,7 +254,38 @@ void MediaCodecPlayer::SeekTo(base::TimeDelta timestamp) {
   RUN_ON_MEDIA_THREAD(SeekTo, timestamp);
 
   DVLOG(1) << __FUNCTION__ << " " << timestamp;
-  NOTIMPLEMENTED();
+
+  switch (state_) {
+    case kStatePaused:
+      SetState(kStateWaitingForSeek);
+      RequestDemuxerSeek(timestamp);
+      break;
+    case kStateWaitingForConfig:
+    case kStatePrefetching:
+    case kStateWaitingForSurface:
+      SetState(kStateWaitingForSeek);
+      StopDecoders();
+      SetPendingStart(true);
+      RequestDemuxerSeek(timestamp);
+      break;
+    case kStatePlaying:
+      SetState(kStateStopping);
+      RequestToStopDecoders();
+      SetPendingStart(true);
+      SetPendingSeek(timestamp);
+      break;
+    case kStateStopping:
+      SetPendingSeek(timestamp);
+      break;
+    case kStateWaitingForSeek:
+      SetPendingSeek(timestamp);
+      break;
+    case kStateError:
+      break;  // ignore
+    default:
+      NOTREACHED();
+      break;
+  }
 }
 
 void MediaCodecPlayer::Release() {
@@ -199,8 +293,22 @@ void MediaCodecPlayer::Release() {
 
   DVLOG(1) << __FUNCTION__;
 
-  SetState(STATE_PAUSED);
+  // Stop decoding threads and delete MediaCodecs, but keep IPC between browser
+  // and renderer processes going. Seek should work across and after Release().
+
   ReleaseDecoderResources();
+
+  SetPendingStart(false);
+
+  if (state_ != kStateWaitingForSeek)
+    SetState(kStatePaused);
+
+  base::TimeDelta pending_seek_time = GetPendingSeek();
+  if (pending_seek_time != kNoTimestamp()) {
+    SetPendingSeek(kNoTimestamp());
+    SetState(kStateWaitingForSeek);
+    RequestDemuxerSeek(pending_seek_time);
+  }
 }
 
 void MediaCodecPlayer::SetVolume(double volume) {
@@ -232,7 +340,10 @@ base::TimeDelta MediaCodecPlayer::GetDuration() {
 
 bool MediaCodecPlayer::IsPlaying() {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
-  return state_ == STATE_PLAYING;
+
+  // TODO(timav): Use another variable since |state_| should only be accessed on
+  // Media thread.
+  return state_ == kStatePlaying || state_ == kStateStopping;
 }
 
 bool MediaCodecPlayer::CanPause() {
@@ -304,7 +415,63 @@ void MediaCodecPlayer::OnDemuxerSeekDone(
 
   DVLOG(1) << __FUNCTION__ << " actual_time:" << actual_browser_seek_time;
 
-  NOTIMPLEMENTED();
+  DCHECK(seek_info_.get());
+  DCHECK(seek_info_->seek_time != kNoTimestamp());
+
+  // A browser seek must not jump into the past. Ideally, it seeks to the
+  // requested time, but it might jump into the future.
+  DCHECK(!seek_info_->is_browser_seek ||
+         seek_info_->seek_time <= actual_browser_seek_time);
+
+  // Restrict the current time to be equal to seek_time
+  // for the next StartPlaybackDecoders() call.
+
+  base::TimeDelta seek_time = seek_info_->is_browser_seek
+                                  ? actual_browser_seek_time
+                                  : seek_info_->seek_time;
+
+  interpolator_.SetBounds(seek_time, seek_time);
+  audio_decoder_->SetBaseTimestamp(seek_time);
+
+  // The Flush() might set the state to kStateError.
+  if (state_ == kStateError) {
+    // Notify the Renderer.
+    if (!seek_info_->is_browser_seek)
+      ui_task_runner_->PostTask(FROM_HERE,
+                                base::Bind(seek_done_cb_, seek_time));
+
+    seek_info_.reset();
+    return;
+  }
+
+  DCHECK_EQ(kStateWaitingForSeek, state_);
+
+  base::TimeDelta pending_seek_time = GetPendingSeek();
+  if (pending_seek_time != kNoTimestamp()) {
+    // Keep kStateWaitingForSeek
+    SetPendingSeek(kNoTimestamp());
+    RequestDemuxerSeek(pending_seek_time);
+    return;
+  }
+
+  if (HasPendingStart()) {
+    SetPendingStart(false);
+    // Prefetch or wait for initial configuration.
+    if (HasAudio() || HasVideo()) {
+      SetState(kStatePrefetching);
+      StartPrefetchDecoders();
+    } else {
+      SetState(kStateWaitingForConfig);
+    }
+  } else {
+    SetState(kStatePaused);
+  }
+
+  // Notify the Renderer.
+  if (!seek_info_->is_browser_seek)
+    ui_task_runner_->PostTask(FROM_HERE, base::Bind(seek_done_cb_, seek_time));
+
+  seek_info_.reset();
 }
 
 void MediaCodecPlayer::OnDemuxerDurationChanged(
@@ -361,26 +528,31 @@ void MediaCodecPlayer::RequestDemuxerData(DemuxerStream::Type stream_type) {
 
 void MediaCodecPlayer::OnPrefetchDone() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
-  DVLOG(1) << __FUNCTION__;
 
-  if (state_ != STATE_PREFETCHING)
+  if (state_ != kStatePrefetching) {
+    DVLOG(1) << __FUNCTION__ << " wrong state " << AsString(state_)
+             << " ignoring";
     return;  // Ignore
+  }
+
+  DVLOG(1) << __FUNCTION__;
 
   if (!HasAudio() && !HasVideo()) {
     // No configuration at all after prefetching.
     // This is an error, initial configuration is expected
     // before the first data chunk.
-    GetMediaTaskRunner()->PostTask(FROM_HERE, error_cb_);
+    DCHECK(!internal_error_cb_.is_null());
+    GetMediaTaskRunner()->PostTask(FROM_HERE, internal_error_cb_);
     return;
   }
 
-  if (HasVideo() && !HasPendingSurface()) {
-    SetState(STATE_WAITING_FOR_SURFACE);
+  if (HasVideo() && !video_decoder_->HasVideoSurface()) {
+    SetState(kStateWaitingForSurface);
     return;
   }
 
-  SetState(STATE_PLAYING);
-  StartPlaybackDecoders();
+  SetState(kStatePlaying);
+  StartPlaybackOrBrowserSeek();
 }
 
 void MediaCodecPlayer::OnStopDone() {
@@ -394,23 +566,33 @@ void MediaCodecPlayer::OnStopDone() {
   if (interpolator_.interpolating())
     interpolator_.StopInterpolating();
 
+  base::TimeDelta seek_time;
   switch (state_) {
-    case STATE_STOPPING:
-      if (HasPendingStart()) {
+    case kStateStopping: {
+      base::TimeDelta seek_time = GetPendingSeek();
+      if (seek_time != kNoTimestamp()) {
+        SetState(kStateWaitingForSeek);
+        SetPendingSeek(kNoTimestamp());
+        RequestDemuxerSeek(seek_time);
+      } else if (HasPendingStart()) {
         SetPendingStart(false);
-        SetState(STATE_PREFETCHING);
+        SetState(kStatePrefetching);
         StartPrefetchDecoders();
       } else {
-        SetState(STATE_PAUSED);
+        SetState(kStatePaused);
       }
-      break;
-    case STATE_PLAYING:
+    } break;
+    case kStatePlaying:
       // Unexpected stop means completion
-      SetState(STATE_PAUSED);
+      SetState(kStatePaused);
       break;
     default:
-      DVLOG(0) << __FUNCTION__ << " illegal state: " << AsString(state_);
-      NOTREACHED();
+      // DVLOG(0) << __FUNCTION__ << " illegal state: " << AsString(state_);
+      // NOTREACHED();
+      // Ignore! There can be a race condition: audio posts OnStopDone,
+      // then video posts, then first OnStopDone arrives at which point
+      // both streams are already stopped, then second OnStopDone arrives. When
+      // the second one arrives, the state us not kStateStopping any more.
       break;
   }
 
@@ -425,20 +607,23 @@ void MediaCodecPlayer::OnError() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__;
 
-  // STATE_ERROR blocks all events
-  SetState(STATE_ERROR);
+  // kStateError blocks all events
+  SetState(kStateError);
 
   ReleaseDecoderResources();
+
+  ui_task_runner_->PostTask(FROM_HERE,
+                            base::Bind(error_cb_, MEDIA_ERROR_DECODE));
 }
 
 void MediaCodecPlayer::OnStarvation(DemuxerStream::Type type) {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " stream type:" << type;
 
-  if (state_ != STATE_PLAYING)
+  if (state_ != kStatePlaying)
     return;  // Ignore
 
-  SetState(STATE_STOPPING);
+  SetState(kStateStopping);
   RequestToStopDecoders();
   SetPendingStart(true);
 }
@@ -447,6 +632,19 @@ void MediaCodecPlayer::OnTimeIntervalUpdate(DemuxerStream::Type type,
                                             base::TimeDelta now_playing,
                                             base::TimeDelta last_buffered) {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+
+  DVLOG(2) << __FUNCTION__ << ": stream type:" << type << " [" << now_playing
+           << "," << last_buffered << "]";
+
+  // I assume that audio stream cannot be added after we get configs by
+  // OnDemuxerConfigsAvailable(), but that audio can finish early.
+
+  if (type == DemuxerStream::VIDEO) {
+    // Ignore video PTS if there is audio stream or if it's behind current
+    // time as set by audio stream.
+    if (!AudioFinished() || now_playing < interpolator_.GetInterpolatedTime())
+      return;
+  }
 
   interpolator_.SetBounds(now_playing, last_buffered);
 
@@ -482,34 +680,34 @@ void MediaCodecPlayer::SetState(PlayerState new_state) {
   state_ = new_state;
 }
 
-void MediaCodecPlayer::SetPendingSurface(gfx::ScopedJavaSurface surface) {
-  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
-  DVLOG(1) << __FUNCTION__;
-
-  video_decoder_->SetPendingSurface(surface.Pass());
-}
-
-bool MediaCodecPlayer::HasPendingSurface() {
-  return video_decoder_->HasPendingSurface();
-}
-
 void MediaCodecPlayer::SetPendingStart(bool need_to_start) {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << ": " << need_to_start;
   pending_start_ = need_to_start;
 }
 
-bool MediaCodecPlayer::HasPendingStart() {
+bool MediaCodecPlayer::HasPendingStart() const {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   return pending_start_;
 }
 
-bool MediaCodecPlayer::HasAudio() {
+void MediaCodecPlayer::SetPendingSeek(base::TimeDelta timestamp) {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  DVLOG(1) << __FUNCTION__ << ": " << timestamp;
+  pending_seek_ = timestamp;
+}
+
+base::TimeDelta MediaCodecPlayer::GetPendingSeek() const {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  return pending_seek_;
+}
+
+bool MediaCodecPlayer::HasAudio() const {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   return audio_decoder_->HasStream();
 }
 
-bool MediaCodecPlayer::HasVideo() {
+bool MediaCodecPlayer::HasVideo() const {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   return video_decoder_->HasStream();
 }
@@ -531,8 +729,8 @@ void MediaCodecPlayer::SetDemuxerConfigs(const DemuxerConfigs& configs) {
   if (configs.video_codec != kUnknownVideoCodec)
     video_decoder_->SetDemuxerConfigs(configs);
 
-  if (state_ == STATE_WAITING_FOR_CONFIG) {
-    SetState(STATE_PREFETCHING);
+  if (state_ == kStateWaitingForConfig) {
+    SetState(kStatePrefetching);
     StartPrefetchDecoders();
   }
 }
@@ -565,33 +763,63 @@ void MediaCodecPlayer::StartPrefetchDecoders() {
     video_decoder_->Prefetch(prefetch_cb);
 }
 
-void MediaCodecPlayer::StartPlaybackDecoders() {
+void MediaCodecPlayer::StartPlaybackOrBrowserSeek() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__;
 
-  // Configure all streams before the start since
-  // we may discover that browser seek is required.
+  // TODO(timav): consider replacing this method with posting a
+  // browser seek task (i.e. generate an event) from StartPlaybackDecoders().
+
+  StartStatus status = StartPlaybackDecoders();
+
+  switch (status) {
+    case kStartBrowserSeekRequired:
+      // Browser seek
+      SetState(kStateWaitingForSeek);
+      SetPendingStart(true);
+      StopDecoders();
+      RequestDemuxerSeek(GetInterpolatedTime(), true);
+      break;
+    case kStartFailed:
+      GetMediaTaskRunner()->PostTask(FROM_HERE, internal_error_cb_);
+      break;
+    case kStartOk:
+      break;
+  }
+}
+
+MediaCodecPlayer::StartStatus MediaCodecPlayer::StartPlaybackDecoders() {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  DVLOG(1) << __FUNCTION__;
 
   bool do_audio = !AudioFinished();
   bool do_video = !VideoFinished();
 
-  // If there is nothing to play, the state machine should determine
-  // this at the prefetch state and never call this method.
+  // If there is nothing to play, the state machine should determine this at the
+  // prefetch state and never call this method.
   DCHECK(do_audio || do_video);
 
-  if (do_audio) {
-    MediaCodecDecoder::ConfigStatus status = audio_decoder_->Configure();
-    if (status != MediaCodecDecoder::CONFIG_OK) {
-      GetMediaTaskRunner()->PostTask(FROM_HERE, error_cb_);
-      return;
-    }
-  }
+  // Configure all streams before the start since we may discover that browser
+  // seek is required. Start with video: if browser seek is required it would
+  // not make sense to configure audio.
 
   if (do_video) {
     MediaCodecDecoder::ConfigStatus status = video_decoder_->Configure();
-    if (status != MediaCodecDecoder::CONFIG_OK) {
-      GetMediaTaskRunner()->PostTask(FROM_HERE, error_cb_);
-      return;
+    switch (status) {
+      case MediaCodecDecoder::kConfigOk:
+        break;
+      case MediaCodecDecoder::kConfigKeyFrameRequired:
+        // TODO(timav): post a task or return the status?
+        return kStartBrowserSeekRequired;
+      case MediaCodecDecoder::kConfigFailure:
+        return kStartFailed;
+    }
+  }
+
+  if (do_audio) {
+    MediaCodecDecoder::ConfigStatus status = audio_decoder_->Configure();
+    if (status != MediaCodecDecoder::kConfigOk) {
+      return kStartFailed;
     }
   }
 
@@ -603,8 +831,7 @@ void MediaCodecPlayer::StartPlaybackDecoders() {
 
   if (do_audio) {
     if (!audio_decoder_->Start(current_time)) {
-      GetMediaTaskRunner()->PostTask(FROM_HERE, error_cb_);
-      return;
+      return kStartFailed;
     }
 
     // Attach listener on UI thread
@@ -613,18 +840,19 @@ void MediaCodecPlayer::StartPlaybackDecoders() {
 
   if (do_video) {
     if (!video_decoder_->Start(current_time)) {
-      GetMediaTaskRunner()->PostTask(FROM_HERE, error_cb_);
-      return;
+      return kStartFailed;
     }
   }
+
+  return kStartOk;
 }
 
 void MediaCodecPlayer::StopDecoders() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__;
 
-  audio_decoder_->SyncStop();
   video_decoder_->SyncStop();
+  audio_decoder_->SyncStop();
 }
 
 void MediaCodecPlayer::RequestToStopDecoders() {
@@ -651,6 +879,23 @@ void MediaCodecPlayer::RequestToStopDecoders() {
     video_decoder_->RequestToStop();
 }
 
+void MediaCodecPlayer::RequestDemuxerSeek(base::TimeDelta seek_time,
+                                          bool is_browser_seek) {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  DVLOG(1) << __FUNCTION__ << " " << seek_time
+           << (is_browser_seek ? " BROWSER_SEEK" : "");
+
+  // Flush decoders before requesting demuxer.
+  audio_decoder_->Flush();
+  video_decoder_->Flush();
+
+  // Save active seek data. Logically it is attached to kStateWaitingForSeek.
+  DCHECK_EQ(kStateWaitingForSeek, state_);
+  seek_info_.reset(new SeekInfo(seek_time, is_browser_seek));
+
+  demuxer_->RequestDemuxerSeek(seek_time, is_browser_seek);
+}
+
 void MediaCodecPlayer::ReleaseDecoderResources() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__;
@@ -670,14 +915,15 @@ void MediaCodecPlayer::CreateDecoders() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__;
 
-  error_cb_ = base::Bind(&MediaCodecPlayer::OnError, media_weak_this_);
+  internal_error_cb_ = base::Bind(&MediaCodecPlayer::OnError, media_weak_this_);
 
   audio_decoder_.reset(new MediaCodecAudioDecoder(
       GetMediaTaskRunner(), base::Bind(&MediaCodecPlayer::RequestDemuxerData,
                                        media_weak_this_, DemuxerStream::AUDIO),
       base::Bind(&MediaCodecPlayer::OnStarvation, media_weak_this_,
                  DemuxerStream::AUDIO),
-      base::Bind(&MediaCodecPlayer::OnStopDone, media_weak_this_), error_cb_,
+      base::Bind(&MediaCodecPlayer::OnStopDone, media_weak_this_),
+      internal_error_cb_,
       base::Bind(&MediaCodecPlayer::OnTimeIntervalUpdate, media_weak_this_,
                  DemuxerStream::AUDIO)));
 
@@ -686,17 +932,19 @@ void MediaCodecPlayer::CreateDecoders() {
                                        media_weak_this_, DemuxerStream::VIDEO),
       base::Bind(&MediaCodecPlayer::OnStarvation, media_weak_this_,
                  DemuxerStream::VIDEO),
-      base::Bind(&MediaCodecPlayer::OnStopDone, media_weak_this_), error_cb_,
-      MediaCodecDecoder::SetTimeCallback(),  // null callback
+      base::Bind(&MediaCodecPlayer::OnStopDone, media_weak_this_),
+      internal_error_cb_,
+      base::Bind(&MediaCodecPlayer::OnTimeIntervalUpdate, media_weak_this_,
+                 DemuxerStream::VIDEO),
       base::Bind(&MediaCodecPlayer::OnVideoResolutionChanged, media_weak_this_),
       base::Bind(&MediaCodecPlayer::OnVideoCodecCreated, media_weak_this_)));
 }
 
-bool MediaCodecPlayer::AudioFinished() {
+bool MediaCodecPlayer::AudioFinished() const {
   return audio_decoder_->IsCompleted() || !audio_decoder_->HasStream();
 }
 
-bool MediaCodecPlayer::VideoFinished() {
+bool MediaCodecPlayer::VideoFinished() const {
   return video_decoder_->IsCompleted() || !video_decoder_->HasStream();
 }
 
@@ -714,13 +962,14 @@ base::TimeDelta MediaCodecPlayer::GetInterpolatedTime() {
 
 const char* MediaCodecPlayer::AsString(PlayerState state) {
   switch (state) {
-    RETURN_STRING(STATE_PAUSED);
-    RETURN_STRING(STATE_WAITING_FOR_CONFIG);
-    RETURN_STRING(STATE_PREFETCHING);
-    RETURN_STRING(STATE_PLAYING);
-    RETURN_STRING(STATE_STOPPING);
-    RETURN_STRING(STATE_WAITING_FOR_SURFACE);
-    RETURN_STRING(STATE_ERROR);
+    RETURN_STRING(kStatePaused);
+    RETURN_STRING(kStateWaitingForConfig);
+    RETURN_STRING(kStatePrefetching);
+    RETURN_STRING(kStatePlaying);
+    RETURN_STRING(kStateStopping);
+    RETURN_STRING(kStateWaitingForSurface);
+    RETURN_STRING(kStateWaitingForSeek);
+    RETURN_STRING(kStateError);
   }
   return nullptr;  // crash early
 }

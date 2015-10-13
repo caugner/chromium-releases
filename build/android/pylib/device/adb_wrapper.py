@@ -170,25 +170,25 @@ class AdbWrapper(object):
     return cls.Devices(timeout=timeout, retries=retries)
 
   @classmethod
-  def Devices(cls, is_ready=True, timeout=_DEFAULT_TIMEOUT,
-              retries=_DEFAULT_RETRIES):
+  def Devices(cls, desired_state=_READY_STATE, long_list=False,
+              timeout=_DEFAULT_TIMEOUT, retries=_DEFAULT_RETRIES):
     """Get the list of active attached devices.
 
     Args:
-      is_ready: Whether the devices should be limited to only those that are
-        ready for use.
+      desired_state: If not None, limit the devices returned to only those
+        in the given state.
+      long_list: Whether to use the long listing format.
       timeout: (optional) Timeout per try in seconds.
       retries: (optional) Number of retries to attempt.
 
     Yields:
       AdbWrapper instances.
     """
-    long_list = False
     lines = cls._RawDevices(long_list=long_list, timeout=timeout,
                             retries=retries)
     return [AdbWrapper(line[0]) for line in lines
             if ((long_list or len(line) == 2)
-                and (not is_ready or line[1] == _READY_STATE))]
+                and (not desired_state or line[1] == desired_state))]
 
   @classmethod
   def _RawDevices(cls, long_list=False, timeout=_DEFAULT_TIMEOUT,
@@ -388,6 +388,27 @@ class AdbWrapper(object):
     """
     self._RunDeviceAdbCmd(['forward', str(local), str(remote)], timeout,
                           retries)
+
+  def ForwardRemove(self, local, timeout=_DEFAULT_TIMEOUT,
+                    retries=_DEFAULT_RETRIES):
+    """Remove a forward socket connection.
+
+    Args:
+      local: The host socket.
+      timeout: (optional) Timeout per try in seconds.
+      retries: (optional) Number of retries to attempt.
+    """
+    self._RunDeviceAdbCmd(['forward', '--remove', str(local)], timeout,
+                          retries)
+
+  def ForwardList(self, timeout=_DEFAULT_TIMEOUT, retries=_DEFAULT_RETRIES):
+    """List all currently forwarded socket connections.
+
+    Args:
+      timeout: (optional) Timeout per try in seconds.
+      retries: (optional) Number of retries to attempt.
+    """
+    return self._RunDeviceAdbCmd(['forward', '--list'], timeout, retries)
 
   def JDWP(self, timeout=_DEFAULT_TIMEOUT, retries=_DEFAULT_RETRIES):
     """List of PIDs of processes hosting a JDWP transport.

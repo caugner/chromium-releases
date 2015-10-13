@@ -7,8 +7,10 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
+#include "android_webview/common/aw_switches.h"
 #include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
+#include "android_webview/native/aw_locale_manager_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
 #include "android_webview/native/aw_message_port_service_impl.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
@@ -104,6 +106,10 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // for Chrome to aggressively persist DOM Storage to minimize data loss.
   // http://crbug.com/479767
   cl->AppendSwitch(switches::kEnableAggressiveDOMStorageFlushing);
+
+  // Webview does not currently support the Presentation API, see
+  // https://crbug.com/521319
+  cl->AppendSwitch(switches::kDisablePresentationAPI);
 
   // This is needed to be able to mmap the V8 snapshot and ICU data file
   // directly from the WebView .apk.
@@ -202,6 +208,10 @@ AwWebPreferencesPopulater* AwMainDelegate::CreateWebPreferencesPopulater() {
 
 AwMessagePortService* AwMainDelegate::CreateAwMessagePortService() {
   return new AwMessagePortServiceImpl();
+}
+
+AwLocaleManager* AwMainDelegate::CreateAwLocaleManager() {
+  return new AwLocaleManagerImpl();
 }
 
 #if defined(VIDEO_HOLE)

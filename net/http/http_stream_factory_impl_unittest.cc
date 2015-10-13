@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "net/base/port_util.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mock_host_resolver.h"
@@ -300,17 +301,17 @@ void PreconnectHelperForURL(int num_streams,
   request.url = url;
   request.load_flags = 0;
 
-  session->http_stream_factory()->PreconnectStreams(
-      num_streams, request, DEFAULT_PRIORITY, ssl_config, ssl_config);
+  session->http_stream_factory()->PreconnectStreams(num_streams, request,
+                                                    ssl_config, ssl_config);
   mock_factory->WaitForPreconnects();
-};
+}
 
 void PreconnectHelper(const TestCase& test,
                       HttpNetworkSession* session) {
   GURL url = test.ssl ? GURL("https://www.google.com") :
       GURL("http://www.google.com");
   PreconnectHelperForURL(test.num_streams, url, session);
-};
+}
 
 template<typename ParentPool>
 class CapturePreconnectsSocketPool : public ParentPool {
@@ -1349,7 +1350,7 @@ TEST_P(HttpStreamFactoryTest, DISABLED_RequestWebSocketSpdyHandshakeStream) {
 TEST_P(HttpStreamFactoryTest, DISABLED_OrphanedWebSocketStream) {
   SpdySessionDependencies session_deps(GetParam(),
                                        ProxyService::CreateDirect());
-  session_deps.use_alternate_protocols = true;
+  session_deps.use_alternative_services = true;
 
   MockRead mock_read(ASYNC, OK);
   SequencedSocketData socket_data(&mock_read, 1, nullptr, 0);
@@ -1374,9 +1375,10 @@ TEST_P(HttpStreamFactoryTest, DISABLED_OrphanedWebSocketStream) {
   request_info.url = GURL("ws://www.google.com:8888");
   request_info.load_flags = 0;
 
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   session->http_server_properties()->SetAlternativeService(
       HostPortPair("www.google.com", 8888),
-      AlternativeService(NPN_HTTP_2, "www.google.com", 9999), 1.0);
+      AlternativeService(NPN_HTTP_2, "www.google.com", 9999), 1.0, expiration);
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;

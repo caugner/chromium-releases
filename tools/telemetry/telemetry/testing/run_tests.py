@@ -1,14 +1,16 @@
 # Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import logging
 import sys
 
-from telemetry.core import device_finder
 from telemetry.core import util
 from telemetry import decorators
 from telemetry.internal.browser import browser_finder
 from telemetry.internal.browser import browser_finder_exceptions
 from telemetry.internal.browser import browser_options
+from telemetry.internal.platform import device_finder
+from telemetry.internal.util import binary_manager
 from telemetry.internal.util import command_line
 from telemetry.testing import browser_test_case
 from telemetry.testing import options_for_unittests
@@ -45,6 +47,7 @@ class RunTestsCommand(command_line.OptparseCommand):
     parser.add_option('--exact-test-filter', action='store_true', default=False,
                       help='Treat test filter as exact matches (default is '
                            'substring matches).')
+    parser.add_option('--client-config', dest='client_config', default=None)
 
     typ.ArgumentParser.add_option_group(parser,
                                         "Options for running the tests",
@@ -78,6 +81,10 @@ class RunTestsCommand(command_line.OptparseCommand):
     cls.AddCommandLineArgs(parser, None)
     options, positional_args = parser.parse_args(args)
     options.positional_args = positional_args
+
+    # Must initialize the DependencyManager before calling
+    # browser_finder.FindBrowser(args)
+    binary_manager.InitDependencyManager(options.client_config)
     cls.ProcessCommandLineArgs(parser, options, None)
 
     obj = cls()
@@ -117,14 +124,15 @@ class RunTestsCommand(command_line.OptparseCommand):
     runner.args.retry_limit = args.retry_limit
     runner.args.test_results_server = args.test_results_server
     runner.args.test_type = args.test_type
-    # Always print out test's timing info.
-    runner.args.timing = True
     runner.args.top_level_dir = args.top_level_dir
-    runner.args.verbose = args.verbosity
     runner.args.write_full_results_to = args.write_full_results_to
     runner.args.write_trace_to = args.write_trace_to
 
     runner.args.path.append(util.GetUnittestDataDir())
+
+    # Always print out these info for the ease of debugging.
+    runner.args.timing = True
+    runner.args.verbose = 2
 
     runner.classifier = GetClassifier(args, possible_browser)
     runner.context = args
@@ -168,6 +176,16 @@ def _MatchesSelectedTest(name, selected_tests, selected_tests_are_exact):
 
 
 def _SetUpProcess(child, context): # pylint: disable=W0613
+  if binary_manager.NeedsInit():
+    # Typ doesn't keep the DependencyManager initialization in the child
+    # processes.
+    binary_manager.InitDependencyManager(context.client_config)
+  # We need to reset the handlers in case some other parts of telemetry already
+  # set it to make this work.
+  logging.getLogger().handlers = []
+  logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(filename)s:%(funcName)s:%(message)s')
   args = context
   if args.device and args.device == 'android':
     android_devices = device_finder.GetDevicesMatchingOptions(args)

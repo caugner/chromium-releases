@@ -9,6 +9,7 @@ import "components/view_manager/public/interfaces/view_manager_constants.mojom";
 import "mojo/application/public/interfaces/service_provider.mojom";
 import "network/public/interfaces/url_loader.mojom";
 import "ui/mojo/events/input_events.mojom";
+import "ui/mojo/ime/text_input_state.mojom";
 import "ui/mojo/geometry/geometry.mojom";
 
 struct ViewportMetrics {
@@ -140,7 +141,8 @@ interface ViewManagerService {
   // A view may only have one embedding in it at a time. Subsequent calls to
   // Embed() for the same view result in the currently embedded
   // ViewManagerClient being removed. The embedded app is told this by way of
-  // OnViewDeleted().
+  // OnUnembed(), which is followed by OnViewDeleted() (as the connection no
+  // longer has access to the view).
   //
   // The embedder can detect when the embedded app disconnects by way of
   // OnEmbeddedAppDisconnected().
@@ -154,6 +156,14 @@ interface ViewManagerService {
   EmbedAllowingReembed(uint32 view_id, URLRequest request) => (bool success);
 
   SetFocus(uint32 view_id) => (bool success);
+
+  // Set text input state for the given view.
+  SetViewTextInputState(uint32 view_id, TextInputState state);
+
+  // Set the input method editor UI (software keyboard, etc) visibility.
+  // If state is non-null, the specified view's text input state is updated.
+  // Otherwise the existing state is used.
+  SetImeVisibility(uint32 view_id, bool visible, TextInputState? state);
 };
 
 // Changes to views are not sent to the connection that originated the
@@ -177,6 +187,10 @@ interface ViewManagerClient {
 
   // Invoked when the application embedded at |view| is disconnected.
   OnEmbeddedAppDisconnected(uint32 view);
+
+  // Sent when another connection is embedded in the View this connection was
+  // previously embedded in. See Embed() for more information.
+  OnUnembed();
 
   // Invoked when a view's bounds have changed.
   OnViewBoundsChanged(uint32 view,

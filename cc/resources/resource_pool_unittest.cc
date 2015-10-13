@@ -4,6 +4,7 @@
 
 #include "cc/resources/resource_pool.h"
 
+#include "cc/resources/resource_util.h"
 #include "cc/resources/scoped_resource.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
@@ -37,13 +38,12 @@ class ResourcePoolTest : public testing::Test {
 TEST_F(ResourcePoolTest, AcquireRelease) {
   gfx::Size size(100, 100);
   ResourceFormat format = RGBA_8888;
-  scoped_ptr<ScopedResource> resource =
-      resource_pool_->AcquireResource(size, format);
+  Resource* resource = resource_pool_->AcquireResource(size, format);
   EXPECT_EQ(size, resource->size());
   EXPECT_EQ(format, resource->format());
   EXPECT_TRUE(resource_provider_->CanLockForWrite(resource->id()));
 
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
+  resource_pool_->ReleaseResource(resource, 0u);
 }
 
 TEST_F(ResourcePoolTest, AccountingSingleResource) {
@@ -54,9 +54,9 @@ TEST_F(ResourcePoolTest, AccountingSingleResource) {
 
   gfx::Size size(100, 100);
   ResourceFormat format = RGBA_8888;
-  size_t resource_bytes = Resource::UncheckedMemorySizeBytes(size, format);
-  scoped_ptr<ScopedResource> resource =
-      resource_pool_->AcquireResource(size, format);
+  size_t resource_bytes =
+      ResourceUtil::UncheckedSizeInBytes<size_t>(size, format);
+  Resource* resource = resource_pool_->AcquireResource(size, format);
 
   EXPECT_EQ(resource_bytes, resource_pool_->total_memory_usage_bytes());
   EXPECT_EQ(resource_bytes, resource_pool_->acquired_memory_usage_bytes());
@@ -64,13 +64,12 @@ TEST_F(ResourcePoolTest, AccountingSingleResource) {
   EXPECT_EQ(1u, resource_pool_->acquired_resource_count());
   EXPECT_EQ(0u, resource_pool_->busy_resource_count());
 
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
+  resource_pool_->ReleaseResource(resource, 0u);
   EXPECT_EQ(resource_bytes, resource_pool_->total_memory_usage_bytes());
   EXPECT_EQ(1u, resource_pool_->total_resource_count());
   EXPECT_EQ(1u, resource_pool_->busy_resource_count());
 
-  bool wait_if_needed = false;
-  resource_pool_->CheckBusyResources(wait_if_needed);
+  resource_pool_->CheckBusyResources();
   EXPECT_EQ(resource_bytes, resource_pool_->total_memory_usage_bytes());
   EXPECT_EQ(0u, resource_pool_->acquired_memory_usage_bytes());
   EXPECT_EQ(1u, resource_pool_->total_resource_count());
@@ -94,26 +93,24 @@ TEST_F(ResourcePoolTest, SimpleResourceReuse) {
 
   gfx::Size size(100, 100);
   ResourceFormat format = RGBA_8888;
-  bool wait_if_needed = false;
 
-  scoped_ptr<ScopedResource> resource =
-      resource_pool_->AcquireResource(size, format);
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
-  resource_pool_->CheckBusyResources(wait_if_needed);
+  Resource* resource = resource_pool_->AcquireResource(size, format);
+  resource_pool_->ReleaseResource(resource, 0u);
+  resource_pool_->CheckBusyResources();
   EXPECT_EQ(1u, resource_provider_->num_resources());
 
   // Same size/format should re-use resource.
   resource = resource_pool_->AcquireResource(size, format);
   EXPECT_EQ(1u, resource_provider_->num_resources());
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
-  resource_pool_->CheckBusyResources(wait_if_needed);
+  resource_pool_->ReleaseResource(resource, 0u);
+  resource_pool_->CheckBusyResources();
   EXPECT_EQ(1u, resource_provider_->num_resources());
 
   // Different size/format should alloate new resource.
   resource = resource_pool_->AcquireResource(gfx::Size(50, 50), LUMINANCE_8);
   EXPECT_EQ(2u, resource_provider_->num_resources());
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
-  resource_pool_->CheckBusyResources(wait_if_needed);
+  resource_pool_->ReleaseResource(resource, 0u);
+  resource_pool_->CheckBusyResources();
   EXPECT_EQ(2u, resource_provider_->num_resources());
 }
 
@@ -125,15 +122,13 @@ TEST_F(ResourcePoolTest, LostResource) {
 
   gfx::Size size(100, 100);
   ResourceFormat format = RGBA_8888;
-  bool wait_if_needed = false;
 
-  scoped_ptr<ScopedResource> resource =
-      resource_pool_->AcquireResource(size, format);
+  Resource* resource = resource_pool_->AcquireResource(size, format);
   EXPECT_EQ(1u, resource_provider_->num_resources());
 
   resource_provider_->LoseResourceForTesting(resource->id());
-  resource_pool_->ReleaseResource(resource.Pass(), 0u);
-  resource_pool_->CheckBusyResources(wait_if_needed);
+  resource_pool_->ReleaseResource(resource, 0u);
+  resource_pool_->CheckBusyResources();
   EXPECT_EQ(0u, resource_provider_->num_resources());
 }
 

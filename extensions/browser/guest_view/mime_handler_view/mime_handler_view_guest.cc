@@ -150,25 +150,11 @@ void MimeHandlerViewGuest::DidInitialize(
   ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
 }
 
+bool MimeHandlerViewGuest::ShouldHandleFindRequestsForEmbedder() const {
+  return is_full_page_plugin();
+}
+
 bool MimeHandlerViewGuest::ZoomPropagatesFromEmbedderToGuest() const {
-  return false;
-}
-
-bool MimeHandlerViewGuest::Find(int request_id,
-                                const base::string16& search_text,
-                                const blink::WebFindOptions& options) {
-  if (is_full_page_plugin()) {
-    web_contents()->Find(request_id, search_text, options);
-    return true;
-  }
-  return false;
-}
-
-bool MimeHandlerViewGuest::StopFinding(content::StopFindAction action) {
-  if (is_full_page_plugin()) {
-    web_contents()->StopFinding(action);
-    return true;
-  }
   return false;
 }
 
@@ -205,23 +191,6 @@ MimeHandlerViewGuest::GetJavaScriptDialogManager(
     WebContents* source) {
   return owner_web_contents()->GetDelegate()->GetJavaScriptDialogManager(
       web_contents());
-}
-
-void MimeHandlerViewGuest::FindReply(content::WebContents* web_contents,
-                                     int request_id,
-                                     int number_of_matches,
-                                     const gfx::Rect& selection_rect,
-                                     int active_match_ordinal,
-                                     bool final_update) {
-  if (!attached() || !embedder_web_contents()->GetDelegate())
-    return;
-
-  embedder_web_contents()->GetDelegate()->FindReply(embedder_web_contents(),
-                                                    request_id,
-                                                    number_of_matches,
-                                                    selection_rect,
-                                                    active_match_ordinal,
-                                                    final_update);
 }
 
 bool MimeHandlerViewGuest::SaveFrame(const GURL& url,

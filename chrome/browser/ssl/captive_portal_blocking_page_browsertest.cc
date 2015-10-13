@@ -73,7 +73,7 @@ class FakeConnectionInfoDelegate : public CaptivePortalBlockingPage::Delegate {
 };
 
 class CaptivePortalBlockingPageTest
-    : public CertificateReportingTestUtils::CertificateReportingTest {
+    : public certificate_reporting_test_utils::CertificateReportingTest {
  public:
   CaptivePortalBlockingPageTest() {}
 
@@ -101,7 +101,7 @@ class CaptivePortalBlockingPageTest
                         ExpectLoginURL expect_login_url,
                         scoped_ptr<SSLCertReporter> ssl_cert_reporter);
 
-  void TestCertReporting(CertificateReportingTestUtils::OptIn opt_in);
+  void TestCertReporting(certificate_reporting_test_utils::OptIn opt_in);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CaptivePortalBlockingPageTest);
@@ -130,7 +130,7 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
   CaptivePortalBlockingPage* blocking_page = new CaptivePortalBlockingPage(
       contents, GURL(kBrokenSSL), login_url, ssl_cert_reporter.Pass(), ssl_info,
       base::Callback<void(bool)>());
-  blocking_page->SetDelegateForTesting(delegate);
+  blocking_page->SetDelegate(delegate);
   blocking_page->Show();
 
   WaitForInterstitialAttach(contents);
@@ -178,17 +178,17 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
 }
 
 void CaptivePortalBlockingPageTest::TestCertReporting(
-    CertificateReportingTestUtils::OptIn opt_in) {
+    certificate_reporting_test_utils::OptIn opt_in) {
   ASSERT_NO_FATAL_FAILURE(SetUpMockReporter());
 
-  CertificateReportingTestUtils::SetCertReportingOptIn(browser(), opt_in);
+  certificate_reporting_test_utils::SetCertReportingOptIn(browser(), opt_in);
   base::RunLoop run_loop;
   scoped_ptr<SSLCertReporter> ssl_cert_reporter =
-      CertificateReportingTestUtils::SetUpMockSSLCertReporter(
+      certificate_reporting_test_utils::SetUpMockSSLCertReporter(
           &run_loop,
-          opt_in == CertificateReportingTestUtils::EXTENDED_REPORTING_OPT_IN
-              ? CertificateReportingTestUtils::CERT_REPORT_EXPECTED
-              : CertificateReportingTestUtils::CERT_REPORT_NOT_EXPECTED);
+          opt_in == certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN
+              ? certificate_reporting_test_utils::CERT_REPORT_EXPECTED
+              : certificate_reporting_test_utils::CERT_REPORT_NOT_EXPECTED);
 
   const GURL kLandingUrl(captive_portal::CaptivePortalDetector::kDefaultURL);
   TestInterstitial(true, std::string(), kLandingUrl, EXPECT_WIFI_YES,
@@ -201,7 +201,7 @@ void CaptivePortalBlockingPageTest::TestCertReporting(
       browser()->tab_strip_model()->GetActiveWebContents();
   tab->GetInterstitialPage()->DontProceed();
 
-  if (opt_in == CertificateReportingTestUtils::EXTENDED_REPORTING_OPT_IN) {
+  if (opt_in == certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN) {
     // Check that the mock reporter received a request to send a report.
     run_loop.Run();
     EXPECT_EQ(GURL(kBrokenSSL).host(), GetLatestHostnameReported());
@@ -279,16 +279,21 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBlockingPageTest,
 }
 
 IN_PROC_BROWSER_TEST_F(CaptivePortalBlockingPageTest, CertReportingOptIn) {
-  CertificateReportingTestUtils::SetCertReportingFinchConfig(
-      CertReportHelper::kFinchGroupShowPossiblySend, "1.0");
-  TestCertReporting(CertificateReportingTestUtils::EXTENDED_REPORTING_OPT_IN);
+  // This test should only run if the Finch config is such that reports
+  // will be sent when opted in. This tests that a report *is* sent when
+  // the user opts in under such a Finch config, and the below test
+  // tests that a report *is not* sent when the user doesn't opt in
+  // (under any Finch config).
+  if (certificate_reporting_test_utils::GetReportExpectedFromFinch() ==
+      certificate_reporting_test_utils::CERT_REPORT_EXPECTED) {
+    TestCertReporting(
+        certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(CaptivePortalBlockingPageTest, CertReportingOptOut) {
-  CertificateReportingTestUtils::SetCertReportingFinchConfig(
-      CertReportHelper::kFinchGroupShowPossiblySend, "1.0");
   TestCertReporting(
-      CertificateReportingTestUtils::EXTENDED_REPORTING_DO_NOT_OPT_IN);
+      certificate_reporting_test_utils::EXTENDED_REPORTING_DO_NOT_OPT_IN);
 }
 
 class CaptivePortalBlockingPageIDNTest : public SecurityInterstitialIDNTest {
@@ -305,7 +310,7 @@ class CaptivePortalBlockingPageIDNTest : public SecurityInterstitialIDNTest {
     CaptivePortalBlockingPage* blocking_page = new CaptivePortalBlockingPage(
         contents, GURL(kBrokenSSL), request_url, nullptr, empty_ssl_info,
         base::Callback<void(bool)>());
-    blocking_page->SetDelegateForTesting(delegate);
+    blocking_page->SetDelegate(delegate);
     return blocking_page;
   }
 };

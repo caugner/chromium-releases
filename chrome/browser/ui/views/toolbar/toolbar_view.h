@@ -107,6 +107,9 @@ class ToolbarView : public views::AccessiblePaneView,
   LocationBarView* location_bar() const { return location_bar_; }
   WrenchToolbarButton* app_menu() const { return app_menu_; }
   HomeButton* home_button() const { return home_; }
+  WrenchMenuBadgeController* wrench_menu_badge_controller() {
+    return &badge_controller_;
+  }
 
   // AccessiblePaneView:
   bool SetPaneFocus(View* initial_focus) override;
@@ -120,7 +123,6 @@ class ToolbarView : public views::AccessiblePaneView,
   content::WebContents* GetWebContents() override;
   ToolbarModel* GetToolbarModel() override;
   const ToolbarModel* GetToolbarModel() const override;
-  InstantController* GetInstant() override;
   views::Widget* CreateViewsBubble(
       views::BubbleDelegateView* bubble_delegate) override;
   PageActionImageView* CreatePageActionImageView(
@@ -175,6 +177,8 @@ class ToolbarView : public views::AccessiblePaneView,
     // the standard spacing.
     kVertSpacing = 5,
   };
+
+  WrenchMenu* wrench_menu_for_testing() { return wrench_menu_.get(); }
 
  protected:
   // AccessiblePaneView:

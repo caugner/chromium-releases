@@ -6,7 +6,7 @@
        doesn't ignore this. -->
   <manifest xmlns:android="http://schemas.android.com/apk/res/android"
       package="org.chromium.chrome.shell.tests">
-    <uses-sdk android:minSdkVersion="16" android:targetSdkVersion="22" />
+    <uses-sdk android:minSdkVersion="16" android:targetSdkVersion="23" />
     <uses-permission android:name="android.permission.RUN_INSTRUMENTATION" />
     <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
     <uses-permission android:name="android.permission.READ_LOGS"/>
@@ -16,13 +16,6 @@
          needed when building test cases. -->
     <application>
         <uses-library android:name="android.test.runner" />
-
-        <provider android:name="org.chromium.chrome.test.partnercustomizations.TestPartnerBrowserCustomizationsProvider"
-            android:authorities="org.chromium.chrome.test.partnercustomizations.TestPartnerBrowserCustomizationsProvider"
-            android:exported="true" />
-        <provider android:name="org.chromium.chrome.test.partnercustomizations.TestPartnerBrowserCustomizationsDelayedProvider"
-            android:authorities="org.chromium.chrome.test.partnercustomizations.TestPartnerBrowserCustomizationsDelayedProvider"
-            android:exported="true" />
 
         <activity android:name="org.chromium.test.broker.OnDeviceInstrumentationBroker"
             android:exported="true"/>

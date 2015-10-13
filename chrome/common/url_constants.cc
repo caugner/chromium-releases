@@ -103,7 +103,6 @@ const char kChromeUICertificateManagerDialogURL[] =
 const char kChromeUIChooseMobileNetworkURL[] =
     "chrome://choose-mobile-network/";
 const char kChromeUIDeviceEmulatorURL[] = "chrome://device-emulator/";
-const char kChromeUIDiscardsURL[] = "chrome://discards/";
 const char kChromeUIFirstRunURL[] = "chrome://first-run/";
 const char kChromeUIImageBurnerURL[] = "chrome://imageburner/";
 const char kChromeUIKeyboardOverlayURL[] = "chrome://keyboardoverlay/";
@@ -148,6 +147,11 @@ const char kChromeUIWebRtcLogsURL[] = "chrome://webrtc-logs/";
 const char kChromeUIMediaRouterURL[] = "chrome://media-router/";
 #endif
 
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+const char kChromeUIDiscardsHost[] = "discards";
+const char kChromeUIDiscardsURL[] = "chrome://discards/";
+#endif
+
 // Add Chrome UI hosts here, in alphabetical order.
 // Add hosts to kChromePaths in browser_about_handler.cc to be listed by
 // chrome://chrome-urls (about:about) and the built-in AutocompleteProvider.
@@ -186,6 +190,7 @@ const char kChromeUIFlagsHost[] = "flags";
 const char kChromeUIFlashHost[] = "flash";
 const char kChromeUIGCMInternalsHost[] = "gcm-internals";
 const char kChromeUIHangHost[] = "hang";
+const char kChromeUIHangUIHost[] = "uithreadhang";
 const char kChromeUIHelpFrameHost[] = "help-frame";
 const char kChromeUIHelpHost[] = "help";
 const char kChromeUIHistoryHost[] = "history";
@@ -225,6 +230,7 @@ const char kChromeUISettingsFrameHost[] = "settings-frame";
 const char kChromeUIShorthangHost[] = "shorthang";
 const char kChromeUISignInInternalsHost[] = "signin-internals";
 const char kChromeUISuggestionsHost[] = "suggestions";
+const char kChromeUISupervisedUserInternalsHost[] = "supervised-user-internals";
 const char kChromeUISupervisedUserPassphrasePageHost[] =
     "managed-user-passphrase";
 const char kChromeUISyncHost[] = "sync";
@@ -271,7 +277,6 @@ const char kChromeUICertificateManagerHost[] = "certificate-manager";
 const char kChromeUIChooseMobileNetworkHost[] = "choose-mobile-network";
 const char kChromeUICryptohomeHost[] = "cryptohome";
 const char kChromeUIDeviceEmulatorHost[] = "device-emulator";
-const char kChromeUIDiscardsHost[] = "discards";
 const char kChromeUIFirstRunHost[] = "first-run";
 const char kChromeUIImageBurnerHost[] = "imageburner";
 const char kChromeUIKeyboardOverlayHost[] = "keyboardoverlay";
@@ -434,9 +439,10 @@ const char kResetProfileSettingsLearnMoreURL[] =
 const char kAutomaticSettingsResetLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_automatic_settings_reset";
 
-const char kSupervisedUserManagementURL[] = "https://www.chrome.com/manage";
-
-const char kSupervisedUserManagementDisplayURL[] = "www.chrome.com/manage";
+const char kLegacySupervisedUserManagementURL[] =
+    "https://www.chrome.com/manage";
+const char kLegacySupervisedUserManagementDisplayURL[] =
+    "www.chrome.com/manage";
 
 const char kSettingsSearchHelpURL[] =
 #if defined(OS_CHROMEOS)
@@ -464,6 +470,13 @@ const char kCrashReasonURL[] =
     "https://support.google.com/chromebook/?p=e_awsnap";
 #else
     "https://support.google.com/chrome/?p=e_awsnap";
+#endif
+
+const char kCrashReasonFeedbackDisplayedURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromebook/?p=e_awsnap_rl";
+#else
+    "https://support.google.com/chrome/?p=e_awsnap_rl";
 #endif
 
 const char kPrivacyLearnMoreURL[] =
@@ -616,7 +629,9 @@ const char* const kChromeHostURLs[] = {
   content::kChromeUITracingHost,
   content::kChromeUIWebRTCInternalsHost,
 #if !defined(OS_ANDROID)
+#if !defined(OS_CHROMEOS)
   kChromeUIAppLauncherPageHost,
+#endif
   kChromeUIBookmarksHost,
   kChromeUIDownloadsHost,
   kChromeUIFlashHost,
@@ -638,7 +653,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUICertificateManagerHost,
   kChromeUIChooseMobileNetworkHost,
   kChromeUICryptohomeHost,
-  kChromeUIDiscardsHost,
   kChromeUIDriveInternalsHost,
   kChromeUIFirstRunHost,
   kChromeUIImageBurnerHost,
@@ -649,6 +663,9 @@ const char* const kChromeHostURLs[] = {
   kChromeUIOSCreditsHost,
   kChromeUIPowerHost,
   kChromeUIProxySettingsHost,
+#endif
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
+  kChromeUIDiscardsHost,
 #endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   kChromeUILinuxProxyConfigHost,
@@ -679,6 +696,7 @@ const char* const kChromeHostURLs[] = {
 const size_t kNumberOfChromeHostURLs = arraysize(kChromeHostURLs);
 
 const char* const kChromeDebugURLs[] = {
+  content::kChromeUIBadCastCrashURL,
   content::kChromeUICrashURL,
   content::kChromeUIDumpURL,
   content::kChromeUIKillURL,

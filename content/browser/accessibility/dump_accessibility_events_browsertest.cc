@@ -89,7 +89,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
       shell(), AccessibilityModeComplete, ui::AX_EVENT_NONE));
 
 
-  web_contents->GetMainFrame()->ExecuteJavaScript(
+  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16("go()"));
 
   // Wait for at least one accessibility event generated in response to
@@ -264,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsTextChanged) {
+                       DISABLED_AccessibilityEventsTextChanged) {
   RunEventTest(FILE_PATH_LITERAL("text-changed.html"));
 }
 

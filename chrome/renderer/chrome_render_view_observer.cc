@@ -18,13 +18,11 @@
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
-#include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/web_apps.h"
-#include "chrome/renderer/webview_color_overlay.h"
 #include "components/translate/content/renderer/translate_helper.h"
 #include "components/web_cache/renderer/web_cache_render_process_observer.h"
 #include "content/public/common/bindings_policy.h"
@@ -103,60 +101,6 @@ static const size_t kMaxIndexChars = 65535;
 // Constants for UMA statistic collection.
 static const char kTranslateCaptureText[] = "Translate.CaptureText";
 
-namespace {
-
-#if defined(OS_ANDROID)
-// Parses the DOM for a <meta> tag with a particular name.
-// |meta_tag_content| is set to the contents of the 'content' attribute.
-// |found_tag| is set to true if the tag was successfully found.
-// Returns true if the document was parsed without errors.
-bool RetrieveMetaTagContent(const WebFrame* main_frame,
-                            const GURL& expected_url,
-                            const std::string& meta_tag_name,
-                            bool* found_tag,
-                            std::string* meta_tag_content) {
-  WebDocument document =
-      main_frame ? main_frame->document() : WebDocument();
-  WebElement head = document.isNull() ? WebElement() : document.head();
-  GURL document_url = document.isNull() ? GURL() : GURL(document.url());
-
-  // Search the DOM for the <meta> tag with the given name.
-  *found_tag = false;
-  *meta_tag_content = "";
-  if (!head.isNull()) {
-    WebNodeList children = head.childNodes();
-    for (unsigned i = 0; i < children.length(); ++i) {
-      WebNode child = children.item(i);
-      if (!child.isElementNode())
-        continue;
-      WebElement elem = child.to<WebElement>();
-      if (elem.hasHTMLTagName("meta")) {
-        if (elem.hasAttribute("name") && elem.hasAttribute("content")) {
-          std::string name = elem.getAttribute("name").utf8();
-          if (name == meta_tag_name) {
-            *meta_tag_content = elem.getAttribute("content").utf8();
-            *found_tag = true;
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // Make sure we're checking the right page and that the length of the content
-  // string is reasonable.
-  bool success = document_url == expected_url;
-  if (meta_tag_content->size() > chrome::kMaxMetaTagAttributeLength) {
-    *meta_tag_content = "";
-    success = false;
-  }
-
-  return success;
-}
-#endif
-
-}  // namespace
-
 ChromeRenderViewObserver::ChromeRenderViewObserver(
     content::RenderView* render_view,
     web_cache::WebCacheRenderProcessObserver* web_cache_render_process_observer)
@@ -168,6 +112,7 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
           0,
           extensions::kExtensionScheme)),
       phishing_classifier_(NULL),
+      webview_visually_deemphasized_(false),
       capture_timer_(false, false) {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -191,8 +136,6 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_UpdateTopControlsState,
                         OnUpdateTopControlsState)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_RetrieveMetaTagContent,
-                        OnRetrieveMetaTagContent)
 #endif
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetWebApplicationInfo,
                         OnGetWebApplicationInfo)
@@ -218,26 +161,6 @@ void ChromeRenderViewObserver::OnUpdateTopControlsState(
     content::TopControlsState current,
     bool animate) {
   render_view()->UpdateTopControlsState(constraints, current, animate);
-}
-
-void ChromeRenderViewObserver::OnRetrieveMetaTagContent(
-    const GURL& expected_url,
-    const std::string tag_name) {
-  bool found_tag;
-  std::string content_str;
-  bool parsed_successfully = RetrieveMetaTagContent(
-      render_view()->GetWebView()->mainFrame(),
-      expected_url,
-      tag_name,
-      &found_tag,
-      &content_str);
-
-  Send(new ChromeViewHostMsg_DidRetrieveMetaTagContent(
-      routing_id(),
-      parsed_successfully && found_tag,
-      tag_name,
-      content_str,
-      expected_url));
 }
 #endif
 
@@ -309,17 +232,17 @@ void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
 
 #if defined(ENABLE_EXTENSIONS)
 void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
-  bool already_deemphasized = !!dimmed_color_overlay_.get();
-  if (already_deemphasized == deemphasized)
+  if (webview_visually_deemphasized_ == deemphasized)
     return;
+
+  webview_visually_deemphasized_ = deemphasized;
 
   if (deemphasized) {
     // 70% opaque grey.
     SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
-    dimmed_color_overlay_.reset(
-        new WebViewColorOverlay(render_view(), greyish));
+    render_view()->GetWebView()->setPageOverlayColor(greyish);
   } else {
-    dimmed_color_overlay_.reset();
+    render_view()->GetWebView()->setPageOverlayColor(SK_ColorTRANSPARENT);
   }
 }
 #endif
@@ -485,7 +408,8 @@ bool ChromeRenderViewObserver::HasRefreshMetaTag(WebFrame* frame) {
     if (!element.hasHTMLTagName(tag_name))
       continue;
     WebString value = element.getAttribute(attribute_name);
-    if (value.isNull() || !base::LowerCaseEqualsASCII(value, "refresh"))
+    if (value.isNull() ||
+        !base::LowerCaseEqualsASCII(base::StringPiece16(value), "refresh"))
       continue;
     return true;
   }

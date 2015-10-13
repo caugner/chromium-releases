@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
+#include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -24,6 +25,7 @@
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #import "testing/gtest_mac.h"
+#import "third_party/ocmock/OCMock/OCMock.h"
 
 using ::testing::Return;
 
@@ -701,6 +703,25 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarHitTest) {
   EXPECT_TRUE([[contentView hitTest:point] isDescendantOf:bookmarkView]);
 }
 
+// Check that when the window becomes/resigns main, the tab strip's background
+// view is redrawn.
+TEST_F(BrowserWindowControllerTest, TabStripBackgroundViewRedrawTest) {
+  NSView* view = controller_.tabStripBackgroundView;
+  id partial_mock = [OCMockObject partialMockForObject:view];
+
+  [[partial_mock expect] setNeedsDisplay:YES];
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:NSWindowDidBecomeMainNotification
+                    object:controller_.window];
+  [partial_mock verify];
+
+  [[partial_mock expect] setNeedsDisplay:YES];
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:NSWindowDidResignMainNotification
+                    object:controller_.window];
+  [partial_mock verify];
+}
+
 @interface BrowserWindowControllerFakeFullscreen : BrowserWindowController {
  @private
   // We release the window ourselves, so we don't have to rely on the unittest
@@ -769,11 +790,13 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);
 
   [controller_ activate];
+  chrome::testing::NSRunLoopRunAllPending();
   EXPECT_TRUE(IsFrontWindow([controller_ window]));
 
   [controller_ enterBrowserFullscreenWithToolbar:YES];
   WaitForFullScreenTransition();
   [controller_ activate];
+  chrome::testing::NSRunLoopRunAllPending();
 
   // No fullscreen window on 10.7+.
   if (base::mac::IsOSSnowLeopard())

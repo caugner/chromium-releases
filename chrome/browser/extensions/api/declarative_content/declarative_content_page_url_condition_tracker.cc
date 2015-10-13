@@ -6,9 +6,58 @@
 
 #include "base/bind.h"
 #include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/values.h"
+#include "chrome/browser/extensions/api/declarative_content/content_constants.h"
+#include "components/url_matcher/url_matcher_factory.h"
 #include "content/public/browser/web_contents.h"
 
 namespace extensions {
+
+namespace {
+
+const char kInvalidTypeOfParameter[] = "Attribute '%s' has an invalid type";
+
+static url_matcher::URLMatcherConditionSet::ID g_next_id = 0;
+
+}  // namespace
+
+//
+// DeclarativeContentPageUrlPredicate
+//
+
+DeclarativeContentPageUrlPredicate::~DeclarativeContentPageUrlPredicate() {
+}
+
+// static
+scoped_ptr<DeclarativeContentPageUrlPredicate>
+DeclarativeContentPageUrlPredicate::Create(
+    url_matcher::URLMatcherConditionFactory* url_matcher_condition_factory,
+    const base::Value& value,
+    std::string* error) {
+  scoped_refptr<url_matcher::URLMatcherConditionSet> url_matcher_condition_set;
+  const base::DictionaryValue* dict = nullptr;
+  if (!value.GetAsDictionary(&dict)) {
+    *error = base::StringPrintf(kInvalidTypeOfParameter,
+                                declarative_content_constants::kPageUrl);
+    return scoped_ptr<DeclarativeContentPageUrlPredicate>();
+  } else {
+    url_matcher_condition_set =
+        url_matcher::URLMatcherFactory::CreateFromURLFilterDictionary(
+            url_matcher_condition_factory, dict, ++g_next_id, error);
+    if (!url_matcher_condition_set)
+      return scoped_ptr<DeclarativeContentPageUrlPredicate>();
+    return make_scoped_ptr(
+        new DeclarativeContentPageUrlPredicate(url_matcher_condition_set));
+  }
+}
+
+DeclarativeContentPageUrlPredicate::DeclarativeContentPageUrlPredicate(
+    scoped_refptr<url_matcher::URLMatcherConditionSet>
+        url_matcher_condition_set)
+    : url_matcher_condition_set_(url_matcher_condition_set) {
+  DCHECK(url_matcher_condition_set);
+}
 
 //
 // PerWebContentsTracker
@@ -60,6 +109,17 @@ DeclarativeContentPageUrlConditionTracker::
 ~DeclarativeContentPageUrlConditionTracker() {
 }
 
+scoped_ptr<DeclarativeContentPageUrlPredicate>
+DeclarativeContentPageUrlConditionTracker::CreatePredicate(
+    const Extension* extension,
+    const base::Value& value,
+    std::string* error) {
+  return DeclarativeContentPageUrlPredicate::Create(
+      url_matcher_.condition_factory(),
+      value,
+      error);
+}
+
 void DeclarativeContentPageUrlConditionTracker::AddConditionSets(
     const url_matcher::URLMatcherConditionSet::Vector& condition_sets) {
   url_matcher_.AddConditionSets(condition_sets);
@@ -100,11 +160,15 @@ void DeclarativeContentPageUrlConditionTracker::OnWebContentsNavigation(
   per_web_contents_tracker_[contents]->UpdateMatchesForCurrentUrl(true);
 }
 
-void DeclarativeContentPageUrlConditionTracker::GetMatches(
-    content::WebContents* contents,
-    std::set<url_matcher::URLMatcherConditionSet::ID>* matches) {
-  DCHECK(ContainsKey(per_web_contents_tracker_, contents));
-  *matches = per_web_contents_tracker_[contents]->matches();
+bool DeclarativeContentPageUrlConditionTracker::EvaluatePredicate(
+    const DeclarativeContentPageUrlPredicate* predicate,
+    content::WebContents* contents) const {
+  auto loc = per_web_contents_tracker_.find(contents);
+  DCHECK(loc != per_web_contents_tracker_.end());
+  const std::set<url_matcher::URLMatcherConditionSet::ID>&
+      web_contents_id_matches = loc->second->matches();
+  return ContainsKey(web_contents_id_matches,
+                     predicate->url_matcher_condition_set()->id());
 }
 
 bool DeclarativeContentPageUrlConditionTracker::IsEmpty() const {

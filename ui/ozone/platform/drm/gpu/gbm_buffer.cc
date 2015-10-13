@@ -10,8 +10,10 @@
 #include <xf86drm.h>
 
 #include "base/logging.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gfx/native_pixmap_handle_ozone.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
 #include "ui/ozone/platform/drm/gpu/gbm_device.h"
 
@@ -19,11 +21,11 @@ namespace ui {
 
 namespace {
 
-int GetGbmFormatFromBufferFormat(SurfaceFactoryOzone::BufferFormat fmt) {
+int GetGbmFormatFromBufferFormat(gfx::BufferFormat fmt) {
   switch (fmt) {
-    case SurfaceFactoryOzone::BGRA_8888:
+    case gfx::BufferFormat::BGRA_8888:
       return GBM_BO_FORMAT_ARGB8888;
-    case SurfaceFactoryOzone::RGBX_8888:
+    case gfx::BufferFormat::BGRX_8888:
       return GBM_BO_FORMAT_XRGB8888;
     default:
       NOTREACHED();
@@ -47,21 +49,23 @@ GbmBuffer::~GbmBuffer() {
 // static
 scoped_refptr<GbmBuffer> GbmBuffer::CreateBuffer(
     const scoped_refptr<GbmDevice>& gbm,
-    SurfaceFactoryOzone::BufferFormat format,
+    gfx::BufferFormat format,
     const gfx::Size& size,
-    bool scanout) {
+    gfx::BufferUsage usage) {
   TRACE_EVENT2("drm", "GbmBuffer::CreateBuffer", "device",
                gbm->device_path().value(), "size", size.ToString());
+  bool use_scanout = (usage == gfx::BufferUsage::SCANOUT);
   unsigned flags = GBM_BO_USE_RENDERING;
-  if (scanout)
+  // GBM_BO_USE_SCANOUT is the hint of x-tiling.
+  if (use_scanout)
     flags |= GBM_BO_USE_SCANOUT;
   gbm_bo* bo = gbm_bo_create(gbm->device(), size.width(), size.height(),
                              GetGbmFormatFromBufferFormat(format), flags);
   if (!bo)
     return NULL;
 
-  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(gbm, bo, scanout));
-  if (scanout && !buffer->GetFramebufferId())
+  scoped_refptr<GbmBuffer> buffer(new GbmBuffer(gbm, bo, use_scanout));
+  if (use_scanout && !buffer->GetFramebufferId())
     return NULL;
 
   return buffer;
@@ -90,6 +94,20 @@ void GbmPixmap::SetScalingCallback(const ScalingCallback& scaling_callback) {
 
 scoped_refptr<NativePixmap> GbmPixmap::GetScaledPixmap(gfx::Size new_size) {
   return scaling_callback_.Run(new_size);
+}
+
+gfx::NativePixmapHandle GbmPixmap::ExportHandle() {
+  gfx::NativePixmapHandle handle;
+
+  int dmabuf_fd = HANDLE_EINTR(dup(dma_buf_));
+  if (dmabuf_fd < 0) {
+    PLOG(ERROR) << "dup";
+    return handle;
+  }
+
+  handle.fd = base::FileDescriptor(dmabuf_fd, true /* auto_close */);
+  handle.stride = gbm_bo_get_stride(buffer_->bo());
+  return handle;
 }
 
 GbmPixmap::~GbmPixmap() {

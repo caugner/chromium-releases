@@ -93,14 +93,15 @@ struct SpdyNetworkTransactionTestParams {
 
 void UpdateSpdySessionDependencies(SpdyNetworkTransactionTestParams test_params,
                                    SpdySessionDependencies* session_deps) {
-  session_deps->use_alternate_protocols = true;
+  session_deps->use_alternative_services = true;
   session_deps->next_protos = SpdyNextProtos();
   if (test_params.ssl_type == HTTP_SPDY_VIA_ALT_SVC) {
+    base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
     session_deps->http_server_properties.SetAlternativeService(
         HostPortPair("www.example.org", 80),
         AlternativeService(AlternateProtocolFromNextProto(test_params.protocol),
                            "www.example.org", 443),
-        1);
+        1.0, expiration);
   }
 }
 
@@ -786,7 +787,7 @@ TEST_P(SpdyNetworkTransactionTest, GetAtEachPriority) {
           FAIL();
       }
     } else {
-      switch(p) {
+      switch (p) {
         case HIGHEST:
           EXPECT_EQ(0, spdy_prio);
           break;
@@ -1081,9 +1082,8 @@ TEST_P(SpdyNetworkTransactionTest, TwoGetsLateBindingFromPreconnect) {
       helper.session()->http_stream_factory();
   helper.session()->GetNextProtos(&preconnect_ssl_config.next_protos);
 
-  http_stream_factory->PreconnectStreams(
-      1, httpreq, DEFAULT_PRIORITY,
-      preconnect_ssl_config, preconnect_ssl_config);
+  http_stream_factory->PreconnectStreams(1, httpreq, preconnect_ssl_config,
+                                         preconnect_ssl_config);
 
   out.rv = trans1->Start(&httpreq, callback1.callback(), log);
   ASSERT_EQ(ERR_IO_PENDING, out.rv);
@@ -5467,13 +5467,16 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyWithHeaders) {
   EXPECT_EQ(ERR_SPDY_PROTOCOL_ERROR, out.rv);
 }
 
-TEST_P(SpdyNetworkTransactionTest, SynReplyWithLateHeaders) {
+// Tests that receiving HEADERS, DATA, HEADERS, and DATA in that sequence will
+// trigger a ERR_SPDY_PROTOCOL_ERROR because trailing HEADERS must not be
+// followed by any DATA frames.
+TEST_P(SpdyNetworkTransactionTest, SyncReplyDataAfterTrailers) {
   scoped_ptr<SpdyFrame> req(
       spdy_util_.ConstructSpdyGet(NULL, 0, false, 1, LOWEST, true));
   scoped_ptr<SpdyFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_PROTOCOL_ERROR));
   MockWrite writes[] = {
-      CreateMockWrite(*req, 0), CreateMockWrite(*rst, 4),
+      CreateMockWrite(*req, 0), CreateMockWrite(*rst, 5),
   };
 
   scoped_ptr<SpdyFrame> stream1_reply(
@@ -5494,10 +5497,8 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyWithLateHeaders) {
   scoped_ptr<SpdyFrame> stream1_body2(
       spdy_util_.ConstructSpdyBodyFrame(1, true));
   MockRead reads[] = {
-      CreateMockRead(*stream1_reply, 1),
-      CreateMockRead(*stream1_body, 2),
-      CreateMockRead(*stream1_headers, 3),
-      CreateMockRead(*stream1_body2, 5),
+      CreateMockRead(*stream1_reply, 1), CreateMockRead(*stream1_body, 2),
+      CreateMockRead(*stream1_headers, 3), CreateMockRead(*stream1_body2, 4),
       MockRead(ASYNC, 0, 6)  // EOF
   };
 

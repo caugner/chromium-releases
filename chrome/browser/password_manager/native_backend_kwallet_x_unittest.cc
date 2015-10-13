@@ -131,6 +131,10 @@ void CheckGetAutofillableLoginsFails(
   EXPECT_FALSE(backend->GetAutofillableLogins(forms));
 }
 
+void CheckTrue(bool result) {
+  EXPECT_TRUE(result);
+}
+
 }  // anonymous namespace
 
 // Obscure magic: we need to declare storage for this constant because we use it
@@ -166,11 +170,10 @@ class NativeBackendKWalletTestBase : public testing::Test {
     form_google_.times_used = 3;
     form_google_.type = PasswordForm::TYPE_GENERATED;
     form_google_.form_data.name = UTF8ToUTF16("form_name");
-    form_google_.form_data.user_submitted = true;
     form_google_.date_synced = base::Time::Now();
     form_google_.date_created = old_form_google_.date_created;
     form_google_.display_name = UTF8ToUTF16("Joe Schmoe");
-    form_google_.avatar_url = GURL("http://www.google.com/avatar");
+    form_google_.icon_url = GURL("http://www.google.com/icon");
     form_google_.federation_url = GURL("http://www.google.com/federation_url");
     form_google_.skip_zero_click = true;
     form_google_.generation_upload_status = PasswordForm::NEGATIVE_SIGNAL_SENT;
@@ -226,7 +229,7 @@ void NativeBackendKWalletTestBase::CheckPasswordForm(
   EXPECT_EQ(expected.scheme, actual.scheme);
   EXPECT_EQ(expected.date_synced, actual.date_synced);
   EXPECT_EQ(expected.display_name, actual.display_name);
-  EXPECT_EQ(expected.avatar_url, actual.avatar_url);
+  EXPECT_EQ(expected.icon_url, actual.icon_url);
   EXPECT_EQ(expected.federation_url, actual.federation_url);
   EXPECT_EQ(expected.skip_zero_click, actual.skip_zero_click);
   EXPECT_EQ(expected.generation_upload_status, actual.generation_upload_status);
@@ -412,9 +415,7 @@ void NativeBackendKWalletTest::TestRemoveLoginsBetween(
       FROM_HERE,
       base::Bind(
           method, base::Unretained(&backend), base::Time(), next_day, &changes),
-      base::Bind(&NativeBackendKWalletTest::CheckPasswordChangesWithResult,
-                 &expected_changes,
-                 &changes));
+      base::Bind(&CheckPasswordChangesWithResult, &expected_changes, &changes));
   RunDBThread();
 
   std::vector<const PasswordForm*> forms;
@@ -432,9 +433,7 @@ void NativeBackendKWalletTest::TestRemoveLoginsBetween(
       FROM_HERE,
       base::Bind(
           method, base::Unretained(&backend), next_day, base::Time(), &changes),
-      base::Bind(&NativeBackendKWalletTest::CheckPasswordChangesWithResult,
-                 &expected_changes,
-                 &changes));
+      base::Bind(&CheckPasswordChangesWithResult, &expected_changes, &changes));
   RunDBThread();
 
   CheckPasswordForms("Chrome Form Data (42)", ExpectationArray());
@@ -660,10 +659,13 @@ TEST_F(NativeBackendKWalletTest, BasicAddLogin) {
   NativeBackendKWalletStub backend(42);
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
-                 base::Unretained(&backend), form_google_));
+      base::Bind(&NativeBackendKWalletStub::AddLogin,
+                 base::Unretained(&backend), form_google_),
+      base::Bind(&CheckPasswordChanges,
+                 PasswordStoreChangeList(1, PasswordStoreChange(
+                     PasswordStoreChange::ADD, form_google_))));
 
   RunDBThread();
 
@@ -693,12 +695,15 @@ TEST_F(NativeBackendKWalletTest, BasicUpdateLogin) {
 
   // Update login
   PasswordStoreChangeList changes;
-  BrowserThread::PostTask(
+  PasswordStoreChangeList expected_changes(
+      1, PasswordStoreChange(PasswordStoreChange::UPDATE, new_form_google));
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::UpdateLogin),
+      base::Bind(&NativeBackendKWalletStub::UpdateLogin,
                  base::Unretained(&backend),
                  new_form_google,
-                 base::Unretained(&changes)));
+                 &changes),
+      base::Bind(&CheckPasswordChangesWithResult, &expected_changes, &changes));
   RunDBThread();
 
   ASSERT_EQ(1u, changes.size());
@@ -722,11 +727,11 @@ TEST_F(NativeBackendKWalletTest, BasicListLogins) {
                  base::Unretained(&backend), form_google_));
 
   ScopedVector<autofill::PasswordForm> form_list;
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&NativeBackendKWalletStub::GetAutofillableLogins),
-          base::Unretained(&backend), &form_list));
+      base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
+                 base::Unretained(&backend), &form_list),
+      base::Bind(&CheckTrue));
 
   RunDBThread();
 
@@ -761,10 +766,14 @@ TEST_F(NativeBackendKWalletTest, BasicRemoveLogin) {
   expected.push_back(make_pair(std::string(form_google_.signon_realm), forms));
   CheckPasswordForms("Chrome Form Data (42)", expected);
 
-  BrowserThread::PostTask(
+  PasswordStoreChangeList changes;
+  PasswordStoreChangeList expected_changes(
+      1, PasswordStoreChange(PasswordStoreChange::REMOVE, form_google_));
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::RemoveLogin),
-                 base::Unretained(&backend), form_google_));
+      base::Bind(&NativeBackendKWalletStub::RemoveLogin,
+                 base::Unretained(&backend), form_google_, &changes),
+      base::Bind(&CheckPasswordChangesWithResult, &expected_changes, &changes));
 
   RunDBThread();
 
@@ -792,12 +801,14 @@ TEST_F(NativeBackendKWalletTest, UpdateNonexistentLogin) {
 
   // Attempt to update a login that doesn't exist.
   PasswordStoreChangeList changes;
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::UpdateLogin),
+      base::Bind(&NativeBackendKWalletStub::UpdateLogin,
                  base::Unretained(&backend),
                  form_isc_,
-                 base::Unretained(&changes)));
+                 &changes),
+      base::Bind(&CheckPasswordChangesWithResult,
+                 base::Owned(new PasswordStoreChangeList), &changes));
 
   RunDBThread();
 
@@ -826,18 +837,21 @@ TEST_F(NativeBackendKWalletTest, RemoveNonexistentLogin) {
   CheckPasswordForms("Chrome Form Data (42)", expected);
 
   // Attempt to remove a login that doesn't exist.
-  BrowserThread::PostTask(
+  PasswordStoreChangeList changes;
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::RemoveLogin),
-                 base::Unretained(&backend), form_isc_));
+      base::Bind(&NativeBackendKWalletStub::RemoveLogin,
+                 base::Unretained(&backend), form_isc_, &changes),
+      base::Bind(&CheckPasswordChangesWithResult,
+                 base::Owned(new PasswordStoreChangeList), &changes));
 
   // Make sure we can still get the first form back.
   ScopedVector<autofill::PasswordForm> form_list;
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&NativeBackendKWalletStub::GetAutofillableLogins),
-          base::Unretained(&backend), &form_list));
+      base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
+                 base::Unretained(&backend), &form_list),
+      base::Bind(&CheckTrue));
 
   RunDBThread();
 
@@ -865,6 +879,7 @@ TEST_F(NativeBackendKWalletTest, AddDuplicateLogin) {
   changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE,
                                         form_google_));
   form_google_.times_used++;
+  form_google_.submit_element = UTF8ToUTF16("submit2");
   changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD,
                                         form_google_));
 
@@ -898,17 +913,20 @@ TEST_F(NativeBackendKWalletTest, AndroidCredentials) {
   saved_android_form.username_value = base::UTF8ToUTF16("randomusername");
   saved_android_form.password_value = base::UTF8ToUTF16("password");
 
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
-                 base::Unretained(&backend), saved_android_form));
+      base::Bind(&NativeBackendKWalletStub::AddLogin,
+                 base::Unretained(&backend), saved_android_form),
+      base::Bind(&CheckPasswordChanges,
+                 PasswordStoreChangeList(1, PasswordStoreChange(
+                     PasswordStoreChange::ADD, saved_android_form))));
 
   ScopedVector<autofill::PasswordForm> form_list;
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&NativeBackendKWalletStub::GetLogins),
-          base::Unretained(&backend), observed_android_form, &form_list));
+      base::Bind(&NativeBackendKWalletStub::GetLogins,
+                 base::Unretained(&backend), observed_android_form, &form_list),
+      base::Bind(&CheckTrue));
 
   RunDBThread();
 
@@ -928,6 +946,58 @@ TEST_F(NativeBackendKWalletTest, RemoveLoginsCreatedBetween) {
 
 TEST_F(NativeBackendKWalletTest, RemoveLoginsSyncedBetween) {
   TestRemoveLoginsBetween(SYNCED);
+}
+
+TEST_F(NativeBackendKWalletTest, ReadDuplicateForms) {
+  NativeBackendKWalletStub backend(42);
+  EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
+
+  // Add 2 slightly different password forms.
+  const char unique_string[] = "unique_unique_string";
+  const char unique_string_replacement[] = "uniKue_unique_string";
+  form_google_.origin =
+      GURL(std::string("http://www.google.com/") + unique_string);
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
+                 base::Unretained(&backend), form_google_));
+  form_google_.origin =
+      GURL(std::string("http://www.google.com/") + unique_string_replacement);
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
+                 base::Unretained(&backend), form_google_));
+  RunDBThread();
+
+  // Read the raw value back. Change the |unique_string| to
+  // |unique_string_replacement| so the forms become unique.
+  TestKWallet::Blob value;
+  ASSERT_TRUE(wallet_.readEntry("Chrome Form Data (42)",
+                                form_google_.signon_realm, &value));
+  TestKWallet::Blob sample(reinterpret_cast<const uint8_t*>(unique_string));
+  size_t position = value.find(sample);
+  ASSERT_NE(TestKWallet::Blob::npos, position);
+  value.replace(position, sample.length(),
+                reinterpret_cast<const uint8_t*>(unique_string_replacement));
+  wallet_.writeEntry("Chrome Form Data (42)", form_google_.signon_realm, value);
+
+  // Now test that GetAutofillableLogins returns only one form.
+  ScopedVector<autofill::PasswordForm> form_list;
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
+                 base::Unretained(&backend), &form_list),
+      base::Bind(&CheckTrue));
+  RunDBThread();
+
+  EXPECT_EQ(1u, form_list.size());
+  EXPECT_EQ(form_google_, *form_list[0]);
+
+  std::vector<const PasswordForm*> forms;
+  forms.push_back(&form_google_);
+  ExpectationArray expected;
+  expected.push_back(make_pair(std::string(form_google_.signon_realm), forms));
+  CheckPasswordForms("Chrome Form Data (42)", expected);
 }
 
 // TODO(mdm): add more basic tests here at some point.
@@ -985,7 +1055,7 @@ void NativeBackendKWalletPickleTest::CreateVersion1PlusPickle(
   if (effective_version < 4)
     return;
   pickle->WriteString16(form.display_name);
-  pickle->WriteString(form.avatar_url.spec());
+  pickle->WriteString(form.icon_url.spec());
   pickle->WriteString(form.federation_url.spec());
   pickle->WriteBool(form.skip_zero_click);
   if (effective_version < 7)
@@ -1067,7 +1137,7 @@ void NativeBackendKWalletPickleTest::CheckVersion3Pickle() {
   PasswordForm form = form_google_;
   // Remove the fields which were not present in version #3.
   form.display_name = default_values.display_name;
-  form.avatar_url = default_values.avatar_url;
+  form.icon_url = default_values.icon_url;
   form.federation_url = default_values.federation_url;
   form.skip_zero_click = default_values.skip_zero_click;
   form.generation_upload_status = default_values.generation_upload_status;
@@ -1134,10 +1204,13 @@ TEST_F(NativeBackendKWalletTest, GetAllLoginsErrorHandling) {
   failing_methods_.insert("readEntry");
 
   // Store some non-blacklisted logins to be potentially returned.
-  BrowserThread::PostTask(
+  BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
-                 base::Unretained(&backend), form_google_));
+      base::Bind(&NativeBackendKWalletStub::AddLogin,
+                 base::Unretained(&backend), form_google_),
+      base::Bind(&CheckPasswordChanges,
+                 PasswordStoreChangeList(1, PasswordStoreChange(
+                      PasswordStoreChange::ADD, form_google_))));
 
   // Verify that nothing is in fact returned, because KWallet fails to respond.
   ScopedVector<autofill::PasswordForm> form_list;

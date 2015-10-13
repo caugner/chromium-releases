@@ -30,10 +30,12 @@ class SyncBackendHostMock : public SyncBackendHost {
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       const syncer::SyncCredentials& credentials,
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
       const base::Closure& report_unrecoverable_error_function,
       syncer::NetworkResources* network_resources,
       scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state)
@@ -71,7 +73,7 @@ class SyncBackendHostMock : public SyncBackendHost {
 
   syncer::UserShare* GetUserShare() const override;
 
-  scoped_ptr<syncer::SyncContextProxy> GetSyncContextProxy() override;
+  scoped_ptr<syncer_v2::SyncContextProxy> GetSyncContextProxy() override;
 
   Status GetDetailedStatus() override;
 
@@ -107,6 +109,9 @@ class SyncBackendHostMock : public SyncBackendHost {
   base::MessageLoop* GetSyncLoopForTesting() override;
 
   void RefreshTypesForTest(syncer::ModelTypeSet types) override;
+
+  void ClearServerData(
+      const syncer::SyncManager::ClearServerDataCallback& callback) override;
 
   void set_fail_initial_download(bool should_fail);
 

@@ -17,7 +17,6 @@
 #include "content/public/renderer/render_process_observer.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_set.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/renderer/resource_bundle_source_map.h"
@@ -74,8 +73,6 @@ class Dispatcher : public content::RenderProcessObserver,
     return function_names_;
   }
 
-  const ExtensionSet* extensions() const { return &extensions_; }
-
   const ScriptContextSet& script_context_set() const {
     return *script_context_set_;
   }
@@ -95,9 +92,17 @@ class Dispatcher : public content::RenderProcessObserver,
                               int extension_group,
                               int world_id);
 
+  // Runs on a different thread and should not use any member variables.
+  static void DidInitializeServiceWorkerContextOnWorkerThread(
+      v8::Local<v8::Context> v8_context,
+      const GURL& url);
+
   void WillReleaseScriptContext(blink::WebLocalFrame* frame,
                                 const v8::Local<v8::Context>& context,
                                 int world_id);
+
+  // Runs on a different thread and should not use any member variables.
+  static void WillDestroyServiceWorkerContextOnWorkerThread(const GURL& url);
 
   void DidCreateDocumentElement(blink::WebLocalFrame* frame);
 
@@ -133,16 +138,10 @@ class Dispatcher : public content::RenderProcessObserver,
 
  private:
   // The RendererPermissionsPolicyDelegateTest.CannotScriptWebstore test needs
-  // to call LoadExtensionForTest and the OnActivateExtension IPCs.
+  // to call the OnActivateExtension IPCs.
   friend class ::ChromeRenderViewTest;
   FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
                            CannotScriptWebstore);
-
-  // Inserts an Extension into |extensions_|. Normally the only way to do this
-  // would be through the ExtensionMsg_Loaded IPC (OnLoaded) but this can't be
-  // triggered for tests, because in the process of serializing then
-  // deserializing the IPC, Extension IDs manually set for testing are lost.
-  void LoadExtensionForTest(const Extension* extension);
 
   // RenderProcessObserver implementation:
   bool OnControlMessageReceived(const IPC::Message& message) override;
@@ -246,17 +245,15 @@ class Dispatcher : public content::RenderProcessObserver,
   // |context|.
   void RequireGuestViewModules(ScriptContext* context);
 
+  // Adds features that are specific to the current channel.
+  void AddChannelSpecificFeatures();
+
   // The delegate for this dispatcher. Not owned, but must extend beyond the
   // Dispatcher's own lifetime.
   DispatcherDelegate* delegate_;
 
   // True if the IdleNotification timer should be set.
   bool set_idle_notifications_;
-
-  // Contains all loaded extensions.  This is essentially the renderer
-  // counterpart to ExtensionService in the browser. It contains information
-  // about all extensions currently loaded by the browser.
-  ExtensionSet extensions_;
 
   // The IDs of extensions that failed to load, mapped to the error message
   // generated on failure.

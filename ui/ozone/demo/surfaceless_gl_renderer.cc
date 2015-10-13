@@ -8,8 +8,10 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
+#include "ui/gl/gl_image_ozone_native_pixmap.h"
 #include "ui/gl/gl_surface.h"
-#include "ui/ozone/gpu/gpu_memory_buffer_factory_ozone_native_buffer.h"
+#include "ui/ozone/public/ozone_platform.h"
+#include "ui/ozone/public/surface_factory_ozone.h"
 
 namespace ui {
 
@@ -28,28 +30,23 @@ SurfacelessGlRenderer::BufferWrapper::~BufferWrapper() {
 }
 
 bool SurfacelessGlRenderer::BufferWrapper::Initialize(
-    GpuMemoryBufferFactoryOzoneNativeBuffer* buffer_factory,
     gfx::AcceleratedWidget widget,
     const gfx::Size& size) {
   glGenFramebuffersEXT(1, &gl_fb_);
   glGenTextures(1, &gl_tex_);
 
-  static int buffer_id_generator = 1;
-  int id = buffer_id_generator++;
-
-  buffer_factory->CreateGpuMemoryBuffer(
-      id, size, gfx::GpuMemoryBuffer::RGBX_8888, gfx::GpuMemoryBuffer::SCANOUT,
-      1, widget);
-  image_ = buffer_factory->CreateImageForGpuMemoryBuffer(
-      id, size, gfx::GpuMemoryBuffer::RGBX_8888, GL_RGB, 1);
-  // Now that we have a reference to |image_|; we can just remove it from the
-  // factory mapping.
-  buffer_factory->DestroyGpuMemoryBuffer(id, widget);
-
-  if (!image_) {
-    LOG(ERROR) << "Failed to create GL image";
+  scoped_refptr<NativePixmap> pixmap =
+      OzonePlatform::GetInstance()
+          ->GetSurfaceFactoryOzone()
+          ->CreateNativePixmap(widget, size, gfx::BufferFormat::BGRX_8888,
+                               gfx::BufferUsage::SCANOUT);
+  scoped_refptr<gfx::GLImageOzoneNativePixmap> image(
+      new gfx::GLImageOzoneNativePixmap(size, GL_RGB));
+  if (!image->Initialize(pixmap.get(), gfx::BufferFormat::BGRX_8888)) {
+    LOG(ERROR) << "Failed to create GLImage";
     return false;
   }
+  image_ = image;
 
   glBindFramebufferEXT(GL_FRAMEBUFFER, gl_fb_);
   glBindTexture(GL_TEXTURE_2D, gl_tex_);
@@ -78,14 +75,9 @@ void SurfacelessGlRenderer::BufferWrapper::SchedulePlane() {
                                gfx::Rect(size_), gfx::RectF(0, 0, 1, 1));
 }
 
-SurfacelessGlRenderer::SurfacelessGlRenderer(
-    gfx::AcceleratedWidget widget,
-    const gfx::Size& size,
-    GpuMemoryBufferFactoryOzoneNativeBuffer* buffer_factory)
-    : GlRenderer(widget, size),
-      buffer_factory_(buffer_factory),
-      weak_ptr_factory_(this) {
-}
+SurfacelessGlRenderer::SurfacelessGlRenderer(gfx::AcceleratedWidget widget,
+                                             const gfx::Size& size)
+    : GlRenderer(widget, size), weak_ptr_factory_(this) {}
 
 SurfacelessGlRenderer::~SurfacelessGlRenderer() {
   // Need to make current when deleting the framebuffer resources allocated in
@@ -98,7 +90,7 @@ bool SurfacelessGlRenderer::Initialize() {
     return false;
 
   for (size_t i = 0; i < arraysize(buffers_); ++i)
-    if (!buffers_[i].Initialize(buffer_factory_, widget_, size_))
+    if (!buffers_[i].Initialize(widget_, size_))
       return false;
 
   PostRenderFrameTask(gfx::SwapResult::SWAP_ACK);
@@ -112,7 +104,7 @@ void SurfacelessGlRenderer::RenderFrame() {
   buffers_[back_buffer_].BindFramebuffer();
 
   glViewport(0, 0, size_.width(), size_.height());
-  glClearColor(1 - fraction, fraction, 0.0, 1.0);
+  glClearColor(1 - fraction, 0.0, fraction, 1.0);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   buffers_[back_buffer_].SchedulePlane();

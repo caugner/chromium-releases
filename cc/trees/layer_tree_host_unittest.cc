@@ -272,6 +272,79 @@ class LayerTreeHostTestReadyToDrawNonEmpty
 // single threaded mode.
 SINGLE_THREAD_TEST_F(LayerTreeHostTestReadyToDrawNonEmpty);
 
+// This tests if we get the READY_TO_DRAW signal and draw if we become invisible
+// and then become visible again.
+class LayerTreeHostTestReadyToDrawVisibility : public LayerTreeHostTest {
+ public:
+  LayerTreeHostTestReadyToDrawVisibility()
+      : LayerTreeHostTest(),
+        toggled_visibility_(false),
+        did_notify_ready_to_draw_(false),
+        did_draw_(false) {}
+
+  void BeginTest() override { PostSetNeedsCommitToMainThread(); }
+
+  void SetupTree() override {
+    client_.set_fill_with_nonsolid_color(true);
+    scoped_refptr<FakePictureLayer> root_layer =
+        FakePictureLayer::Create(layer_settings(), &client_);
+    root_layer->SetBounds(gfx::Size(1024, 1024));
+    root_layer->SetIsDrawable(true);
+
+    layer_tree_host()->SetRootLayer(root_layer);
+    LayerTreeHostTest::SetupTree();
+  }
+
+  void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) override {
+    if (!toggled_visibility_) {
+      {
+        DebugScopedSetMainThread main(proxy());
+        layer_tree_host()->SetVisible(false);
+      }
+      toggled_visibility_ = true;
+      EXPECT_FALSE(host_impl->visible());
+    }
+  }
+
+  void NotifyReadyToDrawOnThread(LayerTreeHostImpl* host_impl) override {
+    // Sometimes the worker thread posts NotifyReadyToDraw in the extremely
+    // short duration of time between PrepareTiles and SetVisible(false) so we
+    // might get two NotifyReadyToDraw signals for this test.
+    did_notify_ready_to_draw_ = true;
+  }
+
+  void DrawLayersOnThread(LayerTreeHostImpl* host_impl) override {
+    EXPECT_FALSE(did_draw_);
+    did_draw_ = true;
+    EndTest();
+  }
+
+  void DidFinishImplFrameOnThread(LayerTreeHostImpl* host_impl) override {
+    if (!host_impl->visible()) {
+      {
+        DebugScopedSetMainThread main(proxy());
+        layer_tree_host()->SetVisible(true);
+      }
+      EXPECT_TRUE(host_impl->visible());
+    }
+  }
+
+  void AfterTest() override {
+    EXPECT_TRUE(did_notify_ready_to_draw_);
+    EXPECT_TRUE(did_draw_);
+  }
+
+ private:
+  FakeContentLayerClient client_;
+  bool toggled_visibility_;
+  bool did_notify_ready_to_draw_;
+  bool did_draw_;
+};
+
+// Note: With this test setup, we only get tiles flagged as REQUIRED_FOR_DRAW in
+// single threaded mode.
+SINGLE_THREAD_TEST_F(LayerTreeHostTestReadyToDrawVisibility);
+
 class LayerTreeHostFreeWorkerContextResourcesTest : public LayerTreeHostTest {
  public:
   scoped_ptr<FakeOutputSurface> CreateFakeOutputSurface() override {
@@ -1242,22 +1315,24 @@ class LayerTreeHostTestStartPageScaleAnimation : public LayerTreeHostTest {
   void SetupTree() override {
     LayerTreeHostTest::SetupTree();
 
+    Layer* root_layer = layer_tree_host()->root_layer();
+
     scoped_refptr<FakePictureLayer> layer =
         FakePictureLayer::Create(layer_settings(), &client_);
     layer->set_always_update_resources(true);
     scroll_layer_ = layer;
 
-    Layer* root_layer = layer_tree_host()->root_layer();
-    scroll_layer_->SetScrollClipLayerId(root_layer->id());
-    scroll_layer_->SetIsContainerForFixedPositionLayers(true);
     scroll_layer_->SetBounds(gfx::Size(2 * root_layer->bounds().width(),
                                        2 * root_layer->bounds().height()));
     scroll_layer_->SetScrollOffset(gfx::ScrollOffset());
-    layer_tree_host()->root_layer()->AddChild(scroll_layer_);
-    // This test requires the page_scale and inner viewport layers to be
-    // identified.
-    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
-                                              scroll_layer_.get(), NULL);
+
+    CreateVirtualViewportLayers(root_layer,
+                                scroll_layer_,
+                                root_layer->bounds(),
+                                root_layer->bounds(),
+                                layer_tree_host(),
+                                layer_settings());
+
     layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.5f, 2.f);
   }
 
@@ -1359,6 +1434,7 @@ class TestOpacityChangeLayerDelegate : public ContentLayerClient {
     return nullptr;
   }
   bool FillsBoundsCompletely() const override { return false; }
+  size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
 
  private:
   Layer* test_layer_;
@@ -1900,7 +1976,8 @@ class LayerTreeHostTestAbortedCommitDoesntStallDisabledVsync
     : public LayerTreeHostTestAbortedCommitDoesntStall {
   void InitializeSettings(LayerTreeSettings* settings) override {
     LayerTreeHostTestAbortedCommitDoesntStall::InitializeSettings(settings);
-    settings->renderer_settings.disable_gpu_vsync = true;
+    settings->wait_for_beginframe_interval = false;
+    settings->renderer_settings.disable_display_vsync = true;
   }
 };
 
@@ -1956,6 +2033,7 @@ class LayerTreeHostTestChangeLayerPropertiesInPaintContents
     }
 
     bool FillsBoundsCompletely() const override { return false; }
+    size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
 
    private:
     Layer* layer_;
@@ -6056,6 +6134,72 @@ class LayerTreeTestPageScaleFlags : public LayerTreeTest {
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeTestPageScaleFlags);
+
+class LayerTreeHostScrollingAndScalingUpdatesLayers : public LayerTreeHostTest {
+ public:
+  LayerTreeHostScrollingAndScalingUpdatesLayers()
+      : requested_update_layers_(false), commit_count_(0) {}
+
+  void SetupTree() override {
+    LayerTreeHostTest::SetupTree();
+    Layer* root_layer = layer_tree_host()->root_layer();
+    scoped_refptr<Layer> scroll_layer = Layer::Create(layer_settings());
+    CreateVirtualViewportLayers(root_layer, scroll_layer, root_layer->bounds(),
+                                root_layer->bounds(), layer_tree_host(),
+                                layer_settings());
+  }
+
+  void BeginTest() override {
+    LayerTreeHostCommon::ScrollUpdateInfo scroll;
+    scroll.layer_id = layer_tree_host()->root_layer()->id();
+    scroll.scroll_delta = gfx::Vector2d(0, 33);
+    scroll_info_.scrolls.push_back(scroll);
+
+    scale_info_.page_scale_delta = 2.71f;
+
+    PostSetNeedsCommitToMainThread();
+  }
+
+  void BeginMainFrame(const BeginFrameArgs& args) override {
+    switch (commit_count_) {
+      case 0:
+        requested_update_layers_ = false;
+        layer_tree_host()->ApplyScrollAndScale(&no_op_info_);
+        EXPECT_FALSE(requested_update_layers_);
+        break;
+      case 1:
+        requested_update_layers_ = false;
+        layer_tree_host()->ApplyScrollAndScale(&scale_info_);
+        EXPECT_TRUE(requested_update_layers_);
+        break;
+      case 2:
+        requested_update_layers_ = false;
+        layer_tree_host()->ApplyScrollAndScale(&scroll_info_);
+        EXPECT_TRUE(requested_update_layers_);
+        EndTest();
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
+  void DidSetNeedsUpdateLayers() override { requested_update_layers_ = true; }
+
+  void DidCommit() override {
+    if (++commit_count_ < 3)
+      PostSetNeedsCommitToMainThread();
+  }
+
+  void AfterTest() override {}
+
+  ScrollAndScaleSet scroll_info_;
+  ScrollAndScaleSet scale_info_;
+  ScrollAndScaleSet no_op_info_;
+  bool requested_update_layers_;
+  int commit_count_;
+};
+
+MULTI_THREAD_TEST_F(LayerTreeHostScrollingAndScalingUpdatesLayers);
 
 }  // namespace
 }  // namespace cc

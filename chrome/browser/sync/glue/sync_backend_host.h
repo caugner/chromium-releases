@@ -20,7 +20,6 @@
 #include "sync/internal_api/public/sync_context_proxy.h"
 #include "sync/internal_api/public/sync_manager.h"
 #include "sync/internal_api/public/sync_manager_factory.h"
-#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 
 class GURL;
@@ -32,6 +31,7 @@ class MessageLoop;
 namespace syncer {
 class NetworkResources;
 class SyncManagerFactory;
+class UnrecoverableErrorHandler;
 }
 
 namespace sync_driver {
@@ -57,8 +57,6 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
   // Optionally deletes the "Sync Data" folder during init in order to make
   // sure we're starting fresh.
   //
-  // Note: |unrecoverable_error_handler| may be invoked from any thread.
-  //
   // |saved_nigori_state| is optional nigori state to restore from a previous
   // backend instance. May be null.
   virtual void Initialize(
@@ -66,10 +64,12 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
       const GURL& service_url,
+      const std::string& sync_user_agent,
       const syncer::SyncCredentials& credentials,
       bool delete_sync_data_folder,
       scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-      scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
+      const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+          unrecoverable_error_handler,
       const base::Closure& report_unrecoverable_error_function,
       syncer::NetworkResources* network_resources,
       scoped_ptr<syncer::SyncEncryptionHandler::NigoriState>
@@ -157,7 +157,7 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
   // the non-blocking sync types to communicate with the server.
   //
   // Should be called only when the backend is initialized.
-  virtual scoped_ptr<syncer::SyncContextProxy> GetSyncContextProxy() = 0;
+  virtual scoped_ptr<syncer_v2::SyncContextProxy> GetSyncContextProxy() = 0;
 
   // Called from any thread to obtain current status information in detailed or
   // summarized form.
@@ -221,6 +221,10 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
 
   // Triggers sync cycle to update |types|.
   virtual void RefreshTypesForTest(syncer::ModelTypeSet types) = 0;
+
+  // See SyncManager::ClearServerData.
+  virtual void ClearServerData(
+      const syncer::SyncManager::ClearServerDataCallback& callback) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(SyncBackendHost);
 };

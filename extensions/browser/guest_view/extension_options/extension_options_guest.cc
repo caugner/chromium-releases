@@ -31,7 +31,7 @@
 using content::WebContents;
 using guest_view::GuestViewBase;
 using guest_view::GuestViewEvent;
-using namespace extensions::core_api;
+using namespace extensions::api;
 
 namespace extensions {
 
@@ -149,6 +149,10 @@ void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
   DispatchEventToView(new GuestViewEvent(
       extension_options_internal::OnPreferredSizeChanged::kEventName,
       options.ToValue()));
+}
+
+bool ExtensionOptionsGuest::ShouldHandleFindRequestsForEmbedder() const {
+  return true;
 }
 
 content::WebContents* ExtensionOptionsGuest::OpenURLFromTab(

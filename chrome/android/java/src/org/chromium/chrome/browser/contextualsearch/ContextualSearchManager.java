@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.contextualsearch;
 
 import android.app.Activity;
 import android.view.View;
+import android.view.View.MeasureSpec;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnGlobalFocusChangeListener;
@@ -13,12 +14,11 @@ import android.view.ViewTreeObserver.OnGlobalFocusChangeListener;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
-import org.chromium.base.CalledByNative;
 import org.chromium.base.SysUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.PanelState;
@@ -32,17 +32,22 @@ import org.chromium.chrome.browser.externalnav.ExternalNavigationParams;
 import org.chromium.chrome.browser.gsa.GSAContextDisplaySelection;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabRedirectHandler;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
+import org.chromium.chrome.browser.widget.findinpage.FindToolbarManager;
+import org.chromium.chrome.browser.widget.findinpage.FindToolbarObserver;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContextualSearchClient;
 import org.chromium.content_public.browser.GestureStateListener;
@@ -98,6 +103,8 @@ public class ContextualSearchManager extends ContextualSearchObservable
     private final ContextualSearchTabPromotionDelegate mTabPromotionDelegate;
     private TabModelSelectorTabObserver mTabModelSelectorTabObserver;
     private TabModelObserver mTabModelObserver;
+    private FindToolbarManager mFindToolbarManager;
+    private FindToolbarObserver mFindToolbarObserver;
     private boolean mIsSearchContentViewShowing;
     private boolean mDidLoadResolvedSearchRequest;
     private long mLoadedSearchUrlTimeMs;
@@ -213,6 +220,13 @@ public class ContextualSearchManager extends ContextualSearchObservable
 
         mTabModelObserver = new EmptyTabModelObserver() {
             @Override
+            public void didSelectTab(Tab tab, TabSelectionType type, int lastId) {
+                if (!mIsPromotingToTab && tab.getId() != lastId) {
+                    hideContextualSearch(StateChangeReason.UNKNOWN);
+                }
+            }
+
+            @Override
             public void didAddTab(Tab tab, TabLaunchType type) {
                 // If we're in the process of promoting this tab, just return and don't mess with
                 // this state.
@@ -243,6 +257,30 @@ public class ContextualSearchManager extends ContextualSearchObservable
     }
 
     /**
+     * Sets the {@link FindToolbarManager} and attaches an observer that dismisses the Contextual
+     * Search panel when the find toolbar is shown.
+     *
+     * @param findToolbarManager The {@link FindToolbarManager} for the current activity.
+     */
+    public void setFindToolbarManager(FindToolbarManager findToolbarManager) {
+        if (mFindToolbarManager != null) {
+            mFindToolbarManager.removeObserver(mFindToolbarObserver);
+        }
+
+        mFindToolbarManager = findToolbarManager;
+
+        if (mFindToolbarObserver == null) {
+            mFindToolbarObserver = new FindToolbarObserver() {
+                @Override
+                public void onFindToolbarShown() {
+                    hideContextualSearch(StateChangeReason.UNKNOWN);
+                }
+            };
+        }
+        mFindToolbarManager.addObserver(mFindToolbarObserver);
+    }
+
+    /**
      * Destroys the native Contextual Search Manager.
      * Call this method before orphaning this object to allow it to be garbage collected.
      */
@@ -255,11 +293,21 @@ public class ContextualSearchManager extends ContextualSearchObservable
         stopListeningForHideNotifications();
         mTabRedirectHandler.clear();
         ApplicationStatus.unregisterActivityStateListener(this);
+        if (mFindToolbarManager != null) {
+            mFindToolbarManager.removeObserver(mFindToolbarObserver);
+            mFindToolbarManager = null;
+            mFindToolbarObserver = null;
+        }
     }
 
     @Override
     public void setContextualSearchPanelDelegate(ContextualSearchPanelDelegate delegate) {
         mSearchPanelDelegate = delegate;
+    }
+
+    @Override
+    public boolean isCustomTab() {
+        return mActivity.isCustomTab();
     }
 
     /**
@@ -311,6 +359,11 @@ public class ContextualSearchManager extends ContextualSearchObservable
     @Override
     public boolean isPromoAvailable() {
         return mPolicy.isPromoAvailable();
+    }
+
+    @Override
+    public int getControlContainerHeightResource() {
+        return mActivity.getControlContainerHeightResource();
     }
 
     /**
@@ -422,6 +475,13 @@ public class ContextualSearchManager extends ContextualSearchObservable
      * @param stateChangeReason The reason explaining the change of state.
      */
     private void showContextualSearch(StateChangeReason stateChangeReason) {
+        if (mFindToolbarManager != null) {
+            mFindToolbarManager.hideToolbar(false);
+        }
+
+        // Dismiss the undo SnackBar if present by committing all tab closures.
+        mActivity.getTabModelSelector().commitAllTabClosures();
+
         if (!mSearchPanelDelegate.isShowing()) {
             // If visible, hide the infobar container before showing the Contextual Search panel.
             InfoBarContainer container = getInfoBarContainer();
@@ -849,6 +909,26 @@ public class ContextualSearchManager extends ContextualSearchObservable
         }
 
         mSearchContentViewCore = new ContentViewCore(mActivity);
+
+        // Adds a ContentViewClient to override the default fullscreen size.
+        if (!mSearchPanelDelegate.isFullscreenSizePanel()) {
+            mSearchContentViewCore.setContentViewClient(new ContentViewClient() {
+                @Override
+                public int getDesiredWidthMeasureSpec() {
+                    return MeasureSpec.makeMeasureSpec(
+                            mSearchPanelDelegate.getSearchContentViewWidthPx(),
+                            MeasureSpec.EXACTLY);
+                }
+
+                @Override
+                public int getDesiredHeightMeasureSpec() {
+                    return MeasureSpec.makeMeasureSpec(
+                            mSearchPanelDelegate.getSearchContentViewHeightPx(),
+                            MeasureSpec.EXACTLY);
+                }
+            });
+        }
+
         ContentView cv = new ContentView(mActivity, mSearchContentViewCore);
         // Creates an initially hidden WebContents which gets shown when the panel is opened.
         mSearchContentViewCore.initialize(cv, cv,
@@ -941,6 +1021,19 @@ public class ContextualSearchManager extends ContextualSearchObservable
      * @param url The URL we are navigating to.
      */
     private void onExternalNavigation(String url) {
+        if (mSearchPanelDelegate.isFullscreenSizePanel()) {
+            // Consider the ContentView height to be fullscreen, and inform the system that
+            // the Toolbar is always visible (from the Compositor's perspective), even though
+            // the Toolbar and Base Page might be offset outside the screen. This means the
+            // renderer will consider the ContentView height to be the fullscreen height
+            // minus the Toolbar height.
+            //
+            // This is necessary to fix the bugs: crbug.com/510205 and crbug.com/510206
+            mSearchContentViewCore.getWebContents().updateTopControlsState(false, true, false);
+        } else {
+            mSearchContentViewCore.getWebContents().updateTopControlsState(true, false, false);
+        }
+
         if (!mDidPromoteSearchNavigation
                 && !BLACKLISTED_URL.equals(url)
                 && !url.startsWith(INTENT_URL_PREFIX)

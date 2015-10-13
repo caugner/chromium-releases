@@ -6,7 +6,6 @@ import logging
 
 from telemetry.core import exceptions
 from telemetry.page import action_runner as action_runner_module
-from telemetry.page import test_expectations
 
 
 class TestNotSupportedOnPlatformError(Exception):
@@ -145,13 +144,8 @@ class PageTest(object):
     """Override to do operations right after the page is navigated and after
     all waiting for completion has occurred."""
 
-  def CleanUpAfterPage(self, page, tab):
+  def DidRunPage(self, platform):
     """Called after the test run method was run, even if it failed."""
-
-  def CreateExpectations(self, page_set):   # pylint: disable=W0613
-    """Override to make this test generate its own expectations instead of
-    any that may have been defined in the page set."""
-    return test_expectations.TestExpectations()
 
   def TabForPage(self, page, browser):   # pylint: disable=W0613
     """Override to select a different tab for the page.  For instance, to

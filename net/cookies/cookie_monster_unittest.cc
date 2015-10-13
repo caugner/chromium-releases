@@ -13,7 +13,6 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_samples.h"
@@ -23,6 +22,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/histogram_tester.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
@@ -97,7 +97,7 @@ struct CookieMonsterTestTraits {
   static const bool is_cookie_monster = true;
   static const bool supports_http_only = true;
   static const bool supports_non_dotted_domains = true;
-  static const bool supports_trailing_dots = true;
+  static const bool preserves_trailing_dots = true;
   static const bool filters_schemes = true;
   static const bool has_path_prefix_bug = false;
   static const int creation_time_granularity_in_ms = 0;
@@ -2809,6 +2809,68 @@ TEST_F(CookieMonsterTest, ControlCharacterPurge) {
   scoped_refptr<CookieMonster> cm(new CookieMonster(store.get(), NULL));
 
   EXPECT_EQ("foo=bar; hello=world", GetCookies(cm.get(), url));
+}
+
+// Test that cookie source schemes are histogrammed correctly.
+TEST_F(CookieMonsterTest, CookieSourceHistogram) {
+  base::HistogramTester histograms;
+  const std::string cookie_source_histogram = "Cookie.CookieSourceScheme";
+
+  scoped_refptr<MockPersistentCookieStore> store(new MockPersistentCookieStore);
+  scoped_refptr<CookieMonster> cm(new CookieMonster(store.get(), NULL));
+
+  histograms.ExpectTotalCount(cookie_source_histogram, 0);
+
+  // Set a Secure cookie on a cryptographic scheme.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_secure_, "A=B; path=/; Secure"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 1);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_SECURE_COOKIE_CRYPTOGRAPHIC_SCHEME, 1);
+
+  // Set a non-Secure cookie on a cryptographic scheme.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_secure_, "C=D; path=/;"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 2);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_NONSECURE_COOKIE_CRYPTOGRAPHIC_SCHEME, 1);
+
+  // Set a Secure cookie on a non-cryptographic scheme.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_, "D=E; path=/; Secure"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 3);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_SECURE_COOKIE_NONCRYPTOGRAPHIC_SCHEME, 1);
+
+  // Overwrite a Secure cookie (set by a cryptographic scheme) on a
+  // non-cryptographic scheme.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_, "A=B; path=/; Secure"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 4);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_SECURE_COOKIE_CRYPTOGRAPHIC_SCHEME, 1);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_SECURE_COOKIE_NONCRYPTOGRAPHIC_SCHEME, 2);
+
+  // Test that clearing a Secure cookie on a http:// URL does not get
+  // counted.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_secure_, "F=G; path=/; Secure"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 5);
+  std::string cookies1 = GetCookies(cm.get(), url_google_secure_);
+  EXPECT_NE(std::string::npos, cookies1.find("F=G"));
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_,
+                        "F=G; path=/; Expires=Thu, 01-Jan-1970 00:00:01 GMT"));
+  std::string cookies2 = GetCookies(cm.get(), url_google_secure_);
+  EXPECT_EQ(std::string::npos, cookies2.find("F=G"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 5);
+
+  // Set a non-Secure cookie on a non-cryptographic scheme.
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_, "H=I; path=/"));
+  histograms.ExpectTotalCount(cookie_source_histogram, 6);
+  histograms.ExpectBucketCount(
+      cookie_source_histogram,
+      CookieMonster::COOKIE_SOURCE_NONSECURE_COOKIE_NONCRYPTOGRAPHIC_SCHEME, 1);
 }
 
 class CookieMonsterNotificationTest : public CookieMonsterTest {

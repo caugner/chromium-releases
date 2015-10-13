@@ -201,6 +201,21 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    public void testPastePopupDismissedOnDestroy() throws Throwable {
+        copyStringToClipboard("SampleTextToCopy");
+        DOMUtils.longPressNode(this, mContentViewCore, "empty_input_text");
+        assertWaitForPastePopupStatus(true);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mContentViewCore.destroy();
+            }
+        });
+        assertWaitForPastePopupStatus(false);
+    }
+
+    @SmallTest
+    @Feature({"TextInput"})
     public void testActionBarConfiguredCorrectlyForInput() throws Throwable {
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
         assertWaitForSelectActionBarVisible(true);
@@ -444,17 +459,28 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput"})
     public void testSelectActionBarPasswordPaste() throws Exception {
-        copyStringToClipboard("SampleTextToCopy");
+        copyStringToClipboard("SamplePassword2");
+
+        // Select the password field.
         DOMUtils.longPressNode(this, mContentViewCore, "input_password");
         assertWaitForSelectActionBarVisible(true);
         assertTrue(mContentViewCore.hasSelection());
+        assertEquals(mContentViewCore.getSelectedText().length(), "SamplePassword".length());
+
+        // Paste "SamplePassword2" into the password field, replacing
+        // "SamplePassword".
         assertNotNull(mContentViewCore.getSelectActionHandler());
         selectActionBarPaste();
-        DOMUtils.clickNode(this, mContentViewCore, "plain_text_1");
+        assertWaitForSelectActionBarVisible(false);
+        assertFalse(mContentViewCore.hasSelection());
+
+        // Ensure the new text matches the pasted text. Note that we can't
+        // actually compare strings as password field selections only provide
+        // a placeholder with the correct length.
         DOMUtils.longPressNode(this, mContentViewCore, "input_password");
         assertWaitForSelectActionBarVisible(true);
         assertTrue(mContentViewCore.hasSelection());
-        assertNotSame(mContentViewCore.getSelectedText(), "SampleTextToCopy");
+        assertEquals(mContentViewCore.getSelectedText().length(), "SamplePassword2".length());
     }
 
     @SmallTest
@@ -618,7 +644,7 @@ public class ContentViewCoreSelectionTest extends ContentShellTestBase {
         assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return show == mContentViewCore.getPastePopupForTest().isShowing();
+                return show == mContentViewCore.isPastePopupShowing();
             }
         }));
     }

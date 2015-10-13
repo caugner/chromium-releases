@@ -11,12 +11,16 @@ if (is_android) {
   java_library_path = "$target_out_dir/java_library.dex.jar"
 
   mojo_android_application("resource_provider") {
-    input_so = "$root_out_dir/lib.stripped/libresource_provider_lib.so"
+    input_so =
+        "$root_shlib_dir/${shlib_prefix}resource_provider_lib$shlib_extension"
     input_dex_jar = java_library_path
     deps = [
       ":java_library",
       ":resource_provider_lib",
+      "//third_party/icu:icudata",
     ]
+
+    resources = [ "$root_out_dir/icudtl.dat" ]
   }
 
   shared_library("resource_provider_lib") {
@@ -69,8 +73,11 @@ if (is_android) {
       "//base",
       "//components/resource_provider/public/interfaces",
       "//mojo/environment:chromium",
+      "//third_party/icu:icudata",
       "//url",
     ]
+
+    resources = [ "$root_out_dir/icudtl.dat" ]
   }
 }
 

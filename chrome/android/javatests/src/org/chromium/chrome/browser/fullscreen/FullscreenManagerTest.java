@@ -10,7 +10,6 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.test.FlakyTest;
 import android.test.suitebuilder.annotation.LargeTest;
-import android.test.suitebuilder.annotation.MediumTest;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -21,9 +20,9 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeWebContentsDelegateAndroid;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.tab.ChromeTab;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.chrome.test.util.PrerenderTestHelper;
@@ -76,7 +75,11 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
             + "</body>"
             + "</html>");
 
-    @MediumTest
+    /**
+     * @MediumTest
+     * Fails consistently on M: http://crbug.com/512222
+     */
+    @FlakyTest
     @Feature({"Fullscreen"})
     public void testTogglePersistentFullscreen() throws InterruptedException {
         startMainActivityWithURL(LONG_HTML_TEST_PAGE);
@@ -97,7 +100,11 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
         assertTrue(waitForPersistentFullscreen(delegate, false));
     }
 
-    @LargeTest
+    /**
+     * @LargeTest
+     * Fails consistently on M: http://crbug.com/512222
+     */
+    @FlakyTest
     @Feature({"Fullscreen"})
     public void testPersistentFullscreenChangingUiFlags() throws InterruptedException {
         // Exiting fullscreen via UI Flags is not supported in versions prior to MR2.
@@ -329,8 +336,12 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
         scrollTopControls(false);
     }
 
+    /*
+    Marked flaky on 2015-07-20: http://crbug.com/512299
     @LargeTest
     @Feature({"Fullscreen"})
+    */
+    @FlakyTest
     public void testTopControlsShownWhenInputIsFocused()
             throws InterruptedException, ExecutionException {
         startMainActivityWithURL(LONG_HTML_WITH_AUTO_FOCUS_INPUT_TEST_PAGE);

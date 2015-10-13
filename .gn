@@ -36,17 +36,26 @@ check_targets = [
   "//components/app_modal/*",
   "//components/autofill/*",
   "//components/bookmarks/*",
+  "//components/google/*",
+  "//components/history/*",
+  "//components/html_viewer/*",
+  "//components/omnibox/*",
   "//components/os_crypt/*",
   "//components/pref_registry/*",
   "//components/undo/*",
   "//components/update_client/*",
-  "//components/url_fixer/*",
+  "//components/url_formatter/*",
   "//components/url_matcher/*",
   "//components/user_manager/*",
   "//components/user_prefs/*",
   "//components/variations/*",
+  "//components/view_manager/*",
   "//components/wallpaper/*",
+  "//components/web_cache/*",
   "//components/webcrypto/*",
+  "//components/web_modal/*",
+  "//components/webdata/*",
+  "//components/webdata_services/*",
 
   #"//content/*",  # A whole lot of errors.
   "//courgette/*",
@@ -68,8 +77,11 @@ check_targets = [
   "//ipc/*",
 
   #"//jingle/*",
+  "//mandoline/*",
+
   #"//media/*",  # Lots of errors.
-  #"//mojo/*",
+  "mojo/*",
+
   #"//native_client/*",
   #"//net/*",  # Needs GN binary changes to work on Android.
 
@@ -116,6 +128,7 @@ exec_script_whitelist = [
   "//build/toolchain/gcc_toolchain.gni",
   "//build/toolchain/mac/BUILD.gn",
   "//build/toolchain/win/BUILD.gn",
+  "//build/util/version.gni",
   "//chrome/android/BUILD.gn",
   "//chrome/browser/BUILD.gn",
   "//chrome/browser/chromeos/BUILD.gn",
@@ -176,13 +189,13 @@ exec_script_whitelist = [
   "//third_party/android_platform/BUILD.gn",
   "//third_party/angle/BUILD.gn",
   "//third_party/boringssl/BUILD.gn",
+  "//third_party/catapult/tracing/BUILD.gn",
   "//third_party/cld_2/BUILD.gn",
   "//third_party/cython/rules.gni",
   "//third_party/google_input_tools/inputview.gni",
   "//third_party/harfbuzz-ng/BUILD.gn",
   "//third_party/libaddressinput/BUILD.gn",
   "//third_party/opus/BUILD.gn",
-  "//third_party/trace-viewer/tracing/BUILD.gn",
   "//third_party/WebKit/Source/bindings/bindings.gni",
   "//third_party/WebKit/Source/bindings/scripts/scripts.gni",
   "//third_party/WebKit/Source/config.gni",

@@ -10,7 +10,7 @@
 #include "sync/syncable/syncable_util.h"
 #include "sync/util/time.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
 scoped_ptr<EntityTracker> EntityTracker::FromServerUpdate(
     const std::string& id_string,
@@ -97,8 +97,8 @@ void EntityTracker::PrepareCommitProto(sync_pb::SyncEntity* commit_entity,
   commit_entity->set_folder(false);
   commit_entity->set_name(non_unique_name_);
   if (!deleted_) {
-    commit_entity->set_ctime(TimeToProtoTime(ctime_));
-    commit_entity->set_mtime(TimeToProtoTime(mtime_));
+    commit_entity->set_ctime(syncer::TimeToProtoTime(ctime_));
+    commit_entity->set_mtime(syncer::TimeToProtoTime(mtime_));
     commit_entity->mutable_specifics()->CopyFrom(specifics_);
   }
 

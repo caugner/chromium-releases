@@ -23,11 +23,11 @@ import android.util.SparseArray;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
-import android.widget.Toast;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.ui.VSyncMonitor;
+import org.chromium.ui.widget.Toast;
 
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
@@ -88,7 +88,7 @@ public class WindowAndroid {
 
     private ViewGroup mKeyboardAccessoryView;
 
-    private boolean mIsKeyboardShowing = false;
+    protected boolean mIsKeyboardShowing = false;
 
     // System accessibility service.
     private final AccessibilityManager mAccessibilityManager;

@@ -60,7 +60,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/file_system_core_util.h"
+#include "chrome/browser/chromeos/drive/file_system_util.h"
 #endif
 
 using content::BrowserContext;
@@ -217,7 +217,8 @@ GURL WebstoreInstaller::GetWebstoreInstallURL(
   GURL url(url_string + "?response=redirect&" +
            update_client::UpdateQueryParams::Get(
                update_client::UpdateQueryParams::CRX) +
-           "&x=" + net::EscapeQueryParamValue(JoinString(params, '&'), true));
+           "&x=" + net::EscapeQueryParamValue(base::JoinString(params, "&"),
+                                              true));
   DCHECK(url.is_valid());
 
   return url;

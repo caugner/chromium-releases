@@ -84,7 +84,6 @@ void HardwareRenderer::CommitFrame() {
   scoped_ptr<cc::CompositorFrame> frame = child_frame_->frame.Pass();
   DCHECK(frame.get());
   DCHECK(!frame->gl_frame_data);
-  DCHECK(!frame->software_frame_data);
 
   // On Android we put our browser layers in physical pixels and set our
   // browser CC device_scale_factor to 1, so suppress the transform between
@@ -107,7 +106,6 @@ void HardwareRenderer::CommitFrame() {
 }
 
 void HardwareRenderer::DrawGL(bool stencil_enabled,
-                              int framebuffer_binding_ext,
                               AwDrawGLInfo* draw_info) {
   TRACE_EVENT0("android_webview", "HardwareRenderer::DrawGL");
 
@@ -176,7 +174,6 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
 
   display_->Resize(viewport);
 
-  gl_surface_->SetBackingFrameBufferObject(framebuffer_binding_ext);
   if (!output_surface_) {
     scoped_refptr<cc::ContextProvider> context_provider =
         AwRenderThreadContextProvider::Create(
@@ -189,12 +186,16 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
   output_surface_->SetExternalStencilTest(stencil_enabled);
   display_->SetExternalClip(clip);
   display_->DrawAndSwap();
-  gl_surface_->ResetBackingFrameBufferObject();
 }
 
 void HardwareRenderer::ReturnResources(
     const cc::ReturnedResourceArray& resources) {
   shared_renderer_state_->InsertReturnedResourcesOnRT(resources);
+}
+
+void HardwareRenderer::SetBackingFrameBufferObject(
+    int framebuffer_binding_ext) {
+  gl_surface_->SetBackingFrameBufferObject(framebuffer_binding_ext);
 }
 
 }  // namespace android_webview

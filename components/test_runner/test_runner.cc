@@ -24,10 +24,10 @@
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebPasswordCredential.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
-#include "third_party/WebKit/public/platform/WebServiceWorkerRegistration.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionData.h"
 #include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceOrientationData.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
 #include "third_party/WebKit/public/web/WebArrayBuffer.h"
 #include "third_party/WebKit/public/web/WebArrayBufferConverter.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
@@ -39,7 +39,6 @@
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebPageOverlay.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
@@ -274,7 +273,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                        v8::Local<v8::Function> callback);
   void SetPOSIXLocale(const std::string& locale);
   void SetMIDIAccessorResult(bool result);
-  void SimulateWebNotificationClick(const std::string& title);
+  void SimulateWebNotificationClick(gin::Arguments* args);
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
@@ -1344,10 +1343,16 @@ void TestRunnerBindings::SetMIDIAccessorResult(bool result) {
     runner_->SetMIDIAccessorResult(result);
 }
 
-void TestRunnerBindings::SimulateWebNotificationClick(
-    const std::string& title) {
-  if (runner_)
-    runner_->SimulateWebNotificationClick(title);
+void TestRunnerBindings::SimulateWebNotificationClick(gin::Arguments* args) {
+  if (!runner_)
+    return;
+  std::string title;
+  int action_index = -1;
+  if (args->GetNext(&title) &&
+      (args->PeekNext().IsEmpty() || args->GetNext(&action_index)))
+    runner_->SimulateWebNotificationClick(title, action_index);
+  else
+    args->ThrowError();
 }
 
 void TestRunnerBindings::AddMockSpeechRecognitionResult(
@@ -1524,23 +1529,6 @@ void TestRunnerBindings::ForceNextDrawingBufferCreationToFail() {
 void TestRunnerBindings::NotImplemented(const gin::Arguments& args) {
 }
 
-class TestPageOverlay : public WebPageOverlay {
- public:
-  TestPageOverlay() {}
-  virtual ~TestPageOverlay() {}
-
-  virtual void paintPageOverlay(WebGraphicsContext* context,
-                                const WebSize& webViewSize) {
-    gfx::Rect rect(webViewSize);
-    SkCanvas* canvas = context->beginDrawing(gfx::RectF(rect));
-    SkPaint paint;
-    paint.setColor(SK_ColorCYAN);
-    paint.setStyle(SkPaint::kFill_Style);
-    canvas->drawRect(gfx::RectToSkRect(rect), paint);
-    context->endDrawing();
-  }
-};
-
 TestRunner::WorkQueue::WorkQueue(TestRunner* controller)
     : frozen_(false)
     , controller_(controller) {}
@@ -1606,7 +1594,6 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       test_interfaces_(interfaces),
       delegate_(nullptr),
       web_view_(nullptr),
-      page_overlay_(nullptr),
       web_content_settings_(new WebContentSettings()),
       weak_factory_(this) {}
 
@@ -1640,11 +1627,7 @@ void TestRunner::Reset() {
     web_view_->setVisibilityState(WebPageVisibilityStateVisible, true);
     web_view_->mainFrame()->enableViewSourceMode(false);
 
-    if (page_overlay_) {
-      web_view_->removePageOverlay(page_overlay_);
-      delete page_overlay_;
-      page_overlay_ = nullptr;
-    }
+    web_view_->setPageOverlayColor(SK_ColorTRANSPARENT);
   }
 
   top_loading_frame_ = nullptr;
@@ -2131,7 +2114,7 @@ void TestRunner::QueueLoadHTMLString(gin::Arguments* args) {
   args->GetNext(&base_url_str);
   WebURL base_url = WebURL(GURL(base_url_str));
 
-  if (args->PeekNext()->IsString()) {
+  if (!args->PeekNext().IsEmpty() && args->PeekNext()->IsString()) {
     std::string unreachable_url_str;
     args->GetNext(&unreachable_url_str);
     WebURL unreachable_url = WebURL(GURL(unreachable_url_str));
@@ -2877,8 +2860,9 @@ void TestRunner::SetMIDIAccessorResult(bool result) {
   midi_accessor_result_ = result;
 }
 
-void TestRunner::SimulateWebNotificationClick(const std::string& title) {
-  delegate_->SimulateWebNotificationClick(title);
+void TestRunner::SimulateWebNotificationClick(const std::string& title,
+                                              int action_index) {
+  delegate_->SimulateWebNotificationClick(title, action_index);
 }
 
 void TestRunner::AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -2909,18 +2893,13 @@ void TestRunner::AddMockCredentialManagerResponse(const std::string& id,
 }
 
 void TestRunner::AddWebPageOverlay() {
-  if (web_view_ && !page_overlay_) {
-    page_overlay_ = new TestPageOverlay;
-    web_view_->addPageOverlay(page_overlay_, 0);
-  }
+  if (web_view_)
+    web_view_->setPageOverlayColor(SK_ColorCYAN);
 }
 
 void TestRunner::RemoveWebPageOverlay() {
-  if (web_view_ && page_overlay_) {
-    web_view_->removePageOverlay(page_overlay_);
-    delete page_overlay_;
-    page_overlay_ = nullptr;
-  }
+  if (web_view_)
+    web_view_->setPageOverlayColor(SK_ColorTRANSPARENT);
 }
 
 void TestRunner::LayoutAndPaintAsync() {

@@ -40,6 +40,7 @@
         'bluetooth/bluetooth_adapter_unittest.cc',
         'bluetooth/bluetooth_adapter_win_unittest.cc',
         'bluetooth/bluetooth_advertisement_chromeos_unittest.cc',
+        'bluetooth/bluetooth_advertisement_unittest.cc',
         'bluetooth/bluetooth_audio_sink_chromeos_unittest.cc',
         'bluetooth/bluetooth_chromeos_unittest.cc',
         'bluetooth/bluetooth_device_unittest.cc',
@@ -55,6 +56,8 @@
         'bluetooth/test/bluetooth_test.h',
         'bluetooth/test/bluetooth_test_android.cc',
         'bluetooth/test/bluetooth_test_android.h',
+        'bluetooth/test/bluetooth_test_mac.h',
+        'bluetooth/test/bluetooth_test_mac.mm',
         'bluetooth/test/test_bluetooth_adapter_observer.cc',
         'bluetooth/test/test_bluetooth_adapter_observer.h',
         'devices_app/usb/device_impl_unittest.cc',
@@ -70,6 +73,7 @@
         'serial/data_sink_unittest.cc',
         'serial/data_source_unittest.cc',
         'serial/serial_connection_unittest.cc',
+        "serial/serial_io_handler_posix_unittest.cc",
         'serial/serial_service_unittest.cc',
         'test/run_all_unittests.cc',
         'test/usb_test_gadget_impl.cc',
@@ -79,6 +83,7 @@
         'usb/usb_device_handle_unittest.cc',
         'usb/usb_ids_unittest.cc',
         'usb/usb_service_unittest.cc',
+        'usb/webusb_descriptors_unittest.cc',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -114,9 +119,17 @@
           ],
         }],
         ['OS=="mac"', {
+          'dependencies': [
+            '../third_party/ocmock/ocmock.gyp:ocmock',
+          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/IOBluetooth.framework',
+            ],
+          },
+          'xcode_settings' : {
+            'OTHER_LDFLAGS' : [
+              '-ObjC',
             ],
           },
         }],

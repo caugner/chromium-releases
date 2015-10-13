@@ -182,13 +182,13 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeRequestHeadersPacket(
   scoped_ptr<SpdySerializedFrame> spdy_frame;
   if (spdy_request_framer_.protocol_version() == SPDY3) {
     SpdySynStreamIR syn_stream(stream_id);
-    syn_stream.set_name_value_block(headers);
+    syn_stream.set_header_block(headers);
     syn_stream.set_fin(fin);
     syn_stream.set_priority(priority);
     spdy_frame.reset(spdy_request_framer_.SerializeSynStream(syn_stream));
   } else {
     SpdyHeadersIR headers_frame(stream_id);
-    headers_frame.set_name_value_block(headers);
+    headers_frame.set_header_block(headers);
     headers_frame.set_fin(fin);
     headers_frame.set_priority(priority);
     headers_frame.set_has_priority(true);
@@ -210,12 +210,12 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeResponseHeadersPacket(
   scoped_ptr<SpdySerializedFrame> spdy_frame;
   if (spdy_request_framer_.protocol_version() == SPDY3) {
     SpdySynReplyIR syn_reply(stream_id);
-    syn_reply.set_name_value_block(headers);
+    syn_reply.set_header_block(headers);
     syn_reply.set_fin(fin);
     spdy_frame.reset(spdy_response_framer_.SerializeSynReply(syn_reply));
   } else {
     SpdyHeadersIR headers_frame(stream_id);
-    headers_frame.set_name_value_block(headers);
+    headers_frame.set_header_block(headers);
     headers_frame.set_fin(fin);
     spdy_frame.reset(spdy_request_framer_.SerializeFrame(headers_frame));
   }
@@ -230,7 +230,6 @@ SpdyHeaderBlock QuicTestPacketMaker::GetRequestHeaders(
     const std::string& scheme,
     const std::string& path) {
   SpdyHeaderBlock headers;
-  headers[":method"] = method;
   if (version_ <= QUIC_VERSION_24) {
     headers[":host"] = host_;
   } else {
@@ -238,6 +237,7 @@ SpdyHeaderBlock QuicTestPacketMaker::GetRequestHeaders(
   }
   headers[":path"] = path;
   headers[":scheme"] = scheme;
+  headers[":method"] = method;
   if (version_ <= QUIC_VERSION_24) {
     headers[":version"] = "HTTP/1.1";
   }

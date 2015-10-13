@@ -26,6 +26,14 @@ function MockWindow(width, height, sizer) {
     this.pageYOffset = Math.max(0, y);
     this.scrollCallback();
   };
+  this.setTimeout = function(callback, time) {
+    this.timerCallback = callback;
+    return "timerId";
+  };
+  this.runTimeout = function() {
+    if (this.timerCallback)
+      this.timerCallback();
+  }
   if (sizer) {
     sizer.resizeCallback_ = function() {
       this.scrollTo(this.pageXOffset, this.pageYOffset);
@@ -35,6 +43,7 @@ function MockWindow(width, height, sizer) {
   this.pageYOffset = 0;
   this.scrollCallback = null;
   this.resizeCallback = null;
+  this.timerCallback = null;
 }
 
 function MockSizer() {
@@ -91,4 +100,28 @@ function MockDocumentDimensions(width, height) {
     this.height = 0;
     this.pageDimensions = [];
   };
+}
+
+function importHTML(src) {
+  var link = document.createElement('link');
+  var promise = new Promise(function(resolve, reject) {
+    link.onload = resolve;
+    link.onerror = reject;
+  });
+  link.rel = 'import';
+  link.href = src;
+  document.head.appendChild(link);
+  return promise;
+}
+
+/**
+ * Import iron-test-helpers into the test document.
+ * @example
+ *   importTestHelpers().then(function() {
+ *     chrome.test.runTests(...);
+ *   })
+ */
+function importTestHelpers() {
+  return importHTML('chrome://resources/polymer/v1_0/iron-test-helpers/' +
+      'iron-test-helpers.html');
 }

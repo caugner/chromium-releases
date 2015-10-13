@@ -34,9 +34,9 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
   SerializedPacket CreateRetransmittablePacket(
       QuicPacketSequenceNumber sequence_number) {
     packets_.push_back(new QuicEncryptedPacket(nullptr, kDefaultLength));
-    return SerializedPacket(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            packets_.back(), 0,
-                            new RetransmittableFrames(ENCRYPTION_NONE));
+    return SerializedPacket(
+        sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER, packets_.back(), 0,
+        new RetransmittableFrames(ENCRYPTION_NONE), false, false);
   }
 
   SerializedPacket CreateRetransmittablePacketForStream(
@@ -48,14 +48,14 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
     frame->stream_id = stream_id;
     frames->AddFrame(QuicFrame(frame));
     return SerializedPacket(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            packets_.back(), 0, frames);
+                            packets_.back(), 0, frames, false, false);
   }
 
   SerializedPacket CreateNonRetransmittablePacket(
       QuicPacketSequenceNumber sequence_number) {
     packets_.push_back(new QuicEncryptedPacket(nullptr, kDefaultLength));
     return SerializedPacket(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            packets_.back(), 0, nullptr);
+                            packets_.back(), 0, nullptr, false, false);
   }
 
   void VerifyInFlightPackets(QuicPacketSequenceNumber* packets,
@@ -138,21 +138,6 @@ TEST_F(QuicUnackedPacketMapTest, RttOnly) {
   VerifyUnackedPackets(nullptr, 0);
   VerifyInFlightPackets(nullptr, 0);
   VerifyRetransmittablePackets(nullptr, 0);
-}
-
-TEST_F(QuicUnackedPacketMapTest, DiscardOldRttOnly) {
-  ValueRestore<bool> old_flag(&FLAGS_quic_use_is_useless_packet, false);
-  // Acks are only tracked for RTT measurement purposes, and are discarded
-  // when more than 200 accumulate.
-  const size_t kNumUnackedPackets = 200;
-  for (size_t i = 1; i < 400; ++i) {
-    unacked_packets_.AddSentPacket(CreateNonRetransmittablePacket(i), 0,
-                                   NOT_RETRANSMISSION, now_, kDefaultAckLength,
-                                   false);
-    unacked_packets_.RemoveObsoletePackets();
-    EXPECT_EQ(min(i, kNumUnackedPackets),
-              unacked_packets_.GetNumUnackedPacketsDebugOnly());
-  }
 }
 
 TEST_F(QuicUnackedPacketMapTest, RetransmittableInflightAndRtt) {

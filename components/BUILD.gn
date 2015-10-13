@@ -14,6 +14,7 @@ group("all_components") {
   visibility = [ "//:*" ]  # Only for the root targets to bring in.
 
   deps = [
+    "//components/about_handler",
     "//components/auto_login_parser",
     "//components/autofill/content/browser",
     "//components/autofill/content/common",
@@ -46,6 +47,7 @@ group("all_components") {
     "//components/favicon_base",
     "//components/feedback",
     "//components/gcm_driver",
+    "//components/gcm_driver/crypto",
     "//components/gcm_driver/instance_id",
     "//components/google/core/browser",
     "//components/history/content/browser",
@@ -67,6 +69,7 @@ group("all_components") {
     "//components/offline_pages",
     "//components/omnibox/browser",
     "//components/onc",
+    "//components/open_from_clipboard",
     "//components/os_crypt",
     "//components/packed_ct_ev_whitelist",
     "//components/pairing",
@@ -91,6 +94,7 @@ group("all_components") {
     "//components/search",
     "//components/search_engines",
     "//components/search_provider_logos",
+    "//components/security_interstitials/core",
     "//components/sessions",
     "//components/signin/core/browser",
     "//components/startup_metric_utils",
@@ -103,14 +107,17 @@ group("all_components") {
     "//components/translate/content/renderer",
     "//components/translate/core/browser",
     "//components/translate/core/common",
-    "//components/ui/zoom:ui_zoom",
+    "//components/ui/zoom",
     "//components/undo",
     "//components/update_client",
-    "//components/url_fixer",
+    "//components/upload_list",
+    "//components/url_formatter",
     "//components/url_matcher",
     "//components/user_manager",
     "//components/user_prefs",
+    "//components/user_prefs/tracked:user_prefs_tracked",
     "//components/variations",
+    "//components/version_info",
     "//components/visitedlink/browser",
     "//components/visitedlink/common",
     "//components/visitedlink/renderer",
@@ -133,6 +140,7 @@ group("all_components") {
 
   if (!is_android && !is_ios) {
     deps += [
+      "//components/audio_modem",
       "//components/proximity_auth",
       "//components/proximity_auth/cryptauth",
     ]
@@ -252,6 +260,15 @@ group("all_components") {
   }
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("components_unittests_run") {
+  testonly = true
+  deps = [
+    ":components_unittests",
+  ]
+}
+
 # To add a unit test to this target, make a "unit_test" source_set in your
 # component (it's important to use a source_set instead of a static library or
 # no tests will run) and add a reference here. You can add more than one unit
@@ -260,6 +277,16 @@ test("components_unittests") {
   sources = [
     "test/run_all_unittests.cc",
   ]
+
+  if (is_android || is_linux || is_mac || is_win) {
+    data = [
+      "test/data/",
+
+      # TODO(dpranke): Remove the next two lines after GN has rolled to 339778.
+      "$root_out_dir/components_tests_resources.pak",
+      "$root_out_dir/ui_test.pak",
+    ]
+  }
 
   # Add only ":unit_tests" dependencies here. If your tests have dependencies
   # (this would at least include the component itself), they should be on the
@@ -284,19 +311,42 @@ test("components_unittests") {
     "//components/devtools_http_handler:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
+    "//components/enhanced_bookmarks:unit_tests",
+    "//components/favicon/content:unit_tests",
+    "//components/favicon/core:unit_tests",
     "//components/favicon_base:unit_tests",
-    "//components/gcm_driver:unit_tests",
+    "//components/gcm_driver/crypto:unit_tests",
     "//components/gcm_driver/instance_id:unit_tests",
+    "//components/gcm_driver:unit_tests",
     "//components/google/core/browser:unit_tests",
-    "//components/invalidation/impl:unittests",
+    "//components/history/content/browser:unit_tests",
+    "//components/history/core/browser:unit_tests",
+    "//components/history/core/common:unit_tests",
+    "//components/invalidation/impl:unit_tests",
+    "//components/keyed_service/content:unit_tests",
+    "//components/keyed_service/core:unit_tests",
     "//components/login:unit_tests",
     "//components/metrics:unit_tests",
     "//components/mime_util:unit_tests",
     "//components/offline_pages:unit_tests",
     "//components/omnibox/browser:unit_tests",
+    "//components/open_from_clipboard:unit_tests",
     "//components/packed_ct_ev_whitelist:unit_tests",
+    "//components/password_manager/content/browser:unit_tests",
+    "//components/password_manager/core/browser:unit_tests",
+    "//components/password_manager/core/common:unit_tests",
+    "//components/password_manager/sync/browser:unit_tests",
+    "//components/rappor:unit_tests",
+    "//components/search:unit_tests",
+    "//components/search_engines:unit_tests",
+    "//components/signin/core/browser:unit_tests",
+    "//components/suggestions:unit_tests",
+    "//components/sync_driver:unit_tests",
     "//components/undo:unit_tests",
+    "//components/url_formatter:unit_tests",
     "//components/update_client:unit_tests",
+    "//components/upload_list:unit_tests",
+    "//components/user_prefs/tracked:unit_tests",
     "//components/variations:unit_tests",
     "//components/web_resource:unit_tests",
     "//components/webcrypto:unit_tests",
@@ -305,13 +355,22 @@ test("components_unittests") {
     # These are the deps required by the code in this target.
     "//base",
     "//base/test:test_support",
+    "//components/policy:policy_component",
     "//content/test:test_support",
     "//net",
     "//ui/base",
     "//ui/resources:ui_test_pak",
   ]
 
-  data_deps = [ ":components_tests_pak" ]
+  data_deps = [
+    ":components_tests_pak",
+    "//third_party/mesa:osmesa",
+    "//ui/resources:ui_test_pak",
+  ]
+
+  if (enable_rlz_support) {
+    deps += [ "//components/rlz:unit_tests" ]
+  }
 
   if (is_android) {
     isolate_file = "components_unittests.isolate"
@@ -320,11 +379,21 @@ test("components_unittests") {
     deps -= [
       "//components/gcm_driver:unit_tests",
       "//components/gcm_driver/instance_id:unit_tests",
+      "//components/password_manager/content/browser:unit_tests",
+      "//components/password_manager/core/browser:unit_tests",
+      "//components/password_manager/core/common:unit_tests",
+      "//components/password_manager/sync/browser:unit_tests",
     ]
   }
 
   if (!is_android && !is_ios) {
-    deps += [ "//components/proximity_auth:unit_tests" ]
+    deps += [
+      "//components/audio_modem:unit_tests",
+      "//components/copresence:unit_tests",
+      "//components/feedback:unit_tests",
+      "//components/proximity_auth:unit_tests",
+      "//components/sessions:unit_tests",
+    ]
   }
 
   if (is_chromeos) {
@@ -337,19 +406,39 @@ test("components_unittests") {
   # Precache tests need these defines.
   #configs += [ "//components/precache/core:precache_config" ]
 
+  if (enable_configuration_policy) {
+    deps += [
+      "//components/policy/core/browser:unit_tests",
+      "//components/policy/core/common:unit_tests",
+    ]
+  }
+
   if (toolkit_views) {
-    # TODO(GYP) enable this as above.
+    # TODO bug 522654 Enable this when the undefined symbol is fixed in
+    # web_modal such that this links.
     #deps += [ "//components/constrained_window:unit_tests" ]
   }
   if (is_win) {
     deps += [ "//components/browser_watcher:unit_tests" ]
   }
   if (is_ios) {
+    deps += [ "//components/signin/core/browser:unit_tests" ]
     deps -= [ "//components/devtools_http_handler:unit_tests" ]
   }
-
   if (!is_ios) {
-    deps += [ "//components/scheduler:unit_tests" ]
+    deps += [
+      "//components/navigation_interception:unit_tests",
+      "//components/safe_json:unit_tests",
+      "//components/scheduler:unit_tests",
+    ]
+  }
+
+  if (enable_basic_printing || enable_print_preview) {
+    deps += [
+      "//components/printing/browser",
+      "//components/printing/common",
+      "//components/printing/renderer",
+    ]
   }
 }
 
@@ -367,14 +456,41 @@ repack("components_tests_pak") {
   ]
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("components_browsertests_run") {
+  testonly = true
+  deps = [
+    ":components_browsertests",
+  ]
+}
+
 test("components_browsertests") {
   sources = [
     "autofill/content/browser/risk/fingerprint_browsertest.cc",
     "autofill/content/renderer/password_form_conversion_utils_browsertest.cc",
-    "dom_distiller/content/distillable_page_utils_browsertest.cc",
-    "dom_distiller/content/distiller_page_web_contents_browsertest.cc",
+    "dom_distiller/content/browser/distillable_page_utils_browsertest.cc",
+    "dom_distiller/content/browser/distiller_page_web_contents_browsertest.cc",
+    "dom_distiller/content/browser/test/dom_distiller_js_browsertest.cc",
     "password_manager/content/renderer/credential_manager_client_browsertest.cc",
   ]
+
+  data = [
+    "$root_out_dir/components_tests_resources.pak",
+    "$root_out_dir/content_shell.pak",
+  ]
+
+  if (is_android || is_linux || is_mac || is_win) {
+    data += [
+      "test/data/",
+      "dom_distiller/core/javascript/",
+      "//third_party/dom_distiller_js/dist/test/data/",
+    ]
+  }
+
+  if (is_mac) {
+    data += [ "$root_out_dir/Content Shell.app/" ]
+  }
 
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
@@ -382,7 +498,7 @@ test("components_browsertests") {
     "autofill/content/browser",
     "autofill/content/renderer",
     "content_settings/core/common",
-    "dom_distiller/content",
+    "dom_distiller/content:content_browser",
     "dom_distiller/core",
     "dom_distiller/core:test_support",
     "password_manager/content/browser",
@@ -399,7 +515,10 @@ test("components_browsertests") {
     "//ui/base",
   ]
 
-  data_deps = [ ":components_tests_pak" ]
+  data_deps = [
+    ":components_tests_pak",
+    "//third_party/mesa:osmesa",
+  ]
 
   if (is_android) {
     sources += [ "test/android/browsertests_apk/components_browser_tests_jni_onload.cc" ]
@@ -417,6 +536,11 @@ test("components_browsertests") {
       "pref_registry:test_support",
       "//base:prefs_test_support",
     ]
+  }
+
+  if (enable_basic_printing || enable_print_preview) {
+    sources += [ "printing/test/print_web_view_helper_browsertest.cc" ]
+    deps += [ "//components/printing/test:test_support" ]
   }
 }
 

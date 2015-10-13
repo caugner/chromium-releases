@@ -47,11 +47,6 @@ void SaveStringPreferenceForced(const char* pref_name,
   prefs->CommitPendingWrite();
 }
 
-bool IsWebViewDisabledCmdLine() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kDisableWebviewSigninFlow);
-}
-
 }  // namespace
 
 namespace chromeos {
@@ -63,8 +58,6 @@ void StartupUtils::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kDeviceRegistered, -1);
   registry->RegisterBooleanPref(prefs::kEnrollmentRecoveryRequired, false);
   registry->RegisterStringPref(prefs::kInitialLocale, "en-US");
-  registry->RegisterBooleanPref(prefs::kWebviewSigninDisabled, false);
-  registry->RegisterBooleanPref(prefs::kNewLoginUIPopup, false);
 }
 
 // static
@@ -184,29 +177,6 @@ std::string StartupUtils::GetInitialLocale() {
 
 // static
 bool StartupUtils::IsWebviewSigninEnabled() {
-  const policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
-      g_browser_process->platform_part()
-          ->browser_policy_connector_chromeos()
-          ->GetDeviceCloudPolicyManager();
-
-  const bool is_shark =
-      policy_manager ? policy_manager->IsSharkRequisition() : false;
-
-  const bool is_webview_disabled_pref =
-      g_browser_process->local_state()->GetBoolean(
-          prefs::kWebviewSigninDisabled);
-
-  // TODO(achuith): Remove is_shark when crbug.com/471744 is resolved.
-  return !is_shark && !IsWebViewDisabledCmdLine() && !is_webview_disabled_pref;
-}
-
-// static
-bool StartupUtils::EnableWebviewSignin(bool is_enabled) {
-  if (is_enabled && IsWebViewDisabledCmdLine())
-    return false;
-
-  g_browser_process->local_state()->SetBoolean(prefs::kWebviewSigninDisabled,
-                                               !is_enabled);
   return true;
 }
 

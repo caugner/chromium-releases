@@ -92,7 +92,9 @@ class TreeSizeMatchesObserver : public ViewObserver {
   MOJO_DISALLOW_COPY_AND_ASSIGN(TreeSizeMatchesObserver);
 };
 
-// Wait until |view|'s tree size matches |tree_size|; returns false on timeout.
+// Wait until |view| has |tree_size| descendants; returns false on timeout. The
+// count includes |view|. For example, if you want to wait for |view| to have
+// a single child, use a |tree_size| of 2.
 bool WaitForTreeSizeToMatch(View* view, size_t tree_size) {
   TreeSizeMatchesObserver observer(view, tree_size);
   return observer.IsTreeCorrectSize() ||
@@ -184,7 +186,7 @@ class ViewManagerTest : public ViewManagerTestBase {
   void ConnectToApplicationAndEmbed(View* view) {
     mojo::URLRequestPtr request(mojo::URLRequest::New());
     request->url = mojo::String::From(application_impl()->url());
-    ApplicationConnection* connection =
+    scoped_ptr<ApplicationConnection> connection =
         application_impl()->ConnectToApplication(request.Pass());
     mojo::ViewManagerClientPtr client;
     connection->ConnectToService(&client);
@@ -197,7 +199,7 @@ class ViewManagerTest : public ViewManagerTestBase {
                             mojo::ViewManagerClientPtr* client) override {
     on_will_embed_count_++;
     if (on_will_embed_return_value_) {
-      ApplicationConnection* connection =
+      scoped_ptr<ApplicationConnection> connection =
           application_impl()->ConnectToApplication(request.Pass());
       connection->ConnectToService(client);
     } else {
@@ -741,31 +743,6 @@ TEST_F(ViewManagerTest, OnWillEmbedFails) {
   EXPECT_EQ(1u, on_will_embed_count());
 }
 
-// Verify an Embed() from an ancestor is not allowed.
-TEST_F(ViewManagerTest, ReembedFails) {
-  window_manager()->SetEmbedRoot();
-
-  View* view1 = window_manager()->CreateView();
-  window_manager()->GetRoot()->AddChild(view1);
-
-  ViewManager* view_manager = Embed(view1);
-  ASSERT_TRUE(view_manager);
-  View* view2 = view_manager->CreateView();
-  view_manager->GetRoot()->AddChild(view2);
-  Embed(view2);
-
-  // Try to embed in view2 from the window_manager. This should fail as the
-  // Embed() didn't grab reembed.
-  View* view2_in_wm = window_manager()->GetViewById(view2->id());
-  ConnectToApplicationAndEmbed(view2_in_wm);
-
-  // The Embed() call above returns immediately. To ensure the server has
-  // processed it nudge the bounds and wait for it to be processed.
-  EXPECT_TRUE(IncrementWidthAndWaitForChange(view1, view_manager));
-
-  EXPECT_EQ(nullptr, most_recent_view_manager());
-}
-
 // Verify an Embed() from an ancestor is allowed if the ancestor is an embed
 // root and Embed was done by way of EmbedAllowingReembed().
 TEST_F(ViewManagerTest, ReembedSucceeds) {
@@ -836,6 +813,47 @@ TEST_F(ViewManagerTest, ViewManagerDestroyedAfterRootObserver) {
   embed_view->Destroy();
   EXPECT_TRUE(DoRunLoopWithTimeout());
   EXPECT_TRUE(got_destroy);
+}
+
+// Verifies an embed root sees views created beneath it from another
+// connection.
+TEST_F(ViewManagerTest, EmbedRootSeesHierarchyChanged) {
+  View* embed_view = window_manager()->CreateView();
+  window_manager()->GetRoot()->AddChild(embed_view);
+
+  ViewManager* vm2 = Embed(embed_view);
+  vm2->SetEmbedRoot();
+  View* vm2_v1 = vm2->CreateView();
+  vm2->GetRoot()->AddChild(vm2_v1);
+
+  ViewManager* vm3 = Embed(vm2_v1);
+  View* vm3_v1 = vm3->CreateView();
+  vm3->GetRoot()->AddChild(vm3_v1);
+
+  // As |vm2| is an embed root it should get notified about |vm3_v1|.
+  ASSERT_TRUE(WaitForTreeSizeToMatch(vm2_v1, 2));
+}
+
+TEST_F(ViewManagerTest, EmbedFromEmbedRoot) {
+  View* embed_view = window_manager()->CreateView();
+  window_manager()->GetRoot()->AddChild(embed_view);
+
+  ViewManager* vm2 = Embed(embed_view);
+  vm2->SetEmbedRoot();
+  View* vm2_v1 = vm2->CreateView();
+  vm2->GetRoot()->AddChild(vm2_v1);
+
+  ViewManager* vm3 = Embed(vm2_v1);
+  View* vm3_v1 = vm3->CreateView();
+  vm3->GetRoot()->AddChild(vm3_v1);
+
+  // As |vm2| is an embed root it should get notified about |vm3_v1|.
+  ASSERT_TRUE(WaitForTreeSizeToMatch(vm2_v1, 2));
+
+  // Embed() from vm2 in vm3_v1. This is allowed as vm2 is an embed root.
+  ASSERT_EQ(1u, vm2_v1->children().size());
+  View* vm3_v1_in_vm2 = vm2_v1->children()[0];
+  ASSERT_TRUE(Embed(vm3_v1_in_vm2));
 }
 
 }  // namespace mojo

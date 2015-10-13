@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/url_constants.h"
-#include "components/web_modal/popup_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -32,6 +32,21 @@ using base::UserMetricsAction;
 using content::WebContents;
 
 namespace {
+
+// Enumeration for UMA tab discarding events.
+enum UMATabDiscarding {
+  UMA_TAB_DISCARDING_SWITCH_TO_LOADED_TAB,
+  UMA_TAB_DISCARDING_SWITCH_TO_DISCARDED_TAB,
+  UMA_TAB_DISCARDING_DISCARD_TAB,
+  UMA_TAB_DISCARDING_DISCARD_TAB_AUDIO,
+  UMA_TAB_DISCARDING_TAB_DISCARDING_MAX
+};
+
+// Records an UMA tab discarding event.
+void RecordUMATabDiscarding(UMATabDiscarding event) {
+  UMA_HISTOGRAM_ENUMERATION("Tab.Discarding", event,
+                            UMA_TAB_DISCARDING_TAB_DISCARDING_MAX);
+}
 
 // Returns true if the specified transition is one of the types that cause the
 // opener relationships for the tab in which the transition occurred to be
@@ -162,6 +177,10 @@ class TabStripModel::WebContentsData : public content::WebContentsObserver {
   // is properly removed from the tab strip.
   void WebContentsDestroyed() override;
 
+  // Marks the tab as no longer discarded if it has been reloaded from another
+  // source (ie: context menu).
+  void DidStartLoading() override;
+
   // The WebContents being tracked by this WebContentsData. The
   // WebContentsObserver does keep a reference, but when the WebContents is
   // deleted, the WebContentsObserver reference is NULLed and thus inaccessible.
@@ -231,6 +250,10 @@ void TabStripModel::WebContentsData::WebContentsDestroyed() {
   int index = tab_strip_model_->GetIndexOfWebContents(web_contents());
   DCHECK_NE(TabStripModel::kNoTab, index);
   tab_strip_model_->DetachWebContentsAt(index);
+}
+
+void TabStripModel::WebContentsData::DidStartLoading() {
+  set_discarded(false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -311,13 +334,13 @@ void TabStripModel::InsertWebContentsAt(int index,
     data->set_opener(active_contents);
   }
 
-  // TODO(gbillock): Ask the bubble manager whether the WebContents should be
-  // blocked, or just let the bubble manager make the blocking call directly
-  // and not use this at all.
-  web_modal::PopupManager* popup_manager =
-      web_modal::PopupManager::FromWebContents(contents);
-  if (popup_manager)
-    data->set_blocked(popup_manager->IsWebModalDialogActive(contents));
+  // TODO(gbillock): Ask the modal dialog manager whether the WebContents should
+  // be blocked, or just let the modal dialog manager make the blocking call
+  // directly and not use this at all.
+  const web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(contents);
+  if (manager)
+    data->set_blocked(manager->IsDialogActive());
 
   contents_data_.insert(contents_data_.begin() + index, data);
 
@@ -371,13 +394,23 @@ WebContents* TabStripModel::DiscardWebContentsAt(int index) {
   WebContents* null_contents =
       WebContents::Create(WebContents::CreateParams(profile()));
   WebContents* old_contents = GetWebContentsAtImpl(index);
+  bool is_playing_audio = old_contents->WasRecentlyAudible();
   // Copy over the state from the navigation controller so we preserve the
   // back/forward history and continue to display the correct title/favicon.
   null_contents->GetController().CopyStateFrom(old_contents->GetController());
+
+  // Make sure we persist the last active time property.
+  null_contents->SetLastActiveTime(old_contents->GetLastActiveTime());
+
   // Replace the tab we're discarding with the null version.
   ReplaceWebContentsAt(index, null_contents);
   // Mark the tab so it will reload when we click.
-  contents_data_[index]->set_discarded(true);
+  if (!contents_data_[index]->discarded()) {
+    contents_data_[index]->set_discarded(true);
+    RecordUMATabDiscarding(UMA_TAB_DISCARDING_DISCARD_TAB);
+    if (is_playing_audio)
+      RecordUMATabDiscarding(UMA_TAB_DISCARDING_DISCARD_TAB_AUDIO);
+  }
   // Discard the old tab's renderer.
   // TODO(jamescook): This breaks script connections with other tabs.
   // We need to find a different approach that doesn't do that, perhaps based
@@ -1018,7 +1051,7 @@ void TabStripModel::ExecuteContextMenuCommand(
       for (std::vector<int>::const_iterator i = indices.begin();
            i != indices.end(); ++i) {
         chrome::SetTabAudioMuted(GetWebContentsAt(*i), mute,
-                                 chrome::kMutedToggleCauseUser);
+                                 TAB_MUTED_REASON_CONTEXT_MENU, std::string());
       }
       break;
     }
@@ -1295,7 +1328,12 @@ void TabStripModel::NotifyIfActiveTabChanged(WebContents* old_contents,
                          reason));
     in_notify_ = false;
     // Activating a discarded tab reloads it, so it is no longer discarded.
-    contents_data_[active_index()]->set_discarded(false);
+    if (contents_data_[active_index()]->discarded()) {
+      contents_data_[active_index()]->set_discarded(false);
+      RecordUMATabDiscarding(UMA_TAB_DISCARDING_SWITCH_TO_DISCARDED_TAB);
+    } else {
+      RecordUMATabDiscarding(UMA_TAB_DISCARDING_SWITCH_TO_LOADED_TAB);
+    }
   }
 }
 

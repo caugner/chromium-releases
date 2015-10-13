@@ -32,10 +32,18 @@ function getFilenameFromURL(url) {
 
 /**
  * Called when navigation happens in the current tab.
+ * @param {boolean} isInTab Indicates if the PDF viewer is displayed in a tab.
+ * @param {boolean} isSourceFileUrl Indicates if the navigation source is a
+ *     file:// URL.
  * @param {string} url The url to be opened in the current tab.
  */
-function onNavigateInCurrentTab(url) {
-  window.location.href = url;
+function onNavigateInCurrentTab(isInTab, isSourceFileUrl, url) {
+  // When the PDFviewer is inside a browser tab, prefer the tabs API because
+  // it can navigate from one file:// URL to another.
+  if (chrome.tabs && isInTab && isSourceFileUrl)
+    chrome.tabs.update({url: url});
+  else
+    window.location.href = url;
 }
 
 /**
@@ -46,7 +54,7 @@ function onNavigateInNewTab(url) {
   // Prefer the tabs API because it guarantees we can just open a new tab.
   // window.open doesn't have this guarantee.
   if (chrome.tabs)
-    chrome.tabs.create({ url: url});
+    chrome.tabs.create({url: url});
   else
     window.open(url);
 }
@@ -73,6 +81,12 @@ function shouldIgnoreKeyEvents(activeElement) {
  * right side of the screen.
  */
 PDFViewer.MIN_TOOLBAR_OFFSET = 15;
+
+/**
+ * The height of the toolbar along the top of the page. The document will be
+ * shifted down by this much in the viewport.
+ */
+PDFViewer.MATERIAL_TOOLBAR_HEIGHT = 64;
 
 /**
  * Creates a new PDFViewer. There should only be one of these objects per
@@ -105,13 +119,16 @@ function PDFViewer(browserApi) {
   this.errorScreen_ = $('error-screen');
 
   // Create the viewport.
+  var topToolbarHeight =
+      this.isMaterial_ ? PDFViewer.MATERIAL_TOOLBAR_HEIGHT : 0;
   this.viewport_ = new Viewport(window,
                                 this.sizer_,
                                 this.viewportChanged_.bind(this),
                                 this.beforeZoom_.bind(this),
                                 this.afterZoom_.bind(this),
                                 getScrollbarWidth(),
-                                this.browserApi_.getDefaultZoom());
+                                this.browserApi_.getDefaultZoom(),
+                                topToolbarHeight);
 
   // Create the plugin object dynamically so we can set its src. The plugin
   // element is sized to fill the entire window and is set to be fixed
@@ -144,8 +161,11 @@ function PDFViewer(browserApi) {
   }
   this.plugin_.setAttribute('headers', headers);
 
-  if (this.isMaterial_)
+  if (this.isMaterial_) {
     this.plugin_.setAttribute('is-material', '');
+    this.plugin_.setAttribute('top-toolbar-height',
+                              PDFViewer.MATERIAL_TOOLBAR_HEIGHT);
+  }
 
   if (!this.browserApi_.getStreamInfo().embedded)
     this.plugin_.setAttribute('full-frame', '');
@@ -170,7 +190,7 @@ function PDFViewer(browserApi) {
     this.zoomToolbar_.addEventListener('fit-to-width',
         this.viewport_.fitToWidth.bind(this.viewport_));
     this.zoomToolbar_.addEventListener('fit-to-page',
-        this.viewport_.fitToPage.bind(this.viewport_));
+        this.fitToPage_.bind(this));
     this.zoomToolbar_.addEventListener('zoom-in',
         this.viewport_.zoomIn.bind(this.viewport_));
     this.zoomToolbar_.addEventListener('zoom-out',
@@ -189,8 +209,14 @@ function PDFViewer(browserApi) {
       this.viewport_.goToPage(e.detail.page);
     }.bind(this));
 
-    this.uiManager_ =
-        new UiManager(window, this.materialToolbar_, this.zoomToolbar_);
+    this.toolbarManager_ =
+        new ToolbarManager(window, this.materialToolbar_, this.zoomToolbar_);
+
+    // Must attach to mouseup on the plugin element, since it eats mousedown and
+    // click events.
+    this.plugin_.addEventListener(
+        'mouseup',
+        this.materialToolbar_.hideDropdowns.bind(this.materialToolbar_));
   }
 
   // Set up the ZoomManager.
@@ -201,14 +227,21 @@ function PDFViewer(browserApi) {
       this.zoomManager_.onBrowserZoomChange.bind(this.zoomManager_));
 
   // Setup the keyboard event listener.
-  document.onkeydown = this.handleKeyEvent_.bind(this);
+  document.addEventListener('keydown', this.handleKeyEvent_.bind(this));
+  document.addEventListener('mousemove', this.handleMouseEvent_.bind(this));
 
   // Parse open pdf parameters.
   this.paramsParser_ =
       new OpenPDFParamsParser(this.getNamedDestination_.bind(this));
+  var isInTab = this.browserApi_.getStreamInfo().tabId != -1;
+  var isSourceFileUrl =
+      this.browserApi_.getStreamInfo().originalUrl.indexOf('file://') == 0;
   this.navigator_ = new Navigator(this.browserApi_.getStreamInfo().originalUrl,
                                   this.viewport_, this.paramsParser_,
-                                  onNavigateInCurrentTab, onNavigateInNewTab);
+                                  onNavigateInCurrentTab.bind(undefined,
+                                                              isInTab,
+                                                              isSourceFileUrl),
+                                  onNavigateInNewTab);
   this.viewportScroller_ =
       new ViewportScroller(this.viewport_, this.plugin_, window);
 }
@@ -227,6 +260,9 @@ PDFViewer.prototype = {
 
     if (shouldIgnoreKeyEvents(document.activeElement) || e.defaultPrevented)
       return;
+
+    if (this.isMaterial_)
+      this.toolbarManager_.hideToolbarsAfterTimeout(e);
 
     var pageUpHandler = function() {
       // Go to the previous page if we are fit-to-page.
@@ -252,6 +288,12 @@ PDFViewer.prototype = {
     }.bind(this);
 
     switch (e.keyCode) {
+      case 27:  // Escape key.
+        if (this.isMaterial_ && !this.isPrintPreview) {
+          this.toolbarManager_.hideSingleToolbarLayer();
+          return;
+        }
+        break;  // Ensure escape falls through to the print-preview handler.
       case 32:  // Space key.
         if (e.shiftKey)
           pageUpHandler();
@@ -313,6 +355,7 @@ PDFViewer.prototype = {
         return;
       case 71: // g key.
         if (this.isMaterial_ && (e.ctrlKey || e.metaKey)) {
+          this.toolbarManager_.showToolbars();
           this.materialToolbar_.selectPageNumber();
           // To prevent the default "find text" behaviour in Chrome.
           e.preventDefault();
@@ -334,7 +377,16 @@ PDFViewer.prototype = {
         type: 'sendKeyEvent',
         keyEvent: SerializeKeyEvent(e)
       });
+    } else if (this.isMaterial_) {
+      // Show toolbars as a fallback.
+      if (!(e.shiftKey || e.ctrlKey || e.altKey))
+        this.toolbarManager_.showToolbars();
     }
+  },
+
+  handleMouseEvent_: function(e) {
+    if (this.isMaterial_)
+      this.toolbarManager_.showToolbarsForMouseMove(e);
   },
 
   /**
@@ -355,6 +407,11 @@ PDFViewer.prototype = {
     this.plugin_.postMessage({
       type: 'rotateCounterclockwise'
     });
+  },
+
+  fitToPage_: function() {
+    this.viewport_.fitToPage();
+    this.toolbarManager_.forceHideTopToolbar();
   },
 
   /**
@@ -462,7 +519,7 @@ PDFViewer.prototype = {
         this.handleScriptingMessage(this.delayedScriptingMessages_.shift());
 
       if (this.isMaterial_)
-        this.uiManager_.hideUiAfterTimeout();
+        this.toolbarManager_.hideToolbarsAfterTimeout();
     }
   },
 

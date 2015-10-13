@@ -4,7 +4,7 @@
 
 import("//mojo/public/mojo_application.gni")
 
-source_set("tab") {
+source_set("lib") {
   sources = [
     "frame.cc",
     "frame.h",
@@ -14,16 +14,56 @@ source_set("tab") {
     "frame_tree.h",
     "frame_tree_delegate.h",
     "frame_user_data.h",
+    "web_view_application_delegate.cc",
+    "web_view_application_delegate.h",
+    "web_view_impl.cc",
+    "web_view_impl.h",
   ]
 
   deps = [
     "//base",
+    "//components/clipboard/public/interfaces",
+    "//components/devtools_service/public/interfaces",
+    "//components/resource_provider/public/interfaces",
     "//components/view_manager/public/cpp",
-    "//mandoline/tab/public/interfaces",
+    "//components/view_manager/public/interfaces",
     "//mojo/application/public/cpp:sources",
     "//mojo/application/public/interfaces",
+    "//mojo/common:common_base",
+    "//mojo/converters/geometry",
     "//mojo/services/network/public/interfaces",
+    "//mojo/services/tracing/public/interfaces",
     "//third_party/mojo/src/mojo/public/cpp/bindings",
+  ]
+
+  public_deps = [
+    "//mandoline/tab/public/interfaces",
+  ]
+
+  if (is_linux && !is_android) {
+    deps += [ "//components/font_service/public/interfaces" ]
+  }
+}
+
+mojo_native_application("web_view") {
+  sources = [
+    "main.cc",
+  ]
+
+  deps = [
+    ":lib",
+    "//mojo/application/public/cpp",
+  ]
+}
+
+source_set("test_support") {
+  sources = [
+    "test_frame_tree_delegate.cc",
+    "test_frame_tree_delegate.h",
+  ]
+  deps = [
+    ":lib",
+    "//base",
   ]
 }
 
@@ -35,12 +75,14 @@ mojo_native_application("mandoline_frame_apptests") {
   ]
 
   deps = [
-    ":tab",
+    ":lib",
+    ":test_support",
     "//base",
     "//base/test:test_config",
     "//components/view_manager/public/cpp",
     "//components/view_manager/public/interfaces",
     "//mandoline/tab/public/interfaces",
+    "//mojo/application/public/cpp:sources",
     "//mojo/application/public/cpp:test_support",
     "//ui/mojo/geometry:interfaces",
     "//ui/mojo/geometry:util",

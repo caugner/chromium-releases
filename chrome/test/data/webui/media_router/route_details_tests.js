@@ -43,6 +43,18 @@ cr.define('route_details', function() {
             details.$[elementId].querySelector('span').innerText);
       };
 
+      // Checks the default route view is shown.
+      var checkDefaultViewIsShown = function() {
+        assertFalse(details.$['route-information'].hasAttribute('hidden'));
+        assertTrue(details.$['custom-controller'].hasAttribute('hidden'));
+      };
+
+      // Checks the custom controller is shown.
+      var checkCustomControllerIsShown = function() {
+        assertTrue(details.$['route-information'].hasAttribute('hidden'));
+        assertFalse(details.$['custom-controller'].hasAttribute('hidden'));
+      };
+
       // Checks whether |expected| and the text in the |elementId| element
       // are equal given an id.
       var checkElementTextWithId = function(expected, elementId) {
@@ -64,7 +76,7 @@ cr.define('route_details', function() {
 
         // Initialize routes and sinks.
         fakeRouteOne = new media_router.Route('route id 1', 'sink id 1',
-            'Video 1', 1, true);
+            'Video 1', 1, true, 'chrome-extension://123/custom_view.html');
         fakeRouteTwo = new media_router.Route('route id 2', 'sink id 2',
             'Video 2', 2, false);
         fakeSinkOne = new media_router.Sink('sink id 1', 'Living Room',
@@ -85,6 +97,15 @@ cr.define('route_details', function() {
         MockInteractions.tap(details.$['back-button']);
       });
 
+      // Tests for 'close-button-click' event firing when the close button
+      // is clicked.
+      test('close button click', function(done) {
+        details.addEventListener('close-button-click', function() {
+          done();
+        });
+        MockInteractions.tap(details.$['close-button']);
+      });
+
       // Tests for 'close-route-click' event firing when the
       // 'close-route-button' button is clicked.
       test('close route button click', function(done) {
@@ -99,8 +120,7 @@ cr.define('route_details', function() {
         // <paper-button> text is styled as upper case.
         checkSpanText(loadTimeData.getString('stopCastingButton')
             .toUpperCase(), 'close-route-button');
-        checkSpanText('', 'route-title');
-        checkSpanText('', 'route-status');
+        checkSpanText('', 'route-information');
         checkElementTextWithId('', 'sink-name');
       });
 
@@ -108,44 +128,43 @@ cr.define('route_details', function() {
       test('route is set', function() {
         // |route| is null.
         assertEquals(null, details.route);
-        checkSpanText('', 'route-title');
+        checkDefaultViewIsShown();
 
-        // Set |route| to be non-null. 'route-title' text should be updated.
+        // Set |route| to be non-null.
         details.route = fakeRouteOne;
         assertEquals(fakeRouteOne, details.route);
-        checkSpanText(fakeRouteOne.title, 'route-title');
-        checkSpanText('', 'route-status');
+        checkSpanText(loadTimeData.getStringF('castingActivityStatus',
+            fakeRouteOne.title), 'route-information');
         assertEquals(null, details.sink);
+        checkDefaultViewIsShown();
 
-        // Set |route| to a different route. 'route-title' text should
-        // be updated.
+        // Set |route| to a different route.
         details.route = fakeRouteTwo;
         assertEquals(fakeRouteTwo, details.route);
-        checkSpanText(fakeRouteTwo.title, 'route-title');
+        checkSpanText(loadTimeData.getStringF('castingActivityStatus',
+            fakeRouteTwo.title), 'route-information');
+        checkDefaultViewIsShown();
       });
 
       // Tests when |sink| exists but |route| is null.
       test('sink is set', function() {
         // |sink| is null.
         assertEquals(null, details.sink);
-        checkSpanText('', 'route-status');
+        checkSpanText('', 'route-information');
 
-        // Set |sink| to be non-null. 'route-status' should be updated.
+        // Set |sink| to be non-null. 'route-information' should be updated.
         details.sink = fakeSinkOne;
         assertEquals(fakeSinkOne, details.sink);
         assertEquals(null, details.route);
-        checkSpanText('', 'route-title');
         checkElementTextWithId(fakeSinkOne.name, 'sink-name');
-        checkSpanText(loadTimeData.getStringF('castingActivityStatus',
-            fakeSinkOne.name), 'route-status');
+        checkSpanText('', 'route-information');
 
-        // Set |sink| to be a different sink. 'route-status' text should
+        // Set |sink| to be a different sink. 'route-information' text should
         // be updated.
         details.sink = fakeSinkTwo;
         assertEquals(fakeSinkTwo, details.sink);
         checkElementTextWithId(fakeSinkTwo.name, 'sink-name');
-        checkSpanText(loadTimeData.getStringF('castingActivityStatus',
-            fakeSinkTwo.name), 'route-status');
+        checkSpanText('', 'route-information');
       });
 
       // Tests when |route| and |sink| both exist.
@@ -154,18 +173,53 @@ cr.define('route_details', function() {
         details.sink = fakeSinkOne;
         assertEquals(fakeSinkOne, details.sink);
         assertEquals(fakeRouteOne, details.route);
-        checkSpanText(fakeRouteOne.title, 'route-title');
         checkElementTextWithId(fakeSinkOne.name, 'sink-name');
         checkSpanText(loadTimeData.getStringF('castingActivityStatus',
-            fakeSinkOne.name), 'route-status');
+            fakeRouteOne.title), 'route-information');
       });
 
       // Tests when |route| and |sink| are both null.
       test('sink and route are null', function() {
         assertEquals(null, details.route);
         assertEquals(null, details.sink);
-        checkSpanText('', 'route-title');
-        checkSpanText('', 'route-status');
+        checkSpanText('', 'route-information');
+      });
+
+      // Tests when |route| and |sink| both exist and |route| has custom
+      // controller and it loads.
+      test('route has custom controller and loading succeeds', function(done) {
+        var loadInvoked = false;
+        details.$['custom-controller'].load = function(url) {
+          loadInvoked = true;
+          assertEquals('chrome-extension://123/custom_view.html', url);
+          return Promise.resolve();
+        };
+
+        details.route = fakeRouteOne;
+        details.sink = fakeSinkOne;
+        setTimeout(function() {
+          assertTrue(loadInvoked);
+          checkCustomControllerIsShown();
+          done();
+        });
+      });
+
+      // Tests when |route| and |sink| both exist and |route| has custom
+      // controller but it fails to load.
+      test('route has custom controller but loading fails', function(done) {
+        var loadInvoked = false;
+        details.$['custom-controller'].load = function(url) {
+          loadInvoked = true;
+          return Promise.reject();
+        };
+
+        details.route = fakeRouteOne;
+        details.sink = fakeSinkOne;
+        setTimeout(function() {
+          assertTrue(loadInvoked);
+          checkDefaultViewIsShown();
+          done();
+        });
       });
     });
   }

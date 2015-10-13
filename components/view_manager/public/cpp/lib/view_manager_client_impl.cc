@@ -99,8 +99,8 @@ ViewManagerClientImpl::~ViewManagerClientImpl() {
   }
 
   // Delete the non-owned views last. In the typical case these are roots. The
-  // exception is the window manager, which may know aboutother random views
-  // that it doesn't own.
+  // exception is the window manager and embed roots, which may know about
+  // other random views that it doesn't own.
   // NOTE: we manually delete as we're a friend.
   for (size_t i = 0; i < non_owned.size(); ++i)
     delete non_owned[i];
@@ -170,6 +170,19 @@ void ViewManagerClientImpl::SetProperty(
                             String(name),
                             Array<uint8_t>::From(data),
                             ActionCompletedCallback());
+}
+
+void ViewManagerClientImpl::SetViewTextInputState(Id view_id,
+                                                  TextInputStatePtr state) {
+  DCHECK(service_);
+  service_->SetViewTextInputState(view_id, state.Pass());
+}
+
+void ViewManagerClientImpl::SetImeVisibility(Id view_id,
+                                             bool visible,
+                                             TextInputStatePtr state) {
+  DCHECK(service_);
+  service_->SetImeVisibility(view_id, visible, state.Pass());
 }
 
 void ViewManagerClientImpl::Embed(Id view_id, ViewManagerClientPtr client) {
@@ -254,7 +267,7 @@ void ViewManagerClientImpl::OnEmbed(ConnectionSpecificId connection_id,
   if (view_manager_service) {
     DCHECK(!service_);
     service_ = view_manager_service.Pass();
-    service_.set_error_handler(this);
+    service_.set_connection_error_handler([this]() { delete this; });
   }
   connection_id_ = connection_id;
 
@@ -283,6 +296,12 @@ void ViewManagerClientImpl::OnEmbeddedAppDisconnected(Id view_id) {
     FOR_EACH_OBSERVER(ViewObserver, *ViewPrivate(view).observers(),
                       OnViewEmbeddedAppDisconnected(view));
   }
+}
+
+void ViewManagerClientImpl::OnUnembed() {
+  delegate_->OnUnembed();
+  // This will send out the various notifications.
+  delete this;
 }
 
 void ViewManagerClientImpl::OnViewBoundsChanged(Id view_id,
@@ -320,7 +339,14 @@ void ViewManagerClientImpl::OnViewHierarchyChanged(
   View* initial_parent = views.size() ?
       GetViewById(views[0]->parent_id) : NULL;
 
+  const bool was_view_known = GetViewById(view_id) != nullptr;
+
   BuildViewTree(this, views, initial_parent);
+
+  // If the view was not known, then BuildViewTree() will have created it and
+  // parented the view.
+  if (!was_view_known)
+    return;
 
   View* new_parent = GetViewById(new_parent_id);
   View* old_parent = GetViewById(old_parent_id);
@@ -403,12 +429,6 @@ void ViewManagerClientImpl::OnViewFocused(Id focused_view_id) {
     FOR_EACH_OBSERVER(ViewObserver, *ViewPrivate(focused).observers(),
                       OnViewFocusChanged(focused, blurred));
   }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// OnConnectionError, private:
-void ViewManagerClientImpl::OnConnectionError() {
-  delete this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

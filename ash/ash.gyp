@@ -69,8 +69,8 @@
       'display/display_change_observer_chromeos.h',
       'display/display_configurator_animation.cc',
       'display/display_configurator_animation.h',
-      'display/display_controller.cc',
-      'display/display_controller.h',
+      'display/window_tree_host_manager.cc',
+      'display/window_tree_host_manager.h',
       'display/display_error_observer_chromeos.cc',
       'display/display_error_observer_chromeos.h',
       'display/display_info.cc',
@@ -741,6 +741,8 @@
       'test/test_user_wallpaper_delegate.h',
       'test/test_volume_control_delegate.cc',
       'test/test_volume_control_delegate.h',
+      'test/tray_cast_test_api.cc',
+      'test/tray_cast_test_api.h',
       'test/ui_controls_factory_ash.cc',
       'test/ui_controls_factory_ash.h',
       'test/user_metrics_recorder_test_api.cc',
@@ -796,7 +798,7 @@
       'dip_unittest.cc',
       'display/cursor_window_controller_unittest.cc',
       'display/display_change_observer_chromeos_unittest.cc',
-      'display/display_controller_unittest.cc',
+      'display/window_tree_host_manager_unittest.cc',
       'display/display_error_observer_chromeos_unittest.cc',
       'display/display_info_unittest.cc',
       'display/display_manager_unittest.cc',
@@ -827,6 +829,7 @@
       'metrics/user_metrics_recorder_unittest.cc',
       'popup_message_unittest.cc',
       'root_window_controller_unittest.cc',
+      'rotator/screen_rotation_animation_unittest.cc',
       'screen_util_unittest.cc',
       'shelf/scoped_observer_with_duplicated_sources_unittest.cc',
       'shelf/shelf_button_pressed_metric_tracker_unittest.cc',
@@ -1102,6 +1105,21 @@
       ],
     },
     {
+      # GN version: //ash:interactive_ui_test_support
+      'target_name': 'ash_interactive_ui_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../skia/skia.gyp:skia',
+        '../testing/gtest.gyp:gtest',
+        'ash',
+        'ash_test_support',
+      ],
+      'sources': [
+        'test/ash_interactive_ui_test_base.cc',
+        'test/ash_interactive_ui_test_base.h',
+      ],
+    },
+    {
       # GN version: //ash:ash_unittests
       'target_name': 'ash_unittests',
       'type': 'executable',
@@ -1210,11 +1228,6 @@
             'ldflags': ['-rdynamic'],
           },
         }],
-        ['use_ozone==1', {
-          'sources!': [
-            'sticky_keys/sticky_keys_unittest.cc',  # crbug.com/354035
-          ],
-        }],
       ],
     },
     {
@@ -1287,38 +1300,6 @@
         ['chromeos==1', {
           'dependencies': [
             '../device/bluetooth/bluetooth.gyp:device_bluetooth',
-          ],
-        }],
-        ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
-          'dependencies': [
-            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-          ],
-        }],
-      ],
-    },
-    {
-      # GN version: //ash:ash_shell_unittests
-      'target_name': 'ash_shell_unittests',
-      'type': 'executable',
-      'dependencies': [
-        '../base/base.gyp:test_support_base',
-        '../components/components.gyp:user_manager',
-        '../content/content_shell_and_tests.gyp:test_support_content',
-        '../skia/skia.gyp:skia',
-        '../testing/gtest.gyp:gtest',
-        '../ui/accessibility/accessibility.gyp:ax_gen',
-        'ash_shell_lib',
-        'ash_test_support',
-      ],
-      'sources': [
-        # Note: file list duplicated in GN build.
-        'shell/window_watcher_unittest.cc',
-        'test/ash_unittests.cc',
-      ],
-      'conditions': [
-        ['chromeos==1', {
-          'dependencies': [
-            '../ui/display/display.gyp:display',
           ],
         }],
         ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {

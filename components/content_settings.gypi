@@ -16,6 +16,7 @@
         'content_settings_core_common',
         'plugins_common',
         'pref_registry',
+        'url_formatter/url_formatter.gyp:url_formatter',
       ],
       'variables': { 'enable_wexit_time_destructors': 1, },
       'include_dirs': [
@@ -35,8 +36,6 @@
         'content_settings/core/browser/content_settings_observer.h',
         'content_settings/core/browser/content_settings_origin_identifier_value_map.cc',
         'content_settings/core/browser/content_settings_origin_identifier_value_map.h',
-        'content_settings/core/browser/content_settings_override_provider.cc',
-        'content_settings/core/browser/content_settings_override_provider.h',
         'content_settings/core/browser/content_settings_policy_provider.cc',
         'content_settings/core/browser/content_settings_policy_provider.h',
         'content_settings/core/browser/content_settings_pref.cc',
@@ -57,6 +56,10 @@
         'content_settings/core/browser/local_shared_objects_counter.h',
         'content_settings/core/browser/plugins_field_trial.cc',
         'content_settings/core/browser/plugins_field_trial.h',
+        'content_settings/core/browser/website_settings_info.cc',
+        'content_settings/core/browser/website_settings_info.h',
+        'content_settings/core/browser/website_settings_registry.cc',
+        'content_settings/core/browser/website_settings_registry.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],

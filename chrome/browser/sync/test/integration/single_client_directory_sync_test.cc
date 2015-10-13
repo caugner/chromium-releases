@@ -108,7 +108,15 @@ IN_PROC_BROWSER_TEST_F(SingleClientDirectorySyncTest,
   // Write a bunch of bookmarks and flush the directory to ensure sync notices
   // the corruption. The key here is to force sync to actually write a lot of
   // data to its DB so it will see the corruption we introduced above.
-  const GURL url("https://www.google.com");
+  const GURL url(
+      "https://"
+      "www."
+      "gooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+      "oooooooooooooooooooogle.com");
   const bookmarks::BookmarkNode* top = bookmarks_helper::AddFolder(
       0, bookmarks_helper::GetOtherNode(0), 0, "top");
   for (int i = 0; i < kNumEntriesRequiredForCorruption; ++i) {

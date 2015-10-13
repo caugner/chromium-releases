@@ -27,6 +27,7 @@
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "jni/WebContentsImpl_jni.h"
@@ -107,7 +108,7 @@ void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
                             float scale_factor,
                             float y_offset,
                             float x_scroll,
-                            const ui::AXTreeUpdate& result) {
+                            const ui::AXTreeUpdate<ui::AXNodeData>& result) {
   JNIEnv* env = base::android::AttachCurrentThread();
   if (result.nodes.empty()) {
     Java_WebContentsImpl_onAccessibilitySnapshot(env, nullptr, callback.obj());
@@ -440,6 +441,39 @@ void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
       ConvertJavaStringToUTF16(env, script), js_callback);
 }
 
+void WebContentsAndroid::EvaluateJavaScriptForTests(JNIEnv* env,
+                                                    jobject obj,
+                                                    jstring script,
+                                                    jobject callback) {
+  RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  DCHECK(rvh);
+
+  if (!rvh->IsRenderViewLive()) {
+    if (!static_cast<WebContentsImpl*>(web_contents_)->
+        CreateRenderViewForInitialEmptyDocument()) {
+      LOG(ERROR) << "Failed to create RenderView in EvaluateJavaScriptForTests";
+      return;
+    }
+  }
+
+  if (!callback) {
+    // No callback requested.
+    web_contents_->GetMainFrame()->ExecuteJavaScriptForTests(
+        ConvertJavaStringToUTF16(env, script));
+    return;
+  }
+
+  // Secure the Java callback in a scoped object and give ownership of it to the
+  // base::Callback.
+  ScopedJavaGlobalRef<jobject> j_callback;
+  j_callback.Reset(env, callback);
+  RenderFrameHost::JavaScriptResultCallback js_callback =
+      base::Bind(&JavaScriptResultCallback, j_callback);
+
+  web_contents_->GetMainFrame()->ExecuteJavaScriptForTests(
+      ConvertJavaStringToUTF16(env, script), js_callback);
+}
+
 void WebContentsAndroid::AddMessageToDevToolsConsole(JNIEnv* env,
                                                      jobject jobj,
                                                      jint level,
@@ -450,6 +484,19 @@ void WebContentsAndroid::AddMessageToDevToolsConsole(JNIEnv* env,
   web_contents_->GetMainFrame()->AddMessageToConsole(
       static_cast<ConsoleMessageLevel>(level),
       ConvertJavaStringToUTF8(env, message));
+}
+
+void WebContentsAndroid::SendMessageToFrame(JNIEnv* env,
+                                            jobject obj,
+                                            jstring frame_name,
+                                            jstring message,
+                                            jstring target_origin) {
+  base::string16 source_origin;
+  base::string16 j_target_origin(ConvertJavaStringToUTF16(env, target_origin));
+  base::string16 j_message(ConvertJavaStringToUTF16(env, message));
+  std::vector<content::TransferredMessagePort> ports;
+  content::MessagePortProvider::PostMessageToFrame(
+      web_contents_, source_origin, j_target_origin, j_message, ports);
 }
 
 jboolean WebContentsAndroid::HasAccessedInitialDocument(
@@ -488,6 +535,16 @@ void WebContentsAndroid::ResumeMediaSession(JNIEnv* env, jobject obj) {
 
 void WebContentsAndroid::SuspendMediaSession(JNIEnv* env, jobject obj) {
   web_contents_->SuspendMediaSession();
+}
+
+void WebContentsAndroid::StopMediaSession(JNIEnv* env, jobject obj) {
+  web_contents_->StopMediaSession();
+}
+
+ScopedJavaLocalRef<jstring>  WebContentsAndroid::GetEncoding(
+    JNIEnv* env, jobject obj) const {
+  return base::android::ConvertUTF8ToJavaString(env,
+                                                web_contents_->GetEncoding());
 }
 
 }  // namespace content

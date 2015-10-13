@@ -31,7 +31,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/filename_util.h"
 #include "net/cookies/cookie_store.h"
@@ -76,9 +75,11 @@ class DOMOperationObserver : public NotificationObserver,
                const NotificationDetails& details) override {
     DCHECK(type == NOTIFICATION_DOM_OPERATION_RESPONSE);
     Details<DomOperationNotificationDetails> dom_op_details(details);
-    response_ = dom_op_details->json;
-    did_respond_ = true;
-    message_loop_runner_->Quit();
+    if (!did_respond_) {
+      response_ = dom_op_details->json;
+      did_respond_ = true;
+      message_loop_runner_->Quit();
+    }
   }
 
   // Overridden from WebContentsObserver:
@@ -234,7 +235,8 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
     const GURL& server_base_url,
     const net::test_server::HttpRequest& request) {
   std::string prefix("/cross-site/");
-  if (!base::StartsWithASCII(request.relative_url, prefix, true))
+  if (!base::StartsWith(request.relative_url, prefix,
+                        base::CompareCase::SENSITIVE))
     return scoped_ptr<net::test_server::HttpResponse>();
 
   std::string params = request.relative_url.substr(prefix.length());
@@ -540,8 +542,6 @@ void SimulateKeyPressWithCode(WebContents* web_contents,
   ASSERT_EQ(modifiers, 0);
 }
 
-namespace internal {
-
 ToRenderFrameHost::ToRenderFrameHost(WebContents* web_contents)
     : render_frame_host_(web_contents->GetMainFrame()) {
 }
@@ -554,16 +554,14 @@ ToRenderFrameHost::ToRenderFrameHost(RenderFrameHost* render_frame_host)
     : render_frame_host_(render_frame_host) {
 }
 
-}  // namespace internal
-
-bool ExecuteScript(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScript(const ToRenderFrameHost& adapter,
                    const std::string& script) {
   std::string new_script =
       script + ";window.domAutomationController.send(0);";
   return ExecuteScriptHelper(adapter.render_frame_host(), new_script, NULL);
 }
 
-bool ExecuteScriptAndExtractInt(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractInt(const ToRenderFrameHost& adapter,
                                 const std::string& script, int* result) {
   DCHECK(result);
   scoped_ptr<base::Value> value;
@@ -575,7 +573,7 @@ bool ExecuteScriptAndExtractInt(const internal::ToRenderFrameHost& adapter,
   return value->GetAsInteger(result);
 }
 
-bool ExecuteScriptAndExtractBool(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractBool(const ToRenderFrameHost& adapter,
                                  const std::string& script, bool* result) {
   DCHECK(result);
   scoped_ptr<base::Value> value;
@@ -587,7 +585,7 @@ bool ExecuteScriptAndExtractBool(const internal::ToRenderFrameHost& adapter,
   return value->GetAsBoolean(result);
 }
 
-bool ExecuteScriptAndExtractString(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractString(const ToRenderFrameHost& adapter,
                                    const std::string& script,
                                    std::string* result) {
   DCHECK(result);
@@ -809,24 +807,6 @@ void TitleWatcher::TestTitle() {
     return;
 
   observed_title_ = *it;
-  message_loop_runner_->Quit();
-}
-
-WebContentsDestroyedWatcher::WebContentsDestroyedWatcher(
-    WebContents* web_contents)
-    : WebContentsObserver(web_contents),
-      message_loop_runner_(new MessageLoopRunner) {
-  EXPECT_TRUE(web_contents != NULL);
-}
-
-WebContentsDestroyedWatcher::~WebContentsDestroyedWatcher() {
-}
-
-void WebContentsDestroyedWatcher::Wait() {
-  message_loop_runner_->Run();
-}
-
-void WebContentsDestroyedWatcher::WebContentsDestroyed() {
   message_loop_runner_->Quit();
 }
 

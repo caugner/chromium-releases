@@ -1708,7 +1708,7 @@ TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTextureParamInvalid) {
   EXPECT_TRUE(texture->wrap_t() == GL_CLAMP_TO_EDGE);
 }
 
-TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTexImage2DError) {
+TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTexImage2D) {
   InitState init;
   init.extensions = "GL_ARB_texture_rectangle";
   init.bind_generates_resource = true;
@@ -1721,9 +1721,11 @@ TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTexImage2DError) {
   GLsizei height = 4;
   GLenum format = GL_RGBA;
   GLenum type = GL_UNSIGNED_BYTE;
+
   DoBindTexture(
       GL_TEXTURE_RECTANGLE_ARB, client_texture_id_, kServiceTextureId);
   ASSERT_TRUE(GetTexture(client_texture_id_) != NULL);
+
   TexImage2D cmd;
   cmd.Init(target,
            level,
@@ -1736,7 +1738,39 @@ TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTexImage2DError) {
            kSharedMemoryOffset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 
-  // TexImage2D is not allowed with GL_TEXTURE_RECTANGLE_ARB targets.
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+}
+
+TEST_P(GLES2DecoderManualInitTest, ARBTextureRectangleTexImage2DInvalid) {
+  InitState init;
+  init.extensions = "GL_ARB_texture_rectangle";
+  init.bind_generates_resource = true;
+  InitDecoder(init);
+
+  GLenum target = GL_TEXTURE_RECTANGLE_ARB;
+  GLint level = 1;
+  GLenum internal_format = GL_RGBA;
+  GLsizei width = 2;
+  GLsizei height = 4;
+  GLenum format = GL_RGBA;
+  GLenum type = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(
+      GL_TEXTURE_RECTANGLE_ARB, client_texture_id_, kServiceTextureId);
+  ASSERT_TRUE(GetTexture(client_texture_id_) != NULL);
+
+  TexImage2D cmd;
+  cmd.Init(target,
+           level,
+           internal_format,
+           width,
+           height,
+           format,
+           type,
+           kSharedMemoryId,
+           kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
@@ -2723,6 +2757,10 @@ class MockGLImage : public gfx::GLImage {
                                           gfx::OverlayTransform,
                                           const gfx::Rect&,
                                           const gfx::RectF&));
+  MOCK_METHOD3(OnMemoryDump,
+               void(base::trace_event::ProcessMemoryDump*,
+                    uint64_t,
+                    const std::string&));
 
  protected:
   virtual ~MockGLImage() {}

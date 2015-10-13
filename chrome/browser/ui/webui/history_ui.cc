@@ -46,13 +46,13 @@
 #include "components/search/search.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/device_info.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
-#include "net/base/net_util.h"
 #include "sync/protocol/history_delete_directive_specifics.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
@@ -183,10 +183,8 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("inContentPack", IDS_HISTORY_IN_CONTENT_PACK);
   source->AddLocalizedString("allowItems", IDS_HISTORY_FILTER_ALLOW_ITEMS);
   source->AddLocalizedString("blockItems", IDS_HISTORY_FILTER_BLOCK_ITEMS);
-  source->AddLocalizedString("lockButton", IDS_HISTORY_LOCK_BUTTON);
   source->AddLocalizedString("blockedVisitText",
                              IDS_HISTORY_BLOCKED_VISIT_TEXT);
-  source->AddLocalizedString("unlockButton", IDS_HISTORY_UNLOCK_BUTTON);
   source->AddLocalizedString("hasSyncedResults",
                              IDS_HISTORY_HAS_SYNCED_RESULTS);
   source->AddLocalizedString("noSyncedResults", IDS_HISTORY_NO_SYNCED_RESULTS);
@@ -209,7 +207,7 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
       prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
   source->AddBoolean("allowDeletingHistory", allow_deleting_history);
   source->AddBoolean("isInstantExtendedApiEnabled",
-                     chrome::IsInstantExtendedAPIEnabled());
+                     search::IsInstantExtendedAPIEnabled());
   source->AddBoolean("isSupervisedProfile", profile->IsSupervised());
   source->AddBoolean("hideDeleteVisitUI",
                      profile->IsSupervised() && !allow_deleting_history);
@@ -352,7 +350,8 @@ scoped_ptr<base::DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   SetUrlAndTitle(result.get());
 
-  base::string16 domain = net::IDNToUnicode(url.host(), accept_languages);
+  base::string16 domain =
+      url_formatter::IDNToUnicode(url.host(), accept_languages);
   // When the domain is empty, use the scheme instead. This allows for a
   // sensible treatment of e.g. file: URLs when group by domain is on.
   if (domain.empty())
@@ -486,7 +485,8 @@ void BrowsingHistoryHandler::WebHistoryTimeout() {
 }
 
 void BrowsingHistoryHandler::QueryHistory(
-    base::string16 search_text, const history::QueryOptions& options) {
+    const base::string16& search_text,
+    const history::QueryOptions& options) {
   Profile* profile = Profile::FromWebUI(web_ui());
 
   // Anything in-flight is invalid.
@@ -1037,7 +1037,7 @@ HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // On mobile we deal with foreign sessions differently.
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-  if (chrome::IsInstantExtendedAPIEnabled()) {
+  if (search::IsInstantExtendedAPIEnabled()) {
     web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
     web_ui->AddMessageHandler(new HistoryLoginHandler());
   }

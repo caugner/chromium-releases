@@ -16,6 +16,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/trace_event/trace_event.h"
 #include "components/tracing/startup_tracing.h"
+#include "components/tracing/tracing_switches.h"
 #include "mojo/runner/context.h"
 #include "mojo/runner/switches.h"
 
@@ -108,9 +109,10 @@ int LauncherProcessMain(int argc, char** argv) {
                                    base::TimeDelta::FromSeconds(5));
     }
 
-    message_loop.PostTask(FROM_HERE,
-                          base::Bind(&Context::RunCommandLineApplication,
-                                     base::Unretained(&shell_context)));
+    message_loop.PostTask(
+        FROM_HERE,
+        base::Bind(&Context::RunCommandLineApplication,
+                   base::Unretained(&shell_context), base::Closure()));
     message_loop.Run();
 
     // Must be called before |message_loop| is destroyed.

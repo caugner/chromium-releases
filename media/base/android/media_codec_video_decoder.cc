@@ -75,18 +75,18 @@ void MediaCodecVideoDecoder::ReleaseDecoderResources() {
   delayed_buffers_.clear();
 }
 
-void MediaCodecVideoDecoder::SetPendingSurface(gfx::ScopedJavaSurface surface) {
+void MediaCodecVideoDecoder::SetVideoSurface(gfx::ScopedJavaSurface surface) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
+
+  DVLOG(1) << class_name() << "::" << __FUNCTION__
+           << (surface.IsEmpty() ? " empty" : " non-empty");
 
   surface_ = surface.Pass();
 
-  if (surface_.IsEmpty()) {
-    // Synchronously stop decoder thread and release MediaCodec
-    ReleaseDecoderResources();
-  }
+  needs_reconfigure_ = true;
 }
 
-bool MediaCodecVideoDecoder::HasPendingSurface() const {
+bool MediaCodecVideoDecoder::HasVideoSurface() const {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
   return !surface_.IsEmpty();
@@ -120,13 +120,13 @@ MediaCodecDecoder::ConfigStatus MediaCodecVideoDecoder::ConfigureInternal() {
   // If we cannot find a key frame in cache, the browser seek is needed.
   if (!au_queue_.RewindToLastKeyFrame()) {
     DVLOG(1) << class_name() << "::" << __FUNCTION__ << " key frame required";
+    return kConfigKeyFrameRequired;
+  }
 
-    // The processing of CONFIG_KEY_FRAME_REQUIRED is not implemented yet,
-    // return error for now.
-    // TODO(timav): Replace this with the following line together with
-    // implementing the browser seek:
-    // return CONFIG_KEY_FRAME_REQUIRED;
-    return CONFIG_FAILURE;
+  if (configs_.video_codec == kUnknownVideoCodec) {
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
+             << " configuration parameters are required";
+    return kConfigFailure;
   }
 
   // TODO(timav): implement DRM.
@@ -137,7 +137,7 @@ MediaCodecDecoder::ConfigStatus MediaCodecVideoDecoder::ConfigureInternal() {
 
   if (surface_.IsEmpty()) {
     DVLOG(0) << class_name() << "::" << __FUNCTION__ << " surface required";
-    return CONFIG_FAILURE;
+    return kConfigFailure;
   }
 
   media_codec_bridge_.reset(VideoCodecBridge::CreateDecoder(
@@ -148,15 +148,16 @@ MediaCodecDecoder::ConfigStatus MediaCodecVideoDecoder::ConfigureInternal() {
       GetMediaCrypto().obj()));
 
   if (!media_codec_bridge_) {
-    DVLOG(1) << class_name() << "::" << __FUNCTION__ << " failed";
-    return CONFIG_FAILURE;
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
+             << " failed: cannot create video codec";
+    return kConfigFailure;
   }
 
-  DVLOG(1) << class_name() << "::" << __FUNCTION__ << " succeeded";
+  DVLOG(0) << class_name() << "::" << __FUNCTION__ << " succeeded";
 
   media_task_runner_->PostTask(FROM_HERE, codec_created_cb_);
 
-  return CONFIG_OK;
+  return kConfigOk;
 }
 
 void MediaCodecVideoDecoder::SynchronizePTSWithTime(
@@ -184,6 +185,7 @@ void MediaCodecVideoDecoder::OnOutputFormatChanged() {
 }
 
 void MediaCodecVideoDecoder::Render(int buffer_index,
+                                    size_t offset,
                                     size_t size,
                                     bool render_output,
                                     base::TimeDelta pts,
@@ -236,13 +238,26 @@ int MediaCodecVideoDecoder::NumDelayedRenderTasks() const {
   return delayed_buffers_.size();
 }
 
-void MediaCodecVideoDecoder::ReleaseDelayedBuffers() {
+void MediaCodecVideoDecoder::ClearDelayedBuffers(bool release) {
   // Media thread
   // Called when there is no decoder thread
-  for (int index : delayed_buffers_)
-    media_codec_bridge_->ReleaseOutputBuffer(index, false);
+  if (release) {
+    for (int index : delayed_buffers_)
+      media_codec_bridge_->ReleaseOutputBuffer(index, false);
+  }
+
   delayed_buffers_.clear();
 }
+
+#ifndef NDEBUG
+void MediaCodecVideoDecoder::VerifyUnitIsKeyFrame(
+    const AccessUnit* unit) const {
+  // The first video frame in a sequence must be a key frame or stand-alone EOS.
+  DCHECK(unit);
+  bool stand_alone_eos = unit->is_end_of_stream && unit->data.empty();
+  DCHECK(stand_alone_eos || unit->is_key_frame);
+}
+#endif
 
 void MediaCodecVideoDecoder::ReleaseOutputBuffer(int buffer_index,
                                                  base::TimeDelta pts,
@@ -252,6 +267,10 @@ void MediaCodecVideoDecoder::ReleaseOutputBuffer(int buffer_index,
   DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
 
   DVLOG(2) << class_name() << "::" << __FUNCTION__ << " pts:" << pts;
+
+  // Do not render if we are in emergency stop, there might be no surface.
+  if (InEmergencyStop())
+    render = false;
 
   media_codec_bridge_->ReleaseOutputBuffer(buffer_index, render);
 

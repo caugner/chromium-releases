@@ -36,7 +36,8 @@ void PasswordFormToJSON(const PasswordForm& form,
   target->SetBoolean("new_password_marked_by_site",
                      form.new_password_marked_by_site);
   target->SetString("other_possible_usernames",
-                    JoinString(form.other_possible_usernames, '|'));
+                    base::JoinString(form.other_possible_usernames,
+                                     base::ASCIIToUTF16("|")));
   target->SetBoolean("blacklisted", form.blacklisted_by_user);
   target->SetBoolean("preferred", form.preferred);
   target->SetBoolean("ssl_valid", form.ssl_valid);
@@ -49,7 +50,7 @@ void PasswordFormToJSON(const PasswordForm& form,
   target->SetString("form_data", form_data_string_stream.str());
   target->SetInteger("generation_upload_status", form.generation_upload_status);
   target->SetString("display_name", form.display_name);
-  target->SetString("avatar_url", form.avatar_url.possibly_invalid_spec());
+  target->SetString("icon_url", form.icon_url.possibly_invalid_spec());
   target->SetString("federation_url",
                     form.federation_url.possibly_invalid_spec());
   target->SetBoolean("skip_next_zero_click", form.skip_zero_click);
@@ -93,6 +94,10 @@ bool PasswordForm::IsPossibleChangePasswordForm() const {
          layout != PasswordForm::Layout::LAYOUT_LOGIN_AND_SIGNUP;
 }
 
+bool PasswordForm::IsPossibleChangePasswordFormWithoutUsername() const {
+  return IsPossibleChangePasswordForm() && username_element.empty();
+}
+
 bool PasswordForm::operator==(const PasswordForm& form) const {
   return scheme == form.scheme &&
       signon_realm == form.signon_realm &&
@@ -119,7 +124,7 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
       form_data.SameFormAs(form.form_data) &&
       generation_upload_status == form.generation_upload_status &&
       display_name == form.display_name &&
-      avatar_url == form.avatar_url &&
+      icon_url == form.icon_url &&
       federation_url == form.federation_url &&
       skip_zero_click == form.skip_zero_click &&
       layout == form.layout &&
@@ -129,6 +134,36 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
 
 bool PasswordForm::operator!=(const PasswordForm& form) const {
   return !operator==(form);
+}
+
+bool ArePasswordFormUniqueKeyEqual(const PasswordForm& left,
+                                   const PasswordForm& right) {
+  return (left.signon_realm == right.signon_realm &&
+          left.origin == right.origin &&
+          left.username_element == right.username_element &&
+          left.username_value == right.username_value &&
+          left.password_element == right.password_element);
+}
+
+bool LessThanUniqueKey::operator()(const PasswordForm* left,
+                                   const PasswordForm* right) const {
+  int result = left->signon_realm.compare(right->signon_realm);
+  if (result)
+    return result < 0;
+
+  result = left->username_element.compare(right->username_element);
+  if (result)
+    return result < 0;
+
+  result = left->username_value.compare(right->username_value);
+  if (result)
+    return result < 0;
+
+  result = left->password_element.compare(right->password_element);
+  if (result)
+    return result < 0;
+
+  return left->origin < right->origin;
 }
 
 std::ostream& operator<<(std::ostream& os, PasswordForm::Layout layout) {

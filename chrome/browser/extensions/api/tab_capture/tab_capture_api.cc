@@ -58,13 +58,21 @@ const char kEnableAutoThrottlingKey[] = "enableAutoThrottling";
 // they provide API's. If there are additional extension ids that need
 // whitelisting and are *not* the Chromecast extension, add them to a new
 // kWhitelist array.
+//
+// This list is also used by CastConfigDelegateChromeos to find official Cast
+// extensions.
 const char* const kChromecastExtensionIds[] = {
     "enhhojjnijigcajfphajepfemndkmdlo",  // Dev
-    "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Dogfood
     "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
     "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
     "dliochdbjfkdbacpmhlcpmleaejidimm",  // Google Cast Beta
     "boadgeojelhgndaghljhdicfkmllpafd",  // Google Cast Stable
+    "hlgmmjhlnlapooncikdpiiokdjcdpjme",  // Test cast extension
+};
+
+const char* const kMediaRouterExtensionIds[] = {
+    "fjhoaacokmgbjemoflkofnenfaiekifl",  // Stable
+    "ekpaaapppgpmolpcldedioblbkmijaca",  // Beta
 };
 
 bool TabCaptureCaptureFunction::RunSync() {
@@ -97,7 +105,9 @@ bool TabCaptureCaptureFunction::RunSync() {
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kWhitelistedExtensionID) != extension_id &&
       !SimpleFeature::IsIdInArray(extension_id, kChromecastExtensionIds,
-                                  arraysize(kChromecastExtensionIds))) {
+                                  arraysize(kChromecastExtensionIds)) &&
+      !SimpleFeature::IsIdInArray(extension_id, kMediaRouterExtensionIds,
+                                  arraysize(kMediaRouterExtensionIds))) {
     error_ = kGrantError;
     return false;
   }

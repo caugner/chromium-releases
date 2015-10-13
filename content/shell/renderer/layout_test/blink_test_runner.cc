@@ -459,8 +459,10 @@ void BlinkTestRunner::SetDatabaseQuota(int quota) {
   Send(new LayoutTestHostMsg_SetDatabaseQuota(routing_id(), quota));
 }
 
-void BlinkTestRunner::SimulateWebNotificationClick(const std::string& title) {
-  Send(new LayoutTestHostMsg_SimulateWebNotificationClick(routing_id(), title));
+void BlinkTestRunner::SimulateWebNotificationClick(const std::string& title,
+                                                   int action_index) {
+  Send(new LayoutTestHostMsg_SimulateWebNotificationClick(routing_id(), title,
+                                                          action_index));
 }
 
 void BlinkTestRunner::SetDeviceScaleFactor(float factor) {
@@ -532,7 +534,7 @@ std::string BlinkTestRunner::PathToLocalResource(const std::string& resource) {
   // Some layout tests use file://// which we resolve as a UNC path. Normalize
   // them to just file:///.
   std::string result = resource;
-  while (base::StringToLowerASCII(result).find("file:////") == 0) {
+  while (base::ToLowerASCII(result).find("file:////") == 0) {
     result = result.substr(0, strlen("file:///")) +
              result.substr(strlen("file:////"));
   }
@@ -683,7 +685,8 @@ void BlinkTestRunner::ResolveBeforeInstallPromptPromise(
       int request_id, const std::string& platform) {
   test_runner::WebTestInterfaces* interfaces =
       LayoutTestRenderProcessObserver::GetInstance()->test_interfaces();
-  interfaces->GetAppBannerClient()->ResolvePromise(request_id, platform);
+  if (interfaces->GetAppBannerClient())
+    interfaces->GetAppBannerClient()->ResolvePromise(request_id, platform);
 }
 
 blink::WebPlugin* BlinkTestRunner::CreatePluginPlaceholder(
@@ -695,6 +698,10 @@ blink::WebPlugin* BlinkTestRunner::CreatePluginPlaceholder(
       new plugins::PluginPlaceholder(render_view()->GetMainRenderFrame(), frame,
                                      params, "<div>Test content</div>");
   return placeholder->plugin();
+}
+
+void BlinkTestRunner::OnWebTestProxyBaseDestroy(
+    test_runner::WebTestProxyBase* proxy) {
 }
 
 // RenderViewObserver  --------------------------------------------------------

@@ -89,7 +89,6 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::PasswordFormFillData)
   IPC_STRUCT_TRAITS_MEMBER(name)
   IPC_STRUCT_TRAITS_MEMBER(origin)
   IPC_STRUCT_TRAITS_MEMBER(action)
-  IPC_STRUCT_TRAITS_MEMBER(user_submitted)
   IPC_STRUCT_TRAITS_MEMBER(username_field)
   IPC_STRUCT_TRAITS_MEMBER(password_field)
   IPC_STRUCT_TRAITS_MEMBER(preferred_realm)
@@ -311,6 +310,11 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidEndTextFieldEditing)
 
 // Instructs the browser to hide the Autofill popup if it is open.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_HidePopup)
+
+// Instructs the browser that generation is available for this particular form.
+// This is used for UMA stats.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_GenerationAvailableForForm,
+                    autofill::PasswordForm)
 
 // Instructs the browser to show the password generation popup at the
 // specified location. This location should be specified in the renderers

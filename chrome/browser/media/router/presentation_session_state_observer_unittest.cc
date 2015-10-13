@@ -29,7 +29,7 @@ MediaRoute::Id CreateRouteId(const char* presentation_url,
 }
 
 MATCHER_P(PresentationSessionInfoEquals, expected, "") {
-  return arg.presentation_url == expected.presentation_url &
+  return arg.presentation_url == expected.presentation_url &&
          arg.presentation_id == expected.presentation_id;
 }
 
@@ -92,7 +92,7 @@ TEST_F(PresentationSessionStateObserverTest, InvokeCallbackWithDisconnected) {
   std::vector<MediaRoute> routes;
   routes.push_back(
       MediaRoute(route_id, MediaSourceForPresentationUrl(kPresentationUrl),
-                 MediaSink("sinkId", "A sink"), "Description", true));
+                 MediaSink("sinkId", "A sink"), "Description", true, ""));
   observer_->OnRoutesUpdated(routes);
 
   // New route list does not contain |route_id|, which means it is disconnected.
@@ -120,7 +120,7 @@ TEST_F(PresentationSessionStateObserverTest, Reset) {
   std::vector<MediaRoute> routes;
   routes.push_back(
       MediaRoute(route_id, MediaSourceForPresentationUrl(kPresentationUrl),
-                 MediaSink("sinkId", "A sink"), "Description", true));
+                 MediaSink("sinkId", "A sink"), "Description", true, ""));
   observer_->OnRoutesUpdated(routes);
 
   // |route_id| is no longer being tracked.

@@ -211,8 +211,7 @@ bool DeserializeInstanceIDData(const std::string& serialized_data,
   return !instance_id->empty() && !extra_data->empty();
 }
 
-void RecordOutgoingMessageToUMA(
-    const gcm::GCMClient::OutgoingMessage& message) {
+void RecordOutgoingMessageToUMA(const gcm::OutgoingMessage& message) {
   OutgoingMessageTTLCategory ttl_category;
   if (message.time_to_live == 0)
     ttl_category = TTL_ZERO;
@@ -382,10 +381,18 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
 
   if (!result->success) {
     if (result->store_does_not_exist) {
-      // In the case that the store does not exist, set |state| back to
-      // INITIALIZED such that store loading could be triggered again when
-      // Start() is called with IMMEDIATE_START.
-      state_ = INITIALIZED;
+      if (start_mode_ == IMMEDIATE_START) {
+        // An immediate start was requested during the delayed start that just
+        // completed. Perform it now.
+        gcm_store_->Load(GCMStore::CREATE_IF_MISSING,
+                         base::Bind(&GCMClientImpl::OnLoadCompleted,
+                                    weak_ptr_factory_.GetWeakPtr()));
+      } else {
+        // In the case that the store does not exist, set |state_| back to
+        // INITIALIZED such that store loading could be triggered again when
+        // Start() is called with IMMEDIATE_START.
+        state_ = INITIALIZED;
+      }
     } else {
       // Otherwise, destroy the store to try again.
       ResetStore();
@@ -1336,6 +1343,8 @@ void GCMClientImpl::HandleIncomingDataMessage(
   if (data_message_stanza.has_token())
     incoming_message.collapse_key = data_message_stanza.token();
   incoming_message.data = message_data;
+  incoming_message.raw_data = data_message_stanza.raw_data();
+
   delegate_->OnMessageReceived(app_id, incoming_message);
 }
 

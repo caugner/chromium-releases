@@ -30,6 +30,7 @@ define('media_router_bindings', [
     return new mediaRouterMojom.MediaSink({
       'name': sink.friendlyName,
       'sink_id': sink.id,
+      'is_launching': sink.isLaunching_,
     });
   }
 
@@ -50,7 +51,8 @@ define('media_router_bindings', [
       }),
       'description': route.description,
       'icon_url': route.iconUrl,
-      'is_local': route.isLocal
+      'is_local': route.isLocal,
+      'custom_controller_path': route.customControllerPath,
     });
   }
 
@@ -62,13 +64,11 @@ define('media_router_bindings', [
   function messageToMojo_(message) {
     if ("string" == typeof message.message) {
       return new mediaRouterMojom.RouteMessage({
-        'route_id': message.routeId,
         'type': mediaRouterMojom.RouteMessage.Type.TEXT,
         'message': message.message,
       });
     } else {
       return new mediaRouterMojom.RouteMessage({
-        'route_id': message.routeId,
         'type': mediaRouterMojom.RouteMessage.Type.BINARY,
         'data': message.message,
       });
@@ -316,9 +316,25 @@ define('media_router_bindings', [
     this.sendRouteMessage = null;
 
     /**
-     * @type {function(Array.<string>): Promise.<Array.<RouteMessage>>}
+     * @type {function(string, Uint8Array): Promise}
+     */
+    this.sendRouteBinaryMessage = null;
+
+    /**
+     * @type {function(string):
+     *     Promise.<{messages: Array.<RouteMessage>, error: boolean}>}
      */
     this.listenForRouteMessages = null;
+
+    /**
+     * @type {function(string)}
+     */
+    this.stopListeningForRouteMessages = null;
+
+    /**
+     * @type {function(string)}
+     */
+    this.onPresentationSessionDetached = null;
 
     /**
      * @type {function()}
@@ -368,7 +384,10 @@ define('media_router_bindings', [
       'stopObservingMediaRoutes',
       'startObservingMediaRoutes',
       'sendRouteMessage',
+      'sendRouteBinaryMessage',
       'listenForRouteMessages',
+      'stopListeningForRouteMessages',
+      'onPresentationSessionDetached',
       'closeRoute',
       'joinRoute',
       'createRoute',
@@ -472,25 +491,63 @@ define('media_router_bindings', [
       routeId, message) {
     return this.handlers_.sendRouteMessage(routeId, message)
         .then(function() {
-          return true;
+          return {'sent': true};
         }, function() {
-          return false;
+          return {'sent': false};
+        });
+  };
+
+  /**
+   * Sends a binary message to the route designated by |routeId|.
+   * @param {!string} routeId
+   * @param {!Uint8Array} data
+   * @return {!Promise.<boolean>} Resolved with true if the data was sent,
+   *    or false on failure.
+   */
+  MediaRouteProvider.prototype.sendRouteBinaryMessage = function(
+      routeId, data) {
+    return this.handlers_.sendRouteBinaryMessage(routeId, data)
+        .then(function() {
+          return {'sent': true};
+        }, function() {
+          return {'sent': false};
         });
   };
 
   /**
    * Listen for next batch of messages from one of the routeIds.
-   * @param {!Array.<string>} routeIds
-   * @return {!Promise.<Array.<RouteMessage>>} Resolved with a list of messages,
-   *    an empty list if an error occurred.
+   * @param {!string} routeId
+   * @return {!Promise.<{messages: Array.<RouteMessage>, error: boolean}>}
+   *     Resolved with a list of messages, and a boolean indicating if an error
+   *     occurred.
    */
-  MediaRouteProvider.prototype.listenForRouteMessages = function(routeIds) {
-    return this.handlers_.listenForRouteMessages(routeIds)
+  MediaRouteProvider.prototype.listenForRouteMessages = function(routeId) {
+    return this.handlers_.listenForRouteMessages(routeId)
         .then(function(messages) {
-          return {'messages': messages.map(messageToMojo_)};
+          return {'messages': messages.map(messageToMojo_), 'error': false};
         }, function() {
-          return {'messages': []};
+          return {'messages': [], 'error': true};
         });
+  };
+
+  /**
+   * If there is an outstanding |listenForRouteMessages| promise for
+   * |routeId|, resolve that promise with an empty array.
+   * @param {!string} routeId
+   */
+  MediaRouteProvider.prototype.stopListeningForRouteMessages = function(
+      routeId) {
+    return this.handlers_.stopListeningForRouteMessages(routeId);
+  };
+
+  /**
+   * Indicates that the presentation session that was connected to |routeId| is
+   * no longer connected to it.
+   * @param {!string} routeId
+   */
+  MediaRouteProvider.prototype.onPresentationSessionDetached = function(
+      routeId) {
+    this.handlers_.onPresentationSessionDetached(routeId);
   };
 
   /**

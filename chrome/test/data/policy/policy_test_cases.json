@@ -590,7 +590,7 @@
   },
 
   "AuthSchemes": {
-    "os": ["win", "linux", "mac", "chromeos"],
+    "os": ["win", "linux", "mac", "chromeos", "android"],
     "test_policy": { "AuthSchemes": "AuthSchemes" },
     "pref_mappings": [
       { "pref": "auth.schemes",
@@ -600,7 +600,7 @@
   },
 
   "DisableAuthNegotiateCnameLookup": {
-    "os": ["win", "linux", "mac", "chromeos"],
+    "os": ["win", "linux", "mac", "chromeos", "android"],
     "test_policy": { "DisableAuthNegotiateCnameLookup": true },
     "pref_mappings": [
       { "pref": "auth.disable_negotiate_cname_lookup",
@@ -620,7 +620,7 @@
   },
 
   "AuthServerWhitelist": {
-    "os": ["win", "linux", "mac", "chromeos"],
+    "os": ["win", "linux", "mac", "chromeos", "android"],
     "test_policy": { "AuthServerWhitelist": "localhost" },
     "pref_mappings": [
       { "pref": "auth.server_whitelist",
@@ -630,7 +630,7 @@
   },
 
   "AuthNegotiateDelegateWhitelist": {
-    "os": ["win", "linux", "mac", "chromeos"],
+    "os": ["win", "linux", "mac", "chromeos", "android"],
     "test_policy": { "AuthNegotiateDelegateWhitelist": "localhost" },
     "pref_mappings": [
       { "pref": "auth.negotiate_delegate_whitelist",
@@ -644,6 +644,16 @@
     "test_policy": { "GSSAPILibraryName": "libwhatever.so" },
     "pref_mappings": [
       { "pref": "auth.gssapi_library_name",
+        "local_state": true
+      }
+    ]
+  },
+
+  "AuthAndroidNegotiateAccountType": {
+    "os": ["android"],
+    "test_policy": { "AuthAndroidNegotiateAccountType": "com.example.spnego" },
+    "pref_mappings": [
+      { "pref": "auth.android_negotiate_account_type",
         "local_state": true
       }
     ]
@@ -1065,7 +1075,7 @@
     "test_policy": { "DefaultMediaStreamSetting": 2 },
     "pref_mappings": [
       { "pref": "profile.managed_default_content_settings.media_stream",
-        "indicator_selector": "[content-setting=media-stream]",
+        "indicator_selector": "[content-setting=media-stream-mic],[content-setting=media-stream-camera]",
         "indicator_tests": [
           { "policy": { "DefaultMediaStreamSetting": 2 },
             "value": "block"
@@ -1079,15 +1089,65 @@
 
     "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
   },
+  
+  "DefaultMediaStreamSetting.OverriddenByAudioCaptureAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultMediaStreamSetting": 3,
+                     "AudioCaptureAllowed": false },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.media_stream",
+        "indicator_selector": "[content-setting=media-stream-mic]",
+        "indicator_tests": [
+          { "policy": { "AudioCaptureAllowed": false },
+            "value": "block"
+          },
+          { "policy": { "AudioCaptureAllowed": true,
+                        "DefaultMediaStreamSetting": 2 },
+            "value": "block"
+          },
+          { "policy": { "AudioCaptureAllowed": true,
+                        "DefaultMediaStreamSetting": 3 },
+            "value": "ask"
+          }
+        ]
+      }
+    ]
+  },
+  
+  "DefaultMediaStreamSetting.OverriddenByVideoCaptureAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultMediaStreamSetting": 3,
+                     "VideoCaptureAllowed": false },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.media_stream",
+        "indicator_selector": "[content-setting=media-stream-camera]",
+        "indicator_tests": [
+          { "policy": { "VideoCaptureAllowed": false },
+            "value": "block"
+          },
+          { "policy": { "VideoCaptureAllowed": true,
+                        "DefaultMediaStreamSetting": 2 },
+            "value": "block"
+          },
+          { "policy": { "VideoCaptureAllowed": true,
+                        "DefaultMediaStreamSetting": 3 },
+            "value": "ask"
+          }
+        ]
+      }
+    ]
+  },
 
   "AudioCaptureAllowed": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "AudioCaptureAllowed": false },
     "pref_mappings": [
       { "pref": "hardware.audio_capture_enabled",
-        "indicator_selector": "#media-indicator",
+        "indicator_selector": "[content-setting=media-stream-mic][value=block]",
         "indicator_tests": [
-          { "policy": { "AudioCaptureAllowed": false } }
+          { "policy": { "AudioCaptureAllowed": false },
+            "value": "block"
+          }
         ]
       }
     ]
@@ -1098,7 +1158,11 @@
     "test_policy": { "AudioCaptureAllowedUrls": ["[*.]google.com"] },
     "pref_mappings": [
       {
-        "pref": "hardware.audio_capture_allowed_urls"
+        "pref": "hardware.audio_capture_allowed_urls",
+        "indicator_selector": "[content-exception=media-stream-mic]",
+        "indicator_tests": [
+          { "policy": { "AudioCaptureAllowedUrls": ["[*.]google.com"] } }
+        ]
       }
     ]
   },
@@ -1108,9 +1172,11 @@
     "test_policy": { "VideoCaptureAllowed": false },
     "pref_mappings": [
       { "pref": "hardware.video_capture_enabled",
-        "indicator_selector": "#media-indicator",
+        "indicator_selector": "[content-setting=media-stream-camera][value=block]",
         "indicator_tests": [
-          { "policy": { "VideoCaptureAllowed": false } }
+          { "policy": { "VideoCaptureAllowed": false },
+            "value": "block"
+          }
         ]
       }
     ]
@@ -1121,7 +1187,11 @@
     "test_policy": { "VideoCaptureAllowedUrls": ["[*.]google.com"] },
     "pref_mappings": [
       {
-        "pref": "hardware.video_capture_allowed_urls"
+        "pref": "hardware.video_capture_allowed_urls",
+        "indicator_selector": "[content-exception=media-stream-camera]",
+        "indicator_tests": [
+          { "policy": { "VideoCaptureAllowedUrls": ["[*.]google.com"] } }
+        ]
       }
     ]
   },
@@ -2253,6 +2323,20 @@
   "KeyPermissions": {
   },
 
+  "HardwareAccelerationModeEnabled": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "HardwareAccelerationModeEnabled": true },
+    "pref_mappings": [
+      { "pref": "hardware_acceleration_mode.enabled",
+        "local_state": true,
+        "indicator_tests": [
+          { "policy": { "HardwareAccelerationModeEnabled": true } },
+          { "policy": { "HardwareAccelerationModeEnabled": false } }
+        ]
+      }
+    ]
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -2277,6 +2361,9 @@
   },
 
   "HeartbeatFrequency": {
+  },
+
+  "LogUploadEnabled": {
   },
 
   "ReportDeviceVersionInfo": {

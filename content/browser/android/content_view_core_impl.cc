@@ -57,7 +57,6 @@
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/size_f.h"
-#include "ui/gfx/screen.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -155,12 +154,6 @@ int ToGestureEventType(WebInputEvent::Type type) {
   };
 }
 
-float GetPrimaryDisplayDeviceScaleFactor() {
-  const gfx::Display& display =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
-  return display.device_scale_factor();
-}
-
 }  // namespace
 
 // Enables a callback when the underlying WebContents is destroyed, to enable
@@ -222,9 +215,9 @@ ContentViewCoreImpl::ContentViewCoreImpl(
       java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
       root_layer_(cc::SolidColorLayer::Create(Compositor::LayerSettings())),
-      dpi_scale_(GetPrimaryDisplayDeviceScaleFactor()),
       page_scale_(1),
       view_android_(new ui::ViewAndroid(view_android_delegate, window_android)),
+      dpi_scale_(ui::GetScaleFactorForNativeView(view_android_.get())),
       window_android_(window_android),
       device_orientation_(0),
       accessibility_enabled_(false) {
@@ -984,26 +977,19 @@ jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
                                                   jlong time_ms,
                                                   jfloat x,
                                                   jfloat y,
-                                                  jfloat vertical_axis,
-                                                  jfloat horizontal_axis) {
+                                                  jfloat ticks_x,
+                                                  jfloat ticks_y,
+                                                  jfloat pixels_per_tick) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
     return false;
 
-  WebMouseWheelEventBuilder::Direction direction;
-  if (vertical_axis > 0) {
-    direction = WebMouseWheelEventBuilder::DIRECTION_UP;
-  } else if (vertical_axis < 0) {
-    direction = WebMouseWheelEventBuilder::DIRECTION_DOWN;
-  } else if (horizontal_axis > 0) {
-    direction = WebMouseWheelEventBuilder::DIRECTION_RIGHT;
-  } else if (horizontal_axis < 0) {
-    direction = WebMouseWheelEventBuilder::DIRECTION_LEFT;
-  } else {
+  if (!ticks_x && !ticks_y)
     return false;
-  }
+
   blink::WebMouseWheelEvent event = WebMouseWheelEventBuilder::Build(
-      direction, time_ms / 1000.0, x / dpi_scale(), y / dpi_scale());
+      ticks_x, ticks_y, pixels_per_tick / dpi_scale(), time_ms / 1000.0,
+      x / dpi_scale(), y / dpi_scale());
 
   rwhv->SendMouseWheelEvent(event);
   return true;
@@ -1376,12 +1362,6 @@ void ContentViewCoreImpl::SetBackgroundOpaque(JNIEnv* env, jobject jobj,
     else
       GetRenderWidgetHostViewAndroid()->SetBackgroundColor(SK_ColorTRANSPARENT);
   }
-}
-
-void ContentViewCoreImpl::SetDrawsContent(JNIEnv* env,
-                                          jobject jobj,
-                                          jboolean draws) {
-  GetLayer()->SetHideLayerAndSubtree(!draws);
 }
 
 void ContentViewCoreImpl::RequestTextSurroundingSelection(

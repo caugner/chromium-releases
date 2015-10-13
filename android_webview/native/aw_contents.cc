@@ -53,6 +53,7 @@
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/navigation_entry.h"
@@ -110,6 +111,8 @@ bool g_should_download_favicons = false;
 
 bool g_force_auxiliary_bitmap_rendering = false;
 
+std::string g_locale;
+
 const void* kAwContentsUserDataKey = &kAwContentsUserDataKey;
 
 class AwContentsUserData : public base::SupportsUserData::Data {
@@ -154,6 +157,16 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
       content::WebContents::FromRenderViewHost(rvh);
   if (!web_contents) return NULL;
   return FromWebContents(web_contents);
+}
+
+// static
+void SetLocale(JNIEnv* env, jclass, jstring locale) {
+  g_locale = ConvertJavaStringToUTF8(env, locale);
+}
+
+// static
+std::string AwContents::GetLocale() {
+  return g_locale;
 }
 
 // static
@@ -922,7 +935,7 @@ bool AwContents::OnDraw(JNIEnv* env,
   scoped_ptr<SoftwareCanvasHolder> canvas_holder = SoftwareCanvasHolder::Create(
       canvas, scroll, view_size, g_force_auxiliary_bitmap_rendering);
   if (!canvas_holder || !canvas_holder->GetCanvas()) {
-    TRACE_EVENT_INSTANT0("android_webview", "EarlyOut_EmptySize",
+    TRACE_EVENT_INSTANT0("android_webview", "EarlyOut_NoSoftwareCanvas",
                          TRACE_EVENT_SCOPE_THREAD);
     return false;
   }
@@ -1088,7 +1101,7 @@ void AwContents::EnableOnNewPicture(JNIEnv* env,
 
 namespace {
 void InvokeVisualStateCallback(const JavaObjectWeakGlobalRef& java_ref,
-                               long request_id,
+                               jlong request_id,
                                ScopedJavaGlobalRef<jobject>* callback,
                                bool result) {
   JNIEnv* env = AttachCurrentThread();
@@ -1101,7 +1114,7 @@ void InvokeVisualStateCallback(const JavaObjectWeakGlobalRef& java_ref,
 }  // namespace
 
 void AwContents::InsertVisualStateCallback(
-    JNIEnv* env, jobject obj, long request_id, jobject callback) {
+    JNIEnv* env, jobject obj, jlong request_id, jobject callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ScopedJavaGlobalRef<jobject>* j_callback = new ScopedJavaGlobalRef<jobject>();
   j_callback->Reset(env, callback);
@@ -1191,6 +1204,11 @@ void AwContents::CreateMessageChannel(JNIEnv* env, jobject obj,
 
   AwMessagePortServiceImpl::GetInstance()->CreateMessageChannel(env, ports,
       GetMessagePortMessageFilter());
+}
+
+void AwContents::GrantFileSchemeAccesstoChildProcess(JNIEnv* env, jobject obj) {
+  content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+      web_contents_->GetRenderProcessHost()->GetID(), url::kFileScheme);
 }
 
 void SetShouldDownloadFavicons(JNIEnv* env, jclass jclazz) {

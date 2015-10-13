@@ -67,48 +67,13 @@ TestKeyedServiceProvider::TestKeyedServiceProvider() {
 TestKeyedServiceProvider::~TestKeyedServiceProvider() {
 }
 
-void TestKeyedServiceProvider::AssertKeyedFactoriesBuilt() {
-  FakeSyncServiceFactory::GetInstance();
-  MissingServiceKeyedServiceFactory::GetInstance();
-}
-
-KeyedServiceBaseFactory* TestKeyedServiceProvider::GetBookmarkModelFactory() {
-  return MissingServiceKeyedServiceFactory::GetInstance();
-}
-
-bookmarks::BookmarkModel*
-TestKeyedServiceProvider::GetBookmarkModelForBrowserState(
-    ChromeBrowserState* browser_state) {
-  return nullptr;
-}
-
 KeyedServiceBaseFactory*
-TestKeyedServiceProvider::GetProfileOAuth2TokenServiceFactory() {
+TestKeyedServiceProvider::GetManagedBookmarkServiceFactory() {
   return MissingServiceKeyedServiceFactory::GetInstance();
 }
 
-ProfileOAuth2TokenService*
-TestKeyedServiceProvider::GetProfileOAuth2TokenServiceForBrowserState(
-    ChromeBrowserState* browser_state) {
-  return nullptr;
-}
-
-KeyedServiceBaseFactory* TestKeyedServiceProvider::GetSigninManagerFactory() {
-  return MissingServiceKeyedServiceFactory::GetInstance();
-}
-
-SigninManager* TestKeyedServiceProvider::GetSigninManagerForBrowserState(
-    ChromeBrowserState* browser_state) {
-  return nullptr;
-}
-
-KeyedServiceBaseFactory*
-TestKeyedServiceProvider::GetPersonalDataManagerFactory() {
-  return MissingServiceKeyedServiceFactory::GetInstance();
-}
-
-autofill::PersonalDataManager*
-TestKeyedServiceProvider::GetPersonalDataManagerForBrowserState(
+bookmarks::ManagedBookmarkService*
+TestKeyedServiceProvider::GetManagedBookmarkServiceForBrowserState(
     ChromeBrowserState* browser_state) {
   return nullptr;
 }
@@ -121,6 +86,17 @@ sync_driver::SyncService*
 TestKeyedServiceProvider::GetSyncServiceForBrowserState(
     ChromeBrowserState* browser_state) {
   return FakeSyncServiceFactory::GetForBrowserState(browser_state);
+}
+
+KeyedServiceBaseFactory*
+TestKeyedServiceProvider::GetProfileInvalidationProviderFactory() {
+  return MissingServiceKeyedServiceFactory::GetInstance();
+}
+
+invalidation::ProfileInvalidationProvider*
+TestKeyedServiceProvider::GetProfileInvalidationProviderForBrowserState(
+    ios::ChromeBrowserState* browser_state) {
+  return nullptr;
 }
 
 }  // namespace ios

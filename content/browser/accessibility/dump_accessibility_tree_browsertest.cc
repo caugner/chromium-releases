@@ -707,7 +707,13 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("contenteditable-descendants.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityEm) {
+#if defined(OS_ANDROID)
+// Flaky failures: http://crbug.com/515053.
+#define MAYBE_AccessibilityEm DISABLED_AccessibilityEm
+#else
+#define MAYBE_AccessibilityEm AccessibilityEm
+#endif
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, MAYBE_AccessibilityEm) {
   RunHtmlTest(FILE_PATH_LITERAL("em.html"));
 }
 
@@ -812,15 +818,13 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputDateTime) {
   RunHtmlTest(FILE_PATH_LITERAL("input-datetime.html"));
 }
 
+// Fails on OS X 10.9 and higher <https://crbug.com/430622>.
+#if !defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityInputDateTimeLocal) {
-#if defined(OS_MACOSX)
-  // Fails on OS X 10.9 <https://crbug.com/430622>.
-  if (base::mac::IsOSMavericks())
-    return;
-#endif
   RunHtmlTest(FILE_PATH_LITERAL("input-datetime-local.html"));
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputEmail) {
   RunHtmlTest(FILE_PATH_LITERAL("input-email.html"));
@@ -908,6 +912,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputTextValue) {
   RunHtmlTest(FILE_PATH_LITERAL("input-text-value.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityInputTextValueChanged) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-text-value-changed.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputTime) {

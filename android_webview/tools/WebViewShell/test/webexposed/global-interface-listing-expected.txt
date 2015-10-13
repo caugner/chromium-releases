@@ -287,6 +287,7 @@ interface CSSRuleList
     method constructor
     method item
 interface CSSStyleDeclaration
+    getter cssFloat
     getter cssText
     getter length
     getter parentRule
@@ -296,6 +297,7 @@ interface CSSStyleDeclaration
     method item
     method removeProperty
     method setProperty
+    setter cssFloat
     setter cssText
 interface CSSStyleRule
     getter selectorText
@@ -322,6 +324,7 @@ interface CSSViewportRule
     method constructor
 interface Cache
     method add
+    method addAll
     method constructor
     method delete
     method keys
@@ -696,16 +699,8 @@ interface Document
     getter onpause
     getter onplay
     getter onplaying
-    getter onpointercancel
-    getter onpointerdown
-    getter onpointerenter
-    getter onpointerleave
     getter onpointerlockchange
     getter onpointerlockerror
-    getter onpointermove
-    getter onpointerout
-    getter onpointerover
-    getter onpointerup
     getter onprogress
     getter onratechange
     getter onreadystatechange
@@ -857,16 +852,8 @@ interface Document
     setter onpause
     setter onplay
     setter onplaying
-    setter onpointercancel
-    setter onpointerdown
-    setter onpointerenter
-    setter onpointerleave
     setter onpointerlockchange
     setter onpointerlockerror
-    setter onpointermove
-    setter onpointerout
-    setter onpointerover
-    setter onpointerup
     setter onprogress
     setter onratechange
     setter onreadystatechange
@@ -913,6 +900,9 @@ interface DocumentType
     getter systemId
     method constructor
     method remove
+interface DragEvent
+    getter dataTransfer
+    method constructor
 interface DynamicsCompressorNode
     getter attack
     getter knee
@@ -1240,7 +1230,29 @@ interface HTMLAnchorElement
     setter type
     setter username
 interface HTMLAppletElement
+    getter align
+    getter alt
+    getter archive
+    getter code
+    getter codeBase
+    getter height
+    getter hspace
+    getter name
+    getter object
+    getter vspace
+    getter width
     method constructor
+    setter align
+    setter alt
+    setter archive
+    setter code
+    setter codeBase
+    setter height
+    setter hspace
+    setter name
+    setter object
+    setter vspace
+    setter width
 interface HTMLAreaElement
     getter alt
     getter coords
@@ -1490,14 +1502,6 @@ interface HTMLElement
     getter onpause
     getter onplay
     getter onplaying
-    getter onpointercancel
-    getter onpointerdown
-    getter onpointerenter
-    getter onpointerleave
-    getter onpointermove
-    getter onpointerout
-    getter onpointerover
-    getter onpointerup
     getter onprogress
     getter onratechange
     getter onreset
@@ -1575,14 +1579,6 @@ interface HTMLElement
     setter onpause
     setter onplay
     setter onplaying
-    setter onpointercancel
-    setter onpointerdown
-    setter onpointerenter
-    setter onpointerleave
-    setter onpointermove
-    setter onpointerout
-    setter onpointerover
-    setter onpointerup
     setter onprogress
     setter onratechange
     setter onreset
@@ -1606,8 +1602,20 @@ interface HTMLElement
     setter translate
     setter webkitdropzone
 interface HTMLEmbedElement
+    getter align
+    getter height
+    getter name
+    getter src
+    getter type
+    getter width
     method constructor
     method getSVGDocument
+    setter align
+    setter height
+    setter name
+    setter src
+    setter type
+    setter width
 interface HTMLFieldSetElement
     getter disabled
     getter elements
@@ -1635,11 +1643,31 @@ interface HTMLFormControlsCollection
     method constructor
     method namedItem
 interface HTMLFormElement
+    getter acceptCharset
+    getter action
+    getter autocomplete
+    getter elements
+    getter encoding
+    getter enctype
+    getter length
+    getter method
+    getter name
+    getter noValidate
+    getter target
     method checkValidity
     method constructor
     method reportValidity
     method reset
     method submit
+    setter acceptCharset
+    setter action
+    setter autocomplete
+    setter encoding
+    setter enctype
+    setter method
+    setter name
+    setter noValidate
+    setter target
 interface HTMLFrameElement
     getter contentDocument
     getter contentWindow
@@ -1662,7 +1690,47 @@ interface HTMLFrameElement
     setter scrolling
     setter src
 interface HTMLFrameSetElement
+    getter cols
+    getter onbeforeunload
+    getter onblur
+    getter onerror
+    getter onfocus
+    getter onhashchange
+    getter onlanguagechange
+    getter onload
+    getter onmessage
+    getter onoffline
+    getter ononline
+    getter onorientationchange
+    getter onpagehide
+    getter onpageshow
+    getter onpopstate
+    getter onresize
+    getter onscroll
+    getter onstorage
+    getter onunload
+    getter rows
     method constructor
+    setter cols
+    setter onbeforeunload
+    setter onblur
+    setter onerror
+    setter onfocus
+    setter onhashchange
+    setter onlanguagechange
+    setter onload
+    setter onmessage
+    setter onoffline
+    setter ononline
+    setter onorientationchange
+    setter onpagehide
+    setter onpageshow
+    setter onpopstate
+    setter onresize
+    setter onscroll
+    setter onstorage
+    setter onunload
+    setter rows
 interface HTMLHRElement
     getter align
     getter color
@@ -2072,11 +2140,48 @@ interface HTMLOListElement
     setter start
     setter type
 interface HTMLObjectElement
+    getter align
+    getter archive
+    getter border
+    getter code
+    getter codeBase
+    getter codeType
+    getter contentDocument
+    getter data
+    getter declare
+    getter form
+    getter height
+    getter hspace
+    getter name
+    getter standby
+    getter type
+    getter useMap
+    getter validationMessage
+    getter validity
+    getter vspace
+    getter width
+    getter willValidate
     method checkValidity
     method constructor
     method getSVGDocument
     method reportValidity
     method setCustomValidity
+    setter align
+    setter archive
+    setter border
+    setter code
+    setter codeBase
+    setter codeType
+    setter data
+    setter declare
+    setter height
+    setter hspace
+    setter name
+    setter standby
+    setter type
+    setter useMap
+    setter vspace
+    setter width
 interface HTMLOptGroupElement
     getter disabled
     getter label
@@ -2479,6 +2584,7 @@ interface Headers
     method values
 interface History
     getter length
+    getter scrollRestoration
     getter state
     method back
     method constructor
@@ -2486,6 +2592,7 @@ interface History
     method go
     method pushState
     method replaceState
+    setter scrollRestoration
 interface IDBCursor
     getter direction
     getter key
@@ -2676,10 +2783,6 @@ interface MIDIPort
     method constructor
     method open
     setter onstatechange
-interface MediaDevices
-    method constructor
-    method enumerateDevices
-    method getUserMedia
 interface MediaElementAudioSourceNode
     getter mediaElement
     method constructor
@@ -2839,7 +2942,6 @@ interface MouseEvent
     getter clientX
     getter clientY
     getter ctrlKey
-    getter dataTransfer
     getter fromElement
     getter layerX
     getter layerY
@@ -2911,7 +3013,6 @@ interface Navigator
     getter language
     getter languages
     getter maxTouchPoints
-    getter mediaDevices
     getter mimeTypes
     getter onLine
     getter platform
@@ -2962,8 +3063,6 @@ interface Node
     getter childNodes
     getter firstChild
     getter lastChild
-    getter localName
-    getter namespaceURI
     getter nextSibling
     getter nodeName
     getter nodeType
@@ -3061,10 +3160,12 @@ interface Path2D
 interface Performance
     getter memory
     getter navigation
+    getter onresourcetimingbufferfull
     getter onwebkitresourcetimingbufferfull
     getter timing
     method clearMarks
     method clearMeasures
+    method clearResourceTimings
     method constructor
     method getEntries
     method getEntriesByName
@@ -3072,8 +3173,10 @@ interface Performance
     method mark
     method measure
     method now
+    method setResourceTimingBufferSize
     method webkitClearResourceTimings
     method webkitSetResourceTimingBufferSize
+    setter onresourcetimingbufferfull
     setter onwebkitresourcetimingbufferfull
 interface PerformanceEntry
     getter duration
@@ -3228,11 +3331,11 @@ interface ReadableStream
     method getReader
 interface Request
     getter bodyUsed
-    getter context
     getter credentials
     getter headers
     getter method
     getter mode
+    getter redirect
     getter referrer
     getter url
     method arrayBuffer
@@ -3395,6 +3498,11 @@ interface SVGDiscardElement
     method constructor
 interface SVGElement
     getter className
+    getter offsetHeight
+    getter offsetLeft
+    getter offsetParent
+    getter offsetTop
+    getter offsetWidth
     getter onabort
     getter onblur
     getter oncancel
@@ -3438,14 +3546,6 @@ interface SVGElement
     getter onpause
     getter onplay
     getter onplaying
-    getter onpointercancel
-    getter onpointerdown
-    getter onpointerenter
-    getter onpointerleave
-    getter onpointermove
-    getter onpointerout
-    getter onpointerover
-    getter onpointerup
     getter onprogress
     getter onratechange
     getter onreset
@@ -3512,14 +3612,6 @@ interface SVGElement
     setter onpause
     setter onplay
     setter onplaying
-    setter onpointercancel
-    setter onpointerdown
-    setter onpointerenter
-    setter onpointerleave
-    setter onpointermove
-    setter onpointerout
-    setter onpointerover
-    setter onpointerup
     setter onprogress
     setter onratechange
     setter onreset
@@ -4751,9 +4843,7 @@ interface TreeWalker
     method previousSibling
     setter currentNode
 interface UIEvent
-    getter charCode
     getter detail
-    getter keyCode
     getter view
     getter which
     method constructor
@@ -5448,14 +5538,6 @@ interface Window
     attribute onpause
     attribute onplay
     attribute onplaying
-    attribute onpointercancel
-    attribute onpointerdown
-    attribute onpointerenter
-    attribute onpointerleave
-    attribute onpointermove
-    attribute onpointerout
-    attribute onpointerover
-    attribute onpointerup
     attribute onpopstate
     attribute onprogress
     attribute onratechange

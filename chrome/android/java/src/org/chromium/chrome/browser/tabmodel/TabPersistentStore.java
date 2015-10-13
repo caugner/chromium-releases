@@ -16,9 +16,9 @@ import org.chromium.base.ImportantFileWriterAndroid;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.tab.Tab;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -218,6 +218,16 @@ public class TabPersistentStore extends TabPersister {
         mTabContentManager = cache;
     }
 
+    private void saveTabList() {
+        if (mSaveListTask == null || (mSaveListTask.cancel(false) && !mSaveListTask.mStateSaved)) {
+            try {
+                saveListToFile(serializeTabMetadata());
+            } catch (IOException e) {
+                logSaveException(e);
+            }
+        }
+    }
+
     public void saveState() {
         // Temporarily allowing disk access. TODO: Fix. See http://b/5518024
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
@@ -255,6 +265,9 @@ public class TabPersistentStore extends TabPersister {
                 mSaveTabTask = null;
             }
 
+            // The list of tabs should be saved first in case our activity is terminated early.
+            saveTabList();
+
             // Synchronously save any remaining unsaved tabs (hopefully very few).
             for (Tab tab : mTabsToSave) {
                 int id = tab.getId();
@@ -270,15 +283,6 @@ public class TabPersistentStore extends TabPersister {
                 }
             }
             mTabsToSave.clear();
-
-            if (mSaveListTask == null
-                    || (mSaveListTask.cancel(false) && !mSaveListTask.mStateSaved)) {
-                try {
-                    saveListToFile(serializeTabMetadata());
-                } catch (IOException e) {
-                    logSaveException(e);
-                }
-            }
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -632,7 +636,10 @@ public class TabPersistentStore extends TabPersister {
             assert  mTabModelSelector.getModel(true).getCount() == 0;
             assert  mTabModelSelector.getModel(false).getCount() == 0;
             int maxId = 0;
+
             File[] folders = getBaseStateDirectory(mContext).listFiles();
+            if (folders == null) return maxId;
+
             File stateFolder = getStateDirectory();
             for (File folder : folders) {
                 assert folder.isDirectory();
@@ -823,12 +830,14 @@ public class TabPersistentStore extends TabPersister {
 
     private void cleanupPersistentData() {
         String[] files = getStateDirectory().list();
-        for (String file : files) {
-            Pair<Integer, Boolean> data = TabState.parseInfoFromFilename(file);
-            if (data != null) {
-                TabModel model = mTabModelSelector.getModel(data.second);
-                if (TabModelUtils.getTabById(model, data.first) == null) {
-                    deleteFileAsync(file);
+        if (files != null) {
+            for (String file : files) {
+                Pair<Integer, Boolean> data = TabState.parseInfoFromFilename(file);
+                if (data != null) {
+                    TabModel model = mTabModelSelector.getModel(data.second);
+                    if (TabModelUtils.getTabById(model, data.first) == null) {
+                        deleteFileAsync(file);
+                    }
                 }
             }
         }
@@ -840,11 +849,12 @@ public class TabPersistentStore extends TabPersister {
 
     private void cleanupPersistentDataAtAndAboveId(int minForbiddenId)  {
         String[] files = getStateDirectory().list();
-
-        for (String file : files) {
-            Pair<Integer, Boolean> data = TabState.parseInfoFromFilename(file);
-            if (data != null && data.first >= minForbiddenId) {
-                deleteFileAsync(file);
+        if (files != null) {
+            for (String file : files) {
+                Pair<Integer, Boolean> data = TabState.parseInfoFromFilename(file);
+                if (data != null && data.first >= minForbiddenId) {
+                    deleteFileAsync(file);
+                }
             }
         }
 
@@ -855,9 +865,11 @@ public class TabPersistentStore extends TabPersister {
 
     private void cleanupAllEncryptedPersistentData() {
         String[] files = getStateDirectory().list();
-        for (String file : files) {
-            if (file.startsWith(TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO)) {
-                deleteFileAsync(file);
+        if (files != null) {
+            for (String file : files) {
+                if (file.startsWith(TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO)) {
+                    deleteFileAsync(file);
+                }
             }
         }
     }

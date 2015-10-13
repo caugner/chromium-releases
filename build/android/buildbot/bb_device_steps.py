@@ -68,8 +68,7 @@ INSTRUMENTATION_TESTS = dict((suite.name, suite) for suite in [
       'org.chromium.chrome.shell',
       'ChromeShellTest',
       'chrome:chrome/test/data/android/device_files',
-      isolate_file_path='chrome/chrome_shell_test_apk.isolate',
-      host_driven_root=constants.CHROME_SHELL_HOST_DRIVEN_DIR),
+      isolate_file_path='chrome/chrome_shell_test_apk.isolate'),
     I('AndroidWebView',
       'AndroidWebView.apk',
       'org.chromium.android_webview.shell',
@@ -214,7 +213,7 @@ def RunChromeProxyTests(options):
   """
   InstallApk(options, INSTRUMENTATION_TESTS['ChromeShell'], False)
   args = ['--browser', 'android-chrome-shell']
-  devices = device_utils.DeviceUtils.HealthyDevices()
+  devices = device_utils.DeviceUtils.HealthyDevices(blacklist=None)
   if devices:
     args = args + ['--device', devices[0].adb.GetDeviceSerial()]
   bb_annotations.PrintNamedStep('chrome_proxy')
@@ -233,7 +232,7 @@ def RunTelemetryTests(options, step_name, run_tests_path):
   """
   InstallApk(options, INSTRUMENTATION_TESTS['ChromeShell'], False)
   args = ['--browser', 'android-chrome-shell']
-  devices = device_utils.DeviceUtils.HealthyDevices()
+  devices = device_utils.DeviceUtils.HealthyDevices(blacklist=None)
   if devices:
     args = args + ['--device', 'android']
   bb_annotations.PrintNamedStep(step_name)

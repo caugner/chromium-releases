@@ -4,7 +4,7 @@
 
 #include "base/android/jni_string.h"
 #include "jni/MandolineActivity_jni.h"
-#include "mandoline/ui/browser/public/interfaces/launch_handler.mojom.h"
+#include "mandoline/ui/desktop_ui/public/interfaces/launch_handler.mojom.h"
 #include "mojo/runner/android/main.h"
 #include "mojo/runner/context.h"
 
@@ -13,7 +13,7 @@ namespace mandoline {
 static void LaunchURL(JNIEnv* env, jclass clazz, jstring jurl) {
   LaunchHandlerPtr launch_handler;
   mojo::runner::GetContext()->application_manager()->ConnectToService(
-      GURL("mojo:browser"), &launch_handler);
+      GURL("mojo:phone_ui"), &launch_handler);
   launch_handler->LaunchURL(
       base::android::ConvertJavaStringToUTF8(env, jurl));
 }

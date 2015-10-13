@@ -26,9 +26,9 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -331,7 +331,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
     private static void logTransactionTooLargeOrRethrow(RuntimeException e, Intent intent) {
         // See http://crbug.com/369574.
-        if (e.getCause() != null && e.getCause() instanceof TransactionTooLargeException) {
+        if (e.getCause() instanceof TransactionTooLargeException) {
             Log.e(TAG, "Could not resolve Activity for intent " + intent.toString(), e);
         } else {
             throw e;

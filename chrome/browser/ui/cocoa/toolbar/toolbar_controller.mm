@@ -42,7 +42,6 @@
 #import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_badge_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
@@ -52,8 +51,9 @@
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #import "ui/base/cocoa/menu_controller.h"
@@ -189,6 +189,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   void OnPreferenceChanged(const std::string& pref_name) {
     [controller_ prefChanged:pref_name];
   }
+
+  WrenchMenuBadgeController* badge_controller() { return &badge_controller_; }
 
  private:
   ToolbarController* controller_;  // weak, owns us
@@ -420,10 +422,20 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   [[backButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
+  NSString* helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_BACK);
+  [[backButton_ cell]
+      accessibilitySetOverrideValue:helpTag
+                       forAttribute:NSAccessibilityHelpAttribute];
+
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_FORWARD);
   [[forwardButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
+  helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_FORWARD);
+  [[forwardButton_ cell]
+      accessibilitySetOverrideValue:helpTag
+                       forAttribute:NSAccessibilityHelpAttribute];
+
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_RELOAD);
   [[reloadButton_ cell]
       accessibilitySetOverrideValue:description
@@ -539,9 +551,13 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 }
 
 - (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun {
-  WrenchToolbarButtonCell* cell =
-      base::mac::ObjCCastStrict<WrenchToolbarButtonCell>([wrenchButton_ cell]);
-  [cell setOverflowedToolbarActionWantsToRun:overflowedActionWantsToRun];
+  notificationBridge_->badge_controller()->SetOverflowedToolbarActionWantsToRun(
+      overflowedActionWantsToRun);
+}
+
+- (BOOL)overflowedToolbarActionWantsToRun {
+  return notificationBridge_->badge_controller()->
+      overflowed_toolbar_action_wants_to_run();
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
@@ -889,8 +905,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     NOTIMPLEMENTED();
 
   // Get the first URL and fix it up.
-  GURL url(url_fixer::FixupURL(base::SysNSStringToUTF8([urls objectAtIndex:0]),
-                               std::string()));
+  GURL url(url_formatter::FixupURL(
+      base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
   if (url.SchemeIs(url::kJavaScriptScheme)) {
     browser_->window()->GetLocationBar()->GetOmniboxView()->SetUserText(

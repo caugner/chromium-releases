@@ -108,6 +108,8 @@ component("cc") {
     "input/page_scale_animation.h",
     "input/scroll_elasticity_helper.cc",
     "input/scroll_elasticity_helper.h",
+    "input/scroll_state.cc",
+    "input/scroll_state.h",
     "input/selection.h",
     "input/selection_bound_type.h",
     "input/top_controls_manager.cc",
@@ -253,6 +255,8 @@ component("cc") {
     "output/overlay_processor.h",
     "output/overlay_strategy_common.cc",
     "output/overlay_strategy_common.h",
+    "output/overlay_strategy_sandwich.cc",
+    "output/overlay_strategy_sandwich.h",
     "output/overlay_strategy_single_on_top.cc",
     "output/overlay_strategy_single_on_top.h",
     "output/overlay_strategy_underlay.cc",
@@ -269,8 +273,6 @@ component("cc") {
     "output/renderer_settings.h",
     "output/shader.cc",
     "output/shader.h",
-    "output/software_frame_data.cc",
-    "output/software_frame_data.h",
     "output/software_output_device.cc",
     "output/software_output_device.h",
     "output/software_renderer.cc",
@@ -319,8 +321,6 @@ component("cc") {
     "playback/raster_source_helper.h",
     "playback/transform_display_item.cc",
     "playback/transform_display_item.h",
-    "quads/checkerboard_draw_quad.cc",
-    "quads/checkerboard_draw_quad.h",
     "quads/content_draw_quad_base.cc",
     "quads/content_draw_quad_base.h",
     "quads/debug_border_draw_quad.cc",
@@ -392,6 +392,7 @@ component("cc") {
     "resources/resource_pool.h",
     "resources/resource_provider.cc",
     "resources/resource_provider.h",
+    "resources/resource_util.h",
     "resources/returned_resource.h",
     "resources/scoped_resource.cc",
     "resources/scoped_resource.h",
@@ -434,6 +435,8 @@ component("cc") {
     "scheduler/video_frame_controller.h",
     "tiles/eviction_tile_priority_queue.cc",
     "tiles/eviction_tile_priority_queue.h",
+    "tiles/image_decode_controller.cc",
+    "tiles/image_decode_controller.h",
     "tiles/picture_layer_tiling.cc",
     "tiles/picture_layer_tiling.h",
     "tiles/picture_layer_tiling_set.cc",
@@ -509,6 +512,8 @@ component("cc") {
     ]
   }
 
+  configs += [ "//build/config:precompiled_headers" ]
+
   public_deps = [
     "//cc/base",
     "//skia",
@@ -523,6 +528,7 @@ component("cc") {
     "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/gl",
   ]
 
   defines = [ "CC_IMPLEMENTATION=1" ]
@@ -627,8 +633,6 @@ source_set("test_support") {
     "test/pixel_test_software_output_device.h",
     "test/pixel_test_utils.cc",
     "test/pixel_test_utils.h",
-    "test/render_pass_test_common.cc",
-    "test/render_pass_test_common.h",
     "test/render_pass_test_utils.cc",
     "test/render_pass_test_utils.h",
     "test/scheduler_test_common.cc",
@@ -662,6 +666,7 @@ source_set("test_support") {
     "test/test_web_graphics_context_3d.h",
   ]
 
+  configs += [ "//build/config:precompiled_headers" ]
   include_dirs = [
     ".",
     "test",
@@ -688,11 +693,21 @@ source_set("test_support") {
     "//ui/gfx/geometry",
     "//ui/gfx:test_support",
     "//ui/gl",
+    "//ui/gl:test_support",
   ]
 
   if (!is_android) {  # TODO(GYP) Enable on Android when osmesa links.
     deps += [ "//third_party/mesa:osmesa" ]
   }
+}
+
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("cc_unittests_run") {
+  testonly = true
+  deps = [
+    ":cc_unittests",
+  ]
 }
 
 test("cc_unittests") {
@@ -708,6 +723,7 @@ test("cc_unittests") {
     "animation/scrollbar_animation_controller_linear_fade_unittest.cc",
     "animation/scrollbar_animation_controller_thinning_unittest.cc",
     "animation/transform_operations_unittest.cc",
+    "base/delayed_unique_notifier_unittest.cc",
     "base/float_quad_unittest.cc",
     "base/histograms_unittest.cc",
     "base/list_container_unittest.cc",
@@ -718,8 +734,11 @@ test("cc_unittests") {
     "base/sidecar_list_container_unittest.cc",
     "base/simple_enclosed_region_unittest.cc",
     "base/tiling_data_unittest.cc",
+    "base/unique_notifier_unittest.cc",
     "debug/frame_timing_tracker_unittest.cc",
     "debug/micro_benchmark_controller_unittest.cc",
+    "debug/rendering_stats_unittest.cc",
+    "input/scroll_state_unittest.cc",
     "input/top_controls_manager_unittest.cc",
     "layers/delegated_frame_provider_unittest.cc",
     "layers/delegated_frame_resource_collection_unittest.cc",
@@ -754,6 +773,7 @@ test("cc_unittests") {
     "layers/video_frame_provider_client_impl_unittest.cc",
     "layers/video_layer_impl_unittest.cc",
     "output/begin_frame_args_unittest.cc",
+    "output/bsp_tree_unittest.cc",
     "output/delegating_renderer_unittest.cc",
     "output/filter_operations_unittest.cc",
     "output/gl_renderer_unittest.cc",
@@ -773,6 +793,7 @@ test("cc_unittests") {
     "playback/picture_unittest.cc",
     "playback/pixel_ref_map_unittest.cc",
     "playback/recording_source_unittest.cc",
+    "quads/draw_polygon_unittest.cc",
     "quads/draw_quad_unittest.cc",
     "quads/render_pass_unittest.cc",
     "raster/scoped_gpu_raster_unittest.cc",
@@ -782,6 +803,7 @@ test("cc_unittests") {
     "resources/platform_color_unittest.cc",
     "resources/resource_pool_unittest.cc",
     "resources/resource_provider_unittest.cc",
+    "resources/resource_util_unittest.cc",
     "resources/scoped_resource_unittest.cc",
     "resources/video_resource_updater_unittest.cc",
     "scheduler/begin_frame_source_unittest.cc",
@@ -790,6 +812,7 @@ test("cc_unittests") {
     "scheduler/scheduler_state_machine_unittest.cc",
     "scheduler/scheduler_unittest.cc",
     "test/layer_tree_json_parser_unittest.cc",
+    "test/ordered_simple_task_runner_unittest.cc",
     "test/test_web_graphics_context_3d_unittest.cc",
     "tiles/picture_layer_tiling_set_unittest.cc",
     "tiles/picture_layer_tiling_unittest.cc",
@@ -824,15 +847,25 @@ test("cc_unittests") {
     "trees/tree_synchronizer_unittest.cc",
 
     # Surfaces test files.
+    "surfaces/display_scheduler_unittest.cc",
+    "surfaces/display_unittest.cc",
     "surfaces/surface_aggregator_test_helpers.cc",
     "surfaces/surface_aggregator_test_helpers.h",
     "surfaces/surface_aggregator_unittest.cc",
+    "surfaces/surface_display_output_surface_unittest.cc",
+    "surfaces/surface_factory_unittest.cc",
+    "surfaces/surface_hittest_unittest.cc",
     "surfaces/surface_unittest.cc",
     "surfaces/surfaces_pixeltest.cc",
 
     # Setup.
     "test/cc_test_suite.cc",
     "test/run_all_unittests.cc",
+  ]
+
+  configs += [ "//build/config:precompiled_headers" ]
+  data = [
+    "test/data/",
   ]
 
   deps = [
@@ -853,7 +886,10 @@ test("cc_unittests") {
     "//ui/gfx/geometry",
     "//ui/gfx:test_support",
     "//ui/gl",
+    "//ui/gl:test_support",
   ]
+
+  data_deps = [ "//third_party/mesa:osmesa" ]
 }
 
 test("cc_perftests") {
@@ -893,6 +929,7 @@ test("cc_perftests") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gl",
+    "//ui/gl:test_support",
   ]
 
   if (is_android) {

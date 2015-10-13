@@ -9,6 +9,7 @@
 #include "chrome/browser/permissions/permission_context_base.h"
 #include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
@@ -58,6 +59,11 @@ ContentSettingsType PermissionTypeToContentSetting(PermissionType permission) {
       NOTIMPLEMENTED();
       break;
 #endif
+    case PermissionType::DURABLE_STORAGE:
+      return CONTENT_SETTINGS_TYPE_DURABLE_STORAGE;
+    case PermissionType::MIDI:
+      // This will hit the NOTREACHED below.
+      break;
     case PermissionType::NUM:
       // This will hit the NOTREACHED below.
       break;
@@ -74,6 +80,39 @@ void PermissionStatusCallbackWrapper(
     const base::Callback<void(PermissionStatus)>& callback,
     ContentSetting content_setting) {
   callback.Run(ContentSettingToPermissionStatus(content_setting));
+}
+
+// Returns whether the permission has a constant PermissionStatus value (i.e.
+// always approved or always denied)
+// The PermissionTypes for which true is returned should be exactly those which
+// return nullptr in PermissionContext::Get since they don't have a context.
+bool IsConstantPermission(PermissionType type) {
+  switch (type) {
+    case PermissionType::MIDI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Function used for handling permission types which do not change their
+// value i.e. they are always approved or always denied etc.
+// CONTENT_SETTING_DEFAULT is returned if the permission needs further handling.
+// This function should only be called when IsConstantPermission has returned
+// true for the PermissionType.
+ContentSetting GetContentSettingForConstantPermission(PermissionType type) {
+  DCHECK(IsConstantPermission(type));
+  switch (type) {
+    case PermissionType::MIDI:
+      return CONTENT_SETTING_ALLOW;
+    default:
+      return CONTENT_SETTING_DEFAULT;
+  }
+}
+
+PermissionStatus GetPermissionStatusForConstantPermission(PermissionType type) {
+  return ContentSettingToPermissionStatus(
+      GetContentSettingForConstantPermission(type));
 }
 
 }  // anonymous namespace
@@ -102,9 +141,23 @@ void PermissionManager::RequestPermission(
     const GURL& requesting_origin,
     bool user_gesture,
     const base::Callback<void(PermissionStatus)>& callback) {
+  if (IsConstantPermission(permission)) {
+    callback.Run(GetPermissionStatusForConstantPermission(permission));
+    return;
+  }
+
   PermissionContextBase* context = PermissionContext::Get(profile_, permission);
   if (!context) {
     callback.Run(content::PERMISSION_STATUS_DENIED);
+    return;
+  }
+
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  if (IsPermissionBubbleManagerMissing(web_contents)) {
+    callback.Run(
+        GetPermissionStatus(permission, requesting_origin,
+                            web_contents->GetLastCommittedURL().GetOrigin()));
     return;
   }
 
@@ -116,10 +169,8 @@ void PermissionManager::RequestPermission(
                                     requesting_origin);
 
   context->RequestPermission(
-      content::WebContents::FromRenderFrameHost(render_frame_host),
-      request, requesting_origin, user_gesture,
-      base::Bind(&PermissionStatusCallbackWrapper,
-                 callback));
+      web_contents, request, requesting_origin, user_gesture,
+      base::Bind(&PermissionStatusCallbackWrapper, callback));
 }
 
 void PermissionManager::CancelPermissionRequest(
@@ -131,6 +182,11 @@ void PermissionManager::CancelPermissionRequest(
   if (!context)
     return;
 
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  if (IsPermissionBubbleManagerMissing(web_contents))
+    return;
+
   int render_process_id = render_frame_host->GetProcess()->GetID();
   int render_frame_id = render_frame_host->GetRoutingID();
   const PermissionRequestID request(render_process_id,
@@ -138,8 +194,7 @@ void PermissionManager::CancelPermissionRequest(
                                     request_id,
                                     requesting_origin);
 
-  context->CancelPermissionRequest(
-      content::WebContents::FromRenderFrameHost(render_frame_host), request);
+  context->CancelPermissionRequest(web_contents, request);
 }
 
 void PermissionManager::ResetPermission(PermissionType permission,
@@ -157,6 +212,9 @@ PermissionStatus PermissionManager::GetPermissionStatus(
     PermissionType permission,
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
+  if (IsConstantPermission(permission))
+    return GetPermissionStatusForConstantPermission(permission);
+
   PermissionContextBase* context = PermissionContext::Get(profile_, permission);
   if (!context)
     return content::PERMISSION_STATUS_DENIED;
@@ -169,6 +227,11 @@ PermissionStatus PermissionManager::GetPermissionStatus(
 void PermissionManager::RegisterPermissionUsage(PermissionType permission,
                                                 const GURL& requesting_origin,
                                                 const GURL& embedding_origin) {
+  // This is required because constant permissions don't have a
+  // ContentSettingsType.
+  if (IsConstantPermission(permission))
+    return;
+
   profile_->GetHostContentSettingsMap()->UpdateLastUsage(
       requesting_origin,
       embedding_origin,
@@ -188,9 +251,15 @@ int PermissionManager::SubscribePermissionStatusChange(
   subscription->requesting_origin = requesting_origin;
   subscription->embedding_origin = embedding_origin;
   subscription->callback = callback;
-  subscription->current_value = PermissionContext::Get(profile_, permission)
-      ->GetPermissionStatus(subscription->requesting_origin,
-                            subscription->embedding_origin);
+
+  if (IsConstantPermission(permission)) {
+    subscription->current_value = GetContentSettingForConstantPermission(
+        permission);
+  } else {
+    subscription->current_value = PermissionContext::Get(profile_, permission)
+        ->GetPermissionStatus(subscription->requesting_origin,
+                              subscription->embedding_origin);
+  }
 
   return subscriptions_.Add(subscription);
 }
@@ -201,6 +270,13 @@ void PermissionManager::UnsubscribePermissionStatusChange(int subscription_id) {
 
   if (subscriptions_.IsEmpty())
     profile_->GetHostContentSettingsMap()->RemoveObserver(this);
+}
+
+bool PermissionManager::IsPermissionBubbleManagerMissing(
+    content::WebContents* web_contents) {
+  // TODO(felt): Remove this method entirely. Leaving it to make a minimal
+  // last-minute merge to 46. See crbug.com/457091 and crbug.com/534631.
+  return false;
 }
 
 void PermissionManager::OnContentSettingChanged(

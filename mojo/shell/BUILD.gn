@@ -8,9 +8,13 @@ import("//testing/test.gni")
 source_set("shell") {
   output_name = "mojo_shell"
   sources = [
+    "application_instance.cc",
+    "application_instance.h",
     "application_loader.h",
     "application_manager.cc",
     "application_manager.h",
+    "capability_filter.cc",
+    "capability_filter.h",
     "content_handler_connection.cc",
     "content_handler_connection.h",
     "data_pipe_peek.cc",
@@ -26,8 +30,6 @@ source_set("shell") {
     "network_fetcher.h",
     "query_util.cc",
     "query_util.h",
-    "shell_impl.cc",
-    "shell_impl.h",
     "static_application_loader.cc",
     "static_application_loader.h",
     "switches.cc",
@@ -48,6 +50,7 @@ source_set("shell") {
   deps = [
     "//base/third_party/dynamic_annotations",
     "//crypto:crypto",
+    "//mojo/application/public/cpp:sources",
     "//url",
     "//third_party/mojo/src/mojo/edk/system",
     "//mojo/environment:chromium",
@@ -58,6 +61,7 @@ source_set("shell") {
 test("mojo_shell_unittests") {
   sources = [
     "application_manager_unittest.cc",
+    "capability_filter_unittest.cc",
     "query_util_unittest.cc",
   ]
 
@@ -74,6 +78,7 @@ test("mojo_shell_unittests") {
 
 mojom("test_bindings") {
   sources = [
+    "capability_filter_unittest.mojom",
     "test.mojom",
   ]
 }

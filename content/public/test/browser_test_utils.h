@@ -157,7 +157,6 @@ void SimulateKeyPressWithCode(WebContents* web_contents,
                               bool alt,
                               bool command);
 
-namespace internal {
 // Allow ExecuteScript* methods to target either a WebContents or a
 // RenderFrameHost.  Targetting a WebContents means executing the script in the
 // RenderFrameHost returned by WebContents::GetMainFrame(), which is the
@@ -173,26 +172,25 @@ class ToRenderFrameHost {
  private:
   RenderFrameHost* render_frame_host_;
 };
-}  // namespace internal
 
 // Executes the passed |script| in the specified frame. The |script| should not
 // invoke domAutomationController.send(); otherwise, your test will hang or be
 // flaky. If you want to extract a result, use one of the below functions.
 // Returns true on success.
-bool ExecuteScript(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScript(const ToRenderFrameHost& adapter,
                    const std::string& script) WARN_UNUSED_RESULT;
 
 // The following methods executes the passed |script| in the specified frame and
 // sets |result| to the value passed to "window.domAutomationController.send" by
 // the executed script. They return true on success, false if the script
 // execution failed or did not evaluate to the expected type.
-bool ExecuteScriptAndExtractInt(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractInt(const ToRenderFrameHost& adapter,
                                 const std::string& script,
                                 int* result) WARN_UNUSED_RESULT;
-bool ExecuteScriptAndExtractBool(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractBool(const ToRenderFrameHost& adapter,
                                  const std::string& script,
                                  bool* result) WARN_UNUSED_RESULT;
-bool ExecuteScriptAndExtractString(const internal::ToRenderFrameHost& adapter,
+bool ExecuteScriptAndExtractString(const ToRenderFrameHost& adapter,
                                    const std::string& script,
                                    std::string* result) WARN_UNUSED_RESULT;
 
@@ -287,24 +285,6 @@ class TitleWatcher : public WebContentsObserver {
   base::string16 observed_title_;
 
   DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
-};
-
-// Watches a WebContents and blocks until it is destroyed.
-class WebContentsDestroyedWatcher : public WebContentsObserver {
- public:
-  explicit WebContentsDestroyedWatcher(WebContents* web_contents);
-  ~WebContentsDestroyedWatcher() override;
-
-  // Waits until the WebContents is destroyed.
-  void Wait();
-
- private:
-  // Overridden WebContentsObserver methods.
-  void WebContentsDestroyed() override;
-
-  scoped_refptr<MessageLoopRunner> message_loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebContentsDestroyedWatcher);
 };
 
 // Watches a RenderProcessHost and waits for specified destruction events.

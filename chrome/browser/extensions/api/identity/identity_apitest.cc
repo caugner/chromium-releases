@@ -21,9 +21,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/fake_gaia_cookie_manager_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
-#include "chrome/browser/signin/fake_signin_manager.h"
+#include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -36,6 +35,7 @@
 #include "components/crx_file/id_util.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -236,7 +236,8 @@ class WaitForGURLAndCloseWindow : public content::WindowedNotificationObserver {
       : WindowedNotificationObserver(
             content::NOTIFICATION_LOAD_STOP,
             content::NotificationService::AllSources()),
-        url_(url) {}
+        url_(url),
+        embedder_web_contents_(nullptr) {}
 
   // NotificationObserver:
   void Observe(int type,
@@ -281,6 +282,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
         auto_login_access_token_(true),
         login_ui_result_(true),
         scope_ui_result_(true),
+        scope_ui_failure_(GaiaWebAuthFlow::WINDOW_CLOSED),
         login_ui_shown_(false),
         scope_ui_shown_(false) {}
 
@@ -553,7 +555,7 @@ class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
     // creating the browser so that a bunch of classes don't register as
     // observers and end up needing to unregister when the fake is substituted.
     SigninManagerFactory::GetInstance()->SetTestingFactory(
-        context, &FakeSigninManagerBase::Build);
+        context, &BuildFakeSigninManagerBase);
     ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
         context, &BuildFakeProfileOAuth2TokenService);
     GaiaCookieManagerServiceFactory::GetInstance()->SetTestingFactory(

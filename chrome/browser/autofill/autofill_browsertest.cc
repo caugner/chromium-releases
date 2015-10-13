@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -242,8 +241,8 @@ class AutofillTest : public InProcessBrowserTest {
         ui_test_utils::GetTestFilePath(base::FilePath().AppendASCII("autofill"),
                                        base::FilePath().AppendASCII(filename));
     CHECK(base::ReadFileToString(data_file, &data));
-    std::vector<std::string> lines;
-    base::SplitString(data, '\n', &lines);
+    std::vector<std::string> lines = base::SplitString(
+        data, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     int parsed_profiles = 0;
     for (size_t i = 0; i < lines.size(); ++i) {
       if (base::StartsWith(lines[i], "#", base::CompareCase::SENSITIVE))

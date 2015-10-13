@@ -237,9 +237,18 @@ if (false && is_win) {
   }
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("crypto_unittests_run") {
+  testonly = true
+  deps = [
+    ":crypto_unittests",
+  ]
+}
+
 test("crypto_unittests") {
   sources = [
-    # Tests.
+    "aead_openssl_unittest.cc",
     "aes_128_gcm_helpers_nss_unittest.cc",
     "curve25519_unittest.cc",
     "ec_private_key_unittest.cc",
@@ -365,7 +374,7 @@ group("platform") {
       public_configs += [ "//third_party/nss:system_nss_no_ssl_config" ]
     } else {
       # Non-Linux platforms use the hermetic NSS from the tree.
-      deps += [
+      public_deps = [
         "//third_party/nss:nspr",
         "//third_party/nss:nss",
       ]

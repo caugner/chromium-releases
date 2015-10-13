@@ -11,6 +11,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "components/html_viewer/blink_url_request_type_converters.h"
 #include "mojo/common/common_type_converters.h"
+#include "mojo/common/data_pipe_utils.h"
 #include "mojo/common/url_type_converters.h"
 #include "mojo/services/network/public/interfaces/url_loader_factory.mojom.h"
 #include "net/base/net_errors.h"
@@ -30,10 +31,12 @@ blink::WebURLResponse::HTTPVersion StatusLineToHTTPVersion(
   if (status_line.is_null())
     return blink::WebURLResponse::HTTP_0_9;
 
-  if (base::StartsWithASCII(status_line, "HTTP/1.0", true))
+  if (base::StartsWith(status_line.get(), "HTTP/1.0",
+                       base::CompareCase::SENSITIVE))
     return blink::WebURLResponse::HTTP_1_0;
 
-  if (base::StartsWithASCII(status_line, "HTTP/1.1", true))
+  if (base::StartsWith(status_line.get(), "HTTP/1.1",
+                       base::CompareCase::SENSITIVE))
     return blink::WebURLResponse::HTTP_1_1;
 
   return blink::WebURLResponse::Unknown;
@@ -88,7 +91,25 @@ void WebURLLoaderImpl::loadSynchronously(
     blink::WebURLResponse& response,
     blink::WebURLError& error,
     blink::WebData& data) {
-  NOTIMPLEMENTED();
+  mojo::URLRequestPtr url_request = mojo::URLRequest::From(request);
+  url_request->auto_follow_redirects = true;
+  URLResponsePtr url_response;
+  url_loader_->Start(url_request.Pass(),
+                     [&url_response](URLResponsePtr url_response_result) {
+                        url_response = url_response_result.Pass();
+                     });
+  url_loader_.WaitForIncomingResponse();
+  if (url_response->error) {
+    error.domain = WebString::fromUTF8(net::kErrorDomain);
+    error.reason = url_response->error->code;
+    error.unreachableURL = GURL(url_response->url);
+    return;
+  }
+
+  response = ToWebURLResponse(url_response);
+  std::string body;
+  mojo::common::BlockingCopyToString(url_response->body.Pass(), &body);
+  data.assign(body.data(), body.length());
 }
 
 void WebURLLoaderImpl::loadAsynchronously(const blink::WebURLRequest& request,

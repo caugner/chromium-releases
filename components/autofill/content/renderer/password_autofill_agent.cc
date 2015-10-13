@@ -18,6 +18,7 @@
 #include "components/autofill/content/renderer/renderer_save_password_progress_logger.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
@@ -74,8 +75,10 @@ struct FormElements {
 
 typedef std::vector<FormElements*> FormElementsList;
 
-bool FillDataContainsUsername(const PasswordFormFillData& fill_data) {
-  return !fill_data.username_field.name.empty();
+bool FillDataContainsFillableUsername(const PasswordFormFillData& fill_data) {
+  return !fill_data.username_field.name.empty() &&
+         (!fill_data.additional_logins.empty() ||
+          !fill_data.username_field.value.empty());
 }
 
 // Utility function to find the unique entry of the |form_element| for the
@@ -179,7 +182,7 @@ bool FindFormInputElements(blink::WebFormElement* form_element,
                            const PasswordFormFillData& data,
                            FormElements* result) {
   return FindFormInputElement(form_element, data.password_field, result) &&
-         (!FillDataContainsUsername(data) ||
+         (!FillDataContainsFillableUsername(data) ||
           FindFormInputElement(form_element, data.username_field, result));
 }
 
@@ -226,7 +229,8 @@ bool DoUsernamesMatch(const base::string16& username1,
                       bool exact_match) {
   if (exact_match)
     return username1 == username2;
-  return base::StartsWith(username1, username2, base::CompareCase::SENSITIVE);
+  return FieldIsSuggestionSubstringStartingOnTokenBoundary(username1, username2,
+                                                           true);
 }
 
 // Returns |true| if the given element is editable. Otherwise, returns |false|.
@@ -408,14 +412,12 @@ bool FillUserNameAndPassword(
   // Input matches the username, fill in required values.
   if (!username_element->isNull() &&
       IsElementAutocompletable(*username_element)) {
+    // TODO(vabr): Why not setSuggestedValue? http://crbug.com/507714
     username_element->setValue(username, true);
     (*nonscript_modified_values)[*username_element] = username;
     username_element->setAutofilled(true);
-
-    if (set_selection) {
-      username_element->setSelectionRange(current_username.length(),
-                                          username.length());
-    }
+    if (set_selection)
+      PreviewSuggestion(username, current_username, username_element);
   } else if (current_username != username) {
     // If the username can't be filled and it doesn't match a saved password
     // as is, don't autofill a password.
@@ -466,7 +468,8 @@ bool FillFormOnPasswordReceived(
   if (!IsElementAutocompletable(password_element))
     return false;
 
-  bool form_contains_username_field = FillDataContainsUsername(fill_data);
+  bool form_contains_fillable_username_field =
+      FillDataContainsFillableUsername(fill_data);
   // If the form contains an autocompletable username field, try to set the
   // username to the preferred name, but only if:
   //   (a) The fill-on-account-select flag is not set, and
@@ -483,7 +486,7 @@ bool FillFormOnPasswordReceived(
   // in the "no highlighting" group.
   //
   // In all other cases, do nothing.
-  bool form_has_fillable_username = form_contains_username_field &&
+  bool form_has_fillable_username = form_contains_fillable_username_field &&
                                     IsElementAutocompletable(username_element);
 
   if (ShouldFillOnAccountSelect()) {
@@ -561,7 +564,6 @@ PasswordAutofillAgent::PasswordAutofillAgent(content::RenderFrame* render_frame)
       logging_state_active_(false),
       was_username_autofilled_(false),
       was_password_autofilled_(false),
-      username_selection_start_(0),
       did_stop_loading_(false),
       weak_ptr_factory_(this) {
   Send(new AutofillHostMsg_PasswordAutofillAgentConstructed(routing_id()));
@@ -646,33 +648,18 @@ bool PasswordAutofillAgent::TextDidChangeInTextField(
     const blink::WebInputElement& element) {
   // TODO(vabr): Get a mutable argument instead. http://crbug.com/397083
   blink::WebInputElement mutable_element = element;  // We need a non-const.
+  mutable_element.setAutofilled(false);
 
   LoginToPasswordInfoMap::iterator iter = login_to_password_info_.find(element);
-  if (iter == login_to_password_info_.end())
-    return false;
-
-  mutable_element.setAutofilled(false);
-  iter->second.password_was_edited_last = false;
-
-  // If wait_for_username is true we will fill when the username loses focus.
-  if (iter->second.fill_data.wait_for_username)
-    return false;
-
-  if (!element.isText() || !IsElementAutocompletable(element) ||
-      !IsElementAutocompletable(iter->second.password_field)) {
-    return false;
+  if (iter != login_to_password_info_.end()) {
+    iter->second.password_was_edited_last = false;
+    // If wait_for_username is true we will fill when the username loses focus.
+    if (iter->second.fill_data.wait_for_username)
+      return false;
   }
 
-  if (element.nameForAutofill().isEmpty())
-    return false;  // If the field has no name, then we won't have values.
-
-  // Don't attempt to autofill with values that are too large.
-  if (element.value().length() > kMaximumTextSizeForAutocomplete)
-    return false;
-
   // Show the popup with the list of available usernames.
-  ShowSuggestionPopup(iter->second.fill_data, element, false, false);
-  return true;
+  return ShowSuggestions(element, false, false);
 }
 
 void PasswordAutofillAgent::UpdateStateForTextChange(
@@ -752,14 +739,14 @@ bool PasswordAutofillAgent::PreviewSuggestion(
     return false;
   }
 
+  if (username_query_prefix_.empty())
+    username_query_prefix_ = username_element.value();
+
   was_username_autofilled_ = username_element.isAutofilled();
-  username_selection_start_ = username_element.selectionStart();
   username_element.setSuggestedValue(username);
   username_element.setAutofilled(true);
-  username_element.setSelectionRange(
-      username_selection_start_,
-      username_element.suggestedValue().length());
-
+  ::autofill::PreviewSuggestion(username_element.suggestedValue(),
+                                username_query_prefix_, &username_element);
   was_password_autofilled_ = password_info->password_field.isAutofilled();
   password_info->password_field.setSuggestedValue(password);
   password_info->password_field.setAutofilled(true);
@@ -816,9 +803,16 @@ bool PasswordAutofillAgent::ShowSuggestions(
   // should be shown. However, return |true| to indicate that this is a known
   // password form and that the request to show suggestions has been handled (as
   // a no-op).
-  if (!IsElementAutocompletable(element) ||
+  if (!element.isTextField() || !IsElementAutocompletable(element) ||
       !IsElementAutocompletable(password_info->password_field))
     return true;
+
+  if (element.nameForAutofill().isEmpty())
+    return false;  // If the field has no name, then we won't have values.
+
+  // Don't attempt to autofill with values that are too large.
+  if (element.value().length() > kMaximumTextSizeForAutocomplete)
+    return false;
 
   bool username_is_available =
       !username_element->isNull() && IsElementEditable(*username_element);
@@ -1174,8 +1168,9 @@ void PasswordAutofillAgent::OnFillPasswordForm(
     blink::WebInputElement username_element, password_element;
 
     // Check whether the password form has a username input field.
-    bool form_contains_username_field = FillDataContainsUsername(form_data);
-    if (form_contains_username_field) {
+    bool form_contains_fillable_username_field =
+        FillDataContainsFillableUsername(form_data);
+    if (form_contains_fillable_username_field) {
       username_element =
           form_elements->input_elements[form_data.username_field.name];
     }
@@ -1266,6 +1261,12 @@ bool PasswordAutofillAgent::ShowSuggestionPopup(
   if (!webview)
     return false;
 
+  if (user_input.isPasswordField() && !user_input.isAutofilled() &&
+      !user_input.value().isEmpty()) {
+    Send(new AutofillHostMsg_HidePopup(routing_id()));
+    return false;
+  }
+
   FormData form;
   FormFieldData field;
   FindFormAndFieldForFormControlElement(user_input, &form, &field);
@@ -1304,6 +1305,7 @@ bool PasswordAutofillAgent::ShowSuggestionPopup(
   Send(new AutofillHostMsg_ShowPasswordSuggestions(
       routing_id(), key_it->second, field.text_direction, username_string,
       options, bounding_box_scaled));
+  username_query_prefix_ = username_string;
   return CanShowSuggestion(fill_data, username_string, show_all);
 }
 
@@ -1339,7 +1341,7 @@ void PasswordAutofillAgent::ClearPreview(
   if (!username->suggestedValue().isEmpty()) {
     username->setSuggestedValue(blink::WebString());
     username->setAutofilled(was_username_autofilled_);
-    username->setSelectionRange(username_selection_start_,
+    username->setSelectionRange(username_query_prefix_.length(),
                                 username->value().length());
   }
   if (!password->suggestedValue().isEmpty()) {

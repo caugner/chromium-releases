@@ -51,7 +51,7 @@ Still reading?
     <ignore path="chrome/android/java/res/drawable-xxxhdpi"/>
     <ignore path="ui/android/java/res/drawable-xxhdpi"/>
     <ignore path="ui/android/java/res/drawable-xxxhdpi"/>
-    <ignore regexp=".*: reader_mode_bar_background.9.png, tabs_moved_htc.png, tabs_moved_nexus.png, tabs_moved_samsung.png$"/>
+    <ignore regexp=".*: data_reduction_illustration.png, reader_mode_bar_background.9.png, tabs_moved_htc.png, tabs_moved_nexus.png, tabs_moved_samsung.png$"/>
   </issue>
   <issue id="IconLocation">
     <!-- It is OK for content_shell_apk and chrome_shell_apk to have missing assets. -->
@@ -105,4 +105,7 @@ Still reading?
   <issue id="UnusedAttribute" severity="ignore"/>
   <issue id="ViewConstructor" severity="ignore"/>
   <issue id="WrongCall" severity="ignore"/>
+  <issue id="UselessParent">
+    <ignore path="chrome/android/java/res/layout/data_reduction_promo_screen.xml" />
+  </issue>
 </lint>

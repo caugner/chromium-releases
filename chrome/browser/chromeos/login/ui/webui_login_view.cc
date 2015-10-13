@@ -26,8 +26,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/common/chrome_version_info.h"
-#include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state.h"
@@ -69,8 +67,6 @@ const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
-const char kAccelNameToggleWebviewSignin[] = "toggle_webview_signin";
-const char kAccelNameToggleNewLoginUI[] = "toggle_new_login_ui";
 const char kAccelNameToggleEasyBootstrap[] = "toggle_easy_bootstrap";
 
 // A class to change arrow key traversal behavior when it's alive.
@@ -132,9 +128,6 @@ WebUILoginView::WebUILoginView()
       ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameEnableDebugging;
   accel_map_[ui::Accelerator(
-      ui::VKEY_L, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
-      kAccelNameToggleNewLoginUI;
-  accel_map_[ui::Accelerator(
       ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameToggleEasyBootstrap;
 
@@ -142,16 +135,6 @@ WebUILoginView::WebUILoginView()
       kAccelFocusPrev;
   accel_map_[ui::Accelerator(ui::VKEY_RIGHT, ui::EF_NONE)] =
       kAccelFocusNext;
-
-  // Ctrl-Alt-Shift-W for canary/dev builds only.
-  const chrome::VersionInfo::Channel channel =
-      chrome::VersionInfo::GetChannel();
-  if (channel != chrome::VersionInfo::CHANNEL_STABLE &&
-      channel != chrome::VersionInfo::CHANNEL_BETA) {
-    accel_map_[ui::Accelerator(
-        ui::VKEY_W, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN |
-                        ui::EF_SHIFT_DOWN)] = kAccelNameToggleWebviewSignin;
-  }
 
   accel_map_[ui::Accelerator(
       ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
@@ -209,9 +192,6 @@ void WebUILoginView::Init() {
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
   WebContentsModalDialogManager::FromWebContents(web_contents)->
       SetDelegate(this);
-  if (!popup_manager_.get())
-    popup_manager_.reset(new web_modal::PopupManager(this));
-  popup_manager_->RegisterWith(web_contents);
 
   web_contents->SetDelegate(this);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(

@@ -22,9 +22,8 @@ namespace {
 ScriptContextSet* g_context_set = nullptr;
 }
 
-ScriptContextSet::ScriptContextSet(ExtensionSet* extensions,
-                                   ExtensionIdSet* active_extension_ids)
-    : extensions_(extensions), active_extension_ids_(active_extension_ids) {
+ScriptContextSet::ScriptContextSet(ExtensionIdSet* active_extension_ids)
+    : active_extension_ids_(active_extension_ids) {
   DCHECK(!g_context_set);
   g_context_set = this;
 }
@@ -126,9 +125,8 @@ void ScriptContextSet::ForEach(
 std::set<ScriptContext*> ScriptContextSet::OnExtensionUnloaded(
     const std::string& extension_id) {
   std::set<ScriptContext*> removed;
-  ForEach(extension_id,
-          base::Bind(&ScriptContextSet::DispatchOnUnloadEventAndRemove,
-                     base::Unretained(this), &removed));
+  ForEach(extension_id, base::Bind(&ScriptContextSet::RecordAndRemove,
+                                   base::Unretained(this), &removed));
   return removed;
 }
 
@@ -146,13 +144,15 @@ const Extension* ScriptContextSet::GetExtensionFromFrameAndWorld(
     GURL frame_url = ScriptContext::GetDataSourceURLForFrame(frame);
     frame_url = ScriptContext::GetEffectiveDocumentURL(frame, frame_url,
                                                        use_effective_url);
-    extension_id = extensions_->GetExtensionOrAppIDByURL(frame_url);
+    extension_id =
+        RendererExtensionRegistry::Get()->GetExtensionOrAppIDByURL(frame_url);
   }
 
   // There are conditions where despite a context being associated with an
   // extension, no extension actually gets found. Ignore "invalid" because CSP
   // blocks extension page loading by switching the extension ID to "invalid".
-  const Extension* extension = extensions_->GetByID(extension_id);
+  const Extension* extension =
+      RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension && !extension_id.empty() && extension_id != "invalid") {
     // TODO(kalman): Do something here?
   }
@@ -182,7 +182,7 @@ Feature::Context ScriptContextSet::ClassifyJavaScriptContext(
   //    before the SecurityContext is updated with the sandbox flags (after
   //    reading the CSP header), so the caller can't check if the context's
   //    security origin is unique yet.
-  if (ScriptContext::IsSandboxedPage(*extensions_, url))
+  if (ScriptContext::IsSandboxedPage(url))
     return Feature::WEB_PAGE_CONTEXT;
 
   if (extension && active_extension_ids_->count(extension->id()) > 0) {
@@ -199,7 +199,8 @@ Feature::Context ScriptContextSet::ClassifyJavaScriptContext(
 
   // TODO(kalman): This isUnique() check is wrong, it should be performed as
   // part of ScriptContext::IsSandboxedPage().
-  if (!origin.isUnique() && extensions_->ExtensionBindingsAllowed(url)) {
+  if (!origin.isUnique() &&
+      RendererExtensionRegistry::Get()->ExtensionBindingsAllowed(url)) {
     if (!extension)  // TODO(kalman): when does this happen?
       return Feature::UNSPECIFIED_CONTEXT;
     return extension->is_hosted_app() ? Feature::BLESSED_WEB_PAGE_CONTEXT
@@ -215,12 +216,10 @@ Feature::Context ScriptContextSet::ClassifyJavaScriptContext(
   return Feature::WEB_PAGE_CONTEXT;
 }
 
-void ScriptContextSet::DispatchOnUnloadEventAndRemove(
-    std::set<ScriptContext*>* out,
-    ScriptContext* context) {
-  context->DispatchOnUnloadEvent();
-  Remove(context);  // deleted asynchronously
-  out->insert(context);
+void ScriptContextSet::RecordAndRemove(std::set<ScriptContext*>* removed,
+                                       ScriptContext* context) {
+  removed->insert(context);
+  Remove(context);  // Note: context deletion is deferred to the message loop.
 }
 
 }  // namespace extensions

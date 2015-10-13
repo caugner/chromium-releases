@@ -6,9 +6,12 @@
 
 #include <set>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
+#include "base/test/values_test_util.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_condition_tracker_test.h"
+#include "components/url_matcher/url_matcher.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/web_contents.h"
@@ -16,6 +19,8 @@
 
 namespace extensions {
 
+using testing::ElementsAre;
+using testing::HasSubstr;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
 
@@ -60,6 +65,44 @@ class DeclarativeContentPageUrlConditionTrackerTest
   DISALLOW_COPY_AND_ASSIGN(DeclarativeContentPageUrlConditionTrackerTest);
 };
 
+TEST(DeclarativeContentPageUrlPredicateTest, WrongPageUrlDatatype) {
+  url_matcher::URLMatcher matcher;
+  std::string error;
+  scoped_ptr<DeclarativeContentPageUrlPredicate> predicate =
+      DeclarativeContentPageUrlPredicate::Create(matcher.condition_factory(),
+                             *base::test::ParseJson("[]"),
+                             &error);
+  EXPECT_THAT(error, HasSubstr("invalid type"));
+  EXPECT_FALSE(predicate);
+
+  EXPECT_TRUE(matcher.IsEmpty()) << "Errors shouldn't add URL conditions";
+}
+
+TEST(DeclarativeContentPageUrlPredicateTest, PageUrlPredicate) {
+  url_matcher::URLMatcher matcher;
+  std::string error;
+  scoped_ptr<DeclarativeContentPageUrlPredicate> predicate =
+      DeclarativeContentPageUrlPredicate::Create(
+          matcher.condition_factory(),
+          *base::test::ParseJson("{\"hostSuffix\": \"example.com\"}"),
+          &error);
+  EXPECT_EQ("", error);
+  ASSERT_TRUE(predicate);
+
+  url_matcher::URLMatcherConditionSet::Vector all_new_condition_sets;
+  all_new_condition_sets.push_back(predicate->url_matcher_condition_set());
+  matcher.AddConditionSets(all_new_condition_sets);
+  EXPECT_FALSE(matcher.IsEmpty());
+
+  EXPECT_THAT(matcher.MatchURL(GURL("http://google.com/")),
+              ElementsAre(/*empty*/));
+  std::set<url_matcher::URLMatcherConditionSet::ID> page_url_matches =
+      matcher.MatchURL(GURL("http://www.example.com/foobar"));
+  EXPECT_THAT(
+      page_url_matches,
+      ElementsAre(predicate->url_matcher_condition_set()->id()));
+}
+
 // Tests that adding and removing condition sets trigger evaluation requests for
 // the matching WebContents.
 TEST_F(DeclarativeContentPageUrlConditionTrackerTest,
@@ -80,26 +123,29 @@ TEST_F(DeclarativeContentPageUrlConditionTrackerTest,
   // add.
   LoadURL(tabs[0], GURL("http://test1/"));
 
-  const int condition_set_id = 100;
-  std::set<url_matcher::URLMatcherCondition> conditions;
-  conditions.insert(
-      tracker.condition_factory()->CreateHostPrefixCondition("test1"));
-  std::vector<scoped_refptr<url_matcher::URLMatcherConditionSet>>
-      condition_sets(1,
-                     new url_matcher::URLMatcherConditionSet(
-                         condition_set_id, conditions));
+  std::string error;
+  scoped_ptr<DeclarativeContentPageUrlPredicate> predicate =
+      DeclarativeContentPageUrlPredicate::Create(
+          tracker.condition_factory(),
+          *base::test::ParseJson("{\"hostPrefix\": \"test1\"}"),
+          &error);
+  EXPECT_EQ("", error);
+  ASSERT_TRUE(predicate);
+
   delegate_.evaluation_requests().clear();
+  url_matcher::URLMatcherConditionSet::Vector condition_sets(
+      1,
+      predicate->url_matcher_condition_set());
   tracker.AddConditionSets(condition_sets);
   EXPECT_THAT(delegate_.evaluation_requests(),
               UnorderedElementsAre(tabs[0]));
-  std::set<int> match_ids;
-  tracker.GetMatches(tabs[0], &match_ids);
-  EXPECT_THAT(match_ids, UnorderedElementsAre(condition_set_id));
-  tracker.GetMatches(tabs[1], &match_ids);
-  EXPECT_TRUE(match_ids.empty());
+  EXPECT_TRUE(tracker.EvaluatePredicate(predicate.get(), tabs[0]));
+  EXPECT_FALSE(tracker.EvaluatePredicate(predicate.get(), tabs[1]));
 
   delegate_.evaluation_requests().clear();
-  tracker.RemoveConditionSets(std::vector<int>(1, condition_set_id));
+  tracker.RemoveConditionSets(std::vector<int>(
+      1,
+      predicate->url_matcher_condition_set()->id()));
   EXPECT_THAT(delegate_.evaluation_requests(),
               UnorderedElementsAre(tabs[0]));
 }

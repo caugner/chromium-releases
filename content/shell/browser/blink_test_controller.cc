@@ -326,12 +326,6 @@ void BlinkTestController::RendererUnresponsive() {
   LOG(WARNING) << "renderer unresponsive";
 }
 
-void BlinkTestController::WorkerCrashed() {
-  DCHECK(CalledOnValidThread());
-  printer_->AddErrorMessage("#CRASHED - worker");
-  DiscardMainWindow();
-}
-
 void BlinkTestController::OverrideWebkitPrefs(WebPreferences* prefs) {
   if (should_override_prefs_) {
     *prefs = prefs_;
@@ -537,7 +531,9 @@ void BlinkTestController::OnImageDump(const std::string& actual_pixel_hash,
 
     bool discard_transparency = true;
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableOverlayFullscreenVideo))
+            switches::kEnableOverlayFullscreenVideo) ||
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kForceOverlayFullscreenVideo))
       discard_transparency = false;
 
     std::vector<gfx::PNGCodec::Comment> comments;

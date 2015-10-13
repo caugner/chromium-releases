@@ -66,10 +66,6 @@ const int kConnectionSectionPaddingLeft = 18;
 const int kConnectionSectionPaddingTop = 16;
 const int kConnectionSectionPaddingRight = 18;
 
-// The text color that is used for the site identity status text, if the site's
-// identity was sucessfully verified.
-const SkColor kIdentityVerifiedTextColor = 0xFF298a27;
-
 // Left icon margin.
 const int kIconMarginLeft = 6;
 
@@ -145,13 +141,18 @@ class PopupHeaderView : public views::View {
 // displayed.
 class InternalPageInfoPopupView : public views::BubbleDelegateView {
  public:
-  explicit InternalPageInfoPopupView(views::View* anchor_view);
+  // If |anchor_view| is nullptr, or has no Widget, |parent_window| may be
+  // provided to ensure this bubble is closed when the parent closes.
+  InternalPageInfoPopupView(views::View* anchor_view,
+                            gfx::NativeView parent_window);
   ~InternalPageInfoPopupView() override;
 
   // views::BubbleDelegateView:
   void OnWidgetDestroying(views::Widget* widget) override;
 
  private:
+  friend class WebsiteSettingsPopupView;
+
   DISALLOW_COPY_AND_ASSIGN(InternalPageInfoPopupView);
 };
 
@@ -233,8 +234,12 @@ void PopupHeaderView::SetIdentityStatus(const base::string16& status,
 // InternalPageInfoPopupView
 ////////////////////////////////////////////////////////////////////////////////
 
-InternalPageInfoPopupView::InternalPageInfoPopupView(views::View* anchor_view)
+InternalPageInfoPopupView::InternalPageInfoPopupView(
+    views::View* anchor_view,
+    gfx::NativeView parent_window)
     : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT) {
+  set_parent_window(parent_window);
+
   // Compensate for built-in vertical padding in the anchor view's image.
   set_anchor_view_insets(gfx::Insets(kLocationIconVerticalMargin, 0,
                                      kLocationIconVerticalMargin, 0));
@@ -254,8 +259,7 @@ InternalPageInfoPopupView::InternalPageInfoPopupView(views::View* anchor_view)
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(label);
 
-  views::BubbleDelegateView::CreateBubble(this)->Show();
-  SizeToContents();
+  views::BubbleDelegateView::CreateBubble(this);
 }
 
 InternalPageInfoPopupView::~InternalPageInfoPopupView() {
@@ -274,17 +278,27 @@ WebsiteSettingsPopupView::~WebsiteSettingsPopupView() {
 
 // static
 void WebsiteSettingsPopupView::ShowPopup(views::View* anchor_view,
+                                         const gfx::Rect& anchor_rect,
                                          Profile* profile,
                                          content::WebContents* web_contents,
                                          const GURL& url,
-                                         const content::SSLStatus& ssl,
-                                         Browser* browser) {
+                                         const content::SSLStatus& ssl) {
   is_popup_showing = true;
+  gfx::NativeView parent_window =
+      anchor_view ? nullptr : web_contents->GetNativeView();
   if (InternalChromePage(url)) {
-    new InternalPageInfoPopupView(anchor_view);
+    // Use the concrete type so that SetAnchorRect() can be called as a friend.
+    InternalPageInfoPopupView* popup =
+        new InternalPageInfoPopupView(anchor_view, parent_window);
+    if (!anchor_view)
+      popup->SetAnchorRect(anchor_rect);
+    popup->GetWidget()->Show();
   } else {
-    new WebsiteSettingsPopupView(anchor_view, profile, web_contents, url, ssl,
-                                 browser);
+    WebsiteSettingsPopupView* popup = new WebsiteSettingsPopupView(
+        anchor_view, parent_window, profile, web_contents, url, ssl);
+    if (!anchor_view)
+      popup->SetAnchorRect(anchor_rect);
+    popup->GetWidget()->Show();
   }
 }
 
@@ -295,14 +309,13 @@ bool WebsiteSettingsPopupView::IsPopupShowing() {
 
 WebsiteSettingsPopupView::WebsiteSettingsPopupView(
     views::View* anchor_view,
+    gfx::NativeView parent_window,
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const content::SSLStatus& ssl,
-    Browser* browser)
+    const content::SSLStatus& ssl)
     : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
       web_contents_(web_contents),
-      browser_(browser),
       header_(nullptr),
       tabbed_pane_(nullptr),
       permissions_tab_(nullptr),
@@ -318,6 +331,8 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
       help_center_link_(nullptr),
       connection_info_content_(nullptr),
       weak_factory_(this) {
+  set_parent_window(parent_window);
+
   // Compensate for built-in vertical padding in the anchor view's image.
   set_anchor_view_insets(gfx::Insets(kLocationIconVerticalMargin, 0,
                                      kLocationIconVerticalMargin, 0));
@@ -362,8 +377,7 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   set_margins(gfx::Insets(kPopupMarginTop, kPopupMarginLeft,
                           kPopupMarginBottom, kPopupMarginRight));
 
-  views::BubbleDelegateView::CreateBubble(this)->Show();
-  SizeToContents();
+  views::BubbleDelegateView::CreateBubble(this);
 
   presenter_.reset(new WebsiteSettings(
       this, profile,
@@ -555,16 +569,9 @@ void WebsiteSettingsPopupView::SetPermissionInfo(
 
 void WebsiteSettingsPopupView::SetIdentityInfo(
     const IdentityInfo& identity_info) {
-  base::string16 identity_status_text = identity_info.GetIdentityStatusText();
-  SkColor text_color = SK_ColorBLACK;
-  if (identity_info.identity_status ==
-          WebsiteSettings::SITE_IDENTITY_STATUS_CERT ||
-      identity_info.identity_status ==
-          WebsiteSettings::SITE_IDENTITY_STATUS_EV_CERT) {
-    text_color = kIdentityVerifiedTextColor;
-  }
+  base::string16 identity_status_text = identity_info.GetSecuritySummary();
   header_->SetIdentityName(base::UTF8ToUTF16(identity_info.site_identity));
-  header_->SetIdentityStatus(identity_status_text, text_color);
+  header_->SetIdentityStatus(identity_status_text, SK_ColorBLACK);
 
   // The headline and the certificate dialog link of the site's identity
   // section is only displayed if the site's identity was verified. If the
@@ -805,12 +812,9 @@ void WebsiteSettingsPopupView::HandleLinkClickedAsync(views::Link* source) {
         WebsiteSettings::WEBSITE_SETTINGS_CERTIFICATE_DIALOG_OPENED);
     ShowCertificateViewerByID(web_contents_, parent, cert_id_);
   } else if (source == help_center_link_) {
-    browser_->OpenURL(
-        content::OpenURLParams(GURL(chrome::kPageInfoHelpCenterURL),
-                               content::Referrer(),
-                               NEW_FOREGROUND_TAB,
-                               ui::PAGE_TRANSITION_LINK,
-                               false));
+    web_contents_->OpenURL(content::OpenURLParams(
+        GURL(chrome::kPageInfoHelpCenterURL), content::Referrer(),
+        NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
     presenter_->RecordWebsiteSettingsAction(
         WebsiteSettings::WEBSITE_SETTINGS_CONNECTION_HELP_OPENED);
   } else if (source == site_settings_link_) {
@@ -818,7 +822,7 @@ void WebsiteSettingsPopupView::HandleLinkClickedAsync(views::Link* source) {
     // for now. But on Android, it opens a page specific to a given origin that
     // shows all of the settings for that origin. If/when that's available on
     // desktop we should link to that here, too.
-    browser_->OpenURL(content::OpenURLParams(
+    web_contents_->OpenURL(content::OpenURLParams(
         GURL(chrome::kChromeUIContentSettingsURL), content::Referrer(),
         NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
     presenter_->RecordWebsiteSettingsAction(

@@ -16,6 +16,9 @@
 #include "extensions/browser/extension_registry.h"
 #include "ui/events/event.h"
 
+SpokenFeedbackEventRewriterDelegate::SpokenFeedbackEventRewriterDelegate()
+    : is_sequencing_(false) {}
+
 bool SpokenFeedbackEventRewriterDelegate::IsSpokenFeedbackEnabled() const {
   return true;
 }
@@ -27,8 +30,7 @@ bool SpokenFeedbackEventRewriterDelegate::DispatchKeyEventToChromeVox(
 
   if (!chromeos::AccessibilityManager::Get())
     return false;
-  content::BrowserContext* context =
-      chromeos::AccessibilityManager::Get()->profile();
+  content::BrowserContext* context = ProfileManager::GetActiveUserProfile();
   if (!context)
     return false;
 
@@ -50,12 +52,24 @@ bool SpokenFeedbackEventRewriterDelegate::DispatchKeyEventToChromeVox(
 
   int modifiers = key_event.flags() & kAllModifiers;
   std::string command_name;
+
+  if (is_sequencing_) {
+    is_sequencing_ = false;
+    modifiers |= ui::EF_SHIFT_DOWN | ui::EF_COMMAND_DOWN;
+    // This command name doesn't exist; used simply to cause ChromeVox to reset
+    // its sequencing state in case command lookup fails.
+    command_name = "sequenceCommand";
+  }
+
   for (auto iter : *commands) {
     int command_modifiers =
         iter.second.accelerator().modifiers() & kAllModifiers;
     if (iter.second.accelerator().key_code() == key_event.key_code() &&
-        command_modifiers == modifiers)
+        command_modifiers == modifiers) {
       command_name = iter.second.command_name();
+      if (!is_sequencing_ && command_name.substr(0, 14) == "sequencePrefix")
+        is_sequencing_ = true;
+    }
   }
 
   if (command_name.empty())

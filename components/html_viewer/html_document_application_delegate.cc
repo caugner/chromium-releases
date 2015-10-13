@@ -5,10 +5,8 @@
 #include "components/html_viewer/html_document_application_delegate.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "components/html_viewer/global_state.h"
 #include "components/html_viewer/html_document_oopif.h"
-#include "components/html_viewer/html_viewer_switches.h"
 #include "mojo/application/public/cpp/application_connection.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/connect.h"
@@ -17,12 +15,8 @@ namespace html_viewer {
 
 namespace {
 
-bool EnableOOPIFs() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kOOPIF);
-}
-
-HTMLDocument* CreateHTMLDocument(HTMLDocument::CreateParams* params) {
-  return new HTMLDocument(params);
+HTMLFrame* CreateHTMLFrame(HTMLFrame::CreateParams* params) {
+  return new HTMLFrame(params);
 }
 
 }  // namespace
@@ -79,27 +73,22 @@ HTMLDocumentApplicationDelegate::HTMLDocumentApplicationDelegate(
       url_(response->url),
       initial_response_(response.Pass()),
       global_state_(global_state),
-      html_document_creation_callback_(base::Bind(CreateHTMLDocument)) {
-}
+      html_frame_creation_callback_(base::Bind(CreateHTMLFrame)),
+      weak_factory_(this) {}
 
 HTMLDocumentApplicationDelegate::~HTMLDocumentApplicationDelegate() {
   // Deleting the documents is going to trigger a callback to
   // OnHTMLDocumentDeleted() and remove from |documents_|. Copy the set so we
   // don't have to worry about the set being modified out from under us.
-  std::set<HTMLDocument*> documents(documents_);
-  for (HTMLDocument* doc : documents)
-    doc->Destroy();
-  DCHECK(documents_.empty());
-
   std::set<HTMLDocumentOOPIF*> documents2(documents2_);
   for (HTMLDocumentOOPIF* doc : documents2)
     doc->Destroy();
   DCHECK(documents2_.empty());
 }
 
-void HTMLDocumentApplicationDelegate::SetHTMLDocumentCreationCallback(
-    const HTMLDocumentCreationCallback& callback) {
-  html_document_creation_callback_ = callback;
+void HTMLDocumentApplicationDelegate::SetHTMLFrameCreationCallback(
+    const HTMLFrameCreationCallback& callback) {
+  html_frame_creation_callback_ = callback;
 }
 
 // Callback from the quit closure. We key off this rather than
@@ -114,9 +103,8 @@ void HTMLDocumentApplicationDelegate::OnTerminate() {
 void HTMLDocumentApplicationDelegate::Initialize(mojo::ApplicationImpl* app) {
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From("mojo:network_service");
-  mojo::ApplicationConnection* connection =
+  scoped_ptr<mojo::ApplicationConnection> connection =
       app_.ConnectToApplication(request.Pass());
-  connection->ConnectToService(&network_service_);
   connection->ConnectToService(&url_loader_factory_);
 }
 
@@ -145,16 +133,10 @@ bool HTMLDocumentApplicationDelegate::ConfigureIncomingConnection(
     raw_loader->Start(
         request.Pass(),
         base::Bind(&HTMLDocumentApplicationDelegate::OnResponseReceived,
-                   base::Unretained(this), base::Passed(&loader), connection,
-                   base::Passed(&service_connector_queue)));
+                   weak_factory_.GetWeakPtr(), base::Passed(&loader),
+                   connection, base::Passed(&service_connector_queue)));
   }
   return true;
-}
-
-void HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted(
-    HTMLDocument* document) {
-  DCHECK(documents_.count(document) > 0);
-  documents_.erase(document);
 }
 
 void HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted2(
@@ -170,20 +152,12 @@ void HTMLDocumentApplicationDelegate::OnResponseReceived(
     mojo::URLResponsePtr response) {
   // HTMLDocument is destroyed when the hosting view is destroyed, or
   // explicitly from our destructor.
-  if (EnableOOPIFs()) {
-    HTMLDocumentOOPIF* document = new HTMLDocumentOOPIF(
-        &app_, connection, response.Pass(), global_state_,
-        base::Bind(&HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted2,
-                   base::Unretained(this)));
-    documents2_.insert(document);
-  } else {
-    HTMLDocument::CreateParams params(
-        &app_, connection, response.Pass(), global_state_,
-        base::Bind(&HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted,
-                   base::Unretained(this)));
-    HTMLDocument* document = html_document_creation_callback_.Run(&params);
-    documents_.insert(document);
-  }
+  HTMLDocumentOOPIF* document = new HTMLDocumentOOPIF(
+      &app_, connection, response.Pass(), global_state_,
+      base::Bind(&HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted2,
+                 base::Unretained(this)),
+      html_frame_creation_callback_);
+  documents2_.insert(document);
 
   if (connector_queue) {
     connector_queue->PushRequestsTo(connection);

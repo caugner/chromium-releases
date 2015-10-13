@@ -840,6 +840,76 @@ TEST_F(TextureTest, POTCubeMap) {
   EXPECT_TRUE(TextureTestHelper::IsCubeComplete(texture));
 }
 
+TEST_F(TextureTest, POTCubeMapWithoutMipmap) {
+  manager_->SetTarget(texture_ref_.get(), GL_TEXTURE_CUBE_MAP);
+  SetParameter(
+      texture_ref_.get(), GL_TEXTURE_MIN_FILTER, GL_NEAREST, GL_NO_ERROR);
+  SetParameter(
+      texture_ref_.get(), GL_TEXTURE_MAG_FILTER, GL_NEAREST, GL_NO_ERROR);
+  SetParameter(
+      texture_ref_.get(), GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE, GL_NO_ERROR);
+  SetParameter(
+      texture_ref_.get(), GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE, GL_NO_ERROR);
+
+  Texture* texture = texture_ref_->texture();
+  EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP), texture->target());
+  // Check Setting level 0 each face to POT
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_FALSE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_FALSE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_FALSE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_TRUE(manager_->HaveUnrenderableTextures());
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_NEGATIVE_X, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_FALSE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_FALSE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_FALSE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_TRUE(manager_->HaveUnrenderableTextures());
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_POSITIVE_Y, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_FALSE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_FALSE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_FALSE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_TRUE(manager_->HaveUnrenderableTextures());
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_NEGATIVE_Y, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_FALSE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_FALSE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_FALSE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_TRUE(manager_->HaveUnrenderableTextures());
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_POSITIVE_Z, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_FALSE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_FALSE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_FALSE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_TRUE(manager_->HaveUnrenderableTextures());
+  manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_CUBE_MAP_NEGATIVE_Z, 0,
+                         GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         gfx::Rect(4, 4));
+  EXPECT_FALSE(TextureTestHelper::IsNPOT(texture));
+  EXPECT_FALSE(TextureTestHelper::IsTextureComplete(texture));
+  EXPECT_TRUE(TextureTestHelper::IsCubeComplete(texture));
+  EXPECT_TRUE(manager_->CanGenerateMipmaps(texture_ref_.get()));
+  EXPECT_TRUE(manager_->CanRender(texture_ref_.get()));
+  EXPECT_FALSE(manager_->HaveUnrenderableTextures());
+}
+
 TEST_F(TextureTest, GetLevelSize) {
   manager_->SetTarget(texture_ref_.get(), GL_TEXTURE_3D);
   manager_->SetLevelInfo(texture_ref_.get(), GL_TEXTURE_3D, 1, GL_RGBA, 4, 5, 6,
@@ -1714,6 +1784,10 @@ class CountingMemoryTracker : public MemoryTracker {
     return current_size_[pool];
   }
 
+  uint64_t ClientTracingId() const override { return 0; }
+
+  int ClientId() const override { return 0; }
+
  private:
   ~CountingMemoryTracker() override {}
 
@@ -1848,9 +1922,11 @@ TEST_F(SharedTextureTest, TextureSafetyAccounting) {
 
 TEST_F(SharedTextureTest, FBOCompletenessCheck) {
   const GLenum kCompleteValue = GL_FRAMEBUFFER_COMPLETE;
-  FramebufferManager framebuffer_manager1(1, 1);
+  FramebufferManager framebuffer_manager1(
+      1, 1, ContextGroup::CONTEXT_TYPE_UNDEFINED, NULL);
   texture_manager1_->set_framebuffer_manager(&framebuffer_manager1);
-  FramebufferManager framebuffer_manager2(1, 1);
+  FramebufferManager framebuffer_manager2(
+      1, 1, ContextGroup::CONTEXT_TYPE_UNDEFINED, NULL);
   texture_manager2_->set_framebuffer_manager(&framebuffer_manager2);
 
   scoped_refptr<TextureRef> ref1 = texture_manager1_->CreateTexture(10, 10);
@@ -2054,12 +2130,6 @@ TEST_F(TextureFormatTypeValidationTest, ES2Basic) {
 
   // ES3
   ExpectInvalidEnum(GL_RGB, GL_UNSIGNED_BYTE, GL_RGB8);
-}
-
-TEST_F(TextureFormatTypeValidationTest, ES2WithExtBGRA) {
-  SetupFeatureInfo("GL_EXT_bgra", "OpenGL ES 2.0");
-
-  ExpectValid(GL_BGRA_EXT, GL_UNSIGNED_BYTE, GL_BGRA_EXT);
 }
 
 TEST_F(TextureFormatTypeValidationTest, ES2WithExtTextureFormatBGRA8888) {

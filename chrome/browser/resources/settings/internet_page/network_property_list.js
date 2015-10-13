@@ -39,7 +39,7 @@ Polymer({
      *   'String' - A text input will be displayed.
      *   TODO(stevenjb): Support types with custom validation, e.g. IPAddress.
      *   TODO(stevenjb): Support 'Number'.
-     * When a field changes, the 'changed' event will be fired with
+     * When a field changes, the 'property-change' event will be fired with
      * the field name and the new value provided in the event detail.
      */
     editFieldTypes: {
@@ -49,19 +49,19 @@ Polymer({
   },
 
   /**
-   * Event triggered when an input field changes. Fires a 'changed' event with
-   * the field (property) name set to the target id, and the value set to the
-   * target input value.
-   * @param {Event} event The input changed event.
+   * Event triggered when an input field changes. Fires a 'property-change'
+   * event with the field (property) name set to the target id, and the value
+   * set to the target input value.
+   * @param {Event} event The input change event.
    * @private
    */
-  onValueChanged_: function(event) {
+  onValueChange_: function(event) {
     var field = event.target.id;
     var curValue = CrOnc.getActiveValue(this.networkState, field);
     var newValue = event.target.value;
     if (newValue == curValue)
       return;
-    this.fire('changed', { field: field, value: newValue });
+    this.fire('property-change', { field: field, value: newValue });
   },
 
   /**
@@ -81,15 +81,27 @@ Polymer({
    * @private
    */
   hasPropertyValue_: function(state, key) {
-    if (!state)
-      return false;
-    var value = this.get(key, state);
+    var value = (state && this.get(key, state)) || undefined;
     return (value !== undefined && value !== '');
   },
 
   /**
    * @param {?CrOnc.NetworkStateProperties} state The network state properties.
-   * @param {Object} editFields The editFieldTypes object.
+   * @param {Object} editFieldTypes The editFieldTypes object.
+   * @param {string} key The property key.
+   * @return {boolean} Whether or not to show the property. Editable properties
+   *     are always shown.
+   * @private
+   */
+  showProperty_: function(state, editFieldTypes, key) {
+    if (editFieldTypes.hasOwnProperty(key))
+      return true;
+    return this.hasPropertyValue_(state, key);
+  },
+
+  /**
+   * @param {?CrOnc.NetworkStateProperties} state The network state properties.
+   * @param {Object} editFieldTypes The editFieldTypes object.
    * @param {string} key The property key.
    * @return {boolean} True if |key| exists in |state| and is not editable.
    * @private
@@ -103,7 +115,7 @@ Polymer({
 
   /**
    * @param {?CrOnc.NetworkStateProperties} state The network state properties.
-   * @param {Object} editFields The editFieldTypes object.
+   * @param {Object} editFieldTypes The editFieldTypes object.
    * @param {string} key The property key.
    * @param {string} type The field type.
    * @return {boolean} True if |key| exists in |state| and is of editable
@@ -111,10 +123,7 @@ Polymer({
    * @private
    */
   showEdit_: function(state, editFieldTypes, key, type) {
-    if (!this.hasPropertyValue_(state, key))
-      return false;
-    var editType = editFieldTypes[key];
-    return editType == type;
+    return editFieldTypes[key] == type;
   },
 
   /**

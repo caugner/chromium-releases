@@ -24,14 +24,12 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
-#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -49,8 +47,10 @@
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_controller.h"
+#include "components/sync_driver/profile_sync_components_factory.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata_services/web_data_service_test_util.h"
 #include "content/public/test/test_browser_thread.h"
@@ -105,10 +105,6 @@ using testing::Not;
 using testing::SetArgumentPointee;
 using testing::Return;
 
-namespace syncable {
-class Id;
-}
-
 namespace {
 
 const char kTestProfileName[] = "test-profile";
@@ -122,7 +118,7 @@ void RunAndSignal(const base::Closure& cb, WaitableEvent* event) {
 
 class AutofillTableMock : public AutofillTable {
  public:
-  AutofillTableMock() : AutofillTable("en-US") {}
+  AutofillTableMock() {}
   MOCK_METHOD2(RemoveFormElement,
                bool(const base::string16& name,
                     const base::string16& value));  // NOLINT
@@ -433,8 +429,8 @@ class MockPersonalDataManager : public PersonalDataManager {
 template <class T> class AddAutofillHelper;
 
 class ProfileSyncServiceAutofillTest
-   : public AbstractProfileSyncServiceTest,
-     public syncer::DataTypeDebugInfoListener {
+    : public AbstractProfileSyncServiceTest,
+      public syncer::DataTypeDebugInfoListener {
  public:
   // DataTypeDebugInfoListener implementation.
   void OnDataTypeConfigureComplete(const std::vector<
@@ -580,17 +576,12 @@ class ProfileSyncServiceAutofillTest
 
   bool AddAutofillSyncNode(const AutofillEntry& entry) {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    syncer::ReadNode autofill_root(&trans);
-    if (autofill_root.InitTypeRoot(syncer::AUTOFILL) != BaseNode::INIT_OK) {
-      return false;
-    }
-
     syncer::WriteNode node(&trans);
     std::string tag = AutocompleteSyncableService::KeyToTag(
         base::UTF16ToUTF8(entry.key().name()),
         base::UTF16ToUTF8(entry.key().value()));
     syncer::WriteNode::InitUniqueByCreationResult result =
-        node.InitUniqueByCreation(syncer::AUTOFILL, autofill_root, tag);
+        node.InitUniqueByCreation(syncer::AUTOFILL, tag);
     if (result != syncer::WriteNode::INIT_SUCCESS)
       return false;
 
@@ -602,15 +593,10 @@ class ProfileSyncServiceAutofillTest
 
   bool AddAutofillSyncNode(const AutofillProfile& profile) {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    syncer::ReadNode autofill_root(&trans);
-    if (autofill_root.InitTypeRoot(AUTOFILL_PROFILE) != BaseNode::INIT_OK) {
-      return false;
-    }
     syncer::WriteNode node(&trans);
     std::string tag = profile.guid();
     syncer::WriteNode::InitUniqueByCreationResult result =
-        node.InitUniqueByCreation(syncer::AUTOFILL_PROFILE,
-                                  autofill_root, tag);
+        node.InitUniqueByCreation(syncer::AUTOFILL_PROFILE, tag);
     if (result != syncer::WriteNode::INIT_SUCCESS)
       return false;
 

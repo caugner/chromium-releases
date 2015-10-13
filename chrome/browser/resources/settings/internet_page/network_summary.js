@@ -45,7 +45,13 @@ var NetworkStateObject;
 var NetworkStateListObject;
 
 /** @const {!Array<string>} */
-var NETWORK_TYPES = ['Ethernet', 'WiFi', 'Cellular', 'WiMAX', 'VPN'];
+var NETWORK_TYPES = [
+  CrOnc.Type.ETHERNET,
+  CrOnc.Type.WI_FI,
+  CrOnc.Type.CELLULAR,
+  CrOnc.Type.WI_MAX,
+  CrOnc.Type.VPN
+];
 
 Polymer({
   is: 'network-summary',
@@ -148,7 +154,8 @@ Polymer({
    */
   onWiFiExpanded_: function(event) {
     this.getNetworkStates_();  // Get the latest network states (only).
-    chrome.networkingPrivate.requestNetworkScan();
+    if (event.detail.expanded)
+      chrome.networkingPrivate.requestNetworkScan();
   },
 
   /**
@@ -198,8 +205,25 @@ Polymer({
   onNetworksChangedEvent_: function(networkIds) {
     networkIds.forEach(function(id) {
       if (id in this.networkIds_) {
-        chrome.networkingPrivate.getState(id,
-                                          this.getStateCallback_.bind(this));
+        chrome.networkingPrivate.getState(
+            id,
+            function(state) {
+              if (chrome.runtime.lastError) {
+                if (chrome.runtime.lastError != 'Error.NetworkUnavailable') {
+                  console.error('Unexpected networkingPrivate.getState error:',
+                                chrome.runtime.lastError);
+                }
+                return;
+              }
+              // Async call, ensure id still exists.
+              if (!this.networkIds_[id])
+                return;
+              if (!state) {
+                this.networkIds_[id] = undefined;
+                return;
+              }
+              this.updateNetworkState_(state.Type, state);
+            }.bind(this));
       }
     }, this);
   },
@@ -211,7 +235,13 @@ Polymer({
    * @private
    */
   connectToNetwork_: function(state) {
-    chrome.networkingPrivate.startConnect(state.GUID);
+    chrome.networkingPrivate.startConnect(state.GUID, function() {
+      if (chrome.runtime.lastError &&
+          chrome.runtime.lastError != 'connecting') {
+        console.error('Unexpected networkingPrivate.startConnect error:',
+                      chrome.runtime.lastError);
+      }
+    });
   },
 
   /**
@@ -267,8 +297,10 @@ Polymer({
     // Clear any current networks.
     this.networkIds_ = {};
 
-    // Get the first (active) state for each type.
+    // Track the first (active) state for each type.
     var foundTypes = {};
+
+    // Complete list of states by type.
     /** @type {!NetworkStateListObject} */ var networkStateLists = {
       Ethernet: [],
       WiFi: [],
@@ -276,6 +308,7 @@ Polymer({
       WiMAX: [],
       VPN: []
     };
+
     states.forEach(function(state) {
       var type = state.Type;
       if (!foundTypes[type]) {
@@ -285,7 +318,8 @@ Polymer({
       networkStateLists[type].push(state);
     }, this);
 
-    // Set any types not found to a default value or null.
+    // Set any types with a deviceState and no network to a default state,
+    // and any types not found to null.
     NETWORK_TYPES.forEach(function(type) {
       if (!foundTypes[type]) {
         /** @type {CrOnc.NetworkStateProperties} */ var defaultState = null;
@@ -299,25 +333,13 @@ Polymer({
 
     // Create a VPN entry in deviceStates if there are any VPN networks.
     if (networkStateLists.VPN && networkStateLists.VPN.length > 0) {
-      var vpn = { Type: 'VPN', State: 'Enabled' };
+      var vpn = { Type: CrOnc.Type.VPN, State: 'Enabled' };
       this.set('deviceStates.VPN', vpn);
     }
   },
 
   /**
-   * networkingPrivate.getState callback.
-   * @param {!CrOnc.NetworkStateProperties} state The network state properties.
-   * @private
-   */
-  getStateCallback_: function(state) {
-    var id = state.GUID;
-    if (!this.networkIds_[id])
-      return;
-    this.updateNetworkState_(state.Type, state);
-  },
-
-  /**
-   * Sets 'networkStates[type]' which will update the network-list-item
+   * Sets 'networkStates[type]' which will update the cr-network-list-item
    * associated with 'type'.
    * @param {string} type The network type.
    * @param {?CrOnc.NetworkStateProperties} state The state properties for the

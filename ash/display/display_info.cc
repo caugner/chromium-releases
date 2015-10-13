@@ -24,7 +24,12 @@
 namespace ash {
 namespace {
 
-bool use_125_dsf_for_ui_scaling = false;
+// Use larger than max int to catch overflow early.
+const int64 kSynthesizedDisplayIdStart = 2200000000LL;
+
+int64 synthesized_display_id = kSynthesizedDisplayIdStart;
+
+bool use_125_dsf_for_ui_scaling = true;
 
 // Check the content of |spec| and fill |bounds| and |device_scale_factor|.
 // Returns true when |bounds| is found.
@@ -84,12 +89,11 @@ DisplayMode::DisplayMode(const gfx::Size& size,
 gfx::Size DisplayMode::GetSizeInDIP(bool is_internal) const {
   gfx::SizeF size_dip(size);
   size_dip.Scale(ui_scale);
-  // DSF=1.25 is special. The screen is drawn with DSF=1.25 in some mode but it
-  // doesn't affect the screen size computation.
-  if (!(use_125_dsf_for_ui_scaling && is_internal) ||
-      device_scale_factor != 1.25f) {
-    size_dip.Scale(1.0f / device_scale_factor);
-  }
+  // DSF=1.25 is special on internal display. The screen is drawn with DSF=1.25
+  // but it doesn't affect the screen size computation.
+  if (use_125_dsf_for_ui_scaling && is_internal && device_scale_factor == 1.25f)
+    return gfx::ToFlooredSize(size_dip);
+  size_dip.Scale(1.0f / device_scale_factor);
   return gfx::ToFlooredSize(size_dip);
 }
 
@@ -106,16 +110,8 @@ DisplayInfo DisplayInfo::CreateFromSpec(const std::string& spec) {
 }
 
 // static
-void DisplayInfo::SetUse125DSFForUIScaling(bool enable) {
-  use_125_dsf_for_ui_scaling = enable;
-}
-
-// static
 DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
                                               int64 id) {
-  // Use larger than max int to catch overflow early.
-  static int64 synthesized_display_id = 2200000000LL;
-
 #if defined(OS_WIN)
   gfx::Rect bounds_in_native(aura::WindowTreeHost::GetNativeScreenSize());
 #else
@@ -231,11 +227,15 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   return display_info;
 }
 
+// static
+void DisplayInfo::SetUse125DSFForUIScalingForTest(bool enable) {
+  use_125_dsf_for_ui_scaling = enable;
+}
+
 DisplayInfo::DisplayInfo()
     : id_(gfx::Display::kInvalidDisplayID),
       has_overscan_(false),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
-      touch_device_id_(0),
       device_scale_factor_(1.0f),
       overscan_insets_in_dip_(0, 0, 0, 0),
       configured_ui_scale_(1.0f),
@@ -252,7 +252,6 @@ DisplayInfo::DisplayInfo(int64 id,
       name_(name),
       has_overscan_(has_overscan),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
-      touch_device_id_(0),
       device_scale_factor_(1.0f),
       overscan_insets_in_dip_(0, 0, 0, 0),
       configured_ui_scale_(1.0f),
@@ -288,7 +287,7 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
   has_overscan_ = native_info.has_overscan_;
 
   touch_support_ = native_info.touch_support_;
-  touch_device_id_ = native_info.touch_device_id_;
+  input_devices_ = native_info.input_devices_;
   device_scale_factor_ = native_info.device_scale_factor_;
   DCHECK(!native_info.bounds_in_native_.IsEmpty());
   bounds_in_native_ = native_info.bounds_in_native_;
@@ -321,7 +320,7 @@ void DisplayInfo::SetBounds(const gfx::Rect& new_bounds_in_native) {
 }
 
 float DisplayInfo::GetEffectiveDeviceScaleFactor() const {
-  if (Use125DSFRorUIScaling() && device_scale_factor_ == 1.25f)
+  if (Use125DSFForUIScaling() && device_scale_factor_ == 1.25f)
     return (configured_ui_scale_ == 0.8f) ? 1.25f : 1.0f;
   if (device_scale_factor_ == configured_ui_scale_)
     return 1.0f;
@@ -329,7 +328,7 @@ float DisplayInfo::GetEffectiveDeviceScaleFactor() const {
 }
 
 float DisplayInfo::GetEffectiveUIScale() const {
-  if (Use125DSFRorUIScaling() && device_scale_factor_ == 1.25f)
+  if (Use125DSFForUIScaling() && device_scale_factor_ == 1.25f)
     return (configured_ui_scale_ == 0.8f) ? 1.0f : configured_ui_scale_;
   if (device_scale_factor_ == configured_ui_scale_)
     return 1.0f;
@@ -367,7 +366,7 @@ void DisplayInfo::SetDisplayModes(
     const std::vector<DisplayMode>& display_modes) {
   display_modes_ = display_modes;
   std::sort(display_modes_.begin(), display_modes_.end(),
-            DisplayModeSorter(id_ == gfx::Display::InternalDisplayId()));
+            DisplayModeSorter(gfx::Display::IsInternalDisplayId(id_)));
 }
 
 gfx::Size DisplayInfo::GetNativeModeSize() const {
@@ -381,23 +380,30 @@ gfx::Size DisplayInfo::GetNativeModeSize() const {
 
 std::string DisplayInfo::ToString() const {
   int rotation_degree = static_cast<int>(GetActiveRotation()) * 90;
-  return base::StringPrintf(
+  std::string devices_str;
+
+  for (size_t i = 0; i < input_devices_.size(); ++i) {
+    devices_str += base::IntToString(input_devices_[i]);
+    if (i != input_devices_.size() - 1)
+      devices_str += ", ";
+  }
+
+  std::string result = base::StringPrintf(
       "DisplayInfo[%lld] native bounds=%s, size=%s, scale=%f, "
       "overscan=%s, rotation=%d, ui-scale=%f, touchscreen=%s, "
-      "touch-device-id=%d",
-      static_cast<long long int>(id_),
-      bounds_in_native_.ToString().c_str(),
-      size_in_pixel_.ToString().c_str(),
-      device_scale_factor_,
-      overscan_insets_in_dip_.ToString().c_str(),
-      rotation_degree,
+      "input_devices=[%s]",
+      static_cast<long long int>(id_), bounds_in_native_.ToString().c_str(),
+      size_in_pixel_.ToString().c_str(), device_scale_factor_,
+      overscan_insets_in_dip_.ToString().c_str(), rotation_degree,
       configured_ui_scale_,
       touch_support_ == gfx::Display::TOUCH_SUPPORT_AVAILABLE
           ? "yes"
           : touch_support_ == gfx::Display::TOUCH_SUPPORT_UNAVAILABLE
                 ? "no"
                 : "unknown",
-      touch_device_id_);
+      devices_str.c_str());
+
+  return result;
 }
 
 std::string DisplayInfo::ToFullString() const {
@@ -429,8 +435,20 @@ bool DisplayInfo::IsColorProfileAvailable(
                    profile) != available_color_profiles_.end();
 }
 
-bool DisplayInfo::Use125DSFRorUIScaling() const {
-  return use_125_dsf_for_ui_scaling && id_ == gfx::Display::InternalDisplayId();
+bool DisplayInfo::Use125DSFForUIScaling() const {
+  return use_125_dsf_for_ui_scaling && gfx::Display::IsInternalDisplayId(id_);
+}
+
+void DisplayInfo::AddInputDevice(int id) {
+  input_devices_.push_back(id);
+}
+
+void DisplayInfo::ClearInputDevices() {
+  input_devices_.clear();
+}
+
+void ResetDisplayIdForTest() {
+  synthesized_display_id = kSynthesizedDisplayIdStart;
 }
 
 }  // namespace ash

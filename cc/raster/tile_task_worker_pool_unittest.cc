@@ -41,6 +41,7 @@ namespace {
 
 const size_t kMaxTransferBufferUsageBytes = 10000U;
 const size_t kMaxBytesPerCopyOperation = 1000U;
+const size_t kMaxStagingBuffers = 32U;
 
 // A resource of this dimension^2 * 4 must be greater than the above transfer
 // buffer constant.
@@ -71,7 +72,7 @@ class TestRasterTaskImpl : public RasterTask {
   void RunOnWorkerThread() override {
     uint64_t new_content_id = 0;
     raster_buffer_->Playback(picture_pile_.get(), gfx::Rect(1, 1),
-                             gfx::Rect(1, 1), new_content_id, 1.f);
+                             gfx::Rect(1, 1), new_content_id, 1.f, true);
   }
 
   // Overridden from TileTask:
@@ -165,12 +166,10 @@ class TileTaskWorkerPoolTest
         break;
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
-        staging_resource_pool_ = ResourcePool::Create(resource_provider_.get(),
-                                                      GL_TEXTURE_2D);
         tile_task_worker_pool_ = OneCopyTileTaskWorkerPool::Create(
             base::ThreadTaskRunnerHandle::Get().get(), &task_graph_runner_,
             context_provider_.get(), resource_provider_.get(),
-            staging_resource_pool_.get(), kMaxBytesPerCopyOperation, false);
+            kMaxBytesPerCopyOperation, false, kMaxStagingBuffers);
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
@@ -332,7 +331,6 @@ class TileTaskWorkerPoolTest
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<ResourcePool> staging_resource_pool_;
   scoped_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
   TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestSharedBitmapManager shared_bitmap_manager_;
@@ -406,8 +404,8 @@ TEST_P(TileTaskWorkerPoolTest, LargeResources) {
         ScopedResource::Create(resource_provider_.get()));
     resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                        RGBA_8888);
-    EXPECT_GE(Resource::UncheckedMemorySizeBytes(resource->size(),
-                                                 resource->format()),
+    EXPECT_GE(ResourceUtil::UncheckedSizeInBytes<size_t>(resource->size(),
+                                                         resource->format()),
               kMaxTransferBufferUsageBytes);
   }
 

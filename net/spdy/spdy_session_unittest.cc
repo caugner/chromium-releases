@@ -2754,6 +2754,72 @@ TEST_P(SpdySessionTest, TestYieldingSlowReads) {
   EXPECT_TRUE(data.AllReadDataConsumed());
 }
 
+// Regression test for https://crbug.com/531570.
+// Test the case where DoRead() takes long but returns synchronously.
+TEST_P(SpdySessionTest, TestYieldingSlowSynchronousReads) {
+  session_deps_.host_resolver->set_synchronous_mode(true);
+  session_deps_.time_func = SlowReads;
+
+  BufferedSpdyFramer framer(spdy_util_.spdy_version(), false);
+
+  scoped_ptr<SpdyFrame> req1(
+      spdy_util_.ConstructSpdyGet(nullptr, 0, false, 1, MEDIUM, true));
+  MockWrite writes[] = {
+      CreateMockWrite(*req1, 0),
+  };
+
+  scoped_ptr<SpdyFrame> partial_data_frame(
+      framer.CreateDataFrame(1, "foo ", 4, DATA_FLAG_NONE));
+  scoped_ptr<SpdyFrame> finish_data_frame(
+      framer.CreateDataFrame(1, "bar", 3, DATA_FLAG_FIN));
+
+  scoped_ptr<SpdyFrame> resp1(
+      spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
+
+  MockRead reads[] = {
+      CreateMockRead(*resp1, 1), MockRead(ASYNC, ERR_IO_PENDING, 2),
+      CreateMockRead(*partial_data_frame, 3, SYNCHRONOUS),
+      CreateMockRead(*partial_data_frame, 4, SYNCHRONOUS),
+      CreateMockRead(*partial_data_frame, 5, SYNCHRONOUS),
+      CreateMockRead(*finish_data_frame, 6, SYNCHRONOUS),
+      MockRead(ASYNC, 0, 7)  // EOF
+  };
+
+  // Create SpdySession and SpdyStream and send the request.
+  SequencedSocketData data(reads, arraysize(reads), writes, arraysize(writes));
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  CreateNetworkSession();
+  base::WeakPtr<SpdySession> session =
+      CreateInsecureSpdySession(http_session_, key_, BoundNetLog());
+
+  base::WeakPtr<SpdyStream> spdy_stream1 = CreateStreamSynchronously(
+      SPDY_REQUEST_RESPONSE_STREAM, session, test_url_, MEDIUM, BoundNetLog());
+  ASSERT_TRUE(spdy_stream1.get() != nullptr);
+  EXPECT_EQ(0u, spdy_stream1->stream_id());
+  test::StreamDelegateDoNothing delegate1(spdy_stream1);
+  spdy_stream1->SetDelegate(&delegate1);
+
+  scoped_ptr<SpdyHeaderBlock> headers1(
+      spdy_util_.ConstructGetHeaderBlock(kDefaultURL));
+  spdy_stream1->SendRequestHeaders(headers1.Pass(), NO_MORE_DATA_TO_SEND);
+  EXPECT_TRUE(spdy_stream1->HasUrlFromHeaders());
+
+  // Run until 1st read.
+  EXPECT_EQ(0u, delegate1.stream_id());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1u, delegate1.stream_id());
+
+  // Read all the data and verify SpdySession::DoReadLoop has posted a task.
+  data.CompleteRead();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ("foo foo foo bar", delegate1.TakeReceivedData());
+  EXPECT_FALSE(spdy_stream1);
+
+  EXPECT_TRUE(data.AllWriteDataConsumed());
+  EXPECT_TRUE(data.AllReadDataConsumed());
+}
+
 // Test that SpdySession::DoReadLoop yields while reading the
 // data. This test makes 32k + 1 bytes of data available on the socket
 // for reading. It then verifies that DoRead has yielded even though
@@ -3389,8 +3455,6 @@ TEST_P(SpdySessionTest, CreateStreamOnStreamReset) {
   EXPECT_FALSE(session);
 }
 
-// The tests below are only for SPDY/3 and above.
-
 TEST_P(SpdySessionTest, UpdateStreamsSendWindowSize) {
   // Set SETTINGS_INITIAL_WINDOW_SIZE to a small number so that WINDOW_UPDATE
   // gets sent.
@@ -3453,16 +3517,11 @@ TEST_P(SpdySessionTest, UpdateStreamsSendWindowSize) {
   EXPECT_FALSE(session);
 }
 
-// The tests below are only for SPDY/3.1 and above.
-
 // SpdySession::{Increase,Decrease}RecvWindowSize should properly
 // adjust the session receive window size. In addition,
 // SpdySession::IncreaseRecvWindowSize should trigger
 // sending a WINDOW_UPDATE frame for a large enough delta.
 TEST_P(SpdySessionTest, AdjustRecvWindowSize) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   session_deps_.host_resolver->set_synchronous_mode(true);
 
   const int32 initial_window_size =
@@ -3520,9 +3579,6 @@ TEST_P(SpdySessionTest, AdjustRecvWindowSize) {
 // adjust the session send window size when the "enable_spdy_31" flag
 // is set.
 TEST_P(SpdySessionTest, AdjustSendWindowSize) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   session_deps_.host_resolver->set_synchronous_mode(true);
 
   MockRead reads[] = {
@@ -3555,9 +3611,6 @@ TEST_P(SpdySessionTest, AdjustSendWindowSize) {
 // receive window size to decrease, but it should cause the unacked
 // bytes to increase.
 TEST_P(SpdySessionTest, SessionFlowControlInactiveStream) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   session_deps_.host_resolver->set_synchronous_mode(true);
 
   scoped_ptr<SpdyFrame> resp(spdy_util_.ConstructSpdyBodyFrame(1, false));
@@ -3701,9 +3754,6 @@ TEST_P(SpdySessionTest, StreamFlowControlTooMuchData) {
 // deltas in the receiving window size when checking incoming frames for flow
 // control errors at session level.
 TEST_P(SpdySessionTest, SessionFlowControlTooMuchDataTwoDataFrames) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const int32 session_max_recv_window_size = 500;
   const int32 first_data_frame_size = 200;
   const int32 second_data_frame_size = 400;
@@ -3768,9 +3818,6 @@ TEST_P(SpdySessionTest, SessionFlowControlTooMuchDataTwoDataFrames) {
 // deltas in the receiving window size when checking incoming data frames for
 // flow control errors at stream level.
 TEST_P(SpdySessionTest, StreamFlowControlTooMuchDataTwoDataFrames) {
-  if (GetParam() < kProtoSPDY3)
-    return;
-
   const int32 stream_max_recv_window_size = 500;
   const int32 first_data_frame_size = 200;
   const int32 second_data_frame_size = 400;
@@ -3876,9 +3923,6 @@ class DropReceivedDataDelegate : public test::StreamDelegateSendImmediate {
 // data. The receive window should still increase to its original
 // value, i.e. we shouldn't "leak" receive window bytes.
 TEST_P(SpdySessionTest, SessionFlowControlNoReceiveLeaks) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
 
   const int32 msg_data_size = 100;
@@ -3962,9 +4006,6 @@ TEST_P(SpdySessionTest, SessionFlowControlNoReceiveLeaks) {
 // can be written to the socket. The send window should then increase
 // to its original value, i.e. we shouldn't "leak" send window bytes.
 TEST_P(SpdySessionTest, SessionFlowControlNoSendLeaks) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
 
   const int32 msg_data_size = 100;
@@ -4044,9 +4085,6 @@ TEST_P(SpdySessionTest, SessionFlowControlNoSendLeaks) {
 // Send data back and forth; the send and receive windows should
 // change appropriately.
 TEST_P(SpdySessionTest, SessionFlowControlEndToEnd) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
 
   const int32 msg_data_size = 100;
@@ -4239,9 +4277,6 @@ void SpdySessionTest::RunResumeAfterUnstallTest(
 // unstall sequences.
 
 TEST_P(SpdySessionTest, ResumeAfterUnstallSession) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallSessionOnly,
                  base::Unretained(this)),
@@ -4252,9 +4287,6 @@ TEST_P(SpdySessionTest, ResumeAfterUnstallSession) {
 // Equivalent to
 // SpdyStreamTest.ResumeAfterSendWindowSizeIncrease.
 TEST_P(SpdySessionTest, ResumeAfterUnstallStream) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallStreamOnly,
                  base::Unretained(this)),
@@ -4263,9 +4295,6 @@ TEST_P(SpdySessionTest, ResumeAfterUnstallStream) {
 }
 
 TEST_P(SpdySessionTest, StallSessionStreamResumeAfterUnstallSessionStream) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallSessionStream,
                  base::Unretained(this)),
@@ -4274,9 +4303,6 @@ TEST_P(SpdySessionTest, StallSessionStreamResumeAfterUnstallSessionStream) {
 }
 
 TEST_P(SpdySessionTest, StallStreamSessionResumeAfterUnstallSessionStream) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallStreamSession,
                  base::Unretained(this)),
@@ -4285,9 +4311,6 @@ TEST_P(SpdySessionTest, StallStreamSessionResumeAfterUnstallSessionStream) {
 }
 
 TEST_P(SpdySessionTest, StallStreamSessionResumeAfterUnstallStreamSession) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallStreamSession,
                  base::Unretained(this)),
@@ -4296,9 +4319,6 @@ TEST_P(SpdySessionTest, StallStreamSessionResumeAfterUnstallStreamSession) {
 }
 
 TEST_P(SpdySessionTest, StallSessionStreamResumeAfterUnstallStreamSession) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   RunResumeAfterUnstallTest(
       base::Bind(&SpdySessionTest::StallSessionStream,
                  base::Unretained(this)),
@@ -4310,9 +4330,6 @@ TEST_P(SpdySessionTest, StallSessionStreamResumeAfterUnstallStreamSession) {
 // streams should resume in priority order when that window is then
 // increased.
 TEST_P(SpdySessionTest, ResumeByPriorityAfterSendWindowSizeIncrease) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
   GURL url(kStreamUrl);
 
@@ -4462,9 +4479,6 @@ class StreamClosingDelegate : public test::StreamDelegateWithBody {
 // Cause a stall by reducing the flow control send window to
 // 0. Unstalling the session should properly handle deleted streams.
 TEST_P(SpdySessionTest, SendWindowSizeIncreaseWithDeletedStreams) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
   GURL url(kStreamUrl);
 
@@ -4621,9 +4635,6 @@ TEST_P(SpdySessionTest, SendWindowSizeIncreaseWithDeletedStreams) {
 // 0. Unstalling the session should properly handle the session itself
 // being closed.
 TEST_P(SpdySessionTest, SendWindowSizeIncreaseWithDeletedSession) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   const char kStreamUrl[] = "http://www.example.org/";
   GURL url(kStreamUrl);
 
@@ -4727,9 +4738,6 @@ TEST_P(SpdySessionTest, SendWindowSizeIncreaseWithDeletedSession) {
 }
 
 TEST_P(SpdySessionTest, GoAwayOnSessionFlowControlError) {
-  if (GetParam() < kProtoSPDY31)
-    return;
-
   scoped_ptr<SpdyFrame> req(
       spdy_util_.ConstructSpdyGet(nullptr, 0, false, 1, LOWEST, true));
   scoped_ptr<SpdyFrame> goaway(spdy_util_.ConstructSpdyGoAway(

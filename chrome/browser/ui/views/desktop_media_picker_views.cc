@@ -12,7 +12,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -431,7 +430,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
 #if defined(USE_ASH)
     if (chrome::IsNativeWindowInAsh(widget->GetNativeWindow())) {
       dialog_window_id =
-          DesktopMediaID::RegisterAuraWindow(widget->GetNativeWindow()).id;
+          DesktopMediaID::RegisterAuraWindow(
+              DesktopMediaID::TYPE_WINDOW, widget->GetNativeWindow()).aura_id;
       DCHECK_NE(dialog_window_id, 0);
     }
 #endif

@@ -15,7 +15,7 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
-#include "ui/gl/gl_image_linux_dma_buffer.h"
+#include "ui/gl/gl_image_ozone_native_pixmap.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_surface_osmesa.h"
@@ -428,29 +428,12 @@ class GL_EXPORT GLSurfaceOzoneSurfacelessSurfaceImpl
   void Destroy() override;
 
  private:
-  class SurfaceImage : public GLImageLinuxDMABuffer {
-   public:
-    SurfaceImage(const gfx::Size& size, unsigned internalformat);
-
-    bool Initialize(scoped_refptr<ui::NativePixmap> pixmap,
-                    gfx::GpuMemoryBuffer::Format format);
-    bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                              int z_order,
-                              gfx::OverlayTransform transform,
-                              const gfx::Rect& bounds_rect,
-                              const gfx::RectF& crop_rect) override;
-
-   private:
-    ~SurfaceImage() override;
-
-    scoped_refptr<ui::NativePixmap> pixmap_;
-  };
-
   ~GLSurfaceOzoneSurfacelessSurfaceImpl() override;
 
   void BindFramebuffer();
   bool CreatePixmaps();
 
+  scoped_refptr<GLContext> context_;
   GLuint fbo_;
   GLuint textures_[2];
   scoped_refptr<GLImage> images_[2];
@@ -458,39 +441,11 @@ class GL_EXPORT GLSurfaceOzoneSurfacelessSurfaceImpl
   DISALLOW_COPY_AND_ASSIGN(GLSurfaceOzoneSurfacelessSurfaceImpl);
 };
 
-GLSurfaceOzoneSurfacelessSurfaceImpl::SurfaceImage::SurfaceImage(
-    const gfx::Size& size,
-    unsigned internalformat)
-    : GLImageLinuxDMABuffer(size, internalformat) {
-}
-
-bool GLSurfaceOzoneSurfacelessSurfaceImpl::SurfaceImage::Initialize(
-    scoped_refptr<ui::NativePixmap> pixmap,
-    gfx::GpuMemoryBuffer::Format format) {
-  base::FileDescriptor handle(pixmap->GetDmaBufFd(), false);
-  if (!GLImageLinuxDMABuffer::Initialize(handle, format,
-                                         pixmap->GetDmaBufPitch()))
-    return false;
-  pixmap_ = pixmap;
-  return true;
-}
-bool GLSurfaceOzoneSurfacelessSurfaceImpl::SurfaceImage::ScheduleOverlayPlane(
-    gfx::AcceleratedWidget widget,
-    int z_order,
-    gfx::OverlayTransform transform,
-    const gfx::Rect& bounds_rect,
-    const gfx::RectF& crop_rect) {
-  return pixmap_->ScheduleOverlayPlane(widget, z_order, transform, bounds_rect,
-                                       crop_rect);
-}
-
-GLSurfaceOzoneSurfacelessSurfaceImpl::SurfaceImage::~SurfaceImage() {
-}
-
 GLSurfaceOzoneSurfacelessSurfaceImpl::GLSurfaceOzoneSurfacelessSurfaceImpl(
     scoped_ptr<ui::SurfaceOzoneEGL> ozone_surface,
     AcceleratedWidget widget)
     : GLSurfaceOzoneSurfaceless(ozone_surface.Pass(), widget),
+      context_(nullptr),
       fbo_(0),
       current_surface_(0) {
   for (auto& texture : textures_)
@@ -503,6 +458,8 @@ GLSurfaceOzoneSurfacelessSurfaceImpl::GetBackingFrameBufferObject() {
 }
 
 bool GLSurfaceOzoneSurfacelessSurfaceImpl::OnMakeCurrent(GLContext* context) {
+  DCHECK(!context_ || context == context_);
+  context_ = context;
   if (!fbo_) {
     glGenFramebuffersEXT(1, &fbo_);
     if (!fbo_)
@@ -553,8 +510,9 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::SwapBuffersAsync(
 }
 
 void GLSurfaceOzoneSurfacelessSurfaceImpl::Destroy() {
-  GLContext* current_context = GLContext::GetCurrent();
-  DCHECK(current_context && current_context->IsCurrent(this));
+  if (!context_)
+    return;
+  ui::ScopedMakeCurrent context(context_.get(), this);
   glBindFramebufferEXT(GL_FRAMEBUFFER, 0);
   if (fbo_) {
     glDeleteTextures(arraysize(textures_), textures_);
@@ -589,13 +547,13 @@ bool GLSurfaceOzoneSurfacelessSurfaceImpl::CreatePixmaps() {
         ui::OzonePlatform::GetInstance()
             ->GetSurfaceFactoryOzone()
             ->CreateNativePixmap(widget_, GetSize(),
-                                 ui::SurfaceFactoryOzone::BGRA_8888,
-                                 ui::SurfaceFactoryOzone::SCANOUT);
+                                 gfx::BufferFormat::BGRA_8888,
+                                 gfx::BufferUsage::SCANOUT);
     if (!pixmap)
       return false;
-    scoped_refptr<SurfaceImage> image =
-        new SurfaceImage(GetSize(), GL_BGRA_EXT);
-    if (!image->Initialize(pixmap, gfx::GpuMemoryBuffer::Format::BGRA_8888))
+    scoped_refptr<GLImageOzoneNativePixmap> image =
+        new GLImageOzoneNativePixmap(GetSize(), GL_BGRA_EXT);
+    if (!image->Initialize(pixmap.get(), gfx::BufferFormat::BGRA_8888))
       return false;
     images_[i] = image;
     // Bind image to texture.

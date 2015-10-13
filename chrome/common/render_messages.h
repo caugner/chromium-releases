@@ -4,30 +4,19 @@
 
 // Multiply-included file, no traditional include guard.
 #include <stdint.h>
-#include <map>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/memory/shared_memory.h"
-#include "base/process/process.h"
 #include "base/strings/string16.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "base/values.h"
-#include "build/build_config.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
 #include "chrome/common/search_provider.h"
 #include "chrome/common/web_application_info.h"
-#include "components/content_settings/core/common/content_settings.h"
-#include "components/content_settings/core/common/content_settings_pattern.h"
-#include "components/nacl/common/nacl_types.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "content/public/common/common_param_traits.h"
-#include "content/public/common/referrer.h"
 #include "content/public/common/top_controls_state.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -35,10 +24,6 @@
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/window_open_disposition.h"
-#include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/ipc/gfx_param_traits.h"
 
 // Singly-included section for enums and custom IPC traits.
 #ifndef CHROME_COMMON_RENDER_MESSAGES_H_
@@ -135,6 +120,8 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(InstantMostVisitedItem)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(title)
+  IPC_STRUCT_TRAITS_MEMBER(thumbnail)
+  IPC_STRUCT_TRAITS_MEMBER(favicon)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(RendererContentSettingRules)
@@ -307,13 +294,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_RequestThumbnailForContextNode_ACK,
 // ChromeViewHostMsg_DidGetWebApplicationInfo.
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_GetWebApplicationInfo)
 
-#if defined(OS_ANDROID)
-// Asks the renderer to return information about the given meta tag.
-IPC_MESSAGE_ROUTED2(ChromeViewMsg_RetrieveMetaTagContent,
-                    GURL /* expected_url */,
-                    std::string /* tag_name */ )
-#endif  // defined(OS_ANDROID)
-
 // chrome.principals messages ------------------------------------------------
 
 // Message sent from the renderer to the browser to get the list of browser
@@ -335,6 +315,11 @@ IPC_MESSAGE_CONTROL0(ChromeViewHostMsg_ShowBrowserAccountManagementUI)
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_NetErrorInfo,
                     int /* DNS probe status */)
 
+// Tells the renderer whether or not there is a local diagnostics service that
+// can be run via ChromeViewHostMsg_RunNetworkDiagnostics messages.
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetCanShowNetworkDiagnosticsDialog,
+                    bool /* can_show_network_diagnostics_dialog */)
+
 // Provides the information needed by the renderer process to contact a
 // navigation correction service.  Handled by the NetErrorHelper.
 IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
@@ -343,6 +328,9 @@ IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
                     std::string /* origin_country */,
                     std::string /* API key to use */,
                     GURL /* Google Search URL to use */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RunNetworkDiagnostics,
+                    GURL /* failed_url */)
 
 //-----------------------------------------------------------------------------
 // Misc messages
@@ -483,14 +471,6 @@ IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_CancelPrerenderForPrinting)
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_DidGetWebApplicationInfo,
                     WebApplicationInfo)
 
-#if defined(OS_ANDROID)
-IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_DidRetrieveMetaTagContent,
-                    bool /* success */,
-                    std::string /* tag_name */,
-                    std::string /* tag_content */,
-                    GURL /* expected_url */)
-#endif  // defined(OS_ANDROID)
-
 // Logs events from InstantExtended New Tab Pages.
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogEvent,
                     int /* page_seq_no */,
@@ -579,9 +559,10 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_IsCrashReportingEnabled,
 
 // Tells the browser process whether the web page wants the banner to be shown.
 // This is a reply from ChromeViewMsg_AppBannerPromptRequest.
-IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_AppBannerPromptReply,
+IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_AppBannerPromptReply,
                     int /* request_id */,
-                    blink::WebAppBannerPromptReply /* reply */)
+                    blink::WebAppBannerPromptReply /* reply */,
+                    std::string /* referrer */)
 
 // Tells the browser to restart the app banner display pipeline.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RequestShowAppBanner,

@@ -4,11 +4,13 @@
 
 #include "chrome/browser/download/notification/download_notification_manager.h"
 
+#include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/notification/download_group_notification.h"
 #include "chrome/browser/download/notification/download_item_notification.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/download_item.h"
 #include "grit/theme_resources.h"
@@ -22,6 +24,21 @@
 // DownloadNotificationManager implementation:
 ///////////////////////////////////////////////////////////////////////////////
 
+bool DownloadNotificationManager::IsEnabled() {
+  // Disabled by default.
+  bool enable_download_notification = false;
+
+  std::string arg = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kEnableDownloadNotification);
+  if (!arg.empty()) {
+    if (arg == "enabled")
+      enable_download_notification = true;
+    else if (arg == "disabled")
+      enable_download_notification = false;
+  }
+  return enable_download_notification;
+}
+
 DownloadNotificationManager::DownloadNotificationManager(Profile* profile)
     : main_profile_(profile),
       items_deleter_(&manager_for_profile_) {
@@ -30,7 +47,7 @@ DownloadNotificationManager::DownloadNotificationManager(Profile* profile)
 DownloadNotificationManager::~DownloadNotificationManager() {
 }
 
-void DownloadNotificationManager::OnAllDownloadsRemoved(Profile* profile) {
+void DownloadNotificationManager::OnAllDownloadsRemoving(Profile* profile) {
   DownloadNotificationManagerForProfile* manager_for_profile =
       manager_for_profile_[profile];
   manager_for_profile_.erase(profile);
@@ -103,10 +120,12 @@ void DownloadNotificationManagerForProfile::OnDownloadRemoved(
   item->OnDownloadRemoved(download);
   group_notification_->OnDownloadRemoved(download);
 
-  delete item;
+  // This removing might be initiated from DownloadNotificationItem, so delaying
+  // deleting for item to do remaining cleanups.
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, item);
 
   if (items_.size() == 0 && parent_manager_)
-    parent_manager_->OnAllDownloadsRemoved(profile_);
+    parent_manager_->OnAllDownloadsRemoving(profile_);
 }
 
 void DownloadNotificationManagerForProfile::OnDownloadDestroyed(
@@ -118,10 +137,12 @@ void DownloadNotificationManagerForProfile::OnDownloadDestroyed(
   item->OnDownloadRemoved(download);
   group_notification_->OnDownloadRemoved(download);
 
-  delete item;
+  // This removing might be initiated from DownloadNotificationItem, so delaying
+  // deleting for item to do remaining cleanups.
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, item);
 
   if (items_.size() == 0 && parent_manager_)
-    parent_manager_->OnAllDownloadsRemoved(profile_);
+    parent_manager_->OnAllDownloadsRemoving(profile_);
 }
 
 void DownloadNotificationManagerForProfile::OnNewDownloadReady(

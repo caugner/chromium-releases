@@ -15,12 +15,14 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/ios/browser/profile_oauth2_token_service_ios_provider.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
-#include "ios/public/provider/components/signin/browser/profile_oauth2_token_service_ios_provider.h"
 #include "net/url_request/url_request_status.h"
 
 namespace {
@@ -28,35 +30,35 @@ namespace {
 // Match the way Chromium handles authentication errors in
 // google_apis/gaia/oauth2_access_token_fetcher.cc:
 GoogleServiceAuthError GetGoogleServiceAuthErrorFromNSError(
-    ios::ProfileOAuth2TokenServiceIOSProvider* provider,
+    ProfileOAuth2TokenServiceIOSProvider* provider,
     NSError* error) {
   if (!error)
     return GoogleServiceAuthError::AuthErrorNone();
 
-  ios::AuthenticationErrorCategory errorCategory =
+  AuthenticationErrorCategory errorCategory =
       provider->GetAuthenticationErrorCategory(error);
   switch (errorCategory) {
-    case ios::kAuthenticationErrorCategoryUnknownErrors:
+    case kAuthenticationErrorCategoryUnknownErrors:
       // Treat all unknown error as unexpected service response errors.
       // This may be too general and may require a finer grain filtering.
       return GoogleServiceAuthError(
           GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE);
-    case ios::kAuthenticationErrorCategoryAuthorizationErrors:
+    case kAuthenticationErrorCategoryAuthorizationErrors:
       return GoogleServiceAuthError(
           GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
-    case ios::kAuthenticationErrorCategoryAuthorizationForbiddenErrors:
+    case kAuthenticationErrorCategoryAuthorizationForbiddenErrors:
       // HTTP_FORBIDDEN (403) is treated as temporary error, because it may be
       // '403 Rate Limit Exceeded.' (for more details, see
       // google_apis/gaia/oauth2_access_token_fetcher.cc).
       return GoogleServiceAuthError(
           GoogleServiceAuthError::SERVICE_UNAVAILABLE);
-    case ios::kAuthenticationErrorCategoryNetworkServerErrors:
+    case kAuthenticationErrorCategoryNetworkServerErrors:
       // Just set the connection error state to FAILED.
       return GoogleServiceAuthError::FromConnectionError(
           net::URLRequestStatus::FAILED);
-    case ios::kAuthenticationErrorCategoryUserCancellationErrors:
+    case kAuthenticationErrorCategoryUserCancellationErrors:
       return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
-    case ios::kAuthenticationErrorCategoryUnknownIdentityErrors:
+    case kAuthenticationErrorCategoryUnknownIdentityErrors:
       return GoogleServiceAuthError(GoogleServiceAuthError::USER_NOT_SIGNED_UP);
   }
 }
@@ -64,8 +66,8 @@ GoogleServiceAuthError GetGoogleServiceAuthErrorFromNSError(
 class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
  public:
   SSOAccessTokenFetcher(OAuth2AccessTokenConsumer* consumer,
-                        ios::ProfileOAuth2TokenServiceIOSProvider* provider,
-                        const std::string account_id);
+                        ProfileOAuth2TokenServiceIOSProvider* provider,
+                        const AccountTrackerService::AccountInfo& account);
   ~SSOAccessTokenFetcher() override;
 
   void Start(const std::string& client_id,
@@ -80,8 +82,8 @@ class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
                              NSError* error);
 
  private:
-  ios::ProfileOAuth2TokenServiceIOSProvider* provider_;  // weak
-  std::string account_id_;
+  ProfileOAuth2TokenServiceIOSProvider* provider_;  // weak
+  AccountTrackerService::AccountInfo account_;
   bool request_was_cancelled_;
   base::WeakPtrFactory<SSOAccessTokenFetcher> weak_factory_;
 
@@ -90,11 +92,11 @@ class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
 
 SSOAccessTokenFetcher::SSOAccessTokenFetcher(
     OAuth2AccessTokenConsumer* consumer,
-    ios::ProfileOAuth2TokenServiceIOSProvider* provider,
-    const std::string account_id)
+    ProfileOAuth2TokenServiceIOSProvider* provider,
+    const AccountTrackerService::AccountInfo& account)
     : OAuth2AccessTokenFetcher(consumer),
       provider_(provider),
-      account_id_(account_id),
+      account_(account),
       request_was_cancelled_(false),
       weak_factory_(this) {
   DCHECK(provider_);
@@ -108,7 +110,7 @@ void SSOAccessTokenFetcher::Start(const std::string& client_id,
                                   const std::vector<std::string>& scopes) {
   std::set<std::string> scopes_set(scopes.begin(), scopes.end());
   provider_->GetAccessToken(
-      account_id_, client_id, client_secret, scopes_set,
+      account_.gaia, client_id, client_secret, scopes_set,
       base::Bind(&SSOAccessTokenFetcher::OnAccessTokenResponse,
                  weak_factory_.GetWeakPtr()));
 }
@@ -142,8 +144,7 @@ ProfileOAuth2TokenServiceIOSDelegate::AccountInfo::AccountInfo(
     const std::string& account_id)
     : signin_error_controller_(signin_error_controller),
       account_id_(account_id),
-      last_auth_error_(GoogleServiceAuthError::NONE),
-      marked_for_removal_(false) {
+      last_auth_error_(GoogleServiceAuthError::NONE) {
   DCHECK(signin_error_controller_);
   DCHECK(!account_id_.empty());
   signin_error_controller_->AddProvider(this);
@@ -173,11 +174,17 @@ ProfileOAuth2TokenServiceIOSDelegate::AccountInfo::GetAuthStatus() const {
 
 ProfileOAuth2TokenServiceIOSDelegate::ProfileOAuth2TokenServiceIOSDelegate(
     SigninClient* client,
+    ProfileOAuth2TokenServiceIOSProvider* provider,
+    AccountTrackerService* account_tracker_service,
     SigninErrorController* signin_error_controller)
-    : client_(client), signin_error_controller_(signin_error_controller) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(client);
-  DCHECK(signin_error_controller);
+    : client_(client),
+      provider_(provider),
+      account_tracker_service_(account_tracker_service),
+      signin_error_controller_(signin_error_controller) {
+  DCHECK(client_);
+  DCHECK(provider_);
+  DCHECK(account_tracker_service_);
+  DCHECK(signin_error_controller_);
 }
 
 ProfileOAuth2TokenServiceIOSDelegate::~ProfileOAuth2TokenServiceIOSDelegate() {
@@ -189,23 +196,18 @@ void ProfileOAuth2TokenServiceIOSDelegate::Shutdown() {
   accounts_.clear();
 }
 
-ios::ProfileOAuth2TokenServiceIOSProvider*
-ProfileOAuth2TokenServiceIOSDelegate::GetProvider() {
-  ios::ProfileOAuth2TokenServiceIOSProvider* provider =
-      client_->GetIOSProvider();
-  DCHECK(provider);
-  return provider;
-}
-
 void ProfileOAuth2TokenServiceIOSDelegate::LoadCredentials(
     const std::string& primary_account_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  if (account_tracker_service_->GetMigrationState() ==
+      AccountTrackerService::MIGRATION_IN_PROGRESS) {
+    MigrateExcludedSecondaryAccountIds();
+  }
 
   // LoadCredentials() is called iff the user is signed in to Chrome, so the
   // primary account id must not be empty.
   DCHECK(!primary_account_id.empty());
 
-  GetProvider()->InitializeSharedAuthentication();
   ReloadCredentials(primary_account_id);
   FireRefreshTokensLoaded();
 }
@@ -226,50 +228,47 @@ void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
     return;
   }
 
-  std::vector<std::string> new_accounts(GetProvider()->GetAllAccountIds());
-  if (GetExcludeAllSecondaryAccounts()) {
-    // Only keep the |primary_account_id| in the list of new accounts.
-    if (std::find(new_accounts.begin(), new_accounts.end(),
-                  primary_account_id_) != new_accounts.end()) {
-      new_accounts.clear();
-      new_accounts.push_back(primary_account_id_);
-    }
-  } else {
-    std::set<std::string> exclude_secondary_accounts =
-        GetExcludedSecondaryAccounts();
-    DCHECK(std::find(exclude_secondary_accounts.begin(),
-                     exclude_secondary_accounts.end(),
-                     primary_account_id_) == exclude_secondary_accounts.end());
-    for (const auto& excluded_account_id : exclude_secondary_accounts) {
-      DCHECK(!excluded_account_id.empty());
-      auto account_id_to_remove_position = std::remove(
-          new_accounts.begin(), new_accounts.end(), excluded_account_id);
-      new_accounts.erase(account_id_to_remove_position, new_accounts.end());
+  // Get the list of new account ids.
+  std::set<std::string> excluded_account_ids = GetExcludedSecondaryAccounts();
+  std::set<std::string> new_account_ids;
+  for (const auto& new_account : provider_->GetAllAccounts()) {
+    DCHECK(!new_account.gaia.empty());
+    DCHECK(!new_account.email.empty());
+    if (!IsAccountExcluded(new_account.gaia, new_account.email,
+                           excluded_account_ids)) {
+      // Account must to be seeded before adding an account to ensure that
+      // the GAIA ID is available if any client of this token service starts
+      // a fetch access token operation when it receives a
+      // |OnRefreshTokenAvailable| notification.
+      std::string account_id = account_tracker_service_->SeedAccountInfo(
+          new_account.gaia, new_account.email);
+      new_account_ids.insert(account_id);
     }
   }
 
-  std::vector<std::string> old_accounts(GetAccounts());
-  std::sort(new_accounts.begin(), new_accounts.end());
-  std::sort(old_accounts.begin(), old_accounts.end());
-  if (new_accounts == old_accounts) {
-    // Avoid starting a batch change if there are no changes in the list of
-    // account.
+  // Get the list of existing account ids.
+  std::vector<std::string> old_account_ids = GetAccounts();
+  std::sort(old_account_ids.begin(), old_account_ids.end());
+
+  std::set<std::string> accounts_to_add =
+      base::STLSetDifference<std::set<std::string>>(new_account_ids,
+                                                    old_account_ids);
+  std::set<std::string> accounts_to_remove =
+      base::STLSetDifference<std::set<std::string>>(old_account_ids,
+                                                    new_account_ids);
+  if (accounts_to_add.empty() && accounts_to_remove.empty())
     return;
-  }
 
   // Remove all old accounts that do not appear in |new_accounts| and then
   // load |new_accounts|.
   ScopedBatchChange batch(this);
-  for (auto i = old_accounts.begin(); i != old_accounts.end(); ++i) {
-    if (std::find(new_accounts.begin(), new_accounts.end(), *i) ==
-        new_accounts.end()) {
-      RemoveAccount(*i);
-    }
+  for (const auto& account_to_remove : accounts_to_remove) {
+    RemoveAccount(account_to_remove);
   }
 
   // Load all new_accounts.
-  for (auto i = new_accounts.begin(); i != new_accounts.end(); ++i) {
-    AddOrUpdateAccount(*i);
+  for (const auto& account_to_add : accounts_to_add) {
+    AddOrUpdateAccount(account_to_add);
   }
 }
 
@@ -299,7 +298,9 @@ ProfileOAuth2TokenServiceIOSDelegate::CreateAccessTokenFetcher(
     const std::string& account_id,
     net::URLRequestContextGetter* getter,
     OAuth2AccessTokenConsumer* consumer) {
-  return new SSOAccessTokenFetcher(consumer, GetProvider(), account_id);
+  AccountTrackerService::AccountInfo account_info =
+      account_tracker_service_->GetAccountInfo(account_id);
+  return new SSOAccessTokenFetcher(consumer, provider_, account_info);
 }
 
 std::vector<std::string> ProfileOAuth2TokenServiceIOSDelegate::GetAccounts() {
@@ -314,8 +315,7 @@ bool ProfileOAuth2TokenServiceIOSDelegate::RefreshTokenIsAvailable(
     const std::string& account_id) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  AccountInfoMap::const_iterator iter = accounts_.find(account_id);
-  return iter != accounts_.end() && !iter->second->marked_for_removal();
+  return accounts_.count(account_id) > 0;
 }
 
 bool ProfileOAuth2TokenServiceIOSDelegate::RefreshTokenHasError(
@@ -340,7 +340,7 @@ void ProfileOAuth2TokenServiceIOSDelegate::UpdateAuthError(
   }
 
   if (accounts_.count(account_id) == 0) {
-    NOTREACHED();
+    // Nothing to update as the account has already been removed.
     return;
   }
   accounts_[account_id]->SetLastAuthError(error);
@@ -351,7 +351,10 @@ void ProfileOAuth2TokenServiceIOSDelegate::UpdateAuthError(
 void ProfileOAuth2TokenServiceIOSDelegate::AddOrUpdateAccount(
     const std::string& account_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!account_id.empty());
+
+  // Account must have been seeded before attempting to add it.
+  DCHECK(!account_tracker_service_->GetAccountInfo(account_id).gaia.empty());
+  DCHECK(!account_tracker_service_->GetAccountInfo(account_id).email.empty());
 
   bool account_present = accounts_.count(account_id) > 0;
   if (account_present &&
@@ -377,11 +380,6 @@ void ProfileOAuth2TokenServiceIOSDelegate::RemoveAccount(
   DCHECK(!account_id.empty());
 
   if (accounts_.count(account_id) > 0) {
-    // This is needed to ensure that refresh token for |acccount_id| is not
-    // available while the account is removed. Thus all access token requests
-    // for |account_id| triggered while an account is being removed will get a
-    // user not signed up error response.
-    accounts_[account_id]->set_marked_for_removal(true);
     accounts_.erase(account_id);
     FireRefreshTokenRevoked(account_id);
   }
@@ -475,4 +473,66 @@ void ProfileOAuth2TokenServiceIOSDelegate::ClearExcludedSecondaryAccounts() {
   client_->GetPrefs()->ClearPref(
       prefs::kTokenServiceExcludeAllSecondaryAccounts);
   client_->GetPrefs()->ClearPref(prefs::kTokenServiceExcludedSecondaryAccounts);
+}
+
+bool ProfileOAuth2TokenServiceIOSDelegate::IsAccountExcluded(
+    const std::string& gaia,
+    const std::string& email,
+    const std::set<std::string>& excluded_account_ids) {
+  std::string account_id =
+      account_tracker_service_->PickAccountIdForAccount(gaia, email);
+  if (account_id == primary_account_id_) {
+    // Only secondary account ids are excluded.
+    return false;
+  }
+
+  if (GetExcludeAllSecondaryAccounts())
+    return true;
+  return excluded_account_ids.count(account_id) > 0;
+}
+
+void ProfileOAuth2TokenServiceIOSDelegate::
+    MigrateExcludedSecondaryAccountIds() {
+  DCHECK_EQ(AccountTrackerService::MIGRATION_IN_PROGRESS,
+            account_tracker_service_->GetMigrationState());
+
+  // Before the account id migration, emails were used as account identifiers.
+  // Thus the pref |prefs::kTokenServiceExcludedSecondaryAccounts| holds the
+  // emails of the excluded secondary accounts.
+  std::set<std::string> excluded_emails = GetExcludedSecondaryAccounts();
+  if (excluded_emails.empty())
+    return;
+
+  std::vector<std::string> excluded_account_ids;
+  for (const std::string& excluded_email : excluded_emails) {
+    ProfileOAuth2TokenServiceIOSProvider::AccountInfo account_info =
+        provider_->GetAccountInfoForEmail(excluded_email);
+    if (account_info.gaia.empty()) {
+      // The provider no longer has an account with email |excluded_email|.
+      // This can occur for 2 reasons:
+      // 1. The account with email |excluded_email| was removed before being
+      //   migrated. It may simply be ignored in this case (no need to exclude
+      //   an account that is no longer available).
+      // 2. The migration of the excluded account ids was already done before,
+      //   but the entire migration of the accounts did not end for whatever
+      //   reason (e.g. the app crashed during the previous attempt to migrate
+      //   the accounts). The entire migration should be ignored in this case.
+      if (provider_->GetAccountInfoForGaia(excluded_email).gaia.empty()) {
+        // Case 1 above (account was removed).
+        DVLOG(1) << "Excluded secondary account with email " << excluded_email
+                 << " was removed before migration.";
+      } else {
+        // Case 2 above (migration already done).
+        DVLOG(1) << "Excluded secondary account ids were already migrated.";
+        return;
+      }
+    } else {
+      std::string excluded_account_id =
+          account_tracker_service_->PickAccountIdForAccount(account_info.gaia,
+                                                            account_info.email);
+      excluded_account_ids.push_back(excluded_account_id);
+    }
+  }
+  ClearExcludedSecondaryAccounts();
+  ExcludeSecondaryAccounts(excluded_account_ids);
 }

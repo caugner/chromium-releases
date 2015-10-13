@@ -5,6 +5,7 @@
 import("//base/android/linker/config.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/internal_rules.gni")
+import("//build/toolchain/toolchain.gni")
 import("//third_party/android_platform/config.gni")
 import("//tools/grit/grit_rule.gni")
 
@@ -908,6 +909,7 @@ template("java_binary") {
       testonly = invoker.testonly
     }
 
+    supports_android = false
     main_class = invoker.main_class
   }
 }
@@ -1079,6 +1081,7 @@ template("java_library") {
 #   deps: Specifies the dependencies of this target. Java targets in this list
 #     will be added to the javac classpath.
 #   jar_path: Path to the prebuilt jar.
+#   jar_dep: Target that builds jar_path (optional).
 #   proguard_preprocess: If true, proguard preprocessing will be run. This can
 #     be used to remove unwanted parts of the library.
 #   proguard_config: Path to the proguard config for preprocessing.
@@ -1095,6 +1098,9 @@ template("java_prebuilt") {
   set_sources_assignment_filter([])
   java_prebuilt_impl(target_name) {
     jar_path = invoker.jar_path
+    if (defined(invoker.jar_dep)) {
+      jar_dep = invoker.jar_dep
+    }
     if (defined(invoker.testonly)) {
       testonly = invoker.testonly
     }
@@ -1432,15 +1438,23 @@ template("android_apk") {
              "Relocation packing requires use of the" + " Chromium linker.")
     }
 
-    _native_libs = process_file_template(
-            invoker.native_libs,
-            "$root_build_dir/lib.stripped/{{source_file_part}}")
+    if (is_component_build) {
+      _native_libs += [ "$root_shlib_dir/libc++_shared.so" ]
+      _chromium_linker_dep += [ "//build/android:cpplib_stripped" ]
+    }
+
+    # Allow native_libs to be in the form "foo.so" or "foo.cr.so"
+    _first_ext_removed =
+        process_file_template(invoker.native_libs, "{{source_name_part}}")
+    _native_libs += process_file_template(
+            _first_ext_removed,
+            "$root_shlib_dir/{{source_name_part}}$shlib_extension")
 
     _native_libs_dir = base_path + "/libs"
 
     if (_use_chromium_linker) {
       _native_libs +=
-          [ "$root_build_dir/lib.stripped/libchromium_android_linker.so" ]
+          [ "$root_shlib_dir/libchromium_android_linker$shlib_extension" ]
     }
 
     _enable_relocation_packing = false
@@ -1651,7 +1665,7 @@ template("android_apk") {
 
       skip_packing_list = [
         "gdbserver",
-        "libchromium_android_linker.so",
+        "libchromium_android_linker$shlib_extension",
       ]
 
       enable_packing_arg = 0
@@ -1935,7 +1949,7 @@ template("unittest_apk") {
   if (defined(invoker.unittests_binary)) {
     unittests_binary = invoker.unittests_binary
   } else {
-    unittests_binary = "lib" + test_suite_name + ".so"
+    unittests_binary = "lib${test_suite_name}${shlib_extension}"
   }
 
   if (defined(invoker.apk_name)) {
@@ -2069,7 +2083,7 @@ template("android_aidl") {
 # Example
 #   create_native_executable_dist("foo_dist") {
 #     dist_dir = "$root_build_dir/foo_dist"
-#     binary = "$root_build_dir/exe.stripped/foo"
+#     binary = "$root_build_dir/foo"
 #     deps = [ ":the_thing_that_makes_foo" ]
 #   }
 template("create_native_executable_dist") {
@@ -2085,15 +2099,9 @@ template("create_native_executable_dist") {
   libraries_list =
       "${target_gen_dir}/${template_name}_library_dependencies.list"
 
-  # TODO(gyp)
-  #'dependencies': [
-  #'<(DEPTH)/build/android/setup.gyp:copy_system_libraries',
-  #],
-
   find_deps_target_name = "${template_name}__find_library_dependencies"
   copy_target_name = "${template_name}__copy_libraries_and_exe"
 
-  stripped_libraries_dir = "$root_build_dir/lib.stripped"
   action(find_deps_target_name) {
     visibility = [ ":$copy_target_name" ]
 
@@ -2113,7 +2121,7 @@ template("create_native_executable_dist") {
       rebase_path(depfile, root_build_dir),
       "--input-libraries=$rebased_binaries",
       "--libraries-dir",
-      rebase_path(stripped_libraries_dir, root_build_dir),
+      rebase_path(root_shlib_dir, root_build_dir),
       "--output",
       rebase_path(libraries_list, root_build_dir),
       "--readelf",
@@ -2137,7 +2145,7 @@ template("create_native_executable_dist") {
     rebased_libraries_list = rebase_path(libraries_list, root_build_dir)
     args = [
       "--files=$rebased_binaries_list",
-      "--files=@FileArg($rebased_libraries_list:libraries)",
+      "--files=@FileArg($rebased_libraries_list:lib_paths)",
     ]
 
     deps = [

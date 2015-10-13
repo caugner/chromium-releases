@@ -15,11 +15,12 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -29,8 +30,8 @@
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
-#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
@@ -168,11 +169,11 @@ void BrowserWindowCocoa::Show() {
   }
 
   {
-    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show Activate");
+    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show makeKeyAndOrderFront");
     // This call takes up a substantial part of startup time, and an even more
     // substantial part of startup time when any CALayers are part of the
     // window's NSView heirarchy.
-    Activate();
+    [window() makeKeyAndOrderFront:controller_];
   }
 
   // When creating windows from nibs it is necessary to |makeKeyAndOrderFront:|
@@ -582,7 +583,11 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
   base::scoped_nsobject<NSView> view([[NSView alloc]
       initWithFrame:NSMakeRect(0, 0, kBookmarkAppBubbleViewWidth,
                                kBookmarkAppBubbleViewHeight)]);
-  [view addSubview:open_as_window_checkbox];
+
+  // When CanHostedAppsOpenInWindows() returns false, do not show the open as
+  // window checkbox to avoid confusing users.
+  if (extensions::util::CanHostedAppsOpenInWindows())
+    [view addSubview:open_as_window_checkbox];
   [view addSubview:app_title];
   [alert setAccessoryView:view];
 

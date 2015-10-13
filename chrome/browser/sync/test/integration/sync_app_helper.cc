@@ -41,7 +41,8 @@ struct AppState {
 
 typedef std::map<std::string, AppState> AppStateMap;
 
-AppState::AppState() : launch_type(extensions::LAUNCH_TYPE_INVALID) {}
+AppState::AppState()
+    : launch_type(extensions::LAUNCH_TYPE_INVALID), from_bookmark(false) {}
 
 AppState::~AppState() {}
 
@@ -88,10 +89,10 @@ AppStateMap GetAppStates(Profile* profile) {
   scoped_ptr<const extensions::ExtensionSet> extensions(
       extensions::ExtensionRegistry::Get(profile)
           ->GenerateInstalledExtensionsSet());
-  for (extensions::ExtensionSet::const_iterator it = extensions->begin();
-       it != extensions->end(); ++it) {
-    if (extensions::sync_helper::IsSyncableApp(it->get())) {
-      const std::string& id = (*it)->id();
+  for (const auto& extension : *extensions) {
+    if (extension->is_app() &&
+        extensions::sync_helper::IsSyncable(extension.get())) {
+      const std::string& id = extension->id();
       LoadApp(profile, id, &(app_state_map[id]));
     }
   }

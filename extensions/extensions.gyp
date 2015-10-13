@@ -123,6 +123,7 @@
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
         '../base/base.gyp:base_prefs',
         '../components/components.gyp:browsing_data',
         '../components/components.gyp:device_event_log_component',
@@ -230,6 +231,7 @@
       'dependencies': [
         '../content/content.gyp:content_common',
         '../content/content.gyp:content_utility',
+        '../skia/skia.gyp:skia',
         '../third_party/zlib/google/zip.gyp:zip',
         'extensions_common',
         'extensions_strings.gyp:extensions_strings',
@@ -248,6 +250,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_prefs_test_support',
+        '../components/components.gyp:pref_registry_test_support',
         '../components/components.gyp:user_prefs',
         '../content/content.gyp:content_browser',
         '../content/content.gyp:content_common',

@@ -50,6 +50,7 @@ source_set("browser") {
     "//components/query_parser",
     "//components/startup_metric_utils",
     "//components/strings",
+    "//components/url_formatter",
     "//net",
     "//third_party/icu",
     "//ui/base",
@@ -72,6 +73,10 @@ source_set("unit_tests") {
     "bookmark_model_unittest.cc",
     "bookmark_utils_unittest.cc",
   ]
+
+  if (toolkit_views) {
+    sources += [ "bookmark_node_data_unittest.cc" ]
+  }
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 

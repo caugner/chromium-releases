@@ -12,7 +12,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/sync/glue/invalidation_helper.h"
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
 #include "chrome/common/chrome_switches.h"
@@ -20,6 +19,7 @@
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/signin/core/browser/signin_client.h"
+#include "components/sync_driver/invalidation_helper.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -102,10 +102,12 @@ void SyncBackendHostImpl::Initialize(
     scoped_ptr<base::Thread> sync_thread,
     const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
     const GURL& sync_service_url,
+    const std::string& sync_user_agent,
     const syncer::SyncCredentials& credentials,
     bool delete_sync_data_folder,
     scoped_ptr<syncer::SyncManagerFactory> sync_manager_factory,
-    scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
+    const syncer::WeakHandle<syncer::UnrecoverableErrorHandler>&
+        unrecoverable_error_handler,
     const base::Closure& report_unrecoverable_error_function,
     syncer::NetworkResources* network_resources,
     scoped_ptr<syncer::SyncEncryptionHandler::NigoriState> saved_nigori_state) {
@@ -141,10 +143,13 @@ void SyncBackendHostImpl::Initialize(
   if (cl->HasSwitch(switches::kSyncEnableClearDataOnPassphraseEncryption))
     clear_data_option = syncer::PASSPHRASE_TRANSITION_CLEAR_DATA;
 
+  std::map<syncer::ModelType, int64> invalidation_versions;
+  sync_prefs_->GetInvalidationVersions(&invalidation_versions);
+
   scoped_ptr<DoInitializeOptions> init_opts(new DoInitializeOptions(
       registrar_->sync_thread()->message_loop(), registrar_.get(), routing_info,
       workers, extensions_activity_monitor_.GetExtensionsActivity(),
-      event_handler, sync_service_url,
+      event_handler, sync_service_url, sync_user_agent,
       network_resources->GetHttpPostProviderFactory(
           make_scoped_refptr(profile_->GetRequestContext()),
           base::Bind(&UpdateNetworkTime),
@@ -156,8 +161,8 @@ void SyncBackendHostImpl::Initialize(
       scoped_ptr<InternalComponentsFactory>(
           new syncer::InternalComponentsFactoryImpl(factory_switches))
           .Pass(),
-      unrecoverable_error_handler.Pass(), report_unrecoverable_error_function,
-      saved_nigori_state.Pass(), clear_data_option));
+      unrecoverable_error_handler, report_unrecoverable_error_function,
+      saved_nigori_state.Pass(), clear_data_option, invalidation_versions));
   InitCore(init_opts.Pass());
 }
 
@@ -458,11 +463,11 @@ syncer::UserShare* SyncBackendHostImpl::GetUserShare() const {
   return core_->sync_manager()->GetUserShare();
 }
 
-scoped_ptr<syncer::SyncContextProxy>
+scoped_ptr<syncer_v2::SyncContextProxy>
 SyncBackendHostImpl::GetSyncContextProxy() {
-  return sync_context_proxy_.get() ? scoped_ptr<syncer::SyncContextProxy>(
+  return sync_context_proxy_.get() ? scoped_ptr<syncer_v2::SyncContextProxy>(
                                          sync_context_proxy_->Clone())
-                                   : scoped_ptr<syncer::SyncContextProxy>();
+                                   : scoped_ptr<syncer_v2::SyncContextProxy>();
 }
 
 SyncBackendHostImpl::Status SyncBackendHostImpl::GetDetailedStatus() {
@@ -625,7 +630,7 @@ void SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop(
     const syncer::WeakHandle<syncer::JsBackend> js_backend,
     const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>
         debug_info_listener,
-    syncer::SyncContextProxy* sync_context_proxy,
+    syncer_v2::SyncContextProxy* sync_context_proxy,
     const std::string& cache_guid) {
   DCHECK_EQ(base::MessageLoop::current(), frontend_loop_);
 
@@ -860,6 +865,11 @@ void SyncBackendHostImpl::HandleDirectoryStatusCountersUpdatedOnFrontendLoop(
   frontend_->OnDirectoryTypeStatusCounterUpdated(type, counters);
 }
 
+void SyncBackendHostImpl::UpdateInvalidationVersions(
+    const std::map<syncer::ModelType, int64>& invalidation_versions) {
+  sync_prefs_->UpdateInvalidationVersions(invalidation_versions);
+}
+
 base::MessageLoop* SyncBackendHostImpl::GetSyncLoopForTesting() {
   return registrar_->sync_thread()->message_loop();
 }
@@ -870,6 +880,20 @@ void SyncBackendHostImpl::RefreshTypesForTest(syncer::ModelTypeSet types) {
   registrar_->sync_thread()->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&SyncBackendHostCore::DoRefreshTypes, core_.get(), types));
+}
+
+void SyncBackendHostImpl::ClearServerData(
+    const syncer::SyncManager::ClearServerDataCallback& callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  registrar_->sync_thread()->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&SyncBackendHostCore::DoClearServerData,
+                            core_.get(), callback));
+}
+
+void SyncBackendHostImpl::ClearServerDataDoneOnFrontendLoop(
+    const syncer::SyncManager::ClearServerDataCallback& frontend_callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  frontend_callback.Run();
 }
 
 }  // namespace browser_sync

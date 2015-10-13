@@ -7,9 +7,9 @@ package org.chromium.chrome.browser.snackbar;
 import android.content.Context;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
-import org.chromium.chrome.browser.preferences.bandwidth.DataReductionProxyUma;
+import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxyUma;
+import org.chromium.chrome.browser.tab.Tab;
 
 /**
  * Each time a tab loads with Lo-Fi this controller saves that tab id and title to the stack of
@@ -44,6 +44,7 @@ public class LoFiBarPopupController implements SnackbarManager.SnackbarControlle
                 .setAction(mContext.getString(R.string.data_reduction_lo_fi_snackbar_action),
                         tab.getId())
                 .setDuration(DEFAULT_LO_FI_SNACKBAR_SHOW_DURATION_MS));
+        DataReductionProxySettings.getInstance().incrementLoFiSnackbarShown();
         DataReductionProxyUma.dataReductionProxyLoFiUIAction(
                 DataReductionProxyUma.ACTION_LOAD_IMAGES_SNACKBAR_SHOWN);
     }

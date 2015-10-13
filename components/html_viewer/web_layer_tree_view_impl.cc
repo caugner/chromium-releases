@@ -15,6 +15,7 @@
 #include "mojo/cc/output_surface_mojo.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
+#include "ui/gfx/buffer_types.h"
 
 namespace html_viewer {
 
@@ -36,7 +37,8 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   // blink::RuntimeEnabledFeature::slimmingPaintEnabled()
   settings.use_display_lists = true;
 
-  settings.use_image_texture_target = GL_TEXTURE_2D;
+  settings.use_image_texture_targets = std::vector<unsigned>(
+      static_cast<size_t>(gfx::BufferFormat::LAST) + 1, GL_TEXTURE_2D);
   settings.use_one_copy = true;
   // TODO(jam): use multiple compositor raster threads and set gather_pixel_refs
   // accordingly (see content).
@@ -65,12 +67,16 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
     scoped_refptr<cc::ContextProvider> context_provider(
         new mojo::ContextProviderMojo(cb.PassInterface().PassHandle()));
     output_surface_.reset(
-        new mojo::OutputSurfaceMojo(this, context_provider, surface.Pass()));
+        new mojo::OutputSurfaceMojo(this, context_provider,
+                                    surface.PassInterface().PassHandle()));
   }
   layer_tree_host_->SetLayerTreeHostClientReady();
 }
 
 WebLayerTreeViewImpl::~WebLayerTreeViewImpl() {
+  // Destroy the LayerTreeHost before anything else as doing so ensures we're
+  // not accessed on the compositor thread (we are the LayerTreeHostClient).
+  layer_tree_host_.reset();
 }
 
 void WebLayerTreeViewImpl::WillBeginMainFrame() {

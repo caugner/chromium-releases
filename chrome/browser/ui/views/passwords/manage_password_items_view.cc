@@ -6,6 +6,7 @@
 
 #include <numeric>
 
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/grit/generated_resources.h"
 #include "grit/components_strings.h"
@@ -79,11 +80,17 @@ scoped_ptr<views::Label> GenerateUsernameLabel(
 
 scoped_ptr<views::Label> GeneratePasswordLabel(
     const autofill::PasswordForm& form) {
-  scoped_ptr<views::Label> label(new views::Label(form.password_value));
+  base::string16 text = form.federation_url.is_empty()
+      ? form.password_value
+      : l10n_util::GetStringFUTF16(
+            IDS_MANAGE_PASSWORDS_IDENTITY_PROVIDER,
+            base::UTF8ToUTF16(form.federation_url.host()));
+  scoped_ptr<views::Label> label(new views::Label(text));
   label->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
       ui::ResourceBundle::SmallFont));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  label->SetObscured(true);
+  if (form.federation_url.is_empty())
+    label->SetObscured(true);
   return label.Pass();
 }
 
@@ -200,9 +207,9 @@ void ManagePasswordItemsView::PasswordFormRow::AddCredentialsRow(
     views::GridLayout* layout) {
   ResetControls();
   int column_set_id =
-      host_->model_->state() == password_manager::ui::PENDING_PASSWORD_STATE
-          ? TWO_COLUMN_SET
-          : THREE_COLUMN_SET;
+      host_->model_->state() == password_manager::ui::MANAGE_STATE
+          ? THREE_COLUMN_SET
+          : TWO_COLUMN_SET;
   BuildColumnSetIfNeeded(layout, column_set_id);
   layout->StartRowWithPadding(0, column_set_id, 0,
                               views::kRelatedControlVerticalSpacing);

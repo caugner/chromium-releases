@@ -32,7 +32,7 @@
 #include "components/search_engines/template_url_service_client.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "components/search_engines/util.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "sync/api/sync_change.h"
@@ -1197,7 +1197,8 @@ syncer::SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
   se_specifics->set_safe_for_autoreplace(turl.safe_for_autoreplace());
   se_specifics->set_originating_url(turl.originating_url().spec());
   se_specifics->set_date_created(turl.date_created().ToInternalValue());
-  se_specifics->set_input_encodings(JoinString(turl.input_encodings(), ';'));
+  se_specifics->set_input_encodings(
+      base::JoinString(turl.input_encodings(), ";"));
   se_specifics->set_show_in_default_list(turl.show_in_default_list());
   se_specifics->set_suggestions_url(turl.suggestions_url());
   se_specifics->set_prepopulate_id(turl.prepopulate_id());
@@ -1280,7 +1281,9 @@ TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
   data.favicon_url = GURL(specifics.favicon_url());
   data.show_in_default_list = specifics.show_in_default_list();
   data.safe_for_autoreplace = specifics.safe_for_autoreplace();
-  base::SplitString(specifics.input_encodings(), ';', &data.input_encodings);
+  data.input_encodings = base::SplitString(
+      specifics.input_encodings(), ";",
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   // If the server data has duplicate encodings, we'll want to push an update
   // below to correct it.  Note that we also fix this in
   // GetSearchProvidersUsingKeywordResult(), since otherwise we'd never correct
@@ -1722,8 +1725,8 @@ void TemplateURLService::AddTabToSearchVisit(const TemplateURL& t_url) {
   if (!client_)
     return;
 
-  GURL url(
-      url_fixer::FixupURL(base::UTF16ToUTF8(t_url.keyword()), std::string()));
+  GURL url(url_formatter::FixupURL(base::UTF16ToUTF8(t_url.keyword()),
+                                   std::string()));
   if (!url.is_valid())
     return;
 
@@ -2106,7 +2109,8 @@ base::string16 TemplateURLService::UniquifyKeyword(const TemplateURL& turl,
     GURL gurl(turl.url());
     if (gurl.is_valid() &&
         (turl.GetType() != TemplateURL::OMNIBOX_API_EXTENSION)) {
-      base::string16 keyword_candidate = TemplateURL::GenerateKeyword(gurl);
+      base::string16 keyword_candidate = TemplateURL::GenerateKeyword(
+          gurl, search_terms_data().GetAcceptLanguages());
       if (!GetTemplateURLForKeyword(keyword_candidate))
         return keyword_candidate;
     }

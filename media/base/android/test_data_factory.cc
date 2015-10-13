@@ -11,9 +11,8 @@
 
 namespace media {
 
-DemuxerConfigs TestDataFactory::CreateAudioConfigs(
-    AudioCodec audio_codec,
-    const base::TimeDelta& duration) {
+DemuxerConfigs TestDataFactory::CreateAudioConfigs(AudioCodec audio_codec,
+                                                   base::TimeDelta duration) {
   DemuxerConfigs configs;
   configs.audio_codec = audio_codec;
   configs.audio_channels = 2;
@@ -30,10 +29,8 @@ DemuxerConfigs TestDataFactory::CreateAudioConfigs(
     } break;
 
     case kCodecAAC: {
-      configs.audio_sampling_rate = 48000;
-      uint8 aac_extra_data[] = {0x13, 0x10};
-      configs.audio_extra_data =
-          std::vector<uint8>(aac_extra_data, aac_extra_data + 2);
+      configs.audio_sampling_rate = 44100;
+      configs.audio_extra_data = {0x12, 0x10};
     } break;
 
     default:
@@ -47,7 +44,7 @@ DemuxerConfigs TestDataFactory::CreateAudioConfigs(
 
 DemuxerConfigs TestDataFactory::CreateVideoConfigs(
     VideoCodec video_codec,
-    const base::TimeDelta& duration,
+    base::TimeDelta duration,
     const gfx::Size& video_size) {
   DemuxerConfigs configs;
   configs.video_codec = video_codec;
@@ -59,8 +56,8 @@ DemuxerConfigs TestDataFactory::CreateVideoConfigs(
 }
 
 TestDataFactory::TestDataFactory(const char* file_name_template,
-                                 const base::TimeDelta& duration,
-                                 const base::TimeDelta& frame_period)
+                                 base::TimeDelta duration,
+                                 base::TimeDelta frame_period)
     : duration_(duration),
       frame_period_(frame_period),
       starvation_mode_(false) {
@@ -74,9 +71,6 @@ bool TestDataFactory::CreateChunk(DemuxerData* chunk, base::TimeDelta* delay) {
   DCHECK(delay);
 
   *delay = base::TimeDelta();
-
-  if (regular_pts_ > duration_)
-    return false;
 
   for (int i = 0; i < 4; ++i) {
     chunk->access_units.push_back(AccessUnit());
@@ -105,6 +99,11 @@ bool TestDataFactory::CreateChunk(DemuxerData* chunk, base::TimeDelta* delay) {
   }
 
   return true;
+}
+
+void TestDataFactory::SeekTo(const base::TimeDelta& seek_time) {
+  regular_pts_ = seek_time;
+  last_pts_ = base::TimeDelta();
 }
 
 void TestDataFactory::LoadPackets(const char* file_name_template) {

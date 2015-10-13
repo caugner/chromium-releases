@@ -8,9 +8,9 @@ import android.content.Context;
 
 import dalvik.system.DexClassLoader;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 import java.io.File;
 import java.io.FilenameFilter;
@@ -20,7 +20,7 @@ import java.lang.reflect.Constructor;
 /**
  * Content handler for archives containing native libraries bundled with Java code.
  * <p>
- * TODO(ppi): create a seperate instance for each application being bootstrapped to keep track of
+ * TODO(ppi): create a separate instance for each application being bootstrapped to keep track of
  * the temporary files and clean them up once the execution finishes.
  */
 @JNINamespace("mojo::runner")

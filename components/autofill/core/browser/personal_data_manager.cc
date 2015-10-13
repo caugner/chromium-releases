@@ -31,6 +31,7 @@
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/common/autofill_util.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
@@ -796,13 +797,26 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
       continue;
     base::string16 value_canon =
         AutofillProfile::CanonicalizeProfileString(value);
-    if (base::StartsWith(value_canon, field_contents_canon,
-                         base::CompareCase::SENSITIVE)) {
-      // Prefix match, add suggestion.
+    bool prefix_matched_suggestion = base::StartsWith(
+        value_canon, field_contents_canon, base::CompareCase::SENSITIVE);
+    if (prefix_matched_suggestion ||
+        FieldIsSuggestionSubstringStartingOnTokenBoundary(value, field_contents,
+                                                          false)) {
       matched_profiles.push_back(profile);
       suggestions.push_back(Suggestion(value));
       suggestions.back().backend_id = profile->guid();
+      suggestions.back().match = prefix_matched_suggestion
+                                     ? Suggestion::PREFIX_MATCH
+                                     : Suggestion::SUBSTRING_MATCH;
     }
+  }
+
+  // Prefix matches should precede other token matches.
+  if (IsFeatureSubstringMatchEnabled()) {
+    std::stable_sort(suggestions.begin(), suggestions.end(),
+                     [](const Suggestion& a, const Suggestion& b) {
+                       return a.match < b.match;
+                     });
   }
 
   // Don't show two suggestions if one is a subset of the other.
@@ -856,6 +870,7 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
     return std::vector<Suggestion>();
 
   std::list<const CreditCard*> cards_to_suggest;
+  std::list<const CreditCard*> substring_matched_cards;
   base::string16 field_contents_lower = base::i18n::ToLower(field_contents);
   for (const CreditCard* credit_card : GetCreditCards()) {
     // The value of the stored data for this field type in the |credit_card|.
@@ -878,12 +893,24 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
            field_contents.size() >= 6)) {
         continue;
       }
-    } else if (!base::StartsWith(creditcard_field_lower, field_contents_lower,
-                                 base::CompareCase::SENSITIVE)) {
-      continue;
+      cards_to_suggest.push_back(credit_card);
+    } else if (base::StartsWith(creditcard_field_lower, field_contents_lower,
+                                base::CompareCase::SENSITIVE)) {
+      cards_to_suggest.push_back(credit_card);
+    } else if (FieldIsSuggestionSubstringStartingOnTokenBoundary(
+                   creditcard_field_lower, field_contents_lower, true)) {
+      substring_matched_cards.push_back(credit_card);
     }
+  }
 
-    cards_to_suggest.push_back(credit_card);
+  cards_to_suggest.sort(RankByMfu);
+
+  // Prefix matches should precede other token matches.
+  if (IsFeatureSubstringMatchEnabled()) {
+    substring_matched_cards.sort(RankByMfu);
+    cards_to_suggest.insert(cards_to_suggest.end(),
+                            substring_matched_cards.begin(),
+                            substring_matched_cards.end());
   }
 
   // De-dupe card suggestions. Full server cards shadow local cards, and
@@ -910,8 +937,6 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
       }
     }
   }
-
-  cards_to_suggest.sort(RankByMfu);
 
   std::vector<Suggestion> suggestions;
   for (const CreditCard* credit_card : cards_to_suggest) {
@@ -1036,23 +1061,22 @@ bool PersonalDataManager::IsCountryOfInterest(const std::string& country_code)
   const std::vector<AutofillProfile*>& profiles = web_profiles();
   std::list<std::string> country_codes;
   for (size_t i = 0; i < profiles.size(); ++i) {
-    country_codes.push_back(base::StringToLowerASCII(base::UTF16ToASCII(
+    country_codes.push_back(base::ToLowerASCII(base::UTF16ToASCII(
         profiles[i]->GetRawInfo(ADDRESS_HOME_COUNTRY))));
   }
 
   std::string timezone_country = CountryCodeForCurrentTimezone();
   if (!timezone_country.empty())
-    country_codes.push_back(base::StringToLowerASCII(timezone_country));
+    country_codes.push_back(base::ToLowerASCII(timezone_country));
 
   // Only take the locale into consideration if all else fails.
   if (country_codes.empty()) {
-    country_codes.push_back(base::StringToLowerASCII(
+    country_codes.push_back(base::ToLowerASCII(
         AutofillCountry::CountryCodeForLocale(app_locale())));
   }
 
   return std::find(country_codes.begin(), country_codes.end(),
-                   base::StringToLowerASCII(country_code)) !=
-                       country_codes.end();
+                   base::ToLowerASCII(country_code)) != country_codes.end();
 }
 
 const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
@@ -1288,7 +1312,7 @@ std::string PersonalDataManager::MostCommonCountryCodeFromProfiles() const {
   std::vector<std::string> country_codes;
   AutofillCountry::GetAvailableCountries(&country_codes);
   for (size_t i = 0; i < profiles.size(); ++i) {
-    std::string country_code = base::StringToUpperASCII(base::UTF16ToASCII(
+    std::string country_code = base::ToUpperASCII(base::UTF16ToASCII(
         profiles[i]->GetRawInfo(ADDRESS_HOME_COUNTRY)));
 
     if (std::find(country_codes.begin(), country_codes.end(), country_code) !=

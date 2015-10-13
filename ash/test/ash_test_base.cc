@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "ash/ash_switches.h"
-#include "ash/display/display_controller.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/ime/input_method_event_handler.h"
 #include "ash/shell.h"
 #include "ash/shell/toplevel_window.h"
@@ -44,6 +44,7 @@
 #include "base/win/windows_version.h"
 #include "ui/aura/remote_window_tree_host_win.h"
 #include "ui/aura/window_tree_host_win.h"
+#include "ui/gfx/win/metro_mode.h"
 #include "ui/platform_window/win/win_window.h"
 #include "win8/test/test_registrar_constants.h"
 #endif
@@ -67,8 +68,10 @@ class AshEventGeneratorDelegate
       const gfx::Point& point_in_screen) const override {
     gfx::Screen* screen = Shell::GetScreen();
     gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
-    return Shell::GetInstance()->display_controller()->
-        GetRootWindowForDisplayId(display.id())->GetHost();
+    return Shell::GetInstance()
+        ->window_tree_host_manager()
+        ->GetRootWindowForDisplayId(display.id())
+        ->GetHost();
   }
 
   aura::client::ScreenPositionClient* GetScreenPositionClient(
@@ -146,7 +149,7 @@ void AshTestBase::SetUp() {
 
 #if defined(OS_WIN)
   if (!command_line->HasSwitch(ash::switches::kForceAshToDesktop)) {
-    if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    if (gfx::win::ShouldUseMetroMode()) {
       ipc_thread_.reset(new base::Thread("test_metro_viewer_ipc_thread"));
       base::Thread::Options options;
       options.message_loop_type = base::MessageLoop::TYPE_IO;
@@ -171,7 +174,7 @@ void AshTestBase::TearDown() {
   RunAllPendingInMessageLoop();
 
 #if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+  if (gfx::win::ShouldUseMetroMode() &&
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
           ash::switches::kForceAshToDesktop)) {
     // Check that our viewer connection is still established.
@@ -223,10 +226,7 @@ bool AshTestBase::SupportsHostWindowResize() {
 }
 
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  DisplayManagerTestApi display_manager_test_api(display_manager);
-  display_manager_test_api.UpdateDisplay(display_specs);
-  display_manager->RunPendingTasksForTest();
+  DisplayManagerTestApi().UpdateDisplay(display_specs);
 }
 
 aura::Window* AshTestBase::CurrentContext() {
@@ -273,8 +273,9 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
   } else {
     gfx::Display display =
         Shell::GetScreen()->GetDisplayMatching(bounds);
-    aura::Window* root = ash::Shell::GetInstance()->display_controller()->
-        GetRootWindowForDisplayId(display.id());
+    aura::Window* root = ash::Shell::GetInstance()
+                             ->window_tree_host_manager()
+                             ->GetRootWindowForDisplayId(display.id());
     gfx::Point origin = bounds.origin();
     ::wm::ConvertPointFromScreen(root, &origin);
     window->SetBounds(gfx::Rect(origin, bounds.size()));
@@ -363,7 +364,9 @@ void AshTestBase::UnblockUserSession() {
 
 void AshTestBase::DisableIME() {
   Shell::GetInstance()->RemovePreTargetHandler(
-      Shell::GetInstance()->display_controller()->input_method_event_handler());
+      Shell::GetInstance()
+          ->window_tree_host_manager()
+          ->input_method_event_handler());
 }
 
 }  // namespace test

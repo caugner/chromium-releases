@@ -14,8 +14,7 @@
 #include "sync/internal_api/public/non_blocking_sync_common.h"
 #include "sync/protocol/sync.pb.h"
 
-namespace syncer {
-
+namespace syncer_v2 {
 class SyncContextProxy;
 class ModelTypeEntity;
 class ModelTypeSyncWorker;
@@ -24,7 +23,7 @@ class ModelTypeSyncWorker;
 // communication between sync and model type threads.
 class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
  public:
-  ModelTypeSyncProxyImpl(ModelType type);
+  ModelTypeSyncProxyImpl(syncer::ModelType type);
   virtual ~ModelTypeSyncProxyImpl();
 
   // Returns true if this object believes that sync is preferred for this type.
@@ -43,7 +42,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
   bool IsConnected() const;
 
   // Returns the model type handled by this type sync proxy.
-  ModelType GetModelType() const;
+  syncer::ModelType GetModelType() const;
 
   // Starts the handshake with the sync thread.
   void Enable(scoped_ptr<SyncContextProxy> context_proxy);
@@ -107,7 +106,7 @@ class SYNC_EXPORT_PRIVATE ModelTypeSyncProxyImpl : base::NonThreadSafe {
   // account.  Useful when a user signs out of the current account.
   void ClearSyncState();
 
-  ModelType type_;
+  syncer::ModelType type_;
   DataTypeState data_type_state_;
 
   // Whether or not sync is preferred for this type.  This is a cached copy of

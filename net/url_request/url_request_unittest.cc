@@ -20,6 +20,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
+#include "base/json/json_reader.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -35,15 +36,16 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "net/base/chunked_upload_data_stream.h"
 #include "net/base/elements_upload_data_stream.h"
+#include "net/base/external_estimate_provider.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
-#include "net/base/network_quality.h"
 #include "net/base/network_quality_estimator.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_data_directory.h"
@@ -258,12 +260,9 @@ void TestLoadTimingNoHttpResponse(
 
 // Do a case-insensitive search through |haystack| for |needle|.
 bool ContainsString(const std::string& haystack, const char* needle) {
-  std::string::const_iterator it =
-      std::search(haystack.begin(),
-                  haystack.end(),
-                  needle,
-                  needle + strlen(needle),
-                  base::CaseInsensitiveCompare<char>());
+  std::string::const_iterator it = std::search(
+      haystack.begin(), haystack.end(), needle, needle + strlen(needle),
+      base::CaseInsensitiveCompareASCII<char>());
   return it != haystack.end();
 }
 
@@ -619,6 +618,27 @@ class TestURLRequestContextWithProxy : public TestURLRequestContext {
     Init();
   }
   ~TestURLRequestContextWithProxy() override {}
+};
+
+// A mock ReportSender that just remembers the latest report
+// URI and report to be sent.
+class MockCertificateReportSender
+    : public TransportSecurityState::ReportSender {
+ public:
+  MockCertificateReportSender() {}
+  ~MockCertificateReportSender() override {}
+
+  void Send(const GURL& report_uri, const std::string& report) override {
+    latest_report_uri_ = report_uri;
+    latest_report_ = report;
+  }
+
+  const GURL& latest_report_uri() { return latest_report_uri_; }
+  const std::string& latest_report() { return latest_report_; }
+
+ private:
+  GURL latest_report_uri_;
+  std::string latest_report_;
 };
 
 }  // namespace
@@ -4078,7 +4098,8 @@ TEST_F(URLRequestTestHTTP, NetworkQualityEstimator) {
   ASSERT_TRUE(test_server_.Start());
   // Enable requests to local host to be used for network quality estimation.
   std::map<std::string, std::string> variation_params;
-  NetworkQualityEstimator estimator(variation_params, true, true);
+  NetworkQualityEstimator estimator(scoped_ptr<net::ExternalEstimateProvider>(),
+                                    variation_params, true, true);
 
   TestDelegate d;
   TestNetworkDelegate network_delegate;  // Must outlive URLRequest.
@@ -4095,11 +4116,13 @@ TEST_F(URLRequestTestHTTP, NetworkQualityEstimator) {
 
   base::RunLoop().Run();
 
-  NetworkQuality network_quality =
-      context.network_quality_estimator()->GetPeakEstimate();
-  EXPECT_GE(network_quality.rtt(), base::TimeDelta());
-  EXPECT_LT(network_quality.rtt(), base::TimeDelta::Max());
-  EXPECT_GT(network_quality.downstream_throughput_kbps(), 0);
+  base::TimeDelta rtt;
+  int32_t kbps;
+  EXPECT_TRUE(estimator.GetRTTEstimate(&rtt));
+  EXPECT_TRUE(estimator.GetDownlinkThroughputKbpsEstimate(&kbps));
+  EXPECT_GE(rtt, base::TimeDelta());
+  EXPECT_LT(rtt, base::TimeDelta::Max());
+  EXPECT_GT(kbps, 0);
 
   // Verify that histograms are not populated. They should populate only when
   // there is a change in ConnectionType.
@@ -5364,13 +5387,26 @@ TEST_F(URLRequestTestHTTP, STSNotProcessedOnIP) {
 // PKPState present because header rejected).
 #if defined(OS_ANDROID)
 #define MAYBE_ProcessPKP DISABLED_ProcessPKP
+#define MAYBE_ProcessPKPAndSendReport DISABLED_ProcessPKPAndSendReport
+#define MAYBE_ProcessPKPReportOnly DISABLED_ProcessPKPReportOnly
+#define MAYBE_ProcessPKPReportOnlyWithNoViolation \
+  DISABLED_ProcessPKPReportOnlyWithNoViolation
 #else
 #define MAYBE_ProcessPKP ProcessPKP
+#define MAYBE_ProcessPKPAndSendReport ProcessPKPAndSendReport
+#define MAYBE_ProcessPKPReportOnly ProcessPKPReportOnly
+#define MAYBE_ProcessPKPReportOnlyWithNoViolation \
+  ProcessPKPReportOnlyWithNoViolation
 #endif
+
+namespace {
+const char kHPKPReportUri[] = "https://hpkp-report.test";
+}  // namespace
 
 // Tests that enabling HPKP on a domain does not affect the HSTS
 // validity/expiration.
 TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
+  GURL report_uri(kHPKPReportUri);
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(SpawnedTestServer::TYPE_HTTPS,
@@ -5400,7 +5436,186 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
   EXPECT_FALSE(sts_state.include_subdomains);
   EXPECT_FALSE(pkp_state.include_subdomains);
   EXPECT_TRUE(pkp_state.HasPublicKeyPins());
+  EXPECT_EQ(report_uri, pkp_state.report_uri);
   EXPECT_NE(sts_state.expiry, pkp_state.expiry);
+}
+
+// Tests that reports get sent on HPKP violations when a report-uri is set.
+TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPAndSendReport) {
+  GURL report_uri(kHPKPReportUri);
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
+  SpawnedTestServer https_test_server(SpawnedTestServer::TYPE_HTTPS,
+                                      ssl_options,
+                                      base::FilePath(kTestFilePath));
+
+  ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
+
+  // Set up a pin for |test_server_hostname|.
+  TransportSecurityState security_state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+  HashValueVector hashes;
+  HashValue hash1;
+  HashValue hash2;
+  // The values here don't matter, as long as they are different from
+  // the mocked CertVerifyResult below.
+  ASSERT_TRUE(hash1.FromString("sha1/111111111111111111111111111="));
+  ASSERT_TRUE(hash2.FromString("sha1/222222222222222222222222222="));
+  hashes.push_back(hash1);
+  hashes.push_back(hash2);
+  security_state.AddHPKP(test_server_hostname, expiry,
+                         false, /* include subdomains */
+                         hashes, report_uri);
+
+  MockCertificateReportSender mock_report_sender;
+  security_state.SetReportSender(&mock_report_sender);
+
+  // Set up a MockCertVerifier to trigger a violation of the previously
+  // set pin.
+  scoped_refptr<X509Certificate> cert = https_test_server.GetCertificate();
+  ASSERT_TRUE(cert);
+
+  MockCertVerifier cert_verifier;
+  CertVerifyResult verify_result;
+  verify_result.verified_cert = cert;
+  verify_result.is_issued_by_known_root = true;
+  HashValue hash3;
+  ASSERT_TRUE(hash3.FromString("sha1/333333333333333333333333333="));
+  verify_result.public_key_hashes.push_back(hash3);
+  cert_verifier.AddResultForCert(cert.get(), verify_result, OK);
+
+  TestNetworkDelegate network_delegate;
+  TestURLRequestContext context(true);
+  context.set_transport_security_state(&security_state);
+  context.set_network_delegate(&network_delegate);
+  context.set_cert_verifier(&cert_verifier);
+  context.Init();
+
+  // Now send a request to trigger the violation.
+  TestDelegate d;
+  scoped_ptr<URLRequest> violating_request(context.CreateRequest(
+      https_test_server.GetURL("files/simple.html"), DEFAULT_PRIORITY, &d));
+  violating_request->Start();
+  base::RunLoop().Run();
+
+  // Check that a report was sent.
+  EXPECT_EQ(report_uri, mock_report_sender.latest_report_uri());
+  ASSERT_FALSE(mock_report_sender.latest_report().empty());
+  scoped_ptr<base::Value> value(
+      base::JSONReader::Read(mock_report_sender.latest_report()));
+  ASSERT_TRUE(value);
+  ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+  base::DictionaryValue* report_dict;
+  ASSERT_TRUE(value->GetAsDictionary(&report_dict));
+  std::string report_hostname;
+  EXPECT_TRUE(report_dict->GetString("hostname", &report_hostname));
+  EXPECT_EQ(test_server_hostname, report_hostname);
+}
+
+// Tests that reports get sent on requests with
+// Public-Key-Pins-Report-Only headers.
+TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPReportOnly) {
+  GURL report_uri(kHPKPReportUri);
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
+  SpawnedTestServer https_test_server(SpawnedTestServer::TYPE_HTTPS,
+                                      ssl_options,
+                                      base::FilePath(kTestFilePath));
+
+  ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
+
+  TransportSecurityState security_state;
+  MockCertificateReportSender mock_report_sender;
+  security_state.SetReportSender(&mock_report_sender);
+
+  // Set up a MockCertVerifier to violate the pin in the Report-Only
+  // header.
+  scoped_refptr<X509Certificate> cert = https_test_server.GetCertificate();
+  ASSERT_TRUE(cert);
+
+  MockCertVerifier cert_verifier;
+  CertVerifyResult verify_result;
+  verify_result.verified_cert = cert;
+  verify_result.is_issued_by_known_root = true;
+  HashValue hash;
+  // This value doesn't matter, as long as it is different from the pins
+  // for the request to hpkp-headers-report-only.html.
+  ASSERT_TRUE(hash.FromString("sha1/111111111111111111111111111="));
+  verify_result.public_key_hashes.push_back(hash);
+  cert_verifier.AddResultForCert(cert.get(), verify_result, OK);
+
+  TestNetworkDelegate network_delegate;
+  TestURLRequestContext context(true);
+  context.set_transport_security_state(&security_state);
+  context.set_network_delegate(&network_delegate);
+  context.set_cert_verifier(&cert_verifier);
+  context.Init();
+
+  // Now send a request to trigger the violation.
+  TestDelegate d;
+  scoped_ptr<URLRequest> violating_request(context.CreateRequest(
+      https_test_server.GetURL("files/hpkp-headers-report-only.html"),
+      DEFAULT_PRIORITY, &d));
+  violating_request->Start();
+  base::RunLoop().Run();
+
+  // Check that a report was sent.
+  EXPECT_EQ(report_uri, mock_report_sender.latest_report_uri());
+  ASSERT_FALSE(mock_report_sender.latest_report().empty());
+  scoped_ptr<base::Value> value(
+      base::JSONReader::Read(mock_report_sender.latest_report()));
+  ASSERT_TRUE(value);
+  ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+  base::DictionaryValue* report_dict;
+  ASSERT_TRUE(value->GetAsDictionary(&report_dict));
+  std::string report_hostname;
+  EXPECT_TRUE(report_dict->GetString("hostname", &report_hostname));
+  EXPECT_EQ(test_server_hostname, report_hostname);
+}
+
+// Tests that reports do not get sent on requests with
+// Public-Key-Pins-Report-Only headers that don't have pin violations.
+TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPReportOnlyWithNoViolation) {
+  GURL report_uri(kHPKPReportUri);
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
+  SpawnedTestServer https_test_server(SpawnedTestServer::TYPE_HTTPS,
+                                      ssl_options,
+                                      base::FilePath(kTestFilePath));
+
+  ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
+
+  TransportSecurityState security_state;
+  MockCertificateReportSender mock_report_sender;
+  security_state.SetReportSender(&mock_report_sender);
+
+  TestNetworkDelegate network_delegate;
+  MockCertVerifier mock_cert_verifier;
+  TestURLRequestContext context(true);
+  context.set_transport_security_state(&security_state);
+  context.set_network_delegate(&network_delegate);
+  context.set_cert_verifier(&mock_cert_verifier);
+  mock_cert_verifier.set_default_result(OK);
+  context.Init();
+
+  // Now send a request that does not trigger the violation.
+  TestDelegate d;
+  scoped_ptr<URLRequest> request(context.CreateRequest(
+      https_test_server.GetURL("files/hpkp-headers-report-only.html"),
+      DEFAULT_PRIORITY, &d));
+  request->Start();
+  base::RunLoop().Run();
+
+  // Check that a report was not sent.
+  EXPECT_EQ(GURL(), mock_report_sender.latest_report_uri());
+  EXPECT_EQ(std::string(), mock_report_sender.latest_report());
 }
 
 TEST_F(URLRequestTestHTTP, PKPNotProcessedOnIP) {
@@ -8452,7 +8667,7 @@ static bool SystemSupportsOCSP() {
 }
 
 static bool SystemSupportsOCSPStapling() {
-#if defined(USE_NSS_CERTS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
   return true;
 #elif defined(OS_WIN)
   return base::win::GetVersion() >= base::win::VERSION_VISTA;
@@ -9208,6 +9423,28 @@ TEST_F(URLRequestTest, NetworkAccessedSetOnHostResolutionFailure) {
   req->Start();
   base::RunLoop().Run();
   EXPECT_TRUE(req->response_info().network_accessed);
+}
+
+// Test that URLRequest is canceled correctly and with detached request
+// URLRequestRedirectJob does not crash in StartAsync.
+// See http://crbug.com/508900
+TEST_F(URLRequestTest, URLRequestRedirectJobDetachRequestNoCrash) {
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context_.CreateRequest(
+      GURL("http://not-a-real-domain/"), DEFAULT_PRIORITY, &d));
+
+  URLRequestRedirectJob* job = new URLRequestRedirectJob(
+      req.get(), &default_network_delegate_,
+      GURL("http://this-should-never-be-navigated-to/"),
+      URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT, "Jumbo shrimp");
+  AddTestInterceptor()->set_main_intercept_job(job);
+
+  req->Start();
+  req->Cancel();
+  job->DetachRequest();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
+  EXPECT_EQ(0, d.received_redirect_count());
 }
 
 }  // namespace net

@@ -16,6 +16,7 @@
         'apk_name': 'AndroidWebView',
         'java_in_dir': 'test/shell',
         'native_lib_target': 'libstandalonelibwebviewchromium',
+        'native_lib_version_name': '<(version_full)',
         'resource_dir': 'test/shell/res',
         'extensions_to_not_compress': '.lpak,.pak,.dat,.bin',
         'asset_location': '<(PRODUCT_DIR)/android_webview_apk/assets',
@@ -72,7 +73,10 @@
           ],
         },
       ],
-      'includes': [ '../build/java_apk.gypi' ],
+      'includes': [
+        '../build/java_apk.gypi',
+        '../build/util/version.gypi',
+      ],
     },
     {
       # android_webview_apk creates a .jar as a side effect. Any java
@@ -120,6 +124,7 @@
         '../testing/gtest.gyp:gtest',
         '../ui/base/ui_base.gyp:ui_base_jni_headers',
         '../ui/gl/gl.gyp:gl',
+        '../ui/gl/gl.gyp:gl_test_support',
         'android_webview_common',
         'android_webview_unittests_jni',
       ],

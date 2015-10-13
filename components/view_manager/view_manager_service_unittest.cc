@@ -16,6 +16,7 @@
 #include "components/view_manager/public/cpp/util.h"
 #include "components/view_manager/public/interfaces/view_manager.mojom.h"
 #include "components/view_manager/server_view.h"
+#include "components/view_manager/surfaces/surfaces_state.h"
 #include "components/view_manager/test_change_tracker.h"
 #include "components/view_manager/view_manager_root_connection.h"
 #include "components/view_manager/view_manager_service_impl.h"
@@ -62,6 +63,7 @@ class TestViewManagerClient : public mojo::ViewManagerClient {
   void OnEmbeddedAppDisconnected(uint32_t view) override {
     tracker_.OnEmbeddedAppDisconnected(view);
   }
+  void OnUnembed() override { tracker_.OnUnembed(); }
   void OnViewBoundsChanged(uint32_t view,
                            mojo::RectPtr old_bounds,
                            mojo::RectPtr new_bounds) override {
@@ -117,11 +119,12 @@ class TestClientConnection : public ClientConnection {
  public:
   explicit TestClientConnection(scoped_ptr<ViewManagerServiceImpl> service_impl)
       : ClientConnection(service_impl.Pass(), &client_) {}
-  ~TestClientConnection() override {}
 
   TestViewManagerClient* client() { return &client_; }
 
  private:
+  ~TestClientConnection() override {}
+
   TestViewManagerClient client_;
 
   DISALLOW_COPY_AND_ASSIGN(TestClientConnection);
@@ -178,19 +181,20 @@ class TestConnectionManagerDelegate : public ConnectionManagerDelegate {
 
 class TestViewManagerRootConnection : public ViewManagerRootConnection {
  public:
-  TestViewManagerRootConnection(
-      scoped_ptr<ViewManagerRootImpl> root,
-      ConnectionManager* manager)
-      : ViewManagerRootConnection(root.Pass(), manager) {
+  TestViewManagerRootConnection(scoped_ptr<ViewManagerRootImpl> root,
+                                ConnectionManager* manager)
+      : ViewManagerRootConnection(root.Pass(), manager) {}
+  ~TestViewManagerRootConnection() override {}
+
+ private:
+  // ViewManagerRootDelegate:
+  void OnDisplayInitialized() override {
     connection_manager()->AddRoot(this);
     set_view_manager_service(connection_manager()->EmbedAtView(
         kInvalidConnectionId,
         view_manager_root()->root_view()->id(),
         mojo::ViewManagerClientPtr()));
   }
-  ~TestViewManagerRootConnection() override {}
-
- private:
   DISALLOW_COPY_AND_ASSIGN(TestViewManagerRootConnection);
 };
 
@@ -202,13 +206,23 @@ class TestDisplayManager : public DisplayManager {
   ~TestDisplayManager() override {}
 
   // DisplayManager:
-  void Init(DisplayManagerDelegate* delegate) override {}
+  void Init(DisplayManagerDelegate* delegate) override {
+    // It is necessary to tell the delegate about the ViewportMetrics to make
+    // sure that the ViewManagerRootConnection is correctly initialized (and a
+    // root-view is created).
+    mojo::ViewportMetrics metrics;
+    metrics.size_in_pixels = mojo::Size::From(gfx::Size(400, 300));
+    metrics.device_pixel_ratio = 1.f;
+    delegate->OnViewportMetricsChanged(mojo::ViewportMetrics(), metrics);
+  }
   void SchedulePaint(const ServerView* view, const gfx::Rect& bounds) override {
   }
   void SetViewportSize(const gfx::Size& size) override {}
   const mojo::ViewportMetrics& GetViewportMetrics() override {
     return display_metrices_;
   }
+  void UpdateTextInputState(const ui::TextInputState& state) override {}
+  void SetImeVisibility(bool visible) override {}
 
  private:
   mojo::ViewportMetrics display_metrices_;
@@ -224,7 +238,8 @@ class TestDisplayManagerFactory : public DisplayManagerFactory {
   DisplayManager* CreateDisplayManager(
       bool is_headless,
       mojo::ApplicationImpl* app_impl,
-      const scoped_refptr<gles2::GpuState>& gpu_state) override {
+      const scoped_refptr<gles2::GpuState>& gpu_state,
+      const scoped_refptr<surfaces::SurfacesState>& surfaces_state) override {
     return new TestDisplayManager();
   }
 
@@ -286,16 +301,15 @@ class ViewManagerServiceTest : public testing::Test {
     DisplayManager::set_factory_for_testing(&display_manager_factory_);
     // TODO(fsamuel): This is probably broken. We need a root.
     connection_manager_.reset(new ConnectionManager(&delegate_));
-    scoped_ptr<ViewManagerRootImpl> root(
-        new ViewManagerRootImpl(connection_manager_.get(),
-                                true /* is_headless */,
-                                nullptr,
-                                scoped_refptr<gles2::GpuState>()));
+    ViewManagerRootImpl* root = new ViewManagerRootImpl(
+        connection_manager_.get(), true /* is_headless */, nullptr,
+        scoped_refptr<gles2::GpuState>(),
+        scoped_refptr<surfaces::SurfacesState>());
     // TODO(fsamuel): This is way too magical. We need to find a better way to
     // manage lifetime.
-    root_connection_ =
-        new TestViewManagerRootConnection(root.Pass(),
-                                          connection_manager_.get());
+    root_connection_ = new TestViewManagerRootConnection(
+        make_scoped_ptr(root), connection_manager_.get());
+    root->Init(root_connection_);
     wm_client_ = delegate_.last_client();
   }
 
