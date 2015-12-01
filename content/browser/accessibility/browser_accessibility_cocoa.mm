@@ -259,11 +259,10 @@ bool InitializeAccessibilityTreeSearch(
   NSDictionary* dictionary = parameter;
 
   id startElementParameter = [dictionary objectForKey:@"AXStartElement"];
-  BrowserAccessibility* startNode = nullptr;
   if ([startElementParameter isKindOfClass:[BrowserAccessibilityCocoa class]]) {
     BrowserAccessibilityCocoa* startNodeCocoa =
         (BrowserAccessibilityCocoa*)startElementParameter;
-    startNode = [startNodeCocoa browserAccessibility];
+    search->SetStartNode([startNodeCocoa browserAccessibility]);
   }
 
   bool immediateDescendantsOnly = false;
@@ -297,7 +296,6 @@ bool InitializeAccessibilityTreeSearch(
   if ([searchTextParameter isKindOfClass:[NSString class]])
     searchText = base::SysNSStringToUTF8(searchTextParameter);
 
-  search->SetStartNode(startNode);
   search->SetDirection(direction);
   search->SetImmediateDescendantsOnly(immediateDescendantsOnly);
   search->SetVisibleOnly(visibleOnly);
@@ -1511,14 +1509,14 @@ bool InitializeAccessibilityTreeSearch(
     return [NSValue valueWithRect:nsrect];
   }
   if ([attribute isEqualToString:@"AXUIElementCountForSearchPredicate"]) {
-    OneShotAccessibilityTreeSearch search(browserAccessibility_->manager());
+    OneShotAccessibilityTreeSearch search(browserAccessibility_);
     if (InitializeAccessibilityTreeSearch(&search, parameter))
       return [NSNumber numberWithInt:search.CountMatches()];
     return nil;
   }
 
   if ([attribute isEqualToString:@"AXUIElementsForSearchPredicate"]) {
-    OneShotAccessibilityTreeSearch search(browserAccessibility_->manager());
+    OneShotAccessibilityTreeSearch search(browserAccessibility_);
     if (InitializeAccessibilityTreeSearch(&search, parameter)) {
       size_t count = search.CountMatches();
       NSMutableArray* result = [NSMutableArray arrayWithCapacity:count];
@@ -1562,8 +1560,7 @@ bool InitializeAccessibilityTreeSearch(
         NSAccessibilityCellForColumnAndRowParameterizedAttribute,
         nil]];
   }
-  if ([[self role] isEqualToString:NSAccessibilityTextFieldRole] ||
-      [[self role] isEqualToString:NSAccessibilityTextAreaRole]) {
+  if (browserAccessibility_->IsEditableText()) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityLineForIndexParameterizedAttribute,
         NSAccessibilityRangeForLineParameterizedAttribute,
@@ -1699,15 +1696,6 @@ bool InitializeAccessibilityTreeSearch(
         @"AXLoaded",
         @"AXLoadingProgress",
         nil]];
-  } else if ([role isEqualToString:NSAccessibilityTextFieldRole] ||
-             [role isEqualToString:NSAccessibilityTextAreaRole]) {
-    [ret addObjectsFromArray:[NSArray arrayWithObjects:
-        NSAccessibilityInsertionPointLineNumberAttribute,
-        NSAccessibilityNumberOfCharactersAttribute,
-        NSAccessibilitySelectedTextAttribute,
-        NSAccessibilitySelectedTextRangeAttribute,
-        NSAccessibilityVisibleCharacterRangeAttribute,
-        nil]];
   } else if ([role isEqualToString:NSAccessibilityTabGroupRole]) {
     [ret addObject:NSAccessibilityTabsAttribute];
   } else if ([role isEqualToString:NSAccessibilityProgressIndicatorRole] ||
@@ -1749,6 +1737,17 @@ bool InitializeAccessibilityTreeSearch(
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilitySelectedChildrenAttribute,
         NSAccessibilityVisibleChildrenAttribute,
+        nil]];
+  }
+
+  // Caret navigation and text selection attributes.
+  if (browserAccessibility_->IsEditableText()) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        NSAccessibilityInsertionPointLineNumberAttribute,
+        NSAccessibilityNumberOfCharactersAttribute,
+        NSAccessibilitySelectedTextAttribute,
+        NSAccessibilitySelectedTextRangeAttribute,
+        NSAccessibilityVisibleCharacterRangeAttribute,
         nil]];
   }
 
@@ -1878,8 +1877,7 @@ bool InitializeAccessibilityTreeSearch(
         ui::AX_ATTR_CAN_SET_VALUE);
   }
   if ([attribute isEqualToString:NSAccessibilitySelectedTextRangeAttribute] &&
-      ([[self role] isEqualToString:NSAccessibilityTextFieldRole] ||
-       [[self role] isEqualToString:NSAccessibilityTextAreaRole]))
+      browserAccessibility_->IsEditableText())
     return YES;
 
   return NO;

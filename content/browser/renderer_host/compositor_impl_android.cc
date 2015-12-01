@@ -9,6 +9,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
@@ -67,7 +68,8 @@ namespace content {
 
 namespace {
 
-const unsigned int kMaxSwapBuffers = 2U;
+const unsigned int kMaxUiSwapBuffers = 1U;
+const unsigned int kMaxDisplaySwapBuffers = 1U;
 
 // Used to override capabilities_.adjust_deadline_for_parent to false
 class OutputSurfaceWithoutParent : public cc::OutputSurface,
@@ -85,7 +87,7 @@ class OutputSurfaceWithoutParent : public cc::OutputSurface,
             base::Bind(&OutputSurfaceWithoutParent::OnSwapBuffersCompleted,
                        base::Unretained(this))) {
     capabilities_.adjust_deadline_for_parent = false;
-    capabilities_.max_frames_pending = 2;
+    capabilities_.max_frames_pending = kMaxDisplaySwapBuffers;
   }
 
   ~OutputSurfaceWithoutParent() override { compositor_->RemoveObserver(this); }
@@ -230,7 +232,6 @@ scoped_ptr<cc::SurfaceIdAllocator> CompositorImpl::CreateSurfaceIdAllocator() {
 CompositorImpl::CompositorImpl(CompositorClient* client,
                                gfx::NativeWindow root_window)
     : root_layer_(cc::Layer::Create(Compositor::LayerSettings())),
-      resource_manager_(&ui_resource_provider_),
       surface_id_allocator_(GetSurfaceManager() ? CreateSurfaceIdAllocator()
                                                 : nullptr),
       has_transparent_background_(false),
@@ -252,6 +253,8 @@ CompositorImpl::CompositorImpl(CompositorClient* client,
   DCHECK(client);
   DCHECK(root_window);
   root_window->AttachCompositor(this);
+  CreateLayerTreeHost();
+  resource_manager_.Init(host_.get());
 }
 
 CompositorImpl::~CompositorImpl() {
@@ -261,6 +264,7 @@ CompositorImpl::~CompositorImpl() {
 }
 
 void CompositorImpl::PostComposite(CompositingTrigger trigger) {
+  DCHECK(host_->visible());
   DCHECK(needs_composite_);
   DCHECK(trigger == COMPOSITE_IMMEDIATELY || trigger == COMPOSITE_EVENTUALLY);
 
@@ -324,16 +328,16 @@ void CompositorImpl::Composite(CompositingTrigger trigger) {
   if (trigger == COMPOSITE_IMMEDIATELY)
     will_composite_immediately_ = false;
 
-  DCHECK(host_);
+  DCHECK(host_->visible());
   DCHECK(trigger == COMPOSITE_IMMEDIATELY || trigger == COMPOSITE_EVENTUALLY);
   DCHECK(needs_composite_);
   DCHECK(!DidCompositeThisFrame());
 
-  DCHECK_LE(pending_swapbuffers_, kMaxSwapBuffers);
+  DCHECK_LE(pending_swapbuffers_, kMaxUiSwapBuffers);
   // Swap Ack accounting is unreliable if the OutputSurface was lost.
   // In that case still attempt to composite, which will cause creation of a
   // new OutputSurface and reset pending_swapbuffers_.
-  if (pending_swapbuffers_ == kMaxSwapBuffers &&
+  if (pending_swapbuffers_ == kMaxUiSwapBuffers &&
       !host_->output_surface_lost()) {
     TRACE_EVENT0("compositor", "CompositorImpl_SwapLimit");
     return;
@@ -347,17 +351,13 @@ void CompositorImpl::Composite(CompositingTrigger trigger) {
   current_composite_task_->Cancel();
   DCHECK(DidCompositeThisFrame() && !WillComposite());
 
-  // Ignore ScheduleComposite() from layer tree changes during layout and
-  // animation updates that will already be reflected in the current frame
-  // we are about to draw.
-  ignore_schedule_composite_ = true;
-
   const base::TimeTicks frame_time = base::TimeTicks::Now();
   if (needs_animate_) {
+    base::AutoReset<bool> auto_reset_ignore_schedule(
+        &ignore_schedule_composite_, true);
     needs_animate_ = false;
     root_window_->Animate(frame_time);
   }
-  ignore_schedule_composite_ = false;
 
   did_post_swapbuffers_ = false;
   host_->Composite(frame_time);
@@ -369,7 +369,7 @@ void CompositorImpl::Composite(CompositingTrigger trigger) {
 }
 
 ui::UIResourceProvider& CompositorImpl::GetUIResourceProvider() {
-  return ui_resource_provider_;
+  return *this;
 }
 
 ui::ResourceManager& CompositorImpl::GetResourceManager() {
@@ -387,7 +387,10 @@ void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
   }
 }
 
-void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
+void CompositorImpl::SetSurface(jobject surface) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
+
   GpuSurfaceTracker* tracker = GpuSurfaceTracker::Get();
 
   if (window_) {
@@ -396,32 +399,10 @@ void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
     tracker->RemoveSurface(surface_id_);
     ANativeWindow_release(window_);
     window_ = NULL;
+    UnregisterViewSurface(surface_id_);
     surface_id_ = 0;
   }
 
-  if (window) {
-    window_ = window;
-    ANativeWindow_acquire(window);
-    surface_id_ = tracker->AddSurfaceForNativeWidget(window);
-    tracker->SetSurfaceHandle(
-        surface_id_,
-        gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NATIVE_DIRECT));
-    SetVisible(true);
-  }
-}
-
-void CompositorImpl::SetSurface(jobject surface) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
-
-  // First, shut down the GL context.
-  int surface_id = surface_id_;
-  SetWindowSurface(NULL);
-  // Then, cleanup any existing surface references.
-  if (surface_id)
-    UnregisterViewSurface(surface_id);
-
-  // Now, set the new surface if we have one.
   ANativeWindow* window = NULL;
   if (surface) {
     // Note: This ensures that any local references used by
@@ -430,24 +411,36 @@ void CompositorImpl::SetSurface(jobject surface) {
     base::android::ScopedJavaLocalFrame scoped_local_reference_frame(env);
     window = ANativeWindow_fromSurface(env, surface);
   }
+
   if (window) {
-    SetWindowSurface(window);
-    ANativeWindow_release(window);
+    window_ = window;
+    ANativeWindow_acquire(window);
+    surface_id_ = tracker->AddSurfaceForNativeWidget(window);
+    tracker->SetSurfaceHandle(
+        surface_id_,
+        gfx::GLSurfaceHandle(surface_id_, gfx::NATIVE_DIRECT));
+    // Register first, SetVisible() might create an OutputSurface.
     RegisterViewSurface(surface_id_, j_surface.obj());
+    SetVisible(true);
+    ANativeWindow_release(window);
   }
 }
 
 void CompositorImpl::CreateLayerTreeHost() {
   DCHECK(!host_);
   DCHECK(!WillCompositeThisFrame());
-  needs_composite_ = false;
-  pending_swapbuffers_ = 0;
+
+  // Just in case, since we immediately hide the LTH in this function,
+  // and we do not want to end up with a pending Composite task when the
+  // host is hidden.
+  base::AutoReset<bool> auto_reset_ignore_schedule(&ignore_schedule_composite_,
+                                                   true);
+
   cc::LayerTreeSettings settings;
   settings.renderer_settings.refresh_rate = 60.0;
   settings.renderer_settings.allow_antialiasing = false;
   settings.renderer_settings.highp_threshold_min = 2048;
   settings.use_zero_copy = true;
-  settings.use_one_copy = false;
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   settings.initial_debug_state.SetRecordRenderingStats(
@@ -469,9 +462,8 @@ void CompositorImpl::CreateLayerTreeHost() {
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params.settings = &settings;
   host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
+  host_->SetVisible(false);
   host_->SetRootLayer(root_layer_);
-
-  host_->SetVisible(true);
   host_->SetLayerTreeHostClientReady();
   host_->SetViewportSize(size_);
   host_->set_has_transparent_background(has_transparent_background_);
@@ -484,7 +476,7 @@ void CompositorImpl::CreateLayerTreeHost() {
 void CompositorImpl::SetVisible(bool visible) {
   TRACE_EVENT1("cc", "CompositorImpl::SetVisible", "visible", visible);
   if (!visible) {
-    DCHECK(host_);
+    DCHECK(host_->visible());
     // Look for any layers that were attached to the root for readback
     // and are waiting for Composite() to happen.
     bool readback_pending = false;
@@ -495,24 +487,29 @@ void CompositorImpl::SetVisible(bool visible) {
       }
     }
     if (readback_pending) {
-      ignore_schedule_composite_ = true;
+      base::AutoReset<bool> auto_reset_ignore_schedule(
+          &ignore_schedule_composite_, true);
       host_->Composite(base::TimeTicks::Now());
-      ignore_schedule_composite_ = false;
     }
     if (WillComposite())
       CancelComposite();
-    ui_resource_provider_.SetLayerTreeHost(NULL);
-    host_.reset();
+    host_->SetVisible(false);
+    if (!host_->output_surface_lost())
+      host_->ReleaseOutputSurface();
+    pending_swapbuffers_ = 0;
+    needs_composite_ = false;
+    composite_on_vsync_trigger_ = DO_NOT_COMPOSITE;
     establish_gpu_channel_timeout_.Stop();
-    output_surface_request_pending_ = false;
     display_client_.reset();
     if (current_composite_task_) {
       current_composite_task_->Cancel();
       current_composite_task_.reset();
     }
-  } else if (!host_) {
-    CreateLayerTreeHost();
-    ui_resource_provider_.SetLayerTreeHost(host_.get());
+  } else {
+    host_->SetVisible(true);
+    if (output_surface_request_pending_)
+      RequestNewOutputSurface();
+    SetNeedsComposite();
   }
 }
 
@@ -541,7 +538,7 @@ void CompositorImpl::SetHasTransparentBackground(bool flag) {
 }
 
 void CompositorImpl::SetNeedsComposite() {
-  if (!host_.get())
+  if (!host_->visible())
     return;
   DCHECK(!needs_composite_ || WillComposite());
 
@@ -580,9 +577,9 @@ CreateGpuProcessViewContext(
 }
 
 void CompositorImpl::Layout() {
-  ignore_schedule_composite_ = true;
+  base::AutoReset<bool> auto_reset_ignore_schedule(&ignore_schedule_composite_,
+                                                   true);
   client_->Layout();
-  ignore_schedule_composite_ = false;
 }
 
 void CompositorImpl::OnGpuChannelEstablished() {
@@ -597,8 +594,9 @@ void CompositorImpl::OnGpuChannelTimeout() {
 void CompositorImpl::RequestNewOutputSurface() {
   output_surface_request_pending_ = true;
 
-#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER) || defined(SYZYASAN)
-  const int64 kGpuChannelTimeoutInSeconds = 30;
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER) || \
+  defined(SYZYASAN) || defined(CYGPROFILE_INSTRUMENTATION)
+  const int64 kGpuChannelTimeoutInSeconds = 40;
 #else
   const int64 kGpuChannelTimeoutInSeconds = 10;
 #endif
@@ -633,8 +631,9 @@ void CompositorImpl::DidFailToInitializeOutputSurface() {
 
 void CompositorImpl::CreateOutputSurface() {
   // We might have had a request from a LayerTreeHost that was then
-  // deleted.
-  if (!output_surface_request_pending_)
+  // hidden (and hidden means we don't have a native surface).
+  // Also make sure we only handle this once.
+  if (!output_surface_request_pending_ || !host_->visible())
     return;
 
   blink::WebGraphicsContext3D::Attributes attrs;
@@ -686,8 +685,7 @@ void CompositorImpl::CreateOutputSurface() {
 
 void CompositorImpl::PopulateGpuCapabilities(
     gpu::Capabilities gpu_capabilities) {
-  ui_resource_provider_.SetSupportsETC1NonPowerOfTwo(
-      gpu_capabilities.texture_format_etc1_npot);
+  gpu_capabilities_ = gpu_capabilities;
 }
 
 void CompositorImpl::AddObserver(VSyncObserver* observer) {
@@ -698,11 +696,24 @@ void CompositorImpl::RemoveObserver(VSyncObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+cc::UIResourceId CompositorImpl::CreateUIResource(
+    cc::UIResourceClient* client) {
+  return host_->CreateUIResource(client);
+}
+
+void CompositorImpl::DeleteUIResource(cc::UIResourceId resource_id) {
+  host_->DeleteUIResource(resource_id);
+}
+
+bool CompositorImpl::SupportsETC1NonPowerOfTwo() const {
+  return gpu_capabilities_.texture_format_etc1_npot;
+}
+
 void CompositorImpl::ScheduleComposite() {
-  DCHECK(!needs_composite_ || WillComposite());
-  if (ignore_schedule_composite_)
+  if (ignore_schedule_composite_ || !host_->visible())
     return;
 
+  DCHECK_IMPLIES(needs_composite_, WillComposite());
   needs_composite_ = true;
   // We currently expect layer tree invalidations at most once per frame
   // during normal operation and therefore try to composite immediately
@@ -711,11 +722,15 @@ void CompositorImpl::ScheduleComposite() {
 }
 
 void CompositorImpl::ScheduleAnimation() {
-  DCHECK(!needs_composite_ || WillComposite());
   needs_animate_ = true;
 
-  if (needs_composite_)
+  if (!host_->visible())
     return;
+
+  if (needs_composite_) {
+    DCHECK(WillComposite());
+    return;
+  }
 
   TRACE_EVENT0("cc", "CompositorImpl::ScheduleAnimation");
   needs_composite_ = true;
@@ -730,7 +745,7 @@ void CompositorImpl::DidPostSwapBuffers() {
 void CompositorImpl::DidCompleteSwapBuffers() {
   TRACE_EVENT0("compositor", "CompositorImpl::DidCompleteSwapBuffers");
   DCHECK_GT(pending_swapbuffers_, 0U);
-  if (pending_swapbuffers_-- == kMaxSwapBuffers && needs_composite_)
+  if (pending_swapbuffers_-- == kMaxUiSwapBuffers && needs_composite_)
     PostComposite(COMPOSITE_IMMEDIATELY);
   client_->OnSwapBuffersCompleted(pending_swapbuffers_);
 }
@@ -785,7 +800,7 @@ void CompositorImpl::OnVSync(base::TimeTicks frame_time,
 
 void CompositorImpl::SetNeedsAnimate() {
   needs_animate_ = true;
-  if (!host_)
+  if (!host_->visible())
     return;
 
   host_->SetNeedsAnimate();

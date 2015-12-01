@@ -37,6 +37,16 @@ PrefService* ChromeBrowserProvider::GetLocalState() {
   return nullptr;
 }
 
+void ChromeBrowserProvider::AssertBrowserContextKeyedFactoriesBuilt() {
+}
+
+void ChromeBrowserProvider::RegisterLocalState(PrefRegistrySimple* registry) {
+}
+
+void ChromeBrowserProvider::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+}
+
 ProfileOAuth2TokenServiceIOSProvider*
 ChromeBrowserProvider::GetProfileOAuth2TokenServiceIOSProvider() {
   return nullptr;
@@ -63,6 +73,10 @@ ChromeIdentityService* ChromeBrowserProvider::GetChromeIdentityService() {
 }
 
 StringProvider* ChromeBrowserProvider::GetStringProvider() {
+  return nullptr;
+}
+
+LiveTabContextProvider* ChromeBrowserProvider::GetLiveTabContextProvider() {
   return nullptr;
 }
 
@@ -97,8 +111,17 @@ std::string ChromeBrowserProvider::GetRiskData() {
   return std::string();
 }
 
+policy::BrowserPolicyConnector*
+ChromeBrowserProvider::GetBrowserPolicyConnector() {
+  return nullptr;
+}
+
 rappor::RapporService* ChromeBrowserProvider::GetRapporService() {
   return nullptr;
+}
+
+bool ChromeBrowserProvider::IsOffTheRecordSessionActive() {
+  return false;
 }
 
 }  // namespace ios

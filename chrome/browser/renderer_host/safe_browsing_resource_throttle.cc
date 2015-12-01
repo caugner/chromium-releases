@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -15,8 +16,11 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/load_flags.h"
+#include "net/log/net_log.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
+
+using net::NetLog;
 
 namespace {
 
@@ -25,26 +29,37 @@ namespace {
 // aborted, and the URL will be treated as if it were safe.
 const int kCheckUrlTimeoutMs = 5000;
 
-// Return true for resource types that are very unlikely to produce a successful
-// malware or phishing page without the main frame also being bad.  This is a
-// latency / safety trade-off, used only on mobile.  We're conservative here,
-// keeping this list small and leaving off uncommon types since they won't save
-// us much on aggregate latency.
-bool IsResourceTypeMostlySafe(content::ResourceType resource_type) {
-  switch (resource_type) {
-    case content::RESOURCE_TYPE_STYLESHEET:
-    case content::RESOURCE_TYPE_IMAGE:
-    case content::RESOURCE_TYPE_FONT_RESOURCE:
-    case content::RESOURCE_TYPE_FAVICON:
-      return true;
-    default:
-      return false;
-  }
-}
-
 void RecordHistogramResourceTypeSafe(content::ResourceType resource_type) {
   UMA_HISTOGRAM_ENUMERATION("SB2.ResourceTypes.Safe", resource_type,
                             content::RESOURCE_TYPE_LAST_TYPE);
+}
+
+// Return a dictionary with "url"=|url-spec| and optionally
+// |name|=|value| (if not null), for netlogging.
+// This will also add a reference to the original request's net_log ID.
+scoped_ptr<base::Value> NetLogUrlCallback(
+    const net::URLRequest* request,
+    const GURL& url,
+    const char* name,
+    const char* value,
+    net::NetLogCaptureMode /* capture_mode */) {
+  scoped_ptr<base::DictionaryValue> event_params(new base::DictionaryValue());
+  event_params->SetString("url", url.spec());
+  if (name && value)
+    event_params->SetString(name, value);
+  request->net_log().source().AddToEventParameters(event_params.get());
+  return event_params.Pass();
+}
+
+// Return a dictionary with |name|=|value|, for netlogging.
+scoped_ptr<base::Value> NetLogStringCallback(
+    const char* name,
+    const char* value,
+    net::NetLogCaptureMode) {
+  scoped_ptr<base::DictionaryValue> event_params(new base::DictionaryValue());
+  if (name && value)
+    event_params->SetString(name, value);
+  return event_params.Pass();
 }
 
 }  // namespace
@@ -57,43 +72,58 @@ SafeBrowsingResourceThrottle* SafeBrowsingResourceThrottle::MaybeCreate(
     net::URLRequest* request,
     content::ResourceType resource_type,
     SafeBrowsingService* sb_service) {
-#if defined(SAFE_BROWSING_DB_LOCAL)
-  // Throttle consults a local database before starting the resource request.
-  return new SafeBrowsingResourceThrottle(
-      request, resource_type, sb_service, DEFER_AT_START,
-      SafeBrowsingService::CHECK_ALL_RESOURCE_TYPES);
-#elif defined(SAFE_BROWSING_DB_REMOTE)
-  if (!sb_service->IsAndroidFieldTrialEnabled())
-    return nullptr;
-
-  // Throttle consults a remote database before processing the response.
-  return new SafeBrowsingResourceThrottle(
-      request, resource_type, sb_service, DONT_DEFER_AT_START,
-      sb_service->GetResourceTypesToCheck());
-#else
-#error "Incompatible compile flags for safe_browsing_resource_throttle"
-#endif
+  if (sb_service->database_manager()->IsSupported()) {
+    return new SafeBrowsingResourceThrottle(request, resource_type, sb_service);
+  }
+  return nullptr;
 }
 
 SafeBrowsingResourceThrottle::SafeBrowsingResourceThrottle(
     const net::URLRequest* request,
     content::ResourceType resource_type,
-    SafeBrowsingService* sb_service,
-    DeferAtStartSetting defer_setting,
-    SafeBrowsingService::ResourceTypesToCheck resource_types_to_check)
-    : defer_at_start_(defer_setting == DEFER_AT_START),
-      resource_types_to_check_(resource_types_to_check),
-      state_(STATE_NONE),
+    SafeBrowsingService* sb_service)
+    : state_(STATE_NONE),
       defer_state_(DEFERRED_NONE),
       threat_type_(SB_THREAT_TYPE_SAFE),
       database_manager_(sb_service->database_manager()),
       ui_manager_(sb_service->ui_manager()),
       request_(request),
-      resource_type_(resource_type) {}
+      resource_type_(resource_type),
+      bound_net_log_(net::BoundNetLog::Make(request->net_log().net_log(),
+                                            NetLog::SOURCE_SAFE_BROWSING)) {}
 
 SafeBrowsingResourceThrottle::~SafeBrowsingResourceThrottle() {
-  if (state_ == STATE_CHECKING_URL)
+  if (defer_state_ != DEFERRED_NONE) {
+    EndNetLogEvent(NetLog::TYPE_SAFE_BROWSING_DEFERRED, nullptr, nullptr);
+  }
+
+  if (state_ == STATE_CHECKING_URL) {
     database_manager_->CancelCheck(this);
+    EndNetLogEvent(NetLog::TYPE_SAFE_BROWSING_CHECKING_URL, "result",
+                   "request_canceled");
+  }
+}
+
+// Note on net_log calls: TYPE_SAFE_BROWSING_DEFERRED events must be wholly
+// nested within TYPE_SAFE_BROWSING_CHECKING_URL events.  Synchronous checks
+// are not logged at all.
+void SafeBrowsingResourceThrottle::BeginNetLogEvent(NetLog::EventType type,
+                                                    const GURL& url,
+                                                    const char* name,
+                                                    const char* value) {
+  bound_net_log_.BeginEvent(
+      type, base::Bind(&NetLogUrlCallback, request_, url, name, value));
+  request_->net_log().AddEvent(
+      type, bound_net_log_.source().ToEventParametersCallback());
+}
+
+void SafeBrowsingResourceThrottle::EndNetLogEvent(NetLog::EventType type,
+                                                  const char* name,
+                                                  const char* value) {
+  bound_net_log_.EndEvent(
+      type, base::Bind(&NetLogStringCallback, name, value));
+  request_->net_log().AddEvent(
+      type, bound_net_log_.source().ToEventParametersCallback());
 }
 
 void SafeBrowsingResourceThrottle::WillStartRequest(bool* defer) {
@@ -101,7 +131,10 @@ void SafeBrowsingResourceThrottle::WillStartRequest(bool* defer) {
   if (CheckUrl(request_->url()))
     return;
 
-  if (!defer_at_start_)
+  // We let the check run in parallel with resource load only if this
+  // db_manager only supports asynchronous checks, like on mobile.
+  // Otherwise, we defer now.
+  if (database_manager_->ChecksAreAlwaysAsync())
     return;
 
   // If the URL couldn't be verified synchronously, defer starting the
@@ -109,11 +142,14 @@ void SafeBrowsingResourceThrottle::WillStartRequest(bool* defer) {
   defer_state_ = DEFERRED_START;
   defer_start_time_ = base::TimeTicks::Now();
   *defer = true;
+  BeginNetLogEvent(NetLog::TYPE_SAFE_BROWSING_DEFERRED, request_->url(),
+                   "defer_reason", "at_start");
 }
 
 void SafeBrowsingResourceThrottle::WillProcessResponse(bool* defer) {
   CHECK_EQ(defer_state_, DEFERRED_NONE);
-  if (defer_at_start_)
+  // TODO(nparker): Maybe remove this check, since it should have no effect.
+  if (!database_manager_->ChecksAreAlwaysAsync())
     return;
 
   if (state_ == STATE_CHECKING_URL ||
@@ -121,6 +157,8 @@ void SafeBrowsingResourceThrottle::WillProcessResponse(bool* defer) {
     defer_state_ = DEFERRED_PROCESSING;
     defer_start_time_ = base::TimeTicks::Now();
     *defer = true;
+    BeginNetLogEvent(NetLog::TYPE_SAFE_BROWSING_DEFERRED, request_->url(),
+                     "defer_reason", "at_response");
   }
 }
 
@@ -149,6 +187,10 @@ void SafeBrowsingResourceThrottle::WillRedirectRequest(
 
   defer_start_time_ = base::TimeTicks::Now();
   *defer = true;
+  BeginNetLogEvent(
+      NetLog::TYPE_SAFE_BROWSING_DEFERRED, redirect_info.new_url,
+      "defer_reason",
+      defer_state_ == DEFERRED_REDIRECT ? "redirect" : "unchecked_redirect");
 }
 
 const char* SafeBrowsingResourceThrottle::GetNameForLogging() const {
@@ -167,6 +209,12 @@ void SafeBrowsingResourceThrottle::OnCheckBrowseUrlResult(
   timer_.Stop();  // Cancel the timeout timer.
   threat_type_ = threat_type;
   state_ = STATE_NONE;
+
+  if (defer_state_ != DEFERRED_NONE) {
+    EndNetLogEvent(NetLog::TYPE_SAFE_BROWSING_DEFERRED, nullptr, nullptr);
+  }
+  EndNetLogEvent(NetLog::TYPE_SAFE_BROWSING_CHECKING_URL, "result",
+                 threat_type_ == SB_THREAT_TYPE_SAFE ? "safe" : "unsafe");
 
   if (threat_type == SB_THREAT_TYPE_SAFE) {
     RecordHistogramResourceTypeSafe(resource_type_);
@@ -205,7 +253,7 @@ void SafeBrowsingResourceThrottle::OnCheckBrowseUrlResult(
   resource.callback = base::Bind(
       &SafeBrowsingResourceThrottle::OnBlockingPageComplete, AsWeakPtr());
   resource.render_process_host_id = info->GetChildID();
-  resource.render_view_id =  info->GetRouteID();
+  resource.render_view_id = info->GetRouteID();
   resource.threat_source = SafeBrowsingUIManager::FROM_DEVICE;
 
   state_ = STATE_DISPLAYING_BLOCKING_PAGE;
@@ -267,11 +315,9 @@ void SafeBrowsingResourceThrottle::OnBlockingPageComplete(bool proceed) {
 
 bool SafeBrowsingResourceThrottle::CheckUrl(const GURL& url) {
   CHECK_EQ(state_, STATE_NONE);
-  // To reduce aggregate latency on mobile, skip checking resources that
-  // can't do much harm.
-  if (resource_types_to_check_ ==
-          SafeBrowsingService::CHECK_ONLY_DANGEROUS_TYPES &&
-      IsResourceTypeMostlySafe(resource_type_)) {
+  // To reduce aggregate latency on mobile, check only the most dangerous
+  // resource types.
+  if (!database_manager_->CanCheckResourceType(resource_type_)) {
     UMA_HISTOGRAM_ENUMERATION("SB2.ResourceTypes.Skipped", resource_type_,
                               content::RESOURCE_TYPE_LAST_TYPE);
     return true;
@@ -290,6 +336,8 @@ bool SafeBrowsingResourceThrottle::CheckUrl(const GURL& url) {
 
   state_ = STATE_CHECKING_URL;
   url_being_checked_ = url;
+  BeginNetLogEvent(NetLog::TYPE_SAFE_BROWSING_CHECKING_URL, url, nullptr,
+                   nullptr);
 
   // Start a timer to abort the check if it takes too long.
   // TODO(nparker): Set this only when we defer, based on remaining time,
@@ -321,6 +369,9 @@ void SafeBrowsingResourceThrottle::ResumeRequest() {
       // We're now waiting for the unchecked_redirect_url_.
       defer_state_ = DEFERRED_REDIRECT;
       resume = false;
+      BeginNetLogEvent(NetLog::TYPE_SAFE_BROWSING_DEFERRED,
+                       unchecked_redirect_url_, "defer_reason",
+                       "resumed_redirect");
     }
   }
 

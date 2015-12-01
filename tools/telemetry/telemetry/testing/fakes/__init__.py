@@ -53,6 +53,9 @@ class FakePlatform(object):
   def GetOSVersionName(self):
     raise NotImplementedError
 
+  def StopAllLocalServers(self):
+    pass
+
 
 class FakeLinuxPlatform(FakePlatform):
   @property
@@ -75,6 +78,9 @@ class FakeLinuxPlatform(FakePlatform):
 class FakePossibleBrowser(object):
   def __init__(self):
     self._returned_browser = _FakeBrowser(FakeLinuxPlatform())
+    self.browser_type = 'linux'
+    self.supports_tab_control = False
+    self.is_remote = False
 
   @property
   def returned_browser(self):
@@ -92,6 +98,9 @@ class FakePossibleBrowser(object):
     platform.
     """
     return self.returned_browser.platform
+
+  def IsRemote(self):
+    return self.is_remote
 
   def SetCredentialsPath(self, _):
     pass
@@ -142,6 +151,7 @@ class _FakeBrowser(object):
     self._tabs = _FakeTabList(self)
     self._returned_system_info = FakeSystemInfo()
     self._platform = platform
+    self._browser_type = 'release'
 
   @property
   def platform(self):
@@ -165,6 +175,16 @@ class _FakeBrowser(object):
     Incoming argument must be an instance of FakeSystemInfo."""
     assert isinstance(incoming, FakeSystemInfo)
     self._returned_system_info = incoming
+
+  @property
+  def browser_type(self):
+    """The browser_type this browser claims to be ('debug', 'release', etc.)"""
+    return self._browser_type
+
+  @browser_type.setter
+  def browser_type(self, incoming):
+    """Allows setting of the browser_type."""
+    self._browser_type = incoming
 
   @property
   def credentials(self):
@@ -206,6 +226,11 @@ class _FakeTab(object):
   def __init__(self, browser, tab_id):
     self._browser = browser
     self._tab_id = str(tab_id)
+    self._collect_garbage_count = 0
+
+  @property
+  def collect_garbage_count(self):
+    return self._collect_garbage_count
 
   @property
   def id(self):
@@ -230,6 +255,9 @@ class _FakeTab(object):
 
   def CloseConnections(self):
     pass
+
+  def CollectGarbage(self):
+    self._collect_garbage_count += 1
 
   def Close(self):
     pass

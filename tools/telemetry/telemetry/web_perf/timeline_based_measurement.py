@@ -1,15 +1,17 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
+import collections
 from collections import defaultdict
 
 from telemetry.timeline import model as model_module
 from telemetry.timeline import tracing_category_filter
 from telemetry.timeline import tracing_options
 from telemetry.value import trace
+from telemetry.web_perf.metrics import timeline_based_metric
 from telemetry.web_perf.metrics import blob_timeline
 from telemetry.web_perf.metrics import gpu_timeline
+from telemetry.web_perf.metrics import indexeddb_timeline
 from telemetry.web_perf.metrics import layout
 from telemetry.web_perf.metrics import memory_timeline
 from telemetry.web_perf.metrics import responsiveness_metric
@@ -44,7 +46,8 @@ def _GetAllTimelineBasedMetrics():
           gpu_timeline.GPUTimelineMetric(),
           blob_timeline.BlobTimelineMetric(),
           memory_timeline.MemoryTimelineMetric(),
-          text_selection.TextSelectionMetric())
+          text_selection.TextSelectionMetric(),
+          indexeddb_timeline.IndexedDBTimelineMetric())
 
 
 class InvalidInteractions(Exception):
@@ -73,10 +76,9 @@ class ResultsWrapperInterface(object):
 
 
 class _TBMResultWrapper(ResultsWrapperInterface):
-
   def AddValue(self, value):
     assert self._tir_label
-    value.name = '%s-%s' % (self._tir_label, value.name)
+    value.tir_label = self._tir_label
     self._results.AddValue(value)
 
 
@@ -107,11 +109,12 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
 
 class _TimelineBasedMetrics(object):
   def __init__(self, model, renderer_thread, interaction_records,
-               results_wrapper):
+               results_wrapper, metrics):
     self._model = model
     self._renderer_thread = renderer_thread
     self._interaction_records = interaction_records
     self._results_wrapper = results_wrapper
+    self._all_metrics = metrics
 
   def AddResults(self, results):
     interactions_by_label = defaultdict(list)
@@ -131,7 +134,7 @@ class _TimelineBasedMetrics(object):
     if not interactions:
       return
 
-    for metric in _GetAllTimelineBasedMetrics():
+    for metric in self._all_metrics:
       metric.AddResults(self._model, self._renderer_thread,
                         interactions, wrapped_results)
 
@@ -141,6 +144,10 @@ class Options(object):
 
   This is created and returned by
   Benchmark.CreateTimelineBasedMeasurementOptions.
+
+  By default, all the timeline based metrics in telemetry/web_perf/metrics are
+  used (see _GetAllTimelineBasedMetrics above).
+  To customize your metric needs, use SetTimelineBasedMetrics().
   """
 
   def __init__(self, overhead_level=NO_OVERHEAD_LEVEL):
@@ -173,6 +180,7 @@ class Options(object):
     self._tracing_options = tracing_options.TracingOptions()
     self._tracing_options.enable_chrome_trace = True
     self._tracing_options.enable_platform_display_trace = True
+    self._timeline_based_metrics = _GetAllTimelineBasedMetrics()
 
 
   def ExtendTraceCategoryFilter(self, filters):
@@ -190,6 +198,15 @@ class Options(object):
   @tracing_options.setter
   def tracing_options(self, value):
     self._tracing_options = value
+
+  def SetTimelineBasedMetrics(self, metrics):
+    assert isinstance(metrics, collections.Iterable)
+    for m in metrics:
+      assert isinstance(m, timeline_based_metric.TimelineBasedMetric)
+    self._timeline_based_metrics = metrics
+
+  def GetTimelineBasedMetrics(self):
+    return self._timeline_based_metrics
 
 
 class TimelineBasedMeasurement(story_test.StoryTest):
@@ -226,51 +243,34 @@ class TimelineBasedMeasurement(story_test.StoryTest):
     self._results_wrapper = results_wrapper or _TBMResultWrapper()
 
   def WillRunStory(self, platform):
-    """Set up test according to the tbm options."""
-    pass
+    """Configure and start tracing."""
+    if not platform.tracing_controller.IsChromeTracingSupported():
+      raise Exception('Not supported')
+
+    platform.tracing_controller.Start(self._tbm_options.tracing_options,
+                                      self._tbm_options.category_filter)
 
   def Measure(self, platform, results):
     """Collect all possible metrics and added them to results."""
-    pass
-
-  def DidRunStory(self, platform):
-    """Clean up test according to the tbm options."""
-    pass
-
-  def WillRunStoryForPageTest(self, tracing_controller,
-                              synthetic_delay_categories=None):
-    """Configure and start tracing.
-
-    Args:
-      app: an app.App subclass instance.
-      synthetic_delay_categories: iterable of delays. For example:
-          ['DELAY(cc.BeginMainFrame;0.014;alternating)']
-          where 'cc.BeginMainFrame' is a timeline event, 0.014 is the delay,
-          and 'alternating' is the mode.
-    """
-    if not tracing_controller.IsChromeTracingSupported():
-      raise Exception('Not supported')
-
-    category_filter = self._tbm_options.category_filter
-    # TODO(slamm): Move synthetic_delay_categories to the TBM options.
-    for delay in synthetic_delay_categories or []:
-      category_filter.AddSyntheticDelay(delay)
-
-    tracing_controller.Start(self._tbm_options.tracing_options, category_filter)
-
-  def MeasureForPageTest(self, tracing_controller, results):
-    """Collect all possible metrics and added them to results."""
-    trace_result = tracing_controller.Stop()
+    trace_result = platform.tracing_controller.Stop()
     results.AddValue(trace.TraceValue(results.current_page, trace_result))
     model = model_module.TimelineModel(trace_result)
     threads_to_records_map = _GetRendererThreadsToInteractionRecordsMap(model)
+    if (len(threads_to_records_map.values()) == 0 and
+        self._tbm_options.tracing_options.enable_chrome_trace):
+      raise story_test.Failure(
+          'No timeline interaction records were recorded in the trace. '
+          'This could be caused by console.time() & console.timeEnd() execution'
+          ' failure or the tracing category specified doesn\'t include '
+          'blink.console categories.')
     for renderer_thread, interaction_records in (
         threads_to_records_map.iteritems()):
       meta_metrics = _TimelineBasedMetrics(
           model, renderer_thread, interaction_records,
-          self._results_wrapper)
+          self._results_wrapper, self._tbm_options.GetTimelineBasedMetrics())
       meta_metrics.AddResults(results)
 
-  def DidRunStoryForPageTest(self, tracing_controller):
-    if tracing_controller.is_tracing_running:
-      tracing_controller.Stop()
+  def DidRunStory(self, platform):
+    """Clean up after running the story."""
+    if platform.tracing_controller.is_tracing_running:
+      platform.tracing_controller.Stop()

@@ -36,7 +36,6 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 -webkit-font-smoothing: auto
 -webkit-highlight: none
 -webkit-hyphenate-character: auto
--webkit-line-box-contain: block inline replaced
 -webkit-line-break: auto
 -webkit-line-clamp: none
 -webkit-locale: auto
@@ -85,6 +84,7 @@ animation-iteration-count: 1
 animation-name: none
 animation-play-state: running
 animation-timing-function: ease
+backdrop-filter: none
 backface-visibility: visible
 background-attachment: scroll
 background-blend-mode: normal
@@ -134,6 +134,7 @@ color: rgb(0, 0, 0)
 color-interpolation: sRGB
 color-interpolation-filters: linearRGB
 color-rendering: auto
+content: 
 cursor: auto
 cx: 0px
 cy: 0px

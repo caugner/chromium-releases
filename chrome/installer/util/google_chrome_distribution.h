@@ -8,7 +8,6 @@
 #ifndef CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_
 
-#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
 #include "chrome/installer/util/browser_distribution.h"
 
@@ -65,7 +64,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   base::string16 GetUninstallRegPath() override;
 
-  bool GetCommandExecuteImplClsid(base::string16* handler_class_uuid) override;
+  base::string16 GetCommandExecuteImplClsid() override;
 
   void UpdateInstallStatus(
       bool system_install,

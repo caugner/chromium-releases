@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
 #include "chrome/common/chrome_paths.h"
@@ -225,7 +226,7 @@ void WebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
 
 // This custom ContentBrowserClient is used to get notified when a WebContents
 // for the print preview dialog gets created.
-class PrintContentBrowserClient : public chrome::ChromeContentBrowserClient {
+class PrintContentBrowserClient : public ChromeContentBrowserClient {
  public:
   PrintContentBrowserClient(WebUIBrowserTest* browser_test,
                             const std::string& preload_test_fixture,

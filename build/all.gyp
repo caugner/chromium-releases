@@ -87,8 +87,7 @@
                 '../android_webview/android_webview.gyp:system_webview_apk',
                 '../android_webview/android_webview_shell.gyp:android_webview_shell_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_public_apk',
-                '../chrome/chrome.gyp:chrome_shell_apk',
-                '../chrome/chrome.gyp:chrome_sync_shell_apk',
+                '../chrome/android/chrome_apk.gyp:chrome_sync_shell_apk',
                 '../remoting/remoting.gyp:remoting_apk',
               ],
             }],
@@ -163,7 +162,7 @@
             '../gpu/skia_runner/skia_runner.gyp:*',
           ],
         }],
-        ['use_openssl==0 and (OS=="mac" or OS=="ios" or OS=="win")', {
+        ['use_openssl==0 and OS=="ios"', {
           'dependencies': [
             '../third_party/nss/nss.gyp:*',
            ],
@@ -784,9 +783,7 @@
       'targets': [
         {
           # The current list of tests for android.  This is temporary
-          # until the full set supported.  If adding a new test here,
-          # please also add it to build/android/pylib/gtest/gtest_config.py,
-          # else the test is not run.
+          # until the full set supported.
           #
           # WARNING:
           # Do not add targets here without communicating the implications
@@ -875,9 +872,8 @@
                 '../android_webview/android_webview.gyp:android_webview_test_apk',
                 '../android_webview/android_webview.gyp:android_webview_unittests_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_public_test_apk',
+                '../chrome/android/chrome_apk.gyp:chrome_sync_shell_test_apk',
                 '../chrome/chrome.gyp:chrome_junit_tests',
-                '../chrome/chrome.gyp:chrome_shell_test_apk',
-                '../chrome/chrome.gyp:chrome_sync_shell_test_apk',
                 '../chrome/chrome.gyp:chrome_uiautomator_tests',
                 '../chrome/chrome.gyp:chromedriver_webview_shell_apk',
                 '../chrome/chrome.gyp:unit_tests_apk',
@@ -1342,7 +1338,7 @@
             }],
             ['use_ash==1', {
               'dependencies': [
-                '../ash/ash.gyp:ash_shell',
+                '../ash/ash.gyp:ash_shell_with_content',
                 '../ash/ash.gyp:ash_unittests',
               ],
             }],

@@ -4,12 +4,10 @@
 
 * {
   --downloads-item-width: 622px;
-  --downloads-shared-style: {
-  };
-  /* (1024 total width - 622 item width) / 2 = 201 room to play. */
-  --downloads-side-column-basis: 201px;
 }
 
-cr-button:not([lowercase]) {
+paper-button {
   font-weight: 500;
+  margin: 0;
+  min-width: auto;
 }

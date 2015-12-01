@@ -10,7 +10,7 @@
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_frame_proxy_host.h"
-#include "content/browser/media/audio_state_provider.h"
+#include "content/browser/media/audio_stream_monitor.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/webui/content_web_ui_controller_factory.h"
@@ -346,11 +346,25 @@ TEST_F(WebContentsImplTest, UpdateTitle) {
   EXPECT_EQ(base::ASCIIToUTF16("Lots O' Whitespace"), contents()->GetTitle());
 }
 
+TEST_F(WebContentsImplTest, UpdateTitleBeforeFirstNavigation) {
+  ASSERT_TRUE(controller().IsInitialNavigation());
+  const base::string16 title = base::ASCIIToUTF16("Initial Entry Title");
+  contents()->UpdateTitle(contents()->GetMainFrame(), -1, title,
+                          base::i18n::LEFT_TO_RIGHT);
+  EXPECT_EQ(title, contents()->GetTitle());
+}
+
 TEST_F(WebContentsImplTest, DontUseTitleFromPendingEntry) {
   const GURL kGURL("chrome://blah");
   controller().LoadURL(
       kGURL, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   EXPECT_EQ(base::string16(), contents()->GetTitle());
+
+  // Also test setting title while the first navigation is still pending.
+  const base::string16 title = base::ASCIIToUTF16("Initial Entry Title");
+  contents()->UpdateTitle(contents()->GetMainFrame(), -1, title,
+                          base::i18n::LEFT_TO_RIGHT);
+  EXPECT_EQ(title, contents()->GetTitle());
 }
 
 TEST_F(WebContentsImplTest, UseTitleFromPendingEntryIfSet) {
@@ -938,7 +952,7 @@ TEST_F(WebContentsImplTest, FindOpenerRVHWhenPending) {
   scoped_ptr<TestWebContents> popup(
       TestWebContents::Create(browser_context(), instance));
   popup->SetOpener(contents());
-  contents()->GetRenderManager()->CreateOpenerProxies(instance);
+  contents()->GetRenderManager()->CreateOpenerProxies(instance, nullptr);
 
   // If swapped out is forbidden, a new proxy should be created for the opener
   // in |instance|, and we should ensure that its routing ID is returned here.
@@ -2992,6 +3006,14 @@ class LoadingWebContentsObserver : public WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(LoadingWebContentsObserver);
 };
 
+// Subclass of WebContentsImplTest for cases that need out-of-process iframes.
+class WebContentsImplTestWithSiteIsolation : public WebContentsImplTest {
+ public:
+  WebContentsImplTestWithSiteIsolation() {
+    IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
+  }
+};
+
 // Ensure that DidStartLoading/DidStopLoading events balance out properly with
 // interleaving cross-process navigations in multiple subframes.
 // See https://crbug.com/448601 for details of the underlying issue. The
@@ -3001,11 +3023,10 @@ class LoadingWebContentsObserver : public WebContentsObserver {
 //   chance to complete the load.
 // The subframe navigations cause the loading_frames_in_progress_ to drop down
 // to 0, while the loading_progresses_ map is not reset.
-TEST_F(WebContentsImplTest, StartStopEventsBalance) {
+TEST_F(WebContentsImplTestWithSiteIsolation, StartStopEventsBalance) {
   // The bug manifests itself in regular mode as well, but browser-initiated
   // navigation of subframes is only possible in --site-per-process mode within
   // unit tests.
-  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
   const GURL initial_url("about:blank");
   const GURL main_url("http://www.chromium.org");
   const GURL foo_url("http://foo.chromium.org");
@@ -3187,23 +3208,23 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   EXPECT_FALSE(contents()->has_video_power_save_blocker_for_testing());
 
   TestRenderFrameHost* rfh = contents()->GetMainFrame();
-  AudioStateProvider* audio_state = contents()->audio_state_provider();
+  AudioStreamMonitor* monitor = contents()->audio_stream_monitor();
 
   // Ensure RenderFrame is initialized before simulating events coming from it.
   main_test_rfh()->InitializeRenderFrameIfNeeded();
 
   // The audio power save blocker should not be based on having a media player
   // when audio stream monitoring is available.
-  if (audio_state->IsAudioStateAvailable()) {
+  if (AudioStreamMonitor::monitoring_available()) {
     // Send a fake audio stream monitor notification.  The audio power save
     // blocker should be created.
-    audio_state->set_was_recently_audible_for_testing(true);
+    monitor->set_was_recently_audible_for_testing(true);
     contents()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TAB);
     EXPECT_TRUE(contents()->has_audio_power_save_blocker_for_testing());
 
     // Send another fake notification, this time when WasRecentlyAudible() will
     // be false.  The power save blocker should be released.
-    audio_state->set_was_recently_audible_for_testing(false);
+    monitor->set_was_recently_audible_for_testing(false);
     contents()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TAB);
     EXPECT_FALSE(contents()->has_audio_power_save_blocker_for_testing());
   }
@@ -3215,7 +3236,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       0, kPlayerAudioVideoId, true, true, false));
   EXPECT_TRUE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Upon hiding the video power save blocker should be released.
   contents()->WasHidden();
@@ -3228,7 +3249,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       0, kPlayerVideoOnlyId, true, false, false));
   EXPECT_FALSE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Showing the WebContents should result in the creation of the blocker.
   contents()->WasShown();
@@ -3240,7 +3261,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       0, kPlayerAudioOnlyId, false, true, false));
   EXPECT_TRUE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Start a remote player. There should be no change in the power save
   // blockers.
@@ -3248,7 +3269,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       0, kPlayerRemoteId, true, true, true));
   EXPECT_TRUE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Destroy the original audio video player.  Both power save blockers should
   // remain.
@@ -3256,7 +3277,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       FrameHostMsg_MediaPausedNotification(0, kPlayerAudioVideoId));
   EXPECT_TRUE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Destroy the audio only player.  The video power save blocker should remain.
   rfh->OnMessageReceived(
@@ -3283,7 +3304,7 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
       0, kPlayerAudioVideoId, true, true, false));
   EXPECT_TRUE(contents()->has_video_power_save_blocker_for_testing());
   EXPECT_EQ(contents()->has_audio_power_save_blocker_for_testing(),
-            !audio_state->IsAudioStateAvailable());
+            !AudioStreamMonitor::monitoring_available());
 
   // Crash the renderer.
   contents()->GetMainFrame()->GetProcess()->SimulateCrash();
@@ -3315,7 +3336,7 @@ TEST_F(WebContentsImplTest, ThemeColorChangeDependingOnFirstVisiblePaint) {
   // propagate the current theme color to the delegates.
   RenderViewHostTester::TestOnMessageReceived(
       test_rvh(),
-      FrameHostMsg_DidFirstVisuallyNonEmptyPaint(rfh->GetRoutingID()));
+      ViewHostMsg_DidFirstVisuallyNonEmptyPaint(rfh->GetRoutingID()));
 
   EXPECT_EQ(SK_ColorRED, contents()->GetThemeColor());
   EXPECT_EQ(SK_ColorRED, observer.last_theme_color());

@@ -277,7 +277,7 @@ void Target::PullDependentTarget(const Target* dep, bool is_public) {
     //
     // However, if the dependency is private:
     //   EXE -> INTERMEDIATE_SHLIB --[private]--> FINAL_SHLIB
-    // the dependency will not be propogated because INTERMEDIATE_SHLIB is
+    // the dependency will not be propagated because INTERMEDIATE_SHLIB is
     // not granting permission to call functiosn from FINAL_SHLIB. If EXE
     // wants to use functions (and link to) FINAL_SHLIB, it will need to do
     // so explicitly.
@@ -453,7 +453,7 @@ bool Target::ResolvePrecompiledHeaders(Err* err) {
       continue;  // Skip the one on the target itself.
 
     const Config* config = iter.GetCurrentConfig();
-    const ConfigValues& cur = config->config_values();
+    const ConfigValues& cur = config->resolved_values();
     if (!cur.has_precompiled_headers())
       continue;  // This one has no precompiled header info, skip.
 

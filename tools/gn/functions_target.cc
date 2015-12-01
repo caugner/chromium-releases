@@ -31,6 +31,10 @@ Value ExecuteGenericTarget(const char* target_type,
                            const std::vector<Value>& args,
                            BlockNode* block,
                            Err* err) {
+  NonNestableBlock non_nestable(scope, function, "target");
+  if (!non_nestable.Enter(err))
+    return Value();
+
   if (!EnsureNotProcessingImport(function, scope, err) ||
       !EnsureNotProcessingBuildConfig(function, scope, err))
     return Value();
@@ -123,7 +127,7 @@ const char kAction_Help[] =
     "\n"
     "Variables\n"
     "\n"
-    "  args, data, data_deps, depfile, deps, outputs*, script*,\n"
+    "  args, console, data, data_deps, depfile, deps, outputs*, script*,\n"
     "  inputs, sources\n"
     "  * = required\n"
     "\n"
@@ -194,7 +198,7 @@ const char kActionForEach_Help[] =
     "\n"
     "Variables\n"
     "\n"
-    "  args, data, data_deps, depfile, deps, outputs*, script*,\n"
+    "  args, console, data, data_deps, depfile, deps, outputs*, script*,\n"
     "  inputs, sources*\n"
     "  * = required\n"
     "\n"
@@ -248,15 +252,16 @@ const char kCopy_Help[] =
     "  reference the output or generated intermediate file directories,\n"
     "  respectively.\n"
     "\n"
-    "  Both \"sources\" and \"outputs\" must be specified. Sources can\n"
+    "  Both \"sources\" and \"outputs\" must be specified. Sources can "
+    "include\n"
     "  as many files as you want, but there can only be one item in the\n"
     "  outputs list (plural is used for the name for consistency with\n"
     "  other target types).\n"
     "\n"
     "  If there is more than one source file, your output name should specify\n"
-    "  a mapping from each source files to output file names using source\n"
+    "  a mapping from each source file to an output file name using source\n"
     "  expansion (see \"gn help source_expansion\"). The placeholders will\n"
-    "  will look like \"{{source_name_part}}\", for example.\n"
+    "  look like \"{{source_name_part}}\", for example.\n"
     "\n"
     "Examples\n"
     "\n"

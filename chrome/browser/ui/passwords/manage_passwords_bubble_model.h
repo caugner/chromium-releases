@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_BUBBLE_MODEL_H_
 
 #include "base/memory/scoped_vector.h"
-#include "chrome/browser/ui/passwords/manage_passwords_bubble.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
@@ -30,20 +29,15 @@ enum class CredentialType;
 class ManagePasswordsBubbleModel : public content::WebContentsObserver {
  public:
   enum PasswordAction { REMOVE_PASSWORD, ADD_PASSWORD };
+  enum DisplayReason { AUTOMATIC, USER_ACTION };
 
   // Creates a ManagePasswordsBubbleModel, which holds a raw pointer to the
-  // WebContents in which it lives. Defaults to a display disposition of
-  // AUTOMATIC_WITH_PASSWORD_PENDING, and a dismissal reason of NOT_DISPLAYED.
-  // The bubble's state is updated from the ManagePasswordsUIController
-  // associated with |web_contents| upon creation.
-  explicit ManagePasswordsBubbleModel(content::WebContents* web_contents);
+  // WebContents in which it lives. Construction implies that the bubble
+  // is shown. The bubble's state is updated from the
+  // ManagePasswordsUIController associated with |web_contents|.
+  ManagePasswordsBubbleModel(content::WebContents* web_contents,
+                             DisplayReason reason);
   ~ManagePasswordsBubbleModel() override;
-
-  // Called by the view code when the bubble is shown.
-  void OnBubbleShown(ManagePasswordsBubble::DisplayReason reason);
-
-  // Called by the view code when the bubble is hidden.
-  void OnBubbleHidden();
 
   // Called by the view code when the "Cancel" button in clicked by the user.
   void OnCancelClicked();
@@ -123,13 +117,13 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
 
   Profile* GetProfile() const;
 
-  // Returns true iff the new UI should be presented to user for managing and
-  // saving the passwords.
-  bool IsNewUIActive() const;
-
   // Returns true iff the multiple account selection prompt for account update
   // should be presented.
   bool ShouldShowMultipleAccountUpdateUI() const;
+
+  // True if the save bubble should display the warm welcome for Google Smart
+  // Lock.
+  bool ShouldShowGoogleSmartLockWelcome() const;
 
 #if defined(UNIT_TEST)
   // Gets and sets the reason the bubble was displayed.
@@ -160,6 +154,8 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Updates |title_| and |title_brand_link_range_| for the
   // PENDING_PASSWORD_STATE.
   void UpdatePendingStateTitle();
+  // Updates |title_| for the MANAGE_STATE.
+  void UpdateManageStateTitle();
   password_manager::metrics_util::UpdatePasswordSubmissionEvent
   GetUpdateDismissalReason(UserBehaviorOnUpdateBubble behavior) const;
   // URL of the page from where this bubble was triggered.

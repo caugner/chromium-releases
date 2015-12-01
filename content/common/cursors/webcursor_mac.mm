@@ -151,7 +151,9 @@ NSCursor* CreateCustomCursor(const std::vector<char>& custom_data,
   }
 
   SkBitmap bitmap;
-  if (bitmap.tryAllocN32Pixels(size.width(), size.height()) && data)
+  SkImageInfo image_info = SkImageInfo::MakeN32(size.width(), size.height(),
+                                                kUnpremul_SkAlphaType);
+  if (bitmap.tryAllocPixels(image_info) && data)
     memcpy(bitmap.getAddr32(0, 0), data, data_size);
   else
     bitmap.eraseARGB(0, 0, 0, 0);
@@ -159,8 +161,8 @@ NSCursor* CreateCustomCursor(const std::vector<char>& custom_data,
   // Convert from pixels to view units.
   if (custom_scale == 0)
     custom_scale = 1;
-  NSSize dip_size = NSSizeFromCGSize(gfx::ToFlooredSize(
-      gfx::ScaleSize(custom_size, 1 / custom_scale)).ToCGSize());
+  NSSize dip_size = NSSizeFromCGSize(
+      gfx::ScaleToFlooredSize(custom_size, 1 / custom_scale).ToCGSize());
   NSPoint dip_hotspot = NSPointFromCGPoint(gfx::ToFlooredPoint(
       gfx::ScalePoint(hotspot, 1 / custom_scale)).ToCGPoint());
 

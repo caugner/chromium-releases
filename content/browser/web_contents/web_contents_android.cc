@@ -156,7 +156,7 @@ WebContents* WebContents::FromJavaWebContents(
 
 // static
 static void DestroyWebContents(JNIEnv* env,
-                               jclass clazz,
+                               const JavaParamRef<jclass>& clazz,
                                jlong jweb_contents_android_ptr) {
   WebContentsAndroid* web_contents_android =
       reinterpret_cast<WebContentsAndroid*>(jweb_contents_android_ptr);
@@ -171,22 +171,22 @@ static void DestroyWebContents(JNIEnv* env,
 }
 
 // static
-jobject FromNativePtr(JNIEnv* env,
-                      jclass clazz,
-                      jlong web_contents_ptr) {
+ScopedJavaLocalRef<jobject> FromNativePtr(JNIEnv* env,
+                                          const JavaParamRef<jclass>& clazz,
+                                          jlong web_contents_ptr) {
   WebContentsAndroid* web_contents_android =
       reinterpret_cast<WebContentsAndroid*>(web_contents_ptr);
 
   if (!web_contents_android)
-    return 0;
+    return ScopedJavaLocalRef<jobject>();
 
   // Check to make sure this object hasn't been destroyed.
   if (g_allocated_web_contents_androids.Get().find(web_contents_android) ==
       g_allocated_web_contents_androids.Get().end()) {
-    return 0;
+    return ScopedJavaLocalRef<jobject>();
   }
 
-  return web_contents_android->GetJavaObject().Release();
+  return web_contents_android->GetJavaObject();
 }
 
 // static

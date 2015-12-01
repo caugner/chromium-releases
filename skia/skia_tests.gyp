@@ -23,7 +23,6 @@
         'ext/bitmap_platform_device_mac_unittest.cc',
         'ext/convolver_unittest.cc',
         'ext/image_operations_unittest.cc',
-        'ext/pixel_ref_utils_unittest.cc',
         'ext/platform_canvas_unittest.cc',
         'ext/recursive_gaussian_convolution_unittest.cc',
         'ext/refptr_unittest.cc',

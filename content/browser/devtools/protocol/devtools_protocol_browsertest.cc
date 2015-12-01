@@ -119,7 +119,7 @@ class DevToolsProtocolTest : public ContentBrowserTest,
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override {
     scoped_ptr<base::DictionaryValue> root(static_cast<base::DictionaryValue*>(
-        base::JSONReader::DeprecatedRead(message)));
+        base::JSONReader::Read(message).release()));
     int id;
     if (root->GetInteger("id", &id)) {
       result_ids_.push_back(id);
@@ -394,6 +394,18 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ReconnectPreservesState) {
       found_notification = true;
   }
   EXPECT_TRUE(found_notification);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ReloadBlankPage) {
+  Shell* window =  Shell::CreateNewWindow(
+      shell()->web_contents()->GetBrowserContext(),
+      GURL("javascript:x=1"),
+      nullptr,
+      gfx::Size());
+  WaitForLoadStop(window->web_contents());
+  Attach();
+  SendCommand("Page.reload", nullptr, false);
+  // Should not crash at this point.
 }
 
 }  // namespace content

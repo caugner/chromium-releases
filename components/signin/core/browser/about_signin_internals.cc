@@ -343,11 +343,12 @@ void AboutSigninInternals::OnTokenRemoved(
   NotifyObservers();
 }
 
-void AboutSigninInternals::OnRefreshTokenReceived(std::string status) {
+void AboutSigninInternals::OnRefreshTokenReceived(const std::string& status) {
   NotifySigninValueChanged(REFRESH_TOKEN_RECEIVED, status);
 }
 
-void AboutSigninInternals::OnAuthenticationResultReceived(std::string status) {
+void AboutSigninInternals::OnAuthenticationResultReceived(
+    const std::string& status) {
   NotifySigninValueChanged(AUTHENTICATION_RESULT_RECEIVED, status);
 }
 
@@ -443,13 +444,17 @@ base::DictionaryValue* AboutSigninInternals::TokenInfo::ToValue() const {
   } else if (!receive_time.is_null()) {
     if (error == GoogleServiceAuthError::AuthErrorNone()) {
       bool token_expired = expiration_time < base::Time::Now();
+      std::string expiration_time_string = GetTimeStr(expiration_time);
+      if (expiration_time.is_null()) {
+        token_expired = false;
+        expiration_time_string = "Expiration time not available";
+      }
       std::string status_str = "";
       if (token_expired)
         status_str = "<p style=\"color: #ffffff; background-color: #ff0000\">";
-      base::StringAppendF(&status_str,
-                          "Received token at %s. Expire at %s",
+      base::StringAppendF(&status_str, "Received token at %s. Expire at %s",
                           GetTimeStr(receive_time).c_str(),
-                          GetTimeStr(expiration_time).c_str());
+                          expiration_time_string.c_str());
       if (token_expired)
         base::StringAppendF(&status_str, "</p>");
       token_info->SetString("status", status_str);
@@ -509,8 +514,6 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
   AddSectionEntry(basic_info, "Chrome Version", product_version);
   AddSectionEntry(basic_info, "Webview Based Signin?",
       switches::IsEnableWebviewBasedSignin() == true ? "On" : "Off");
-  AddSectionEntry(basic_info, "New Avatar Menu?",
-      switches::IsNewAvatarMenu() == true ? "On" : "Off");
   AddSectionEntry(basic_info, "New Profile Management?",
       switches::IsNewProfileManagement() == true ? "On" : "Off");
   AddSectionEntry(basic_info, "Account Consistency?",
@@ -537,7 +540,7 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
     AddSectionEntry(basic_info,
                     SigninStatusFieldToLabel(
                         static_cast<UntimedSigninStatusField>(USERNAME)),
-                    signin_manager->GetAuthenticatedUsername());
+                    signin_manager->GetAuthenticatedAccountInfo().email);
     if (signin_error_controller->HasError()) {
       const std::string error_account_id =
           signin_error_controller->error_account_id();

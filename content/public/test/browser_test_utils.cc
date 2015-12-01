@@ -22,7 +22,6 @@
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -74,9 +73,9 @@ class DOMOperationObserver : public NotificationObserver,
                const NotificationSource& source,
                const NotificationDetails& details) override {
     DCHECK(type == NOTIFICATION_DOM_OPERATION_RESPONSE);
-    Details<DomOperationNotificationDetails> dom_op_details(details);
+    Details<std::string> dom_op_result(details);
     if (!did_respond_) {
-      response_ = dom_op_details->json;
+      response_ = *dom_op_result.ptr();
       did_respond_ = true;
       message_loop_runner_->Quit();
     }
@@ -143,6 +142,43 @@ bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
   DOMOperationObserver dom_op_observer(render_frame_host->GetRenderViewHost());
   render_frame_host->ExecuteJavaScriptWithUserGestureForTests(
       base::UTF8ToUTF16(script));
+  std::string json;
+  if (!dom_op_observer.WaitAndGetResponse(&json)) {
+    DLOG(ERROR) << "Cannot communicate with DOMOperationObserver.";
+    return false;
+  }
+
+  // Nothing more to do for callers that ignore the returned JS value.
+  if (!result)
+    return true;
+
+  base::JSONReader reader(base::JSON_ALLOW_TRAILING_COMMAS);
+  *result = reader.ReadToValue(json);
+  if (!*result) {
+    DLOG(ERROR) << reader.GetErrorMessage();
+    return false;
+  }
+
+  return true;
+}
+
+// Specifying a prototype so that we can add the WARN_UNUSED_RESULT attribute.
+bool ExecuteScriptInIsolatedWorldHelper(RenderFrameHost* render_frame_host,
+                                        const int world_id,
+                                        const std::string& original_script,
+                                        scoped_ptr<base::Value>* result)
+    WARN_UNUSED_RESULT;
+
+bool ExecuteScriptInIsolatedWorldHelper(RenderFrameHost* render_frame_host,
+                                        const int world_id,
+                                        const std::string& original_script,
+                                        scoped_ptr<base::Value>* result) {
+  std::string script =
+      "window.domAutomationController.setAutomationId(0);" + original_script;
+  DOMOperationObserver dom_op_observer(render_frame_host->GetRenderViewHost());
+  render_frame_host->ExecuteJavaScriptInIsolatedWorld(
+      base::UTF8ToUTF16(script),
+      content::RenderFrameHost::JavaScriptResultCallback(), world_id);
   std::string json;
   if (!dom_op_observer.WaitAndGetResponse(&json)) {
     DLOG(ERROR) << "Cannot communicate with DOMOperationObserver.";
@@ -410,6 +446,49 @@ void SimulateMouseEvent(WebContents* web_contents,
   web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
 }
 
+void SimulateMouseWheelEvent(WebContents* web_contents,
+                             const gfx::Point& point,
+                             const gfx::Vector2d& delta) {
+  blink::WebMouseWheelEvent wheel_event;
+  wheel_event.type = blink::WebInputEvent::MouseWheel;
+  wheel_event.x = point.x();
+  wheel_event.y = point.y();
+  wheel_event.deltaX = delta.x();
+  wheel_event.deltaY = delta.y();
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  widget_host->ForwardWheelEvent(wheel_event);
+}
+
+void SimulateGestureScrollSequence(WebContents* web_contents,
+                                   const gfx::Point& point,
+                                   const gfx::Vector2dF& delta) {
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+
+  blink::WebGestureEvent scroll_begin;
+  scroll_begin.type = blink::WebGestureEvent::GestureScrollBegin;
+  scroll_begin.x = point.x();
+  scroll_begin.y = point.y();
+  widget_host->ForwardGestureEvent(scroll_begin);
+
+  blink::WebGestureEvent scroll_update;
+  scroll_update.type = blink::WebGestureEvent::GestureScrollUpdate;
+  scroll_update.x = point.x();
+  scroll_update.y = point.y();
+  scroll_update.data.scrollUpdate.deltaX = delta.x();
+  scroll_update.data.scrollUpdate.deltaY = delta.y();
+  scroll_update.data.scrollUpdate.velocityX = 0;
+  scroll_update.data.scrollUpdate.velocityY = 0;
+  widget_host->ForwardGestureEvent(scroll_update);
+
+  blink::WebGestureEvent scroll_end;
+  scroll_end.type = blink::WebGestureEvent::GestureScrollEnd;
+  scroll_end.x = point.x() + delta.x();
+  scroll_end.y = point.y() + delta.y();
+  widget_host->ForwardGestureEvent(scroll_end);
+}
+
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point) {
   blink::WebGestureEvent tap;
   tap.type = blink::WebGestureEvent::GestureTap;
@@ -578,6 +657,22 @@ bool ExecuteScriptAndExtractBool(const ToRenderFrameHost& adapter,
   DCHECK(result);
   scoped_ptr<base::Value> value;
   if (!ExecuteScriptHelper(adapter.render_frame_host(), script, &value) ||
+      !value.get()) {
+    return false;
+  }
+
+  return value->GetAsBoolean(result);
+}
+
+bool ExecuteScriptInIsolatedWorldAndExtractBool(
+    const ToRenderFrameHost& adapter,
+    const int world_id,
+    const std::string& script,
+    bool* result) {
+  DCHECK(result);
+  scoped_ptr<base::Value> value;
+  if (!ExecuteScriptInIsolatedWorldHelper(adapter.render_frame_host(), world_id,
+                                          script, &value) ||
       !value.get()) {
     return false;
   }
@@ -863,8 +958,8 @@ DOMMessageQueue::~DOMMessageQueue() {}
 void DOMMessageQueue::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  Details<DomOperationNotificationDetails> dom_op_details(details);
-  message_queue_.push(dom_op_details->json);
+  Details<std::string> dom_op_result(details);
+  message_queue_.push(*dom_op_result.ptr());
   if (message_loop_runner_.get())
     message_loop_runner_->Quit();
 }

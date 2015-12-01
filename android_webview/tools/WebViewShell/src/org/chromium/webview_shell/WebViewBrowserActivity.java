@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 
 import android.view.KeyEvent;
@@ -52,7 +53,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
     private static final Pattern WEBVIEW_VERSION_PATTERN =
             Pattern.compile("(Chrome/)([\\d\\.]+)\\s");
 
-    // TODO(michaelbai) : Replace "android.webkit.resoruce.MIDI_SYSEX" with
+    // TODO(michaelbai) : Replace "android.webkit.resource.MIDI_SYSEX" with
     // PermissionRequest.RESOURCE_MIDI_SYSEX once Android M SDK is used.
     private static final String[] AUTOMATICALLY_GRANT =
             { PermissionRequest.RESOURCE_VIDEO_CAPTURE, PermissionRequest.RESOURCE_AUDIO_CAPTURE,
@@ -61,6 +62,9 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         setContentView(R.layout.activity_webview_browser);
         mWebView = (WebView) findViewById(R.id.webview);
         WebSettings settings = mWebView.getSettings();

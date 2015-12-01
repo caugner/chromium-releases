@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/basictypes.h"
+#include "base/guid.h"
 #include "base/location.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,7 +25,9 @@
 
 using content::Manifest;
 
-jlong Initialize(JNIEnv* env, jobject obj, jobject java_web_contents) {
+jlong Initialize(JNIEnv* env,
+                 const JavaParamRef<jobject>& obj,
+                 const JavaParamRef<jobject>& java_web_contents) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
   AddToHomescreenDialogHelper* add_to_homescreen_helper =
@@ -32,11 +35,17 @@ jlong Initialize(JNIEnv* env, jobject obj, jobject java_web_contents) {
   return reinterpret_cast<intptr_t>(add_to_homescreen_helper);
 }
 
-AddToHomescreenDialogHelper::AddToHomescreenDialogHelper(JNIEnv* env,
-                                             jobject obj,
-                                             content::WebContents* web_contents)
+AddToHomescreenDialogHelper::AddToHomescreenDialogHelper(
+    JNIEnv* env,
+    jobject obj,
+    content::WebContents* web_contents)
     : add_shortcut_pending_(false),
-      data_fetcher_(new AddToHomescreenDataFetcher(web_contents, this)) {
+      data_fetcher_(new AddToHomescreenDataFetcher(web_contents,
+          ShortcutHelper::GetIdealHomescreenIconSizeInDp(),
+          ShortcutHelper::GetMinimumHomescreenIconSizeInDp(),
+          ShortcutHelper::GetIdealSplashImageSizeInDp(),
+          ShortcutHelper::GetMinimumSplashImageSizeInDp(),
+          this)) {
   java_ref_.Reset(env, obj);
 }
 
@@ -56,7 +65,7 @@ void AddToHomescreenDialogHelper::OnUserTitleAvailable(
 }
 
 void AddToHomescreenDialogHelper::OnDataAvailable(const ShortcutInfo& info,
-                                            const SkBitmap& icon) {
+                                                  const SkBitmap& icon) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> java_bitmap;
   if (icon.getSize())
@@ -122,7 +131,7 @@ void AddToHomescreenDialogHelper::AddShortcut(JNIEnv* env,
 }
 
 void AddToHomescreenDialogHelper::AddShortcut(const ShortcutInfo& info,
-                                        const SkBitmap& icon) {
+                                              const SkBitmap& icon) {
   DCHECK(add_shortcut_pending_);
   if (!add_shortcut_pending_)
     return;
@@ -130,12 +139,16 @@ void AddToHomescreenDialogHelper::AddShortcut(const ShortcutInfo& info,
 
   RecordAddToHomescreen();
 
+  const std::string& uid = base::GenerateGUID();
   content::BrowserThread::PostTask(
       content::BrowserThread::IO,
       FROM_HERE,
       base::Bind(&ShortcutHelper::AddShortcutInBackgroundWithSkBitmap,
                  info,
+                 uid,
                  icon));
+
+  data_fetcher_->FetchSplashScreenImage(uid);
 }
 
 bool AddToHomescreenDialogHelper::RegisterAddToHomescreenDialogHelper(

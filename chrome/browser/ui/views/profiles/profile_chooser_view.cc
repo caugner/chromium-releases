@@ -46,6 +46,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/clip_transform_recorder.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -53,7 +54,7 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/text_elider.h"
-#include "ui/gfx/vector_icons_public2.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/blue_button.h"
@@ -1287,16 +1288,15 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
         auth_error_email_button_ =
             new RightAlignedIconLabelButton(this, avatar_item.username);
         auth_error_email_button_->SetElideBehavior(gfx::ELIDE_EMAIL);
-        SkColor icon_color;
-        ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
-                                      &icon_color);
         auth_error_email_button_->SetImage(
             views::LabelButton::STATE_NORMAL,
-            gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 18, icon_color));
+            gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 18,
+                                  gfx::kChromeIconGrey));
 
         auth_error_email_button_->SetTextColor(
             views::LabelButton::STATE_NORMAL,
-            views::Link::GetDefaultEnabledColor());
+            ui::NativeTheme::instance()->GetSystemColor(
+                ui::NativeTheme::kColorId_LinkEnabled));
         auth_error_email_button_->SetFocusable(true);
         gfx::Insets insets =
             views::LabelButtonAssetBorder::GetDefaultInsetsForStyle(
@@ -1393,13 +1393,10 @@ views::View* ProfileChooserView::CreateOptionsView(bool display_lock) {
   base::string16 text = browser_->profile()->IsGuestSession() ?
       l10n_util::GetStringUTF16(IDS_PROFILES_EXIT_GUEST) :
       l10n_util::GetStringUTF16(IDS_PROFILES_SWITCH_USERS_BUTTON);
-  SkColor icon_color;
-  ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
-                                &icon_color);
   const int kIconSize = 16;
   users_button_ = new BackgroundColorHoverButton(
       this, text, gfx::CreateVectorIcon(gfx::VectorIconId::ACCOUNT_BOX,
-                                        kIconSize, icon_color));
+                                        kIconSize, gfx::kChromeIconGrey));
   layout->StartRow(1, 0);
   layout->AddView(users_button_);
 
@@ -1422,7 +1419,8 @@ views::View* ProfileChooserView::CreateOptionsView(bool display_lock) {
 
     lock_button_ = new BackgroundColorHoverButton(
         this, l10n_util::GetStringUTF16(IDS_PROFILES_PROFILE_SIGNOUT_BUTTON),
-        gfx::CreateVectorIcon(gfx::VectorIconId::LOCK, kIconSize, icon_color));
+        gfx::CreateVectorIcon(gfx::VectorIconId::LOCK, kIconSize,
+                              gfx::kChromeIconGrey));
     layout->StartRow(1, 0);
     layout->AddView(lock_button_);
   }
@@ -1507,12 +1505,9 @@ void ProfileChooserView::CreateAccountButton(views::GridLayout* layout,
   gfx::ImageSkia warning_default_image;
   int warning_button_width = 0;
   if (reauth_required) {
-    SkColor icon_color;
-    ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
-                                  &icon_color);
     const int kIconSize = 18;
-    warning_default_image = gfx::CreateVectorIcon(gfx::VectorIconId::WARNING,
-                                                  kIconSize, icon_color);
+    warning_default_image = gfx::CreateVectorIcon(
+        gfx::VectorIconId::WARNING, kIconSize, gfx::kChromeIconGrey);
     warning_button_width = kIconSize + views::kRelatedButtonHSpacing;
   }
   int available_width = width - 2 * views::kButtonHEdgeMarginNew -
@@ -1770,13 +1765,10 @@ views::View* ProfileChooserView::CreateSwitchUserView() {
   layout->AddView(new views::Separator(views::Separator::HORIZONTAL));
 
   const int kIconSize = 24;
-  SkColor icon_color;
-  ui::CommonThemeGetSystemColor(ui::NativeTheme::kColorId_ChromeIconGrey,
-                                &icon_color);
   add_person_button_ = new BackgroundColorHoverButton(
       this, l10n_util::GetStringUTF16(IDS_PROFILES_ADD_PERSON_BUTTON),
       gfx::CreateVectorIcon(gfx::VectorIconId::ACCOUNT_BOX, kIconSize,
-                            icon_color));
+                            gfx::kChromeIconGrey));
   layout->StartRow(1, 0);
   layout->AddView(add_person_button_);
 
@@ -1787,7 +1779,7 @@ views::View* ProfileChooserView::CreateSwitchUserView() {
   disconnect_button_ = new BackgroundColorHoverButton(
       this, l10n_util::GetStringUTF16(IDS_PROFILES_DISCONNECT_BUTTON),
       gfx::CreateVectorIcon(gfx::VectorIconId::REMOVE_BOX, kIconSize,
-                            icon_color));
+                            gfx::kChromeIconGrey));
   layout->StartRow(1, 0);
   layout->AddView(disconnect_button_);
 

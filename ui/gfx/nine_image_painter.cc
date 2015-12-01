@@ -132,9 +132,6 @@ void NineImagePainter::Paint(Canvas* canvas,
   int i6w = ImageWidthInPixels(images_[6], scale_x);
   int i8w = ImageWidthInPixels(images_[8], scale_x);
 
-  int i4x = std::min(std::min(i0w, i3w), i6w);
-  int i4w = width_in_pixels - i4x - std::min(std::min(i2w, i5w), i8w);
-
   int i0h = ImageHeightInPixels(images_[0], scale_y);
   int i1h = ImageHeightInPixels(images_[1], scale_y);
   int i2h = ImageHeightInPixels(images_[2], scale_y);
@@ -142,8 +139,26 @@ void NineImagePainter::Paint(Canvas* canvas,
   int i7h = ImageHeightInPixels(images_[7], scale_y);
   int i8h = ImageHeightInPixels(images_[8], scale_y);
 
+  i0w = std::min(i0w, width_in_pixels);
+  i2w = std::min(i2w, width_in_pixels - i0w);
+  i3w = std::min(i3w, width_in_pixels);
+  i5w = std::min(i5w, width_in_pixels - i3w);
+  i6w = std::min(i6w, width_in_pixels);
+  i8w = std::min(i8w, width_in_pixels - i6w);
+
+  i0h = std::min(i0h, height_in_pixels);
+  i1h = std::min(i1h, height_in_pixels);
+  i2h = std::min(i2h, height_in_pixels);
+  i6h = std::min(i6h, height_in_pixels - i0h);
+  i7h = std::min(i7h, height_in_pixels - i1h);
+  i8h = std::min(i8h, height_in_pixels - i2h);
+
+  int i4x = std::min(std::min(i0w, i3w), i6w);
   int i4y = std::min(std::min(i0h, i1h), i2h);
-  int i4h = height_in_pixels - i4y - std::min(std::min(i6h, i7h), i8h);
+  int i4w =
+      std::max(width_in_pixels - i4x - std::min(std::min(i2w, i5w), i8w), 0);
+  int i4h =
+      std::max(height_in_pixels - i4y - std::min(std::min(i6h, i7h), i8h), 0);
 
   SkPaint paint;
   paint.setAlpha(alpha);

@@ -14,6 +14,7 @@
 #include "components/autofill/core/browser/autofill_xml_parser.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/variations/net/variations_http_header_provider.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
@@ -28,12 +29,20 @@ namespace {
 
 const char kAutofillQueryServerNameStartInHeader[] = "GFE/";
 const size_t kMaxFormCacheSize = 16;
+const size_t kMaxFieldsPerQueryRequest = 100;
 
 #if defined(GOOGLE_CHROME_BUILD)
 const char kClientName[] = "Google Chrome";
 #else
 const char kClientName[] = "Chromium";
 #endif  // defined(GOOGLE_CHROME_BUILD)
+
+size_t CountActiveFieldsInForms(const std::vector<FormStructure*>& forms) {
+  size_t active_field_count = 0;
+  for (const auto* form : forms)
+    active_field_count += form->active_field_count();
+  return active_field_count;
+}
 
 std::string RequestTypeToString(AutofillDownloadManager::RequestType type) {
   switch (type) {
@@ -88,6 +97,12 @@ bool AutofillDownloadManager::StartQueryRequest(
     // We are in back-off mode: do not do the request.
     return false;
   }
+
+  // Do not send the request if it contains more fields than the server can
+  // accept.
+  if (CountActiveFieldsInForms(forms) > kMaxFieldsPerQueryRequest)
+    return false;
+
   std::string form_xml;
   FormRequestData request_data;
   if (!FormStructure::EncodeQueryRequest(forms, &request_data.form_signatures,
@@ -183,6 +198,8 @@ bool AutofillDownloadManager::StartRequest(
   net::URLFetcher* fetcher =
       net::URLFetcher::Create(fetcher_id_for_unittest_++, request_url,
                               net::URLFetcher::POST, this).release();
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      fetcher, data_use_measurement::DataUseUserData::AUTOFILL);
   url_fetchers_[fetcher] = request_data;
   fetcher->SetAutomaticallyRetryOn5xx(false);
   fetcher->SetRequestContext(request_context);

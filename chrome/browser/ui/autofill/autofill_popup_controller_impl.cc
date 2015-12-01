@@ -15,7 +15,7 @@
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/suggestion.h"
-#include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/common/autofill_util.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/components_scaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -65,8 +65,6 @@ const DataResource kDataResources[] = {
 #if defined(OS_ANDROID)
   { "scanCreditCardIcon", IDR_AUTOFILL_CC_SCAN_NEW },
   { "settings", IDR_AUTOFILL_SETTINGS },
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
-  { "macContactsIcon", IDR_AUTOFILL_MAC_CONTACTS_ICON },
 #endif
 };
 
@@ -362,11 +360,8 @@ int AutofillPopupControllerImpl::GetIconResourceID(
   }
 
 #if defined(OS_ANDROID)
-  if (result == IDR_AUTOFILL_CC_SCAN_NEW &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableAccessorySuggestionView)) {
+  if (result == IDR_AUTOFILL_CC_SCAN_NEW && IsKeyboardAccessoryEnabled())
     result = IDR_AUTOFILL_CC_SCAN_NEW_KEYBOARD_ACCESSORY;
-  }
 #endif  // OS_ANDROID
 
   return result;
@@ -584,7 +579,6 @@ bool AutofillPopupControllerImpl::HasSuggestions() {
          id == POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY ||
          id == POPUP_ITEM_ID_PASSWORD_ENTRY ||
          id == POPUP_ITEM_ID_DATALIST_ENTRY ||
-         id == POPUP_ITEM_ID_MAC_ACCESS_CONTACTS ||
          id == POPUP_ITEM_ID_SCAN_CREDIT_CARD;
 }
 

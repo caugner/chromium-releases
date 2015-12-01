@@ -13,6 +13,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
+#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/about_ui.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/ui/webui/device_log_ui.h"
 #include "chrome/browser/ui/webui/domain_reliability_internals_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
+#include "chrome/browser/ui/webui/engagement/site_engagement_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/flash_ui.h"
 #include "chrome/browser/ui/webui/gcm_internals_ui.h"
@@ -33,6 +35,7 @@
 #include "chrome/browser/ui/webui/interstitials/interstitial_ui.h"
 #include "chrome/browser/ui/webui/invalidations_ui.h"
 #include "chrome/browser/ui/webui/local_state/local_state_ui.h"
+#include "chrome/browser/ui/webui/log_web_ui_url.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
@@ -112,6 +115,10 @@
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/ui/webui/popular_sites_internals_ui.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
@@ -133,6 +140,7 @@
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
+#include "chrome/browser/ui/webui/voice_search_ui.h"
 #include "components/proximity_auth/webui/proximity_auth_ui.h"
 #include "components/proximity_auth/webui/url_constants.h"
 #endif
@@ -173,7 +181,6 @@
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
-#include "chrome/browser/ui/webui/voice_search_ui.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -228,7 +235,8 @@ WebUIController* NewWebUI<proximity_auth::ProximityAuthUI>(WebUI* web_ui,
   content::BrowserContext* browser_context =
       web_ui->GetWebContents()->GetBrowserContext();
   return new proximity_auth::ProximityAuthUI(
-      web_ui, EasyUnlockServiceFactory::GetForBrowserContext(browser_context));
+      web_ui, EasyUnlockServiceFactory::GetForBrowserContext(browser_context)
+                  ->proximity_auth_client());
 }
 #endif
 
@@ -383,9 +391,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Downloads list on Android uses the built-in download manager.
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<DownloadsUI>;
-  // Flash is not available on android.
-  if (url.host() == chrome::kChromeUIFlashHost)
-    return &NewWebUI<FlashUI>;
   if (url.host() == chrome::kChromeUIGCMInternalsHost)
     return &NewWebUI<GCMInternalsUI>;
   // Help is implemented with native UI elements on Android.
@@ -396,13 +401,14 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<IdentityInternalsUI>;
   if (url.host() == chrome::kChromeUINewTabHost)
     return &NewWebUI<NewTabUI>;
-  if (url.host() == chrome::kChromeUIMdSettingsHost &&
-      ::switches::MdSettingsEnabled()) {
+  if (url.host() == chrome::kChromeUIMdSettingsHost)
     return &NewWebUI<settings::MdSettingsUI>;
+  // If the material design extensions page is enabled, it gets its own host.
+  // Otherwise, it's handled by the uber settings page.
+  if (url.host() == chrome::kChromeUIExtensionsHost &&
+      ::switches::MdExtensionsEnabled()) {
+    return &NewWebUI<extensions::ExtensionsUI>;
   }
-  // Android does not support plugins for now.
-  if (url.host() == chrome::kChromeUIPluginsHost)
-    return &NewWebUI<PluginsUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
   // Settings are implemented with native UI elements on Android.
@@ -471,6 +477,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::SlowUI>;
   if (url.host() == chrome::kChromeUISlowTraceHost)
     return &NewWebUI<chromeos::SlowTraceController>;
+  if (url.host() == chrome::kChromeUIVoiceSearchHost)
+    return &NewWebUI<VoiceSearchUI>;
 #endif  // defined(OS_CHROMEOS)
 #if !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
   if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -497,11 +505,13 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIInspectHost)
     return &NewWebUI<InspectUI>;
 #endif
+#if defined(OS_ANDROID)
+  if (url.host() == chrome::kChromeUIPopularSitesInternalsHost)
+    return &NewWebUI<PopularSitesInternalsUI>;
+#endif
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
-  if (url.host() == chrome::kChromeUIUserManagerHost &&
-      switches::IsNewAvatarMenu()) {
+  if (url.host() == chrome::kChromeUIUserManagerHost)
     return &NewWebUI<UserManagerUI>;
-  }
 #endif
 
   /****************************************************************************
@@ -545,8 +555,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(ENABLE_EXTENSIONS)
   if (url.host() == chrome::kChromeUIExtensionsFrameHost)
     return &NewWebUI<extensions::ExtensionsUI>;
-  if (url.host() == chrome::kChromeUIVoiceSearchHost)
-    return &NewWebUI<VoiceSearchUI>;
+#endif
+#if defined(ENABLE_PLUGINS)
+  if (url.host() == chrome::kChromeUIFlashHost)
+    return &NewWebUI<FlashUI>;
+  if (url.host() == chrome::kChromeUIPluginsHost)
+    return &NewWebUI<PluginsUI>;
 #endif
 #if defined(ENABLE_PRINT_PREVIEW)
   if (url.host() == chrome::kChromeUIPrintHost &&
@@ -575,6 +589,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (dom_distiller::IsEnableDomDistillerSet() &&
       url.host() == dom_distiller::kChromeUIDomDistillerHost) {
     return &NewWebUI<dom_distiller::DomDistillerUi>;
+  }
+
+  if (SiteEngagementService::IsEnabled() &&
+      url.host() == chrome::kChromeUISiteEngagementHost) {
+    return &NewWebUI<SiteEngagementUI>;
   }
 
   return NULL;
@@ -622,6 +641,9 @@ WebUIController* ChromeWebUIControllerFactory::CreateWebUIControllerForURL(
   WebUIFactoryFunction function = GetWebUIFactoryFunction(web_ui, profile, url);
   if (!function)
     return NULL;
+
+  if (web_ui->HasRenderFrame())
+    webui::LogWebUIUrl(url);
 
   return (*function)(web_ui, url);
 }
@@ -692,7 +714,7 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
 
 // static
 ChromeWebUIControllerFactory* ChromeWebUIControllerFactory::GetInstance() {
-  return Singleton<ChromeWebUIControllerFactory>::get();
+  return base::Singleton<ChromeWebUIControllerFactory>::get();
 }
 
 ChromeWebUIControllerFactory::ChromeWebUIControllerFactory() {

@@ -77,7 +77,8 @@ StartupAppLauncher::StartupAppLauncher(Profile* profile,
       network_ready_handled_(false),
       launch_attempt_(0),
       ready_to_launch_(false),
-      wait_for_crx_update_(false) {
+      wait_for_crx_update_(false),
+      secondary_apps_updated_(false) {
   DCHECK(profile_);
   DCHECK(crx_file::id_util::IdIsValid(app_id_));
   KioskAppManager::Get()->AddObserver(this);
@@ -179,8 +180,7 @@ void StartupAppLauncher::RestartLauncher() {
 void StartupAppLauncher::MaybeInitializeNetwork() {
   network_ready_handled_ = false;
 
-  const Extension* extension = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->GetInstalledExtension(app_id_);
+  const Extension* extension = GetPrimaryAppExtension();
   bool crx_cached = KioskAppManager::Get()->HasCachedCrx(app_id_);
   const bool requires_network =
       (!extension && !crx_cached) ||
@@ -248,9 +248,7 @@ void StartupAppLauncher::OnRefreshTokensLoaded() {
 
 void StartupAppLauncher::MaybeLaunchApp() {
   // Check if the app is offline enabled.
-  const Extension* extension = extensions::ExtensionSystem::Get(profile_)
-                                   ->extension_service()
-                                   ->GetInstalledExtension(app_id_);
+  const Extension* extension = GetPrimaryAppExtension();
   DCHECK(extension);
   const bool offline_enabled =
       extensions::OfflineEnabledInfo::IsOfflineEnabled(extension);
@@ -290,14 +288,17 @@ void StartupAppLauncher::OnFinishCrxInstall(const std::string& extension_id,
     return;
   }
 
-  if (success) {
-    MaybeLaunchApp();
+  if (DidPrimaryOrSecondaryAppFailedToInstall(success, extension_id)) {
+    OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
     return;
   }
 
-  LOG(ERROR) << "Failed to install the kiosk application app_id: "
-             << extension_id;
-  OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
+  if (GetPrimaryAppExtension()) {
+    if (!secondary_apps_updated_)
+      MaybeInstallSecondaryApps();
+    else
+      MaybeLaunchApp();
+  }
 }
 
 void StartupAppLauncher::OnKioskExtensionLoadedInCache(
@@ -322,14 +323,82 @@ void StartupAppLauncher::OnKioskAppDataLoadStatusChanged(
     OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_DOWNLOAD);
 }
 
+bool StartupAppLauncher::IsAnySecondaryAppPending() const {
+  const extensions::Extension* extension = GetPrimaryAppExtension();
+  DCHECK(extension);
+  extensions::KioskModeInfo* info = extensions::KioskModeInfo::Get(extension);
+  for (const auto& id : info->secondary_app_ids) {
+    if (extensions::ExtensionSystem::Get(profile_)
+            ->extension_service()
+            ->pending_extension_manager()
+            ->IsIdPending(id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool StartupAppLauncher::AreSecondaryAppsInstalled() const {
+  const extensions::Extension* extension = GetPrimaryAppExtension();
+  DCHECK(extension);
+  extensions::KioskModeInfo* info = extensions::KioskModeInfo::Get(extension);
+  for (const auto& id : info->secondary_app_ids) {
+    if (!extensions::ExtensionSystem::Get(profile_)
+             ->extension_service()
+             ->GetInstalledExtension(id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool StartupAppLauncher::HasSecondaryApps() const {
+  const extensions::Extension* extension = GetPrimaryAppExtension();
+  DCHECK(extension);
+  return extensions::KioskModeInfo::HasSecondaryApps(extension);
+}
+
+bool StartupAppLauncher::DidPrimaryOrSecondaryAppFailedToInstall(
+    bool success,
+    const std::string& id) const {
+  if (success)
+    return false;
+
+  if (id == app_id_) {
+    LOG(ERROR) << "Failed to install crx file of the primary app id=" << id;
+    return true;
+  }
+
+  const extensions::Extension* extension = GetPrimaryAppExtension();
+  if (!extension)
+    return false;
+
+  extensions::KioskModeInfo* info = extensions::KioskModeInfo::Get(extension);
+  for (const auto& app_id : info->secondary_app_ids) {
+    if (app_id == id) {
+      LOG(ERROR) << "Failed to install a secondary app id=" << id;
+      return true;
+    }
+  }
+
+  LOG(WARNING) << "Failed to install crx file for an app id=" << id;
+  return false;
+}
+
+const extensions::Extension* StartupAppLauncher::GetPrimaryAppExtension()
+    const {
+  return extensions::ExtensionSystem::Get(profile_)
+      ->extension_service()
+      ->GetInstalledExtension(app_id_);
+}
+
 void StartupAppLauncher::LaunchApp() {
   if (!ready_to_launch_) {
     NOTREACHED();
     LOG(ERROR) << "LaunchApp() called but launcher is not initialized.";
   }
 
-  const Extension* extension = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->GetInstalledExtension(app_id_);
+  const Extension* extension = GetPrimaryAppExtension();
   CHECK(extension);
 
   if (!extensions::KioskModeInfo::IsKioskEnabled(extension)) {
@@ -382,13 +451,38 @@ void StartupAppLauncher::BeginInstall() {
     return;
   }
 
-  if (extensions::ExtensionSystem::Get(profile_)
-          ->extension_service()
-          ->GetInstalledExtension(app_id_)) {
-    // Launch the app.
-    OnReadyToLaunch();
+  if (GetPrimaryAppExtension()) {
+    // Install secondary apps.
+    MaybeInstallSecondaryApps();
   } else {
     // The extension is skipped for installation due to some error.
+    OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
+  }
+}
+
+void StartupAppLauncher::MaybeInstallSecondaryApps() {
+  if (!AreSecondaryAppsInstalled() && !delegate_->IsNetworkReady()) {
+    OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
+    return;
+  }
+
+  secondary_apps_updated_ = true;
+  extensions::KioskModeInfo* info =
+      extensions::KioskModeInfo::Get(GetPrimaryAppExtension());
+  KioskAppManager::Get()->InstallSecondaryApps(info->secondary_app_ids);
+  if (IsAnySecondaryAppPending()) {
+    delegate_->OnInstallingApp();
+    // Observe the crx installation events.
+    extensions::InstallTracker* tracker =
+        extensions::InstallTrackerFactory::GetForBrowserContext(profile_);
+    tracker->AddObserver(this);
+    return;
+  }
+
+  if (AreSecondaryAppsInstalled()) {
+    // Launch the primary app.
+    MaybeLaunchApp();
+  } else {
     OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
   }
 }

@@ -58,7 +58,7 @@ class ContentViewCoreImpl : public ContentViewCore,
       float scale,
       SkColorType preferred_color_type,
       const gfx::Rect& src_subrect,
-      ReadbackRequestCallback& result_callback) override;
+      const ReadbackRequestCallback& result_callback) override;
   float GetDpiScale() const override;
   void PauseOrResumeGeolocation(bool should_pause) override;
   void RequestTextSurroundingSelection(
@@ -148,7 +148,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
                  jfloat x, jfloat y);
   void DoubleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                 jfloat x, jfloat y) ;
+                 jfloat x, jfloat y);
   void LongPress(JNIEnv* env, jobject obj, jlong time_ms,
                  jfloat x, jfloat y);
   void PinchBegin(JNIEnv* env, jobject obj, jlong time_ms, jfloat x, jfloat y);
@@ -226,7 +226,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                            const gfx::Rect& bounds,
                            const std::vector<MenuItem>& items,
                            int selected_item,
-                           bool multiple);
+                           bool multiple,
+                           bool right_aligned);
   // Hides a visible popup menu.
   void HideSelectPopupMenu();
 
@@ -263,7 +264,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   void OnSelectionEvent(ui::SelectionEventType event,
                         const gfx::PointF& selection_anchor,
                         const gfx::RectF& selection_rect);
-  scoped_ptr<ui::TouchHandleDrawable> CreatePopupTouchHandleDrawable();
 
   void StartContentIntent(const GURL& content_url);
 

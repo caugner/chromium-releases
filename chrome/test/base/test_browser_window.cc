@@ -134,6 +134,10 @@ LocationBar* TestBrowserWindow::GetLocationBar() const {
   return const_cast<TestLocationBar*>(&location_bar_);
 }
 
+ToolbarActionsBar* TestBrowserWindow::GetToolbarActionsBar() {
+  return nullptr;
+}
+
 bool TestBrowserWindow::PreHandleKeyboardEvent(
     const content::NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
@@ -158,10 +162,6 @@ bool TestBrowserWindow::IsToolbarVisible() const {
 
 gfx::Rect TestBrowserWindow::GetRootWindowResizerRect() const {
   return gfx::Rect();
-}
-
-bool TestBrowserWindow::ShowSessionCrashedBubble() {
-  return false;
 }
 
 bool TestBrowserWindow::IsProfileResetBubbleSupported() const {

@@ -10,24 +10,20 @@ source_set("media") {
     "cast_browser_cdm_factory.h",
     "cast_media_client_android.cc",
     "cast_media_client_android.h",
+    "cma_media_pipeline_client.cc",
+    "cma_media_pipeline_client.h",
     "cma_message_filter_host.cc",
     "cma_message_filter_host.h",
     "media_pipeline_host.cc",
     "media_pipeline_host.h",
   ]
 
-  if (chromecast_branding == "public" && !is_android) {
-    sources += [ "cast_browser_cdm_factory_simple.cc" ]
-  }
-
   deps = [
     "//base",
+    "//chromecast/base",
     "//chromecast/common/media",
     "//chromecast/media",
-    "//chromecast/public",
-    "//chromecast/public/media",
     "//content/public/browser",
     "//media",
-    "//ui/gfx/geometry",
   ]
 }

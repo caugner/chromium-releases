@@ -14,6 +14,7 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
@@ -34,9 +35,11 @@
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
+#include "chrome/browser/extensions/api/braille_display_private/stub_braille_controller.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -57,6 +60,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -77,6 +81,7 @@ using content::RenderViewHost;
 using extensions::api::braille_display_private::BrailleController;
 using extensions::api::braille_display_private::DisplayState;
 using extensions::api::braille_display_private::KeyEvent;
+using extensions::api::braille_display_private::StubBrailleController;
 
 namespace chromeos {
 
@@ -87,9 +92,14 @@ static chromeos::AccessibilityManager* g_accessibility_manager = NULL;
 static BrailleController* g_braille_controller_for_test = NULL;
 
 BrailleController* GetBrailleController() {
-  return g_braille_controller_for_test
-      ? g_braille_controller_for_test
-      : BrailleController::GetInstance();
+  if (g_braille_controller_for_test)
+    return g_braille_controller_for_test;
+  // Don't use the real braille controller for tests to avoid automatically
+  // starting ChromeVox which confuses some tests.
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kTestType))
+    return StubBrailleController::GetInstance();
+  return BrailleController::GetInstance();
 }
 
 base::FilePath GetChromeVoxPath() {
@@ -474,9 +484,10 @@ void AccessibilityManager::UpdateLargeCursorFromPref() {
 }
 
 bool AccessibilityManager::IsIncognitoAllowed() {
-  // Supervised users can't create incognito-mode windows.
-  return !user_manager::UserManager::Get()->IsLoggedInAsSupervisedUser() &&
-         !user_manager::UserManager::Get()->IsLoggedInAsChildUser();
+  return profile_ != NULL &&
+         profile_->GetProfileType() != Profile::GUEST_PROFILE &&
+         IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
+             IncognitoModePrefs::DISABLED;
 }
 
 bool AccessibilityManager::IsLargeCursorEnabled() {
@@ -939,6 +950,10 @@ void AccessibilityManager::SetProfile(Profile* profile) {
 
 void AccessibilityManager::ActiveUserChanged(const std::string& user_id) {
   SetProfile(ProfileManager::GetActiveUserProfile());
+}
+
+void AccessibilityManager::OnAppTerminating() {
+  session_state_observer_.reset();
 }
 
 void AccessibilityManager::SetProfileForTest(Profile* profile) {

@@ -13,15 +13,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/sync/chrome_sync_client.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/sync_backend_host_core.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/supervised_user_signin_manager_wrapper.h"
 #include "chrome/browser/sync/test/test_http_bridge_factory.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/sync_driver/profile_sync_components_factory.h"
+#include "components/sync_driver/signin_manager_wrapper.h"
+#include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/test/sync_manager_factory_for_profile_sync_test.h"
 #include "sync/internal_api/public/test/test_internal_components_factory.h"
@@ -29,6 +30,7 @@
 #include "sync/protocol/encryption.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+using content::BrowserThread;
 using syncer::InternalComponentsFactory;
 using syncer::TestInternalComponentsFactory;
 using syncer::UserShare;
@@ -37,12 +39,17 @@ namespace browser_sync {
 
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
+    const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
     invalidation::InvalidationService* invalidator,
     const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
     base::Closure callback)
     : browser_sync::SyncBackendHostImpl(
-        profile->GetDebugName(), profile, invalidator,
-        sync_prefs, base::FilePath(FILE_PATH_LITERAL("test"))),
+          profile->GetDebugName(),
+          profile,
+          ui_thread,
+          invalidator,
+          sync_prefs,
+          base::FilePath(FILE_PATH_LITERAL("test"))),
       callback_(callback) {}
 
 SyncBackendHostForProfileSyncTest::~SyncBackendHostForProfileSyncTest() {}
@@ -112,16 +119,16 @@ TestProfileSyncService::GetJsEventHandler() {
 }
 
 TestProfileSyncService::TestProfileSyncService(
-    scoped_ptr<ProfileSyncComponentsFactory> factory,
     Profile* profile,
     SigninManagerBase* signin,
     ProfileOAuth2TokenService* oauth2_token_service,
     browser_sync::ProfileSyncServiceStartBehavior behavior)
     : ProfileSyncService(
-          factory.Pass(),
+          make_scoped_ptr(new browser_sync::ChromeSyncClient(
+              profile,
+              make_scoped_ptr(new ProfileSyncComponentsFactoryMock))),
           profile,
-          make_scoped_ptr(new SupervisedUserSigninManagerWrapper(profile,
-                                                                 signin)),
+          make_scoped_ptr(new SigninManagerWrapper(signin)),
           oauth2_token_service,
           behavior) {
   SetSyncSetupCompleted();
@@ -139,8 +146,6 @@ scoped_ptr<KeyedService> TestProfileSyncService::TestFactoryFunction(
   ProfileOAuth2TokenService* oauth2_token_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
   return make_scoped_ptr(new TestProfileSyncService(
-      scoped_ptr<ProfileSyncComponentsFactory>(
-          new ProfileSyncComponentsFactoryMock()),
       profile, signin, oauth2_token_service, browser_sync::AUTO_START));
 }
 
@@ -151,25 +156,26 @@ TestProfileSyncService* TestProfileSyncService::BuildAutoStartAsyncInit(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile, &TestProfileSyncService::TestFactoryFunction));
   ProfileSyncComponentsFactoryMock* components =
-      sync_service->components_factory_mock();
+      sync_service->GetSyncApiComponentFactoryMock();
   // TODO(tim): Convert to a fake instead of mock.
-  EXPECT_CALL(*components,
-              CreateSyncBackendHost(testing::_,testing::_, testing::_,
-                                    testing::_, testing::_)).
-      WillOnce(testing::Return(
-          new browser_sync::SyncBackendHostForProfileSyncTest(
+  EXPECT_CALL(*components, CreateSyncBackendHost(testing::_, testing::_,
+                                                 testing::_, testing::_))
+      .WillOnce(
+          testing::Return(new browser_sync::SyncBackendHostForProfileSyncTest(
               profile,
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
               invalidation::ProfileInvalidationProviderFactory::GetForProfile(
-                  profile)->GetInvalidationService(),
-              sync_service->sync_prefs_.AsWeakPtr(),
-              callback)));
+                  profile)
+                  ->GetInvalidationService(),
+              sync_service->sync_prefs_.AsWeakPtr(), callback)));
   return sync_service;
 }
 
 ProfileSyncComponentsFactoryMock*
-TestProfileSyncService::components_factory_mock() {
+TestProfileSyncService::GetSyncApiComponentFactoryMock() {
   // We always create a mock factory, see Build* routines.
-  return static_cast<ProfileSyncComponentsFactoryMock*>(factory());
+  return static_cast<ProfileSyncComponentsFactoryMock*>(
+      GetSyncClient()->GetSyncApiComponentFactory());
 }
 
 void TestProfileSyncService::OnConfigureDone(

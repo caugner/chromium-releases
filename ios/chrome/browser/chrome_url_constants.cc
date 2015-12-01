@@ -4,5 +4,9 @@
 
 #include "ios/chrome/browser/chrome_url_constants.h"
 
+const char kChromeUINewTabURL[] = "chrome://newtab/";
+
 const char kChromeUIExternalFileHost[] = "external-file";
+const char kChromeUINetExportHost[] = "net-export";
 const char kChromeUIOmahaHost[] = "omaha";
+const char kChromeUISyncInternalsHost[] = "sync-internals";

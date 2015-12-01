@@ -11,7 +11,6 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -70,11 +69,7 @@ public class AppBannerManager extends EmptyTabObserver {
      * @param tab Tab that the AppBannerManager will be attached to.
      */
     public AppBannerManager(Tab tab, Context context) {
-        int iconSizePx = context.getResources().getDimensionPixelSize(R.dimen.app_banner_icon_size);
-        float density = context.getResources().getDisplayMetrics().density;
-        int iconSizeDp = (int) (iconSizePx / density);
-
-        mNativePointer = nativeInit(iconSizeDp);
+        mNativePointer = nativeInit();
         mTab = tab;
         updatePointers();
     }
@@ -172,7 +167,7 @@ public class AppBannerManager extends EmptyTabObserver {
         return nativeIsFetcherActive(mNativePointer);
     }
 
-    private native long nativeInit(int iconSize);
+    private native long nativeInit();
     private native void nativeDestroy(long nativeAppBannerManagerAndroid);
     private native void nativeReplaceWebContents(long nativeAppBannerManagerAndroid,
             WebContents webContents);

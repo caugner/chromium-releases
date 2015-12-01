@@ -64,10 +64,10 @@ protected:
     void processDisplayItem(const DisplayItem& displayItem) { m_builder.processDisplayItem(displayItem); }
     void processDisplayItem(PassOwnPtr<DisplayItem> displayItem) { processDisplayItem(*displayItem); }
     void processDummyDisplayItem() { processDisplayItem(DummyDisplayItem(newDummyClient())); }
-    const DummyClient& processBeginTransform3D(const TransformationMatrix& transform)
+    const DummyClient& processBeginTransform3D(const TransformationMatrix& transform, const FloatPoint3D& transformOrigin = FloatPoint3D())
     {
         const DummyClient& client = newDummyClient();
-        processDisplayItem(BeginTransform3DDisplayItem(client, DisplayItem::Transform3DElementTransform, transform));
+        processDisplayItem(BeginTransform3DDisplayItem(client, DisplayItem::Transform3DElementTransform, transform, transformOrigin));
         return client;
     }
     void processEndTransform3D(const DummyClient& client)
@@ -413,6 +413,29 @@ TEST_F(DisplayItemPropertyTreeBuilderTest, ScrollDisplayItemIs2DTranslation)
         AllOf(hasRange(0, 1), hasTransformNode(0), hasOffset(FloatSize(0, 0))),
         AllOf(hasRange(2, 3), hasTransformNode(0), hasOffset(FloatSize(90, -400))),
         AllOf(hasRange(4, 5), hasTransformNode(0), hasOffset(FloatSize(0, 0)))));
+}
+
+TEST_F(DisplayItemPropertyTreeBuilderTest, TransformTreeIncludesTransformOrigin)
+{
+    FloatPoint3D transformOrigin(1, 2, 3);
+    TransformationMatrix matrix;
+    matrix.scale3d(2, 2, 2);
+
+    auto transformClient = processBeginTransform3D(matrix, transformOrigin);
+    processDummyDisplayItem();
+    processEndTransform3D(transformClient);
+    finishPropertyTrees();
+
+    // There should be two transform nodes.
+    ASSERT_EQ(2u, transformTree().nodeCount());
+    EXPECT_TRUE(transformTree().nodeAt(0).isRoot());
+
+    // And the non-root node should have both the matrix and the origin,
+    // separately.
+    const auto& transformNode = transformTree().nodeAt(1);
+    EXPECT_EQ(0u, transformNode.parentNodeIndex);
+    EXPECT_EQ(TransformationMatrix::toSkMatrix44(matrix), transformNode.matrix);
+    EXPECT_EQ(transformOrigin, transformNode.transformOrigin);
 }
 
 } // namespace

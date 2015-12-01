@@ -4,11 +4,13 @@
 
 #include "chrome/browser/safe_browsing/incident_reporting/state_store.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
+#include "chrome/browser/safe_browsing/incident_reporting/platform_state_store.h"
 #include "chrome/common/pref_names.h"
 
 namespace safe_browsing {
@@ -26,6 +28,8 @@ StateStore::Transaction::~Transaction() {
 #if DCHECK_IS_ON()
   store_->has_transaction_ = false;
 #endif
+  if (pref_update_)
+    platform_state_store::Store(store_->profile_, store_->incidents_sent_);
 }
 
 void StateStore::Transaction::MarkAsReported(IncidentType type,
@@ -40,6 +44,26 @@ void StateStore::Transaction::MarkAsReported(IncidentType type,
     incidents_sent->SetWithoutPathExpansion(type_string, type_dict);
   }
   type_dict->SetStringWithoutPathExpansion(key, base::UintToString(digest));
+}
+
+void StateStore::Transaction::Clear(IncidentType type, const std::string& key) {
+  // Nothing to do if the pref dict does not exist.
+  if (!store_->incidents_sent_)
+    return;
+
+  // Use the read-only view on the preference to figure out if there is a value
+  // to remove before committing to making a change since any use of GetPrefDict
+  // will result in a full serialize-and-write operation on the preferences
+  // store.
+  std::string type_string(base::IntToString(static_cast<int32_t>(type)));
+  const base::DictionaryValue* const_type_dict = nullptr;
+  if (store_->incidents_sent_->GetDictionaryWithoutPathExpansion(
+          type_string, &const_type_dict) &&
+      const_type_dict->GetWithoutPathExpansion(key, nullptr)) {
+    base::DictionaryValue* type_dict = nullptr;
+    GetPrefDict()->GetDictionaryWithoutPathExpansion(type_string, &type_dict);
+    type_dict->RemoveWithoutPathExpansion(key, nullptr);
+  }
 }
 
 void StateStore::Transaction::ClearForType(IncidentType type) {
@@ -59,6 +83,12 @@ void StateStore::Transaction::ClearForType(IncidentType type) {
   }
 }
 
+void StateStore::Transaction::ClearAll() {
+  // Clear the preference if it exists and contains any values.
+  if (store_->incidents_sent_ && !store_->incidents_sent_->empty())
+    GetPrefDict()->Clear();
+}
+
 base::DictionaryValue* StateStore::Transaction::GetPrefDict() {
   if (!pref_update_) {
     pref_update_.reset(new DictionaryPrefUpdate(
@@ -69,6 +99,11 @@ base::DictionaryValue* StateStore::Transaction::GetPrefDict() {
     store_->incidents_sent_ = pref_update_->Get();
   }
   return pref_update_->Get();
+}
+
+void StateStore::Transaction::ReplacePrefDict(
+    scoped_ptr<base::DictionaryValue> pref_dict) {
+  GetPrefDict()->Swap(pref_dict.get());
 }
 
 
@@ -88,8 +123,26 @@ StateStore::StateStore(Profile* profile)
   if (value)
     value->GetAsDictionary(&incidents_sent_);
 
+  // Apply the platform data.
   Transaction transaction(this);
-  CleanLegacyValues(&transaction);
+  scoped_ptr<base::DictionaryValue> value_dict(
+      platform_state_store::Load(profile_));
+
+  InitializationResult state_store_init_result = PSS_MATCHES;
+  if (!value_dict) {
+    state_store_init_result = PSS_NULL;
+  } else if (value_dict->empty()) {
+    if (incidents_sent_ && !incidents_sent_->empty())
+      state_store_init_result = PSS_EMPTY;
+    transaction.ClearAll();
+  } else if (!incidents_sent_ || !incidents_sent_->Equals(value_dict.get())) {
+    state_store_init_result = PSS_DIFFERS;
+    transaction.ReplacePrefDict(value_dict.Pass());
+  }
+  UMA_HISTOGRAM_ENUMERATION("SBIRS.StateStoreInit", state_store_init_result,
+                            NUM_INITIALIZATION_RESULTS);
+  if (incidents_sent_)
+    CleanLegacyValues(&transaction);
 }
 
 StateStore::~StateStore() {

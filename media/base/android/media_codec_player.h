@@ -11,7 +11,9 @@
 #include "base/threading/thread.h"
 #include "base/time/default_tick_clock.h"
 #include "media/base/android/demuxer_android.h"
+#include "media/base/android/media_drm_bridge.h"
 #include "media/base/android/media_player_android.h"
+#include "media/base/android/media_statistics.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_export.h"
 #include "media/base/time_delta_interpolator.h"
@@ -32,6 +34,10 @@
 //        |
 //        |
 //        | <----------------------------------------------
+//        |                                                |
+//   [ Waiting for permission ]                            |
+//        |                                                |
+//        |                                                |
 //        v                                                |
 //   [ Prefetching ] -------------------                   |
 //        |                             |                  |
@@ -54,17 +60,27 @@
 //    |                            ^  |                              /
 //    |                            |  |                             /
 //    |                    Pause:  |  | Start w/config:            /
-//    |                            |  |    dec.Prefetch           /
+//    |        Permission denied:  |  |    requestPermission      /
 //    |                            |  |                          /
 //    |                            |  |                         /
 //    |                            |  |                        /
 //    |                            |  |                       / DemuxerConfigs:
-//    |                            |  |                      /    dec.Prefetch
+//    |                            |  |                      / requestPermission
 //    |                            |  |                     /
 //    |                            |  |                    /
 //    |                            |  v                   /
 //    |                                                  /
-//    |   ------------------> [ Prefetching ]  <--------/      [   Waiting   ]
+//    |   ------------------> [ Waiting for ]  <--------/
+//    |   |                   [ permission  ]
+//    |   |                          |
+//    |   |                          |
+//    |   |                          | Permission granted:
+//    |   |                          |     dec.Prefetch
+//    |   |                          |
+//    |   |                          |
+//    |   |                          v
+//    |   |
+//    |   |                   [ Prefetching ]                  [   Waiting   ]
 //    |   |                   [             ] -------------->  [ for surface ]
 //    |   |                          |         PrefetchDone,         /
 //    |   |                          |          no surface:         /
@@ -102,17 +118,23 @@
 //                                           |         |  |
 //                                           |         |  |
 //                                           |         |  | Start:
-//                    Seek:                  |         |  |   SetPendingStart
-//                      dec.Stop             |         |  |
-//                      SetPendingSeek       |         |  |
+//                                           |         |  |   SetPendingStart
+//                Seek: dec.Stop             |         |  |
+//                      SetPendingStart      |         |  |
 //                      demuxer.RequestSeek  |         |  |
-//  [ Prefetching ] -----------------------> |         |  |
-//  [             ] <----------------------  |         |  | Pause:
-//        |          SeekDone                |         |  |   RemovePendingStart
+//  [ Waiting for ] -----------------------> |         |  |
+//  [ permission  ] <----------------------  |         |  | Pause:
+//                   SeekDone                |         |  |   RemovePendingStart
 //        |          w/pending start:        |         |  |
-//        |            dec.Prefetch          | Waiting |  |
+//        |            requestPermission     | Waiting |  |
 //        |                                  |   for   |  | Seek:
 //        |                                  |   seek  |  |   SetPendingSeek
+//        |                                  |         |  |
+//        |       Seek: dec.Stop             |         |  |
+//        v             SetPendingStart      |         |  |
+//                      demuxer.RequestSeek  |         |  |
+//   [ Prefetching ] ----------------------> |         |  |
+//                                           |         |  |
 //        |                                  |         |  |
 //        | PrefetchDone: dec.Start          |         |  |
 //        |                                  |         |  | SeekDone
@@ -139,9 +161,6 @@ class BrowserCdm;
 class MediaCodecAudioDecoder;
 class MediaCodecVideoDecoder;
 
-// Returns the task runner for the media thread
-MEDIA_EXPORT scoped_refptr<base::SingleThreadTaskRunner> GetMediaTaskRunner();
-
 class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
                                       public DemuxerAndroidClient {
  public:
@@ -157,13 +176,22 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
 
   typedef base::Callback<void(int)> ErrorCallback;
 
+  // For testing only.
+  typedef base::Callback<void(DemuxerStream::Type,
+                              base::TimeDelta,
+                              base::TimeDelta)> DecodersTimeCallback;
+
+  // For testing only.
+  typedef base::Callback<void(DemuxerStream::Type)> CodecCreatedCallback;
+
   // Constructs a player with the given ID and demuxer. |manager| must outlive
   // the lifetime of this object.
-  MediaCodecPlayer(int player_id,
-                   base::WeakPtr<MediaPlayerManager> manager,
-                   const RequestMediaResourcesCB& request_media_resources_cb,
-                   scoped_ptr<DemuxerAndroid> demuxer,
-                   const GURL& frame_url);
+  MediaCodecPlayer(
+      int player_id,
+      base::WeakPtr<MediaPlayerManager> manager,
+      const OnDecoderResourcesReleasedCB& on_decoder_resources_released_cb,
+      scoped_ptr<DemuxerAndroid> demuxer,
+      const GURL& frame_url);
   ~MediaCodecPlayer() override;
 
   // A helper method that performs the media thread part of initialization.
@@ -194,15 +222,24 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   void OnDemuxerSeekDone(base::TimeDelta actual_browser_seek_time) override;
   void OnDemuxerDurationChanged(base::TimeDelta duration) override;
 
+  // For testing only.
+  void SetDecodersTimeCallbackForTests(DecodersTimeCallback cb);
+  void SetCodecCreatedCallbackForTests(CodecCreatedCallback cb);
+  void SetAlwaysReconfigureForTests(DemuxerStream::Type type);
+  bool IsPrerollingForTests(DemuxerStream::Type type) const;
+
  private:
   // The state machine states.
   enum PlayerState {
     kStatePaused,
     kStateWaitingForConfig,
+    kStateWaitingForPermission,
     kStatePrefetching,
     kStatePlaying,
     kStateStopping,
     kStateWaitingForSurface,
+    kStateWaitingForKey,
+    kStateWaitingForMediaCrypto,
     kStateWaitingForSeek,
     kStateError,
   };
@@ -210,6 +247,7 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   enum StartStatus {
     kStartOk = 0,
     kStartBrowserSeekRequired,
+    kStartCryptoRequired,
     kStartFailed,
   };
 
@@ -228,6 +266,12 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   };
 
   // MediaPlayerAndroid implementation.
+
+  // This method requests playback permission from the manager on UI thread,
+  // passing total duration as an argiment. The duration must be known by the
+  // time of the call. The method posts the result to the media thread.
+  void RequestPermissionAndPostResult(base::TimeDelta duration) override;
+
   // This method caches the data and calls manager's OnMediaMetadataChanged().
   void OnMediaMetadataChanged(base::TimeDelta duration,
                               const gfx::Size& video_size) override;
@@ -236,19 +280,31 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   void OnTimeUpdate(base::TimeDelta current_timestamp,
                     base::TimeTicks current_time_ticks) override;
 
+  // Callback from manager
+  void OnPermissionDecided(bool granted);
+
   // Callbacks from decoders
   void RequestDemuxerData(DemuxerStream::Type stream_type);
   void OnPrefetchDone();
-  void OnStopDone();
+  void OnPrerollDone();
+  void OnDecoderDrained(DemuxerStream::Type type);
+  void OnStopDone(DemuxerStream::Type type);
+  void OnMissingKeyReported(DemuxerStream::Type type);
   void OnError();
   void OnStarvation(DemuxerStream::Type stream_type);
   void OnTimeIntervalUpdate(DemuxerStream::Type stream_type,
                             base::TimeDelta now_playing,
-                            base::TimeDelta last_buffered);
+                            base::TimeDelta last_buffered,
+                            bool postpone);
 
   // Callbacks from video decoder
-  void OnVideoCodecCreated();
   void OnVideoResolutionChanged(const gfx::Size& size);
+
+  // Callbacks from CDM
+  void OnMediaCryptoReady(MediaDrmBridge::JavaObjectPtr media_crypto,
+                          bool needs_protected_surface);
+  void OnKeyAdded();
+  void OnCdmUnset();
 
   // Operations called from the state machine.
   void SetState(PlayerState new_state);
@@ -259,9 +315,13 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   bool HasVideo() const;
   bool HasAudio() const;
   void SetDemuxerConfigs(const DemuxerConfigs& configs);
+  void RequestPlayPermission();
   void StartPrefetchDecoders();
   void StartPlaybackOrBrowserSeek();
   StartStatus StartPlaybackDecoders();
+  StartStatus ConfigureDecoders();
+  StartStatus MaybePrerollDecoders(bool* preroll_required);
+  StartStatus StartDecoders();
   void StopDecoders();
   void RequestToStopDecoders();
   void RequestDemuxerSeek(base::TimeDelta seek_time,
@@ -290,9 +350,9 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   PlayerState state_;
 
   // Notification callbacks, they call MediaPlayerManager.
-  base::Closure request_resources_cb_;
   TimeUpdateCallback time_update_cb_;
   base::Closure completion_cb_;
+  base::Closure waiting_for_decryption_key_cb_;
   SeekDoneCallback seek_done_cb_;
   ErrorCallback error_cb_;
 
@@ -331,6 +391,27 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
 
   // Cached current time, accessed on UI thread.
   base::TimeDelta current_time_cache_;
+
+  // For testing only.
+  DecodersTimeCallback decoders_time_cb_;
+
+  // DRM
+  MediaDrmBridge::JavaObjectPtr media_crypto_;
+
+  MediaDrmBridge* drm_bridge_;
+  int cdm_registration_id_;
+
+  // The flag is set when the player receives the error from decoder that the
+  // decoder needs a new decryption key. Cleared on starting the playback.
+  bool key_is_required_;
+
+  // The flag is set after the new encryption key is added to MediaDrm. Cleared
+  // on starting the playback.
+  bool key_is_added_;
+
+  // Gathers and reports playback quality statistics to UMA.
+  // Use pointer to enable replacement of this object for tests.
+  scoped_ptr<MediaStatistics> media_stat_;
 
   base::WeakPtr<MediaCodecPlayer> media_weak_this_;
   // NOTE: Weak pointers must be invalidated before all other member variables.

@@ -10,7 +10,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/services/gcm/fake_gcm_profile_service.h"
@@ -31,6 +30,7 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 
 const std::string kGaiaId = "gaiaid-user@gmail.com";
 const std::string kEmail = "user@gmail.com";
@@ -59,14 +59,13 @@ class ProfileChooserControllerTest : public CocoaProfileTest {
     gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactory(
         browser()->profile(), gcm::FakeGCMProfileService::Build);
 
-    testing_profile_manager()->
-        CreateTestingProfile("test1", scoped_ptr<PrefServiceSyncable>(),
-                             base::ASCIIToUTF16("Test 1"), 0, std::string(),
-                             testing_factories());
-    testing_profile_manager()->
-        CreateTestingProfile("test2", scoped_ptr<PrefServiceSyncable>(),
-                             base::ASCIIToUTF16("Test 2"), 1, std::string(),
-                             TestingProfile::TestingFactories());
+    testing_profile_manager()->CreateTestingProfile(
+        "test1", scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+        base::ASCIIToUTF16("Test 1"), 0, std::string(), testing_factories());
+    testing_profile_manager()->CreateTestingProfile(
+        "test2", scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+        base::ASCIIToUTF16("Test 2"), 1, std::string(),
+        TestingProfile::TestingFactories());
 
     menu_ = new AvatarMenu(testing_profile_manager()->profile_info_cache(),
                            NULL, NULL);
@@ -151,8 +150,6 @@ class ProfileChooserControllerTest : public CocoaProfileTest {
 };
 
 TEST_F(ProfileChooserControllerTest, InitialLayoutWithNewMenu) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   StartProfileChooserController();
 
   NSArray* subviews = [[[controller() window] contentView] subviews];
@@ -218,8 +215,6 @@ TEST_F(ProfileChooserControllerTest, InitialLayoutWithNewMenu) {
 }
 
 TEST_F(ProfileChooserControllerTest, RightClickTutorialShownAfterWelcome) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   // The welcome upgrade tutorial takes precedence so show it then dismiss it.
   // The right click tutorial should be shown right away.
   StartProfileChooserControllerWithTutorialMode(
@@ -230,8 +225,6 @@ TEST_F(ProfileChooserControllerTest, RightClickTutorialShownAfterWelcome) {
 }
 
 TEST_F(ProfileChooserControllerTest, RightClickTutorialShownAfterReopen) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   // The welcome upgrade tutorial takes precedence so show it then close the
   // menu. Reopening the menu should show the tutorial.
   StartProfileChooserController();
@@ -248,8 +241,6 @@ TEST_F(ProfileChooserControllerTest, RightClickTutorialShownAfterReopen) {
 }
 
 TEST_F(ProfileChooserControllerTest, RightClickTutorialNotShownAfterDismiss) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   // The welcome upgrade tutorial takes precedence so show it then close the
   // menu. Reopening the menu should show the tutorial.
   StartProfileChooserController();
@@ -281,19 +272,16 @@ TEST_F(ProfileChooserControllerTest, RightClickTutorialNotShownAfterDismiss) {
 }
 
 TEST_F(ProfileChooserControllerTest, OtherProfilesSortedAlphabetically) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
-
   // Add two extra profiles, to make sure sorting is alphabetical and not
   // by order of creation.
-  testing_profile_manager()->
-      CreateTestingProfile("test3", scoped_ptr<PrefServiceSyncable>(),
-                           base::ASCIIToUTF16("New Profile"), 1, std::string(),
-                           TestingProfile::TestingFactories());
-  testing_profile_manager()->
-      CreateTestingProfile("test4", scoped_ptr<PrefServiceSyncable>(),
-                           base::ASCIIToUTF16("Another Test"), 1, std::string(),
-                           TestingProfile::TestingFactories());
+  testing_profile_manager()->CreateTestingProfile(
+      "test3", scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+      base::ASCIIToUTF16("New Profile"), 1, std::string(),
+      TestingProfile::TestingFactories());
+  testing_profile_manager()->CreateTestingProfile(
+      "test4", scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+      base::ASCIIToUTF16("Another Test"), 1, std::string(),
+      TestingProfile::TestingFactories());
   StartFastUserSwitcher();
 
   NSArray* subviews = [[[controller() window] contentView] subviews];
@@ -322,8 +310,6 @@ TEST_F(ProfileChooserControllerTest, OtherProfilesSortedAlphabetically) {
 
 TEST_F(ProfileChooserControllerTest,
     LocalProfileActiveCardLinksWithNewMenu) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   StartProfileChooserController();
   NSArray* subviews = [[[controller() window] contentView] subviews];
   ASSERT_EQ(2U, [subviews count]);
@@ -370,8 +356,6 @@ TEST_F(ProfileChooserControllerTest,
 
 TEST_F(ProfileChooserControllerTest,
     SignedInProfileActiveCardLinksWithNewMenu) {
-  switches::EnableNewAvatarMenuForTesting(
-      base::CommandLine::ForCurrentProcess());
   // Sign in the first profile.
   ProfileInfoCache* cache = testing_profile_manager()->profile_info_cache();
   cache->SetAuthInfoOfProfileAtIndex(0, kGaiaId, base::ASCIIToUTF16(kEmail));

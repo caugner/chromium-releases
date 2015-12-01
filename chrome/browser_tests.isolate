@@ -50,13 +50,6 @@
         ],
       },
     }],
-    ['OS=="linux" and libpeer_target_type=="loadable_module"', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/lib/libpeerconnection.so',
-        ],
-      },
-    }],
     ['OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
         'files': [
@@ -78,7 +71,6 @@
           '../third_party/safe_browsing/',
           '../third_party/simplejson/',
           '../third_party/tlslite/',
-          '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
           '<(PRODUCT_DIR)/browser_tests.pak',
           '<(PRODUCT_DIR)/pseudo_locales/',
           '<(PRODUCT_DIR)/pyproto/',

@@ -3450,6 +3450,8 @@ TEST_F(HistoryBackendTest, ExpireHistoryForTimes) {
 
   std::set<base::Time> times;
   times.insert(args[5].time);
+  // Invalid time (outside range), should have no effect.
+  times.insert(base::Time::FromInternalValue(10));
   backend_->ExpireHistoryForTimes(times,
                                   base::Time::FromInternalValue(2),
                                   base::Time::FromInternalValue(8));
@@ -3492,7 +3494,7 @@ TEST_F(HistoryBackendTest, ExpireHistory) {
   // Insert 4 entries into the database.
   HistoryAddPageArgs args[4];
   for (size_t i = 0; i < arraysize(args); ++i) {
-    args[i].url = GURL("http://example" + base::IntToString(i) + ".com");
+    args[i].url = GURL("http://example" + base::SizeTToString(i) + ".com");
     args[i].time = reference_time + base::TimeDelta::FromDays(i);
     backend_->AddPage(args[i]);
   }

@@ -6,10 +6,7 @@ package org.chromium.chrome.browser.webapps;
 
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
-import android.text.TextUtils;
-import android.util.Base64;
 import android.util.Log;
 
 import org.chromium.chrome.browser.ShortcutHelper;
@@ -179,12 +176,37 @@ public class WebappInfo {
     }
 
     /**
+     * Returns whether the theme color specified in the Intent is valid.
+     * A theme color isn't valid if its value is ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING;
+     */
+    public boolean hasValidThemeColor() {
+        return mThemeColor != ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING;
+    }
+
+    /**
      * Background color is actually a 32 bit unsigned integer which encodes a color
      * in ARGB format. mBackgroundColor is a long because we also need to encode the
      * error state of ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING.
      */
     public long backgroundColor() {
         return mBackgroundColor;
+    }
+
+    /**
+     * Returns whether the background color specified in the Intent is valid.
+     * A background color isn't valid if its value is
+     * ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING.
+     */
+    public boolean hasValidBackgroundColor() {
+        return mBackgroundColor != ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING;
+    }
+
+    /**
+     * Returns the background color specified by {@link #backgroundColor()} if
+     * the value is valid. Returns the specified fallback color otherwise.
+     */
+    public int backgroundColor(int fallback) {
+        return hasValidBackgroundColor() ? (int) mBackgroundColor : fallback;
     }
 
     // This is needed for clients that want to send the icon trough an intent.
@@ -197,10 +219,7 @@ public class WebappInfo {
      */
     public Bitmap icon() {
         if (mDecodedIcon != null) return mDecodedIcon;
-        if (TextUtils.isEmpty(mEncodedIcon)) return null;
-
-        byte[] decoded = Base64.decode(mEncodedIcon, Base64.DEFAULT);
-        mDecodedIcon = BitmapFactory.decodeByteArray(decoded, 0, decoded.length);
+        mDecodedIcon = ShortcutHelper.decodeBitmapFromString(mEncodedIcon);
         return mDecodedIcon;
     }
 

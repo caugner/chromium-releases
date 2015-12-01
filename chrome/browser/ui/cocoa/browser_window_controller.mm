@@ -15,7 +15,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
-#import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -31,17 +30,19 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_observer_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
+#import "chrome/browser/ui/cocoa/browser_window_command_handler.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/browser_window_layout.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
@@ -73,7 +74,6 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
-#include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
@@ -95,6 +95,7 @@
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#import "ui/gfx/mac/coordinate_conversion.h"
 #include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
 
 using bookmarks::BookmarkModel;
@@ -225,6 +226,11 @@ using content::WebContents;
     browser_.reset(browser);
     ownsBrowser_ = ownIt;
     NSWindow* window = [self window];
+    // Make the window handle browser window commands.
+    [base::mac::ObjCCastStrict<ChromeEventProcessingWindow>(window)
+        setCommandHandler:[[[BrowserWindowCommandHandler alloc] init]
+                              autorelease]];
+
     // Make the content view for the window have a layer. This will make all
     // sub-views have layers. This is necessary to ensure correct layer
     // ordering of all child views and their layers.
@@ -1060,208 +1066,6 @@ using content::WebContents;
   }
 }
 
-// Update a toggle state for an NSMenuItem if modified.
-// Take care to ensure |item| looks like a NSMenuItem.
-// Called by validateUserInterfaceItem:.
-- (void)updateToggleStateWithTag:(NSInteger)tag forItem:(id)item {
-  if (![item respondsToSelector:@selector(state)] ||
-      ![item respondsToSelector:@selector(setState:)])
-    return;
-
-  // On Windows this logic happens in bookmark_bar_view.cc.  On the
-  // Mac we're a lot more MVC happy so we've moved it into a
-  // controller.  To be clear, this simply updates the menu item; it
-  // does not display the bookmark bar itself.
-  if (tag == IDC_SHOW_BOOKMARK_BAR) {
-    bool toggled = windowShim_->IsBookmarkBarVisible();
-    NSInteger oldState = [(NSMenuItem*)item state];
-    NSInteger newState = toggled ? NSOnState : NSOffState;
-    if (oldState != newState)
-      [item setState:newState];
-  }
-
-  // Update the checked/Unchecked state of items in the encoding menu.
-  // On Windows, this logic is part of |EncodingMenuModel| in
-  // browser/ui/views/toolbar_view.h.
-  EncodingMenuController encoding_controller;
-  if (encoding_controller.DoesCommandBelongToEncodingMenu(tag)) {
-    DCHECK(browser_.get());
-    Profile* profile = browser_->profile();
-    DCHECK(profile);
-    WebContents* current_tab =
-        browser_->tab_strip_model()->GetActiveWebContents();
-    if (!current_tab)
-      return;
-
-    const std::string encoding = current_tab->GetEncoding();
-
-    bool toggled = encoding_controller.IsItemChecked(profile, encoding, tag);
-    NSInteger oldState = [(NSMenuItem*)item state];
-    NSInteger newState = toggled ? NSOnState : NSOffState;
-    if (oldState != newState)
-      [item setState:newState];
-  }
-}
-
-// Called to validate menu and toolbar items when this window is key. All the
-// items we care about have been set with the |-commandDispatch:| or
-// |-commandDispatchUsingKeyModifiers:| actions and a target of FirstResponder
-// in IB. If it's not one of those, let it continue up the responder chain to be
-// handled elsewhere. We pull out the tag as the cross-platform constant to
-// differentiate and dispatch the various commands.
-// NOTE: we might have to handle state for app-wide menu items,
-// although we could cheat and directly ask the app controller if our
-// command_updater doesn't support the command. This may or may not be an issue,
-// too early to tell.
-- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
-  SEL action = [item action];
-  BOOL enable = NO;
-  if (action == @selector(commandDispatch:) ||
-      action == @selector(commandDispatchUsingKeyModifiers:)) {
-    NSInteger tag = [item tag];
-    if (chrome::SupportsCommand(browser_.get(), tag)) {
-      // Generate return value (enabled state)
-      enable = chrome::IsCommandEnabled(browser_.get(), tag);
-      switch (tag) {
-        case IDC_CLOSE_TAB:
-          // Disable "close tab" if the receiving window is not tabbed.
-          // We simply check whether the item has a keyboard shortcut set here;
-          // app_controller_mac.mm actually determines whether the item should
-          // be enabled.
-          if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item))
-            enable &= !![[menuItem keyEquivalent] length];
-          break;
-        case IDC_FULLSCREEN: {
-          if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
-            NSString* menuTitle = l10n_util::GetNSString(
-                [self isInAppKitFullscreen] && ![self inPresentationMode]
-                    ? IDS_EXIT_FULLSCREEN_MAC
-                    : IDS_ENTER_FULLSCREEN_MAC);
-            [menuItem setTitle:menuTitle];
-
-            if (!chrome::mac::SupportsSystemFullscreen())
-              [menuItem setHidden:YES];
-          }
-          break;
-        }
-        case IDC_PRESENTATION_MODE: {
-          if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
-            NSString* menuTitle = l10n_util::GetNSString(
-                [self inPresentationMode] ? IDS_EXIT_PRESENTATION_MAC :
-                                            IDS_ENTER_PRESENTATION_MAC);
-            [menuItem setTitle:menuTitle];
-          }
-          break;
-        }
-        case IDC_SHOW_SIGNIN: {
-          Profile* original_profile =
-              browser_->profile()->GetOriginalProfile();
-          [AppController updateSigninItem:item
-                               shouldShow:enable
-                           currentProfile:original_profile];
-          break;
-        }
-        case IDC_BOOKMARK_PAGE: {
-          // Extensions have the ability to hide the bookmark page menu item.
-          // This only affects the bookmark page menu item under the main menu.
-          // The bookmark page menu item under the wrench menu has its
-          // visibility controlled by WrenchMenuModel.
-          bool shouldHide =
-              chrome::ShouldRemoveBookmarkThisPageUI(browser_->profile());
-          NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item);
-          [menuItem setHidden:shouldHide];
-          break;
-        }
-        case IDC_BOOKMARK_ALL_TABS: {
-          // Extensions have the ability to hide the bookmark all tabs menu
-          // item.  This only affects the bookmark page menu item under the main
-          // menu.  The bookmark page menu item under the wrench menu has its
-          // visibility controlled by WrenchMenuModel.
-          bool shouldHide =
-              chrome::ShouldRemoveBookmarkOpenPagesUI(browser_->profile());
-          NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item);
-          [menuItem setHidden:shouldHide];
-          break;
-        }
-        default:
-          // Special handling for the contents of the Text Encoding submenu. On
-          // Mac OS, instead of enabling/disabling the top-level menu item, we
-          // enable/disable the submenu's contents (per Apple's HIG).
-          EncodingMenuController encoding_controller;
-          if (encoding_controller.DoesCommandBelongToEncodingMenu(tag)) {
-            enable &= chrome::IsCommandEnabled(browser_.get(),
-                                               IDC_ENCODING_MENU) ? YES : NO;
-          }
-      }
-
-      // If the item is toggleable, find its toggle state and
-      // try to update it.  This is a little awkward, but the alternative is
-      // to check after a commandDispatch, which seems worse.
-      [self updateToggleStateWithTag:tag forItem:item];
-    }
-  }
-  return enable;
-}
-
-// Called when the user picks a menu or toolbar item when this window is key.
-// Calls through to the browser object to execute the command. This assumes that
-// the command is supported and doesn't check, otherwise it would have been
-// disabled in the UI in validateUserInterfaceItem:.
-- (void)commandDispatch:(id)sender {
-  DCHECK(sender);
-  // Identify the actual BWC to which the command should be dispatched. It might
-  // belong to a background window, yet this controller gets it because it is
-  // the foreground window's controller and thus in the responder chain. Some
-  // senders don't have this problem (for example, menus only operate on the
-  // foreground window), so this is only an issue for senders that are part of
-  // windows.
-  BrowserWindowController* targetController = self;
-  if ([sender respondsToSelector:@selector(window)])
-    targetController = [[sender window] windowController];
-  DCHECK([targetController isKindOfClass:[BrowserWindowController class]]);
-  DCHECK(targetController->browser_.get());
-  chrome::ExecuteCommand(targetController->browser_.get(), [sender tag]);
-}
-
-// Same as |-commandDispatch:|, but executes commands using a disposition
-// determined by the key flags. If the window is in the background and the
-// command key is down, ignore the command key, but process any other modifiers.
-- (void)commandDispatchUsingKeyModifiers:(id)sender {
-  DCHECK(sender);
-
-  if (![sender isEnabled]) {
-    // This code is reachable e.g. if the user mashes the back button, queuing
-    // up a bunch of events before the button's enabled state is updated:
-    // http://crbug.com/63254
-    return;
-  }
-
-  // See comment above for why we do this.
-  BrowserWindowController* targetController = self;
-  if ([sender respondsToSelector:@selector(window)])
-    targetController = [[sender window] windowController];
-  DCHECK([targetController isKindOfClass:[BrowserWindowController class]]);
-  DCHECK(targetController->browser_.get());
-
-  NSInteger command = [sender tag];
-  NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
-  if ((command == IDC_RELOAD) &&
-      (modifierFlags & (NSShiftKeyMask | NSControlKeyMask))) {
-    command = IDC_RELOAD_IGNORING_CACHE;
-    // Mask off Shift and Control so they don't affect the disposition below.
-    modifierFlags &= ~(NSShiftKeyMask | NSControlKeyMask);
-  }
-  if (![[sender window] isMainWindow]) {
-    // Remove the command key from the flags, it means "keep the window in
-    // the background" in this case.
-    modifierFlags &= ~NSCommandKeyMask;
-  }
-  chrome::ExecuteCommandWithDisposition(
-      targetController->browser_.get(), command,
-      ui::WindowOpenDispositionFromNSEventWithFlags(
-          [NSApp currentEvent], modifierFlags));
-}
-
 - (BOOL)handledByExtensionCommand:(NSEvent*)event
     priority:(ui::AcceleratorManager::HandlerPriority)priority {
   return extension_keybinding_registry_->ProcessKeyEvent(
@@ -1304,7 +1108,7 @@ using content::WebContents;
   if (newContents) {
     manager = PermissionBubbleManager::FromWebContents(newContents);
     if (manager)
-      manager->DisplayPendingRequests(browser_.get());
+      manager->DisplayPendingRequests();
   }
 }
 
@@ -1585,8 +1389,7 @@ using content::WebContents;
 }
 
 - (BOOL)shouldUseNewAvatarButton {
-  return switches::IsNewAvatarMenu() &&
-      profiles::IsRegularOrGuestSession(browser_.get());
+  return profiles::IsRegularOrGuestSession(browser_.get());
 }
 
 - (BOOL)isBookmarkBarVisible {
@@ -1765,36 +1568,39 @@ using content::WebContents;
 // Show the bookmark bubble (e.g. user just clicked on the STAR).
 - (void)showBookmarkBubbleForURL:(const GURL&)url
                alreadyBookmarked:(BOOL)alreadyMarked {
-  if (!bookmarkBubbleController_) {
+  if (bookmarkBubbleObserver_.get())
+    return;
+
+  bookmarkBubbleObserver_.reset(new BookmarkBubbleObserverCocoa(self));
+
+  if (chrome::ToolkitViewsDialogsEnabled()) {
+    chrome::ShowBookmarkBubbleViewsAtPoint(
+        gfx::ScreenPointFromNSPoint(
+            [[self window] convertBaseToScreen:[self bookmarkBubblePoint]]),
+        [[self window] contentView], bookmarkBubbleObserver_.get(),
+        browser_.get(), url, alreadyMarked);
+  } else {
     BookmarkModel* model =
         BookmarkModelFactory::GetForProfile(browser_->profile());
     bookmarks::ManagedBookmarkService* managed =
         ManagedBookmarkServiceFactory::GetForProfile(browser_->profile());
     const BookmarkNode* node = model->GetMostRecentlyAddedUserNodeForURL(url);
-    bookmarkBubbleController_ =
-        [[BookmarkBubbleController alloc] initWithParentWindow:[self window]
-                                                       managed:managed
-                                                         model:model
-                                                          node:node
-                                             alreadyBookmarked:alreadyMarked];
+    bookmarkBubbleController_ = [[BookmarkBubbleController alloc]
+        initWithParentWindow:[self window]
+              bubbleObserver:bookmarkBubbleObserver_.get()
+                     managed:managed
+                       model:model
+                        node:node
+           alreadyBookmarked:alreadyMarked];
     [bookmarkBubbleController_ showWindow:self];
-    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-    [center addObserver:self
-               selector:@selector(bookmarkBubbleWindowWillClose:)
-                   name:NSWindowWillCloseNotification
-                 object:[bookmarkBubbleController_ window]];
   }
+  DCHECK(bookmarkBubbleObserver_);
 }
 
-// Nil out the weak bookmark bubble controller reference.
-- (void)bookmarkBubbleWindowWillClose:(NSNotification*)notification {
-  DCHECK_EQ([notification object], [bookmarkBubbleController_ window]);
-
-  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center removeObserver:self
-                    name:NSWindowWillCloseNotification
-                  object:[bookmarkBubbleController_ window]];
+- (void)bookmarkBubbleClosed {
+  // Nil out the weak bookmark bubble controller reference.
   bookmarkBubbleController_ = nil;
+  bookmarkBubbleObserver_.reset();
 }
 
 // Handle the editBookmarkNode: action sent from bookmark bubble controllers.

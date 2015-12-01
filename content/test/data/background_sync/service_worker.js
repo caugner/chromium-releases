@@ -9,6 +9,7 @@
 // "delay" - Delays finishing the sync event with event.waitUntil.
 //           Send a postMessage of "completeDelayedOneShot" to finish the
 //           event.
+// "unregister" - Unregisters the sync registration from within the sync event.
 
 'use strict';
 
@@ -16,7 +17,7 @@ var resolveCallback = null;
 var rejectCallback = null;
 
 this.onmessage = function(event) {
-  if (event.data === 'completeDelayedOneShot') {
+  if (event.data['action'] === 'completeDelayedOneShot') {
     if (resolveCallback === null) {
       sendMessageToClients('sync', 'error - resolveCallback is null');
       return;
@@ -27,7 +28,7 @@ this.onmessage = function(event) {
     return;
   }
 
-  if (event.data === 'rejectDelayedOneShot') {
+  if (event.data['action'] === 'rejectDelayedOneShot') {
     if (rejectCallback === null) {
       sendMessageToClients('sync', 'error - rejectCallback is null');
       return;
@@ -36,9 +37,39 @@ this.onmessage = function(event) {
     rejectCallback();
     sendMessageToClients('sync', 'ok - delay rejected');
   }
+
+  if (event.data['action'] === 'notifyWhenDone') {
+    var tag = event.data['tag'];
+    registration.sync.getRegistration(tag)
+      .then(function (syncRegistration) {
+        sendMessageToClients('sync', 'ok - ' + tag + ' done');
+        return syncRegistration.done;
+      })
+      .then(function(success) {
+        sendMessageToClients('sync', tag + " done result: " + success);
+      }, function(error) {
+        sendMessageToClients('sync', tag + " done result: error");
+      })
+      .catch(sendSyncErrorToClients);
+  }
 }
 
 this.onsync = function(event) {
+  var eventProperties = [
+    // Extract name from toString result: "[object <Class>]"
+    Object.prototype.toString.call(event).match(/\s([a-zA-Z]+)/)[1],
+    (typeof event.waitUntil)
+  ];
+
+  if (eventProperties[0] != 'SyncEvent') {
+    sendMessageToClients('sync', 'error - wrong event type');
+    return;
+  }
+
+  if (eventProperties[1] != 'function') {
+    sendMessageToClients('sync', 'error - wrong wait until type');
+  }
+
   if (event.registration === undefined) {
     sendMessageToClients('sync', 'error - event missing registration');
     return;
@@ -60,6 +91,14 @@ this.onsync = function(event) {
     return;
   }
 
+  if (tag === 'unregister') {
+    event.waitUntil(event.registration.unregister()
+      .then(function() {
+        sendMessageToClients('sync', 'ok - unregister completed');
+      }));
+    return;
+  }
+
   sendMessageToClients('sync', tag + ' fired');
 };
 
@@ -71,4 +110,8 @@ function sendMessageToClients(type, data) {
   }, function(error) {
     console.log(error);
   });
+}
+
+function sendSyncErrorToClients(error) {
+  sendMessageToClients('sync', error.name + ' - ' + error.message);
 }

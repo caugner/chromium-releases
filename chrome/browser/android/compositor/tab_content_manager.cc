@@ -150,14 +150,6 @@ void TabContentManager::Destroy(JNIEnv* env, jobject obj) {
   delete this;
 }
 
-void TabContentManager::SetUIResourceProvider(JNIEnv* env,
-                                              jobject obj,
-                                              jlong ui_resource_provider_ptr) {
-  ui::UIResourceProvider* ui_resource_provider =
-      reinterpret_cast<ui::UIResourceProvider*>(ui_resource_provider_ptr);
-  SetUIResourceProvider(ui_resource_provider);
-}
-
 void TabContentManager::SetUIResourceProvider(
     ui::UIResourceProvider* ui_resource_provider) {
   thumbnail_cache_->SetUIResourceProvider(ui_resource_provider);
@@ -342,6 +334,10 @@ void TabContentManager::GetDecompressedThumbnail(JNIEnv* env,
                                                 decompress_done_callback);
 }
 
+void TabContentManager::OnUIResourcesWereEvicted() {
+  thumbnail_cache_->OnUIResourcesWereEvicted();
+}
+
 void TabContentManager::OnFinishedThumbnailRead(int tab_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_TabContentManager_notifyListenersOfThumbnailChange(
@@ -370,7 +366,7 @@ bool RegisterTabContentManager(JNIEnv* env) {
 // ----------------------------------------------------------------------------
 
 jlong Init(JNIEnv* env,
-           jobject obj,
+           const JavaParamRef<jobject>& obj,
            jint default_cache_size,
            jint approximation_cache_size,
            jint compression_queue_max_size,

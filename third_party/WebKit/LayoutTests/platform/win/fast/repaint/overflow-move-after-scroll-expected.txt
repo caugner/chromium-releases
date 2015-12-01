@@ -23,6 +23,7 @@
               "children": [
                 {
                   "bounds": [685, 600],
+                  "shouldFlattenTransform": false,
                   "drawsContent": true,
                   "repaintRects": [
                     [300, 200, 120, 50],
@@ -30,11 +31,6 @@
                   ],
                   "paintInvalidationClients": [
                     "LayoutBlockFlow (positioned) DIV id='block'"
-                  ],
-                  "children": [
-                    {
-
-                    }
                   ]
                 }
               ]
@@ -43,18 +39,13 @@
               "children": [
                 {
                   "position": [0, 385],
-                  "bounds": [685, 15],
-                  "drawsContent": true
+                  "bounds": [685, 15]
                 },
                 {
                   "position": [685, 0],
                   "bounds": [15, 385],
-                  "drawsContent": true,
                   "repaintRects": [
                     [0, 0, 15, 385]
-                  ],
-                  "paintInvalidationClients": [
-                    "##ALL##"
                   ]
                 },
                 {

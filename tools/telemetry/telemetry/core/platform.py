@@ -5,10 +5,13 @@ import logging as real_logging
 import os
 
 from telemetry.core import discover
+from telemetry.core import local_server
+from telemetry.core import memory_cache_http_server
 from telemetry.core import network_controller
 from telemetry.core import tracing_controller
 from telemetry.core import util
-from telemetry.internal.platform import platform_backend as platform_backend_module
+from telemetry.internal.platform import (
+    platform_backend as platform_backend_module)
 
 
 _host_platform = None
@@ -79,6 +82,9 @@ class Platform(object):
         self._platform_backend.network_controller_backend)
     self._tracing_controller = tracing_controller.TracingController(
         self._platform_backend.tracing_controller_backend)
+    self._local_server_controller = local_server.LocalServerController(
+        self._platform_backend)
+    self._is_monitoring_power = False
 
   @property
   def is_host_platform(self):
@@ -153,9 +159,6 @@ class Platform(object):
 
   def FlushSystemCacheForDirectory(self, directory):
     """Flushes the OS's file cache for the specified directory.
-
-    Any files or directories inside |directory| matching a name in the
-    |ignoring| list will be skipped.
 
     This function does not require root or administrator access."""
     return self._platform_backend.FlushSystemCacheForDirectory(directory)
@@ -238,6 +241,7 @@ class Platform(object):
     """
     assert self._platform_backend.CanMonitorPower()
     self._platform_backend.StartMonitoringPower(browser)
+    self._is_monitoring_power = True
 
   def StopMonitoringPower(self):
     """Stops monitoring power utilization and returns stats
@@ -280,7 +284,13 @@ class Platform(object):
 
       }
     """
-    return self._platform_backend.StopMonitoringPower()
+    ret_val = self._platform_backend.StopMonitoringPower()
+    self._is_monitoring_power = False
+    return ret_val
+
+  def IsMonitoringPower(self):
+    """Returns true if power is currently being monitored, false otherwise."""
+    return self._is_monitoring_power
 
   def CanMonitorNetworkData(self):
     """Returns true if network data can be retrieved, false otherwise."""
@@ -315,3 +325,51 @@ class Platform(object):
     Returns True if it is believed the attempt succeeded.
     """
     return self._platform_backend.CooperativelyShutdown(proc, app_name)
+
+  def StartLocalServer(self, server):
+    """Starts a LocalServer and associates it with this platform.
+    |server.Close()| should be called manually to close the started server.
+    """
+    self._local_server_controller.StartServer(server)
+
+  @property
+  def http_server(self):
+    return self._local_server_controller.GetRunningServer(
+        memory_cache_http_server.MemoryCacheHTTPServer, None)
+
+  def SetHTTPServerDirectories(self, paths):
+    """Returns True if the HTTP server was started, False otherwise."""
+    if isinstance(paths, basestring):
+      paths = set([paths])
+    paths = set(os.path.realpath(p) for p in paths)
+
+    # If any path is in a subdirectory of another, remove the subdirectory.
+    duplicates = set()
+    for parent_path in paths:
+      for sub_path in paths:
+        if parent_path == sub_path:
+          continue
+        if os.path.commonprefix((parent_path, sub_path)) == parent_path:
+          duplicates.add(sub_path)
+    paths -= duplicates
+
+    if self.http_server:
+      if paths and self.http_server.paths == paths:
+        return False
+
+      self.http_server.Close()
+
+    if not paths:
+      return False
+
+    server = memory_cache_http_server.MemoryCacheHTTPServer(paths)
+    self.StartLocalServer(server)
+    return True
+
+  def StopAllLocalServers(self):
+    self._local_server_controller.Close()
+
+  @property
+  def local_servers(self):
+    """Returns the currently running local servers."""
+    return self._local_server_controller.local_servers

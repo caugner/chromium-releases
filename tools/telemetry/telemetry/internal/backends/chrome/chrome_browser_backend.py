@@ -173,7 +173,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
 
   def HasBrowserFinishedLaunching(self):
     assert self._port, 'No DevTools port info available.'
-    return devtools_client_backend.IsDevToolsAgentAvailable(self._port)
+    return devtools_client_backend.IsDevToolsAgentAvailable(self._port, self)
 
   def _InitDevtoolsClientBackend(self, remote_devtools_port=None):
     """ Initiate the devtool client backend which allow browser connection
@@ -322,6 +322,14 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
 
   def DumpMemory(self, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
     return self.devtools_client.DumpMemory(timeout)
+
+  @property
+  def supports_overriding_memory_pressure_notifications(self):
+    return True
+
+  def SetMemoryPressureNotificationsSuppressed(
+      self, suppressed, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
+    self.devtools_client.SetMemoryPressureNotificationsSuppressed(suppressed)
 
   @property
   def supports_cpu_metrics(self):

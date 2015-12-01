@@ -33,24 +33,23 @@ class ChromePermissionMessageProviderUnittest : public testing::Test {
   ~ChromePermissionMessageProviderUnittest() override {}
 
  protected:
-  CoalescedPermissionMessages GetMessages(const APIPermissionSet& permissions,
-                                          Manifest::Type type) {
-    scoped_refptr<const PermissionSet> permission_set = new PermissionSet(
-        permissions, ManifestPermissionSet(), URLPatternSet(), URLPatternSet());
+  PermissionMessages GetMessages(const APIPermissionSet& permissions,
+                                 Manifest::Type type) {
     return message_provider_->GetPermissionMessages(
-        message_provider_->GetAllPermissionIDs(permission_set.get(), type));
+        message_provider_->GetAllPermissionIDs(
+            PermissionSet(permissions, ManifestPermissionSet(), URLPatternSet(),
+                          URLPatternSet()),
+            type));
   }
 
   bool IsPrivilegeIncrease(const APIPermissionSet& old_permissions,
                            const APIPermissionSet& new_permissions) {
-    scoped_refptr<PermissionSet> old_set(
-        new PermissionSet(old_permissions, ManifestPermissionSet(),
-                          URLPatternSet(), URLPatternSet()));
-    scoped_refptr<PermissionSet> new_set(
-        new PermissionSet(new_permissions, ManifestPermissionSet(),
-                          URLPatternSet(), URLPatternSet()));
-    return message_provider_->IsPrivilegeIncrease(old_set.get(), new_set.get(),
-                                                  Manifest::TYPE_EXTENSION);
+    return message_provider_->IsPrivilegeIncrease(
+        PermissionSet(old_permissions, ManifestPermissionSet(), URLPatternSet(),
+                      URLPatternSet()),
+        PermissionSet(new_permissions, ManifestPermissionSet(), URLPatternSet(),
+                      URLPatternSet()),
+        Manifest::TYPE_EXTENSION);
   }
 
  private:
@@ -66,7 +65,7 @@ TEST_F(ChromePermissionMessageProviderUnittest,
   {
     APIPermissionSet permissions;
     permissions.insert(APIPermission::kTab);
-    CoalescedPermissionMessages messages =
+    PermissionMessages messages =
         GetMessages(permissions, Manifest::TYPE_PLATFORM_APP);
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(
@@ -76,7 +75,7 @@ TEST_F(ChromePermissionMessageProviderUnittest,
   {
     APIPermissionSet permissions;
     permissions.insert(APIPermission::kTopSites);
-    CoalescedPermissionMessages messages =
+    PermissionMessages messages =
         GetMessages(permissions, Manifest::TYPE_PLATFORM_APP);
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_TOPSITES),
@@ -86,7 +85,7 @@ TEST_F(ChromePermissionMessageProviderUnittest,
     APIPermissionSet permissions;
     permissions.insert(APIPermission::kTab);
     permissions.insert(APIPermission::kTopSites);
-    CoalescedPermissionMessages messages =
+    PermissionMessages messages =
         GetMessages(permissions, Manifest::TYPE_PLATFORM_APP);
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(
@@ -114,21 +113,21 @@ TEST_F(ChromePermissionMessageProviderUnittest,
   ASSERT_TRUE(usb->FromValue(devices_list.get(), nullptr, nullptr));
   permissions.insert(usb.release());
 
-  CoalescedPermissionMessages messages =
+  PermissionMessages messages =
       GetMessages(permissions, Manifest::TYPE_EXTENSION);
 
   ASSERT_EQ(2U, messages.size());
   auto it = messages.begin();
-  const CoalescedPermissionMessage& message0 = *it++;
-  EXPECT_EQ(
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
-      message0.message());
-  EXPECT_FALSE(message0.submessages().empty());
-  const CoalescedPermissionMessage& message1 = *it++;
+  const PermissionMessage& message0 = *it++;
   EXPECT_EQ(
       l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ),
+      message0.message());
+  EXPECT_TRUE(message0.submessages().empty());
+  const PermissionMessage& message1 = *it++;
+  EXPECT_EQ(
+      l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
       message1.message());
-  EXPECT_TRUE(message1.submessages().empty());
+  EXPECT_FALSE(message1.submessages().empty());
 }
 
 // Anti-test: Check that adding a parameter to a SettingsOverridePermission

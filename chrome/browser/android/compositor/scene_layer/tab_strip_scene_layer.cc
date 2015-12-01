@@ -5,12 +5,12 @@
 #include "chrome/browser/android/compositor/scene_layer/tab_strip_scene_layer.h"
 
 #include "base/android/jni_android.h"
+#include "cc/resources/scoped_ui_resource.h"
 #include "chrome/browser/android/compositor/layer/tab_handle_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "content/public/browser/android/compositor.h"
 #include "jni/TabStripSceneLayer_jni.h"
 #include "ui/android/resources/resource_manager_impl.h"
-#include "ui/android/resources/ui_resource_android.h"
 
 namespace chrome {
 namespace android {
@@ -216,7 +216,7 @@ scoped_refptr<TabHandleLayer> TabStripSceneLayer::GetNextLayer(
   return layer_tree;
 }
 
-static jlong Init(JNIEnv* env, jobject jobj) {
+static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   TabStripSceneLayer* scene_layer = new TabStripSceneLayer(env, jobj);
   return reinterpret_cast<intptr_t>(scene_layer);

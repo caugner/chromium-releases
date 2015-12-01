@@ -7,10 +7,6 @@
  */
 
 login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
-  // Gaia loading time after which error message must be displayed and
-  // lazy portal check should be fired.
-  /** @const */ var GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC = 7;
-
   // GAIA animation guard timer. Started when GAIA page is loaded
   // (Authenticator 'ready' event) and is intended to guard against edge cases
   // when 'showView' message is not generated/received.
@@ -36,7 +32,6 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
   return {
     EXTERNAL_API: [
       'loadAuthExtension',
-      'updateAuthExtension',
       'doReload',
       'monitorOfflineIdle',
       'onWebviewError',
@@ -344,24 +339,12 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     },
 
     /**
-     * Handler for Gaia loading suspiciously long timeout.
-     * @private
-     */
-    onLoadingSuspiciouslyLong_: function() {
-      if (this != Oobe.getInstance().currentScreen)
-        return;
-      chrome.send('showLoadingTimeoutError');
-      this.loadingTimer_ = setTimeout(
-          this.onLoadingTimeOut_.bind(this),
-          (MAX_GAIA_LOADING_TIME_SEC - GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC) *
-          1000);
-    },
-
-    /**
      * Handler for Gaia loading timeout.
      * @private
      */
     onLoadingTimeOut_: function() {
+      if (this != Oobe.getInstance().currentScreen)
+        return;
       this.loadingTimer_ = undefined;
       chrome.send('showLoadingTimeoutError');
     },
@@ -383,9 +366,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     startLoadingTimer_: function() {
       this.clearLoadingTimer_();
-      this.loadingTimer_ = setTimeout(
-          this.onLoadingSuspiciouslyLong_.bind(this),
-          GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC * 1000);
+      this.loadingTimer_ = setTimeout(this.onLoadingTimeOut_.bind(this),
+                                      MAX_GAIA_LOADING_TIME_SEC * 1000);
     },
 
     /**
@@ -490,7 +472,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       this.classList.toggle('full-width', false);
       this.samlPasswordConfirmAttempt_ = 0;
 
-      this.updateAuthExtension(data);
+      this.updateAuthExtension_(data);
 
       var params = {};
       for (var i in cr.login.GaiaAuthHost.SUPPORTED_PARAMS) {
@@ -549,7 +531,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * @param {Object} data New extension parameters bag.
      * @private
      */
-    updateAuthExtension: function(data) {
+    updateAuthExtension_: function(data) {
       if (this.isNewGaiaFlow) {
         $('login-header-bar').showCreateSupervisedButton =
             data.supervisedUsersEnabled && data.supervisedUsersCanCreate;

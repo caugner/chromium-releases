@@ -38,12 +38,11 @@ remoting.ClientSessionFactory = function(container, capabilities) {
  *
  * @param {remoting.ClientSession.EventHandler} listener
  * @param {remoting.SessionLogger} logger
- * @param {boolean=} opt_useApiaryForLogging
  * @return {Promise<!remoting.ClientSession>} Resolves with the client session
  *     if succeeded or rejects with remoting.Error on failure.
  */
 remoting.ClientSessionFactory.prototype.createSession =
-    function(listener, logger, opt_useApiaryForLogging) {
+    function(listener, logger) {
   var that = this;
   /** @type {string} */
   var token;
@@ -55,7 +54,8 @@ remoting.ClientSessionFactory.prototype.createSession =
   function OnError(/** !remoting.Error */ error) {
     logger.logSessionStateChange(
         remoting.ChromotingEvent.SessionState.CONNECTION_FAILED,
-        remoting.ChromotingEvent.ConnectionError.UNEXPECTED);
+        toConnectionError(error));
+
     base.dispose(signalStrategy);
     base.dispose(clientPlugin);
     throw error;
@@ -78,13 +78,7 @@ remoting.ClientSessionFactory.prototype.createSession =
     return createPlugin(that.container_, that.requiredCapabilities_);
   }).then(function(/** remoting.ClientPlugin */ plugin) {
     clientPlugin = plugin;
-    // TODO(kelvinp): Remove |opt_useApiaryForLogging| once we have migrated
-    // away from XMPP based logging (crbug.com/523423).
-    var sessionLogger = Boolean(opt_useApiaryForLogging) ?
-                            logger :
-                            new remoting.LogToServer(signalStrategy);
-    return new remoting.ClientSession(
-        plugin, signalStrategy, sessionLogger, listener);
+    return new remoting.ClientSession(plugin, signalStrategy, logger, listener);
   }).catch(
     remoting.Error.handler(OnError)
   );
@@ -128,20 +122,20 @@ function connectSignaling(email, token) {
 function createPlugin(container, capabilities) {
   var plugin = remoting.ClientPlugin.factory.createPlugin(
       container, capabilities);
-  var deferred = new base.Deferred();
+  return plugin.initialize().then(function() {
+    return plugin;
+  });
+}
 
-  function onInitialized(/** boolean */ initialized) {
-    if (!initialized) {
-      console.error('ERROR: remoting plugin not loaded');
-      plugin.dispose();
-      deferred.reject(new remoting.Error(remoting.Error.Tag.MISSING_PLUGIN));
-      return;
-    }
-
-    deferred.resolve(plugin);
+/**
+ * @param {remoting.Error} e
+ * @return {remoting.ChromotingEvent.ConnectionError}
+ */
+function toConnectionError(/** Error */ e) {
+  if (e instanceof remoting.Error) {
+    return e.toConnectionError();
   }
-  plugin.initialize(onInitialized);
-  return deferred.promise();
+  return remoting.ChromotingEvent.ConnectionError.UNEXPECTED;
 }
 
 })();

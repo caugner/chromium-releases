@@ -10,6 +10,18 @@
 
 namespace blink {
 
+// Returns the first mismatching index in |input1| and |input2|.
+static size_t mismatch(const std::string& input1, const std::string& input2)
+{
+    size_t index = 0;
+    for (auto char1 : input1) {
+        if (index == input2.size() || char1 != input2[index])
+            return index;
+        ++index;
+    }
+    return input1.size();
+}
+
 // This is smoke test of |StyledMarkupSerializer|. Full testing will be done
 // in layout tests.
 class StyledMarkupSerializerTest : public EditingTestBase {
@@ -18,19 +30,19 @@ protected:
     std::string serialize(EAnnotateForInterchange = DoNotAnnotateForInterchange);
 
     template <typename Strategy>
-    std::string serializePart(const PositionAlgorithm<Strategy>& start, const PositionAlgorithm<Strategy>& end, EAnnotateForInterchange = DoNotAnnotateForInterchange);
+    std::string serializePart(const PositionTemplate<Strategy>& start, const PositionTemplate<Strategy>& end, EAnnotateForInterchange = DoNotAnnotateForInterchange);
 };
 
 template <typename Strategy>
 std::string StyledMarkupSerializerTest::serialize(EAnnotateForInterchange shouldAnnotate)
 {
-    PositionAlgorithm<Strategy> start = PositionAlgorithm<Strategy>(document().body(), PositionAnchorType::BeforeChildren);
-    PositionAlgorithm<Strategy> end = PositionAlgorithm<Strategy>(document().body(), PositionAnchorType::AfterChildren);
+    PositionTemplate<Strategy> start = PositionTemplate<Strategy>(document().body(), PositionAnchorType::BeforeChildren);
+    PositionTemplate<Strategy> end = PositionTemplate<Strategy>(document().body(), PositionAnchorType::AfterChildren);
     return createMarkup(start, end, shouldAnnotate).utf8().data();
 }
 
 template <typename Strategy>
-std::string StyledMarkupSerializerTest::serializePart(const PositionAlgorithm<Strategy>& start, const PositionAlgorithm<Strategy>& end, EAnnotateForInterchange shouldAnnotate)
+std::string StyledMarkupSerializerTest::serializePart(const PositionTemplate<Strategy>& start, const PositionTemplate<Strategy>& end, EAnnotateForInterchange shouldAnnotate)
 {
     return createMarkup(start, end, shouldAnnotate).utf8().data();
 }
@@ -117,7 +129,7 @@ TEST_F(StyledMarkupSerializerTest, ShadowTreeDistributeOrder)
     const char* bodyContent = "<p id=\"host\">00<b id=\"one\">11</b><b id=\"two\">22</b>33</p>";
     const char* shadowContent = "<a><content select=#two></content><content select=#one></content></a>";
     setBodyContent(bodyContent);
-    setShadowContent(shadowContent);
+    setShadowContent(shadowContent, "host");
     EXPECT_EQ("<p id=\"host\"><b id=\"one\">11</b><b id=\"two\">22</b></p>", serialize<EditingStrategy>())
         << "00 and 33 aren't appeared since they aren't distributed.";
     EXPECT_EQ("<p id=\"host\"><a><b id=\"two\">22</b><b id=\"one\">11</b></a></p>", serialize<EditingInComposedTreeStrategy>())
@@ -129,7 +141,7 @@ TEST_F(StyledMarkupSerializerTest, ShadowTreeInput)
     const char* bodyContent = "<p id=\"host\">00<b id=\"one\">11</b><b id=\"two\"><input value=\"22\"></b>33</p>";
     const char* shadowContent = "<a><content select=#two></content><content select=#one></content></a>";
     setBodyContent(bodyContent);
-    setShadowContent(shadowContent);
+    setShadowContent(shadowContent, "host");
     EXPECT_EQ("<p id=\"host\"><b id=\"one\">11</b><b id=\"two\"><input value=\"22\"></b></p>", serialize<EditingStrategy>())
         << "00 and 33 aren't appeared since they aren't distributed.";
     EXPECT_EQ("<p id=\"host\"><a><b id=\"two\"><input value=\"22\"></b><b id=\"one\">11</b></a></p>", serialize<EditingInComposedTreeStrategy>())
@@ -142,13 +154,31 @@ TEST_F(StyledMarkupSerializerTest, ShadowTreeNested)
     const char* shadowContent1 = "<a><content select=#two></content><b id=host2></b><content select=#one></content></a>";
     const char* shadowContent2 = "NESTED";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot1 = setShadowContent(shadowContent1);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot1 = setShadowContent(shadowContent1, "host");
     createShadowRootForElementWithIDAndSetInnerHTML(*shadowRoot1, "host2", shadowContent2);
 
     EXPECT_EQ("<p id=\"host\"><b id=\"one\">11</b><b id=\"two\">22</b></p>", serialize<EditingStrategy>())
         << "00 and 33 aren't appeared since they aren't distributed.";
     EXPECT_EQ("<p id=\"host\"><a><b id=\"two\">22</b><b id=\"host2\">NESTED</b><b id=\"one\">11</b></a></p>", serialize<EditingInComposedTreeStrategy>())
         << "00 and 33 aren't appeared since they aren't distributed.";
+}
+
+TEST_F(StyledMarkupSerializerTest, ShadowTreeInterchangedNewline)
+{
+    const char* bodyContent = "<a id=host><b id=one>1</b></a>";
+    const char* shadowContent = "<content select=#one></content><div><br></div>";
+    setBodyContent(bodyContent);
+    setShadowContent(shadowContent, "host");
+
+    std::string resultFromDOMTree = serialize<EditingStrategy>(AnnotateForInterchange);
+    std::string resultFromComposedTree = serialize<EditingInComposedTreeStrategy>(AnnotateForInterchange);
+    size_t mismatchedIndex = mismatch(resultFromDOMTree, resultFromComposedTree);
+
+    // Note: We check difference between DOM tree result and composed tree
+    // result, because results contain "style" attribute and this test
+    // doesn't care about actual value of "style" attribute.
+    EXPECT_EQ("/a>", resultFromDOMTree.substr(mismatchedIndex));
+    EXPECT_EQ("div><br></div></a><br class=\"Apple-interchange-newline\">", resultFromComposedTree.substr(mismatchedIndex));
 }
 
 TEST_F(StyledMarkupSerializerTest, StyleDisplayNone)
@@ -181,7 +211,7 @@ TEST_F(StyledMarkupSerializerTest, ShadowTreeStyle)
     bodyContent = "<p id='host' style='color: red'>00<span id='one'>11</span>22</p>\n";
     const char* shadowContent = "<span style='font-weight: bold'><content select=#one></content></span>";
     setBodyContent(bodyContent);
-    setShadowContent(shadowContent);
+    setShadowContent(shadowContent, "host");
     one = document().getElementById("one");
     text = toText(one->firstChild());
     PositionInComposedTree startICT(text, 0);

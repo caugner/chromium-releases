@@ -143,13 +143,14 @@ remoting.LegacyHostListApi.prototype.parseHostListResponse_ =
           host.jabberId = base.getStringAttr(item, 'jabberId', '');
           host.publicKey = base.getStringAttr(item, 'publicKey', '');
           host.hostVersion = base.getStringAttr(item, 'hostVersion', '');
+          host.hostOs = remoting.ChromotingEvent.toOs(
+              base.getStringAttr(item, 'hostOs', ''));
+          host.hostOsVersion = base.getStringAttr(item, 'hostOsVersion', '');
           host.tokenUrlPatterns =
               base.getArrayAttr(item, 'tokenUrlPatterns', []);
           host.updatedTime = base.getStringAttr(item, 'updatedTime', '');
           host.hostOfflineReason =
               base.getStringAttr(item, 'hostOfflineReason', '');
-          host.loggingChannel =
-              base.getStringAttr(item, 'loggingChannel', 'XMPP');
           return host;
       });
       return hosts;
@@ -201,8 +202,6 @@ remoting.LegacyHostListApi.prototype.getSupportHost = function(supportId) {
         host.jabberId = base.getStringAttr(response.data, 'jabberId', '');
         host.publicKey = base.getStringAttr(response.data, 'publicKey', '');
         host.hostName = host.jabberId.split('/')[0];
-        host.loggingChannel =
-              base.getStringAttr(response.data, 'loggingChannel', 'XMPP');
         return host;
       } else {
         console.error('Invalid "support-hosts" response from server.');

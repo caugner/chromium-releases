@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.sync;
 
-import android.content.Context;
-
 /**
  * Fake some ProfileSyncService methods for testing.
  *
@@ -15,12 +13,12 @@ public class FakeProfileSyncService extends ProfileSyncService {
 
     private boolean mBackendInitialized;
 
-    public FakeProfileSyncService(Context context) {
-        super(context);
+    public FakeProfileSyncService() {
+        super();
     }
 
     @Override
-    public boolean isSyncInitialized() {
+    public boolean isBackendInitialized() {
         return mBackendInitialized;
     }
 

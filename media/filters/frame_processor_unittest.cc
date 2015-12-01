@@ -4,6 +4,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
@@ -12,8 +13,10 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "media/base/media_log.h"
+#include "media/base/media_util.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_helpers.h"
+#include "media/base/timestamp_constants.h"
 #include "media/filters/chunk_demuxer.h"
 #include "media/filters/frame_processor.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -281,13 +284,9 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
       case DemuxerStream::AUDIO: {
         ASSERT_FALSE(audio_);
         audio_.reset(new ChunkDemuxerStream(DemuxerStream::AUDIO, true));
-        AudioDecoderConfig decoder_config(kCodecVorbis,
-                                          kSampleFormatPlanarF32,
-                                          CHANNEL_LAYOUT_STEREO,
-                                          1000,
-                                          NULL,
-                                          0,
-                                          false);
+        AudioDecoderConfig decoder_config(kCodecVorbis, kSampleFormatPlanarF32,
+                                          CHANNEL_LAYOUT_STEREO, 1000,
+                                          EmptyExtraData(), false);
         frame_processor_->OnPossibleAudioConfigUpdate(decoder_config);
         ASSERT_TRUE(audio_->UpdateAudioConfig(decoder_config, new MediaLog()));
         break;
@@ -737,6 +736,23 @@ TEST_P(FrameProcessorTest, PartialAppendWindowFilterNoNewMediaSegment) {
   CheckExpectedRangesByTimestamp(video_.get(), "{ [0,20) }");
   CheckReadsThenReadStalls(audio_.get(), "0:-5");
   CheckReadsThenReadStalls(video_.get(), "0 10");
+}
+
+TEST_F(FrameProcessorTest, AudioOnly_SequenceModeContinuityAcrossReset) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  new_media_segment_ = true;
+  frame_processor_->SetSequenceMode(true);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_));
+  ProcessFrames("0K", "");
+  frame_processor_->Reset();
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_ * 2));
+  ProcessFrames("100K", "");
+
+  EXPECT_EQ(frame_duration_ * -9, timestamp_offset_);
+  EXPECT_FALSE(new_media_segment_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,20) }");
+  CheckReadsThenReadStalls(audio_.get(), "0 10:100");
 }
 
 INSTANTIATE_TEST_CASE_P(SequenceMode, FrameProcessorTest, Values(true));

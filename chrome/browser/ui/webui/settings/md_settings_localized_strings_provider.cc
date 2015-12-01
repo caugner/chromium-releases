@@ -5,24 +5,54 @@
 #include "chrome/browser/ui/webui/settings/md_settings_localized_strings_provider.h"
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/google_chrome_strings.h"
 #include "chrome/grit/locale_settings.h"
+#include "chrome/grit/settings_strings.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
+#include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 #include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 #endif
 
 namespace {
 
-// Note that md_settings.html contains a <script> tag which imports a script of
+// Note that settings.html contains a <script> tag which imports a script of
 // the following name. These names must be kept in sync.
 const char kLocalizedStringsFile[] = "strings.js";
 
+void AddCommonStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString("basicPageTitle", IDS_SETTINGS_BASIC);
+  html_source->AddLocalizedString("advancedPageTitle", IDS_SETTINGS_ADVANCED);
+  html_source->AddLocalizedString("addLabel", IDS_ADD);
+#if defined(OS_CHROMEOS)
+  html_source->AddLocalizedString("controlledSettingShared",
+                                  IDS_OPTIONS_CONTROLLED_SETTING_SHARED);
+  html_source->AddLocalizedString("controlledSettingOwner",
+                                  IDS_OPTIONS_CONTROLLED_SETTING_OWNER);
+#endif
+  html_source->AddLocalizedString("controlledSettingPolicy",
+                                  IDS_OPTIONS_CONTROLLED_SETTING_POLICY);
+  html_source->AddLocalizedString("controlledSettingRecommendedMatches",
+                                  IDS_OPTIONS_CONTROLLED_SETTING_RECOMMENDED);
+  html_source->AddLocalizedString(
+      "controlledSettingRecommendedDiffers",
+      IDS_OPTIONS_CONTROLLED_SETTING_HAS_RECOMMENDATION);
+  html_source->AddLocalizedString("controlledSettingExtension",
+                                  IDS_SETTINGS_CONTROLLED_SETTING_EXTENSION);
+  html_source->AddLocalizedString("learnMore", IDS_LEARN_MORE);
+}
+
+#if defined(OS_CHROMEOS)
 void AddA11yStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "a11yPageTitle", IDS_SETTINGS_ACCESSIBILITY);
@@ -63,7 +93,21 @@ void AddA11yStrings(content::WebUIDataSource* html_source) {
       "delayBeforeClickVeryLong", IDS_SETTINGS_DELAY_BEFORE_CLICK_VERY_LONG);
   html_source->AddLocalizedString(
       "onScreenKeyboardLabel", IDS_SETTINGS_ON_SCREEN_KEYBOARD_LABEL);
+  html_source->AddLocalizedString(
+      "a11yExplanation", IDS_SETTINGS_ACCESSIBILITY_EXPLANATION);
+  html_source->AddString(
+      "a11yLearnMoreUrl", chrome::kChromeAccessibilityHelpURL);
 }
+#endif
+
+#if defined(OS_CHROMEOS)
+void AddAccountUITweaksStrings(content::WebUIDataSource* html_source,
+                               Profile* profile) {
+  base::DictionaryValue localized_values;
+  chromeos::AddAccountUITweaksLocalizedValues(&localized_values, profile);
+  html_source->AddLocalizedStrings(localized_values);
+}
+#endif
 
 void AddAppearanceStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
@@ -80,6 +124,8 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source) {
       "showBookmarksBar", IDS_SETTINGS_SHOW_BOOKMARKS_BAR);
   html_source->AddLocalizedString(
       "homePageNtp", IDS_SETTINGS_HOME_PAGE_NTP);
+  html_source->AddLocalizedString(
+      "openThisPage", IDS_SETTINGS_OPEN_THIS_PAGE);
   html_source->AddLocalizedString(
       "changeHomePage", IDS_SETTINGS_CHANGE_HOME_PAGE);
   html_source->AddLocalizedString(
@@ -125,8 +171,37 @@ void AddCertificateManagerStrings(content::WebUIDataSource* html_source) {
                                   IDS_SETTINGS_CERTIFICATE_MANAGER_DONE);
 }
 
-void AddCommonStrings(content::WebUIDataSource* html_source) {
-  html_source->AddLocalizedString("addLabel", IDS_ADD);
+void AddClearBrowsingDataStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString("clearFollowingItemsFrom",
+                                  IDS_SETTINGS_CLEAR_FOLLOWING_ITEMS_FROM);
+  html_source->AddLocalizedString("clearBrowsingHistory",
+                                  IDS_SETTINGS_CLEAR_BROWSING_HISTORY);
+  html_source->AddLocalizedString("clearDownloadHistory",
+                                  IDS_SETTINGS_CLEAR_DOWNLOAD_HISTORY);
+  html_source->AddLocalizedString("clearCache",
+                                  IDS_SETTINGS_CLEAR_CACHE);
+  html_source->AddLocalizedString("clearCookies",
+                                  IDS_SETTINGS_CLEAR_COOKIES);
+  html_source->AddLocalizedString("clearCookiesFlash",
+                                  IDS_SETTINGS_CLEAR_COOKIES_FLASH);
+  html_source->AddLocalizedString("clearPasswords",
+                                  IDS_SETTINGS_CLEAR_PASSWORDS);
+  html_source->AddLocalizedString("clearFormData",
+                                  IDS_SETTINGS_CLEAR_FORM_DATA);
+  html_source->AddLocalizedString("clearHostedAppData",
+                                  IDS_SETTINGS_CLEAR_HOSTED_APP_DATA);
+  html_source->AddLocalizedString("clearDeauthorizeContentLicenses",
+                                  IDS_SETTINGS_DEAUTHORIZE_CONTENT_LICENSES);
+  html_source->AddLocalizedString("clearDataHour",
+                                  IDS_SETTINGS_CLEAR_DATA_HOUR);
+  html_source->AddLocalizedString("clearDataDay",
+                                  IDS_SETTINGS_CLEAR_DATA_DAY);
+  html_source->AddLocalizedString("clearDataWeek",
+                                  IDS_SETTINGS_CLEAR_DATA_WEEK);
+  html_source->AddLocalizedString("clearData4Weeks",
+                                  IDS_SETTINGS_CLEAR_DATA_4WEEKS);
+  html_source->AddLocalizedString("clearDataEverything",
+                                  IDS_SETTINGS_CLEAR_DATA_EVERYTHING);
 }
 
 void AddDownloadsStrings(content::WebUIDataSource* html_source) {
@@ -157,6 +232,8 @@ void AddInternetStrings(content::WebUIDataSource* html_source) {
       "internetPageTitle", IDS_SETTINGS_INTERNET);
   html_source->AddLocalizedString(
       "internetDetailPageTitle", IDS_SETTINGS_INTERNET_DETAIL);
+  html_source->AddLocalizedString("internetKnownNetworksPageTitle",
+                                  IDS_SETTINGS_INTERNET_KNOWN_NETWORKS);
 
   // Required by cr_network_list_item.js. TODO(stevenjb): Add to
   // settings_strings.grdp or provide an alternative translation method.
@@ -174,8 +251,97 @@ void AddInternetStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString("OncTypeVPN", IDS_NETWORK_TYPE_VPN);
   html_source->AddLocalizedString("OncTypeWiFi", IDS_NETWORK_TYPE_WIFI);
   html_source->AddLocalizedString("OncTypeWimax", IDS_NETWORK_TYPE_WIMAX);
+  html_source->AddLocalizedString(
+      "vpnNameTemplate",
+      IDS_OPTIONS_SETTINGS_SECTION_THIRD_PARTY_VPN_NAME_TEMPLATE);
 }
 #endif
+
+void AddLanguagesStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "languagesPageTitle", IDS_SETTINGS_LANGUAGES_PAGE_TITLE);
+  html_source->AddLocalizedString(
+      "languagesListTitle", IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_TITLE);
+  html_source->AddLocalizedString(
+      "manageLanguages", IDS_SETTINGS_LANGUAGES_LANGUAGES_MANAGE);
+  html_source->AddLocalizedString(
+      "inputMethodsListTitle", IDS_SETTINGS_LANGUAGES_INPUT_METHODS_LIST_TITLE);
+  html_source->AddLocalizedString(
+      "manageInputMethods", IDS_SETTINGS_LANGUAGES_INPUT_METHODS_MANAGE);
+  html_source->AddLocalizedString(
+      "spellCheckListTitle", IDS_SETTINGS_LANGUAGES_SPELL_CHECK_LIST_TITLE);
+  html_source->AddLocalizedString(
+      "manageSpellCheck", IDS_SETTINGS_LANGUAGES_SPELL_CHECK_MANAGE);
+  html_source->AddLocalizedString(
+      "manageLanguagesPageTitle",
+      IDS_SETTINGS_LANGUAGES_MANAGE_LANGUAGES_TITLE);
+  html_source->AddLocalizedString(
+      "allLanguages", IDS_SETTINGS_LANGUAGES_ALL_LANGUAGES);
+  html_source->AddLocalizedString(
+      "enabledLanguages", IDS_SETTINGS_LANGUAGES_ENABLED_LANGUAGES);
+  html_source->AddLocalizedString(
+      "cannotBeDisplayedInThisLanguage",
+      IDS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE);
+  html_source->AddLocalizedString(
+      "isDisplayedInThisLanguage",
+      IDS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE);
+  html_source->AddLocalizedString(
+      "displayInThisLanguage",
+      IDS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE);
+  html_source->AddLocalizedString(
+      "offerToTranslateInThisLanguage",
+      IDS_OPTIONS_LANGUAGES_OFFER_TO_TRANSLATE_IN_THIS_LANGUAGE);
+  html_source->AddLocalizedString(
+      "cannotTranslateInThisLanguage",
+      IDS_OPTIONS_LANGUAGES_CANNOT_TRANSLATE_IN_THIS_LANGUAGE);
+  html_source->AddLocalizedString(
+      "restart",
+      IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON);
+}
+
+#if defined(OS_CHROMEOS)
+void AddMultiProfilesStrings(content::WebUIDataSource* html_source,
+                             Profile* profile) {
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
+  std::string primary_user_email = user_manager->GetPrimaryUser()->email();
+  html_source->AddString("primaryUserEmail", primary_user_email);
+  html_source->AddBoolean("isSecondaryUser",
+                          user && user->email() != primary_user_email);
+}
+#endif
+
+void AddOnStartupStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "onStartup",
+      IDS_SETTINGS_ON_STARTUP);
+  html_source->AddLocalizedString(
+      "onStartupOpenNewTab",
+      IDS_SETTINGS_ON_STARTUP_OPEN_NEW_TAB);
+  html_source->AddLocalizedString(
+      "onStartupContinue",
+      IDS_SETTINGS_ON_STARTUP_CONTINUE);
+  html_source->AddLocalizedString(
+      "onStartupOpenSpecific",
+      IDS_SETTINGS_ON_STARTUP_OPEN_SPECIFIC);
+  html_source->AddLocalizedString(
+      "onStartupAddPage",
+      IDS_SETTINGS_ON_STARTUP_ADD_PAGE);
+  html_source->AddLocalizedString(
+      "onStartupSetPages",
+      IDS_SETTINGS_ON_STARTUP_SET_PAGES);
+  html_source->AddLocalizedString(
+      "onStartupUseCurrent",
+      IDS_SETTINGS_ON_STARTUP_USE_CURRENT);
+  html_source->AddLocalizedString(
+      "onStartupAddNewPage",
+      IDS_SETTINGS_ON_STARTUP_ADD_NEW_PAGE);
+  html_source->AddLocalizedString(
+      "onStartupEnterUrl",
+      IDS_SETTINGS_ON_STARTUP_ENTER_URL);
+}
 
 void AddPrivacyStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString("privacyPageTitle",
@@ -213,6 +379,8 @@ void AddPrivacyStrings(content::WebUIDataSource* html_source) {
                                   IDS_SETTINGS_SITE_SETTINGS);
   html_source->AddLocalizedString("clearBrowsingData",
                                   IDS_SETTINGS_CLEAR_DATA);
+  html_source->AddLocalizedString("titleAndCount",
+                                  IDS_SETTINGS_TITLE_AND_COUNT);
 }
 
 void AddSearchStrings(content::WebUIDataSource* html_source) {
@@ -361,27 +529,34 @@ void AddUsersStrings(content::WebUIDataSource* html_source) {
 
 namespace settings {
 
-void AddLocalizedStrings(content::WebUIDataSource* html_source) {
-  html_source->AddLocalizedString("basicPageTitle",
-                                  IDS_SETTINGS_BASIC);
-  html_source->AddLocalizedString("advancedPageTitle",
-                                  IDS_SETTINGS_ADVANCED);
+void AddLocalizedStrings(content::WebUIDataSource* html_source,
+                         Profile* profile) {
+  AddCommonStrings(html_source);
 
+#if defined(OS_CHROMEOS)
   AddA11yStrings(html_source);
+  AddAccountUITweaksStrings(html_source, profile);
+#endif
   AddAppearanceStrings(html_source);
   AddCertificateManagerStrings(html_source);
-  AddCommonStrings(html_source);
-  AddDownloadsStrings(html_source);
+  AddClearBrowsingDataStrings(html_source);
   AddDateTimeStrings(html_source);
+  AddDownloadsStrings(html_source);
 #if defined(OS_CHROMEOS)
   AddInternetStrings(html_source);
 #endif
+  AddLanguagesStrings(html_source);
+#if defined(OS_CHROMEOS)
+  AddMultiProfilesStrings(html_source, profile);
+#endif
+  AddOnStartupStrings(html_source);
   AddPrivacyStrings(html_source);
-  AddSearchStrings(html_source);
   AddSearchEnginesStrings(html_source);
+  AddSearchStrings(html_source);
   AddSiteSettingsStrings(html_source);
   AddSyncStrings(html_source);
   AddUsersStrings(html_source);
+
   html_source->SetJsonPath(kLocalizedStringsFile);
 }
 

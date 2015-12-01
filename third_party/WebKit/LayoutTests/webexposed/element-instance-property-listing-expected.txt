@@ -252,17 +252,6 @@ html element abbr
 html element acronym
 html element address
 html element applet
-    property align
-    property alt
-    property archive
-    property code
-    property codeBase
-    property height
-    property hspace
-    property name
-    property object
-    property vspace
-    property width
 html element area
     property alt
     property coords
@@ -395,6 +384,7 @@ html element button
 html element canvas
     property getContext
     property height
+    property toBlob
     property toDataURL
     property width
 html element caption
@@ -551,6 +541,7 @@ html element iframe
     property marginHeight
     property marginWidth
     property name
+    property referrerpolicy
     property sandbox
     property scrolling
     property src

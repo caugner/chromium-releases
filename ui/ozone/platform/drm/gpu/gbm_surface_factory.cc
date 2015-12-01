@@ -13,7 +13,6 @@
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
 #include "ui/ozone/platform/drm/gpu/gbm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/gbm_device.h"
-#include "ui/ozone/platform/drm/gpu/gbm_surface.h"
 #include "ui/ozone/platform/drm/gpu/gbm_surfaceless.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_controller.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
@@ -23,10 +22,8 @@
 
 namespace ui {
 
-GbmSurfaceFactory::GbmSurfaceFactory(bool allow_surfaceless)
-    : DrmSurfaceFactory(nullptr),
-      allow_surfaceless_(allow_surfaceless),
-      drm_device_manager_(nullptr) {}
+GbmSurfaceFactory::GbmSurfaceFactory()
+    : drm_device_manager_(nullptr), screen_manager_(nullptr) {}
 
 GbmSurfaceFactory::~GbmSurfaceFactory() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -36,6 +33,22 @@ void GbmSurfaceFactory::InitializeGpu(DrmDeviceManager* drm_device_manager,
                                       ScreenManager* screen_manager) {
   drm_device_manager_ = drm_device_manager;
   screen_manager_ = screen_manager;
+}
+
+void GbmSurfaceFactory::RegisterSurface(gfx::AcceleratedWidget widget,
+                                        GbmSurfaceless* surface) {
+  widget_to_surface_map_.insert(std::make_pair(widget, surface));
+}
+
+void GbmSurfaceFactory::UnregisterSurface(gfx::AcceleratedWidget widget) {
+  widget_to_surface_map_.erase(widget);
+}
+
+GbmSurfaceless* GbmSurfaceFactory::GetSurface(
+    gfx::AcceleratedWidget widget) const {
+  auto it = widget_to_surface_map_.find(widget);
+  DCHECK(it != widget_to_surface_map_.end());
+  return it->second;
 }
 
 intptr_t GbmSurfaceFactory::GetNativeDisplay() {
@@ -81,27 +94,16 @@ scoped_ptr<SurfaceOzoneCanvas> GbmSurfaceFactory::CreateCanvasForWidget(
 
 scoped_ptr<SurfaceOzoneEGL> GbmSurfaceFactory::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  scoped_refptr<GbmDevice> gbm = GetGbmDevice(widget);
-  DCHECK(gbm);
-
-  scoped_ptr<GbmSurface> surface(
-      new GbmSurface(screen_manager_->GetWindow(widget), gbm));
-  if (!surface->Initialize())
-    return nullptr;
-
-  return surface.Pass();
+  NOTREACHED();
+  return nullptr;
 }
 
 scoped_ptr<SurfaceOzoneEGL>
 GbmSurfaceFactory::CreateSurfacelessEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!allow_surfaceless_)
-    return nullptr;
-
   return make_scoped_ptr(new GbmSurfaceless(screen_manager_->GetWindow(widget),
-                                            drm_device_manager_));
+                                            drm_device_manager_, this));
 }
 
 scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
@@ -112,7 +114,7 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
 #if !defined(OS_CHROMEOS)
   // Support for memory mapping accelerated buffers requires some
   // CrOS-specific patches (using vgem).
-  DCHECK_EQ(gfx::BufferUsage::SCANOUT, usage);
+  DCHECK(gfx::BufferUsage::SCANOUT == usage);
 #endif
 
   scoped_refptr<GbmDevice> gbm = GetGbmDevice(widget);
@@ -123,16 +125,11 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
   if (!buffer.get())
     return nullptr;
 
-  scoped_refptr<GbmPixmap> pixmap(new GbmPixmap(buffer, screen_manager_));
+  scoped_refptr<GbmPixmap> pixmap(new GbmPixmap(buffer, this));
   if (!pixmap->Initialize())
     return nullptr;
 
   return pixmap;
-}
-
-bool GbmSurfaceFactory::CanShowPrimaryPlaneAsOverlay() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return allow_surfaceless_;
 }
 
 scoped_refptr<GbmDevice> GbmSurfaceFactory::GetGbmDevice(

@@ -27,6 +27,7 @@ import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksShim;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.components.bookmarks.BookmarkId;
 
@@ -413,7 +414,7 @@ public class EnhancedBookmarkManager implements EnhancedBookmarkDelegate {
     public void openBookmark(BookmarkId bookmark, int launchLocation) {
         clearSelection();
         if (mEnhancedBookmarksModel.getBookmarkById(bookmark) != null) {
-            String url = mEnhancedBookmarksModel.getBookmarkLaunchUrl(bookmark);
+            String url = mEnhancedBookmarksModel.getLaunchUrlAndMarkAccessed(mActivity, bookmark);
             // TODO(jianli): Notify the user about the failure.
             if (TextUtils.isEmpty(url)) return;
 
@@ -461,6 +462,11 @@ public class EnhancedBookmarkManager implements EnhancedBookmarkDelegate {
     @Override
     public LargeIconBridge getLargeIconBridge() {
         return mLargeIconBridge;
+    }
+
+    @Override
+    public SnackbarManager getSnackbarManager() {
+        return ((SnackbarManageable) mActivity).getSnackbarManager();
     }
 
     /**

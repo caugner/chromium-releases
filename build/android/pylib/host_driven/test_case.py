@@ -28,7 +28,6 @@ from pylib import constants
 from pylib import forwarder
 from pylib import valgrind_tools
 from pylib.base import base_test_result
-from pylib.device import device_utils
 from pylib.instrumentation import test_package
 from pylib.instrumentation import test_result
 from pylib.instrumentation import test_runner

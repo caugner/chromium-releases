@@ -1,4 +1,22 @@
 {
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ChromotingQUIC": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "QUIC": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "alternate_protocol_probability_threshold": "0.001"
+            }
+        }
+    ],
     "SdchPersistence": [
         {
             "group_name": "Enabled"
@@ -12,17 +30,9 @@
             "group_name": "Disabled"
         }
     ],
-    "AutofillFieldMetadata": [
+    "TabSyncByRecency": [
         {
             "group_name": "Enabled"
-        }
-    ],
-    "QUIC": [
-        {
-            "group_name": "Enabled",
-            "params": {
-              "alternate_protocol_probability_threshold": "0.01"
-            }
         }
     ],
     "VarationsServiceControl": [

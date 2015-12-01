@@ -90,6 +90,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 #endif  // defined(OS_MACOSX)
   void OnSwapCompositorFrame(uint32 output_surface_id,
                              scoped_ptr<cc::CompositorFrame> frame) override;
+  void ClearCompositorFrame() override {}
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -115,7 +116,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      ReadbackRequestCallback& callback,
+      const ReadbackRequestCallback& callback,
       const SkColorType preferred_color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
@@ -132,8 +133,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void UnlockCompositingSurface() override {}
 #endif
   void GetScreenInfo(blink::WebScreenInfo* results) override {}
+  bool GetScreenColorProfile(std::vector<char>* color_profile) override;
   gfx::Rect GetBoundsInRootWindow() override;
-  gfx::GLSurfaceHandle GetCompositingSurface() override;
   bool LockMouse() override;
   void UnlockMouse() override;
 #if defined(OS_WIN)
@@ -204,8 +205,8 @@ class TestRenderViewHost
   TestRenderViewHost(SiteInstance* instance,
                      RenderViewHostDelegate* delegate,
                      RenderWidgetHostDelegate* widget_delegate,
-                     int routing_id,
-                     int main_frame_routing_id,
+                     int32 routing_id,
+                     int32 main_frame_routing_id,
                      bool swapped_out);
   ~TestRenderViewHost() override;
 

@@ -22,8 +22,10 @@ namespace {
 // Default colors.
 #if defined(OS_CHROMEOS)
 // Used for theme fallback colors.
-const SkColor kDefaultColorFrame = SkColorSetRGB(109, 109, 109);
-const SkColor kDefaultColorFrameInactive = SkColorSetRGB(176, 176, 176);
+const SkColor kDefaultColorFrame[] = {
+    SkColorSetRGB(109, 109, 109), SkColorSetRGB(204, 204, 204)};
+const SkColor kDefaultColorFrameInactive[] = {
+    SkColorSetRGB(176, 176, 176), SkColorSetRGB(220, 220, 220)};
 #elif defined(OS_MACOSX)
 const SkColor kDefaultColorFrame = SkColorSetRGB(224, 224, 224);
 const SkColor kDefaultColorFrameInactive = SkColorSetRGB(246, 246, 246);
@@ -31,21 +33,30 @@ const SkColor kDefaultColorFrameInactive = SkColorSetRGB(246, 246, 246);
 const SkColor kDefaultColorFrame = SkColorSetRGB(66, 116, 201);
 const SkColor kDefaultColorFrameInactive = SkColorSetRGB(161, 182, 228);
 #endif  // OS_CHROMEOS
-const SkColor kDefaultColorFrameIncognito = SkColorSetRGB(83, 106, 139);
-const SkColor kDefaultColorFrameIncognitoInactive =
-    SkColorSetRGB(126, 139, 156);
+
+const SkColor kDefaultColorFrameIncognito[] = {
+    SkColorSetRGB(83, 106, 139), SkColorSetRGB(160, 160, 162)};
+const SkColor kDefaultColorFrameIncognitoInactive[] = {
+    SkColorSetRGB(126, 139, 156), SkColorSetRGB(120, 120, 122)};
+
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorToolbar = SkColorSetRGB(230, 230, 230);
 #else
-const SkColor kDefaultColorToolbar = SkColorSetRGB(223, 223, 223);
-#endif
+const SkColor kDefaultColorToolbar[] = {
+    SkColorSetRGB(223, 223, 223), SkColorSetRGB(242, 242, 242)};
+#endif  // OS_MACOSX
+
 const SkColor kDefaultColorTabText = SK_ColorBLACK;
+
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorBackgroundTabText = SK_ColorBLACK;
 #else
-const SkColor kDefaultColorBackgroundTabText = SkColorSetRGB(64, 64, 64);
-#endif
+const SkColor kDefaultColorBackgroundTabText[] = {
+    SkColorSetRGB(64, 64, 64), SK_ColorBLACK };
+#endif  // OS_MACOSX
+
 const SkColor kDefaultColorBookmarkText = SK_ColorBLACK;
+
 #if defined(OS_WIN)
 const SkColor kDefaultColorNTPBackground =
     color_utils::GetSysSkColor(COLOR_WINDOW);
@@ -58,7 +69,8 @@ const SkColor kDefaultColorNTPLink =
 const SkColor kDefaultColorNTPBackground = SK_ColorWHITE;
 const SkColor kDefaultColorNTPText = SK_ColorBLACK;
 const SkColor kDefaultColorNTPLink = SkColorSetRGB(6, 55, 116);
-#endif
+#endif  // OS_WIN
+
 const SkColor kDefaultColorNTPHeader = SkColorSetRGB(150, 150, 150);
 const SkColor kDefaultColorNTPSection = SkColorSetRGB(229, 229, 229);
 const SkColor kDefaultColorNTPSectionText = SK_ColorBLACK;
@@ -73,19 +85,12 @@ const color_utils::HSL kDefaultTintFrameIncognito = { -1, 0.2f, 0.35f };
 const color_utils::HSL kDefaultTintFrameIncognitoInactive = { -1, 0.3f, 0.6f };
 const color_utils::HSL kDefaultTintBackgroundTab = { -1, 0.5, 0.75 };
 
-// Default display properties.
-const int kDefaultDisplayPropertyNTPAlignment =
-    ThemeProperties::ALIGN_CENTER;
-const int kDefaultDisplayPropertyNTPTiling =
-    ThemeProperties::NO_REPEAT;
-// By default, we do not use the ntp alternate logo.
-const int kDefaultDisplayPropertyNTPAlternateLogo = 0;
-
 // ----------------------------------------------------------------------------
 // Defaults for properties which are not stored in the browser theme pack.
 
 const SkColor kDefaultColorControlBackground = SK_ColorWHITE;
-const SkColor kDefaultColorToolbarSeparator = SkColorSetRGB(170, 170, 171);
+const SkColor kDefaultColorToolbarSeparator[] = {
+    SkColorSetRGB(170, 170, 171), SkColorSetRGB(182, 180, 182)};
 
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorToolbarButtonStroke = SkColorSetARGB(75, 81, 81, 81);
@@ -94,73 +99,7 @@ const SkColor kDefaultColorToolbarButtonStrokeInactive =
 const SkColor kDefaultColorToolbarBezel = SkColorSetRGB(204, 204, 204);
 const SkColor kDefaultColorToolbarStroke = SkColorSetRGB(103, 103, 103);
 const SkColor kDefaultColorToolbarStrokeInactive = SkColorSetRGB(163, 163, 163);
-#endif
-
-// ----------------------------------------------------------------------------
-// Defaults for layout properties which are not stored in the browser theme
-// pack. The array indices here are the values of
-// ui::MaterialDesignController::Mode, see
-// ui/base/resource/material_design/material_design_controller.h
-
-// Additional horizontal padding applied on the trailing edge of icon-label
-// views.
-const int kIconLabelViewTrailingPadding[] = {2, 8, 8};
-
-// The horizontal space between the edge and a bubble
-const int kLocationBarBubbleHorizontalPadding[] = {1, 5, 5};
-
-// The additional vertical padding of a bubble.
-const int kLocationBarBubbleVerticalPadding[] = {1, 3, 3};
-
-// The height to be occupied by the LocationBar. For
-// MaterialDesignController::NON_MATERIAL the height is determined from image
-// assets.
-const int kLocationBarHeight[] = {0, 28, 32};
-
-// Space between items in the location bar, as well as between items and the
-// edges.
-const int kLocationBarHorizontalPadding[] = {3, 6, 6};
-
-// The Vertical padding of items in the location bar.
-const int kLocationBarVerticalPadding[] = {2, 6, 6};
-
-// The number of pixels in the omnibox dropdown border image interior to
-// the actual border.
-const int kOmniboxDropdownBorderInterior[] = {6, 0, 0};
-
-// In an omnibox dropdown row, the minimum distance between the top and
-// bottom of the row's icon and the top or bottom of the row edge.
-const int kOmniboxDropdownMinIconVerticalPadding[] = {2, 4, 8};
-
-// In an omnibox dropdown row, the minimum distance between the top and
-// bottom of the row's text and the top or bottom of the row edge.
-const int kOmniboxDropdownMinTextVerticalPadding[] = {3, 4, 8};
-
-// The spacing between a ToolbarButton's image and its border.
-const int kToolbarButtonBorderInset[] = {2, 6, 6};
-
-// Non-ash uses a rounded content area with no shadow in the assets.
-const int kToolbarViewContentShadowHeight[] = {0, 0, 0};
-
-// Ash doesn't use a rounded content area and its top edge has an extra shadow.
-const int kToolbarViewContentShadowHeightAsh[] = {2, 0, 0};
-
-// Additional horizontal padding between the elements in the toolbar.
-const int kToolbarViewElementPadding[] = {0, 0, 8};
-
-// Padding between the right-edge of the location bar and browser actions.
-const int kToolbarViewLocationBarRightPadding[] = {0, 4, 8};
-
-// The edge graphics have some built-in spacing/shadowing, so we have to adjust
-// our spacing to make it match.
-const int kToolbarViewLeftEdgeSpacing[] = {3, 4, 8};
-const int kToolbarViewRightEdgeSpacing[] = {2, 4, 8};
-
-// The horizontal space between most items.
-const int kToolbarViewStandardSpacing[] = {3, 4, 8};
-
-// The minimal vertical padding of the toolbar.
-const int kToolbarViewVerticalPadding[] = {5, 4, 4};
+#endif  // OS_MACOSX
 
 // ----------------------------------------------------------------------------
 
@@ -300,22 +239,39 @@ color_utils::HSL ThemeProperties::GetDefaultTint(int id) {
 
 // static
 SkColor ThemeProperties::GetDefaultColor(int id) {
+  int mode = ui::MaterialDesignController::IsModeMaterial();
   switch (id) {
     // Properties stored in theme pack.
     case COLOR_FRAME:
+#if defined(OS_CHROMEOS)
+      return kDefaultColorFrame[mode];
+#else
       return kDefaultColorFrame;
+#endif  // OS_CHROMEOS
     case COLOR_FRAME_INACTIVE:
+#if defined(OS_CHROMEOS)
+      return kDefaultColorFrameInactive[mode];
+#else
       return kDefaultColorFrameInactive;
+#endif  // OS_CHROMEOS
     case COLOR_FRAME_INCOGNITO:
-      return kDefaultColorFrameIncognito;
+      return kDefaultColorFrameIncognito[mode];
     case COLOR_FRAME_INCOGNITO_INACTIVE:
-      return kDefaultColorFrameIncognitoInactive;
+      return kDefaultColorFrameIncognitoInactive[mode];
     case COLOR_TOOLBAR:
+#if defined(OS_MACOSX)
       return kDefaultColorToolbar;
+#else
+      return kDefaultColorToolbar[mode];
+#endif  // OS_MACOSX
     case COLOR_TAB_TEXT:
       return kDefaultColorTabText;
     case COLOR_BACKGROUND_TAB_TEXT:
+#if defined(OS_MACOSX)
       return kDefaultColorBackgroundTabText;
+#else
+      return kDefaultColorBackgroundTabText[mode];
+#endif  // OS_MACOSX
     case COLOR_BOOKMARK_TEXT:
       return kDefaultColorBookmarkText;
     case COLOR_NTP_BACKGROUND:
@@ -343,7 +299,7 @@ SkColor ThemeProperties::GetDefaultColor(int id) {
     case COLOR_CONTROL_BACKGROUND:
       return kDefaultColorControlBackground;
     case COLOR_TOOLBAR_SEPARATOR:
-      return kDefaultColorToolbarSeparator;
+      return kDefaultColorToolbarSeparator[mode];
 #if defined(OS_MACOSX)
     case COLOR_TOOLBAR_BUTTON_STROKE:
       return kDefaultColorToolbarButtonStroke;
@@ -359,56 +315,5 @@ SkColor ThemeProperties::GetDefaultColor(int id) {
     default:
       // Return a debugging red color.
       return SK_ColorRED;
-  }
-}
-
-// static
-int ThemeProperties::GetDefaultDisplayProperty(int id) {
-  int mode = ui::MaterialDesignController::GetMode();
-  switch (id) {
-    case ThemeProperties::NTP_BACKGROUND_ALIGNMENT:
-      return kDefaultDisplayPropertyNTPAlignment;
-    case ThemeProperties::NTP_BACKGROUND_TILING:
-      return kDefaultDisplayPropertyNTPTiling;
-    case ThemeProperties::NTP_LOGO_ALTERNATE:
-      return kDefaultDisplayPropertyNTPAlternateLogo;
-    case ThemeProperties::PROPERTY_ICON_LABEL_VIEW_TRAILING_PADDING:
-      return kIconLabelViewTrailingPadding[mode];
-    case ThemeProperties::PROPERTY_LOCATION_BAR_BUBBLE_HORIZONTAL_PADDING:
-      return kLocationBarBubbleHorizontalPadding[mode];
-    case ThemeProperties::PROPERTY_LOCATION_BAR_BUBBLE_VERTICAL_PADDING:
-      return kLocationBarBubbleVerticalPadding[mode];
-    case ThemeProperties::PROPERTY_LOCATION_BAR_HEIGHT:
-      return kLocationBarHeight[mode];
-    case ThemeProperties::PROPERTY_LOCATION_BAR_HORIZONTAL_PADDING:
-      return kLocationBarHorizontalPadding[mode];
-    case ThemeProperties::PROPERTY_LOCATION_BAR_VERTICAL_PADDING:
-      return kLocationBarVerticalPadding[mode];
-    case ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_BORDER_INTERIOR:
-      return kOmniboxDropdownBorderInterior[mode];
-    case ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_ICON_VERTICAL_PADDING:
-      return kOmniboxDropdownMinIconVerticalPadding[mode];
-    case ThemeProperties::PROPERTY_OMNIBOX_DROPDOWN_MIN_TEXT_VERTICAL_PADDING:
-      return kOmniboxDropdownMinTextVerticalPadding[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_BUTTON_BORDER_INSET:
-      return kToolbarButtonBorderInset[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_CONTENT_SHADOW_HEIGHT:
-      return kToolbarViewContentShadowHeight[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_CONTENT_SHADOW_HEIGHT_ASH:
-      return kToolbarViewContentShadowHeightAsh[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_ELEMENT_PADDING:
-      return kToolbarViewElementPadding[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_LEFT_EDGE_SPACING:
-      return kToolbarViewLeftEdgeSpacing[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_LOCATION_BAR_RIGHT_PADDING:
-      return kToolbarViewLocationBarRightPadding[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_RIGHT_EDGE_SPACING:
-      return kToolbarViewRightEdgeSpacing[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_STANDARD_SPACING:
-      return kToolbarViewStandardSpacing[mode];
-    case ThemeProperties::PROPERTY_TOOLBAR_VIEW_VERTICAL_PADDING:
-      return kToolbarViewVerticalPadding[mode];
-    default:
-      return -1;
   }
 }

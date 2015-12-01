@@ -24,19 +24,20 @@ promise_test(() => {
 
 promise_test(function() {
   testRunner.setBluetoothMockDataSet('GenericAccessAdapter');
+  let expected = {
+    name: 'NotFoundError',
+    message: 'Service not found in device.'
+  };
   return requestDeviceWithKeyDown({filters: [{services: ['generic_access']}]})
     .then(device => device.connectGATT())
     .then(gattServer => Promise.all(
-      [gattServer.getPrimaryService(heart_rate.alias),
-       gattServer.getPrimaryService(heart_rate.name),
-       gattServer.getPrimaryService(heart_rate.uuid)]))
-    .then(services => {
-      services.forEach(service => {
-        assert_equals(service, null,
-                      'Non existent services should return null.');
-      });
-    });
-}, 'Request for wrong service. Should return null.');
+      [assert_promise_rejects_with_message(
+        gattServer.getPrimaryService(heart_rate.alias), expected),
+       assert_promise_rejects_with_message(
+         gattServer.getPrimaryService(heart_rate.name), expected),
+       assert_promise_rejects_with_message(
+         gattServer.getPrimaryService(heart_rate.uuid), expected)]));
+}, 'Request for wrong service. Reject with NotFoundError.');
 
 promise_test(function() {
   testRunner.setBluetoothMockDataSet('GenericAccessAdapter');
@@ -88,7 +89,13 @@ promise_test(() => {
           name: 'SyntaxError',
           message: 'Failed to execute \'getPrimaryService\' on ' +
                    '\'BluetoothGATTRemoteServer\': Invalid Service name: ' +
-                   '\'wrong_name\'.'
+                   '\'wrong_name\'. ' +
+                   'It must be a valid UUID alias (e.g. 0x1234), ' +
+                   'UUID (lowercase hex characters e.g. ' +
+                   '\'00001234-0000-1000-8000-00805f9b34fb\'), ' +
+                   'or recognized standard name from ' +
+                   'https://developer.bluetooth.org/gatt/services/Pages/ServicesHome.aspx' +
+                   ' e.g. \'alert_notification\'.'
         }, 'Wrong Service name passed.');
     });
 }, 'Wrong Service name. Reject with SyntaxError.');

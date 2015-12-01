@@ -91,6 +91,7 @@ class StartupAppLauncher : public base::SupportsWeakPtr<StartupAppLauncher>,
 
   void InitializeTokenService();
   void MaybeInitializeNetwork();
+  void MaybeInstallSecondaryApps();
   void MaybeLaunchApp();
 
   void StartLoadingOAuthFile();
@@ -98,6 +99,22 @@ class StartupAppLauncher : public base::SupportsWeakPtr<StartupAppLauncher>,
   void OnOAuthFileLoaded(KioskOAuthParams* auth_params);
 
   void OnKioskAppDataLoadStatusChanged(const std::string& app_id);
+
+  // Returns true if any secondary app is pending.
+  bool IsAnySecondaryAppPending() const;
+
+  // Returns true if all secondary apps have been installed.
+  bool AreSecondaryAppsInstalled() const;
+
+  // Returns true if secondary apps are declared in manifest.
+  bool HasSecondaryApps() const;
+
+  // Returns true if the app with |id| failed, and it is the primary or one of
+  // the secondary apps.
+  bool DidPrimaryOrSecondaryAppFailedToInstall(bool success,
+                                               const std::string& id) const;
+
+  const extensions::Extension* GetPrimaryAppExtension() const;
 
   // OAuth2TokenService::Observer overrides.
   void OnRefreshTokenAvailable(const std::string& account_id) override;
@@ -119,6 +136,7 @@ class StartupAppLauncher : public base::SupportsWeakPtr<StartupAppLauncher>,
   int launch_attempt_;
   bool ready_to_launch_;
   bool wait_for_crx_update_;
+  bool secondary_apps_updated_;
 
   KioskOAuthParams auth_params_;
 

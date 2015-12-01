@@ -4,6 +4,8 @@
 
 #include "components/cronet/android/cronet_url_request_context_adapter.h"
 
+#include <map>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
@@ -21,12 +23,14 @@
 #include "base/values.h"
 #include "components/cronet/url_request_context_config.h"
 #include "jni/CronetUrlRequestContext_jni.h"
+#include "net/base/external_estimate_provider.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_server_properties_manager.h"
 #include "net/log/write_to_file_net_log_observer.h"
+#include "net/proxy/proxy_config_service_android.h"
 #include "net/proxy/proxy_service.h"
 #include "net/sdch/sdch_owner.h"
 #include "net/url_request/url_request_context.h"
@@ -76,9 +80,6 @@ class BasicNetworkDelegate : public net::NetworkDelegateImpl {
                         const GURL& new_location) override {}
 
   void OnResponseStarted(net::URLRequest* request) override {}
-
-  void OnRawBytesRead(const net::URLRequest& request, int bytes_read) override {
-  }
 
   void OnCompleted(net::URLRequest* request, bool started) override {}
 
@@ -142,6 +143,10 @@ CronetURLRequestContextAdapter::~CronetURLRequestContextAdapter() {
     http_server_properties_manager_->ShutdownOnPrefThread();
   if (pref_service_)
     pref_service_->CommitPendingWrite();
+  if (network_quality_estimator_) {
+    network_quality_estimator_->RemoveRTTObserver(this);
+    network_quality_estimator_->RemoveThroughputObserver(this);
+  }
   StopNetLogOnNetworkThread();
 }
 
@@ -150,13 +155,87 @@ void CronetURLRequestContextAdapter::InitRequestContextOnMainThread(
     jobject jcaller) {
   base::android::ScopedJavaGlobalRef<jobject> jcaller_ref;
   jcaller_ref.Reset(env, jcaller);
-  proxy_config_service_.reset(net::ProxyService::CreateSystemProxyConfigService(
-      GetNetworkTaskRunner(), nullptr));
+  proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
+      GetNetworkTaskRunner(), nullptr /* Ignored on Android */);
+  net::ProxyConfigServiceAndroid* android_proxy_config_service =
+      static_cast<net::ProxyConfigServiceAndroid*>(proxy_config_service_.get());
+  // If a PAC URL is present, ignore it and use the address and port of
+  // Android system's local HTTP proxy server. See: crbug.com/432539.
+  // TODO(csharrison) Architect the wrapper better so we don't need to cast for
+  // android ProxyConfigServices.
+  android_proxy_config_service->set_exclude_pac_url(true);
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(&CronetURLRequestContextAdapter::InitializeOnNetworkThread,
                  base::Unretained(this), Passed(&context_config_),
                  jcaller_ref));
+}
+
+void CronetURLRequestContextAdapter::
+    EnableNetworkQualityEstimatorOnNetworkThread(bool use_local_host_requests,
+                                                 bool use_smaller_responses) {
+  DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+  DCHECK(!network_quality_estimator_);
+  network_quality_estimator_.reset(new net::NetworkQualityEstimator(
+      scoped_ptr<net::ExternalEstimateProvider>(),
+      std::map<std::string, std::string>(), use_local_host_requests,
+      use_smaller_responses));
+  context_->set_network_quality_estimator(network_quality_estimator_.get());
+}
+
+void CronetURLRequestContextAdapter::EnableNetworkQualityEstimator(
+    JNIEnv* env,
+    jobject jcaller,
+    jboolean use_local_host_requests,
+    jboolean use_smaller_responses) {
+  PostTaskToNetworkThread(
+      FROM_HERE, base::Bind(&CronetURLRequestContextAdapter::
+                                EnableNetworkQualityEstimatorOnNetworkThread,
+                            base::Unretained(this), use_local_host_requests,
+                            use_smaller_responses));
+}
+
+void CronetURLRequestContextAdapter::ProvideRTTObservationsOnNetworkThread(
+    bool should) {
+  DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+  if (!network_quality_estimator_)
+    return;
+  if (should) {
+    network_quality_estimator_->AddRTTObserver(this);
+  } else {
+    network_quality_estimator_->RemoveRTTObserver(this);
+  }
+}
+
+void CronetURLRequestContextAdapter::ProvideRTTObservations(JNIEnv* env,
+                                                            jobject jcaller,
+                                                            bool should) {
+  PostTaskToNetworkThread(FROM_HERE,
+                          base::Bind(&CronetURLRequestContextAdapter::
+                                         ProvideRTTObservationsOnNetworkThread,
+                                     base::Unretained(this), should));
+}
+
+void CronetURLRequestContextAdapter::
+    ProvideThroughputObservationsOnNetworkThread(bool should) {
+  DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+  if (!network_quality_estimator_)
+    return;
+  if (should) {
+    network_quality_estimator_->AddThroughputObserver(this);
+  } else {
+    network_quality_estimator_->RemoveThroughputObserver(this);
+  }
+}
+
+void CronetURLRequestContextAdapter::ProvideThroughputObservations(
+    JNIEnv* env,
+    jobject jcaller,
+    bool should) {
+  PostTaskToNetworkThread(
+      FROM_HERE, base::Bind(&CronetURLRequestContextAdapter::
+                                ProvideThroughputObservationsOnNetworkThread,
+                            base::Unretained(this), should));
 }
 
 void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
@@ -176,22 +255,18 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   context_builder.set_http_network_session_params(
       custom_http_network_session_params);
 
-  scoped_ptr<net::NetLog> net_log(new net::NetLog);
+  net_log_.reset(new net::NetLog);
   scoped_ptr<net::NetworkDelegate> network_delegate(new BasicNetworkDelegate());
 #if defined(DATA_REDUCTION_PROXY_SUPPORT)
   DCHECK(!data_reduction_proxy_);
   // For now, the choice to enable the data reduction proxy happens once,
   // at initialization. It cannot be disabled thereafter.
   if (!config->data_reduction_proxy_key.empty()) {
-    data_reduction_proxy_.reset(
-        new CronetDataReductionProxy(
-            config->data_reduction_proxy_key,
-            config->data_reduction_primary_proxy,
-            config->data_reduction_fallback_proxy,
-            config->data_reduction_secure_proxy_check_url,
-            config->user_agent,
-            GetNetworkTaskRunner(),
-            net_log.get()));
+    data_reduction_proxy_.reset(new CronetDataReductionProxy(
+        config->data_reduction_proxy_key, config->data_reduction_primary_proxy,
+        config->data_reduction_fallback_proxy,
+        config->data_reduction_secure_proxy_check_url, config->user_agent,
+        GetNetworkTaskRunner(), net_log_.get()));
     network_delegate =
         data_reduction_proxy_->CreateNetworkDelegate(network_delegate.Pass());
     ScopedVector<net::URLRequestInterceptor> interceptors;
@@ -199,9 +274,15 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
     context_builder.SetInterceptors(interceptors.Pass());
   }
 #endif  // defined(DATA_REDUCTION_PROXY_SUPPORT)
-  context_builder.set_network_delegate(network_delegate.release());
-  context_builder.set_net_log(net_log.release());
-  context_builder.set_proxy_config_service(proxy_config_service_.release());
+  context_builder.set_network_delegate(network_delegate.Pass());
+  context_builder.set_net_log(net_log_.get());
+
+  // Android provides a local HTTP proxy server that handles proxying when a PAC
+  // URL is present. Create a proxy service without a resolver and rely on this
+  // local HTTP proxy. See: crbug.com/432539.
+  context_builder.set_proxy_service(
+      net::ProxyService::CreateWithoutProxyResolver(
+          proxy_config_service_.Pass(), net_log_.get()));
   config->ConfigureURLRequestContextBuilder(&context_builder);
 
   // Set up pref file if storage path is specified.
@@ -230,7 +311,7 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
         http_server_properties_manager.Pass());
   }
 
-  context_.reset(context_builder.Build());
+  context_ = context_builder.Build().Pass();
 
   default_load_flags_ = net::LOAD_DO_NOT_SAVE_COOKIES |
                         net::LOAD_DO_NOT_SEND_COOKIES;
@@ -291,6 +372,7 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   }
 
   JNIEnv* env = base::android::AttachCurrentThread();
+  jcronet_url_request_context_.Reset(env, jcronet_url_request_context.obj());
   Java_CronetUrlRequestContext_initNetworkThread(
       env, jcronet_url_request_context.obj());
 
@@ -409,11 +491,31 @@ base::Thread* CronetURLRequestContextAdapter::GetFileThread() {
   return file_thread_.get();
 }
 
+void CronetURLRequestContextAdapter::OnRTTObservation(
+    int32_t rtt_ms,
+    const base::TimeTicks& timestamp,
+    net::NetworkQualityEstimator::ObservationSource source) {
+  Java_CronetUrlRequestContext_onRttObservation(
+      base::android::AttachCurrentThread(), jcronet_url_request_context_.obj(),
+      rtt_ms, (timestamp - base::TimeTicks::UnixEpoch()).InMilliseconds(),
+      source);
+}
+
+void CronetURLRequestContextAdapter::OnThroughputObservation(
+    int32_t throughput_kbps,
+    const base::TimeTicks& timestamp,
+    net::NetworkQualityEstimator::ObservationSource source) {
+  Java_CronetUrlRequestContext_onThroughputObservation(
+      base::android::AttachCurrentThread(), jcronet_url_request_context_.obj(),
+      throughput_kbps,
+      (timestamp - base::TimeTicks::UnixEpoch()).InMilliseconds(), source);
+}
+
 // Creates RequestContextAdater if config is valid URLRequestContextConfig,
 // returns 0 otherwise.
 static jlong CreateRequestContextAdapter(JNIEnv* env,
-                                         jclass jcaller,
-                                         jstring jconfig) {
+                                         const JavaParamRef<jclass>& jcaller,
+                                         const JavaParamRef<jstring>& jconfig) {
   std::string config_string =
       base::android::ConvertJavaStringToUTF8(env, jconfig);
   scoped_ptr<URLRequestContextConfig> context_config(
@@ -426,7 +528,9 @@ static jlong CreateRequestContextAdapter(JNIEnv* env,
   return reinterpret_cast<jlong>(context_adapter);
 }
 
-static jint SetMinLogLevel(JNIEnv* env, jclass jcaller, jint jlog_level) {
+static jint SetMinLogLevel(JNIEnv* env,
+                           const JavaParamRef<jclass>& jcaller,
+                           jint jlog_level) {
   jint old_log_level = static_cast<jint>(logging::GetMinLogLevel());
   // MinLogLevel is global, shared by all URLRequestContexts.
   logging::SetMinLogLevel(static_cast<int>(jlog_level));

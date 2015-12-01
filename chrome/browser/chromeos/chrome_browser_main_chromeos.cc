@@ -105,6 +105,7 @@
 #include "chromeos/network/network_change_notifier_chromeos.h"
 #include "chromeos/network/network_change_notifier_factory_chromeos.h"
 #include "chromeos/network/network_handler.h"
+#include "chromeos/network/portal_detector/network_portal_detector_stub.h"
 #include "chromeos/system/statistics_provider.h"
 #include "chromeos/tpm/tpm_token_loader.h"
 #include "components/device_event_log/device_event_log.h"
@@ -118,6 +119,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/main_function_params.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/ssl_server_socket.h"
@@ -155,6 +157,21 @@ bool ShouldAutoLaunchKioskApp(const base::CommandLine& command_line) {
       KioskAppLaunchError::Get() == KioskAppLaunchError::NONE;
 }
 
+// Creates an instance of the NetworkPortalDetector implementation or a stub.
+void InitializeNetworkPortalDetector() {
+  if (network_portal_detector::SetForTesting())
+    return;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          ::switches::kTestType)) {
+    network_portal_detector::SetNetworkPortalDetector(
+        new NetworkPortalDetectorStub());
+  } else {
+    network_portal_detector::SetNetworkPortalDetector(
+        new NetworkPortalDetectorImpl(
+            g_browser_process->system_request_context(), true));
+  }
+}
+
 }  // namespace
 
 namespace internal {
@@ -168,6 +185,12 @@ class DBusServices {
     // Initialize DBusThreadManager for the browser. This must be done after
     // the main message loop is started, as it uses the message loop.
     DBusThreadManager::Initialize();
+
+    bluez::BluezDBusManager::Initialize(
+        DBusThreadManager::Get()->GetSystemBus(),
+        chromeos::DBusThreadManager::Get()->IsUsingStub(
+            chromeos::DBusClientBundle::BLUETOOTH));
+
     PowerPolicyController::Initialize(
         DBusThreadManager::Get()->GetPowerManagerClient());
 
@@ -234,6 +257,7 @@ class DBusServices {
     PowerDataCollector::Shutdown();
     PowerPolicyController::Shutdown();
     device::BluetoothAdapterFactory::Shutdown();
+    bluez::BluezDBusManager::Shutdown();
 
     // NOTE: This must only be called if Initialize() was called.
     DBusThreadManager::Shutdown();
@@ -496,11 +520,18 @@ void GuestLanguageSetCallbackData::Callback(
       input_method::InputMethodManager::Get();
   scoped_refptr<input_method::InputMethodManager::State> ime_state =
       manager->GetActiveIMEState();
+  // For guest mode, we should always use the first login input methods.
+  // This is to keep consistency with UserSessionManager::SetFirstLoginPrefs().
+  // See crbug.com/530808.
+  std::vector<std::string> input_methods;
+  manager->GetInputMethodUtil()->GetFirstLoginInputMethodIds(
+      result.loaded_locale, ime_state->GetCurrentInputMethod(), &input_methods);
+  ime_state->ReplaceEnabledInputMethods(input_methods);
+
   // Active layout must be hardware "login layout".
   // The previous one must be "locale default layout".
   // First, enable all hardware input methods.
-  const std::vector<std::string>& input_methods =
-      manager->GetInputMethodUtil()->GetHardwareInputMethodIds();
+  input_methods = manager->GetInputMethodUtil()->GetHardwareInputMethodIds();
   for (size_t i = 0; i < input_methods.size(); ++i)
     ime_state->EnableInputMethod(input_methods[i]);
 
@@ -550,10 +581,8 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // NetworkStateHandler and initiates captive portal detection for
   // active networks. Should be called before call to CreateSessionManager,
   // because it depends on NetworkPortalDetector.
-  NetworkPortalDetectorImpl::Initialize(
-      g_browser_process->system_request_context());
+  InitializeNetworkPortalDetector();
   {
-    NetworkPortalDetector* detector = NetworkPortalDetector::Get();
 #if defined(GOOGLE_CHROME_BUILD)
     bool is_official_build = true;
 #else
@@ -562,7 +591,7 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
     // Enable portal detector if EULA was previously accepted or if
     // this is an unofficial build.
     if (!is_official_build || StartupUtils::IsEulaAccepted())
-      detector->Enable(true);
+      network_portal_detector::GetInstance()->Enable(true);
   }
 
   // Initialize input methods.
@@ -713,8 +742,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   MagnificationManager::Shutdown();
 
-  AccessibilityManager::Shutdown();
-
   media::SoundsManager::Shutdown();
 
   system::StatisticsProvider::GetInstance()->Shutdown();
@@ -750,6 +777,8 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // Ash needs to be closed before UserManager is destroyed.
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 
+  AccessibilityManager::Shutdown();
+
   input_method::Shutdown();
 
   // Stops all in-flight OAuth2 token fetchers before the IO thread stops.
@@ -762,7 +791,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // ChromeBrowserMainPartsLinux::PostMainMessageLoopRun() to be
   // executed after execution of chrome::CloseAsh(), because some
   // parts of WebUI depends on NetworkPortalDetector.
-  NetworkPortalDetector::Shutdown();
+  network_portal_detector::Shutdown();
 
   g_browser_process->platform_part()->DestroyChromeUserManager();
 

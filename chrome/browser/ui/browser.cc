@@ -43,7 +43,6 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
-#include "chrome/browser/custom_handlers/register_protocol_handler_infobar_delegate.h"
 #include "chrome/browser/custom_handlers/register_protocol_handler_permission_request.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
@@ -75,8 +74,8 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
@@ -98,8 +97,9 @@
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_toolbar_model_delegate.h"
@@ -131,6 +131,7 @@
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
+#include "chrome/browser/ui/tabs/tab_discard_state.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
@@ -160,7 +161,8 @@
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/search/search.h"
-#include "components/sessions/session_types.h"
+#include "components/sessions/core/session_types.h"
+#include "components/sessions/core/tab_restore_service.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/zoom_controller.h"
@@ -204,7 +206,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
-#include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "components/autofill/core/browser/autofill_ie_toolbar_import_win.h"
@@ -252,6 +253,28 @@ BrowserWindow* CreateBrowserWindow(Browser* browser) {
 bool IsFastTabUnloadEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableFastUnload);
+}
+
+// Note: This is a lossy operation. Not all of the policies that can be
+// expressed by a SecurityLevel (a //chrome concept) can be expressed by
+// a content::SecurityStyle.
+content::SecurityStyle SecurityLevelToSecurityStyle(
+    SecurityStateModel::SecurityLevel security_level) {
+  switch (security_level) {
+    case SecurityStateModel::NONE:
+      return content::SECURITY_STYLE_UNAUTHENTICATED;
+    case SecurityStateModel::SECURITY_WARNING:
+    case SecurityStateModel::SECURITY_POLICY_WARNING:
+      return content::SECURITY_STYLE_WARNING;
+    case SecurityStateModel::EV_SECURE:
+    case SecurityStateModel::SECURE:
+      return content::SECURITY_STYLE_AUTHENTICATED;
+    case SecurityStateModel::SECURITY_ERROR:
+      return content::SECURITY_STYLE_AUTHENTICATION_BROKEN;
+  }
+
+  NOTREACHED();
+  return content::SECURITY_STYLE_UNKNOWN;
 }
 
 }  // namespace
@@ -355,7 +378,7 @@ Browser::Browser(const CreateParams& params)
       content_setting_bubble_model_delegate_(
           new BrowserContentSettingBubbleModelDelegate(this)),
       toolbar_model_delegate_(new BrowserToolbarModelDelegate(this)),
-      tab_restore_service_delegate_(new BrowserTabRestoreServiceDelegate(this)),
+      live_tab_context_(new BrowserLiveTabContext(this)),
       synced_window_delegate_(new BrowserSyncedWindowDelegate(this)),
       bookmark_bar_state_(BookmarkBar::HIDDEN),
       command_controller_(new chrome::BrowserCommandController(this)),
@@ -471,6 +494,7 @@ Browser::~Browser() {
   // The tab strip should not have any tabs at this point.
   DCHECK(tab_strip_model_->empty());
   tab_strip_model_->RemoveObserver(this);
+  bubble_manager_.reset();
 
   // Destroy the BrowserCommandController before removing the browser, so that
   // it doesn't act on any notifications that are sent as a result of removing
@@ -483,10 +507,10 @@ Browser::~Browser() {
   if (session_service)
     session_service->WindowClosed(session_id_);
 
-  TabRestoreService* tab_restore_service =
+  sessions::TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfile(profile());
   if (tab_restore_service)
-    tab_restore_service->BrowserClosed(tab_restore_service_delegate());
+    tab_restore_service->BrowserClosed(live_tab_context());
 
 #if !defined(OS_MACOSX)
   if (!chrome::GetTotalBrowserCountForProfile(profile_)) {
@@ -548,6 +572,12 @@ Browser::~Browser() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // Getters & Setters
+
+ChromeBubbleManager* Browser::GetBubbleManager() {
+  if (!bubble_manager_)
+    bubble_manager_.reset(new ChromeBubbleManager(tab_strip_model_.get()));
+  return bubble_manager_.get();
+}
 
 FindBarController* Browser::GetFindBarController() {
   if (!find_bar_controller_.get()) {
@@ -699,16 +729,16 @@ void Browser::OnWindowClosing() {
   if (session_service)
     session_service->WindowClosing(session_id());
 
-  TabRestoreService* tab_restore_service =
+  sessions::TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfile(profile());
 
 #if defined(USE_AURA)
   if (tab_restore_service && is_app() && !is_devtools())
-    tab_restore_service->BrowserClosing(tab_restore_service_delegate());
+    tab_restore_service->BrowserClosing(live_tab_context());
 #endif
 
   if (tab_restore_service && is_type_tabbed() && tab_strip_model_->count())
-    tab_restore_service->BrowserClosing(tab_restore_service_delegate());
+    tab_restore_service->BrowserClosing(live_tab_context());
 
   // TODO(sky): convert session/tab restore to use notification.
   content::NotificationService::current()->Notify(
@@ -1024,13 +1054,8 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   exclusive_access_manager_->OnTabDetachedFromView(old_contents);
 
   // Discarded tabs always get reloaded.
-  if (tab_strip_model_->IsTabDiscarded(index)) {
-    LOG(WARNING) << "Reloading discarded tab at " << index;
-    static int reload_count = 0;
-    UMA_HISTOGRAM_CUSTOM_COUNTS(
-        "Tabs.Discard.ReloadCount", ++reload_count, 1, 1000, 50);
+  if (TabDiscardState::IsDiscarded(new_contents))
     chrome::Reload(this, CURRENT_TAB);
-  }
 
   // If we have any update pending, do it now.
   if (chrome_updater_factory_.HasWeakPtrs() && old_contents)
@@ -1289,14 +1314,18 @@ bool Browser::CanDragEnter(content::WebContents* source,
 content::SecurityStyle Browser::GetSecurityStyle(
     WebContents* web_contents,
     content::SecurityStyleExplanations* security_style_explanations) {
-  connection_security::SecurityInfo security_info;
-  connection_security::GetSecurityInfoForWebContents(web_contents,
-                                                     &security_info);
+  SecurityStateModel* model = SecurityStateModel::FromWebContents(web_contents);
+  DCHECK(model);
+  const SecurityStateModel::SecurityInfo& security_info =
+      model->GetSecurityInfo();
+
+  const content::SecurityStyle security_style =
+      SecurityLevelToSecurityStyle(security_info.security_level);
 
   security_style_explanations->ran_insecure_content_style =
-      connection_security::kRanInsecureContentStyle;
+      SecurityStateModel::kRanInsecureContentStyle;
   security_style_explanations->displayed_insecure_content_style =
-      connection_security::kDisplayedInsecureContentStyle;
+      SecurityStateModel::kDisplayedInsecureContentStyle;
 
   // Check if the page is HTTP; if so, no explanations are needed. Note
   // that SECURITY_STYLE_UNAUTHENTICATED does not necessarily mean that
@@ -1307,35 +1336,36 @@ content::SecurityStyle Browser::GetSecurityStyle(
   // algorithms with the same UI treatment as HTTP pages).
   security_style_explanations->scheme_is_cryptographic =
       security_info.scheme_is_cryptographic;
-  if (!security_info.scheme_is_cryptographic ||
-      security_info.security_style == content::SECURITY_STYLE_UNKNOWN) {
-    return security_info.security_style;
+  if (!security_info.scheme_is_cryptographic) {
+    return security_style;
   }
 
   if (security_info.sha1_deprecation_status ==
-      connection_security::DEPRECATED_SHA1_BROKEN) {
+      SecurityStateModel::DEPRECATED_SHA1_MAJOR) {
     security_style_explanations->broken_explanations.push_back(
         content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_BROKEN_SHA1),
-            l10n_util::GetStringUTF8(IDS_BROKEN_SHA1_DESCRIPTION)));
+            l10n_util::GetStringUTF8(IDS_MAJOR_SHA1),
+            l10n_util::GetStringUTF8(IDS_MAJOR_SHA1_DESCRIPTION),
+            security_info.cert_id));
   } else if (security_info.sha1_deprecation_status ==
-             connection_security::DEPRECATED_SHA1_WARNING) {
+             SecurityStateModel::DEPRECATED_SHA1_MINOR) {
     security_style_explanations->warning_explanations.push_back(
         content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_WARNING_SHA1),
-            l10n_util::GetStringUTF8(IDS_WARNING_SHA1_DESCRIPTION)));
+            l10n_util::GetStringUTF8(IDS_MINOR_SHA1),
+            l10n_util::GetStringUTF8(IDS_MINOR_SHA1_DESCRIPTION),
+            security_info.cert_id));
   }
 
   security_style_explanations->ran_insecure_content =
       security_info.mixed_content_status ==
-          connection_security::RAN_MIXED_CONTENT ||
+          SecurityStateModel::RAN_MIXED_CONTENT ||
       security_info.mixed_content_status ==
-          connection_security::RAN_AND_DISPLAYED_MIXED_CONTENT;
+          SecurityStateModel::RAN_AND_DISPLAYED_MIXED_CONTENT;
   security_style_explanations->displayed_insecure_content =
       security_info.mixed_content_status ==
-          connection_security::DISPLAYED_MIXED_CONTENT ||
+          SecurityStateModel::DISPLAYED_MIXED_CONTENT ||
       security_info.mixed_content_status ==
-          connection_security::RAN_AND_DISPLAYED_MIXED_CONTENT;
+          SecurityStateModel::RAN_AND_DISPLAYED_MIXED_CONTENT;
 
   if (net::IsCertStatusError(security_info.cert_status)) {
     base::string16 error_string = base::UTF8ToUTF16(net::ErrorToString(
@@ -1344,7 +1374,8 @@ content::SecurityStyle Browser::GetSecurityStyle(
     content::SecurityStyleExplanation explanation(
         l10n_util::GetStringUTF8(IDS_CERTIFICATE_CHAIN_ERROR),
         l10n_util::GetStringFUTF8(
-            IDS_CERTIFICATE_CHAIN_ERROR_DESCRIPTION_FORMAT, error_string));
+            IDS_CERTIFICATE_CHAIN_ERROR_DESCRIPTION_FORMAT, error_string),
+        security_info.cert_id);
 
     if (net::IsCertStatusMinorError(security_info.cert_status))
       security_style_explanations->warning_explanations.push_back(explanation);
@@ -1355,16 +1386,25 @@ content::SecurityStyle Browser::GetSecurityStyle(
     // deprecated SHA1, then add an explanation that the certificate is
     // valid.
     if (security_info.sha1_deprecation_status ==
-        connection_security::NO_DEPRECATED_SHA1) {
+        SecurityStateModel::NO_DEPRECATED_SHA1) {
       security_style_explanations->secure_explanations.push_back(
           content::SecurityStyleExplanation(
               l10n_util::GetStringUTF8(IDS_VALID_SERVER_CERTIFICATE),
               l10n_util::GetStringUTF8(
-                  IDS_VALID_SERVER_CERTIFICATE_DESCRIPTION)));
+                  IDS_VALID_SERVER_CERTIFICATE_DESCRIPTION),
+              security_info.cert_id));
     }
   }
 
-  return security_info.security_style;
+  return security_style;
+}
+
+void Browser::ShowCertificateViewerInDevTools(
+    content::WebContents* web_contents, int cert_id) {
+  DevToolsWindow* devtools_window =
+      DevToolsWindow::GetInstanceForInspectedWebContents(web_contents);
+  if (devtools_window)
+    devtools_window->ShowCertificateViewer(cert_id);
 }
 
 bool Browser::IsMouseLocked() const {
@@ -1376,24 +1416,7 @@ void Browser::OnWindowDidShow() {
     return;
   window_has_shown_ = true;
 
-// CurrentProcessInfo::CreationTime() is missing on some platforms.
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-  // Measure the latency from startup till the first browser window becomes
-  // visible.
-  static bool is_first_browser_window = true;
-  if (is_first_browser_window &&
-      !startup_metric_utils::WasNonBrowserUIDisplayed()) {
-    is_first_browser_window = false;
-    const base::Time process_creation_time =
-        base::CurrentProcessInfo::CreationTime();
-
-    if (!process_creation_time.is_null()) {
-      UMA_HISTOGRAM_LONG_TIMES(
-          "Startup.BrowserWindowDisplay",
-          base::Time::Now() - process_creation_time);
-    }
-  }
-#endif  // defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
+  startup_metric_utils::RecordBrowserWindowDisplay(base::Time::Now());
 
   // Nothing to do for non-tabbed windows.
   if (!is_type_tabbed())
@@ -1751,6 +1774,17 @@ bool Browser::IsFullscreenForTabOrPending(
       ->IsFullscreenForTabOrPending(web_contents);
 }
 
+blink::WebDisplayMode Browser::GetDisplayMode(
+    const WebContents* web_contents) const {
+  if (window_->IsFullscreen())
+    return blink::WebDisplayModeFullscreen;
+
+  if (is_type_popup())
+    return blink::WebDisplayModeStandalone;
+
+  return blink::WebDisplayModeBrowser;
+}
+
 void Browser::RegisterProtocolHandler(WebContents* web_contents,
                                       const std::string& protocol,
                                       const GURL& url,
@@ -1786,13 +1820,10 @@ void Browser::RegisterProtocolHandler(WebContents* web_contents,
 
   PermissionBubbleManager* bubble_manager =
       PermissionBubbleManager::FromWebContents(web_contents);
-  if (PermissionBubbleManager::Enabled() && bubble_manager) {
+  if (bubble_manager) {
     bubble_manager->AddRequest(
         new RegisterProtocolHandlerPermissionRequest(registry, handler,
                                                      url, user_gesture));
-  } else {
-    RegisterProtocolHandlerInfoBarDelegate::Create(
-        InfoBarService::FromWebContents(web_contents), registry, handler);
   }
 }
 

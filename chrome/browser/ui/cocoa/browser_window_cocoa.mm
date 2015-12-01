@@ -33,6 +33,7 @@
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
+#import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "chrome/browser/ui/cocoa/key_equivalent_constants.h"
@@ -72,7 +73,6 @@
 #endif
 
 using content::NativeWebKeyboardEvent;
-using content::SSLStatus;
 using content::WebContents;
 
 namespace {
@@ -484,6 +484,13 @@ void BrowserWindowCocoa::FocusToolbar() {
   // Not needed on the Mac.
 }
 
+ToolbarActionsBar* BrowserWindowCocoa::GetToolbarActionsBar() {
+  if ([controller_ hasToolbar])
+    return [[[controller_ toolbarController] browserActionsController]
+               toolbarActionsBar];
+  return nullptr;
+}
+
 void BrowserWindowCocoa::ToolbarSizeChanged(bool is_animating) {
   // Not needed on the Mac.
 }
@@ -637,10 +644,6 @@ void BrowserWindowCocoa::ShowTranslateBubble(
                                        errorType:error_type];
 }
 
-bool BrowserWindowCocoa::ShowSessionCrashedBubble() {
-  return false;
-}
-
 bool BrowserWindowCocoa::IsProfileResetBubbleSupported() const {
   return false;
 }
@@ -703,8 +706,9 @@ void BrowserWindowCocoa::ShowWebsiteSettings(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const content::SSLStatus& ssl) {
-  WebsiteSettingsUIBridge::Show(window(), profile, web_contents, url, ssl);
+    const SecurityStateModel::SecurityInfo& security_info) {
+  WebsiteSettingsUIBridge::Show(window(), profile, web_contents, url,
+                                security_info);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {

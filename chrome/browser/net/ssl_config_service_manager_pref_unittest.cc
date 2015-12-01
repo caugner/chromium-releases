@@ -10,15 +10,16 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service_mock_factory.h"
+#include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/syncable_prefs/pref_service_mock_factory.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread.h"
-#include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_config.h"
 #include "net/ssl/ssl_config_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -132,7 +133,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, BadDisabledCipherSuites) {
 TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
   scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
 
-  PrefServiceMockFactory factory;
+  syncable_prefs::PrefServiceMockFactory factory;
   factory.set_user_prefs(local_state_store);
   scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
   scoped_ptr<PrefService> local_state(factory.Create(registry.get()));
@@ -147,12 +148,10 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
 
   SSLConfig ssl_config;
   config_service->GetSSLConfig(&ssl_config);
-  // In the absence of command-line options, TLS versions from 1.0 up to 1.1 or
-  // 1.2 (depending on the underlying library and cryptographic implementation)
-  // are enabled.
-  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1, ssl_config.version_min);
-  EXPECT_EQ(net::SSLClientSocket::GetMaxSupportedSSLVersion(),
-            ssl_config.version_max);
+  // In the absence of command-line options, the default TLS version range is
+  // enabled.
+  EXPECT_EQ(net::kDefaultSSLVersionMin, ssl_config.version_min);
+  EXPECT_EQ(net::kDefaultSSLVersionMax, ssl_config.version_max);
 
   // The settings should not be added to the local_state.
   EXPECT_FALSE(local_state->HasPrefPath(prefs::kSSLVersionMin));
@@ -176,9 +175,9 @@ TEST_F(SSLConfigServiceManagerPrefTest, CommandLinePrefs) {
   command_line.AppendSwitchASCII(switches::kSSLVersionMin, "tls1.1");
   command_line.AppendSwitchASCII(switches::kSSLVersionMax, "tls1");
 
-  PrefServiceMockFactory factory;
+  syncable_prefs::PrefServiceMockFactory factory;
   factory.set_user_prefs(local_state_store);
-  factory.SetCommandLine(&command_line);
+  factory.set_command_line_prefs(new CommandLinePrefStore(&command_line));
   scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
   scoped_ptr<PrefService> local_state(factory.Create(registry.get()));
 
@@ -220,9 +219,9 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoSSL3) {
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kSSLVersionMin, "ssl3");
 
-  PrefServiceMockFactory factory;
+  syncable_prefs::PrefServiceMockFactory factory;
   factory.set_user_prefs(local_state_store);
-  factory.SetCommandLine(&command_line);
+  factory.set_command_line_prefs(new CommandLinePrefStore(&command_line));
   scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
   scoped_ptr<PrefService> local_state(factory.Create(registry.get()));
 

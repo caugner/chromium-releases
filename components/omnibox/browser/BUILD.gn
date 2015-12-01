@@ -107,7 +107,8 @@ source_set("browser") {
     "//base:i18n",
     "//base:prefs",
     "//components/bookmarks/browser",
-    "//components/crash_keys",  # TODO(mpearson): remove once 464926 is fixed.
+    "//components/crash/core/common",  # TODO(mpearson): remove once 464926 is fixed.
+    "//components/data_use_measurement/core",
     "//components/keyed_service/core",
     "//components/metrics",
     "//components/omnibox/common",
@@ -171,6 +172,8 @@ source_set("unit_tests") {
     "in_memory_url_index_types_unittest.cc",
     "keyword_provider_unittest.cc",
     "omnibox_field_trial_unittest.cc",
+    "omnibox_popup_model_unittest.cc",
+    "omnibox_view_unittest.cc",
     "scored_history_match_unittest.cc",
     "suggestion_answer_unittest.cc",
   ]

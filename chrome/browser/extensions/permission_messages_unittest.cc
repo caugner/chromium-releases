@@ -78,21 +78,20 @@ class PermissionMessagesUnittest : public testing::Test {
   // Returns the permission messages that would display in the prompt that
   // requests all the optional permissions for the current |app_|.
   std::vector<base::string16> GetOptionalPermissionMessages() {
-    scoped_refptr<const PermissionSet> granted_permissions =
+    scoped_ptr<const PermissionSet> granted_permissions =
         env_.GetExtensionPrefs()->GetGrantedPermissions(app_->id());
-    scoped_refptr<const PermissionSet> optional_permissions =
+    const PermissionSet& optional_permissions =
         PermissionsParser::GetOptionalPermissions(app_.get());
-    scoped_refptr<const PermissionSet> requested_permissions =
-        PermissionSet::CreateDifference(optional_permissions.get(),
-                                        granted_permissions.get());
-    return GetMessages(requested_permissions);
+    scoped_ptr<const PermissionSet> requested_permissions =
+        PermissionSet::CreateDifference(optional_permissions,
+                                        *granted_permissions);
+    return GetMessages(*requested_permissions);
   }
 
   void GrantOptionalPermissions() {
     PermissionsUpdater perms_updater(env_.profile());
     perms_updater.AddPermissions(
-        app_.get(),
-        PermissionsParser::GetOptionalPermissions(app_.get()).get());
+        app_.get(), PermissionsParser::GetOptionalPermissions(app_.get()));
   }
 
   std::vector<base::string16> active_permissions() {
@@ -108,12 +107,11 @@ class PermissionMessagesUnittest : public testing::Test {
   }
 
  private:
-  std::vector<base::string16> GetMessages(
-      scoped_refptr<const PermissionSet> permissions) {
+  std::vector<base::string16> GetMessages(const PermissionSet& permissions) {
     std::vector<base::string16> messages;
-    for (const CoalescedPermissionMessage& msg :
+    for (const PermissionMessage& msg :
          message_provider_->GetPermissionMessages(
-             message_provider_->GetAllPermissionIDs(permissions.get(),
+             message_provider_->GetAllPermissionIDs(permissions,
                                                     app_->GetType()))) {
       messages.push_back(msg.message());
     }
@@ -259,7 +257,7 @@ class USBDevicePermissionMessagesTest : public testing::Test {
       : message_provider_(new ChromePermissionMessageProvider()) {}
   ~USBDevicePermissionMessagesTest() override {}
 
-  CoalescedPermissionMessages GetMessages(const PermissionIDSet& permissions) {
+  PermissionMessages GetMessages(const PermissionIDSet& permissions) {
     return message_provider_->GetPermissionMessages(permissions);
   }
 
@@ -280,8 +278,7 @@ TEST_F(USBDevicePermissionMessagesTest, SingleDevice) {
         PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice));
     ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL, NULL));
 
-    CoalescedPermissionMessages messages =
-        GetMessages(permission.GetPermissions());
+    PermissionMessages messages = GetMessages(permission.GetPermissions());
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(base::ASCIIToUTF16(kMessage), messages.front().message());
   }
@@ -296,8 +293,7 @@ TEST_F(USBDevicePermissionMessagesTest, SingleDevice) {
         PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice));
     ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL, NULL));
 
-    CoalescedPermissionMessages messages =
-        GetMessages(permission.GetPermissions());
+    PermissionMessages messages = GetMessages(permission.GetPermissions());
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(base::ASCIIToUTF16(kMessage), messages.front().message());
   }
@@ -312,8 +308,7 @@ TEST_F(USBDevicePermissionMessagesTest, SingleDevice) {
         PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice));
     ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL, NULL));
 
-    CoalescedPermissionMessages messages =
-        GetMessages(permission.GetPermissions());
+    PermissionMessages messages = GetMessages(permission.GetPermissions());
     ASSERT_EQ(1U, messages.size());
     EXPECT_EQ(base::ASCIIToUTF16(kMessage), messages.front().message());
   }
@@ -348,8 +343,7 @@ TEST_F(USBDevicePermissionMessagesTest, MultipleDevice) {
       PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice));
   ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL, NULL));
 
-  CoalescedPermissionMessages messages =
-      GetMessages(permission.GetPermissions());
+  PermissionMessages messages = GetMessages(permission.GetPermissions());
   ASSERT_EQ(1U, messages.size());
   EXPECT_EQ(base::ASCIIToUTF16(kMessage), messages.front().message());
   const std::vector<base::string16>& submessages =

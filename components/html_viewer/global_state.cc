@@ -15,6 +15,7 @@
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "gin/v8_initializer.h"
 #include "mojo/application/public/cpp/application_impl.h"
+#include "mojo/logging/init_logging.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -32,9 +33,6 @@ namespace {
 
 // Disables support for (unprefixed) Encrypted Media Extensions.
 const char kDisableEncryptedMedia[] = "disable-encrypted-media";
-
-// Prevents creation of any output surface.
-const char kIsHeadless[] = "is-headless";
 
 // Specifies the flags passed to JS engine.
 const char kJavaScriptFlags[] = "js-flags";
@@ -63,14 +61,10 @@ std::set<std::string> GetResourcePaths() {
 GlobalState::GlobalState(mojo::ApplicationImpl* app)
     : app_(app),
       resource_loader_(app->shell(), GetResourcePaths()),
-      is_headless_(
-          base::CommandLine::ForCurrentProcess()->HasSwitch(kIsHeadless)),
       did_init_(false),
       device_pixel_ratio_(1.f),
       discardable_memory_allocator_(kDesiredMaxMemory),
       compositor_thread_("compositor thread") {
-  if (is_headless_)
-    InitIfNecessary(gfx::Size(1024, 1024), 1.f);
 }
 
 GlobalState::~GlobalState() {
@@ -78,6 +72,15 @@ GlobalState::~GlobalState() {
     renderer_scheduler_->Shutdown();
     blink::shutdown();
   }
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
+  if (font_loader_.get()) {
+    SkFontConfigInterface::SetGlobal(nullptr);
+    // FontLoader is ref counted. We need to explicitly shutdown the background
+    // thread, otherwise the background thread may be shutdown after the app is
+    // torn down, when we're in a bad state.
+    font_loader_->Shutdown();
+  }
+#endif
 }
 
 void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
@@ -98,15 +101,23 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
   }
 
 #if defined(OS_LINUX) && !defined(OS_ANDROID)
-  SkFontConfigInterface::SetGlobal(new font_service::FontLoader(app_));
+  font_loader_ = skia::AdoptRef(new font_service::FontLoader(app_));
+  SkFontConfigInterface::SetGlobal(font_loader_.get());
 #endif
 
   ui_init_.reset(
       new ui::mojo::UIInit(screen_size_in_pixels, device_pixel_ratio));
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
 
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From("mojo:mus");
+  app_->ConnectToService(request.Pass(), &gpu_service_);
+  gpu_service_->GetGpuInfo(base::Bind(&GlobalState::GetGpuInfoCallback,
+                                      base::Unretained(this)));
+
   renderer_scheduler_ = scheduler::RendererScheduler::Create();
-  blink_platform_.reset(new BlinkPlatformImpl(app_, renderer_scheduler_.get()));
+  blink_platform_.reset(
+      new BlinkPlatformImpl(this, app_, renderer_scheduler_.get()));
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   gin::V8Initializer::LoadV8SnapshotFromFD(
       resource_loader_.ReleaseFile(kResourceSnapshotBlob).TakePlatformFile(),
@@ -122,26 +133,20 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
 
   ui::RegisterPathProvider();
 
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  mojo::logging::InitLogging();
 
-  logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
-  logging::InitLogging(settings);
-  // Display process ID, thread ID and timestamp in logs.
-  logging::SetLogItems(true, true, true, false);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   if (command_line->HasSwitch(kDisableEncryptedMedia))
     blink::WebRuntimeFeatures::enableEncryptedMedia(false);
 
-  if (!is_headless_) {
-    base::File pak_file = resource_loader_.ReleaseFile(kResourceResourcesPak);
-    base::File pak_file_2 = pak_file.Duplicate();
-    ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
-        pak_file.Pass(), base::MemoryMappedFile::Region::kWholeFile);
-    // TODO(sky): why is this always using 100?
-    ui::ResourceBundle::GetSharedInstance().AddDataPackFromFile(
+  base::File pak_file = resource_loader_.ReleaseFile(kResourceResourcesPak);
+  base::File pak_file_2 = pak_file.Duplicate();
+  ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
+      pak_file.Pass(), base::MemoryMappedFile::Region::kWholeFile);
+  // TODO(sky): why is this always using 100?
+  ui::ResourceBundle::GetSharedInstance().AddDataPackFromFile(
       pak_file_2.Pass(), ui::SCALE_FACTOR_100P);
-  }
 
   compositor_thread_.Start();
 
@@ -152,6 +157,18 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
     std::string flags(command_line->GetSwitchValueASCII(kJavaScriptFlags));
     v8::V8::SetFlagsFromString(flags.c_str(), static_cast<int>(flags.size()));
   }
+}
+
+const mojo::GpuInfo* GlobalState::GetGpuInfo() {
+  if (gpu_service_)
+    CHECK(gpu_service_.WaitForIncomingResponse()) <<"Get GPU info failed!";
+  return gpu_info_.get();
+}
+
+void GlobalState::GetGpuInfoCallback(mojo::GpuInfoPtr gpu_info) {
+  CHECK(gpu_info);
+  gpu_info_ = gpu_info.Pass();
+  gpu_service_.reset();
 }
 
 }  // namespace html_viewer

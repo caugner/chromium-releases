@@ -123,6 +123,7 @@
       ],
       'targets': [
         {
+          # GN version: //chrome/browser/extensions/default_extensions
           'target_name': 'default_extensions',
           'type': 'none',
           'conditions': [
@@ -228,14 +229,6 @@
                          '--breakpad=0',
                          '--keystone=0',
                          '--scm=0'],
-            },
-            {
-              # Make sure there isn't any Objective-C in the helper app's
-              # executable.
-              'postbuild_name': 'Verify No Objective-C',
-              'action': [
-                '../build/mac/verify_no_objc.sh',
-              ],
             },
           ],
           'conditions': [
@@ -574,19 +567,20 @@
             'chrome_resources.gyp:chrome_strings',
             'chrome_strings_grd',
             'chrome_version_java',
-            'connection_security_security_levels_java',
+            'connection_security_levels_java',
             'connectivity_check_result_java',
             'document_tab_model_info_proto_java',
+            'infobar_action_type_java',
             'profile_account_management_metrics_java',
             'content_setting_java',
             'content_settings_type_java',
+            'most_visited_tile_type_java',
             'page_info_connection_type_java',
             'resource_id_java',
             'tab_load_status_java',
             'shortcut_source_java',
             '../base/base.gyp:base',
             '../chrome/android/chrome_apk.gyp:custom_tabs_service_aidl',
-            '../components/components.gyp:app_restrictions_resources',
             '../components/components.gyp:bookmarks_java',
             '../components/components.gyp:dom_distiller_core_java',
             '../components/components.gyp:enhanced_bookmarks_java_enums_srcjar',
@@ -594,7 +588,6 @@
             '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
             '../components/components.gyp:offline_pages_enums_java',
-            '../components/components.gyp:policy_java',
             '../components/components.gyp:precache_java',
             '../components/components.gyp:safe_json_java',
             '../components/components.gyp:service_tab_launcher_java',
@@ -616,6 +609,7 @@
             '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
             '../third_party/android_tools/android_tools.gyp:google_play_services_javalib',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_javalib',
+            '../third_party/gif_player/gif_player.gyp:gif_player_java',
             '../third_party/jsr-305/jsr-305.gyp:jsr_305_javalib',
             '../ui/android/ui_android.gyp:ui_java',
           ],
@@ -639,9 +633,10 @@
             ],
           },
           'conditions': [
-            ['configuration_policy != 1', {
-              'dependencies!': [
+            ['configuration_policy == 1', {
+              'dependencies': [
                 '../components/components.gyp:app_restrictions_resources',
+                '../components/components.gyp:policy_java',
               ],
             }],
           ],
@@ -665,6 +660,7 @@
           'target_name': 'chrome_locale_paks',
           'type': 'none',
           'variables': {
+            'package_name': 'chrome_locale_paks',
             'locale_pak_files': [ '<@(chrome_android_pak_locale_resources)' ],
           },
           'includes': [

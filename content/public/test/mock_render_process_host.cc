@@ -172,6 +172,10 @@ base::ProcessHandle MockRenderProcessHost::GetHandle() const {
   return base::GetCurrentProcessHandle();
 }
 
+bool MockRenderProcessHost::IsReady() const {
+  return false;
+}
+
 bool MockRenderProcessHost::Send(IPC::Message* msg) {
   // Save the message in the sink.
   sink_.OnMessageReceived(*msg);
@@ -236,7 +240,7 @@ void MockRenderProcessHost::AddFilter(BrowserMessageFilter* filter) {
 }
 
 bool MockRenderProcessHost::FastShutdownForPageCount(size_t count) {
-  if (static_cast<size_t>(GetActiveViewCount()) == count)
+  if (GetActiveViewCount() == count)
     return FastShutdownIfPossible();
   return false;
 }
@@ -287,10 +291,11 @@ void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
 }
 
 #if defined(ENABLE_WEBRTC)
-void MockRenderProcessHost::EnableAecDump(const base::FilePath& file) {
+void MockRenderProcessHost::EnableAudioDebugRecordings(
+    const base::FilePath& file) {
 }
 
-void MockRenderProcessHost::DisableAecDump() {
+void MockRenderProcessHost::DisableAudioDebugRecordings() {
 }
 
 void MockRenderProcessHost::SetWebRtcLogMessageCallback(
@@ -351,4 +356,4 @@ void MockRenderProcessHostFactory::Remove(MockRenderProcessHost* host) const {
   }
 }
 
-}  // content
+}  // namespace content

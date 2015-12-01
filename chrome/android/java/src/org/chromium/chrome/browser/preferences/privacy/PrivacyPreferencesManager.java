@@ -15,7 +15,6 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.preferences.NetworkPredictionOptions;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 
 /**
@@ -25,12 +24,8 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
 
     static final String PREF_CRASH_DUMP_UPLOAD = "crash_dump_upload";
     static final String PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR = "crash_dump_upload_no_cellular";
-    private static final String PREF_NETWORK_PREDICTIONS = "network_predictions";
-    private static final String PREF_BANDWIDTH_OLD = "prefetch_bandwidth";
-    private static final String PREF_BANDWIDTH_NO_CELLULAR_OLD = "prefetch_bandwidth_no_cellular";
     private static final String PREF_METRICS_REPORTING = "metrics_reporting";
     private static final String PREF_CELLULAR_EXPERIMENT = "cellular_experiment";
-    private static final String ALLOW_PRERENDER_OLD = "allow_prefetch";
 
     private static PrivacyPreferencesManager sInstance;
 
@@ -68,109 +63,6 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
                 mCrashDumpNeverUpload);
     }
 
-    /**
-     * Migrate and delete old preferences.  Note that migration has to happen in Android-specific
-     * code because we need to access ALLOW_PRERENDER sharedPreference.
-     * TODO(bnc) https://crbug.com/394845. This change is planned for M38. After a year or so, it
-     * would be worth considering removing this migration code (also removing accessors in
-     * PrefServiceBridge and pref_service_bridge), and reverting to default for users
-     * who had set preferences but have not used Chrome for a year. This change would be subject to
-     * privacy review.
-     */
-    public void migrateNetworkPredictionPreferences() {
-        PrefServiceBridge prefService = PrefServiceBridge.getInstance();
-
-        // See if PREF_NETWORK_PREDICTIONS is an old boolean value.
-        boolean predictionOptionIsBoolean = false;
-        try {
-            mSharedPreferences.getString(PREF_NETWORK_PREDICTIONS, "");
-        } catch (ClassCastException ex) {
-            predictionOptionIsBoolean = true;
-        }
-
-        // Nothing to do if the user or this migration code has already set the new
-        // preference.
-        if (!predictionOptionIsBoolean
-                && prefService.networkPredictionOptionsHasUserSetting()) {
-            return;
-        }
-
-        // Nothing to do if the old preferences are unset.
-        if (!predictionOptionIsBoolean
-                && !mSharedPreferences.contains(PREF_BANDWIDTH_OLD)
-                && !mSharedPreferences.contains(PREF_BANDWIDTH_NO_CELLULAR_OLD)) {
-            return;
-        }
-
-        // Migrate if the old preferences are at their default values.
-        // (Note that for PREF_BANDWIDTH*, if the setting is default, then there is no way to tell
-        // whether the user has set it.)
-        final String prefBandwidthDefault = BandwidthType.PRERENDER_ON_WIFI.title();
-        final String prefBandwidth =
-                mSharedPreferences.getString(PREF_BANDWIDTH_OLD, prefBandwidthDefault);
-        boolean prefBandwidthNoCellularDefault = true;
-        boolean prefBandwidthNoCellular = mSharedPreferences.getBoolean(
-                PREF_BANDWIDTH_NO_CELLULAR_OLD, prefBandwidthNoCellularDefault);
-
-        if (!(prefBandwidthDefault.equals(prefBandwidth))
-                || (prefBandwidthNoCellular != prefBandwidthNoCellularDefault)) {
-            NetworkPredictionOptions newValue = NetworkPredictionOptions.DEFAULT;
-            // Observe PREF_BANDWIDTH on mobile network capable devices.
-            if (isMobileNetworkCapable()) {
-                if (mSharedPreferences.contains(PREF_BANDWIDTH_OLD)) {
-                    BandwidthType prefetchBandwidthTypePref = BandwidthType.getBandwidthFromTitle(
-                            prefBandwidth);
-                    if (BandwidthType.NEVER_PRERENDER.equals(prefetchBandwidthTypePref)) {
-                        newValue = NetworkPredictionOptions.NETWORK_PREDICTION_NEVER;
-                    } else if (BandwidthType.PRERENDER_ON_WIFI.equals(prefetchBandwidthTypePref)) {
-                        newValue = NetworkPredictionOptions.NETWORK_PREDICTION_WIFI_ONLY;
-                    } else if (BandwidthType.ALWAYS_PRERENDER.equals(prefetchBandwidthTypePref)) {
-                        newValue = NetworkPredictionOptions.NETWORK_PREDICTION_ALWAYS;
-                    }
-                }
-            // Observe PREF_BANDWIDTH_NO_CELLULAR on devices without mobile network.
-            } else {
-                if (mSharedPreferences.contains(PREF_BANDWIDTH_NO_CELLULAR_OLD)) {
-                    if (prefBandwidthNoCellular) {
-                        newValue = NetworkPredictionOptions.NETWORK_PREDICTION_WIFI_ONLY;
-                    } else {
-                        newValue = NetworkPredictionOptions.NETWORK_PREDICTION_NEVER;
-                    }
-                }
-            }
-            // But disable after all if kNetworkPredictionEnabled was disabled by the user.
-            if (prefService.networkPredictionEnabledHasUserSetting()
-                    && !prefService.getNetworkPredictionEnabledUserPrefValue()) {
-                newValue = NetworkPredictionOptions.NETWORK_PREDICTION_NEVER;
-            }
-            // Save new value in Chrome PrefService.
-            prefService.setNetworkPredictionOptions(newValue);
-        }
-
-        // Delete old sharedPreferences.
-        SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
-        // Delete PREF_BANDWIDTH and PREF_BANDWIDTH_NO_CELLULAR: just migrated these options.
-        if (mSharedPreferences.contains(PREF_BANDWIDTH_OLD)) {
-            sharedPreferencesEditor.remove(PREF_BANDWIDTH_OLD);
-        }
-        if (mSharedPreferences.contains(PREF_BANDWIDTH_NO_CELLULAR_OLD)) {
-            sharedPreferencesEditor.remove(PREF_BANDWIDTH_NO_CELLULAR_OLD);
-        }
-        // Also delete ALLOW_PRERENDER, which was updated based on PREF_BANDWIDTH[_NO_CELLULAR] and
-        // network connectivity type, therefore does not carry additional information.
-        if (mSharedPreferences.contains(ALLOW_PRERENDER_OLD)) {
-            sharedPreferencesEditor.remove(ALLOW_PRERENDER_OLD);
-        }
-        // Delete bool PREF_NETWORK_PREDICTIONS so that string values can be stored. Note that this
-        // SharedPreference carries no information, because it used to be overwritten by
-        // kNetworkPredictionEnabled on startup, and now it is overwritten by
-        // kNetworkPredictionOptions on startup.
-        if (mSharedPreferences.contains(PREF_NETWORK_PREDICTIONS)) {
-            sharedPreferencesEditor.remove(PREF_NETWORK_PREDICTIONS);
-        }
-        sharedPreferencesEditor.apply();
-    }
-
     private NetworkInfo getActiveNetworkInfo() {
         ConnectivityManager connectivityManager =
                 (ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -190,8 +82,15 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
     }
 
     protected boolean isMobileNetworkCapable() {
-        return ((ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE))
-            .getNetworkInfo(ConnectivityManager.TYPE_MOBILE) != null;
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        // Android telephony team said it is OK to continue using getNetworkInfo() for our purposes.
+        // We cannot use ConnectivityManager#getAllNetworks() because that one only reports enabled
+        // networks. See crbug.com/532455.
+        @SuppressWarnings("deprecation")
+        NetworkInfo networkInfo = connectivityManager
+                .getNetworkInfo(ConnectivityManager.TYPE_MOBILE);
+        return networkInfo != null;
     }
 
     /**
@@ -199,9 +98,8 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
      * @return Whether prerendering should be allowed.
      */
     public boolean shouldPrerender() {
-        if (!DeviceClassManager.enablePrerendering()) return false;
-        migrateNetworkPredictionPreferences();
-        return PrefServiceBridge.getInstance().canPredictNetworkActions();
+        return DeviceClassManager.enablePrerendering()
+                && PrefServiceBridge.getInstance().canPredictNetworkActions();
     }
 
     /**
@@ -348,15 +246,15 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
     }
 
     /**
-     * Check whether uploading crash dump should be in constrained mode based on user experiments.
-     * This function shows whether in general uploads should be limited for this user and does not
-     * determine whether crash uploads are currently possible or not. Use |isUploadPermitted|
-     * function for that before calling |isUploadLimited|.
+     * Check whether uploading crash dump should be in constrained mode based on user experiments
+     * and current connection type. This function shows whether in general uploads should be limited
+     * for this user and does not determine whether crash uploads are currently possible or not. Use
+     * |isUploadPermitted| function for that before calling |isUploadLimited|.
      *
      * @return whether uploading logic should be constrained.
      */
     @Override
     public boolean isUploadLimited() {
-        return isCellularExperimentEnabled();
+        return isCellularExperimentEnabled() && !isWiFiOrEthernetNetwork();
     }
 }

@@ -14,6 +14,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/rand_util.h"
 #include "base/strings/string16.h"
 #include "base/threading/platform_thread.h"
 #include "chrome/browser/browser_process.h"
@@ -21,14 +22,12 @@
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/metrics/chrome_stability_metrics_provider.h"
 #include "chrome/browser/metrics/time_ticks_experiment_win.h"
-#include "chrome/browser/process_resource_usage.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
-#include "chrome/common/metrics/version_utils.h"
 #include "chrome/common/pref_names.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/drive_metrics_provider.h"
@@ -36,8 +35,10 @@
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
+#include "components/metrics/net/version_utils.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
+#include "components/metrics/stability_metrics_helper.h"
 #include "components/metrics/url_constants.h"
 #include "components/omnibox/browser/omnibox_metrics_provider.h"
 #include "components/variations/variations_associated_data.h"
@@ -45,8 +46,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/common/service_registry.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/metrics/android_metrics_provider.h"
@@ -114,7 +113,7 @@ bool IsCellularLogicEnabled() {
 bool ShouldClearSavedMetrics() {
 #if defined(OS_ANDROID)
   PrefService* local_state = g_browser_process->local_state();
-  return !local_state->HasPrefPath(prefs::kMetricsReportingEnabled) &&
+  return !local_state->HasPrefPath(metrics::prefs::kMetricsReportingEnabled) &&
          variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
                                             "Enabled") == "true";
 #else
@@ -140,6 +139,7 @@ ChromeMetricsServiceClient::ChromeMetricsServiceClient(
 #endif
       drive_metrics_provider_(nullptr),
       start_time_(base::TimeTicks::Now()),
+      has_uploaded_profiler_data_(false),
       weak_ptr_factory_(this) {
   DCHECK(thread_checker_.CalledOnValidThread());
   RecordCommandLineMetrics();
@@ -169,7 +169,7 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
 
   metrics::MetricsService::RegisterPrefs(registry);
-  ChromeStabilityMetricsProvider::RegisterPrefs(registry);
+  metrics::StabilityMetricsHelper::RegisterPrefs(registry);
 
 #if defined(OS_ANDROID)
   AndroidMetricsProvider::RegisterPrefs(registry);
@@ -220,9 +220,9 @@ void ChromeMetricsServiceClient::OnLogUploadComplete() {
 #endif
 }
 
-void ChromeMetricsServiceClient::StartGatheringMetrics(
+void ChromeMetricsServiceClient::InitializeSystemProfileMetrics(
     const base::Closure& done_callback) {
-  finished_gathering_initial_metrics_callback_ = done_callback;
+  finished_init_task_callback_ = done_callback;
   base::Closure got_hardware_class_callback =
       base::Bind(&ChromeMetricsServiceClient::OnInitTaskGotHardwareClass,
                  weak_ptr_factory_.GetWeakPtr());
@@ -234,56 +234,19 @@ void ChromeMetricsServiceClient::StartGatheringMetrics(
 #endif  // defined(OS_CHROMEOS)
 }
 
-void ChromeMetricsServiceClient::CollectFinalMetrics(
+void ChromeMetricsServiceClient::CollectFinalMetricsForLog(
     const base::Closure& done_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   collect_final_metrics_done_callback_ = done_callback;
 
-  // Begin the multi-step process of collecting memory usage histograms:
-  // First spawn a task to collect the memory details; when that task is
-  // finished, it will call OnMemoryDetailCollectionDone. That will in turn
-  // call HistogramSynchronization to collect histograms from all renderers and
-  // then call OnHistogramSynchronizationDone to continue processing.
-  DCHECK(!waiting_for_collect_final_metrics_step_);
-  waiting_for_collect_final_metrics_step_ = true;
-
-  base::Closure callback =
-      base::Bind(&ChromeMetricsServiceClient::OnMemoryDetailCollectionDone,
-                 weak_ptr_factory_.GetWeakPtr());
-
-  scoped_refptr<MetricsMemoryDetails> details(
-      new MetricsMemoryDetails(callback, &memory_growth_tracker_));
-  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
-
-  base::ScopedPtrMap<int, scoped_ptr<ProcessResourceUsage>> current_map;
-  host_resource_usage_map_.swap(current_map);
-
-  // Collect WebCore cache information to put into a histogram.
-  for (content::RenderProcessHost::iterator i(
-          content::RenderProcessHost::AllHostsIterator());
-       !i.IsAtEnd(); i.Advance()) {
-    content::RenderProcessHost* host = i.GetCurrentValue();
-    int host_id = host->GetID();
-    ProcessResourceUsage* resource_usage = nullptr;
-    auto iter = current_map.find(host_id);
-    if (iter != current_map.end()) {
-      resource_usage = iter->second;
-      host_resource_usage_map_.set(host_id, current_map.take_and_erase(iter));
-    } else {
-      content::ServiceRegistry* service_registry = host->GetServiceRegistry();
-      if (service_registry) {
-        ResourceUsageReporterPtr service;
-        service_registry->ConnectToRemoteService(mojo::GetProxy(&service));
-        resource_usage = new ProcessResourceUsage(service.Pass());
-        host_resource_usage_map_.set(host_id, make_scoped_ptr(resource_usage));
-      }
-    }
-    if (resource_usage) {
-      resource_usage->Refresh(
-          base::Bind(&ChromeMetricsServiceClient::OnWebCacheStatsRefresh,
-                     weak_ptr_factory_.GetWeakPtr(), host_id));
-    }
+  if (ShouldIncludeProfilerDataInLog()) {
+    // Fetch profiler data. This will call into
+    // |FinishedReceivingProfilerData()| when the task completes.
+    metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
+        weak_ptr_factory_.GetWeakPtr());
+  } else {
+    CollectFinalHistograms();
   }
 }
 
@@ -353,7 +316,8 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider(
           base::Bind(&chrome::IsOffTheRecordSessionActive))));
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new ChromeStabilityMetricsProvider));
+      scoped_ptr<metrics::MetricsProvider>(new ChromeStabilityMetricsProvider(
+          g_browser_process->local_state())));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider));
 
@@ -463,30 +427,33 @@ void ChromeMetricsServiceClient::OnInitTaskGotPluginInfo() {
 }
 
 void ChromeMetricsServiceClient::OnInitTaskGotGoogleUpdateData() {
-  // Start the next part of the init task: fetching performance data.  This will
-  // call into |FinishedReceivingProfilerData()| when the task completes.
-  metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
-      weak_ptr_factory_.GetWeakPtr());
+  drive_metrics_provider_->GetDriveMetrics(
+      base::Bind(&ChromeMetricsServiceClient::OnInitTaskGotDriveMetrics,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-void ChromeMetricsServiceClient::OnWebCacheStatsRefresh(int host_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+void ChromeMetricsServiceClient::OnInitTaskGotDriveMetrics() {
+  finished_init_task_callback_.Run();
+}
 
-  auto iter = host_resource_usage_map_.find(host_id);
-  if (iter != host_resource_usage_map_.end()) {
-    blink::WebCache::ResourceTypeStats stats =
-        iter->second->GetWebCoreCacheStats();
-    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ImagesSizeKB",
-                           static_cast<int>(stats.images.size / 1024));
-    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.CSSStylesheetsSizeKB",
-                           static_cast<int>(stats.cssStyleSheets.size / 1024));
-    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.ScriptsSizeKB",
-                           static_cast<int>(stats.scripts.size / 1024));
-    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.XSLStylesheetsSizeKB",
-                           static_cast<int>(stats.xslStyleSheets.size / 1024));
-    LOCAL_HISTOGRAM_COUNTS("WebCoreCache.FontsSizeKB",
-                           static_cast<int>(stats.fonts.size / 1024));
-  }
+bool ChromeMetricsServiceClient::ShouldIncludeProfilerDataInLog() {
+  // Upload profiler data at most once per session.
+  if (has_uploaded_profiler_data_)
+    return false;
+
+  // For each log, flip a fair coin. Thus, profiler data is sent with the first
+  // log with probability 50%, with the second log with probability 25%, and so
+  // on. As a result, uploaded data is biased toward earlier logs.
+  // TODO(isherman): Explore other possible algorithms, and choose one that
+  // might be more appropriate.  For example, it might be reasonable to include
+  // profiler data with some fixed probability, so that a given client might
+  // upload profiler data more than once; but on average, clients won't upload
+  // too much data.
+  if (base::RandDouble() < 0.5)
+    return false;
+
+  has_uploaded_profiler_data_ = true;
+  return true;
 }
 
 void ChromeMetricsServiceClient::ReceivedProfilerData(
@@ -500,8 +467,27 @@ void ChromeMetricsServiceClient::ReceivedProfilerData(
 }
 
 void ChromeMetricsServiceClient::FinishedReceivingProfilerData() {
-  drive_metrics_provider_->GetDriveMetrics(
-      finished_gathering_initial_metrics_callback_);
+  CollectFinalHistograms();
+}
+
+void ChromeMetricsServiceClient::CollectFinalHistograms() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Begin the multi-step process of collecting memory usage histograms:
+  // First spawn a task to collect the memory details; when that task is
+  // finished, it will call OnMemoryDetailCollectionDone. That will in turn
+  // call HistogramSynchronization to collect histograms from all renderers and
+  // then call OnHistogramSynchronizationDone to continue processing.
+  DCHECK(!waiting_for_collect_final_metrics_step_);
+  waiting_for_collect_final_metrics_step_ = true;
+
+  base::Closure callback =
+      base::Bind(&ChromeMetricsServiceClient::OnMemoryDetailCollectionDone,
+                 weak_ptr_factory_.GetWeakPtr());
+
+  scoped_refptr<MetricsMemoryDetails> details(
+      new MetricsMemoryDetails(callback, &memory_growth_tracker_));
+  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 }
 
 void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {

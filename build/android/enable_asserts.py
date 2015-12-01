@@ -9,8 +9,8 @@
 import argparse
 import sys
 
-from pylib.device import device_blacklist
-from pylib.device import device_utils
+from devil.android import device_blacklist
+from devil.android import device_utils
 
 
 def main():
@@ -28,10 +28,9 @@ def main():
 
   args = parser.parse_args()
 
-  if args.blacklist_file:
-    blacklist = device_blacklist.Blacklist(args.blacklist_file)
-  else:
-    blacklist = None
+  blacklist = (device_blacklist.Blacklist(args.blacklist_file)
+               if args.blacklist_file
+               else None)
 
   # TODO(jbudorick): Accept optional serial number and run only for the
   # specified device when present.

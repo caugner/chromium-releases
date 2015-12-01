@@ -20,12 +20,8 @@
                   "children": [
                     {
                       "bounds": [85, 144],
-                      "drawsContent": true,
-                      "children": [
-                        {
-
-                        }
-                      ]
+                      "shouldFlattenTransform": false,
+                      "drawsContent": true
                     }
                   ]
                 },
@@ -85,12 +81,8 @@
               "children": [
                 {
                   "bounds": [105, 144],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -146,11 +138,7 @@
                   "children": [
                     {
                       "bounds": [85, 144],
-                      "children": [
-                        {
-
-                        }
-                      ]
+                      "shouldFlattenTransform": false
                     }
                   ]
                 },
@@ -213,12 +201,8 @@
                   "children": [
                     {
                       "bounds": [85, 144],
-                      "drawsContent": true,
-                      "children": [
-                        {
-
-                        }
-                      ]
+                      "shouldFlattenTransform": false,
+                      "drawsContent": true
                     }
                   ]
                 },
@@ -278,12 +262,8 @@
               "children": [
                 {
                   "bounds": [105, 144],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -339,11 +319,7 @@
                   "children": [
                     {
                       "bounds": [85, 144],
-                      "children": [
-                        {
-
-                        }
-                      ]
+                      "shouldFlattenTransform": false
                     }
                   ]
                 },
@@ -403,11 +379,7 @@
               "children": [
                 {
                   "bounds": [105, 144],
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },
@@ -460,11 +432,7 @@
               "children": [
                 {
                   "bounds": [105, 144],
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },
@@ -517,12 +485,8 @@
               "children": [
                 {
                   "bounds": [85, 144],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -582,11 +546,7 @@
               "children": [
                 {
                   "bounds": [85, 144],
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },
@@ -646,12 +606,8 @@
               "children": [
                 {
                   "bounds": [85, 144],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -711,11 +667,7 @@
               "children": [
                 {
                   "bounds": [85, 144],
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },

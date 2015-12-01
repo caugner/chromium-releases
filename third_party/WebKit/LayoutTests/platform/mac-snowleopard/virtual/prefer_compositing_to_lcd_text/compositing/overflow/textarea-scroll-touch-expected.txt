@@ -20,12 +20,8 @@
               "children": [
                 {
                   "bounds": [189, 308],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -58,12 +54,8 @@
               "children": [
                 {
                   "bounds": [189, 308],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },

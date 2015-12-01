@@ -4,7 +4,7 @@
 
 # GYP: //tools/android/forwarder2/forwarder.gyp:forwarder2
 group("forwarder2") {
-  datadeps = [
+  data_deps = [
     ":host_forwarder($host_toolchain)",
     ":host_forwarder_copy($host_toolchain)",
     ":device_forwarder($default_toolchain)",
@@ -42,11 +42,10 @@ if (current_toolchain == default_toolchain) {
     ]
     deps = [
       "//base",
+      "//build/config/sanitizers:deps",
       "//tools/android/common",
     ]
-    datadeps = [
-      "//build/android/pylib/device/commands",
-    ]
+    data_deps = [ "//build/android/pylib/device/commands" ]
   }
 
   # GYP: //tools/android/forwarder2/forwarder.gyp:forwarder2
@@ -85,6 +84,7 @@ if (current_toolchain != default_toolchain) {
     ]
     deps = [
       "//base",
+      "//build/config/sanitizers:deps",
       "//tools/android/common",
     ]
   }

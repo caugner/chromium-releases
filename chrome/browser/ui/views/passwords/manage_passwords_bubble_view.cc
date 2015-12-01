@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_selection_view.h"
-#include "chrome/browser/ui/views/passwords/manage_credential_item_view.h"
 #include "chrome/browser/ui/views/passwords/manage_password_items_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_view.h"
 #include "chrome/grit/generated_resources.h"
@@ -41,6 +40,7 @@ int ManagePasswordsBubbleView::auto_signin_toast_timeout_ = 3;
 namespace {
 
 const int kDesiredBubbleWidth = 370;
+const SkColor kWarmWelcomeColor = SkColorSetARGB(0xFF, 0x64, 0x64, 0x64);
 
 enum ColumnSetType {
   // | | (FILL, FILL) | |
@@ -243,11 +243,20 @@ void ManagePasswordsBubbleView::AccountChooserView::AddCredentialItemsWithType(
   net::URLRequestContextGetter* request_context =
       parent_->model()->GetProfile()->GetRequestContext();
   for (const autofill::PasswordForm* form : password_forms) {
-    // Add the title to the layout with appropriate padding.
+    const base::string16& upper_string =
+        form->display_name.empty() ? form->username_value : form->display_name;
+    base::string16 lower_string;
+    if (form->federation_url.is_empty()) {
+      if (!form->display_name.empty())
+        lower_string = form->username_value;
+    } else {
+      lower_string = l10n_util::GetStringFUTF16(
+          IDS_PASSWORDS_VIA_FEDERATION,
+          base::UTF8ToUTF16(form->federation_url.host()));
+    }
     layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-    layout->AddView(new CredentialsItemView(
-        this, form, type, CredentialsItemView::ACCOUNT_CHOOSER,
-        request_context));
+    layout->AddView(new CredentialsItemView(this, form, type, upper_string,
+                                            lower_string, request_context));
   }
 }
 
@@ -291,7 +300,7 @@ class ManagePasswordsBubbleView::AutoSigninView
         ManagePasswordsBubbleView::auto_signin_toast_timeout_);
   }
 
-  base::OneShotTimer<AutoSigninView> timer_;
+  base::OneShotTimer timer_;
   ManagePasswordsBubbleView* parent_;
   ScopedObserver<views::Widget, views::WidgetObserver> observed_browser_;
 
@@ -303,13 +312,16 @@ ManagePasswordsBubbleView::AutoSigninView::AutoSigninView(
     : parent_(parent),
       observed_browser_(this) {
   SetLayoutManager(new views::FillLayout);
+  const autofill::PasswordForm& form = parent_->model()->pending_password();
   CredentialsItemView* credential = new CredentialsItemView(
-      this, &parent_->model()->pending_password(),
+      this, &form,
       password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD,
-      CredentialsItemView::AUTO_SIGNIN,
+      base::string16(),
+      l10n_util::GetStringFUTF16(IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE,
+                                 form.username_value),
       parent_->model()->GetProfile()->GetRequestContext());
   AddChildView(credential);
-  parent_->set_initially_focused_view(credential);
+  credential->SetEnabled(false);
 
   Browser* browser =
       chrome::FindBrowserWithWebContents(parent_->web_contents());
@@ -392,7 +404,7 @@ ManagePasswordsBubbleView::PendingView::PendingView(
       ui::ResourceBundle::SmallFont));
   never_button_ = new views::LabelButton(
       this,
-      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON1));
+      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON));
   never_button_->SetStyle(views::Button::STYLE_BUTTON);
   never_button_->SetFontList(
       ui::ResourceBundle::GetSharedInstance().GetFontList(
@@ -412,18 +424,33 @@ ManagePasswordsBubbleView::PendingView::PendingView(
   BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
   layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
   layout->AddView(title_label);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   // Credential row.
   if (item) {
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
+    layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
+                                views::kUnrelatedControlVerticalSpacing);
     layout->AddView(item);
+  }
+
+  // Smart Lock warm welcome.
+  if (parent_->model()->ShouldShowGoogleSmartLockWelcome()) {
+    views::Label* smart_lock_label = new views::Label(
+        l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK_WELCOME));
+    smart_lock_label->SetMultiLine(true);
+    smart_lock_label->SetFontList(
+        ui::ResourceBundle::GetSharedInstance().GetFontList(
+            ui::ResourceBundle::SmallFont));
+    smart_lock_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    smart_lock_label->SetEnabledColor(kWarmWelcomeColor);
+    layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
+                                views::kUnrelatedControlVerticalSpacing);
+    layout->AddView(smart_lock_label);
   }
 
   // Button row.
   BuildColumnSet(layout, DOUBLE_BUTTON_COLUMN_SET);
-  layout->StartRowWithPadding(
-      0, DOUBLE_BUTTON_COLUMN_SET, 0, views::kRelatedControlVerticalSpacing);
+  layout->StartRowWithPadding(0, DOUBLE_BUTTON_COLUMN_SET, 0,
+                              views::kUnrelatedControlVerticalSpacing);
   layout->AddView(save_button_);
   layout->AddView(never_button_);
 
@@ -500,7 +527,8 @@ ManagePasswordsBubbleView::ManageView::ManageView(
   if (!parent_->model()->local_credentials().empty()) {
     ManagePasswordItemsView* item = new ManagePasswordItemsView(
         parent_->model(), parent_->model()->local_credentials().get());
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
+    layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
+                                views::kUnrelatedControlVerticalSpacing);
     layout->AddView(item);
   } else {
     views::Label* empty_label = new views::Label(
@@ -511,9 +539,9 @@ ManagePasswordsBubbleView::ManageView::ManageView(
         ui::ResourceBundle::GetSharedInstance().GetFontList(
             ui::ResourceBundle::SmallFont));
 
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
+    layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
+                                views::kUnrelatedControlVerticalSpacing);
     layout->AddView(empty_label);
-    layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
   }
 
   // Then add the "manage passwords" link and "Done" button.
@@ -531,8 +559,8 @@ ManagePasswordsBubbleView::ManageView::ManageView(
       ui::ResourceBundle::SmallFont));
 
   BuildColumnSet(layout, LINK_BUTTON_COLUMN_SET);
-  layout->StartRowWithPadding(
-      0, LINK_BUTTON_COLUMN_SET, 0, views::kRelatedControlVerticalSpacing);
+  layout->StartRowWithPadding(0, LINK_BUTTON_COLUMN_SET, 0,
+                              views::kUnrelatedControlVerticalSpacing);
   layout->AddView(manage_link_);
   layout->AddView(done_button_);
 
@@ -555,102 +583,6 @@ void ManagePasswordsBubbleView::ManageView::ButtonPressed(
 
 void ManagePasswordsBubbleView::ManageView::LinkClicked(views::Link* source,
                                                         int event_flags) {
-  DCHECK_EQ(source, manage_link_);
-  parent_->model()->OnManageLinkClicked();
-  parent_->Close();
-}
-
-// ManagePasswordsBubbleView::ManageAccountsView ------------------------------
-
-// A view offering the user a list of his currently saved through the Credential
-// Manager API accounts for the current page.
-class ManagePasswordsBubbleView::ManageAccountsView
-    : public views::View,
-      public views::ButtonListener,
-      public views::LinkListener {
- public:
-  explicit ManageAccountsView(ManagePasswordsBubbleView* parent);
-
- private:
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  // views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
-
-  ManagePasswordsBubbleView* parent_;
-
-  views::Link* manage_link_;
-  views::LabelButton* done_button_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManageAccountsView);
-};
-
-ManagePasswordsBubbleView::ManageAccountsView::ManageAccountsView(
-    ManagePasswordsBubbleView* parent)
-    : parent_(parent) {
-  views::GridLayout* layout = new views::GridLayout(this);
-  layout->set_minimum_size(gfx::Size(kDesiredBubbleWidth, 0));
-  SetLayoutManager(layout);
-
-  // Add the title.
-  BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
-  AddTitleRow(layout, parent_->model());
-
-  if (!parent_->model()->local_credentials().empty()) {
-    for (const autofill::PasswordForm* form :
-         parent_->model()->local_credentials()) {
-      layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-      layout->AddView(new ManageCredentialItemView(parent_->model(), form));
-    }
-  } else {
-    views::Label* empty_label = new views::Label(
-        l10n_util::GetStringUTF16(IDS_MANAGE_PASSWORDS_NO_PASSWORDS),
-        ui::ResourceBundle::GetSharedInstance().GetFontList(
-            ui::ResourceBundle::SmallFont));
-    empty_label->SetMultiLine(true);
-    empty_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-    layout->AddView(empty_label);
-    layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
-  }
-
-  // Then add the "manage passwords" link and "Done" button.
-  manage_link_ = new views::Link(parent_->model()->manage_link());
-  manage_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  manage_link_->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::SmallFont));
-  manage_link_->SetUnderline(false);
-  manage_link_->set_listener(this);
-
-  done_button_ =
-      new views::LabelButton(this, l10n_util::GetStringUTF16(IDS_DONE));
-  done_button_->SetStyle(views::Button::STYLE_BUTTON);
-  done_button_->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::SmallFont));
-
-  BuildColumnSet(layout, LINK_BUTTON_COLUMN_SET);
-  layout->StartRowWithPadding(
-      0, LINK_BUTTON_COLUMN_SET, 0, views::kRelatedControlVerticalSpacing);
-  layout->AddView(manage_link_);
-  layout->AddView(done_button_);
-
-  // Extra padding for visual awesomeness.
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
-
-  parent_->set_initially_focused_view(done_button_);
-}
-
-void ManagePasswordsBubbleView::ManageAccountsView::ButtonPressed(
-    views::Button* sender, const ui::Event& event) {
-  DCHECK(sender == done_button_);
-  parent_->model()->OnDoneClicked();
-  parent_->Close();
-}
-
-void ManagePasswordsBubbleView::ManageAccountsView::LinkClicked(
-    views::Link* source, int event_flags) {
   DCHECK_EQ(source, manage_link_);
   parent_->model()->OnManageLinkClicked();
   parent_->Close();
@@ -918,8 +850,9 @@ ManagePasswordsBubbleView* ManagePasswordsBubbleView::manage_passwords_bubble_ =
     NULL;
 
 // static
-void ManagePasswordsBubbleView::ShowBubble(content::WebContents* web_contents,
-                                           DisplayReason reason) {
+void ManagePasswordsBubbleView::ShowBubble(
+    content::WebContents* web_contents,
+    ManagePasswordsBubbleModel::DisplayReason reason) {
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
   DCHECK(browser);
   DCHECK(browser->window());
@@ -945,7 +878,7 @@ void ManagePasswordsBubbleView::ShowBubble(content::WebContents* web_contents,
     manage_passwords_bubble_->AdjustForFullscreen(
         browser_view->GetBoundsInScreen());
   }
-  if (reason == AUTOMATIC)
+  if (reason == ManagePasswordsBubbleModel::AUTOMATIC)
     manage_passwords_bubble_->GetWidget()->ShowInactive();
   else
     manage_passwords_bubble_->GetWidget()->Show();
@@ -965,15 +898,15 @@ void ManagePasswordsBubbleView::ActivateBubble() {
 }
 
 content::WebContents* ManagePasswordsBubbleView::web_contents() const {
-  return model()->web_contents();
+  return model_.web_contents();
 }
 
 ManagePasswordsBubbleView::ManagePasswordsBubbleView(
     content::WebContents* web_contents,
     ManagePasswordsIconView* anchor_view,
-    DisplayReason reason)
-    : ManagePasswordsBubble(web_contents, reason),
-      ManagedFullScreenBubbleDelegateView(anchor_view, web_contents),
+    ManagePasswordsBubbleModel::DisplayReason reason)
+    : ManagedFullScreenBubbleDelegateView(anchor_view, web_contents),
+      model_(web_contents, reason),
       anchor_view_(anchor_view),
       initially_focused_view_(NULL) {
   // Compensate for built-in vertical padding in the anchor view's image.
@@ -1010,29 +943,25 @@ void ManagePasswordsBubbleView::OnWidgetClosing(views::Widget* /*widget*/) {
 }
 
 bool ManagePasswordsBubbleView::ShouldShowCloseButton() const {
-  return model()->state() == password_manager::ui::PENDING_PASSWORD_STATE;
+  return model_.state() == password_manager::ui::PENDING_PASSWORD_STATE;
 }
 
 void ManagePasswordsBubbleView::Refresh() {
   RemoveAllChildViews(true);
   initially_focused_view_ = NULL;
-  if (model()->state() == password_manager::ui::PENDING_PASSWORD_STATE) {
+  if (model_.state() == password_manager::ui::PENDING_PASSWORD_STATE) {
     AddChildView(new PendingView(this));
-  } else if (model()->state() ==
+  } else if (model_.state() ==
              password_manager::ui::PENDING_PASSWORD_UPDATE_STATE) {
     AddChildView(new UpdatePendingView(this));
-  } else if (model()->state() == password_manager::ui::CONFIRMATION_STATE) {
+  } else if (model_.state() == password_manager::ui::CONFIRMATION_STATE) {
     AddChildView(new SaveConfirmationView(this));
-  } else if (model()->state() ==
-                 password_manager::ui::CREDENTIAL_REQUEST_STATE) {
+  } else if (model_.state() == password_manager::ui::CREDENTIAL_REQUEST_STATE) {
     AddChildView(new AccountChooserView(this));
-  } else if (model()->state() == password_manager::ui::AUTO_SIGNIN_STATE) {
+  } else if (model_.state() == password_manager::ui::AUTO_SIGNIN_STATE) {
     AddChildView(new AutoSigninView(this));
   } else {
-    if (model()->IsNewUIActive())
-      AddChildView(new ManageAccountsView(this));
-    else
-      AddChildView(new ManageView(this));
+    AddChildView(new ManageView(this));
   }
   GetLayoutManager()->Layout(this);
 }

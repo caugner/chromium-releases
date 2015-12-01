@@ -50,12 +50,13 @@ class MockMediaRouter : public MediaRouter {
                void(const MediaRoute::Id& route_id,
                     std::vector<uint8>* data,
                     const SendRouteMessageCallback& callback));
+  MOCK_METHOD1(AddIssue, void(const Issue& issue));
   MOCK_METHOD1(ClearIssue, void(const Issue::Id& issue_id));
   MOCK_METHOD1(OnPresentationSessionDetached,
                void(const MediaRoute::Id& route_id));
   MOCK_METHOD1(RegisterIssuesObserver, void(IssuesObserver* observer));
   MOCK_METHOD1(UnregisterIssuesObserver, void(IssuesObserver* observer));
-  MOCK_METHOD1(RegisterMediaSinksObserver, void(MediaSinksObserver* observer));
+  MOCK_METHOD1(RegisterMediaSinksObserver, bool(MediaSinksObserver* observer));
   MOCK_METHOD1(UnregisterMediaSinksObserver,
                void(MediaSinksObserver* observer));
   MOCK_METHOD1(RegisterMediaRoutesObserver,

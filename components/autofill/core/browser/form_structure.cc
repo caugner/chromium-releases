@@ -411,7 +411,7 @@ FormStructure::FormStructure(const FormData& form)
     // guaranteed to avoid collisions.
     base::string16 unique_name =
         field.name + base::ASCIIToUTF16("_") +
-        base::IntToString16(++unique_names[field.name]);
+        base::SizeTToString16(++unique_names[field.name]);
     fields_.push_back(new AutofillField(field, unique_name));
   }
 }
@@ -647,6 +647,8 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
       ++current_info;
     }
 
+    AutofillMetrics::LogServerResponseHasDataForForm(
+        !query_response_has_no_server_data);
     if (query_response_has_no_server_data && form->source_url().is_valid()) {
       rappor::SampleDomainAndRegistryFromGURL(
           rappor_service, "Autofill.QueryResponseHasNoServerDataForForm",

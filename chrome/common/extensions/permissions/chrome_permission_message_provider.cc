@@ -25,11 +25,10 @@ namespace extensions {
 
 namespace {
 
-// Copyable wrapper to make CoalescedPermissionMessages comparable.
+// Copyable wrapper to make PermissionMessages comparable.
 class ComparablePermission {
  public:
-  explicit ComparablePermission(const CoalescedPermissionMessage& msg)
-      : msg_(&msg) {}
+  explicit ComparablePermission(const PermissionMessage& msg) : msg_(&msg) {}
 
   bool operator<(const ComparablePermission& rhs) const {
     if (msg_->message() < rhs.msg_->message())
@@ -40,7 +39,7 @@ class ComparablePermission {
   }
 
  private:
-  const CoalescedPermissionMessage* msg_;
+  const PermissionMessage* msg_;
 };
 using ComparablePermissions = std::vector<ComparablePermission>;
 
@@ -63,8 +62,7 @@ ChromePermissionMessageProvider::ChromePermissionMessageProvider() {
 ChromePermissionMessageProvider::~ChromePermissionMessageProvider() {
 }
 
-CoalescedPermissionMessages
-ChromePermissionMessageProvider::GetPermissionMessages(
+PermissionMessages ChromePermissionMessageProvider::GetPermissionMessages(
     const PermissionIDSet& permissions) const {
   std::vector<ChromePermissionMessageRule> rules =
       ChromePermissionMessageRule::GetAllRules();
@@ -73,17 +71,10 @@ ChromePermissionMessageProvider::GetPermissionMessages(
   // permissions. Once a permission is used in a rule, remove it from the set
   // of available permissions so it cannot be applied to subsequent rules.
   PermissionIDSet remaining_permissions = permissions;
-  CoalescedPermissionMessages messages;
+  PermissionMessages messages;
   for (const auto& rule : rules) {
-    // Only apply the rule if we have all the required permission IDs. If the
-    // rule has no required IDs, then apply it only if any of the optional ones
-    // are there.
-    bool has_required_permissions = !rule.required_permissions().empty();
-    bool use_rule =
-        has_required_permissions
-            ? remaining_permissions.ContainsAllIDs(rule.required_permissions())
-            : remaining_permissions.ContainsAnyID(rule.optional_permissions());
-    if (use_rule) {
+    // Only apply the rule if we have all the required permission IDs.
+    if (remaining_permissions.ContainsAllIDs(rule.required_permissions())) {
       // We can apply the rule. Add all the required permissions, and as many
       // optional permissions as we can, to the new message.
       PermissionIDSet used_permissions =
@@ -100,31 +91,28 @@ ChromePermissionMessageProvider::GetPermissionMessages(
 }
 
 bool ChromePermissionMessageProvider::IsPrivilegeIncrease(
-    const PermissionSet* old_permissions,
-    const PermissionSet* new_permissions,
+    const PermissionSet& old_permissions,
+    const PermissionSet& new_permissions,
     Manifest::Type extension_type) const {
   // Things can't get worse than native code access.
-  if (old_permissions->HasEffectiveFullAccess())
+  if (old_permissions.HasEffectiveFullAccess())
     return false;
 
   // Otherwise, it's a privilege increase if the new one has full access.
-  if (new_permissions->HasEffectiveFullAccess())
+  if (new_permissions.HasEffectiveFullAccess())
     return true;
 
   if (IsHostPrivilegeIncrease(old_permissions, new_permissions, extension_type))
     return true;
 
-  if (IsAPIPrivilegeIncrease(old_permissions, new_permissions))
-    return true;
-
-  if (IsManifestPermissionPrivilegeIncrease(old_permissions, new_permissions))
+  if (IsAPIOrManifestPrivilegeIncrease(old_permissions, new_permissions))
     return true;
 
   return false;
 }
 
 PermissionIDSet ChromePermissionMessageProvider::GetAllPermissionIDs(
-    const PermissionSet* permissions,
+    const PermissionSet& permissions,
     Manifest::Type extension_type) const {
   PermissionIDSet permission_ids;
   AddAPIPermissions(permissions, &permission_ids);
@@ -134,9 +122,9 @@ PermissionIDSet ChromePermissionMessageProvider::GetAllPermissionIDs(
 }
 
 void ChromePermissionMessageProvider::AddAPIPermissions(
-    const PermissionSet* permissions,
+    const PermissionSet& permissions,
     PermissionIDSet* permission_ids) const {
-  for (const APIPermission* permission : permissions->apis())
+  for (const APIPermission* permission : permissions.apis())
     permission_ids->InsertAll(permission->GetPermissions());
 
   // A special hack: The warning message for declarativeWebRequest
@@ -148,19 +136,19 @@ void ChromePermissionMessageProvider::AddAPIPermissions(
   // "<all_urls>" (aka APIPermission::kHostsAll), such as kTab. This would
   // happen automatically if we didn't differentiate between API/Manifest/Host
   // permissions here.
-  if (permissions->ShouldWarnAllHosts())
+  if (permissions.ShouldWarnAllHosts())
     permission_ids->erase(APIPermission::kDeclarativeWebRequest);
 }
 
 void ChromePermissionMessageProvider::AddManifestPermissions(
-    const PermissionSet* permissions,
+    const PermissionSet& permissions,
     PermissionIDSet* permission_ids) const {
-  for (const ManifestPermission* p : permissions->manifest_permissions())
+  for (const ManifestPermission* p : permissions.manifest_permissions())
     permission_ids->InsertAll(p->GetPermissions());
 }
 
 void ChromePermissionMessageProvider::AddHostPermissions(
-    const PermissionSet* permissions,
+    const PermissionSet& permissions,
     PermissionIDSet* permission_ids,
     Manifest::Type extension_type) const {
   // Since platform apps always use isolated storage, they can't (silently)
@@ -170,12 +158,12 @@ void ChromePermissionMessageProvider::AddHostPermissions(
   if (extension_type == Manifest::TYPE_PLATFORM_APP)
     return;
 
-  if (permissions->ShouldWarnAllHosts()) {
+  if (permissions.ShouldWarnAllHosts()) {
     permission_ids->insert(APIPermission::kHostsAll);
   } else {
     URLPatternSet regular_hosts;
     ExtensionsClient::Get()->FilterHostPermissions(
-        permissions->effective_hosts(), &regular_hosts, permission_ids);
+        permissions.effective_hosts(), &regular_hosts, permission_ids);
 
     std::set<std::string> hosts =
         permission_message_util::GetDistinctHosts(regular_hosts, true, true);
@@ -186,13 +174,15 @@ void ChromePermissionMessageProvider::AddHostPermissions(
   }
 }
 
-bool ChromePermissionMessageProvider::IsAPIPrivilegeIncrease(
-    const PermissionSet* old_permissions,
-    const PermissionSet* new_permissions) const {
+bool ChromePermissionMessageProvider::IsAPIOrManifestPrivilegeIncrease(
+    const PermissionSet& old_permissions,
+    const PermissionSet& new_permissions) const {
   PermissionIDSet old_ids;
   AddAPIPermissions(old_permissions, &old_ids);
+  AddManifestPermissions(old_permissions, &old_ids);
   PermissionIDSet new_ids;
   AddAPIPermissions(new_permissions, &new_ids);
+  AddManifestPermissions(new_permissions, &new_ids);
 
   // Ugly hack: Before M46 beta, we didn't store the parameter for settings
   // override permissions in prefs (which is where |old_permissions| is coming
@@ -208,36 +198,14 @@ bool ChromePermissionMessageProvider::IsAPIPrivilegeIncrease(
     DropPermissionParameter(id, &new_ids);
   }
 
-  // A special hack: kFileSystemWriteDirectory implies kFileSystemDirectory.
-  // TODO(sammc): Remove this. See http://crbug.com/284849.
-  if (old_ids.ContainsID(APIPermission::kFileSystemWriteDirectory))
-    old_ids.insert(APIPermission::kFileSystemDirectory);
-
-  return IsAPIOrManifestPrivilegeIncrease(old_ids, new_ids);
-}
-
-bool ChromePermissionMessageProvider::IsManifestPermissionPrivilegeIncrease(
-    const PermissionSet* old_permissions,
-    const PermissionSet* new_permissions) const {
-  PermissionIDSet old_ids;
-  AddManifestPermissions(old_permissions, &old_ids);
-  PermissionIDSet new_ids;
-  AddManifestPermissions(new_permissions, &new_ids);
-
-  return IsAPIOrManifestPrivilegeIncrease(old_ids, new_ids);
-}
-
-bool ChromePermissionMessageProvider::IsAPIOrManifestPrivilegeIncrease(
-    const PermissionIDSet& old_ids,
-    const PermissionIDSet& new_ids) const {
   // If all the IDs were already there, it's not a privilege increase.
   if (old_ids.Includes(new_ids))
     return false;
 
   // Otherwise, check the actual messages - not all IDs result in a message,
   // and some messages can suppress others.
-  CoalescedPermissionMessages old_messages = GetPermissionMessages(old_ids);
-  CoalescedPermissionMessages new_messages = GetPermissionMessages(new_ids);
+  PermissionMessages old_messages = GetPermissionMessages(old_ids);
+  PermissionMessages new_messages = GetPermissionMessages(new_ids);
 
   ComparablePermissions old_strings(old_messages.begin(), old_messages.end());
   ComparablePermissions new_strings(new_messages.begin(), new_messages.end());
@@ -249,8 +217,8 @@ bool ChromePermissionMessageProvider::IsAPIOrManifestPrivilegeIncrease(
 }
 
 bool ChromePermissionMessageProvider::IsHostPrivilegeIncrease(
-    const PermissionSet* old_permissions,
-    const PermissionSet* new_permissions,
+    const PermissionSet& old_permissions,
+    const PermissionSet& new_permissions,
     Manifest::Type extension_type) const {
   // Platform apps host permission changes do not count as privilege increases.
   // Note: this must remain consistent with AddHostPermissions.
@@ -258,16 +226,16 @@ bool ChromePermissionMessageProvider::IsHostPrivilegeIncrease(
     return false;
 
   // If the old permission set can access any host, then it can't be elevated.
-  if (old_permissions->HasEffectiveAccessToAllHosts())
+  if (old_permissions.HasEffectiveAccessToAllHosts())
     return false;
 
   // Likewise, if the new permission set has full host access, then it must be
   // a privilege increase.
-  if (new_permissions->HasEffectiveAccessToAllHosts())
+  if (new_permissions.HasEffectiveAccessToAllHosts())
     return true;
 
-  const URLPatternSet& old_list = old_permissions->effective_hosts();
-  const URLPatternSet& new_list = new_permissions->effective_hosts();
+  const URLPatternSet& old_list = old_permissions.effective_hosts();
+  const URLPatternSet& new_list = new_permissions.effective_hosts();
 
   // TODO(jstritar): This is overly conservative with respect to subdomains.
   // For example, going from *.google.com to www.google.com will be

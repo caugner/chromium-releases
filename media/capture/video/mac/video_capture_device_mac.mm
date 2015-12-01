@@ -390,7 +390,7 @@ void VideoCaptureDeviceMac::AllocateAndStart(
                std::min(params.requested_format.frame_rate, kMaxFrameRate));
   // Leave the pixel format selection to AVFoundation/QTKit. The pixel format
   // will be passed to |ReceiveFrame|.
-  capture_format_.pixel_format = VIDEO_CAPTURE_PIXEL_FORMAT_UNKNOWN;
+  capture_format_.pixel_format = PIXEL_FORMAT_UNKNOWN;
 
   // QTKit: Set the capture resolution only if this is VGA or smaller, otherwise
   // leave it unconfigured and start capturing: QTKit will produce frames at the
@@ -416,7 +416,7 @@ void VideoCaptureDeviceMac::AllocateAndStart(
     if (base::HexStringToInt(base::StringPiece(vendor_id), &vendor_id_as_int) &&
         base::HexStringToInt(base::StringPiece(model_id), &model_id_as_int)) {
       SetAntiFlickerInUsbDevice(vendor_id_as_int, model_id_as_int,
-                                GetPowerLineFrequencyForLocation());
+                                GetPowerLineFrequency(params));
     }
   }
 

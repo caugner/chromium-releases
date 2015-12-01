@@ -105,7 +105,7 @@ void AccountFetcherService::EnableNetworkFetches() {
   // If there are accounts in |pending_user_info_fetches_|, they were deemed
   // invalid after being loaded from prefs and need to be fetched now instead of
   // waiting after the timer.
-  for (std::string account_id : pending_user_info_fetches_)
+  for (const std::string& account_id : pending_user_info_fetches_)
     StartFetchingUserInfo(account_id);
   pending_user_info_fetches_.clear();
 
@@ -225,7 +225,7 @@ void AccountFetcherService::RefreshAccountInfo(const std::string& account_id,
   DVLOG(1) << "AVAILABLE " << account_id;
 
   account_tracker_service_->StartTrackingAccount(account_id);
-  const AccountTrackerService::AccountInfo& info =
+  const AccountInfo& info =
       account_tracker_service_->GetAccountInfo(account_id);
   if (!AccountSupportsUserInfo(account_id))
     return;

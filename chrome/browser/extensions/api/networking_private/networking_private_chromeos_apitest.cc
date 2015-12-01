@@ -223,6 +223,7 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
                                     base::StringValue("Cellular1_Carrier"));
     base::DictionaryValue home_provider;
     home_provider.SetString("name", "Cellular1_Provider");
+    home_provider.SetString("code", "000000");
     home_provider.SetString("country", "us");
     device_test_->SetDeviceProperty(
         kCellularDevicePath, shill::kHomeProviderProperty, home_provider);
@@ -272,7 +273,7 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
 
   void SetUpOnMainThread() override {
     detector_ = new NetworkPortalDetectorTestImpl();
-    NetworkPortalDetector::InitializeForTesting(detector_);
+    chromeos::network_portal_detector::InitializeForTesting(detector_);
 
     ExtensionApiTest::SetUpOnMainThread();
     content::RunAllPendingInMessageLoop();
@@ -586,6 +587,7 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetManagedProperties) {
   policy::PolicyMap policy;
   policy.Set(policy::key::kOpenNetworkConfiguration,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_CLOUD,
              new base::StringValue(user_policy_blob), nullptr);
   provider_.UpdateChromePolicy(policy);
 

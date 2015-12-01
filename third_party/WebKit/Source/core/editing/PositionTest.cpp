@@ -6,26 +6,11 @@
 #include "core/editing/Position.h"
 
 #include "core/editing/EditingTestBase.h"
-#include "core/editing/EditingUtilities.h"
 
 namespace blink {
 
 class PositionTest : public EditingTestBase {
 };
-
-// TODO(yoisn) We should move |NextNodeIndex| to "EditingUtilitiesTest.cpp".
-TEST_F(PositionTest, NextNodeIndex)
-{
-    const char* bodyContent = "<p id='host'>00<b id='one'>11</b><b id='two'>22</b>33</p>";
-    const char* shadowContent = "<content select=#two></content><content select=#one></content>";
-    setBodyContent(bodyContent);
-    setShadowContent(shadowContent);
-    Node* host = document().getElementById("host");
-    Node* two = document().getElementById("two");
-
-    EXPECT_EQ(Position(host, 3), nextPositionOf(Position(two, 2), PositionMoveType::CodePoint));
-    EXPECT_EQ(PositionInComposedTree(host, 1), nextPositionOf(PositionInComposedTree(two, 2), PositionMoveType::CodePoint));
-}
 
 TEST_F(PositionTest, NodeAsRangeLastNodeNull)
 {
@@ -66,7 +51,7 @@ TEST_F(PositionTest, NodeAsRangeLastNodeShadow)
     const char* bodyContent = "<p id='host'>00<b id='one'>11</b><b id='two'>22</b>33</p>";
     const char* shadowContent = "<a id='a'><content select=#two></content><content select=#one></content></a>";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent, "host");
 
     Node* host = document().getElementById("host");
     Node* n1 = document().getElementById("one");
@@ -95,7 +80,7 @@ TEST_F(PositionTest, ToPositionInComposedTreeWithActiveInsertionPoint)
     const char* bodyContent = "<p id='host'>00<b id='one'>11</b>22</p>";
     const char* shadowContent = "<a id='a'><content select=#one id='content'></content><content></content></a>";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent, "host");
     RefPtrWillBeRawPtr<Element> anchor = shadowRoot->getElementById("a");
 
     EXPECT_EQ(PositionInComposedTree(anchor.get(), 0), toPositionInComposedTree(Position(anchor.get(), 0)));
@@ -113,12 +98,21 @@ TEST_F(PositionTest, ToPositionInComposedTreeWithInactiveInsertionPoint)
     EXPECT_EQ(PositionInComposedTree(anchor, PositionAnchorType::AfterChildren), toPositionInComposedTree(Position(anchor.get(), 1)));
 }
 
+// This test comes from "editing/style/block-style-progress-crash.html".
+TEST_F(PositionTest, ToPositionInComposedTreeWithNotDistributed)
+{
+    setBodyContent("<progress id=sample>foo</progress>");
+    Element* sample = document().getElementById("sample");
+
+    EXPECT_EQ(PositionInComposedTree(sample, PositionAnchorType::AfterChildren), toPositionInComposedTree(Position(sample, 0)));
+}
+
 TEST_F(PositionTest, ToPositionInComposedTreeWithShadowRoot)
 {
     const char* bodyContent = "<p id='host'>00<b id='one'>11</b>22</p>";
     const char* shadowContent = "<a><content select=#one></content></a>";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent, "host");
     RefPtrWillBeRawPtr<Element> host = document().getElementById("host");
 
     EXPECT_EQ(PositionInComposedTree(host.get(), 0), toPositionInComposedTree(Position(shadowRoot.get(), 0)));
@@ -130,7 +124,7 @@ TEST_F(PositionTest, ToPositionInComposedTreeWithShadowRootContainingSingleConte
     const char* bodyContent = "<p id='host'>00<b id='one'>11</b>22</p>";
     const char* shadowContent = "<content select=#one></content>";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent, "host");
     RefPtrWillBeRawPtr<Element> host = document().getElementById("host");
 
     EXPECT_EQ(PositionInComposedTree(host.get(), 0), toPositionInComposedTree(Position(shadowRoot.get(), 0)));
@@ -142,7 +136,7 @@ TEST_F(PositionTest, ToPositionInComposedTreeWithEmptyShadowRoot)
     const char* bodyContent = "<p id='host'>00<b id='one'>11</b>22</p>";
     const char* shadowContent = "";
     setBodyContent(bodyContent);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = setShadowContent(shadowContent, "host");
     RefPtrWillBeRawPtr<Element> host = document().getElementById("host");
 
     EXPECT_EQ(PositionInComposedTree(host, PositionAnchorType::AfterChildren), toPositionInComposedTree(Position(shadowRoot.get(), 0)));

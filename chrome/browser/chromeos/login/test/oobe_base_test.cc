@@ -40,6 +40,7 @@ const char kGAIAHost[] = "accounts.google.com";
 // static
 const char OobeBaseTest::kFakeUserEmail[] = "fake-email@gmail.com";
 const char OobeBaseTest::kFakeUserPassword[] = "fake-password";
+const char OobeBaseTest::kFakeUserGaiaId[] = "fake-gaiaId";
 const char OobeBaseTest::kFakeSIDCookie[] = "fake-SID-cookie";
 const char OobeBaseTest::kFakeLSIDCookie[] = "fake-LSID-cookie";
 
@@ -82,7 +83,7 @@ void OobeBaseTest::SetUp() {
 void OobeBaseTest::SetUpInProcessBrowserTestFixture() {
   host_resolver()->AddRule("*", "127.0.0.1");
   network_portal_detector_ = new NetworkPortalDetectorTestImpl();
-  NetworkPortalDetector::InitializeForTesting(network_portal_detector_);
+  network_portal_detector::InitializeForTesting(network_portal_detector_);
   network_portal_detector_->SetDefaultNetworkForTesting(
       FakeShillManagerClient::kFakeEthernetNetworkGuid);
 
@@ -109,6 +110,8 @@ void OobeBaseTest::SetUpOnMainThread() {
   test::UserSessionManagerTestApi session_manager_test_api(
       UserSessionManager::GetInstance());
   session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
+
+  LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
 
   ExtensionApiTest::SetUpOnMainThread();
 }
@@ -214,13 +217,18 @@ WebUILoginDisplay* OobeBaseTest::GetLoginDisplay() {
 
 void OobeBaseTest::WaitForGaiaPageLoad() {
   WaitForSigninScreen();
+  WaitForGaiaPageReload();
+}
 
-  JS().Evaluate(
-      "$('gaia-signin').gaiaAuthHost_.addEventListener('ready',"
-      "function() {"
-      "window.domAutomationController.setAutomationId(0);"
-      "window.domAutomationController.send('GaiaReady');"
-      "});");
+void OobeBaseTest::WaitForGaiaPageReload() {
+  JS()
+      .Evaluate(
+          "$('gaia-signin').gaiaAuthHost_.addEventListener('ready',"
+          "function f() {"
+          "$(\'gaia-signin\').gaiaAuthHost_.removeEventListener(\'ready\', f);"
+          "window.domAutomationController.setAutomationId(0);"
+          "window.domAutomationController.send('GaiaReady');"
+          "});");
 
   content::DOMMessageQueue message_queue;
   std::string message;

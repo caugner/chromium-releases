@@ -226,7 +226,8 @@ cr.define('options', function() {
           PageManager.showPageByName('editDictionary');
         };
         $('dictionary-download-retry-button').onclick = function(e) {
-          chrome.send('retryDictionaryDownload');
+          chrome.send('retryDictionaryDownload',
+                      [e.currentTarget.languageCode]);
         };
       }
 
@@ -275,7 +276,6 @@ cr.define('options', function() {
       // Public session users cannot change the locale.
       if (cr.isChromeOS && UIAccountTweaks.loggedInAsPublicAccount())
         $('language-options-ui-language-section').hidden = true;
-          PageManager.closeOverlay.bind(PageManager);
     },
 
     /**
@@ -685,6 +685,7 @@ cr.define('options', function() {
               [spellCheckLanguageSection, dictionaryDownloadFailed], 1);
           if (this.spellcheckDictionaryDownloadFailures_ > 1)
             dictionaryDownloadFailHelp.hidden = false;
+          $('dictionary-download-retry-button').languageCode = languageCode;
           break;
       }
 

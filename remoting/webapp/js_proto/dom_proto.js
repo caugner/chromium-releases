@@ -130,12 +130,6 @@ Event.prototype.initMouseEvent = function(
 /** @type {Object} */
 Event.prototype.data = {};
 
-/**
- * @param {*} value
- * @return {boolean} whether value is an integer or not.
- */
-Number.isInteger = function(value) {};
-
 // Chrome implements XMLHttpRequest.responseURL starting from Chrome 37.
 /** @type {string} */
 XMLHttpRequest.prototype.responseURL = "";
@@ -218,3 +212,11 @@ chrome.ConsoleMessageBrowserEvent.prototype.message;
 
 /** @type {string} */
 chrome.ConsoleMessageBrowserEvent.prototype.sourceId;
+
+/**
+ * The last error of the NaCL embed element.
+ * https://developer.chrome.com/native-client/devguide/coding/progress-events
+ *
+ * @type {string}
+ */
+HTMLEmbedElement.prototype.lastError;

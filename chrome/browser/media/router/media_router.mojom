@@ -6,10 +6,19 @@ module media_router.interfaces;
 
 // Represents an output sink to which media can be routed.
 struct MediaSink {
+  enum IconType {
+    CAST,
+    CAST_AUDIO,
+    GENERIC,
+    HANGOUT
+  };
+
   // The sink identifier, e.g. "rs71w7mFzYLFlabir_qO4NHl6SUc."
   string sink_id;
   // The human-readable name, e.g. "Janet's Chromecast".
   string name;
+  // The type of icon to show in the UI for this media sink.
+  IconType icon_type;
   // True if a route is being created to this sink.
   bool is_launching;
 };
@@ -21,8 +30,8 @@ struct MediaRoute {
   // The ID of the media source being sent through this media route.
   // May be missing if route is not local.
   string? media_source;
-  // The sink that is rendering the media content.
-  MediaSink media_sink;
+  // The ID of sink that is rendering the media content.
+  string media_sink_id;
   // Human readable description of this route, e.g.
   // "Tab casting".
   string description;
@@ -32,6 +41,8 @@ struct MediaRoute {
   // component extension. When set, the route can have custom route detail as
   // well as its own route controls in the media router dialog.
   string? custom_controller_path;
+  // Set to true if this route should be displayed for |media_sink_id| in UI.
+  bool for_display;
 };
 
 // Notifications or an actionable events to be shown to the user.
@@ -55,8 +66,6 @@ struct Issue {
   };
 
   enum ActionType {
-    OK,
-    CANCEL,
     DISMISS,
     LEARN_MORE
   };
@@ -158,9 +167,6 @@ interface MediaRouteProvider {
 
   // Stops querying the state of all media routes.
   StopObservingMediaRoutes();
-
-  // "Clears" an issue after it is addressed.
-  ClearIssue(string issue_id);
 
   // Called when the MediaRouter is ready to get the next batch of messages
   // associated with |route_id|.

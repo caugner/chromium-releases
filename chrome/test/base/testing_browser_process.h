@@ -64,8 +64,8 @@ class TestingBrowserProcess : public BrowserProcess {
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;
   PrefService* local_state() override;
-  chrome_variations::VariationsService* variations_service() override;
-  PromoResourceService* promo_resource_service() override;
+  variations::VariationsService* variations_service() override;
+  web_resource::PromoResourceService* promo_resource_service() override;
   policy::BrowserPolicyConnector* browser_policy_connector() override;
   policy::PolicyService* policy_service() override;
   IconManager* icon_manager() override;
@@ -105,7 +105,7 @@ class TestingBrowserProcess : public BrowserProcess {
   void StartAutoupdateTimer() override {}
 #endif
 
-  ChromeNetLog* net_log() override;
+  net_log::ChromeNetLog* net_log() override;
   component_updater::ComponentUpdateService* component_updater() override;
   CRLSetFetcher* crl_set_fetcher() override;
   component_updater::PnaclComponentInstaller* pnacl_component_installer()
@@ -122,7 +122,7 @@ class TestingBrowserProcess : public BrowserProcess {
   network_time::NetworkTimeTracker* network_time_tracker() override;
 
   gcm::GCMDriver* gcm_driver() override;
-  memory::OomPriorityManager* GetOomPriorityManager() override;
+  memory::TabManager* GetTabManager() override;
   ShellIntegration::DefaultWebClientState CachedDefaultWebClientState()
       override;
 
@@ -131,11 +131,11 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetLocalState(PrefService* local_state);
   void SetProfileManager(ProfileManager* profile_manager);
   void SetIOThread(IOThread* io_thread);
-  void SetBrowserPolicyConnector(policy::BrowserPolicyConnector* connector);
   void SetSafeBrowsingService(SafeBrowsingService* sb_service);
   void SetSystemRequestContext(net::URLRequestContextGetter* context_getter);
   void SetNotificationUIManager(
       scoped_ptr<NotificationUIManager> notification_ui_manager);
+  void ShutdownBrowserPolicyConnector();
 
  private:
   // See CreateInstance() and DestoryInstance() above.
@@ -150,6 +150,7 @@ class TestingBrowserProcess : public BrowserProcess {
 #if !defined(OS_IOS)
 #if defined(ENABLE_CONFIGURATION_POLICY)
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+  bool created_browser_policy_connector_ = false;
 #else
   scoped_ptr<policy::PolicyService> policy_service_;
 #endif

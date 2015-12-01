@@ -26,7 +26,6 @@
 #include "net/http/http_network_session.h"
 #include "net/socket/next_proto.h"
 
-class ChromeNetLog;
 class PrefProxyConfigTracker;
 class PrefService;
 class PrefRegistrySimple;
@@ -69,6 +68,10 @@ class URLRequestContextGetter;
 class URLRequestJobFactory;
 class URLSecurityManager;
 }  // namespace net
+
+namespace net_log {
+class ChromeNetLog;
+}
 
 namespace policy {
 class PolicyService;
@@ -194,6 +197,7 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<int> quic_max_number_of_lossy_connections;
     Optional<float> quic_packet_loss_threshold;
     Optional<int> quic_socket_receive_buffer_size;
+    Optional<bool> quic_delay_tcp_race;
     Optional<size_t> quic_max_packet_length;
     net::QuicTagVector quic_connection_options;
     Optional<std::string> quic_user_agent_id;
@@ -209,7 +213,7 @@ class IOThread : public content::BrowserThreadDelegate {
   // |net_log| must either outlive the IOThread or be NULL.
   IOThread(PrefService* local_state,
            policy::PolicyService* policy_service,
-           ChromeNetLog* net_log,
+           net_log::ChromeNetLog* net_log,
            extensions::EventRouterForwarder* extension_event_router_forwarder);
 
   ~IOThread() override;
@@ -224,7 +228,7 @@ class IOThread : public content::BrowserThreadDelegate {
   // IOThread global objects.
   void SetGlobalsForTesting(Globals* globals);
 
-  ChromeNetLog* net_log();
+  net_log::ChromeNetLog* net_log();
 
   // Handles changing to On The Record mode, discarding confidential data.
   void ChangedToOnTheRecord();
@@ -380,6 +384,7 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Returns true if QUIC should enable alternative services.
   static bool ShouldQuicEnableAlternativeServices(
+      const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 
   // Returns the maximum number of QUIC connections with high packet loss in a
@@ -397,6 +402,10 @@ class IOThread : public content::BrowserThreadDelegate {
   // Returns the size of the QUIC receive buffer to use, or 0 if
   // the default should be used.
   static int GetQuicSocketReceiveBufferSize(
+      const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC should delay TCP connection when QUIC works.
+  static bool ShouldQuicDelayTcpRace(
       const VariationParameters& quic_trial_params);
 
   // Returns the maximum length for QUIC packets, based on any flags in
@@ -428,9 +437,20 @@ class IOThread : public content::BrowserThreadDelegate {
       const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 
+  static net::URLRequestContext* ConstructSystemRequestContext(
+      IOThread::Globals* globals,
+      net::NetLog* net_log);
+
+  // TODO(willchan): Remove proxy script fetcher context since it's not
+  // necessary now that I got rid of refcounting URLRequestContexts.
+  // See IOThread::Globals for details.
+  static net::URLRequestContext* ConstructProxyScriptFetcherContext(
+      IOThread::Globals* globals,
+      net::NetLog* net_log);
+
   // The NetLog is owned by the browser process, to allow logging from other
   // threads during shutdown, but is used most frequently on the IOThread.
-  ChromeNetLog* net_log_;
+  net_log::ChromeNetLog* net_log_;
 
 #if defined(ENABLE_EXTENSIONS)
   // The extensions::EventRouterForwarder allows for sending events to

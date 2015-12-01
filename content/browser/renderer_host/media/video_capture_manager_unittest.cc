@@ -48,6 +48,10 @@ class MockFrameObserver : public VideoCaptureControllerEventHandler {
   void OnBufferCreated(VideoCaptureControllerID id,
                        base::SharedMemoryHandle handle,
                        int length, int buffer_id) override {}
+  void OnBufferCreated2(VideoCaptureControllerID id,
+                        const std::vector<gfx::GpuMemoryBufferHandle>& handles,
+                        const gfx::Size& size,
+                        int buffer_id) override {}
   void OnBufferDestroyed(VideoCaptureControllerID id, int buffer_id) override {}
   void OnBufferReady(VideoCaptureControllerID id,
                      int buffer_id,
@@ -101,7 +105,7 @@ class VideoCaptureManagerTest : public testing::Test {
   VideoCaptureControllerID StartClient(int session_id, bool expect_success) {
     media::VideoCaptureParams params;
     params.requested_format = media::VideoCaptureFormat(
-        gfx::Size(320, 240), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420);
+        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420);
 
     VideoCaptureControllerID client_id(next_client_id_++);
     base::RunLoop run_loop;
@@ -125,6 +129,26 @@ class VideoCaptureManagerTest : public testing::Test {
     vcm_->StopCaptureForClient(controllers_[client_id], client_id,
                                frame_observer_.get(), false);
     controllers_.erase(client_id);
+  }
+
+  void ResumeClient(int session_id, int client_id) {
+    ASSERT_EQ(1u, controllers_.count(client_id));
+    media::VideoCaptureParams params;
+    params.requested_format = media::VideoCaptureFormat(
+        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420);
+
+    vcm_->ResumeCaptureForClient(
+        session_id,
+        params,
+        controllers_[client_id],
+        client_id,
+        frame_observer_.get());
+  }
+
+  void PauseClient(VideoCaptureControllerID client_id) {
+    ASSERT_EQ(1u, controllers_.count(client_id));
+    vcm_->PauseCaptureForClient(controllers_[client_id], client_id,
+                               frame_observer_.get());
   }
 
   int next_client_id_;
@@ -501,6 +525,37 @@ TEST_F(VideoCaptureManagerTest, CloseWithoutStop) {
   StopClient(client_id);
 
   // Wait to check callbacks before removing the listener
+  message_loop_->RunUntilIdle();
+  vcm_->Unregister();
+}
+
+// Try to open, start, pause and resume a device.
+TEST_F(VideoCaptureManagerTest, PauseAndResume) {
+  StreamDeviceInfoArray devices;
+
+  InSequence s;
+  EXPECT_CALL(*listener_, DevicesEnumerated(MEDIA_DEVICE_VIDEO_CAPTURE, _))
+      .WillOnce(SaveArg<1>(&devices));
+  EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+  EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+
+  vcm_->EnumerateDevices(MEDIA_DEVICE_VIDEO_CAPTURE);
+
+  // Wait to get device callback.
+  message_loop_->RunUntilIdle();
+
+  int video_session_id = vcm_->Open(devices.front());
+  VideoCaptureControllerID client_id = StartClient(video_session_id, true);
+
+  // Resume client a second time should cause no problem.
+  PauseClient(client_id);
+  ResumeClient(video_session_id, client_id);
+  ResumeClient(video_session_id, client_id);
+
+  StopClient(client_id);
+  vcm_->Close(video_session_id);
+
+  // Wait to check callbacks before removing the listener.
   message_loop_->RunUntilIdle();
   vcm_->Unregister();
 }

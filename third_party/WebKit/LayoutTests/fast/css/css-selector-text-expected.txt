@@ -40,6 +40,8 @@ PASS parseThenSerializeRule(':focus { }') is ':focus { }'
 PASS parseThenSerializeRule(':hover { }') is ':hover { }'
 PASS parseThenSerializeRule(':indeterminate { }') is ':indeterminate { }'
 PASS parseThenSerializeRule(':link { }') is ':link { }'
+PASS parseThenSerializeRule(':not(:placeholder-shown) { }') is ':not(:placeholder-shown) { }'
+PASS parseThenSerializeRule(':placeholder-shown { }') is ':placeholder-shown { }'
 PASS parseThenSerializeRule(':root { }') is ':root { }'
 PASS parseThenSerializeRule(':target { }') is ':target { }'
 PASS parseThenSerializeRule(':visited { }') is ':visited { }'
@@ -90,7 +92,7 @@ PASS parseThenSerializeRule(':-webkit-any(.class1:hover) { }') is ':-webkit-any(
 PASS parseThenSerializeRule(':-webkit-any(a.class1.class2.class3:hover) { }') is ':-webkit-any(a.class1.class2.class3:hover) { }'
 
 PASS parseThenSerializeRule('*:active { }') is ':active { }'
-PASS parseThenSerializeRule('|a { }') is 'a { }'
+PASS parseThenSerializeRule('|a { }') is '|a { }'
 
 PASS parseThenSerializeRule('input[type=file]:focus { }') is 'input[type="file"]:focus { }'
 

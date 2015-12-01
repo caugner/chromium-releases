@@ -165,54 +165,6 @@ bool FilesystemStringsEqual(const base::FilePath::StringType& a,
 
 }  // namespace
 
-const char* GetExtensionForOutputType(Target::OutputType type,
-                                      Settings::TargetOS os) {
-  switch (os) {
-    case Settings::MAC:
-      switch (type) {
-        case Target::EXECUTABLE:
-          return "";
-        case Target::SHARED_LIBRARY:
-          return "dylib";
-        case Target::STATIC_LIBRARY:
-          return "a";
-        default:
-          NOTREACHED();
-      }
-      break;
-
-    case Settings::WIN:
-      switch (type) {
-        case Target::EXECUTABLE:
-          return "exe";
-        case Target::SHARED_LIBRARY:
-          return "dll.lib";  // Extension of import library.
-        case Target::STATIC_LIBRARY:
-          return "lib";
-        default:
-          NOTREACHED();
-      }
-      break;
-
-    case Settings::LINUX:
-      switch (type) {
-        case Target::EXECUTABLE:
-          return "";
-        case Target::SHARED_LIBRARY:
-          return "so";
-        case Target::STATIC_LIBRARY:
-          return "a";
-        default:
-          NOTREACHED();
-      }
-      break;
-
-    default:
-      NOTREACHED();
-  }
-  return "";
-}
-
 std::string FilePathToUTF8(const base::FilePath::StringType& str) {
 #if defined(OS_WIN)
   return base::WideToUTF8(str);
@@ -729,13 +681,27 @@ SourceDir GetToolchainGenDir(const BuildSettings* build_settings,
 
 SourceDir GetOutputDirForSourceDir(const Settings* settings,
                                    const SourceDir& source_dir) {
-  return GetOutputDirForSourceDirAsOutputFile(settings, source_dir).AsSourceDir(
-      settings->build_settings());
+  return GetOutputDirForSourceDir(
+      settings->build_settings(), source_dir,
+      settings->toolchain_label(), settings->is_default());
 }
 
-OutputFile GetOutputDirForSourceDirAsOutputFile(const Settings* settings,
-                                                const SourceDir& source_dir) {
-  OutputFile result = settings->toolchain_output_subdir();
+SourceDir GetOutputDirForSourceDir(
+    const BuildSettings* build_settings,
+    const SourceDir& source_dir,
+    const Label& toolchain_label,
+    bool is_default_toolchain) {
+  return GetOutputDirForSourceDirAsOutputFile(
+          build_settings, source_dir, toolchain_label, is_default_toolchain)
+      .AsSourceDir(build_settings);
+}
+
+OutputFile GetOutputDirForSourceDirAsOutputFile(
+    const BuildSettings* build_settings,
+    const SourceDir& source_dir,
+    const Label& toolchain_label,
+    bool is_default_toolchain) {
+  OutputFile result(GetOutputSubdirName(toolchain_label, is_default_toolchain));
   result.value().append("obj/");
 
   if (source_dir.is_source_absolute()) {
@@ -745,8 +711,7 @@ OutputFile GetOutputDirForSourceDirAsOutputFile(const Settings* settings,
                           source_dir.value().size() - 2);
   } else {
     // System-absolute.
-    const std::string& build_dir =
-        settings->build_settings()->build_dir().value();
+    const std::string& build_dir = build_settings->build_dir().value();
 
     if (base::StartsWith(source_dir.value(), build_dir,
                          base::CompareCase::SENSITIVE)) {
@@ -769,6 +734,13 @@ OutputFile GetOutputDirForSourceDirAsOutputFile(const Settings* settings,
     }
   }
   return result;
+}
+
+OutputFile GetOutputDirForSourceDirAsOutputFile(const Settings* settings,
+                                                const SourceDir& source_dir) {
+  return GetOutputDirForSourceDirAsOutputFile(
+      settings->build_settings(), source_dir,
+      settings->toolchain_label(), settings->is_default());
 }
 
 SourceDir GetGenDirForSourceDir(const Settings* settings,

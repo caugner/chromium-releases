@@ -96,13 +96,21 @@ base::string16 WebsiteSettingsUI::IdentityInfo::GetSecuritySummary() const {
     case WebsiteSettings::SITE_IDENTITY_STATUS_CERT:
     case WebsiteSettings::SITE_IDENTITY_STATUS_EV_CERT:
     case WebsiteSettings::SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN:
-      if (connection_status ==
-          WebsiteSettings::SITE_CONNECTION_STATUS_MIXED_CONTENT) {
-        return l10n_util::GetStringUTF16(
-            IDS_WEBSITE_SETTINGS_MIXED_PASSIVE_CONTENT);
+      switch (connection_status) {
+        case WebsiteSettings::SITE_CONNECTION_STATUS_MIXED_CONTENT:
+          return l10n_util::GetStringUTF16(
+              IDS_WEBSITE_SETTINGS_MIXED_PASSIVE_CONTENT);
+        case WebsiteSettings::SITE_CONNECTION_STATUS_MIXED_SCRIPT:
+          return l10n_util::GetStringUTF16(
+              IDS_WEBSITE_SETTINGS_MIXED_ACTIVE_CONTENT);
+        default:
+          return l10n_util::GetStringUTF16(
+              IDS_WEBSITE_SETTINGS_SECURE_TRANSPORT);
       }
-      return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_SECURE_TRANSPORT);
-    case WebsiteSettings::SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM:
+    case WebsiteSettings::
+        SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MINOR:
+    case WebsiteSettings::
+        SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MAJOR:
       return l10n_util::GetStringUTF16(
           IDS_WEBSITE_DEPRECATED_SIGNATURE_ALGORITHM);
     case WebsiteSettings::SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT:
@@ -143,8 +151,6 @@ base::string16 WebsiteSettingsUI::PermissionTypeToUIString(
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_FULLSCREEN);
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MOUSELOCK);
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-      return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MEDIASTREAM);
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MIC);
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
@@ -236,7 +242,12 @@ int WebsiteSettingsUI::GetPermissionIconID(ContentSettingsType type,
       resource_id = use_blocked ? IDR_BLOCKED_POPUPS : IDR_ALLOWED_POPUPS;
       break;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
+#if defined(ENABLE_PLUGINS)
       resource_id = use_blocked ? IDR_BLOCKED_PLUGINS : IDR_ALLOWED_PLUGINS;
+#else
+      NOTREACHED();
+      resource_id = kInvalidResourceID;
+#endif
       break;
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       resource_id = use_blocked ? IDR_BLOCKED_LOCATION : IDR_ALLOWED_LOCATION;
@@ -307,8 +318,13 @@ int WebsiteSettingsUI::GetIdentityIconID(
     case WebsiteSettings::SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT:
       resource_id = IDR_PAGEINFO_ENTERPRISE_MANAGED;
       break;
-    case WebsiteSettings::SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM:
+    case WebsiteSettings::
+        SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MINOR:
       resource_id = IDR_PAGEINFO_WARNING_MINOR;
+      break;
+    case WebsiteSettings::
+        SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM_MAJOR:
+      resource_id = IDR_PAGEINFO_BAD;
       break;
     default:
       NOTREACHED();
@@ -341,11 +357,9 @@ int WebsiteSettingsUI::GetConnectionIconID(
     case WebsiteSettings::SITE_CONNECTION_STATUS_UNENCRYPTED:
       resource_id = IDR_PAGEINFO_WARNING_MAJOR;
       break;
+    case WebsiteSettings::SITE_CONNECTION_STATUS_MIXED_SCRIPT:
     case WebsiteSettings::SITE_CONNECTION_STATUS_ENCRYPTED_ERROR:
       resource_id = IDR_PAGEINFO_BAD;
-      break;
-    default:
-      NOTREACHED();
       break;
   }
   return resource_id;

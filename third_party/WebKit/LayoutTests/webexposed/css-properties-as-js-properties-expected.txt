@@ -14,6 +14,7 @@ animationIterationCount
 animationName
 animationPlayState
 animationTimingFunction
+backdropFilter
 backfaceVisibility
 background
 backgroundAttachment
@@ -321,7 +322,6 @@ webkitFontSizeDelta
 webkitFontSmoothing
 webkitHighlight
 webkitHyphenateCharacter
-webkitLineBoxContain
 webkitLineBreak
 webkitLineClamp
 webkitLocale

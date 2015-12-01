@@ -1,0 +1,46 @@
+// Copyright 2015 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+module web_view.mojom;
+
+import "components/mus/public/interfaces/view_tree.mojom";
+import "network/public/interfaces/url_loader.mojom";
+
+enum ButtonState {
+  ENABLED,
+  DISABLED,
+};
+
+interface WebViewClient {
+  // Page-generated request for a top level frame navigation.
+  TopLevelNavigateRequest(mojo.URLRequest request);
+
+  // Notification that the navigation has started. This can be useful for
+  // navigations triggered from sources other than the page itself (e.g.
+  // back/forward history navigation).
+  TopLevelNavigationStarted(string url);
+
+  // Loading and progress notifications.
+  LoadingStateChanged(bool is_loading, double progress);
+  BackForwardChanged(ButtonState back_button, ButtonState forward_button);
+
+  // TODO(beng): also forward text direction.
+  TitleChanged(string? title);
+};
+
+interface WebView {
+  // Navigate the top level frame to |request|.
+  LoadRequest(mojo.URLRequest request);
+
+  // Provide a ViewTreeClient for this specific WebView.
+  GetViewTreeClient(mojo.ViewTreeClient& view_tree_client);
+
+  // Moves forward and backward.
+  GoBack();
+  GoForward();
+};
+
+interface WebViewFactory {
+  CreateWebView(WebViewClient client, WebView& web_view);
+};

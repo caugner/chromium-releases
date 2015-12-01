@@ -17,6 +17,7 @@ import android.view.View.OnAttachStateChangeListener;
 import android.view.View.OnClickListener;
 import android.widget.FrameLayout;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
@@ -611,6 +612,14 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     }
 
     /**
+     * @return The view that the pop up menu should be anchored to on the UI.
+     */
+    public View getMenuAnchor() {
+        return mToolbar.shouldShowMenuButton() ? mToolbar.getMenuButton()
+                : mToolbar.getLocationBar().getMenuAnchor();
+    }
+
+    /**
      * Sets/adds a custom action button to the {@link Toolbar} if it is supported. If there is
      * already an action button, update the button instead.
      * @param drawable The {@link Drawable} to use as the background for the button.
@@ -811,11 +820,20 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
      * @param color The primary color for the current tab.
      */
     public void updatePrimaryColor(int color) {
+        updatePrimaryColor(color, true);
+    }
+
+    /**
+     * Update the primary color used by the model to the given color.
+     * @param color The primary color for the current tab.
+     * @param shouldAnimate Whether the change of color should be animated.
+     */
+    private void updatePrimaryColor(int color, boolean shouldAnimate) {
         boolean colorChanged = mToolbarModel.getPrimaryColor() != color;
         if (!colorChanged) return;
 
         mToolbarModel.setPrimaryColor(color);
-        mToolbar.onPrimaryColorChanged();
+        mToolbar.onPrimaryColorChanged(shouldAnimate);
     }
 
     /**
@@ -840,13 +858,6 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     public void setUrlBarFocus(boolean focused) {
         if (!isInitialized()) return;
         mToolbar.getLocationBar().setUrlBarFocus(focused);
-    }
-
-    /**
-     * @return Whether {@link Toolbar} has drawn at least once.
-     */
-    public boolean hasDoneFirstDraw() {
-        return mToolbar.getFirstDrawTime() != 0;
     }
 
     /**
@@ -953,11 +964,12 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
                 if (tab != null) tab.addObserver(mTabObserver);
             }
             int defaultPrimaryColor = isIncognito
-                    ? mToolbar.getResources().getColor(R.color.incognito_primary_color)
-                    : mToolbar.getResources().getColor(R.color.default_primary_color);
-            int primaryColor = (tab != null && tab.getWebContents() != null)
-                    ? tab.getWebContents().getThemeColor(defaultPrimaryColor) : defaultPrimaryColor;
-            updatePrimaryColor(primaryColor);
+                    ? ApiCompatibilityUtils.getColor(mToolbar.getResources(),
+                            R.color.incognito_primary_color)
+                    : ApiCompatibilityUtils.getColor(mToolbar.getResources(),
+                            R.color.default_primary_color);
+            int primaryColor = tab != null ? tab.getThemeColor() : defaultPrimaryColor;
+            updatePrimaryColor(primaryColor, false);
 
             mToolbar.onTabOrModelChanged();
 

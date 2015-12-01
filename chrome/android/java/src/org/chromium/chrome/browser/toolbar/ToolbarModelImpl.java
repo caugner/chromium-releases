@@ -6,13 +6,13 @@ package org.chromium.chrome.browser.toolbar;
 
 import android.content.Context;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ToolbarModel.ToolbarModelDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -82,9 +82,9 @@ class ToolbarModelImpl extends ToolbarModel implements ToolbarDataProvider, Tool
     public void setPrimaryColor(int color) {
         mPrimaryColor = color;
         Context context = ApplicationStatus.getApplicationContext();
-        mIsUsingBrandColor = FeatureUtilities.isDocumentMode(context)
-                && !isIncognito()
-                && mPrimaryColor != context.getResources().getColor(R.color.default_primary_color)
+        mIsUsingBrandColor = !isIncognito()
+                && mPrimaryColor != ApiCompatibilityUtils.getColor(context.getResources(),
+                        R.color.default_primary_color)
                 && getTab() != null && !getTab().isNativePage();
     }
 

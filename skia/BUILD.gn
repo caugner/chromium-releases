@@ -280,6 +280,7 @@ component("skia") {
     # Chrome sources.
     "ext/SkDiscardableMemory_chrome.cc",
     "ext/SkMemory_new_handler.cpp",
+    "ext/SkTraceMemoryDump_chrome.cc",
     "ext/analysis_canvas.cc",
     "ext/benchmarking_canvas.cc",
     "ext/convolver.cc",
@@ -288,7 +289,6 @@ component("skia") {
     "ext/google_logging.cc",
     "ext/image_operations.cc",
     "ext/opacity_filter_canvas.cc",
-    "ext/pixel_ref_utils.cc",
     "ext/platform_device.cc",
     "ext/platform_device_linux.cc",
     "ext/platform_device_mac.cc",
@@ -461,14 +461,15 @@ component("skia") {
   ]
 
   if (is_linux) {
-    configs += [
-      "//build/config/linux:fontconfig",
-      "//build/config/linux:freetype2",
-    ]
+    configs += [ "//build/config/linux:freetype2" ]
+
     if (use_pango) {
       configs += [ "//build/config/linux:pangocairo" ]
     }
-    deps += [ "//third_party/icu:icuuc" ]
+    deps += [
+      "//build/linux:fontconfig",
+      "//third_party/icu:icuuc",
+    ]
   }
 
   if (is_android) {
@@ -488,7 +489,7 @@ component("skia") {
   }
 
   if (is_android && !is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 
@@ -589,7 +590,7 @@ source_set("skia_opts") {
   }
 
   if (is_android && !is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 
@@ -618,7 +619,6 @@ test("skia_unittests") {
     "ext/bitmap_platform_device_mac_unittest.cc",
     "ext/convolver_unittest.cc",
     "ext/image_operations_unittest.cc",
-    "ext/pixel_ref_utils_unittest.cc",
     "ext/platform_canvas_unittest.cc",
     "ext/recursive_gaussian_convolution_unittest.cc",
     "ext/refptr_unittest.cc",
@@ -655,6 +655,7 @@ if (is_linux && !is_chromeos) {
     deps = [
       ":skia",
       "//base",
+      "//build/config/sanitizers:deps",
     ]
   }
 
@@ -668,6 +669,7 @@ if (is_linux && !is_chromeos) {
       ":skia",
       "//base",
       "//base/test:test_support",
+      "//build/config/sanitizers:deps",
     ]
   }
 }

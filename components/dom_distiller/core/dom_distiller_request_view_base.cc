@@ -32,15 +32,9 @@ DomDistillerRequestViewBase::~DomDistillerRequestViewBase() {
 void DomDistillerRequestViewBase::FlagAsErrorPage() {
   // Viewer handle is not passed to this in the case of error pages
   // so send all JavaScript now.
-  SendJavaScript(viewer::GetJavaScript());
+  SendCommonJavaScript();
   SendJavaScript(viewer::GetErrorPageJs());
 
-  std::string title(l10n_util::GetStringUTF8(
-      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_CONTENT));
-  SendJavaScript(viewer::GetSetTitleJs(title));
-
-  SendJavaScript(viewer::GetSetTextDirectionJs(std::string("auto")));
-  SendJavaScript(viewer::GetShowFeedbackFormJs());
   is_error_page_ = true;
 }
 
@@ -114,13 +108,23 @@ void DomDistillerRequestViewBase::OnChangeFontFamily(
   SendJavaScript(viewer::GetDistilledPageFontFamilyJs(new_font));
 }
 
+void DomDistillerRequestViewBase::OnChangeFontScaling(float scaling) {
+  SendJavaScript(viewer::GetDistilledPageFontScalingJs(scaling));
+}
+
 void DomDistillerRequestViewBase::TakeViewerHandle(
     scoped_ptr<ViewerHandle> viewer_handle) {
   viewer_handle_ = viewer_handle.Pass();
   // Getting the viewer handle means this is not an error page, send
   // the viewer JavaScript and show the loading indicator.
-  SendJavaScript(viewer::GetJavaScript());
+  SendCommonJavaScript();
   SendJavaScript(viewer::GetToggleLoadingIndicatorJs(false));
+}
+
+void DomDistillerRequestViewBase::SendCommonJavaScript() {
+  SendJavaScript(viewer::GetJavaScript());
+  SendJavaScript(viewer::GetDistilledPageFontScalingJs(
+      distilled_page_prefs_->GetFontScaling()));
 }
 
 }  // namespace dom_distiller

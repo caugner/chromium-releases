@@ -8,10 +8,13 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
+#include "base/scoped_observer.h"
+#include "base/version.h"
 #include "chrome/browser/extensions/sync_bundle.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "extensions/browser/extension_prefs.h"
-#include "extensions/common/extension.h"
+#include "extensions/browser/extension_prefs_observer.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "sync/api/syncable_service.h"
 
 class ExtensionService;
@@ -23,16 +26,12 @@ class ExtensionSet;
 class ExtensionSyncData;
 }  // namespace extensions
 
-namespace syncer {
-class SyncChange;
-class SyncChangeProcessor;
-class SyncErrorFactory;
-}
-
 // SyncableService implementation responsible for the APPS and EXTENSIONS data
 // types, i.e. "proper" apps/extensions (not themes).
 class ExtensionSyncService : public syncer::SyncableService,
-                             public KeyedService {
+                             public KeyedService,
+                             public extensions::ExtensionRegistryObserver,
+                             public extensions::ExtensionPrefsObserver {
  public:
   explicit ExtensionSyncService(Profile* profile);
   ~ExtensionSyncService() override;
@@ -40,11 +39,10 @@ class ExtensionSyncService : public syncer::SyncableService,
   // Convenience function to get the ExtensionSyncService for a BrowserContext.
   static ExtensionSyncService* Get(content::BrowserContext* context);
 
-  // Notifies Sync that the given |extension| has been uninstalled.
-  void SyncUninstallExtension(const extensions::Extension& extension);
-
   // Notifies Sync (if needed) of a newly-installed extension or a change to
-  // an existing extension.
+  // an existing extension. Call this when you change an extension setting that
+  // is synced as part of ExtensionSyncData (e.g. incognito_enabled or
+  // all_urls_enabled).
   void SyncExtensionChangeIfNeeded(const extensions::Extension& extension);
 
   // syncer::SyncableService implementation.
@@ -59,23 +57,29 @@ class ExtensionSyncService : public syncer::SyncableService,
       const tracked_objects::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
+  void SetSyncStartFlareForTesting(
+      const syncer::SyncableService::StartSyncFlare& flare);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(TwoClientAppsSyncTest, UnexpectedLaunchType);
   FRIEND_TEST_ALL_PREFIXES(ExtensionDisabledGlobalErrorTest,
                            HigherPermissionsFromSync);
-  FRIEND_TEST_ALL_PREFIXES(ExtensionDisabledGlobalErrorTest, RemoteInstall);
-  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
-                           DeferredSyncStartupPreInstalledComponent);
-  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
-                           DeferredSyncStartupPreInstalledNormal);
-  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
-                           DeferredSyncStartupOnInstall);
-  friend class EphemeralAppBrowserTest;
-
-  void SetSyncStartFlareForTesting(
-      const syncer::SyncableService::StartSyncFlare& flare);
 
   ExtensionService* extension_service() const;
+
+  // extensions::ExtensionRegistryObserver:
+  void OnExtensionInstalled(content::BrowserContext* browser_context,
+                            const extensions::Extension* extension,
+                            bool is_update) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
+
+  // extensions::ExtensionPrefsObserver:
+  void OnExtensionStateChanged(const std::string& extension_id,
+                               bool state) override;
+  void OnExtensionDisableReasonsChanged(const std::string& extension_id,
+                                        int disabled_reasons) override;
 
   // Gets the SyncBundle for the given |type|.
   extensions::SyncBundle* GetSyncBundle(syncer::ModelType type);
@@ -86,9 +90,11 @@ class ExtensionSyncService : public syncer::SyncableService,
       const extensions::Extension& extension) const;
 
   // Applies the given change coming in from the server to the local state.
-  // Returns false if the changes were not completely applied and were added
-  // to the pending list.
-  bool ApplySyncData(const extensions::ExtensionSyncData& extension_sync_data);
+  void ApplySyncData(const extensions::ExtensionSyncData& extension_sync_data);
+
+  // Applies the bookmark app specific parts of |extension_sync_data|.
+  void ApplyBookmarkAppSyncData(
+      const extensions::ExtensionSyncData& extension_sync_data);
 
   // Collects the ExtensionSyncData for all installed apps or extensions.
   // If |include_everything| is true, includes all installed extensions,
@@ -104,22 +110,20 @@ class ExtensionSyncService : public syncer::SyncableService,
       bool include_everything,
       std::vector<extensions::ExtensionSyncData>* sync_data_list) const;
 
-  // Handles applying the extension specific values in |extension_sync_data| to
-  // the local state.
-  // Returns false if the changes were not completely applied.
-  bool ApplyExtensionSyncDataHelper(
-      const extensions::ExtensionSyncData& extension_sync_data,
-      syncer::ModelType type);
-
-  // Processes the bookmark app specific parts of an AppSyncData.
-  void ApplyBookmarkAppSyncData(
-      const extensions::ExtensionSyncData& extension_sync_data);
-
   // The normal profile associated with this ExtensionSyncService.
   Profile* profile_;
 
+  ScopedObserver<extensions::ExtensionRegistry,
+                 extensions::ExtensionRegistryObserver> registry_observer_;
+  ScopedObserver<extensions::ExtensionPrefs,
+                 extensions::ExtensionPrefsObserver> prefs_observer_;
+
   extensions::SyncBundle app_sync_bundle_;
   extensions::SyncBundle extension_sync_bundle_;
+
+  // Map from extension id to new version. Used to send the new version back to
+  // the sync server while we're waiting for an extension to update.
+  std::map<std::string, base::Version> pending_update_versions_;
 
   // Run()ning tells sync to try and start soon, because syncable changes
   // have started happening. It will cause sync to call us back

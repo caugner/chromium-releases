@@ -12,6 +12,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/affiliated_match_helper.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_syncable_service.h"
 
@@ -84,10 +85,6 @@ bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare) {
 void PasswordStore::SetAffiliatedMatchHelper(
     scoped_ptr<AffiliatedMatchHelper> helper) {
   affiliated_match_helper_ = helper.Pass();
-}
-
-bool PasswordStore::HasAffiliatedMatchHelper() const {
-  return affiliated_match_helper_;
 }
 
 void PasswordStore::AddLogin(const PasswordForm& form) {
@@ -387,12 +384,14 @@ void PasswordStore::GetLoginsWithAffiliationsImpl(
     android_form.scheme = PasswordForm::SCHEME_HTML;
     android_form.signon_realm = realm;
     ScopedVector<PasswordForm> more_results(
-        AffiliatedMatchHelper::TransformAffiliatedAndroidCredentials(
-            form, FillMatchingLogins(android_form, DISALLOW_PROMPT)));
+        FillMatchingLogins(android_form, DISALLOW_PROMPT));
+    for (PasswordForm* form : more_results)
+      form->is_affiliation_based_match = true;
     ScopedVector<PasswordForm>::iterator it_first_federated = std::partition(
         more_results.begin(), more_results.end(),
         [](PasswordForm* form) { return form->federation_url.is_empty(); });
     more_results.erase(it_first_federated, more_results.end());
+    password_manager_util::TrimUsernameOnlyCredentials(&more_results);
     results.insert(results.end(), more_results.begin(), more_results.end());
     more_results.weak_clear();
   }
@@ -416,7 +415,7 @@ scoped_ptr<PasswordForm> PasswordStore::GetLoginImpl(
       FillMatchingLogins(primary_key, DISALLOW_PROMPT));
   for (PasswordForm*& candidate : candidates) {
     if (ArePasswordFormUniqueKeyEqual(*candidate, primary_key) &&
-        !candidate->IsPublicSuffixMatch()) {
+        !candidate->is_public_suffix_match) {
       scoped_ptr<PasswordForm> result(candidate);
       candidate = nullptr;
       return result.Pass();
@@ -460,7 +459,7 @@ void PasswordStore::UpdateAffiliatedWebLoginsImpl(
       // non-HTML login forms; PSL matches; logins with a different username;
       // and logins with the same password (to avoid generating no-op updates).
       if (!AffiliatedMatchHelper::IsValidWebCredential(*web_login) ||
-          web_login->IsPublicSuffixMatch() ||
+          web_login->is_public_suffix_match ||
           web_login->username_value != updated_android_form.username_value ||
           web_login->password_value == updated_android_form.password_value)
         continue;

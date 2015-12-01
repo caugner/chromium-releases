@@ -12,7 +12,7 @@ button {
   cursor: pointer;
 }
 
-input:focus, button:focus {
+button:focus {
   outline: 1px solid rgb(77, 144, 254);
 }
 
@@ -439,6 +439,15 @@ paper-slider::shadow .expand:not(.pin) > #sliderKnob > #sliderKnobInner {
   -webkit-animation: fadeIn 500ms ease-in;
 }
 
+@-webkit-keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .gallery .ribbon-image[selected] > .selection-frame {
   border: 2px solid rgb(27, 168, 243);
   box-sizing: border-box;
@@ -559,6 +568,7 @@ paper-slider::shadow .expand:not(.pin) > #sliderKnob > #sliderKnobInner {
 
 .gallery > .toolbar paper-button,
 .gallery > .toolbar button {
+  border-radius: 2px;
   margin: 0 8px;
 }
 
@@ -603,6 +613,13 @@ paper-slider::shadow .expand:not(.pin) > #sliderKnob > #sliderKnobInner {
   position: absolute;
   top: 0;
   z-index: 1;
+}
+
+.gallery > .toolbar .icon-button > files-toggle-ripple {
+  height: 28px;
+  left: 2px;
+  top: 2px;
+  width: 28px;
 }
 
 .gallery > .toolbar button.edit > .icon {
@@ -687,6 +704,10 @@ button[disabled] {
 }
 
 /* Edit main toolbar. */
+.gallery > .toolbar .edit-main button {
+  border-radius: 1px;
+}
+
 .edit-main button.autofix .icon {
   background-image: -webkit-image-set(
       url(../images/100/auto_fix.png) 1x,
@@ -1068,8 +1089,7 @@ paper-slider::shadow paper-progress::shadow #progressContainer {
 /* Load spinner and error banner. */
 
 .gallery .spinner {
-  background-image:
-      url(chrome://resources/images/throbber.svg);
+  background-image: url(chrome://resources/images/throbber_medium.svg);
   background-size: 100%;
   height: 32px;
   left: 50%;
@@ -1123,106 +1143,8 @@ files-toast {
   pointer-events: auto;
 }
 
-/* Mosaic view. */
-.mosaic {
-  bottom: 0;
-  left: 0;
-  overflow-x: scroll;
-  overflow-y: hidden;
-  position: absolute;
-  right: 0;
-  top: 55px; /* Toolbar height. */
-
-  /* transition-duration is set in Javascript. */
-  transition-property: transform;
-  transition-timing-function: linear;
-}
-
-.mosaic::-webkit-scrollbar {
-  background: transparent;
-}
-
-.mosaic::-webkit-scrollbar-thumb {
-  background: rgb(31, 31, 31);
-}
-
-.gallery:not([mode='mosaic']) .mosaic::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-
-.mosaic-tile {
-  position: absolute;
-  /* Tile's zoom factor is animated on hover. We apply the transform to
-  the entire tile so that the image outline is included into the animation. */
-  transition: transform 150ms linear;
-  z-index: 50;
-}
-
-/* Mosaic tile's opacity is controlled by |visible| attribute which changes
-   separately from .gallery[mode] */
-.mosaic:not([visible]) .mosaic-tile .img-border {
-  opacity: 0;
-}
-
-/* Animate tile's opacity, except for the selected tile which should show/hide
-  instantly (this looks better when zooming to/from the slide mode). */
-.mosaic-tile:not([selected]) .img-border {
-  transition: opacity 350ms linear;
-}
-
-/* Must be in sync with mosaic_mode.js.
-  Mosaic.Layout.SPACING should be equal to
-    top + bottom + border-top-width + border-bottom-width AND
-    left + right + border-left-width + border-right-width */
-.mosaic-tile .img-border {
-  border: 1px solid black;  /* Space between the outline and the image. */
-  bottom: 4px;
-  left: 4px;
-  outline: 2px solid transparent;
-  overflow: hidden;
-  position: absolute;
-  right: 4px;
-  top: 4px;
-}
-
-/* Selected and hover state are only visible when zoom transition is over. */
-.mosaic[visible='normal'] .mosaic-tile[selected] .img-border {
-  outline-color: rgb(51, 153, 255);
-}
-
-.mosaic[visible='normal'].hover-visible
-    .mosaic-tile:hover:not([selected]) .img-border {
-  outline-color: rgb(182, 212, 252);
-}
-
-.mosaic-tile .img-wrapper {
-  bottom: 0;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
-}
-
-.mosaic-tile .img-wrapper[generic-thumbnail],
-.mosaic-tile .img-wrapper.animated:not([generic-thumbnail])
-    canvas:not(.cached) {
-  -webkit-animation: fadeIn ease-in 1;
-  -webkit-animation-duration: 500ms;
-  -webkit-animation-fill-mode: forwards;
-}
-
-@-webkit-keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 /* In order to do mode animated transitions smoothly we keep both mosaic and
   image-container but transparent. */
-.gallery:not([mode='mosaic']) .mosaic,
 .gallery:not([mode='slide']) .image-container {
   pointer-events: none;
 }

@@ -17,8 +17,6 @@ namespace media_router {
 class IssueAction {
  public:
   enum Type {
-    TYPE_OK,
-    TYPE_CANCEL,
     TYPE_DISMISS,
     TYPE_LEARN_MORE,
     TYPE_MAX /* Denotes enum value boundary. */
@@ -73,7 +71,7 @@ class Issue {
   }
   MediaRoute::Id route_id() const { return route_id_; }
   Severity severity() const { return severity_; }
-  const Issue::Id id() const { return id_; }
+  const Issue::Id& id() const { return id_; }
   bool is_blocking() const { return is_blocking_; }
   bool is_global() const { return route_id_.empty(); }
   const GURL& help_url() const { return help_url_; }

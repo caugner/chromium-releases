@@ -12,9 +12,7 @@
     <dimen name="website_settings_popup_padding_sides">16dp</dimen>
     <dimen name="website_settings_popup_button_height">36dp</dimen>
     <dimen name="website_settings_popup_button_padding_sides">8dp</dimen>
-    <dimen name="website_settings_popup_button_margin_sides">4dp</dimen>
     <dimen name="website_settings_popup_permission_icon_size">24dp</dimen>
-    <dimen name="website_settings_popup_permission_spinner_text_size">16sp</dimen>
 
     <!-- Accessibility tab switcher -->
     <dimen name="accessibility_tab_height">65dp</dimen>
@@ -72,7 +70,6 @@
     <dimen name="infobar_icon_size">36dp</dimen>
 
     <!-- App banner dimensions -->
-    <dimen name="app_banner_icon_size">48dp</dimen>
     <dimen name="app_banner_icon_spacing">16dp</dimen>
 
     <!-- Contextual search dimensions -->
@@ -95,7 +92,7 @@
     <!-- Data Saver -->
     <dimen name="data_usage_chart_height">252dp</dimen>
     <dimen name="data_reduction_promo_screen_width">330dp</dimen>
-    <dimen name="data_reduction_promo_screen_height">550dp</dimen>
+    <dimen name="data_reduction_promo_screen_width_horizontal">500dp</dimen>
     <dimen name="data_reduction_promo_title_text_size">20sp</dimen>
     <dimen name="data_reduction_promo_normal_text_size">14sp</dimen>
     <dimen name="data_reduction_promo_button_text_size">13sp</dimen>
@@ -134,9 +131,6 @@
     <dimen name="badged_user_picture_width">46dp</dimen>
     <dimen name="badge_radius">10dp</dimen>
     <dimen name="badge_border_size">1.3dp</dimen>
-
-    <!-- Account Chooser infobar Dimensions -->
-    <dimen name="account_chooser_infobar_item_height">80dp</dimen>
 
     <!-- First Run Experience and Welcome Page dimensions -->
     <dimen name="fre_button_padding">16dp</dimen>
@@ -195,6 +189,11 @@
     <dimen name="find_in_page_popup_height">60dp</dimen>
     <dimen name="find_in_page_popup_margin_end">62dp</dimen>
 
+    <!-- Web app dimensions -->
+    <dimen name="webapp_splash_image_size">128dp</dimen>
+    <dimen name="webapp_home_screen_icon_size">48dp</dimen>
+    <dimen name="webapp_splash_image_min_size">48dp</dimen>
+
     <!-- Toolbar dimensions -->
     <dimen name="toolbar_tab_count_text_size_1_digit">12dp</dimen>
     <dimen name="toolbar_tab_count_text_size_2_digit">10dp</dimen>
@@ -221,7 +220,6 @@
     <dimen name="most_visited_tile_width">156dp</dimen>
     <dimen name="most_visited_thumbnail_width">148dp</dimen>
     <dimen name="most_visited_thumbnail_height">94dp</dimen>
-    <dimen name="most_visited_favicon_size">16dp</dimen>
     <dimen name="most_visited_bg_corner_radius">2dp</dimen>
     <!-- 250dp was chosen because it's smaller than the smallest dimension on the smallest device,
          so we'll always have at least two columns of tiles (except in multiwindow with a narrow
@@ -244,7 +242,6 @@
     <dimen name="ntp_list_item_padding">16dp</dimen>
     <dimen name="ntp_list_item_min_height">48dp</dimen>
     <dimen name="ntp_list_item_text_size">16sp</dimen>
-    <dimen name="ntp_list_item_favicon_size">16dp</dimen>
     <dimen name="ntp_list_item_favicon_container_size">24dp</dimen>
     <dimen name="ntp_shadow_height">9dp</dimen>
 
@@ -288,10 +285,15 @@
     <dimen name="min_toolbar_icon_side_padding">6dp</dimen>
     <dimen name="custom_tabs_url_text_size">12sp</dimen>
     <dimen name="custom_tabs_title_text_size">16sp</dimen>
-    <dimen name="menu_footer_height">28dp</dimen>
+
+    <!-- Favicon dimensions -->
+    <dimen name="default_favicon_size">16dp</dimen>
 
     <!-- Media UI dimensions -->
     <!-- The media_session_icon_size is just big enough to make sure Android doesn't discard the
          icon but otherwise, the icon is meant to be a flat color so it doesn't really matter. -->
     <dimen name="media_session_icon_size">48dp</dimen>
+
+    <!-- Offline pages dimensions -->
+    <dimen name="offline_page_item_vertical_spacing">16dp</dimen>
 </resources>

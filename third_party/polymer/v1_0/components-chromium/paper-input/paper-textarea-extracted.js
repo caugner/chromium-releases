@@ -1,7 +1,5 @@
-(function() {
 
   Polymer({
-
     is: 'paper-textarea',
 
     behaviors: [
@@ -9,7 +7,6 @@
     ],
 
     properties: {
-
       _ariaLabelledBy: {
         observer: '_ariaLabelledByChanged',
         type: String
@@ -43,8 +40,7 @@
       maxRows: {
        type: Number,
        value: 0
-      },
-
+      }
     },
 
     _ariaLabelledByChanged: function(ariaLabelledBy) {
@@ -54,7 +50,4 @@
     _ariaDescribedByChanged: function(ariaDescribedBy) {
       this.$.input.textarea.setAttribute('aria-describedby', ariaDescribedBy);
     }
-
   });
-
-})();

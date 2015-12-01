@@ -15,12 +15,12 @@
 #include "base/task_runner.h"
 #include "base/task_runner_util.h"
 #include "base/thread_task_runner_handle.h"
-#include "mojo/edk/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/interface_ptr_info.h"
 #include "mojo/public/cpp/system/core.h"
 #include "mojo/runner/context.h"
 #include "mojo/runner/switches.h"
 #include "mojo/runner/task_runners.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
 
 #if defined(OS_LINUX) && !defined(OS_ANDROID)
 #include "sandbox/linux/services/namespace_sandbox.h"
@@ -31,12 +31,10 @@ namespace runner {
 
 ChildProcessHost::ChildProcessHost(Context* context,
                                    bool start_sandboxed,
-                                   const base::FilePath& app_path,
-                                   bool clean_app_path)
+                                   const base::FilePath& app_path)
     : context_(context),
       start_sandboxed_(start_sandboxed),
       app_path_(app_path),
-      clean_app_path_(clean_app_path),
       channel_info_(nullptr) {
   platform_channel_ = platform_channel_pair_.PassServerHandle();
   CHECK(platform_channel_.is_valid());
@@ -109,9 +107,6 @@ bool ChildProcessHost::DoLaunch() {
   child_command_line.AppendArguments(*parent_command_line, false);
   child_command_line.AppendSwitchPath(switches::kChildProcess, app_path_);
 
-  if (clean_app_path_)
-    child_command_line.AppendSwitch(switches::kDeleteAfterLoad);
-
   if (start_sandboxed_)
     child_command_line.AppendSwitch(switches::kEnableSandbox);
 
@@ -161,7 +156,8 @@ void ChildProcessHost::AppCompleted(int32_t result) {
 void ChildProcessHost::DidCreateChannel(embedder::ChannelInfo* channel_info) {
   DVLOG(2) << "AppChildProcessHost::DidCreateChannel()";
 
-  CHECK(channel_info);
+  DCHECK(channel_info ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch("use-new-edk"));
   channel_info_ = channel_info;
 }
 

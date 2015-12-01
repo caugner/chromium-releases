@@ -13,9 +13,9 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tabs/tab_resources.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/tabs/media_indicator_button.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
@@ -38,8 +38,10 @@
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
@@ -58,12 +60,6 @@ using base::UserMetricsAction;
 
 namespace {
 
-// Padding around the "content" of a tab, occupied by the tab border graphics.
-const int kLeftPadding = 22;
-const int kTopPadding = 4;
-const int kRightPadding = 17;
-const int kBottomPadding = 2;
-
 // Height of the shadow at the top of the tab image assets.
 const int kDropShadowHeight = 4;
 
@@ -71,51 +67,48 @@ const int kDropShadowHeight = 4;
 const int kPulseDurationMs = 200;
 
 // Width of touch tabs.
-static const int kTouchWidth = 120;
+const int kTouchWidth = 120;
 
-static const int kToolbarOverlap = 1;
-static const int kFaviconTitleSpacing = 4;
-static const int kViewSpacing = 3;
-static const int kStandardTitleWidth = 175;
-
-// Width of pinned-tabs.
-const int kPinnedTabWidth = 64;
+const int kToolbarOverlap = 1;
+const int kExtraLeftPaddingToBalanceCloseButtonPadding = 2;
+const int kAfterTitleSpacing = 4;
 
 // When a non-pinned tab becomes a pinned tab the width of the tab animates. If
-// the width of a pinned tab is >= kPinnedTabRendererAsNormalTabWidth then the
-// tab is rendered as a normal tab. This is done to avoid having the title
-// immediately disappear when transitioning a tab from normal to pinned tab.
-static const int kPinnedTabRendererAsNormalTabWidth = kPinnedTabWidth + 30;
+// the width of a pinned tab is at least kPinnedTabExtraWidthToRenderAsNormal
+// larger than the desired pinned tab width then the tab is rendered as a normal
+// tab. This is done to avoid having the title immediately disappear when
+// transitioning a tab from normal to pinned tab.
+const int kPinnedTabExtraWidthToRenderAsNormal = 30;
 
 // How opaque to make the hover state (out of 1).
-static const double kHoverOpacity = 0.33;
+const double kHoverOpacity = 0.33;
 
 // Opacity for non-active selected tabs.
-static const double kSelectedTabOpacity = .45;
+const double kSelectedTabOpacity = .45;
 
 // Selected (but not active) tabs have their throb value scaled down by this.
-static const double kSelectedTabThrobScale = .5;
+const double kSelectedTabThrobScale = .5;
 
 // Durations for the various parts of the pinned tab title animation.
-static const int kPinnedTitleChangeAnimationDuration1MS = 1600;
-static const int kPinnedTitleChangeAnimationStart1MS = 0;
-static const int kPinnedTitleChangeAnimationEnd1MS = 1900;
-static const int kPinnedTitleChangeAnimationDuration2MS = 0;
-static const int kPinnedTitleChangeAnimationDuration3MS = 550;
-static const int kPinnedTitleChangeAnimationStart3MS = 150;
-static const int kPinnedTitleChangeAnimationEnd3MS = 800;
-static const int kPinnedTitleChangeAnimationIntervalMS = 40;
+const int kPinnedTitleChangeAnimationDuration1MS = 1600;
+const int kPinnedTitleChangeAnimationStart1MS = 0;
+const int kPinnedTitleChangeAnimationEnd1MS = 1900;
+const int kPinnedTitleChangeAnimationDuration2MS = 0;
+const int kPinnedTitleChangeAnimationDuration3MS = 550;
+const int kPinnedTitleChangeAnimationStart3MS = 150;
+const int kPinnedTitleChangeAnimationEnd3MS = 800;
+const int kPinnedTitleChangeAnimationIntervalMS = 40;
 
 // Offset from the right edge for the start of the pinned title change
 // animation.
-static const int kPinnedTitleChangeInitialXOffset = 6;
+const int kPinnedTitleChangeInitialXOffset = 6;
 
 // Radius of the radial gradient used for pinned title change animation.
-static const int kPinnedTitleChangeGradientRadius = 20;
+const int kPinnedTitleChangeGradientRadius = 20;
 
 // Colors of the gradient used during the pinned title change animation.
-static const SkColor kPinnedTitleChangeGradientColor1 = SK_ColorWHITE;
-static const SkColor kPinnedTitleChangeGradientColor2 =
+const SkColor kPinnedTitleChangeGradientColor1 = SK_ColorWHITE;
+const SkColor kPinnedTitleChangeGradientColor2 =
     SkColorSetARGB(0, 255, 255, 255);
 
 // Max number of images to cache. This has to be at least two since rounding
@@ -142,6 +135,7 @@ const double kImmersiveTabMinThrobOpacity = 0.66;
 const int kImmersiveLoadingStepCount = 32;
 
 const char kTabCloseButtonName[] = "TabCloseButton";
+const int kTabCloseButtonSize = 16;
 
 void DrawIconAtLocation(gfx::Canvas* canvas,
                         const gfx::ImageSkia& image,
@@ -418,15 +412,15 @@ Tab::Tab(TabController* controller)
       favicon_hiding_offset_(0),
       immersive_loading_step_(0),
       should_display_crashed_favicon_(false),
-      close_button_(NULL),
-      media_indicator_button_(NULL),
+      media_indicator_button_(nullptr),
+      close_button_(nullptr),
       title_(new views::Label()),
       tab_activated_with_last_tap_down_(false),
       hover_controller_(this),
       showing_icon_(false),
       showing_media_indicator_(false),
       showing_close_button_(false),
-      close_button_color_(0) {
+      button_color_(SK_ColorTRANSPARENT) {
   DCHECK(controller);
   InitTabResources();
 
@@ -446,17 +440,24 @@ Tab::Tab(TabController* controller)
   SetEventTargeter(
       scoped_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
 
-  // Add the Close Button.
+  media_indicator_button_ = new MediaIndicatorButton(this);
+  AddChildView(media_indicator_button_);
+
   close_button_ = new TabCloseButton(this);
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  close_button_->SetImage(views::CustomButton::STATE_NORMAL,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_1));
-  close_button_->SetImage(views::CustomButton::STATE_HOVERED,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_1_H));
-  close_button_->SetImage(views::CustomButton::STATE_PRESSED,
-                          rb.GetImageSkiaNamed(IDR_CLOSE_1_P));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
+  // The normal image is set by OnButtonColorMaybeChanged() because it depends
+  // on the current theme and active state.  The hovered and pressed images
+  // don't depend on the these, so we can set them here.
+  const gfx::ImageSkia& hovered = gfx::CreateVectorIcon(
+      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED, kTabCloseButtonSize,
+      SkColorSetARGB(0xFF, 0xDB, 0x44, 0x37));
+  const gfx::ImageSkia& pressed = gfx::CreateVectorIcon(
+      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED, kTabCloseButtonSize,
+      SkColorSetARGB(0xFF, 0xA8, 0x35, 0x2A));
+  close_button_->SetImage(views::CustomButton::STATE_HOVERED, &hovered);
+  close_button_->SetImage(views::CustomButton::STATE_PRESSED, &pressed);
+
   // Disable animation so that the red danger sign shows up immediately
   // to help avoid mis-clicks.
   close_button_->SetAnimationDuration(0);
@@ -468,7 +469,7 @@ Tab::Tab(TabController* controller)
 Tab::~Tab() {
 }
 
-void Tab::set_animation_container(gfx::AnimationContainer* container) {
+void Tab::SetAnimationContainer(gfx::AnimationContainer* container) {
   animation_container_ = container;
   hover_controller_.SetAnimationContainer(container);
 }
@@ -478,7 +479,8 @@ bool Tab::IsActive() const {
 }
 
 void Tab::ActiveStateChanged() {
-  GetMediaIndicatorButton()->UpdateEnabledForMuteToggle();
+  OnButtonColorMaybeChanged();
+  media_indicator_button_->UpdateEnabledForMuteToggle();
 }
 
 bool Tab::IsSelected() const {
@@ -530,7 +532,7 @@ void Tab::SetData(const TabRendererData& data) {
   }
 
   if (data_.media_state != old.media_state)
-    GetMediaIndicatorButton()->TransitionToMediaState(data_.media_state);
+    media_indicator_button_->TransitionToMediaState(data_.media_state);
 
   if (old.pinned != data_.pinned) {
     StopAndDeleteAnimation(pinned_title_change_animation_.Pass());
@@ -611,35 +613,27 @@ int Tab::GetWidthOfLargestSelectableRegion() const {
   return std::min(indicator_left, close_button_left);
 }
 
-// static
-gfx::Size Tab::GetBasicMinimumUnselectedSize() {
-  InitTabResources();
-
-  gfx::Size minimum_size;
-  minimum_size.set_width(kLeftPadding + kRightPadding);
-  // Since we use image images, the real minimum height of the image is
-  // defined most accurately by the height of the end cap images.
-  minimum_size.set_height(tab_active_.image_l->height());
-  return minimum_size;
-}
-
 gfx::Size Tab::GetMinimumUnselectedSize() {
-  return GetBasicMinimumUnselectedSize();
+  // Since we use images, the real minimum height of the image is
+  // defined most accurately by the height of the end cap images.
+  InitTabResources();
+  int height = tab_active_.image_l->height();
+  return gfx::Size(GetLayoutInsets(TAB).width(), height);
 }
 
 // static
 gfx::Size Tab::GetMinimumSelectedSize() {
-  gfx::Size minimum_size = GetBasicMinimumUnselectedSize();
-  minimum_size.set_width(
-      kLeftPadding + gfx::kFaviconSize + kRightPadding);
+  gfx::Size minimum_size = GetMinimumUnselectedSize();
+  minimum_size.Enlarge(gfx::kFaviconSize, 0);
   return minimum_size;
 }
 
 // static
 gfx::Size Tab::GetStandardSize() {
-  gfx::Size standard_size = GetBasicMinimumUnselectedSize();
-  standard_size.set_width(
-      standard_size.width() + kFaviconTitleSpacing + kStandardTitleWidth);
+  gfx::Size standard_size = GetMinimumUnselectedSize();
+  const int title_spacing = GetLayoutConstant(TAB_FAVICON_TITLE_SPACING);
+  const int title_width = GetLayoutConstant(TAB_MAXIMUM_TITLE_WIDTH);
+  standard_size.Enlarge(title_spacing + title_width, 0);
   return standard_size;
 }
 
@@ -650,7 +644,8 @@ int Tab::GetTouchWidth() {
 
 // static
 int Tab::GetPinnedWidth() {
-  return kPinnedTabWidth;
+  return GetMinimumUnselectedSize().width() +
+      GetLayoutConstant(TAB_PINNED_CONTENT_WIDTH);
 }
 
 // static
@@ -722,9 +717,8 @@ bool Tab::GetHitTestMask(gfx::Path* mask) const {
   // shadow of the tab, such that the user can click anywhere along the top
   // edge of the screen to select a tab. Ditto for immersive fullscreen.
   const views::Widget* widget = GetWidget();
-  bool include_top_shadow =
-      widget && (widget->IsMaximized() || widget->IsFullscreen());
-  TabResources::GetHitTestMask(width(), height(), include_top_shadow, mask);
+  GetHitTestMaskHelper(
+      widget && (widget->IsMaximized() || widget->IsFullscreen()), mask);
 
   // It is possible for a portion of the tab to be occluded if tabs are
   // stacked, so modify the hit test mask to only include the visible
@@ -743,6 +737,14 @@ bool Tab::GetHitTestMask(gfx::Path* mask) const {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Tab, views::View overrides:
+
+void Tab::ViewHierarchyChanged(const ViewHierarchyChangedDetails& details) {
+  // If this hierarchy changed has resulted in us being part of a widget
+  // hierarchy for the first time, we can now get at the theme provider, and
+  // should recalculate the button color.
+  if (details.is_add)
+    OnButtonColorMaybeChanged();
+}
 
 void Tab::OnPaint(gfx::Canvas* canvas) {
   // Don't paint if we're narrower than we can render correctly. (This should
@@ -772,9 +774,14 @@ void Tab::Layout() {
   if (lb.IsEmpty())
     return;
 
-  lb.Inset(kLeftPadding, kTopPadding, kRightPadding, kBottomPadding);
+  lb.Inset(GetLayoutInsets(TAB));
   showing_icon_ = ShouldShowIcon();
-  favicon_bounds_.SetRect(lb.x(), lb.y(), 0, 0);
+  // See comments in IconCapacity().
+  const int extra_padding =
+      (controller_->ShouldHideCloseButtonForInactiveTabs() ||
+       (IconCapacity() < 3)) ? 0 : kExtraLeftPaddingToBalanceCloseButtonPadding;
+  const int start = lb.x() + extra_padding;
+  favicon_bounds_.SetRect(start, lb.y(), 0, 0);
   if (showing_icon_) {
     favicon_bounds_.set_size(gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize));
     favicon_bounds_.set_y(lb.y() + (lb.height() - gfx::kFaviconSize + 1) / 2);
@@ -794,20 +801,22 @@ void Tab::Layout() {
     close_button_->SetBorder(views::Border::NullBorder());
     const gfx::Size close_button_size(close_button_->GetPreferredSize());
     const int top = lb.y() + (lb.height() - close_button_size.height() + 1) / 2;
-    const int bottom = height() - (close_button_size.height() + top);
-    const int left = kViewSpacing;
-    const int right = width() - (lb.width() + close_button_size.width() + left);
+    const int left = kAfterTitleSpacing;
+    const int close_button_end = lb.right() +
+        GetLayoutConstant(TAB_CLOSE_BUTTON_TRAILING_PADDING_OVERLAP);
+    close_button_->SetPosition(
+        gfx::Point(close_button_end - close_button_size.width() - left, 0));
+    const int bottom = height() - close_button_size.height() - top;
+    const int right = width() - close_button_end;
     close_button_->SetBorder(
         views::Border::CreateEmptyBorder(top, left, bottom, right));
-    close_button_->SetPosition(gfx::Point(lb.width(), 0));
     close_button_->SizeToPreferredSize();
   }
   close_button_->SetVisible(showing_close_button_);
 
   showing_media_indicator_ = ShouldShowMediaIndicator();
   if (showing_media_indicator_) {
-    views::ImageButton* const button = GetMediaIndicatorButton();
-    const gfx::Size image_size(button->GetPreferredSize());
+    const gfx::Size image_size(media_indicator_button_->GetPreferredSize());
     const int right = showing_close_button_ ?
         close_button_->x() + close_button_->GetInsets().left() : lb.right();
     gfx::Rect bounds(
@@ -816,24 +825,24 @@ void Tab::Layout() {
         image_size.width(),
         image_size.height());
     MaybeAdjustLeftForPinnedTab(&bounds);
-    button->SetBoundsRect(bounds);
-    button->SetVisible(true);
-  } else if (media_indicator_button_) {
-    media_indicator_button_->SetVisible(false);
+    media_indicator_button_->SetBoundsRect(bounds);
   }
+  media_indicator_button_->SetVisible(showing_media_indicator_);
 
   // Size the title to fill the remaining width and use all available height.
-  bool show_title =
-      !data().pinned || width() >= kPinnedTabRendererAsNormalTabWidth;
+  const bool show_title = ShouldRenderAsNormalTab();
   if (show_title) {
-    int title_left = favicon_bounds_.right() + kFaviconTitleSpacing;
-    int title_width = lb.width() - title_left;
+    const int title_spacing = GetLayoutConstant(TAB_FAVICON_TITLE_SPACING);
+    int title_left = showing_icon_ ?
+        (favicon_bounds_.right() + title_spacing) : start;
+    int title_width = lb.right() - title_left;
     if (showing_media_indicator_) {
-      title_width = media_indicator_button_->x() - kViewSpacing - title_left;
+      title_width =
+          media_indicator_button_->x() - kAfterTitleSpacing - title_left;
     } else if (close_button_->visible()) {
       // Allow the title to overlay the close button's empty border padding.
       title_width = close_button_->x() + close_button_->GetInsets().left() -
-          kViewSpacing - title_left;
+          kAfterTitleSpacing - title_left;
     }
     gfx::Rect rect(title_left, lb.y(), std::max(title_width, 0), lb.height());
     const int title_height = title_->GetPreferredSize().height();
@@ -848,6 +857,7 @@ void Tab::Layout() {
 
 void Tab::OnThemeChanged() {
   LoadTabImages();
+  OnButtonColorMaybeChanged();
 }
 
 const char* Tab::GetClassName() const {
@@ -1018,15 +1028,15 @@ void Tab::GetAccessibleState(ui::AXViewState* state) {
 // Tab, private
 
 void Tab::MaybeAdjustLeftForPinnedTab(gfx::Rect* bounds) const {
-  if (!data().pinned || width() >= kPinnedTabRendererAsNormalTabWidth)
+  if (ShouldRenderAsNormalTab())
     return;
-  const int pinned_delta =
-      kPinnedTabRendererAsNormalTabWidth - GetPinnedWidth();
   const int ideal_delta = width() - GetPinnedWidth();
   const int ideal_x = (GetPinnedWidth() - bounds->width()) / 2;
-  bounds->set_x(bounds->x() + static_cast<int>(
-      (1 - static_cast<float>(ideal_delta) / static_cast<float>(pinned_delta)) *
-      (ideal_x - bounds->x())));
+  bounds->set_x(
+      bounds->x() + static_cast<int>(
+          (1 - static_cast<float>(ideal_delta) /
+              static_cast<float>(kPinnedTabExtraWidthToRenderAsNormal)) *
+          (ideal_x - bounds->x())));
 }
 
 void Tab::DataChanged(const TabRendererData& old) {
@@ -1049,30 +1059,13 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
   const bool show_close_button = ShouldShowCloseBox();
   if (show_icon != showing_icon_ ||
       show_media_indicator != showing_media_indicator_ ||
-      show_close_button != showing_close_button_) {
+      show_close_button != showing_close_button_)
     Layout();
-  }
 
   PaintTabBackground(canvas);
 
-  const SkColor title_color = GetThemeProvider()->GetColor(IsSelected() ?
-      ThemeProperties::COLOR_TAB_TEXT :
-      ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
-  title_->SetVisible(!data().pinned ||
-                     width() > kPinnedTabRendererAsNormalTabWidth);
-  title_->SetEnabledColor(title_color);
-
   if (show_icon)
     PaintIcon(canvas);
-
-  // If the close button color has changed, generate a new one.
-  if (!close_button_color_ || title_color != close_button_color_) {
-    close_button_color_ = title_color;
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    close_button_->SetBackground(close_button_color_,
-        rb.GetImageSkiaNamed(IDR_CLOSE_1),
-        rb.GetImageSkiaNamed(IDR_CLOSE_1_MASK));
-  }
 }
 
 void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
@@ -1418,17 +1411,27 @@ void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
 }
 
 int Tab::IconCapacity() const {
-  if (height() < GetMinimumUnselectedSize().height())
+  const gfx::Size min_size(GetMinimumUnselectedSize());
+  if (height() < min_size.height())
     return 0;
-  const int available_width =
-      std::max(0, width() - kLeftPadding - kRightPadding);
-  const int width_per_icon = gfx::kFaviconSize;
-  const int kPaddingBetweenIcons = 2;
-  if (available_width >= width_per_icon &&
-      available_width < (width_per_icon + kPaddingBetweenIcons)) {
-    return 1;
-  }
-  return available_width / (width_per_icon + kPaddingBetweenIcons);
+  const int available_width = std::max(0, width() - min_size.width());
+  // All icons are the same size as the favicon.
+  const int icon_width = gfx::kFaviconSize;
+  // We need enough space to display the icons flush against each other.
+  const int visible_icons = available_width / icon_width;
+  // When the close button will be visible on inactive tabs, we add additional
+  // padding to the left of the favicon to balance the whitespace inside the
+  // non-hovered close button image; otherwise, the tab contents look too close
+  // to the left edge.  If the tab close button isn't visible on inactive tabs,
+  // we let the tab contents take the full width of the tab, to maximize visible
+  // content on tiny tabs.  We base the determination on the inactive tab close
+  // button state so that when a tab is activated its contents don't suddenly
+  // shift.
+  if (visible_icons < 3)
+    return visible_icons;
+  const int padding = controller_->ShouldHideCloseButtonForInactiveTabs() ?
+      0 : kExtraLeftPaddingToBalanceCloseButtonPadding;
+  return (available_width - padding) / icon_width;
 }
 
 bool Tab::ShouldShowIcon() const {
@@ -1451,6 +1454,11 @@ bool Tab::ShouldShowCloseBox() const {
 
   return chrome::ShouldTabShowCloseButton(
       IconCapacity(), data().pinned, IsActive());
+}
+
+bool Tab::ShouldRenderAsNormalTab() const {
+  return !data().pinned ||
+      (width() >= (GetPinnedWidth() + kPinnedTabExtraWidthToRenderAsNormal));
 }
 
 double Tab::GetThrobValue() {
@@ -1500,6 +1508,29 @@ bool Tab::IsPerformingCrashAnimation() const {
   return crash_icon_animation_.get() && data_.IsCrashed();
 }
 
+void Tab::OnButtonColorMaybeChanged() {
+  // The theme provider may be null if we're not currently in a widget
+  // hierarchy.
+  ui::ThemeProvider* theme_provider = GetThemeProvider();
+  if (!theme_provider)
+    return;
+
+  const SkColor title_color = theme_provider->GetColor(IsActive() ?
+      ThemeProperties::COLOR_TAB_TEXT :
+      ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
+  const SkColor new_button_color = SkColorSetA(title_color, 0xA0);
+  if (button_color_ != new_button_color) {
+    button_color_ = new_button_color;
+    title_->SetEnabledColor(title_color);
+    media_indicator_button_->OnParentTabButtonColorChanged();
+    const gfx::ImageSkia& close_button_normal_image = gfx::CreateVectorIcon(
+        gfx::VectorIconId::TAB_CLOSE_NORMAL, kTabCloseButtonSize,
+        button_color_);
+    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+                            &close_button_normal_image);
+  }
+}
+
 void Tab::ScheduleIconPaint() {
   gfx::Rect bounds = favicon_bounds_;
   if (bounds.IsEmpty())
@@ -1510,6 +1541,58 @@ void Tab::ScheduleIconPaint() {
     bounds.set_height(height() - bounds.y());
   bounds.set_x(GetMirroredXForRect(bounds));
   SchedulePaintInRect(bounds);
+}
+
+void Tab::GetHitTestMaskHelper(bool include_top_shadow, gfx::Path* path) const {
+  DCHECK(path);
+
+  // Hit mask constants.
+  const SkScalar kTabCapWidth = 15;
+  const SkScalar kTabTopCurveWidth = 4;
+  const SkScalar kTabBottomCurveWidth = 3;
+#if defined(OS_MACOSX)
+  // Mac's Cocoa UI doesn't have shadows.
+  const SkScalar kTabInset = 0;
+  const SkScalar kTabTop = 0;
+#elif defined(TOOLKIT_VIEWS)
+  // The views browser UI has shadows in the left, right and top parts of the
+  // tab.
+  const SkScalar kTabInset = 6;
+  const SkScalar kTabTop = 2;
+#endif
+
+  SkScalar left = kTabInset;
+  SkScalar top = kTabTop;
+  SkScalar right = SkIntToScalar(width()) - kTabInset;
+  SkScalar bottom = SkIntToScalar(height());
+
+  // Start in the lower-left corner.
+  path->moveTo(left, bottom);
+
+  // Left end cap.
+  path->lineTo(left + kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
+  path->lineTo(left + kTabCapWidth - kTabTopCurveWidth,
+               top + kTabTopCurveWidth);
+  path->lineTo(left + kTabCapWidth, top);
+
+  // Extend over the top shadow area if we have one and the caller wants it.
+  if (kTabTop > 0 && include_top_shadow) {
+    path->lineTo(left + kTabCapWidth, 0);
+    path->lineTo(right - kTabCapWidth, 0);
+  }
+
+  // Connect to the right cap.
+  path->lineTo(right - kTabCapWidth, top);
+
+  // Right end cap.
+  path->lineTo(right - kTabCapWidth + kTabTopCurveWidth,
+               top + kTabTopCurveWidth);
+  path->lineTo(right - kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
+  path->lineTo(right, bottom);
+
+  // Close out the path.
+  path->lineTo(left, bottom);
+  path->close();
 }
 
 gfx::Rect Tab::GetImmersiveBarRect() const {
@@ -1537,14 +1620,6 @@ void Tab::GetTabIdAndFrameId(views::Widget* widget,
     *tab_id = IDR_THEME_TAB_BACKGROUND;
     *frame_id = IDR_THEME_FRAME;
   }
-}
-
-MediaIndicatorButton* Tab::GetMediaIndicatorButton() {
-  if (!media_indicator_button_) {
-    media_indicator_button_ = new MediaIndicatorButton(this);
-    AddChildView(media_indicator_button_);  // Takes ownership.
-  }
-  return media_indicator_button_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

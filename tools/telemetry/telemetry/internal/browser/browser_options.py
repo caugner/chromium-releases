@@ -47,6 +47,7 @@ class BrowserFinderOptions(optparse.Values):
     self.browser_options = BrowserOptions()
     self.output_file = None
 
+    self.android_blacklist_file = None
     self.android_rndis = False
     self.no_performance_mode = False
 
@@ -111,8 +112,9 @@ class BrowserFinderOptions(optparse.Values):
     group.add_option(
         '--profiler', default=None, type='choice',
         choices=profiler_choices,
-        help='Record profiling data using this tool. Supported values: ' +
-             ', '.join(profiler_choices))
+        help='Record profiling data using this tool. Supported values: %s. '
+             '(Notice: this flag cannot be used for Timeline Based Measurement '
+             'benchmarks.)' % ', '.join(profiler_choices))
     group.add_option(
         '-v', '--verbose', action='count', dest='verbosity',
         help='Increase verbosity level (repeat as needed)')
@@ -133,6 +135,8 @@ class BrowserFinderOptions(optparse.Values):
     group.add_option('--no-android-rndis', dest='android_rndis',
         action='store_false', help='Do not use RNDIS forwarding on Android.'
         ' [default]')
+    group.add_option('--android-blacklist-file',
+                     help='Device blacklist JSON file.')
     parser.add_option_group(group)
 
     # Browser options.
@@ -426,6 +430,7 @@ class CrosBrowserOptions(ChromeBrowserOptions):
     self.gaia_login = False
     self.username = 'test@test.test'
     self.password = ''
+    self.gaia_id = '12345'
 
   def IsCrosBrowserOptions(self):
     return True

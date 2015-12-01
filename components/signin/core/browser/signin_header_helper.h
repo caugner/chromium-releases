@@ -72,9 +72,9 @@ struct ManageAccountsParams {
 bool SettingsAllowSigninCookies(
     const content_settings::CookieSettings* cookie_settings);
 
-// Returns the X-Chrome-Connected header, or an empty string if it should not be
+// Returns the X-CHROME-CONNECTED cookie, or an empty string if it should not be
 // added to the request to |url|.
-std::string BuildMirrorRequestHeaderIfPossible(
+std::string BuildMirrorRequestCookieIfPossible(
     const GURL& url,
     const std::string& account_id,
     const content_settings::CookieSettings* cookie_settings,
@@ -89,6 +89,10 @@ bool AppendMirrorRequestHeaderIfPossible(
     const std::string& account_id,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask);
+
+// Returns the parameters contained in the X-Chrome-Manage-Accounts response
+// header.
+ManageAccountsParams BuildManageAccountsParams(const std::string& header_value);
 
 // Returns the parameters contained in the X-Chrome-Manage-Accounts response
 // header.

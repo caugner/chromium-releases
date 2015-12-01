@@ -28,6 +28,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -212,8 +213,7 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
     } else if (!extension_prefs_->IsExtensionDisabled(extension->id()) &&
                policy->MustRemainDisabled(
                    extension.get(), &disable_reason, NULL)) {
-      extension_prefs_->SetExtensionState(extension->id(), Extension::DISABLED);
-      extension_prefs_->AddDisableReason(extension->id(), disable_reason);
+      extension_prefs_->SetExtensionDisabled(extension->id(), disable_reason);
       force_disabled = true;
     }
     UMA_HISTOGRAM_BOOLEAN("ExtensionInstalledLoader.ForceDisabled",
@@ -512,7 +512,7 @@ void InstalledLoader::RecordExtensionsMetrics() {
     // extensions are boring.
     if (extension->ShouldDisplayInExtensionSettings() &&
         !Manifest::IsPolicyLocation(extension->location())) {
-      if (extension->can_be_incognito_enabled()) {
+      if (util::CanBeIncognitoEnabled(extension)) {
         if (util::IsIncognitoEnabled(extension->id(), profile))
           ++incognito_allowed_count;
         else

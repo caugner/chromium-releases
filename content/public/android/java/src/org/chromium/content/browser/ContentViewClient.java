@@ -11,7 +11,6 @@ import android.view.KeyEvent;
 import android.view.View.MeasureSpec;
 
 import org.chromium.base.Log;
-import org.chromium.content.browser.WebActionModeCallback.ActionHandler;
 
 /**
  *  Main callback class used by ContentView.
@@ -58,13 +57,6 @@ public class ContentViewClient {
 
         if (!shouldPropagateKey(keyCode)) return true;
 
-        // We also have to intercept some shortcuts before we send them to the ContentView.
-        if (event.isCtrlPressed() && (keyCode == KeyEvent.KEYCODE_TAB
-                || keyCode == KeyEvent.KEYCODE_W
-                || keyCode == KeyEvent.KEYCODE_F4)) {
-            return true;
-        }
-
         return false;
     }
 
@@ -81,16 +73,6 @@ public class ContentViewClient {
      * @param editable Whether the focused node is editable.
      */
     public void onFocusedNodeEditabilityChanged(boolean editable) {
-    }
-
-    /**
-     * Returns a WebActionModeCallback for in-page text selection.
-     * @param context the associated context.
-     * @param actionHandler the associated selection action handler.
-     */
-    public WebActionModeCallback getWebActionModeCallback(
-            Context context, ActionHandler actionHandler) {
-        return new WebActionModeCallback(context, actionHandler);
     }
 
     /**
@@ -153,14 +135,6 @@ public class ContentViewClient {
      * @return true to prevent the resource from being loaded.
      */
     public boolean shouldBlockMediaRequest(String url) {
-        return false;
-    }
-
-    /**
-     * @return Whether an externally managed (i.e., not compositor-driven) fling
-     *         of this ContentView is active.
-     */
-    public boolean isExternalScrollActive() {
         return false;
     }
 

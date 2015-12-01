@@ -47,6 +47,7 @@ import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.feedback.EmptyFeedbackReporter;
 import org.chromium.chrome.browser.feedback.FeedbackReporter;
+import org.chromium.chrome.browser.firstrun.ForcedSigninProcessor;
 import org.chromium.chrome.browser.gsa.GSAHelper;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
@@ -62,6 +63,7 @@ import org.chromium.chrome.browser.notifications.NotificationUIManager;
 import org.chromium.chrome.browser.omaha.RequestGenerator;
 import org.chromium.chrome.browser.omaha.UpdateInfoBarHelper;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
+import org.chromium.chrome.browser.physicalweb.PhysicalWebBleClient;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.preferences.AccessibilityPreferences;
 import org.chromium.chrome.browser.preferences.LocationSettings;
@@ -74,6 +76,7 @@ import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.printing.PrintingControllerFactory;
 import org.chromium.chrome.browser.rlz.RevenueStats;
+import org.chromium.chrome.browser.services.AccountsChangedReceiver;
 import org.chromium.chrome.browser.services.AndroidEduOwnerCheckCallback;
 import org.chromium.chrome.browser.services.GoogleServicesManager;
 import org.chromium.chrome.browser.share.ShareHelper;
@@ -384,23 +387,6 @@ public class ChromeApplication extends ContentApplication {
         });
     }
 
-    /**
-     * Returns the class name of the Settings activity.
-     *
-     * TODO(newt): delete this when ChromeShell is deleted.
-     */
-    public String getSettingsActivityName() {
-        return Preferences.class.getName();
-    }
-
-    /**
-     * Open Chrome Sync settings page.
-     * @param accountName the name of the account that is being synced.
-     */
-    public void openSyncSettings(String accountName) {
-        // TODO(aurimas): implement this once SyncCustomizationFragment is upstreamed.
-    }
-
     @CalledByNative
     protected void showAutofillSettings() {
         PreferencesLauncher.launchSettingsPage(this,
@@ -446,6 +432,18 @@ public class ChromeApplication extends ContentApplication {
         if (mInitializedSharedClasses) return;
         mInitializedSharedClasses = true;
 
+        ForcedSigninProcessor.start(this);
+        AccountsChangedReceiver.addObserver(new AccountsChangedReceiver.AccountsChangedObserver() {
+            @Override
+            public void onAccountsChanged(Context context, Intent intent) {
+                ThreadUtils.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        ForcedSigninProcessor.start(ChromeApplication.this);
+                    }
+                });
+            }
+        });
         GoogleServicesManager.get(this).onMainActivityStart();
         RevenueStats.getInstance();
 
@@ -488,7 +486,6 @@ public class ChromeApplication extends ContentApplication {
 
     @Override
     public void initCommandLine() {
-        // TODO(newt): delete this when deleting ChromeShell.
         ChromeCommandLineInitUtil.initChromeCommandLine(this);
     }
 
@@ -603,9 +600,10 @@ public class ChromeApplication extends ContentApplication {
     }
 
     /**
-     * @return A provider of network quality.
+     * @return A provider of external estimates.
+     * @param nativePtr Pointer to the native ExternalEstimateProviderAndroid object.
      */
-    public ExternalEstimateProviderAndroid createExternalEstimateProviderAndroid() {
+    public ExternalEstimateProviderAndroid createExternalEstimateProviderAndroid(long nativePtr) {
         return new ExternalEstimateProviderAndroid();
     }
 
@@ -698,6 +696,13 @@ public class ChromeApplication extends ContentApplication {
      */
     public CustomTabsConnection createCustomTabsConnection() {
         return new CustomTabsConnection(this);
+    }
+
+    /**
+     * @return A new PhysicalWebBleClient instance.
+     */
+    public PhysicalWebBleClient createPhysicalWebBleClient() {
+        return new PhysicalWebBleClient();
     }
 
     /**

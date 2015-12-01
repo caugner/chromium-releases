@@ -111,6 +111,10 @@ struct NewWindowInfo {
 // Registers the current user agent with the web view.
 - (void)registerUserAgent;
 
+// Returns YES if the current navigation item corresponds to a web page
+// loaded by a POST request.
+- (BOOL)isCurrentNavigationItemPOST;
+
 // Returns the type of document object loaded in the web view.
 - (web::WebViewDocumentType)webViewDocumentType;
 
@@ -169,6 +173,10 @@ struct NewWindowInfo {
 
 // Handles cancelled load in WKWebView (error with NSURLErrorCancelled code).
 - (void)handleCancelledError:(NSError*)error;
+
+// Called when a load completes, to perform any final actions before informing
+// delegates.
+- (void)loadCompletedForURL:(const GURL&)loadedURL;
 
 #pragma mark - Optional methods for subclasses
 // Subclasses may overwrite methods in this section.
@@ -236,9 +244,9 @@ struct NewWindowInfo {
 // Returns whether the user is interacting with the page.
 @property(nonatomic, readonly) BOOL userIsInteracting;
 
-// YES if a user interaction has been registered at any time once the page has
+// YES if a user interaction has been registered at any time since the page has
 // loaded.
-@property(nonatomic, readonly) BOOL userInteractionRegistered;
+@property(nonatomic, readwrite) BOOL userInteractionRegistered;
 
 // Returns the current window id.
 @property(nonatomic, readonly) NSString* windowId;
@@ -294,10 +302,6 @@ struct NewWindowInfo {
 // been registered for a non-document-changing URL change. Updates internal
 // state not specific to web pages, and informs the delegate.
 - (void)didStartLoadingURL:(const GURL&)URL updateHistory:(BOOL)updateHistory;
-
-// Should be called with YES if a user interaction has been registered at any
-// time once the page has loaded.
-- (void)setUserInteractionRegistered:(BOOL)flag;
 
 // Returns YES if the user interacted with the page recently.
 - (BOOL)userClickedRecently;

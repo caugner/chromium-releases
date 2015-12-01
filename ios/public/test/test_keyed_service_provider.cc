@@ -25,7 +25,7 @@ class MissingServiceKeyedServiceFactory
   static MissingServiceKeyedServiceFactory* GetInstance();
 
  private:
-  friend struct DefaultSingletonTraits<MissingServiceKeyedServiceFactory>;
+  friend struct base::DefaultSingletonTraits<MissingServiceKeyedServiceFactory>;
 
   MissingServiceKeyedServiceFactory();
   ~MissingServiceKeyedServiceFactory() override;
@@ -40,7 +40,7 @@ class MissingServiceKeyedServiceFactory
 // static
 MissingServiceKeyedServiceFactory*
 MissingServiceKeyedServiceFactory::GetInstance() {
-  return Singleton<MissingServiceKeyedServiceFactory>::get();
+  return base::Singleton<MissingServiceKeyedServiceFactory>::get();
 }
 
 MissingServiceKeyedServiceFactory::MissingServiceKeyedServiceFactory()
@@ -67,6 +67,7 @@ TestKeyedServiceProvider::TestKeyedServiceProvider() {
 TestKeyedServiceProvider::~TestKeyedServiceProvider() {
 }
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
 KeyedServiceBaseFactory*
 TestKeyedServiceProvider::GetManagedBookmarkServiceFactory() {
   return MissingServiceKeyedServiceFactory::GetInstance();
@@ -77,6 +78,7 @@ TestKeyedServiceProvider::GetManagedBookmarkServiceForBrowserState(
     ChromeBrowserState* browser_state) {
   return nullptr;
 }
+#endif
 
 KeyedServiceBaseFactory* TestKeyedServiceProvider::GetSyncServiceFactory() {
   return FakeSyncServiceFactory::GetInstance();
@@ -86,6 +88,12 @@ sync_driver::SyncService*
 TestKeyedServiceProvider::GetSyncServiceForBrowserState(
     ChromeBrowserState* browser_state) {
   return FakeSyncServiceFactory::GetForBrowserState(browser_state);
+}
+
+sync_driver::SyncService*
+TestKeyedServiceProvider::GetSyncServiceForBrowserStateIfExists(
+    ChromeBrowserState* browser_state) {
+  return FakeSyncServiceFactory::GetForBrowserStateIfExists(browser_state);
 }
 
 KeyedServiceBaseFactory*

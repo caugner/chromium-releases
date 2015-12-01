@@ -32,7 +32,10 @@
 #include "ui/base/l10n/time_format.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 
@@ -161,25 +164,23 @@ DownloadItemNotification::DownloadItemNotification(
     DownloadNotificationManagerForProfile* manager)
     : item_(item),
       weak_factory_(this) {
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-
-  message_center::RichNotificationData data;
-  // Creates the notification instance. |title| and |body| will be overridden
-  // by UpdateNotificationData() below.
+  // Creates the notification instance. |title|, |body| and |icon| will be
+  // overridden by UpdateNotificationData() below.
   notification_.reset(new Notification(
       message_center::NOTIFICATION_TYPE_PROGRESS,
       base::string16(),  // title
       base::string16(),  // body
-      bundle.GetImageNamed(IDR_DOWNLOAD_NOTIFICATION_DOWNLOADING),
+      gfx::Image(),      // icon
       message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
                                  kDownloadNotificationNotifierId),
       base::string16(),                    // display_source
       GURL(kDownloadNotificationOrigin),   // origin_url
       base::UintToString(item_->GetId()),  // tag
-      data, watcher()));
+      message_center::RichNotificationData(), watcher()));
 
   notification_->set_progress(0);
   notification_->set_never_timeout(false);
+  notification_->set_adjust_icon(false);
 }
 
 DownloadItemNotification::~DownloadItemNotification() {
@@ -187,11 +188,20 @@ DownloadItemNotification::~DownloadItemNotification() {
     ImageDecoder::Cancel(this);
 }
 
+bool DownloadItemNotification::HasNotificationClickedListener() {
+  if (item_->IsDangerous()) {
+    // Dangerous notifications don't have a click handler.
+    return false;
+  }
+  return true;
+}
+
 void DownloadItemNotification::OnNotificationClose() {
   visible_ = false;
 
   if (item_ && item_->IsDangerous() && !item_->IsDone()) {
-    // TODO(yoshiki): Add metrics.
+    content::RecordAction(
+        UserMetricsAction("DownloadNotification.Close_Dangerous"));
     item_->Cancel(true /* by_user */);
     return;
   }
@@ -342,24 +352,13 @@ void DownloadItemNotification::UpdateNotificationData(
 
   notification_->set_title(GetTitle());
   notification_->set_message(GetStatusString());
+  notification_->set_priority(message_center::DEFAULT_PRIORITY);
 
   if (item_->IsDangerous()) {
     notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
-
-    // Show icon.
-    if (model.MightBeMalicious()) {
-      SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_WARNING_BAD);
-      notification_->set_priority(message_center::DEFAULT_PRIORITY);
-    } else {
-      SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_WARNING_UNWANTED);
+    if (!model.MightBeMalicious())
       notification_->set_priority(message_center::HIGH_PRIORITY);
-    }
   } else {
-    notification_->set_priority(message_center::DEFAULT_PRIORITY);
-
-    bool is_off_the_record = item_->GetBrowserContext() &&
-                             item_->GetBrowserContext()->IsOffTheRecord();
-
     switch (item_->GetState()) {
       case content::DownloadItem::IN_PROGRESS: {
         int percent_complete = item_->PercentComplete();
@@ -371,25 +370,12 @@ void DownloadItemNotification::UpdateNotificationData(
               message_center::NOTIFICATION_TYPE_BASE_FORMAT);
           notification_->set_progress(0);
         }
-        if (is_off_the_record) {
-          SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_INCOGNITO);
-        } else {
-          SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_DOWNLOADING);
-        }
         break;
       }
       case content::DownloadItem::COMPLETE:
         DCHECK(item_->IsDone());
-
         notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
-
         notification_->set_progress(100);
-
-        if (is_off_the_record) {
-          SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_INCOGNITO);
-        } else {
-          SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_DOWNLOADING);
-        }
         break;
       case content::DownloadItem::CANCELLED:
         // Confgirms that a download is cancelled by user action.
@@ -404,14 +390,13 @@ void DownloadItemNotification::UpdateNotificationData(
         // Shows a notifiation as progress type once so the visible content will
         // be updated. (same as the case of type = COMPLETE)
         notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
-
         notification_->set_progress(0);
-        SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_ERROR);
         break;
       case content::DownloadItem::MAX_DOWNLOAD_STATE:  // sentinel
         NOTREACHED();
     }
   }
+  UpdateNotificationIcon();
 
   std::vector<message_center::ButtonInfo> notification_actions;
   scoped_ptr<std::vector<DownloadCommands::Command>> actions(
@@ -497,6 +482,57 @@ void DownloadItemNotification::UpdateNotificationData(
   }
 }
 
+void DownloadItemNotification::UpdateNotificationIcon() {
+  if (item_->IsDangerous()) {
+    DownloadItemModel model(item_);
+#if defined(OS_MACOSX)
+    SetNotificationIcon(model.MightBeMalicious()
+                            ? IDR_DOWNLOAD_NOTIFICATION_WARNING_BAD
+                            : IDR_DOWNLOAD_NOTIFICATION_WARNING_UNWANTED);
+#else
+    SetNotificationVectorIcon(
+        gfx::VectorIconId::WARNING,
+        model.MightBeMalicious() ? gfx::kErrorRed : gfx::kAmber);
+#endif
+    return;
+  }
+
+  bool is_off_the_record = item_->GetBrowserContext() &&
+                           item_->GetBrowserContext()->IsOffTheRecord();
+  switch (item_->GetState()) {
+    case content::DownloadItem::IN_PROGRESS:
+    case content::DownloadItem::COMPLETE:
+      if (is_off_the_record) {
+#if defined(OS_MACOSX)
+        SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_INCOGNITO);
+#else
+        SetNotificationVectorIcon(gfx::VectorIconId::FILE_DOWNLOAD_INCOGNITO,
+                                  gfx::kChromeIconGrey);
+#endif
+      } else {
+        SetNotificationVectorIcon(gfx::VectorIconId::FILE_DOWNLOAD,
+                                  gfx::kGoogleBlue);
+      }
+      break;
+
+    case content::DownloadItem::INTERRUPTED:
+#if defined(OS_MACOSX)
+      SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_ERROR);
+#else
+      SetNotificationVectorIcon(gfx::VectorIconId::ERROR_CIRCLE,
+                                gfx::kErrorRed);
+#endif
+      break;
+
+    case content::DownloadItem::CANCELLED:
+      break;
+
+    case content::DownloadItem::MAX_DOWNLOAD_STATE:
+      NOTREACHED();
+      break;
+  }
+}
+
 void DownloadItemNotification::OnDownloadRemoved(content::DownloadItem* item) {
   // The given |item| may be already free'd.
   DCHECK_EQ(item, item_);
@@ -516,6 +552,15 @@ void DownloadItemNotification::SetNotificationIcon(int resource_id) {
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   image_resource_id_ = resource_id;
   notification_->set_icon(bundle.GetImageNamed(image_resource_id_));
+}
+
+void DownloadItemNotification::SetNotificationVectorIcon(gfx::VectorIconId id,
+                                                         SkColor color) {
+  if (vector_icon_params_ == std::make_pair(id, color))
+    return;
+  vector_icon_params_ = std::make_pair(id, color);
+  image_resource_id_ = 0;
+  notification_->set_icon(gfx::Image(gfx::CreateVectorIcon(id, 40, color)));
 }
 
 void DownloadItemNotification::OnImageLoaded(const std::string& image_data) {
@@ -639,9 +684,9 @@ base::string16 DownloadItemNotification::GetCommandLabel(
   switch (command) {
     case DownloadCommands::OPEN_WHEN_COMPLETE:
       if (item_ && !item_->IsDone())
-        id = IDS_DOWNLOAD_STATUS_OPEN_WHEN_COMPLETE;
+        id = IDS_DOWNLOAD_NOTIFICATION_LABEL_OPEN_WHEN_COMPLETE;
       else
-        id = IDS_DOWNLOAD_STATUS_OPEN_WHEN_COMPLETE;
+        id = IDS_DOWNLOAD_NOTIFICATION_LABEL_OPEN;
       break;
     case DownloadCommands::PAUSE:
       // Only for non menu.

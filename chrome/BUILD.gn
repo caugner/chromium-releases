@@ -5,6 +5,7 @@
 import("//build/config/chrome_build.gni")
 import("//build/config/features.gni")
 import("//build/config/locales.gni")
+import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build/config/win/manifest.gni")
 import("//chrome/chrome_repack_locales.gni")
@@ -14,11 +15,50 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
+if (is_win) {
+  action("reorder_imports") {
+    script = "//build/win/reorder-imports.py"
+
+    # See comment in chrome_dll.gypi in the hardlink_to_output
+    # target for why this cannot be 'initial' like the DLL.
+    inputs = [
+      "$root_out_dir/initialexe/chrome.exe",
+    ]
+    outputs = [
+      "$root_out_dir/chrome.exe",
+      "$root_out_dir/chrome.exe.pdb",
+    ]
+    args = [
+      "-i",
+      rebase_path("$root_out_dir/initialexe", root_build_dir),
+      "-o",
+      rebase_path("$root_out_dir", root_build_dir),
+      "-a",
+      target_cpu,
+    ]
+    deps = [
+      ":chrome_initial",
+    ]
+  }
+}
+
 if (!is_android) {
-  # TODO(GYP) bug 512599: for Windows need to the the reorder-imports step
-  # which probably means adding another target and renaming this to
-  # chrome_initial like in GYP.
-  executable("chrome") {
+  group("chrome") {
+    public_deps = [
+      ":chrome_initial",
+    ]
+    if (is_win) {
+      public_deps += [ ":reorder_imports" ]
+    }
+  }
+
+  executable("chrome_initial") {
+    if (is_win) {
+      output_name = "initialexe/chrome"
+    } else {
+      output_name = "chrome"
+    }
+
     # Because the sources list varies so significantly per-platform, generally
     # each platform lists its own files rather than relying on filtering or
     # removing unused files.
@@ -26,7 +66,35 @@ if (!is_android) {
       "app/chrome_exe_resource.h",
     ]
     defines = []
-    deps = []
+    public_deps = []
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
+
+    data = [
+      "$root_out_dir/resources.pak",
+    ]
+    if (is_linux || is_win) {
+      data += [
+        "$root_out_dir/chrome_100_percent.pak",
+        "$root_out_dir/locales/en-US.pak",
+        "$root_out_dir/locales/fr.pak",
+      ]
+    }
+    if (enable_nacl) {
+      if (is_win || (is_linux && target_cpu == "x64")) {
+        data += [
+          # TODO(GYP): Enable this when the IRT is in the right location.
+          # "$root_out_dir/nacl_irt_x86_64.nexe"
+        ]
+      } else if (is_linux && target_cpu == "arm") {
+        data += [
+          # TODO(GYP): same comment
+          # "$root_out_dir/nacl_irt_arm.nexe"
+        ]
+      }
+    }
+
     data_deps = []
 
     # TODO(GYP) mac_bundle_resources, xcode_settings
@@ -78,21 +146,27 @@ if (!is_android) {
         "//chrome/installer/util",
         "//chrome_elf",
         "//components/browser_watcher:browser_watcher_client",
-        "//components/crash/app",
-        "//components/crash_keys",
+        "//components/crash/content/app",
+        "//components/crash/core/common",
         "//content:startup_helper_win",
         "//crypto",
         "//sandbox",
         "//ui/gfx",
       ]
-      data_deps = [ "//chrome/app/version_assembly:version_assembly_manifest" ]
+      data_deps = [
+        "//chrome/app/version_assembly:version_assembly_manifest",
+      ]
 
       libs = [
         "wintrust.lib",
         "crypt32.lib",
       ]
-      configs -= [ "//build/config/win:console" ]
-      configs += [ "//build/config/win:windowed" ]
+      if (!is_asan) {
+        # Set /SUBSYSTEM:WINDOWS for chrome.exe itself, except for the
+        # AddressSanitizer build where console output is important.
+        configs -= [ "//build/config/win:console" ]
+        configs += [ "//build/config/win:windowed" ]
+      }
     } else if (use_aura) {
       # Non-Windows aura entrypoint.
       sources += [ "app/chrome_exe_main_aura.cc" ]
@@ -118,6 +192,13 @@ if (!is_android) {
         "//chrome/installer/util",
         "//content/public/app:both",
       ]
+      if (enable_plugins) {
+        deps += [ "//pdf" ]
+      }
+
+      public_deps = [
+        ":xdg_mime",  # Needs to be public for installer to consume files.
+      ]
 
       # Needed for chrome_main.cc initialization of libraries.
       configs += [ "//build/config/linux:pangocairo" ]
@@ -139,7 +220,7 @@ if (!is_android) {
       # TODO(GYP) lots more stuff in the is_mac block.
     } else {  # Non-Mac.
       # These files are used by the installer so we need a public dep.
-      public_deps = [
+      public_deps += [
         ":packed_extra_resources",
         ":packed_resources",
       ]
@@ -152,10 +233,6 @@ if (!is_android) {
         "//third_party/adobe/flash:flapper_binaries",
         "//third_party/widevine/cdm:widevinecdmadapter",
       ]
-    }
-
-    if (is_linux && enable_plugins) {
-      deps += [ "//pdf" ]
     }
 
     if (is_multi_dll_chrome) {
@@ -172,6 +249,7 @@ shared_library("main_dll") {
   deps = [
     ":browser_dependencies",
     "//base/allocator",
+    "//build/config/sanitizers:deps",
   ]
   if (is_win) {
     output_name = "chrome"
@@ -273,6 +351,7 @@ if (is_multi_dll_chrome) {
       ":chrome_child_manifest",
       ":chrome_dll_version",
       "//base/allocator",
+      "//build/config/sanitizers:deps",
       "//chrome/browser/policy:path_parser",
       "//content/public/app:child",
     ]
@@ -302,31 +381,31 @@ if (is_multi_dll_chrome) {
 
 # GYP version: chromium_browser_dependencies variable in chrome.gyp
 group("browser_dependencies") {
-  deps = [
+  public_deps = [
     "//chrome/browser",
     "//chrome/common",
     "//sync",
   ]
   if (!is_ios) {
-    deps += [ "//ppapi/host" ]
+    public_deps += [ "//ppapi/host" ]
   }
 
   if (enable_basic_printing || enable_print_preview) {
-    deps += [ "//printing" ]
+    public_deps += [ "//printing" ]
     if (enable_print_preview) {
-      deps += [ "//chrome/service" ]
+      public_deps += [ "//chrome/service" ]
     }
   }
 }
 
 # GYP version: chromium_child_dependencies variable in chrome.gyp
 group("child_dependencies") {
-  deps = [
+  public_deps = [
     "//chrome/common",
     "//sync",
   ]
   if (!is_ios) {
-    deps += [
+    public_deps += [
       "//chrome/browser/devtools",
       "//chrome/child",
       "//chrome/plugin",
@@ -337,11 +416,11 @@ group("child_dependencies") {
     ]
   }
   if (cld_version == 2) {
-    deps += [ "//third_party/cld_2:cld2_platform_impl" ]
+    public_deps += [ "//third_party/cld_2:cld2_platform_impl" ]
   }
 
   if (enable_nacl) {
-    deps += [ "//components/nacl/renderer/plugin:nacl_trusted_plugin" ]
+    public_deps += [ "//components/nacl/renderer/plugin:nacl_trusted_plugin" ]
   }
 }
 
@@ -363,6 +442,7 @@ if (is_win) {
   }
 
   process_version("chrome_exe_version") {
+    template_file = chrome_version_rc_template
     sources = [
       "app/chrome_exe.ver",
     ]
@@ -370,6 +450,7 @@ if (is_win) {
   }
 
   process_version("chrome_dll_version") {
+    template_file = chrome_version_rc_template
     sources = [
       "app/chrome_dll.ver",
     ]
@@ -386,6 +467,7 @@ if (is_win) {
   }
 
   process_version("nacl64_exe_version") {
+    template_file = chrome_version_rc_template
     sources = [
       "app/nacl64_exe.ver",
     ]
@@ -393,6 +475,7 @@ if (is_win) {
   }
 
   process_version("other_version") {
+    template_file = chrome_version_rc_template
     sources = [
       "app/other.ver",
     ]
@@ -412,7 +495,7 @@ if (is_win) {
 
 # GYP version: chrome/chrome_resources.gyp:chrome_resources
 group("resources") {
-  deps = [
+  public_deps = [
     # Note: GYP lists some dependencies in addition to these actions. However,
     # these are just dependencies for the actions themselves, which our actions
     # list individually when needed.
@@ -422,23 +505,22 @@ group("resources") {
   ]
 
   if (enable_extensions) {
-    deps += [ "//chrome/common:extensions_api_resources" ]
+    public_deps += [ "//chrome/common:extensions_api_resources" ]
   }
 }
 
 # GYP version: chrome/chrome_resources.gyp:chrome_extra_resources
 group("extra_resources") {
-  deps = [
+  public_deps = [
     "//chrome/browser/resources:invalidations_resources",
     "//chrome/browser/resources:memory_internals_resources",
     "//chrome/browser/resources:net_internals_resources",
     "//chrome/browser/resources:password_manager_internals_resources",
     "//chrome/browser/resources:signin_internals_resources",
-    "//chrome/browser/resources:sync_internals_resources",
     "//chrome/browser/resources:translate_internals_resources",
   ]
   if (!is_ios) {
-    deps += [
+    public_deps += [
       "//chrome/browser/resources:component_extension_resources",
       "//chrome/browser/resources:options_resources",
       "//chrome/browser/resources:settings_resources",
@@ -446,11 +528,11 @@ group("extra_resources") {
   }
 
   if (is_chromeos) {
-    deps += [ "//chrome/browser/resources/chromeos/chromevox" ]
+    public_deps += [ "//chrome/browser/resources/chromeos/chromevox" ]
   }
 
   if (enable_extensions) {
-    deps += [
+    public_deps += [
       "//chrome/browser/resources:quota_internals_resources",
       "//chrome/browser/resources:sync_file_system_internals_resources",
     ]
@@ -471,29 +553,32 @@ if (is_chrome_branded) {
     outputs = [
       "$root_out_dir/default_apps/{{source_file_part}}",
     ]
+
+    # Force anybody that depends on this to get the default apps as data files.
+    data = process_file_template(sources, outputs)
   }
 }
 
 group("packed_resources") {
-  deps = [
+  public_deps = [
     ":repack_locales_pack",
     ":repack_pseudo_locales_pack",
     ":repack_chrome_100_percent",
   ]
 
   if (is_chrome_branded) {
-    deps += [ ":default_apps" ]
+    public_deps += [ ":default_apps" ]
   }
 
   if (enable_hidpi) {
-    deps += [ ":repack_chrome_200_percent" ]
+    public_deps += [ ":repack_chrome_200_percent" ]
   }
 
   if (enable_topchrome_md) {
-    deps += [ ":repack_chrome_material_100_percent" ]
+    public_deps += [ ":repack_chrome_material_100_percent" ]
 
     if (enable_hidpi) {
-      deps += [ ":repack_chrome_material_200_percent" ]
+      public_deps += [ ":repack_chrome_material_200_percent" ]
     }
   }
 }
@@ -509,7 +594,6 @@ repack("packed_extra_resources") {
     "$root_gen_dir/chrome/net_internals_resources.pak",
     "$root_gen_dir/chrome/password_manager_internals_resources.pak",
     "$root_gen_dir/chrome/signin_internals_resources.pak",
-    "$root_gen_dir/chrome/sync_internals_resources.pak",
     "$root_gen_dir/chrome/translate_internals_resources.pak",
     "$root_gen_dir/components/components_resources.pak",
     "$root_gen_dir/net/net_resources.pak",
@@ -524,7 +608,6 @@ repack("packed_extra_resources") {
     "//chrome/browser/resources:net_internals_resources",
     "//chrome/browser/resources:password_manager_internals_resources",
     "//chrome/browser/resources:signin_internals_resources",
-    "//chrome/browser/resources:sync_internals_resources",
     "//chrome/browser/resources:translate_internals_resources",
     "//components/resources",
     "//net:net_resources",
@@ -789,6 +872,7 @@ group("strings") {
     "//chrome/app:chromium_strings",
     "//chrome/app:generated_resources",
     "//chrome/app:google_chrome_strings",
+    "//chrome/app:settings_strings",
     "//chrome/app/resources:locale_settings",
   ]
 }
@@ -922,6 +1006,19 @@ if (is_linux) {
     deps = [
       ":chrome",
       dump_syms_label,
+    ]
+  }
+
+  # Copies some scripts and resources that are used for desktop integration.
+  copy("xdg_mime") {
+    sources = [
+      "//chrome/app/theme/$branding_path_component/product_logo_48.png",
+      "//chrome/tools/build/linux/chrome-wrapper",
+      "//third_party/xdg-utils/scripts/xdg-mime",
+      "//third_party/xdg-utils/scripts/xdg-settings",
+    ]
+    outputs = [
+      "$root_out_dir/{{source_file_part}}",
     ]
   }
 }

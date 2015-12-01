@@ -30,7 +30,7 @@ function test()
             {
                 rule = section.styleRule.rule();
                 InspectorTest.addResult("=== Rule added ===");
-                InspectorTest.addResult(rule.selectorText + " {" + rule.style.cssText + "}");
+                InspectorTest.addResult(rule.selectorText() + " {" + rule.style.cssText + "}");
                 InspectorTest.addResult("Selectors matching the (#inspected) node: " + InspectorTest.matchingSelectors(rule));
                 next();
             }
@@ -40,37 +40,37 @@ function test()
         {
             rule.style.appendProperty("width", "100%", callback);
 
-            function callback(newStyle)
+            function callback(success)
             {
                 InspectorTest.addResult("=== Added rule modified ===");
-                if (!newStyle) {
+                if (!success) {
                     InspectorTest.addResult("[!] No valid rule style received");
                     InspectorTest.completeTest();
                 } else {
-                    dumpProperties(newStyle);
-                    InspectorTest.cssModel.setRuleSelector(rule, nodeId, "body", successCallback, failureCallback);
+                    dumpProperties(rule.style);
+                    rule.setSelectorText(nodeId, "body", successCallback);
                 }
             }
 
-            function successCallback(rule)
+            function successCallback(success)
             {
+                if (!success) {
+                    InspectorTest.addResult("[!] Failed to change selector");
+                    InspectorTest.completeTest();
+                    return;
+                }
                 var doesAffectSelectedNode = rule.matchingSelectors.length > 0;
                 InspectorTest.addResult("=== Selector changed ===");
-                InspectorTest.addResult(rule.selectorText + " {" + rule.style.cssText + "}");
+                InspectorTest.addResult(rule.selectorText() + " {" + rule.style.cssText + "}");
                 InspectorTest.addResult("Selectors matching the (#inspected) node: " + InspectorTest.matchingSelectors(rule));
 
                 next();
-            }
-
-            function failureCallback()
-            {
-                InspectorTest.addResult("[!] Failed to change selector");
-                InspectorTest.completeTest();
             }
         },
 
         function testModifyInlineStyle(next)
         {
+            var inlineStyle;
             InspectorTest.cssModel.inlineStylesPromise(nodeId).then(stylesCallback);
 
             function stylesCallback(inlineStyleResult)
@@ -79,19 +79,20 @@ function test()
                     InspectorTest.completeTest();
                     return;
                 }
-                inlineStyleResult.inlineStyle.appendProperty("font-size", "14px", appendCallback);
+                inlineStyle = inlineStyleResult.inlineStyle;
+                inlineStyle.appendProperty("font-size", "14px", appendCallback);
             }
 
-            function appendCallback(newStyle)
+            function appendCallback(success)
             {
                 InspectorTest.addResult("=== Inline style modified ===");
-                if (!newStyle) {
+                if (!success) {
                     InspectorTest.addResult("No valid inline style received");
                     InspectorTest.completeTest();
                     return;
                 }
 
-                dumpProperties(newStyle);
+                dumpProperties(inlineStyle);
                 next();
             }
         }

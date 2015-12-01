@@ -15,9 +15,11 @@
 #include "net/quic/quic_connection_helper.h"
 #include "net/quic/quic_default_packet_writer.h"
 #include "net/quic/quic_flags.h"
+#include "net/quic/quic_packet_reader.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_server_id.h"
 #include "net/quic/spdy_utils.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/udp/udp_client_socket.h"
 
@@ -134,8 +136,10 @@ bool QuicSimpleClient::CreateUDPSocket() {
   }
 
   socket_.swap(socket);
-  packet_reader_.reset(new QuicPacketReader(socket_.get(), this,
-                                            BoundNetLog()));
+  packet_reader_.reset(new QuicPacketReader(
+      socket_.get(), &clock_, this, kQuicYieldAfterPacketsRead,
+      QuicTime::Delta::FromMilliseconds(kQuicYieldAfterDurationMilliseconds),
+      BoundNetLog()));
 
   if (socket != nullptr) {
     socket->Close();

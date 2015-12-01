@@ -20,13 +20,14 @@ mojo_native_application("omnibox") {
 
 source_set("lib") {
   sources = [
-    "omnibox_impl.cc",
-    "omnibox_impl.h",
+    "omnibox_application.cc",
+    "omnibox_application.h",
   ]
 
   deps = [
     "//base",
-    "//components/view_manager/public/cpp",
+    "//components/mus/public/cpp",
+    "//components/url_formatter",
     "//mandoline/ui/aura",
     "//mandoline/ui/desktop_ui/public/interfaces",
     "//mojo/application/public/cpp:sources",

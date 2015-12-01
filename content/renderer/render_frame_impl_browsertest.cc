@@ -20,7 +20,6 @@ namespace {
 const int32 kSubframeRouteId = 20;
 const int32 kSubframeWidgetRouteId = 21;
 const int32 kFrameProxyRouteId = 22;
-const int32 kSubframeSurfaceId = 43;
 }  // namespace
 
 namespace content {
@@ -34,12 +33,11 @@ class RenderFrameImplTest : public RenderViewTest {
 
   void SetUp() override {
     RenderViewTest::SetUp();
-    EXPECT_FALSE(static_cast<RenderFrameImpl*>(view_->GetMainRenderFrame())
-                     ->is_subframe_);
+    EXPECT_TRUE(static_cast<RenderFrameImpl*>(view_->GetMainRenderFrame())
+                    ->is_main_frame_);
 
     FrameMsg_NewFrame_WidgetParams widget_params;
     widget_params.routing_id = kSubframeWidgetRouteId;
-    widget_params.surface_id = kSubframeSurfaceId;
     widget_params.hidden = false;
 
     IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
@@ -50,13 +48,13 @@ class RenderFrameImplTest : public RenderViewTest {
         view_->GetMainRenderFrame()->GetWebFrame()->firstChild())
         ->OnSwapOut(kFrameProxyRouteId, false, FrameReplicationState());
 
-    RenderFrameImpl::CreateFrame(kSubframeRouteId, kFrameProxyRouteId,
-                                 MSG_ROUTING_NONE, MSG_ROUTING_NONE,
-                                 FrameReplicationState(), &compositor_deps_,
-                                 widget_params);
+    RenderFrameImpl::CreateFrame(kSubframeRouteId, MSG_ROUTING_NONE,
+                                 MSG_ROUTING_NONE, kFrameProxyRouteId,
+                                 MSG_ROUTING_NONE, FrameReplicationState(),
+                                 &compositor_deps_, widget_params);
 
     frame_ = RenderFrameImpl::FromRoutingID(kSubframeRouteId);
-    EXPECT_TRUE(frame_->is_subframe_);
+    EXPECT_FALSE(frame_->is_main_frame_);
   }
 
   void TearDown() override {

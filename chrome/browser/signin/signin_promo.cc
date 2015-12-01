@@ -191,19 +191,15 @@ GURL GetPromoURL(signin_metrics::Source source,
 }
 
 GURL GetReauthURL(Profile* profile, const std::string& account_id) {
-  AccountTrackerService::AccountInfo info =
-      AccountTrackerServiceFactory::GetForProfile(profile)->
-          GetAccountInfo(account_id);
+  AccountInfo info = AccountTrackerServiceFactory::GetForProfile(profile)
+                         ->GetAccountInfo(account_id);
   return GetReauthURLWithEmail(info.email);
 }
 
 GURL GetReauthURLWithEmail(const std::string& email) {
-  signin_metrics::Source source = switches::IsNewAvatarMenu() ?
-      signin_metrics::SOURCE_REAUTH : signin_metrics::SOURCE_SETTINGS;
-
   GURL url = signin::GetPromoURL(
-      source, true /* auto_close */,
-      switches::IsNewAvatarMenu() /* is_constrained */);
+      signin_metrics::SOURCE_REAUTH, true /* auto_close */,
+      true /* is_constrained */);
 
   url = net::AppendQueryParameter(url, "email", email);
   url = net::AppendQueryParameter(url, "validateEmail", "1");

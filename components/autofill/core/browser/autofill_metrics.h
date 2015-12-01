@@ -573,6 +573,13 @@ class AutofillMetrics {
   static void LogNumberOfEditedAutofilledFieldsAtSubmission(
       size_t num_edited_autofilled_fields);
 
+  // This should be called each time a server response is parsed for a form.
+  static void LogServerResponseHasDataForForm(bool has_data);
+
+  // This should be called at each form submission to indicate whether a new
+  // profile was created.
+  static void LogAutomaticProfileCreation(bool created);
+
   // Utility to autofill form events in the relevant histograms depending on
   // the presence of server and/or local data.
   class FormEventLogger {

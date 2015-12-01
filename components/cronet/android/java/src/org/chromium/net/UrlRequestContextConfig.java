@@ -73,8 +73,10 @@ public class UrlRequestContextConfig {
      * {@link java.net.HttpURLConnection} implementation is enabled.
      * Defaults to disabled.
      * @return the config to facilitate chaining.
+     * @deprecated Not supported by the new API.
      */
-    UrlRequestContextConfig enableLegacyMode(boolean value) {
+    @Deprecated
+    public UrlRequestContextConfig enableLegacyMode(boolean value) {
         return putBoolean(UrlRequestContextConfigList.ENABLE_LEGACY_MODE,
                           value);
     }

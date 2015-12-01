@@ -103,9 +103,6 @@ void SortContainer(std::vector<Type1>* to_sort,
 // static
 bool ToolbarActionsBar::disable_animations_for_testing_ = false;
 
-// static
-bool ToolbarActionsBar::send_overflowed_action_changes_ = true;
-
 ToolbarActionsBar::PlatformSettings::PlatformSettings(bool in_overflow_mode)
     : left_padding(in_overflow_mode ? kOverflowLeftPadding : kLeftPadding),
       right_padding(in_overflow_mode ? kOverflowRightPadding : kRightPadding),
@@ -127,8 +124,8 @@ ToolbarActionsBar::ToolbarActionsBar(ToolbarActionsBarDelegate* delegate,
       model_observer_(this),
       suppress_layout_(false),
       suppress_animation_(true),
-      overflowed_action_wants_to_run_(false),
       checked_extension_bubble_(false),
+      is_drag_in_progress_(false),
       popped_out_action_(nullptr),
       weak_ptr_factory_(this) {
   if (model_)  // |model_| can be null in unittests.
@@ -231,7 +228,7 @@ size_t ToolbarActionsBar::WidthToIconCount(int pixels) const {
 
 size_t ToolbarActionsBar::GetIconCount() const {
   if (!model_)
-    return 0u;
+    return 0;
 
   int pop_out_modifier = 0;
   // If there is a popped out action, it could affect the number of visible
@@ -268,9 +265,33 @@ size_t ToolbarActionsBar::GetIconCount() const {
   return visible_icons;
 }
 
-gfx::Rect ToolbarActionsBar::GetFrameForIndex(size_t index) const {
-  size_t start_index = in_overflow_mode() ?
-      toolbar_actions_.size() - GetIconCount() : 0u;
+size_t ToolbarActionsBar::GetStartIndexInBounds() const {
+  return in_overflow_mode() ? main_bar_->GetEndIndexInBounds() : 0;
+}
+
+size_t ToolbarActionsBar::GetEndIndexInBounds() const {
+  // The end index for the main bar is however many icons can fit with the given
+  // width. We take the width-after-animation here so that we don't have to
+  // constantly adjust both this and the overflow as the size changes (the
+  // animations are small and fast enough that this doesn't cause problems).
+  return in_overflow_mode()
+             ? toolbar_actions_.size()
+             : WidthToIconCount(delegate_->GetWidth(
+                   ToolbarActionsBarDelegate::GET_WIDTH_AFTER_ANIMATION));
+}
+
+bool ToolbarActionsBar::NeedsOverflow() const {
+  DCHECK(!in_overflow_mode());
+  // We need an overflow view if either the end index is less than the number of
+  // icons, or if a drag is in progress with the redesign turned on (since the
+  // user can drag an icon into the wrench menu).
+  return GetEndIndexInBounds() != toolbar_actions_.size() ||
+         (is_drag_in_progress_ && !platform_settings_.chevron_enabled);
+}
+
+gfx::Rect ToolbarActionsBar::GetFrameForIndex(
+    size_t index) const {
+  size_t start_index = GetStartIndexInBounds();
 
   // If the index is for an action that is before range we show (i.e., is for
   // a button that's on the main bar, and this is the overflow), send back an
@@ -317,8 +338,7 @@ ToolbarActionsBar::GetActions() const {
 
 void ToolbarActionsBar::CreateActions() {
   DCHECK(toolbar_actions_.empty());
-  // We wait for the extension system to be initialized before we add any
-  // actions, as they rely on the extension system to function.
+  // If the model isn't initialized, wait for it.
   if (!model_ || !model_->actions_initialized())
     return;
 
@@ -398,6 +418,16 @@ void ToolbarActionsBar::Update() {
   ReorderActions();  // Also triggers a draw.
 }
 
+bool ToolbarActionsBar::ShowToolbarActionPopup(const std::string& action_id,
+                                               bool grant_active_tab) {
+  // Don't override another popup, and only show in the active window.
+  if (popup_owner() || !browser_->window()->IsActive())
+    return false;
+
+  ToolbarActionViewController* action = GetActionForId(action_id);
+  return action && action->ExecuteAction(grant_active_tab);
+}
+
 void ToolbarActionsBar::SetOverflowRowWidth(int width) {
   DCHECK(in_overflow_mode());
   platform_settings_.icons_per_overflow_menu_row =
@@ -413,11 +443,25 @@ void ToolbarActionsBar::OnResizeComplete(int width) {
   model_->SetVisibleIconCount(resized_count);
 }
 
+void ToolbarActionsBar::OnDragStarted() {
+  // All drag-and-drop commands should go to the main bar.
+  ToolbarActionsBar* main_bar = in_overflow_mode() ? main_bar_ : this;
+  DCHECK(!main_bar->is_drag_in_progress_);
+  main_bar->is_drag_in_progress_ = true;
+}
+
+void ToolbarActionsBar::OnDragEnded() {
+  // All drag-and-drop commands should go to the main bar.
+  ToolbarActionsBar* main_bar = in_overflow_mode() ? main_bar_ : this;
+  DCHECK(main_bar->is_drag_in_progress_);
+  main_bar->is_drag_in_progress_ = false;
+}
+
 void ToolbarActionsBar::OnDragDrop(int dragged_index,
                                    int dropped_index,
                                    DragType drag_type) {
-  // All drag-and-drop commands should go to the main bar.
   if (in_overflow_mode()) {
+    // All drag-and-drop commands should go to the main bar.
     main_bar_->OnDragDrop(dragged_index, dropped_index, drag_type);
     return;
   }
@@ -610,8 +654,6 @@ void ToolbarActionsBar::OnToolbarActionRemoved(const std::string& action_id) {
       ResizeDelegate(gfx::Tween::EASE_OUT, false);
     }
   }
-
-  SetOverflowedActionWantsToRun();
 }
 
 void ToolbarActionsBar::OnToolbarActionMoved(const std::string& action_id,
@@ -627,31 +669,19 @@ void ToolbarActionsBar::OnToolbarActionUpdated(const std::string& action_id) {
   ToolbarActionViewController* action = GetActionForId(action_id);
   // There might not be a view in cases where we are highlighting or if we
   // haven't fully initialized the actions.
-  if (action) {
+  if (action)
     action->UpdateState();
-    SetOverflowedActionWantsToRun();
-  }
-}
-
-bool ToolbarActionsBar::ShowToolbarActionPopup(const std::string& action_id,
-                                               bool grant_active_tab) {
-  // Don't override another popup, and only show in the active window.
-  if (popup_owner() || !browser_->window()->IsActive())
-    return false;
-
-  ToolbarActionViewController* action = GetActionForId(action_id);
-  return action && action->ExecuteAction(grant_active_tab);
 }
 
 void ToolbarActionsBar::OnToolbarVisibleCountChanged() {
   ResizeDelegate(gfx::Tween::EASE_OUT, false);
-  SetOverflowedActionWantsToRun();
 }
 
 void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
                                        bool suppress_chevron) {
   int desired_width = GetPreferredSize().width();
-  if (desired_width != delegate_->GetWidth()) {
+  if (desired_width !=
+      delegate_->GetWidth(ToolbarActionsBarDelegate::GET_WIDTH_CURRENT)) {
     delegate_->ResizeAndAnimate(tween_type, desired_width, suppress_chevron);
   } else if (delegate_->IsAnimating()) {
     // It's possible that we're right where we're supposed to be in terms of
@@ -695,10 +725,6 @@ void ToolbarActionsBar::OnToolbarModelInitialized() {
   ResizeDelegate(gfx::Tween::EASE_OUT, false);
 }
 
-Browser* ToolbarActionsBar::GetBrowser() {
-  return browser_;
-}
-
 void ToolbarActionsBar::ReorderActions() {
   if (toolbar_actions_.empty())
     return;
@@ -715,28 +741,6 @@ void ToolbarActionsBar::ReorderActions() {
   if (!suppress_layout_) {
     ResizeDelegate(gfx::Tween::EASE_OUT, false);
     delegate_->Redraw(true);
-  }
-
-  SetOverflowedActionWantsToRun();
-}
-
-void ToolbarActionsBar::SetOverflowedActionWantsToRun() {
-  if (in_overflow_mode())
-    return;
-  bool overflowed_action_wants_to_run = false;
-  content::WebContents* web_contents = GetCurrentWebContents();
-  for (size_t i = GetIconCount(); i < toolbar_actions_.size(); ++i) {
-    if (toolbar_actions_[i]->WantsToRun(web_contents)) {
-      overflowed_action_wants_to_run = true;
-      break;
-    }
-  }
-
-  if (overflowed_action_wants_to_run_ != overflowed_action_wants_to_run) {
-    overflowed_action_wants_to_run_ = overflowed_action_wants_to_run;
-    if (send_overflowed_action_changes_)
-      delegate_->OnOverflowedActionWantsToRunChanged(
-          overflowed_action_wants_to_run_);
   }
 }
 

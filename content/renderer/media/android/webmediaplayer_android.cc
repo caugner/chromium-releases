@@ -40,6 +40,7 @@
 #include "media/base/media_keys.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
+#include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/blink/webmediaplayer_delegate.h"
@@ -72,6 +73,8 @@ using blink::WebSize;
 using blink::WebString;
 using blink::WebURL;
 using gpu::gles2::GLES2Interface;
+using media::LogHelper;
+using media::MediaLog;
 using media::MediaPlayerAndroid;
 using media::VideoFrame;
 
@@ -118,7 +121,7 @@ bool AllocateSkBitmapTexture(GrContext* gr,
     return false;
 
   SkImageInfo info = SkImageInfo::MakeN32Premul(desc.fWidth, desc.fHeight);
-  SkGrPixelRef* pixel_ref = SkNEW_ARGS(SkGrPixelRef, (info, texture.get()));
+  SkGrPixelRef* pixel_ref = new SkGrPixelRef(info, texture.get());
   if (!pixel_ref)
     return false;
   bitmap->setInfo(info);
@@ -196,6 +199,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       allow_stored_credentials_(false),
       is_local_resource_(false),
       interpolator_(&default_tick_clock_),
+      suppress_deleting_texture_(false),
       weak_factory_(this) {
   DCHECK(player_manager_);
   DCHECK(cdm_factory_);
@@ -426,13 +430,12 @@ void WebMediaPlayerAndroid::seek(double seconds) {
   if (seeking_) {
     if (new_seek_time == seek_time_) {
       if (media_source_delegate_) {
-        if (!pending_seek_) {
-          // If using media source demuxer, only suppress redundant seeks if
-          // there is no pending seek. This enforces that any pending seek that
-          // results in a demuxer seek is preceded by matching
-          // CancelPendingSeek() and StartWaitingForSeek() calls.
-          return;
-        }
+        // Don't suppress any redundant in-progress MSE seek. There could have
+        // been changes to the underlying buffers after seeking the demuxer and
+        // before receiving OnSeekComplete() for the currently in-progress seek.
+        MEDIA_LOG(DEBUG, media_log_)
+            << "Detected MediaSource seek to same time as in-progress seek to "
+            << seek_time_ << ".";
       } else {
         // Suppress all redundant seeks if unrestricted by media source
         // demuxer API.
@@ -827,6 +830,9 @@ void WebMediaPlayerAndroid::OnPlaybackComplete() {
 void WebMediaPlayerAndroid::OnBufferingUpdate(int percentage) {
   buffered_[0].end = duration() * percentage / 100;
   did_loading_progress_ = true;
+
+  if (percentage == 100 && network_state_ < WebMediaPlayer::NetworkStateLoaded)
+    UpdateNetworkState(WebMediaPlayer::NetworkStateLoaded);
 }
 
 void WebMediaPlayerAndroid::OnSeekRequest(const base::TimeDelta& time_to_seek) {
@@ -927,6 +933,10 @@ void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
 void WebMediaPlayerAndroid::OnTimeUpdate(base::TimeDelta current_timestamp,
                                          base::TimeTicks current_time_ticks) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
+
+  if (seeking())
+    return;
+
   // Compensate the current_timestamp with the IPC latency.
   base::TimeDelta lower_bound =
       base::TimeTicks::Now() - current_time_ticks + current_timestamp;
@@ -940,7 +950,9 @@ void WebMediaPlayerAndroid::OnTimeUpdate(base::TimeDelta current_timestamp,
   // if the lower_bound is smaller than the current time, just use the current
   // time so that the timer is always progressing.
   lower_bound =
-      std::min(lower_bound, base::TimeDelta::FromSecondsD(currentTime()));
+      std::max(lower_bound, base::TimeDelta::FromSecondsD(currentTime()));
+  if (lower_bound > upper_bound)
+    upper_bound = lower_bound;
   interpolator_.SetBounds(lower_bound, upper_bound);
 }
 
@@ -974,6 +986,7 @@ void WebMediaPlayerAndroid::OnDidExitFullscreen() {
   if (!paused() && needs_establish_peer_) {
     TryCreateStreamTextureProxyIfNeeded();
     EstablishSurfaceTexturePeer();
+    suppress_deleting_texture_ = true;
   }
 
 #if defined(VIDEO_HOLE)
@@ -1318,8 +1331,13 @@ void WebMediaPlayerAndroid::PutCurrentFrame() {
 
 void WebMediaPlayerAndroid::ResetStreamTextureProxy() {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-
-  RemoveSurfaceTextureAndProxy();
+  // When suppress_deleting_texture_ is true,  OnDidExitFullscreen has already
+  // re-connected surface texture for embedded playback. There is no need to
+  // delete them and create again. In fact, Android gives MediaPlayer erorr
+  // code: what == 1, extra == -19 when Android WebView tries to create, delete
+  // then create the surface textures for a video in quick succession.
+  if (!suppress_deleting_texture_)
+    RemoveSurfaceTextureAndProxy();
 
   TryCreateStreamTextureProxyIfNeeded();
   if (needs_establish_peer_ && is_playing_)
@@ -1429,7 +1447,7 @@ bool WebMediaPlayerAndroid::UpdateBoundaryRectangle() {
 
   // Compute the geometry of video frame layer.
   cc::Layer* layer = video_weblayer_->layer();
-  gfx::RectF rect(layer->bounds());
+  gfx::RectF rect(gfx::SizeF(layer->bounds()));
   while (layer) {
     rect.Offset(layer->position().OffsetFromOrigin());
     layer = layer->parent();
@@ -1891,6 +1909,7 @@ void WebMediaPlayerAndroid::enterFullscreen() {
     player_manager_->EnterFullscreen(player_id_);
   SetNeedsEstablishPeer(false);
   is_fullscreen_ = true;
+  suppress_deleting_texture_ = false;
 }
 
 bool WebMediaPlayerAndroid::IsHLSStream() const {

@@ -11,6 +11,7 @@
  * @param {function()} changeToSlideModeCallback A callback to be called to
  *     change to slide mode.
  * @constructor
+ * @extends {cr.EventTarget}
  * @struct
  */
 function ThumbnailMode(container, errorBanner, dataModel, selectionModel,
@@ -41,16 +42,29 @@ function ThumbnailMode(container, errorBanner, dataModel, selectionModel,
 }
 
 /**
- * Return name of this mode.
+ * Mode must extend cr.EventTarget.
+ */
+ThumbnailMode.prototype.__proto__ = cr.EventTarget.prototype;
+
+/**
+ * Returns name of this mode.
  * @return {string} Mode name.
  */
 ThumbnailMode.prototype.getName = function() { return 'thumbnail'; };
 
 /**
- * Return title of this mode.
+ * Returns title of this mode.
  * @return {string} Mode title.
  */
 ThumbnailMode.prototype.getTitle = function() { return 'GALLERY_THUMBNAIL'; };
+
+/**
+ * Returns current sub mode.
+ * @return {Gallery.SubMode}
+ */
+ThumbnailMode.prototype.getSubMode = function() {
+  return Gallery.SubMode.BROWSE;
+};
 
 /**
  * Executes an action. An action is executed immediately since this mode does
@@ -358,7 +372,9 @@ ThumbnailView.prototype.moveSelection_ = function(direction, selectRange) {
   }
 
   var vertical = direction === 'Up' || direction === 'Down';
-  var baseIndex = this.selectionModel_.leadIndex;
+  var baseIndex = this.selectionModel_.leadIndex !== -1 ?
+      this.selectionModel_.leadIndex :
+      this.selectionModel_.selectedIndex;
   var baseRect = this.getThumbnailRect(baseIndex);
   var baseCenter = baseRect.left + baseRect.width / 2;
   var minHorizontalGap = Number.MAX_VALUE;
@@ -740,17 +756,17 @@ ThumbnailView.prototype.performEnterAnimation = function(index, rect) {
   this.animationThumbnail_.height = ThumbnailView.ROW_HEIGHT;
 
   var animationPlayer = this.animationThumbnail_.animate([{
-    height: rect.height,
-    left: rect.left,
-    top: rect.top,
-    width: rect.width,
+    height: rect.height + 'px',
+    left: rect.left + 'px',
+    top: rect.top + 'px',
+    width: rect.width + 'px',
     offset: 0,
     easing: 'linear'
   }, {
-    height: thumbnailRect.height,
-    left: thumbnailRect.left,
-    top: thumbnailRect.top,
-    width: thumbnailRect.width,
+    height: thumbnailRect.height + 'px',
+    left: thumbnailRect.left + 'px',
+    top: thumbnailRect.top + 'px',
+    width: thumbnailRect.width + 'px',
     offset: 1
   }], 250);
 
@@ -931,35 +947,81 @@ ThumbnailView.Thumbnail.prototype.update = function() {
 
   // Calculate and set width.
   var metadata = this.galleryItem_.getMetadataItem();
-  if (metadata) {
-    var rotated = metadata.imageRotation % 2 === 1;
-    var imageWidth = rotated ? metadata.imageHeight : metadata.imageWidth;
-    var imageHeight = rotated ? metadata.imageWidth : metadata.imageHeight;
-    this.setWidth_(~~(imageWidth * ThumbnailView.ROW_HEIGHT / imageHeight));
-  } else {
+  if (!metadata) {
     this.setWidth_(ThumbnailView.ROW_HEIGHT);
+    return;
   }
+
+  var rotated = metadata.imageRotation % 2 === 1;
+  var imageWidth = rotated ? metadata.imageHeight : metadata.imageWidth;
+  var imageHeight = rotated ? metadata.imageWidth : metadata.imageHeight;
+  this.setWidth_(~~(imageWidth * ThumbnailView.ROW_HEIGHT / imageHeight));
 
   // Set thumbnail.
   var thumbnailMetadata = this.galleryItem_.getThumbnailMetadataItem();
-  if (thumbnailMetadata) {
-    this.thumbnailLoadRequestId_++;
+  if (!thumbnailMetadata)
+    return;
 
-    this.thumbnailLoader_ = new ThumbnailLoader(
-        this.galleryItem_.getEntry(), undefined, thumbnailMetadata);
-    this.thumbnailLoader_.loadAsDataUrl(ThumbnailLoader.FillMode.FIT)
-        .then(function(thumbnailLoadRequestId, result) {
-          // Discard the result of old request.
-          if (thumbnailLoadRequestId !== this.thumbnailLoadRequestId_)
-            return;
+  this.loadAndSetThumbnail_(thumbnailMetadata,
+      false /* do not force to generate thumbnail */).then(function(result) {
+    if (!result ||
+        result.height >= ThumbnailView.ROW_HEIGHT ||
+        result.loadTarget === ThumbnailLoader.LoadTarget.FILE_ENTRY ||
+        metadata.imageHeight <= ThumbnailView.ROW_HEIGHT ||
+        (thumbnailMetadata.external && !thumbnailMetadata.external.present)) {
+      return;
+    }
 
-          // Update width by using the widh of actual data.
-          this.setWidth_(
-              ~~(result.width * ThumbnailView.ROW_HEIGHT / result.height));
+    // If thumbnail height is lower than ThumbnailView.ROW_HEIGHT, generate
+    // thumbnail from image content.
+    this.loadAndSetThumbnail_(
+        thumbnailMetadata, true /* force to generate thumbnail */);
+  }.bind(this));
+};
 
-          this.imageFrame_.style.backgroundImage = 'url(' + result.data + ')';
-          this.setError_(null);
-        }.bind(this, this.thumbnailLoadRequestId_))
-        .catch(this.setError_.bind(this));
-  }
+/**
+ * Loads thumbnail and sets it.
+ * @param {!ThumbnailMetadataItem} thumbnailMetadata
+ * @param {boolean} forceToGenerate True to force generating thumbnail from
+ *     image content.
+ * @return {!Promise<?{height:number, loadTarget:?ThumbnailLoader.LoadTarget}>}
+ *     null is returned for error case.
+ * @private
+ */
+ThumbnailView.Thumbnail.prototype.loadAndSetThumbnail_ = function(
+    thumbnailMetadata, forceToGenerate) {
+  this.thumbnailLoadRequestId_++;
+
+  var loadTargets = forceToGenerate ?
+      [ThumbnailLoader.LoadTarget.FILE_ENTRY] :
+      undefined /* default value */;
+
+  this.thumbnailLoader_ = new ThumbnailLoader(this.galleryItem_.getEntry(),
+      undefined /* opt_loaderType */, thumbnailMetadata,
+      undefined /* opt_mediaType */, loadTargets);
+  return this.thumbnailLoader_.loadAsDataUrl(
+      ThumbnailLoader.FillMode.FIT).then(function(requestId, result) {
+    // Discard the result of old request.
+    if (requestId !== this.thumbnailLoadRequestId_)
+      return null;
+
+    // Update width by using the width of actual data.
+    this.setWidth_(
+        ~~(result.width * ThumbnailView.ROW_HEIGHT / result.height));
+
+    this.imageFrame_.style.backgroundImage = 'url(' + result.data + ')';
+    this.setError_(null);
+
+    return {
+      height: result.height,
+      loadTarget: this.thumbnailLoader_.getLoadTarget()
+    };
+    }.bind(this, this.thumbnailLoadRequestId_))
+    .catch(function(requestId, error) {
+      if (requestId !== this.thumbnailLoadRequestId_)
+        return null;
+
+      this.setError_(error);
+      return null;
+    }.bind(this, this.thumbnailLoadRequestId_));
 };

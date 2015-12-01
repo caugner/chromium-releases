@@ -74,7 +74,6 @@ void HardwareDisplayController::Disable() {
 
 bool HardwareDisplayController::SchedulePageFlip(
     const OverlayPlaneList& plane_list,
-    bool is_sync,
     bool test_only,
     const PageFlipCallback& callback) {
   TRACE_EVENT0("drm", "HDC::SchedulePageFlip");
@@ -95,8 +94,10 @@ bool HardwareDisplayController::SchedulePageFlip(
             [](const OverlayPlane& l, const OverlayPlane& r) {
               return l.z_order < r.z_order;
             });
-  if (pending_planes.front().z_order != 0)
+  if (pending_planes.front().z_order != 0) {
+    callback.Run(gfx::SwapResult::SWAP_FAILED);
     return false;
+  }
 
   for (const auto& planes : owned_hardware_planes_)
     planes.first->plane_manager()->BeginFrame(planes.second);
@@ -109,13 +110,32 @@ bool HardwareDisplayController::SchedulePageFlip(
   }
 
   for (const auto& planes : owned_hardware_planes_) {
-    if (!planes.first->plane_manager()->Commit(planes.second, is_sync,
-                                               test_only)) {
+    if (!planes.first->plane_manager()->Commit(planes.second, test_only)) {
       status = false;
     }
   }
 
   return status;
+}
+
+std::vector<uint32_t> HardwareDisplayController::GetCompatibleHardwarePlaneIds(
+    const OverlayPlane& plane) const {
+  std::vector<uint32_t> plane_ids =
+      crtc_controllers_[0]->GetCompatibleHardwarePlaneIds(plane);
+
+  if (plane_ids.empty())
+    return plane_ids;
+
+  for (size_t i = 1; i < crtc_controllers_.size(); ++i) {
+    // Make sure all mirrored displays have overlays to support this
+    // plane.
+    if (crtc_controllers_[i]->GetCompatibleHardwarePlaneIds(plane).empty())
+      return std::vector<uint32_t>();
+  }
+
+  // TODO(kalyank): We Should ensure that this list doesn't contain any planes
+  // which mirrored displays share with primary.
+  return plane_ids;
 }
 
 bool HardwareDisplayController::SetCursor(

@@ -560,8 +560,12 @@ base::string16 NotificationView::FormatContextMessage(
   if (notification.UseOriginAsContextMessage()) {
     const GURL url = notification.origin_url();
     DCHECK(url.is_valid());
-    return url_formatter::ElideHost(url, views::Label().font_list(),
-                                    kContextMessageViewWidth);
+    // TODO(palmer): Find a way to get the Profile's real languages.
+    // crbug.com/496965.
+    return gfx::ElideText(url_formatter::FormatUrlForSecurityDisplayOmitScheme(
+                              url, std::string()),
+                          views::Label().font_list(), kContextMessageViewWidth,
+                          gfx::ELIDE_HEAD);
   }
 
   return gfx::TruncateString(notification.context_message(),
@@ -648,19 +652,24 @@ void NotificationView::CreateOrUpdateIconView(
     const Notification& notification) {
   if (!icon_view_) {
     icon_view_ = new ProportionalImageView(gfx::Size(kIconSize, kIconSize));
-    icon_view_->set_background(
-        views::Background::CreateSolidBackground(kIconBackgroundColor));
     AddChildView(icon_view_);
   }
 
   gfx::ImageSkia icon = notification.icon().AsImageSkia();
-  gfx::Size max_image_size =
-      notification.type() == NOTIFICATION_TYPE_SIMPLE &&
-              (icon.width() < kIconSize || icon.height() < kIconSize ||
-               HasAlpha(icon, GetWidget()))
-          ? gfx::Size(kLegacyIconSize, kLegacyIconSize)
-          : gfx::Size(kIconSize, kIconSize);
-  icon_view_->SetImage(icon, max_image_size);
+  if (notification.adjust_icon()) {
+    icon_view_->set_background(
+        views::Background::CreateSolidBackground(kIconBackgroundColor));
+    gfx::Size max_image_size =
+        notification.type() == NOTIFICATION_TYPE_SIMPLE &&
+                (icon.width() < kIconSize || icon.height() < kIconSize ||
+                 HasAlpha(icon, GetWidget()))
+            ? gfx::Size(kLegacyIconSize, kLegacyIconSize)
+            : gfx::Size(kIconSize, kIconSize);
+    icon_view_->SetImage(icon, max_image_size);
+  } else {
+    icon_view_->SetImage(icon, icon.size());
+    icon_view_->set_background(nullptr);
+  }
 }
 
 void NotificationView::CreateOrUpdateImageView(

@@ -5,6 +5,7 @@
 #include "ui/ozone/demo/surfaceless_gl_renderer.h"
 
 #include "base/bind.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
@@ -70,14 +71,11 @@ void SurfacelessGlRenderer::BufferWrapper::BindFramebuffer() {
   glBindFramebufferEXT(GL_FRAMEBUFFER, gl_fb_);
 }
 
-void SurfacelessGlRenderer::BufferWrapper::SchedulePlane() {
-  image_->ScheduleOverlayPlane(widget_, 0, gfx::OVERLAY_TRANSFORM_NONE,
-                               gfx::Rect(size_), gfx::RectF(0, 0, 1, 1));
-}
-
-SurfacelessGlRenderer::SurfacelessGlRenderer(gfx::AcceleratedWidget widget,
-                                             const gfx::Size& size)
-    : GlRenderer(widget, size), weak_ptr_factory_(this) {}
+SurfacelessGlRenderer::SurfacelessGlRenderer(
+    gfx::AcceleratedWidget widget,
+    const scoped_refptr<gfx::GLSurface>& surface,
+    const gfx::Size& size)
+    : GlRenderer(widget, surface, size), weak_ptr_factory_(this) {}
 
 SurfacelessGlRenderer::~SurfacelessGlRenderer() {
   // Need to make current when deleting the framebuffer resources allocated in
@@ -89,33 +87,54 @@ bool SurfacelessGlRenderer::Initialize() {
   if (!GlRenderer::Initialize())
     return false;
 
-  for (size_t i = 0; i < arraysize(buffers_); ++i)
-    if (!buffers_[i].Initialize(widget_, size_))
+  for (size_t i = 0; i < arraysize(buffers_); ++i) {
+    buffers_[i].reset(new BufferWrapper());
+    if (!buffers_[i]->Initialize(widget_, size_))
       return false;
+  }
 
   PostRenderFrameTask(gfx::SwapResult::SWAP_ACK);
   return true;
 }
 
 void SurfacelessGlRenderer::RenderFrame() {
+  TRACE_EVENT0("ozone", "SurfacelessGlRenderer::RenderFrame");
+
   float fraction = NextFraction();
 
   context_->MakeCurrent(surface_.get());
-  buffers_[back_buffer_].BindFramebuffer();
+  buffers_[back_buffer_]->BindFramebuffer();
 
   glViewport(0, 0, size_.width(), size_.height());
   glClearColor(1 - fraction, 0.0, fraction, 1.0);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-  buffers_[back_buffer_].SchedulePlane();
+  surface_->ScheduleOverlayPlane(0, gfx::OVERLAY_TRANSFORM_NONE,
+                                 buffers_[back_buffer_]->image(),
+                                 gfx::Rect(size_), gfx::RectF(0, 0, 1, 1));
   back_buffer_ ^= 1;
-  if (!surface_->SwapBuffersAsync(base::Bind(&GlRenderer::PostRenderFrameTask,
-                                             weak_ptr_factory_.GetWeakPtr())))
+  if (!surface_->SwapBuffersAsync(
+          base::Bind(&SurfacelessGlRenderer::PostRenderFrameTask,
+                     weak_ptr_factory_.GetWeakPtr())))
     LOG(FATAL) << "Failed to swap buffers";
 }
 
-scoped_refptr<gfx::GLSurface> SurfacelessGlRenderer::CreateSurface() {
-  return gfx::GLSurface::CreateSurfacelessViewGLSurface(widget_);
+void SurfacelessGlRenderer::PostRenderFrameTask(gfx::SwapResult result) {
+  switch (result) {
+    case gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS:
+      for (size_t i = 0; i < arraysize(buffers_); ++i) {
+        buffers_[i].reset(new BufferWrapper());
+        if (!buffers_[i]->Initialize(widget_, size_))
+          LOG(FATAL) << "Failed to recreate buffer";
+      }
+    // Fall through since we want to render a new frame anyways.
+    case gfx::SwapResult::SWAP_ACK:
+      GlRenderer::PostRenderFrameTask(result);
+      break;
+    case gfx::SwapResult::SWAP_FAILED:
+      LOG(FATAL) << "Failed to swap buffers";
+      break;
+  }
 }
 
 }  // namespace ui

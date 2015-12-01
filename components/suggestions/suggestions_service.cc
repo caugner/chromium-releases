@@ -16,6 +16,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/suggestions/blacklist_store.h"
 #include "components/suggestions/suggestions_store.h"
@@ -85,6 +86,8 @@ const int kSchedulingMaxDelaySec = 5 * 60;
 const char kFaviconURL[] =
     "https://s2.googleusercontent.com/s2/favicons?domain_url=%s&alt=s&sz=32";
 
+const char kPingURL[] =
+    "https://www.google.com/chromesuggestions/click?q=%lld&cd=%d";
 }  // namespace
 
 // TODO(mathp): Put this in TemplateURL.
@@ -148,8 +151,16 @@ void SuggestionsService::FetchSuggestionsData(
 
 void SuggestionsService::GetPageThumbnail(
     const GURL& url,
-    base::Callback<void(const GURL&, const SkBitmap*)> callback) {
+    const base::Callback<void(const GURL&, const SkBitmap*)>& callback) {
   thumbnail_manager_->GetImageForURL(url, callback);
+}
+
+void SuggestionsService::GetPageThumbnailWithURL(
+    const GURL& url,
+    const GURL& thumbnail_url,
+    const base::Callback<void(const GURL&, const SkBitmap*)>& callback) {
+  thumbnail_manager_->AddImageURL(url, thumbnail_url);
+  GetPageThumbnail(url, callback);
 }
 
 void SuggestionsService::BlacklistURL(
@@ -159,7 +170,8 @@ void SuggestionsService::BlacklistURL(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!blacklist_store_->BlacklistUrl(candidate_url)) {
-    fail_callback.Run();
+    if (!fail_callback.is_null())
+      fail_callback.Run();
     return;
   }
 
@@ -187,7 +199,8 @@ void SuggestionsService::UndoBlacklistURL(
     ServeFromCache();
     return;
   }
-  fail_callback.Run();
+  if (!fail_callback.is_null())
+    fail_callback.Run();
 }
 
 void SuggestionsService::ClearBlacklist(const ResponseCallback& callback) {
@@ -253,6 +266,8 @@ scoped_ptr<net::URLFetcher> SuggestionsService::CreateSuggestionsRequest(
     const GURL& url) {
   scoped_ptr<net::URLFetcher> request =
       net::URLFetcher::Create(0, url, net::URLFetcher::GET, this);
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      request.get(), data_use_measurement::DataUseUserData::SUGGESTIONS);
   request->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   request->SetRequestContext(url_request_context_);
   // Add Chrome experiment state to the request headers.
@@ -319,7 +334,7 @@ void SuggestionsService::OnURLFetchComplete(const net::URLFetcher* source) {
     int64 now_usec = (base::Time::NowFromSystemTime() - base::Time::UnixEpoch())
         .ToInternalValue();
     SetDefaultExpiryTimestamp(&suggestions, now_usec + kDefaultExpiryUsec);
-    PopulateFaviconUrls(&suggestions);
+    PopulateExtraData(&suggestions);
     suggestions_store_->StoreSuggestions(suggestions);
   } else {
     LogResponseState(RESPONSE_INVALID);
@@ -329,11 +344,21 @@ void SuggestionsService::OnURLFetchComplete(const net::URLFetcher* source) {
   ScheduleBlacklistUpload();
 }
 
-void SuggestionsService::PopulateFaviconUrls(SuggestionsProfile* suggestions) {
+void SuggestionsService::PopulateExtraData(SuggestionsProfile* suggestions) {
   for (int i = 0; i < suggestions->suggestions_size(); ++i) {
     suggestions::ChromeSuggestion* s = suggestions->mutable_suggestions(i);
     if (!s->has_favicon_url() || s->favicon_url().empty()) {
       s->set_favicon_url(base::StringPrintf(kFaviconURL, s->url().c_str()));
+    }
+    if (!s->has_impression_url() || s->impression_url().empty()) {
+      s->set_impression_url(
+          base::StringPrintf(
+              kPingURL, static_cast<long long>(suggestions->timestamp()), -1));
+    }
+
+    if (!s->has_click_url() || s->click_url().empty()) {
+      s->set_click_url(base::StringPrintf(
+          kPingURL, static_cast<long long>(suggestions->timestamp()), i));
     }
   }
 }

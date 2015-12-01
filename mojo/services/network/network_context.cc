@@ -168,8 +168,7 @@ scoped_ptr<net::URLRequestContext> NetworkContext::MakeURLRequestContext(
         new net::MappedHostResolver(host_resolver.Pass()));
     remapped_host_resolver->SetRulesFromString(
         command_line->GetSwitchValueASCII(kHostResolverRules));
-    host_resolver.reset(remapped_host_resolver.release());
-    builder.set_host_resolver(host_resolver.release());
+    builder.set_host_resolver(remapped_host_resolver.Pass());
   }
 
   builder.set_accept_language("en-us,en");
@@ -210,7 +209,7 @@ scoped_ptr<net::URLRequestContext> NetworkContext::MakeURLRequestContext(
         new net::CookieMonster(cookie_store, nullptr), nullptr);
   }
 
-  return make_scoped_ptr(builder.Build());
+  return builder.Build().Pass();
 }
 
 }  // namespace mojo

@@ -43,6 +43,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -57,6 +58,7 @@
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_server_id.h"
 #include "net/quic/quic_utils.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/tools/quic/quic_simple_client.h"
 #include "net/tools/quic/synchronous_host_resolver.h"
@@ -203,8 +205,7 @@ int main(int argc, char *argv[]) {
   VLOG(1) << "Resolved " << host << " to " << host_port << endl;
 
   // Build the client, and try to connect.
-  bool is_https = (FLAGS_port == 443);
-  net::QuicServerId server_id(host, FLAGS_port, is_https,
+  net::QuicServerId server_id(host, FLAGS_port, /*is_https=*/true,
                               net::PRIVACY_MODE_DISABLED);
   net::QuicVersionVector versions = net::QuicSupportedVersions();
   if (FLAGS_quic_version != -1) {
@@ -217,13 +218,11 @@ int main(int argc, char *argv[]) {
   scoped_ptr<TransportSecurityState> transport_security_state;
   client.set_initial_max_packet_length(
       FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
-  if (is_https) {
-    // For secure QUIC we need to verify the cert chain.a
-    cert_verifier.reset(CertVerifier::CreateDefault());
-    transport_security_state.reset(new TransportSecurityState);
-    client.SetProofVerifier(new ProofVerifierChromium(
-        cert_verifier.get(), nullptr, transport_security_state.get()));
-  }
+  // For secure QUIC we need to verify the cert chain.
+  cert_verifier = CertVerifier::CreateDefault();
+  transport_security_state.reset(new TransportSecurityState);
+  client.SetProofVerifier(new ProofVerifierChromium(
+      cert_verifier.get(), nullptr, transport_security_state.get()));
   if (!client.Initialize()) {
     cerr << "Failed to initialize client." << endl;
     return 1;
@@ -280,7 +279,7 @@ int main(int argc, char *argv[]) {
   if (!FLAGS_quiet) {
     cout << "Request:" << endl;
     cout << "headers:" << endl;
-    for (const std::pair<string, string>& kv : header_block) {
+    for (const auto& kv : header_block) {
       cout << " " << kv.first << ": " << kv.second << endl;
     }
     cout << "body: " << FLAGS_body << endl;

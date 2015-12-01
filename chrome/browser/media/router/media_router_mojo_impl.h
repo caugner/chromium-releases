@@ -12,6 +12,7 @@
 
 #include "base/containers/hash_tables.h"
 #include "base/containers/scoped_ptr_hash_map.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/media/router/issue_manager.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router.mojom.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
 
 namespace content {
 class BrowserContext;
@@ -78,6 +80,7 @@ class MediaRouterMojoImpl : public MediaRouter,
       const MediaRoute::Id& route_id,
       scoped_ptr<std::vector<uint8>> data,
       const SendRouteMessageCallback& callback) override;
+  void AddIssue(const Issue& issue) override;
   void ClearIssue(const Issue::Id& issue_id) override;
   void OnPresentationSessionDetached(const MediaRoute::Id& route_id) override;
 
@@ -91,6 +94,7 @@ class MediaRouterMojoImpl : public MediaRouter,
 
  private:
   friend class MediaRouterFactory;
+  friend class MediaRouterMojoExtensionTest;
   friend class MediaRouterMojoTest;
 
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest,
@@ -124,7 +128,7 @@ class MediaRouterMojoImpl : public MediaRouter,
   void ExecutePendingRequests();
 
   // MediaRouter implementation.
-  void RegisterMediaSinksObserver(MediaSinksObserver* observer) override;
+  bool RegisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void UnregisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void RegisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
   void UnregisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
@@ -155,7 +159,6 @@ class MediaRouterMojoImpl : public MediaRouter,
                                   const SendRouteMessageCallback& callback);
   void DoListenForRouteMessages(const MediaRoute::Id& route_id);
   void DoStopListeningForRouteMessages(const MediaRoute::Id& route_id);
-  void DoClearIssue(const Issue::Id& issue_id);
   void DoOnPresentationSessionDetached(const MediaRoute::Id& route_id);
   void DoStartObservingMediaSinks(const MediaSource::Id& source_id);
   void DoStopObservingMediaSinks(const MediaSource::Id& source_id);

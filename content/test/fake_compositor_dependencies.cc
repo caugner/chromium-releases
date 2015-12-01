@@ -42,10 +42,6 @@ bool FakeCompositorDependencies::IsZeroCopyEnabled() {
   return true;
 }
 
-bool FakeCompositorDependencies::IsOneCopyEnabled() {
-  return false;
-}
-
 bool FakeCompositorDependencies::IsPersistentGpuMemoryBufferEnabled() {
   return false;
 }
@@ -98,7 +94,7 @@ cc::TaskGraphRunner* FakeCompositorDependencies::GetTaskGraphRunner() {
   return &task_graph_runner_;
 }
 
-bool FakeCompositorDependencies::IsGatherPixelRefsEnabled() {
+bool FakeCompositorDependencies::AreImageDecodeTasksEnabled() {
   return false;
 }
 

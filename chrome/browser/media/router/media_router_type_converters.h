@@ -21,18 +21,17 @@ namespace mojo {
 // and vice versa.
 
 // MediaSink conversion.
+media_router::MediaSink::IconType SinkIconTypeFromMojo(
+    media_router::interfaces::MediaSink::IconType type);
+
+media_router::interfaces::MediaSink::IconType SinkIconTypeToMojo(
+    media_router::MediaSink::IconType type);
+
 template <>
 struct TypeConverter<media_router::MediaSink,
                      media_router::interfaces::MediaSinkPtr> {
   static media_router::MediaSink Convert(
       const media_router::interfaces::MediaSinkPtr& input);
-};
-
-template <>
-struct TypeConverter<media_router::interfaces::MediaSinkPtr,
-                     media_router::MediaSink> {
-  static media_router::interfaces::MediaSinkPtr Convert(
-      const media_router::MediaSink& input);
 };
 
 // MediaRoute conversion.
@@ -48,13 +47,6 @@ struct TypeConverter<scoped_ptr<media_router::MediaRoute>,
                      media_router::interfaces::MediaRoutePtr> {
   static scoped_ptr<media_router::MediaRoute> Convert(
       const media_router::interfaces::MediaRoutePtr& input);
-};
-
-template <>
-struct TypeConverter<media_router::interfaces::MediaRoutePtr,
-                     media_router::MediaRoute> {
-  static media_router::interfaces::MediaRoutePtr Convert(
-      const media_router::MediaRoute& input);
 };
 
 // Issue conversion.

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_observer.h"
@@ -276,7 +277,7 @@ class WebstoreInstaller : public content::NotificationObserver,
   // Used to periodically update the extension's download status. This will
   // trigger at least every second, though sometimes more frequently (depending
   // on number of modules, etc).
-  base::OneShotTimer<WebstoreInstaller> download_progress_timer_;
+  base::OneShotTimer download_progress_timer_;
   scoped_ptr<Approval> approval_;
   GURL download_url_;
   scoped_refptr<CrxInstaller> crx_installer_;

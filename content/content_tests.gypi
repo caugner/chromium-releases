@@ -192,6 +192,7 @@
       'browser/accessibility/dump_accessibility_tree_browsertest.cc',
       'browser/accessibility/site_per_process_accessibility_browsertest.cc',
       'browser/accessibility/snapshot_ax_tree_browsertest.cc',
+      'browser/accessibility/touch_accessibility_aura_browsertest.cc',
       'browser/background_sync/background_sync_browsertest.cc',
       'browser/battery_status/battery_monitor_impl_browsertest.cc',
       'browser/battery_status/battery_monitor_integration_browsertest.cc',
@@ -223,6 +224,7 @@
       'browser/indexed_db/mock_browsertest_indexed_db_class_factory.cc',
       'browser/indexed_db/mock_browsertest_indexed_db_class_factory.h',
       'browser/loader/resource_dispatcher_host_browsertest.cc',
+      'browser/loader/async_resource_handler_browsertest.cc',
       'browser/manifest/manifest_browsertest.cc',
       'browser/media/android/media_session_browsertest.cc',
       'browser/media/encrypted_media_browsertest.cc',
@@ -230,6 +232,7 @@
       'browser/media/media_browsertest.h',
       'browser/media/media_canplaytype_browsertest.cc',
       'browser/media/media_source_browsertest.cc',
+      'browser/memory/memory_pressure_controller_browsertest.cc',
       'browser/message_port_provider_browsertest.cc',
       'browser/mojo_shell_browsertest.cc',
       'browser/net_info_browsertest.cc',
@@ -240,6 +243,7 @@
       'browser/renderer_host/render_process_host_browsertest.cc',
       'browser/renderer_host/render_view_host_browsertest.cc',
       'browser/renderer_host/render_widget_host_view_browsertest.cc',
+      'browser/resource_loading_browsertest.cc',
       'browser/screen_orientation/screen_orientation_browsertest.cc',
       'browser/security_exploit_browsertest.cc',
       'browser/service_worker/service_worker_browsertest.cc',
@@ -248,6 +252,7 @@
       'browser/site_per_process_browsertest.cc',
       'browser/site_per_process_browsertest.h',
       'browser/tracing/background_tracing_manager_browsertest.cc',
+      'browser/tracing/memory_tracing_browsertest.cc',
       'browser/tracing/tracing_controller_browsertest.cc',
       'browser/web_contents/opened_by_dom_browsertest.cc',
       'browser/web_contents/web_contents_impl_browsertest.cc',
@@ -280,7 +285,7 @@
       'shell/android/browsertests_apk/content_browser_tests_jni_onload.cc',
     ],
     'content_browsertests_webrtc_sources': [
-      'browser/media/webrtc_aecdump_browsertest.cc',
+      'browser/media/webrtc_audio_debug_recordings_browsertest.cc',
       'browser/media/webrtc_browsertest.cc',
       'browser/media/webrtc_getusermedia_browsertest.cc',
       'browser/media/webrtc_internals_browsertest.cc',
@@ -381,6 +386,7 @@
       'browser/download/file_metadata_unittest_linux.cc',
       'browser/download/rate_estimator_unittest.cc',
       'browser/download/save_package_unittest.cc',
+      'browser/fileapi/blob_reader_unittest.cc',
       'browser/fileapi/blob_storage_context_unittest.cc',
       'browser/fileapi/blob_url_request_job_unittest.cc',
       'browser/fileapi/copy_or_move_file_validator_unittest.cc',
@@ -477,7 +483,7 @@
       'browser/loader/temporary_file_stream_unittest.cc',
       'browser/loader/upload_data_stream_builder_unittest.cc',
       'browser/mach_broker_mac_unittest.cc',
-      'browser/media/audio_stream_monitor_unittest.cc',
+      'browser/media/android/media_session_uma_helper_unittest.cc',
       'browser/media/capture/audio_mirroring_manager_unittest.cc',
       'browser/media/capture/web_contents_audio_input_stream_unittest.cc',
       'browser/media/capture/web_contents_video_capture_device_unittest.cc',
@@ -524,9 +530,12 @@
       'browser/renderer_host/input/touch_action_filter_unittest.cc',
       'browser/renderer_host/input/touch_emulator_unittest.cc',
       'browser/renderer_host/input/touch_event_queue_unittest.cc',
+      'browser/renderer_host/input/web_input_event_builders_mac_unittest.mm',
       'browser/renderer_host/input/web_input_event_unittest.cc',
       'browser/renderer_host/input/web_input_event_util_unittest.cc',
       'browser/renderer_host/media/audio_input_device_manager_unittest.cc',
+      'browser/renderer_host/media/audio_input_sync_writer_unittest.cc',
+      'browser/renderer_host/media/audio_output_device_enumerator_unittest.cc',
       'browser/renderer_host/media/audio_renderer_host_unittest.cc',
       'browser/renderer_host/media/media_stream_dispatcher_host_unittest.cc',
       'browser/renderer_host/media/media_stream_manager_unittest.cc',
@@ -595,6 +604,8 @@
       'child/blob_storage/blob_consolidation_unittest.cc',
       'child/fileapi/webfilewriter_base_unittest.cc',
       'child/indexed_db/indexed_db_dispatcher_unittest.cc',
+      'child/indexed_db/mock_webidbcallbacks.cc',
+      'child/indexed_db/mock_webidbcallbacks.h',
       'child/indexed_db/webidbcursor_impl_unittest.cc',
       'child/multipart_response_delegate_unittest.cc',
       'child/notifications/notification_data_conversions_unittest.cc',
@@ -622,7 +633,11 @@
       'common/dom_storage/dom_storage_map_unittest.cc',
       'common/dwrite_font_platform_win_unittest.cc',
       'common/fileapi/file_system_util_unittest.cc',
+      'common/font_warmup_win_unittest.cc',
       'common/gpu/client/gpu_memory_buffer_impl_unittest.cc',
+      'common/gpu/gpu_channel_test_common.cc',
+      'common/gpu/gpu_channel_test_common.h',
+      'common/gpu/gpu_channel_unittest.cc',
       'common/gpu/gpu_channel_manager_unittest.cc',
       'common/gpu/gpu_memory_buffer_factory_unittest.cc',
       'common/gpu/gpu_memory_manager_unittest.cc',
@@ -667,6 +682,7 @@
       'renderer/input/input_event_filter_unittest.cc',
       'renderer/input/input_handler_proxy_unittest.cc',
       'renderer/input/input_scroll_elasticity_controller_unittest.cc',
+      'renderer/peripheral_content_heuristic_unittest.cc',
       'renderer/manifest/manifest_parser_unittest.cc',
       'renderer/media/android/media_info_loader_unittest.cc',
       'renderer/media/audio_message_filter_unittest.cc',
@@ -696,6 +712,7 @@
       'browser/speech/google_streaming_remote_engine_unittest.cc',
       'browser/speech/speech_recognizer_impl_unittest.cc',
     ],
+    # Put WebRTC-related sources in the plugin+WebRTC section below.
     'content_unittests_plugins_sources': [
       'browser/plugin_loader_posix_unittest.cc',
       'browser/renderer_host/pepper/browser_ppapi_host_test.cc',
@@ -705,7 +722,6 @@
       'browser/renderer_host/pepper/pepper_printing_host_unittest.cc',
       'browser/renderer_host/pepper/quota_reservation_unittest.cc',
       'child/npapi/plugin_lib_unittest.cc',
-      'renderer/media/webrtc/video_destination_handler_unittest.cc',
       'renderer/npapi/webplugin_impl_unittest.cc',
       'renderer/pepper/event_conversion_unittest.cc',
       'renderer/pepper/host_var_tracker_unittest.cc',
@@ -714,6 +730,7 @@
       'renderer/pepper/plugin_instance_throttler_impl_unittest.cc',
       'renderer/pepper/v8_var_converter_unittest.cc',
     ],
+    # WebRTC-specific sources. Put WebRTC plugin-related stuff further below.
     'content_unittests_webrtc_sources': [
       'browser/media/webrtc_internals_unittest.cc',
       'browser/renderer_host/media/webrtc_identity_service_host_unittest.cc',
@@ -723,10 +740,12 @@
       'browser/renderer_host/p2p/socket_host_test_utils.h',
       'browser/renderer_host/p2p/socket_host_udp_unittest.cc',
       'browser/renderer_host/p2p/socket_host_unittest.cc',
+      'renderer/media/media_recorder_handler_unittest.cc',
       'renderer/media/media_stream_audio_processor_unittest.cc',
       'renderer/media/media_stream_constraints_util_unittest.cc',
       'renderer/media/media_stream_dispatcher_unittest.cc',
-      'renderer/media/media_stream_video_capture_source_unittest.cc',
+      'renderer/media/media_stream_video_capturer_source_unittest.cc',
+      'renderer/media/media_stream_video_renderer_sink_unittest.cc',
       'renderer/media/media_stream_video_source_unittest.cc',
       'renderer/media/media_stream_video_track_unittest.cc',
       'renderer/media/mock_media_constraint_factory.cc',
@@ -741,7 +760,7 @@
       'renderer/media/rtc_video_decoder_unittest.cc',
       'renderer/media/speech_recognition_audio_sink_unittest.cc',
       'renderer/media/user_media_client_impl_unittest.cc',
-      'renderer/media/video_source_handler_unittest.cc',
+      'renderer/media/video_track_recorder_unittest.cc',
       'renderer/media/webrtc/media_stream_remote_video_source_unittest.cc',
       'renderer/media/webrtc/media_stream_track_metrics_unittest.cc',
       'renderer/media/webrtc/peer_connection_dependency_factory_unittest.cc',
@@ -755,7 +774,12 @@
       'renderer/media/webrtc_local_audio_source_provider_unittest.cc',
       'renderer/media/webrtc_local_audio_track_unittest.cc',
       'renderer/media/webrtc_uma_histograms_unittest.cc',
+      'renderer/p2p/filtering_network_manager_unittest.cc',
       'renderer/p2p/ipc_network_manager_unittest.cc',
+    ],
+    'content_unittests_plugin_webrtc_sources': [
+      'renderer/media/pepper_to_video_track_adapter_unittest.cc',
+      'renderer/media/video_track_to_pepper_adapter_unittest.cc',
     ],
     'content_unittests_android_sources': [
       'browser/android/java/gin_java_method_invocation_helper_unittest.cc',
@@ -970,7 +994,7 @@
           ],
           'dependencies': [
             '../ui/compositor/compositor.gyp:compositor',
-            '../third_party/libvpx/libvpx.gyp:libvpx',
+            '../third_party/libvpx_new/libvpx.gyp:libvpx_new',
           ],
         }],
         ['OS=="android"', {
@@ -993,6 +1017,7 @@
       'type': '<(gtest_target_type)',
       'dependencies': [
         'browser/background_sync/background_sync_proto.gyp:background_sync_proto',
+        'browser/cache_storage/cache_storage_proto.gyp:cache_storage_proto',
         'browser/notifications/notification_proto.gyp:notification_proto',
         'browser/service_worker/service_worker_proto.gyp:service_worker_proto',
         'browser/speech/proto/speech_proto.gyp:speech_proto',
@@ -1087,10 +1112,9 @@
             '../third_party/libjingle/libjingle.gyp:libpeerconnection',
             '../third_party/webrtc/modules/modules.gyp:video_capture_module',
           ]
-        }, {
-          'sources!': [
-            'renderer/media/webrtc/video_destination_handler_unittest.cc',
-          ],
+        }],
+        ['enable_webrtc==1 and enable_plugins==1', {
+          'sources': [ '<@(content_unittests_plugin_webrtc_sources)' ],
         }],
         ['enable_webrtc==1 and (OS=="linux" or OS=="mac" or OS=="win")', {
           'sources': [
@@ -1160,16 +1184,22 @@
             'browser/geolocation/network_location_provider_unittest.cc',
             'browser/geolocation/wifi_data_provider_common_unittest.cc',
             'browser/media/audio_stream_monitor_unittest.cc',
+            'browser/power_usage_monitor_impl_unittest.cc',
             'browser/renderer_host/begin_frame_observer_proxy_unittest.cc',
             'browser/webui/url_data_manager_backend_unittest.cc',
+            'renderer/media/media_recorder_handler_unittest.cc',
+            'renderer/media/video_track_recorder_unittest.cc',
           ],
           'dependencies': [
             '../testing/android/native_test.gyp:native_test_native_code',
           ],
+          'dependencies!': [
+            '../device/battery/battery.gyp:device_battery',
+          ],
         }],
         ['OS != "android" and OS != "ios"', {
           'dependencies': [
-            '../third_party/libvpx/libvpx.gyp:libvpx',
+            '../third_party/libvpx_new/libvpx.gyp:libvpx_new',
           ],
         }],
         ['use_aura!=1 and OS!="android"', {
@@ -1193,7 +1223,7 @@
             '../ui/ozone/ozone.gyp:ozone_base',
           ],
         }],
-        ['OS == "mac" and use_openssl==1', {
+        ['OS == "mac"', {
           'dependencies': [
             '../third_party/boringssl/boringssl.gyp:boringssl',
           ],
@@ -1499,6 +1529,9 @@
                 'content_shell_lib',
                 '../testing/android/native_test.gyp:native_test_support',
               ],
+              'dependencies!': [
+                '../device/battery/battery.gyp:device_battery',
+              ],
             }],
             ['OS=="mac"', {
               'dependencies': [
@@ -1506,6 +1539,11 @@
               ],
               'sources': [
                 'renderer/external_popup_menu_browsertest.cc',
+              ],
+            }],
+            ['chromecast==1', {
+              'defines': [
+                'ENABLE_HEVC_DEMUXING',
               ],
             }],
             ['use_aura==1 or toolkit_views==1', {
@@ -1852,10 +1890,6 @@
                   '<(PRODUCT_DIR)/content_unittests_apk/assets/natives_blob.bin',
                   '<(PRODUCT_DIR)/content_unittests_apk/assets/snapshot_blob.bin',
                 ],
-                'inputs': [
-                  '<(PRODUCT_DIR)/natives_blob.bin',
-                  '<(PRODUCT_DIR)/snapshot_blob.bin',
-                ],
               }],
             ],
           },
@@ -1919,6 +1953,11 @@
                   '<(PRODUCT_DIR)/snapshot_blob.bin',
                 ],
               }],
+              ['enable_plugins==1', {
+                'additional_bundled_libs': [
+                  '<(PRODUCT_DIR)/libppapi_tests.so',
+                ],
+              }],
             ],
           },
           'includes': [ '../build/apk_browsertest.gypi' ],
@@ -1951,7 +1990,7 @@
           'target_name': 'chromium_linker_test_apk',
           'type': 'none',
           'conditions': [
-            ['target_arch != "x64" and target_arch != "arm64"', {
+            ['target_arch != "x64"', {
               'dependencies': [
                 'chromium_android_linker_test',
                 'content.gyp:content_icudata',
@@ -1999,6 +2038,7 @@
             # Required to include "content/public/browser/android/compositor.h"
             # in chromium_linker_test_android.cc :-(
             '../skia/skia.gyp:skia',
+            '../third_party/re2/re2.gyp:re2',
           ],
           'sources': [
             'shell/android/linker_test_apk/chromium_linker_test_android.cc',

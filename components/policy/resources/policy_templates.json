@@ -123,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 306
+#   For your editing convenience: highest ID currently used: 307
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -1012,16 +1012,19 @@
           },
           'example_value': True,
           'id': 16,
-          'caption': '''Enable the password manager''',
-          'desc': '''Enables saving passwords and using saved passwords in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+          'caption': '''Enable saving passwords to the password manager''',
+          'desc': '''
+          If this setting is enabled, users can have <ph
+          name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> memorize passwords
+          and provide them automatically the next time they log in to a site.
 
-          If you enable this setting, users can have <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> memorize passwords and provide them automatically the next time they log in to a site.
+          If this settings is disabled, users cannot save new passwords but they
+          may still use passwords that have been saved previously.
 
-          If you disable this setting, users are not able to save passwords or use already saved passwords.
-
-          If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
-
-          If this policy is left not set, this will be enabled but the user will be able to change it.''',
+          If this policy is enabled or disabled, users cannot change or override
+          it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. If this
+          policy is unset, password saving is allowed (but can be turned off by
+          the user).''',
         },
         {
           'name': 'PasswordManagerAllowShowPasswords',
@@ -1840,29 +1843,58 @@
             'dynamic_refresh': True,
             'per_profile': True,
           },
-          'example_value': ['lcncmkcnkcdbbanbjakcencbaoegdjlp;https://clients2.google.com/service/update2/crx'],
+          'example_value': ['gbchcmhmhahfdphkhkmpfmihenigjmpp;https://clients2.google.com/service/update2/crx'],
           'id': 34,
-          'caption': '''Configure the list of force-installed extensions''',
-          'desc': '''Allows you to specify a list of extensions that will be installed silently, without user interaction.
+          'caption': '''Configure the list of force-installed apps and extensions''',
+          'desc': '''
+          Specifies a list of apps and extensions that are installed silently,
+          without user interaction, and which cannot be uninstalled by the
+          user. All permissions requested by the apps/extensions are granted
+          implicitly, without user interaction, including any additional
+          permissions requested by future versions of the app/extension.
+          Furthermore, permissions are granted for the
+          enterprise.deviceAttributes and enterprise.platformKeys extension
+          APIs. (These two APIs are not available to apps/extensions that are
+          not force-installed.)
+
+          This policy takes precedence over a potentially conflicting
+          ExtensionsInstallBlacklist policy. If an app or extension that
+          previously had been force-installed is removed from this list, it is
+          automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google
+          Chrome</ex></ph>.
 
           For Windows instances that are not joined to an Active Directory
-          domain, forced installation is limited to extensions listed in the
-          Chrome Web Store.
+          domain, forced installation is limited to apps and extensions listed
+          in the Chrome Web Store.
 
-          Each item of the list is a string that contains an extension ID and an update URL delimited by a semicolon (<ph name="SEMICOLON">;</ph>). The extension ID is the 32-letter string found e.g. on <ph name="CHROME_EXTENSIONS_LINK">chrome://extensions</ph> when in developer mode. The update URL should point to an Update Manifest XML document as described at <ph name="LINK_TO_EXTENSION_DOC1">https://developer.chrome.com/extensions/autoupdate</ph>. Note that the update URL set in this policy is only used for the initial installation; subsequent updates of the extension will use the update URL indicated in the extension's manifest.
+          Note that the source code of any extension may be altered by users via
+          Developer Tools (potentially rendering the extension
+          dysfunctional). If this is a concern, the DeveloperToolsDisabled
+          policy should be set.
 
-          For each item, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retrieve the extension specified by the extension ID from the update service at the specified update URL and silently install it.
+          Each list item of the policy is a string that contains an extension ID
+          and an "update" URL separated by a semicolon (<ph
+          name="SEMICOLON">;</ph>). The extension ID is the 32-letter string
+          found e.g. on <ph
+          name="CHROME_EXTENSIONS_LINK">chrome://extensions</ph> when in
+          developer mode. The "update" URL should point to an Update Manifest
+          XML document as described at <ph
+          name="LINK_TO_EXTENSION_DOC1">https://developer.chrome.com/extensions/autoupdate</ph>. Note
+          that the "update" URL set in this policy is only used for the initial
+          installation; subsequent updates of the extension employ the update
+          URL indicated in the extension's manifest.
 
-          For example, <ph name="EXTENSION_POLICY_EXAMPLE">lcncmkcnkcdbbanbjakcencbaoegdjlp;https://clients2.google.com/service/update2/crx</ph> installs the <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME">Google SSL Web Search</ph> extension from the standard Chrome Web Store update URL. For more information about hosting extensions, see: <ph name="LINK_TO_EXTENSION_DOC2">https://developer.chrome.com/extensions/hosting</ph>.
+          For example, <ph
+          name="EXTENSION_POLICY_EXAMPLE">gbchcmhmhahfdphkhkmpfmihenigjmpp;https://clients2.google.com/service/update2/crx</ph>
+          installs the <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME">Chrome
+          Remote Desktop</ph> app from the standard Chrome Web Store "update"
+          URL. For more information about hosting extensions, see: <ph
+          name="LINK_TO_EXTENSION_DOC2">https://developer.chrome.com/extensions/hosting</ph>.
 
-          Users will be unable to uninstall extensions that are specified by this policy. If you remove an extension from this list, then it will be automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Extensions specified in this list are also automatically whitelisted for installation; the ExtensionsInstallBlacklist does not affect them.
-
-          Note that the source code of any extension may be altered (potentially
-          rendering the extension dysfunctional) by using Developer Tools. If
-          this is a concern, the DeveloperToolsDisabled policy should be set.
-
-          If this policy is left not set the user can uninstall any extension in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
-          'label': '''Extension IDs and update URLs to be silently installed''',
+          If this policy is left not set, no apps or extensions are installed
+          automatically and the user can uninstall any app or extension in <ph
+          name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+          'label': '''Extension/App IDs and update URLs to be silently installed''',
         },
         {
           'name': 'ExtensionInstallSources',
@@ -4081,17 +4113,17 @@
       'name': 'DisableSSLRecordSplitting',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:18-', 'chrome_os:18-'],
+      'supported_on': ['chrome.*:18-46', 'chrome_os:18-46'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': False,
       },
       'example_value': True,
       'id': 118,
-      'caption': '''Disable SSL record splitting''',
-      'desc': '''Specifies whether SSL record splitting should be disabled. Record splitting is a workaround for a weakness in SSL 3.0 and TLS 1.0 but can cause compatibility issues with some HTTPS servers and proxies.
+      'caption': '''Disable TLS False Start''',
+      'desc': '''Specifies whether the TLS False Start optimization should be disabled. For historical reasons, this policy is named DisableSSLRecordSplitting.
 
-      If the policy is not set, or is set to false, then record splitting will be used on SSL/TLS connections which use CBC ciphersuites.''',
+      If the policy is not set, or is set to false, then TLS False Start will be enabled. If it is set to true, TLS False Start will be disabled.''',
     },
     {
       'name': 'EnableOnlineRevocationChecks',
@@ -6918,7 +6950,14 @@
       'caption': '''Managed Bookmarks''',
       'desc': '''Configures a list of managed bookmarks.
 
-      The policy is a list of bookmarks, and each bookmark is a dictionary containing the bookmark "name" and the target "url". A bookmark can also be configured as a folder. In that case, define the folder "name" but don't define an "url"; instead, define the folder contents as another list of bookmarks under the "children" key. Chrome will amend incomplete URLs as if they were submitted via the Omnibox. For example, "google.com" becomes "https://google.com/".
+      The policy consists of a list of bookmarks whereas each bookmark is a
+      dictionary containing the keys "name" and "url" which hold the bookmark's
+      name and its target. A subfolder may be configured by defining a bookmark
+      without an "url" key but with an additional "children" key which itself
+      contains a list of bookmarks as defined above (some of which may be
+      folders again). <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>
+      amends incomplete URLs as if they were submitted via the Omnibox, for
+      example "google.com" becomes "https://google.com/".
 
       These bookmarks are placed in a Managed bookmarks folder that can't be modified by the user, but the user can choose to hide it from the bookmark bar. Managed bookmarks are not synced to the user account and can't be modified by extensions.''',
     },
@@ -7416,17 +7455,17 @@
       },
       'example_value': {
         'extension1': {
-          'allowCorporateKeyUsage': 'true'
+          'allowCorporateKeyUsage': True
         },
         'extension2': {
-          'allowCorporateKeyUsage': 'false'
+          'allowCorporateKeyUsage': False
         }
       },
       'id': 302,
       'caption': 'Key Permissions',
       'desc': '''Grants access to corporate keys to extensions.
 
-      Keys are designated for corporate usage if they're generated using the chrome.platformKeys API on a managed account. Keys imported or generated in another way are not designated for corporate usage.
+      Keys are designated for corporate usage if they're generated using the chrome.enterprise.platformKeys API on a managed account. Keys imported or generated in another way are not designated for corporate usage.
 
       Access to keys designated for corporate usage is solely controlled by this policy. The user can neither grant nor withdraw access to corporate keys to or from extensions.
 
@@ -7469,6 +7508,27 @@
       If this policy is set to true or left unset, hardware acceleration will be enabled unless a certain GPU feature is blacklisted.
 
       If this policy is set to false, hardware acceleration will be disabled.''',
+    },
+    {
+      'name': 'UnifiedDesktopEnabledByDefault',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:47-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 307,
+      'caption': '''Make Unified Desktop available and turn on by default.''',
+      'desc': '''If this policy is set to true, Unified Desktop is allowed and
+      enabled by default, which allows applications to span multiple displays.
+      The user may disable Unified Desktop for individual displays by unchecking
+      it in the display settings.
+
+      If this policy is set to false or unset, Unified Desktop will be
+      disabled. In this case, the user cannot enable the feature.''',
     },
   ],
   'messages': {

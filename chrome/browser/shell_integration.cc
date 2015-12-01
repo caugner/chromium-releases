@@ -31,6 +31,30 @@
 
 using content::BrowserThread;
 
+namespace {
+
+const struct ShellIntegration::AppModeInfo* gAppModeInfo = nullptr;
+
+}  // namespace
+
+#if !defined(OS_WIN)
+// static
+bool ShellIntegration::SetAsDefaultBrowserInteractive() {
+  return false;
+}
+
+// static
+bool ShellIntegration::IsSetAsDefaultAsynchronous() {
+  return false;
+}
+
+// static
+bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
+    const std::string& protocol) {
+  return false;
+}
+#endif  // !defined(OS_WIN)
+
 // static
 ShellIntegration::DefaultWebClientSetPermission
     ShellIntegration::CanSetAsDefaultProtocolClient() {
@@ -43,7 +67,12 @@ ShellIntegration::DefaultWebClientSetPermission
                                                   : permission;
 }
 
-static const struct ShellIntegration::AppModeInfo* gAppModeInfo = NULL;
+#if !defined(OS_WIN)
+// static
+bool ShellIntegration::IsElevationNeededForSettingDefaultProtocolClient() {
+  return false;
+}
+#endif  // !defined(OS_WIN)
 
 // static
 void ShellIntegration::SetAppModeInfo(const struct AppModeInfo* info) {
@@ -118,35 +147,16 @@ void ShellIntegration::AppendProfileArgs(const base::FilePath& profile_path,
 }
 
 #if !defined(OS_WIN)
-
 base::string16 ShellIntegration::GetAppShortcutsSubdirName() {
   if (chrome::GetChannel() == version_info::Channel::CANARY)
     return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY);
   return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME);
 }
-
-// static
-bool ShellIntegration::SetAsDefaultBrowserInteractive() {
-  return false;
-}
-
-// static
-bool ShellIntegration::IsSetAsDefaultAsynchronous() {
-  return false;
-}
-
-// static
-bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
-    const std::string& protocol) {
-  return false;
-}
-
-// static
-bool ShellIntegration::IsElevationNeededForSettingDefaultProtocolClient() {
-  return false;
-}
-
 #endif  // !defined(OS_WIN)
+
+///////////////////////////////////////////////////////////////////////////////
+// ShellIntegration::DefaultWebClientObserver
+//
 
 bool ShellIntegration::DefaultWebClientObserver::IsOwnedByWorker() {
   return false;
@@ -206,7 +216,7 @@ void ShellIntegration::DefaultWebClientWorker::StartSetAsDefault() {
 void ShellIntegration::DefaultWebClientWorker::ObserverDestroyed() {
   // Our associated view has gone away, so we shouldn't call back to it if
   // our worker thread returns after the view is dead.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   observer_ = nullptr;
 
   if (set_as_default_initialized_) {
@@ -225,7 +235,7 @@ ShellIntegration::DefaultWebClientWorker::~DefaultWebClientWorker() {}
 
 void ShellIntegration::DefaultWebClientWorker::OnCheckIsDefaultComplete(
     DefaultWebClientState state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   UpdateUI(state);
   // The worker has finished everything it needs to do, so free the observer
   // if we own it.
@@ -237,7 +247,7 @@ void ShellIntegration::DefaultWebClientWorker::OnCheckIsDefaultComplete(
 
 void ShellIntegration::DefaultWebClientWorker::OnSetAsDefaultAttemptComplete(
     AttemptResult result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Hold on to a reference because if this was called via the default browser
   // callback in StartupBrowserCreator, clearing the callback in
   // FinalizeSetAsDefault would otherwise remove the last reference and delete

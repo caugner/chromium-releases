@@ -101,6 +101,7 @@
 //<include src="dialog_type.js">
 //<include src="directory_contents.js">
 //<include src="directory_model.js">
+//<include src="directory_tree_naming_controller.js">
 //<include src="empty_folder_controller.js">
 //<include src="file_manager.js">
 //<include src="file_manager_commands.js">
@@ -137,7 +138,7 @@
 //<include src="providers_model.js">
 //<include src="ui/banners.js" >
 //<include src="ui/conflict_dialog.js">
-//<include src="ui/default_action_dialog.js">
+//<include src="ui/default_task_dialog.js">
 //<include src="ui/dialog_footer.js">
 //<include src="ui/directory_tree.js">
 //<include src="ui/drag_selector.js">
@@ -148,6 +149,7 @@
 //<include src="ui/file_list_selection_model.js">
 //<include src="ui/file_table.js">
 //<include src="ui/file_table_list.js">
+//<include src="ui/files_menu.js">
 //<include src="ui/gear_menu.js">
 //<include src="ui/list_container.js">
 //<include src="ui/location_line.js">

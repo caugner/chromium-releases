@@ -80,7 +80,6 @@ void SetContentCommandLineFlags(bool single_process,
   if (base::SysInfo::IsLowEndDevice())
     parsed_command_line->AppendSwitch(switches::kInProcessGPU);
 
-  parsed_command_line->AppendSwitch(switches::kEnableViewportMeta);
   parsed_command_line->AppendSwitch(
       switches::kMainFrameResizesAreOrientationChanges);
 
@@ -89,8 +88,6 @@ void SetContentCommandLineFlags(bool single_process,
       cc::switches::kDisableCompositedAntialiasing);
 
   parsed_command_line->AppendSwitch(switches::kUIPrioritizeInGpuProcess);
-
-  parsed_command_line->AppendSwitch(switches::kEnableDelegatedRenderer);
 
   if (!plugin_descriptor.empty()) {
     parsed_command_line->AppendSwitchNative(

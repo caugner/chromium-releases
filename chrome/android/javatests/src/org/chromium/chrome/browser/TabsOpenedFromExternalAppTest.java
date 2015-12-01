@@ -495,7 +495,7 @@ public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase 
                 return getActivity().getTabModelSelector().getTotalTabCount() == 1;
             }
         }));
-        ApplicationTestUtils.assertWaitForPageScaleFactorMatch(getActivity(), 0.5f);
+        ApplicationTestUtils.assertWaitForPageScaleFactorMatch(getActivity(), 0.5f, false);
 
         // Long press the center of the page, which should bring up the context menu.
         final TestTabObserver observer = new TestTabObserver();
@@ -507,7 +507,7 @@ public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase 
                 return getActivity().getActivityTab().getContentViewCore().getContainerView();
             }
         });
-        TouchCommon.longPressView(view, view.getWidth() / 2, view.getHeight() / 2);
+        TouchCommon.longPressView(view);
         assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {

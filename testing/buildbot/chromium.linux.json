@@ -1,10 +1,9 @@
 {
   "Android GN": {
     "additional_compile_targets": [
+      "blimp_tests",
       "chrome_public_apk",
       "chrome_public_test_apk",
-      "chrome_shell_apk",
-      "chrome_shell_test_apk",
       "content_shell_apk",
       "mandoline:all"
     ],
@@ -37,9 +36,15 @@
         "test": "mojo_public_environment_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_system_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_utility_unittests"
       },
       {
@@ -63,20 +68,13 @@
       {
         "test": "view_manager_unittests"
       }
-    ],
-    "scripts": [
-      {
-        "name": "gn_check",
-        "script": "gn_check.py"
-      }
     ]
   },
   "Android GN (dbg)": {
     "additional_compile_targets": [
+      "blimp_tests",
       "chrome_public_apk",
       "chrome_public_test_apk",
-      "chrome_shell_apk",
-      "chrome_shell_test_apk",
       "content_shell_apk",
       "content_shell_test_apk",
       "mandoline:all"
@@ -180,6 +178,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "jingle_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "media_blink_unittests"
       },
       {
         "swarming": {
@@ -388,6 +392,9 @@
         "test": "gn_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "google_apis_unittests"
       },
       {
@@ -430,21 +437,39 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "media_blink_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_common_unittests"
       },
       {
         "test": "mojo_public_application_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_bindings_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_environment_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_system_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_utility_unittests"
       },
       {
@@ -458,6 +483,9 @@
       },
       {
         "test": "mojo_system_unittests"
+      },
+      {
+        "test": "mojo_view_manager_lib_unittests"
       },
       {
         "swarming": {
@@ -558,10 +586,6 @@
     ],
     "scripts": [
       {
-        "name": "gn_check",
-        "script": "gn_check.py"
-      },
-      {
         "args": [
           "chrome"
         ],
@@ -607,6 +631,7 @@
       "jingle_unittests",
       "mandoline:all",
       "media_unittests",
+      "media_blink_unittests",
       "net_unittests",
       "ppapi_unittests",
       "printing_unittests",
@@ -630,6 +655,10 @@
     ]
   },
   "Linux Tests": {
+    "additional_compile_targets": [
+      "blimp_tests",
+      "mandoline:all"
+    ],
     "gtest_tests": [
       {
         "swarming": {
@@ -795,6 +824,9 @@
         "test": "gpu_unittests"
       },
       {
+        "test": "html_viewer_unittests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -819,6 +851,12 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "media_blink_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "media_unittests"
       },
       {
@@ -834,6 +872,9 @@
         "test": "mojo_common_unittests"
       },
       {
+        "test": "mojo_public_application_unittests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -846,13 +887,31 @@
         "test": "mojo_public_environment_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_system_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_utility_unittests"
       },
       {
+        "test": "mojo_runner_unittests"
+      },
+      {
+        "test": "mojo_shell_unittests"
+      },
+      {
+        "test": "mojo_surfaces_lib_unittests"
+      },
+      {
         "test": "mojo_system_unittests"
+      },
+      {
+        "test": "mojo_view_manager_lib_unittests"
       },
       {
         "swarming": {
@@ -880,6 +939,9 @@
           "can_use_on_swarming_builders": true
         },
         "test": "remoting_unittests"
+      },
+      {
+        "test": "resource_provider_unittests"
       },
       {
         "swarming": {
@@ -936,6 +998,9 @@
         "test": "url_unittests"
       },
       {
+        "test": "view_manager_unittests"
+      },
+      {
         "test": "views_unittests"
       },
       {
@@ -943,6 +1008,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "wm_unittests"
+      }
+    ],
+    "isolated_scripts": [
+      {
+        "isolate_name": "telemetry_gpu_unittests",
+        "name": "telemetry_gpu_unittests"
       }
     ],
     "scripts": [
@@ -963,20 +1034,24 @@
         "script": "telemetry_unittests.py"
       },
       {
-        "name": "telemetry_gpu_unittests",
-        "script": "telemetry_gpu_unittests.py"
-      },
-      {
         "name": "telemetry_perf_unittests",
         "script": "telemetry_perf_unittests.py"
       },
       {
         "name": "nacl_integration",
         "script": "nacl_integration.py"
+      },
+      {
+        "name": "mojo_apptests",
+        "script": "mojo_apptests.py"
       }
     ]
   },
   "Linux Tests (dbg)(1)": {
+    "additional_compile_targets": [
+      "blimp_tests",
+      "mandoline:all"
+    ],
     "gtest_tests": [
       {
         "swarming": {
@@ -1161,6 +1236,12 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "media_blink_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "media_unittests"
       },
       {
@@ -1188,9 +1269,15 @@
         "test": "mojo_public_environment_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_system_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_utility_unittests"
       },
       {
@@ -1290,14 +1377,16 @@
         "test": "wm_unittests"
       }
     ],
+    "isolated_scripts": [
+      {
+        "isolate_name": "telemetry_gpu_unittests",
+        "name": "telemetry_gpu_unittests"
+      }
+    ],
     "scripts": [
       {
         "name": "telemetry_unittests",
         "script": "telemetry_unittests.py"
-      },
-      {
-        "name": "telemetry_gpu_unittests",
-        "script": "telemetry_gpu_unittests.py"
       },
       {
         "name": "telemetry_perf_unittests",
@@ -1493,6 +1582,12 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "media_blink_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "media_unittests"
       },
       {
@@ -1520,9 +1615,15 @@
         "test": "mojo_public_environment_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_system_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "mojo_public_utility_unittests"
       },
       {

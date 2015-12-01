@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.TabState;
@@ -20,6 +21,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tab.TabUma;
 import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
+import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
@@ -30,8 +32,6 @@ import org.chromium.ui.base.WindowAndroid;
  * A Tab child class with Chrome documents specific functionality.
  */
 public class DocumentTab extends ChromeTab {
-    private static final int DESIRED_ICON_SIZE_DP = 32;
-
     /**
      * Observer class with extra calls specific to Chrome Documents
      */
@@ -43,7 +43,6 @@ public class DocumentTab extends ChromeTab {
         protected void onFaviconReceived(Bitmap image) { }
     }
 
-    private int mDesiredIconSizePx;
     private boolean mDidRestoreState;
 
     // Whether this document tab was constructed from passed-in web contents pointer.
@@ -119,9 +118,6 @@ public class DocumentTab extends ChromeTab {
      */
     private void initialize(String url, WebContents webContents,
             TabContentManager tabContentManager, boolean unfreeze, boolean initiallyHidden) {
-        mDesiredIconSizePx = (int) (DESIRED_ICON_SIZE_DP
-                * mActivity.getResources().getDisplayMetrics().density);
-
         if (!unfreeze && webContents == null) {
             webContents = WarmupManager.getInstance().hasPrerenderedUrl(url)
                     ? WarmupManager.getInstance().takePrerenderedWebContents()
@@ -137,9 +133,6 @@ public class DocumentTab extends ChromeTab {
     public void onFaviconAvailable(Bitmap image) {
         super.onFaviconAvailable(image);
         if (image == null) return;
-        if (image.getWidth() < mDesiredIconSizePx || image.getHeight() < mDesiredIconSizePx) {
-            return;
-        }
         RewindableIterator<TabObserver> observers = getTabObservers();
         while (observers.hasNext()) {
             TabObserver observer = observers.next();
@@ -152,8 +145,11 @@ public class DocumentTab extends ChromeTab {
     /**
      * A web contents delegate for handling opening new windows in Document mode.
      */
-    public class DocumentTabChromeWebContentsDelegateAndroidImpl
-            extends TabChromeWebContentsDelegateAndroidImpl {
+    public class DocumentTabWebContentsDelegateAndroid extends TabWebContentsDelegateAndroid {
+        public DocumentTabWebContentsDelegateAndroid(Tab tab, ChromeActivity activity) {
+            super(tab, activity);
+        }
+
         /**
          * TODO(dfalcantara): Remove this when DocumentActivity.getTabModelSelector()
          *                    can return a TabModelSelector that activateContents() can use.
@@ -165,8 +161,8 @@ public class DocumentTab extends ChromeTab {
     }
 
     @Override
-    protected TabChromeWebContentsDelegateAndroid createWebContentsDelegate() {
-        return new DocumentTabChromeWebContentsDelegateAndroidImpl();
+    protected TabWebContentsDelegateAndroid createWebContentsDelegate() {
+        return new DocumentTabWebContentsDelegateAndroid(this, mActivity);
     }
 
     /**

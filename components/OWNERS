@@ -23,6 +23,11 @@ per-file browsing_data.gypi=mkwst@chromium.org
 per-file browsing_data.gypi=bauerb@chromium.org
 per-file browsing_data.gypi=michaeln@chromium.org
 
+per-file bubble.gypi=groby@chromium.org
+per-file bubble.gypi=hcarmona@chromium.org
+per-file bubble.gypi=msw@chromium.org
+per-file bubble.gypi=rouslan@chromium.org
+
 per-file cdm.gypi=ddorwin@chromium.org
 per-file cdm.gypi=xhwang@chromium.org
 
@@ -62,7 +67,10 @@ per-file data_reduction_proxy*=bengr@chromium.org
 per-file data_reduction_proxy*=marq@chromium.org
 per-file data_reduction_proxy*=bolian@chromium.org
 per-file data_reduction_proxy*=sclittle@chromium.org
-per-file data_reduction_proxy*=jeremyim@chromium.org
+per-file data_reduction_proxy*=megjablon@chromium.org
+
+per-file data_use_measurement*=sclittle@chromium.org
+per-file data_use_measurement*=bengr@chromium.org
 
 per-file devtools_discovery.gyp*=dgozman@chromium.org
 per-file devtools_discovery.gyp*=pfeldman@chromium.org
@@ -74,7 +82,7 @@ per-file network_hints*=jar@chromium.org
 per-file network_hints*=ttuttle@chromium.org
 
 per-file dom_distiller*=bengr@chromium.org
-per-file dom_distiller*=cjhopman@chromium.org
+per-file dom_distiller*=mdjones@chromium.org
 per-file dom_distiller*=nyquist@chromium.org
 
 per-file domain_reliability.gypi=davidben@chromium.org
@@ -107,10 +115,11 @@ per-file favicon*=stevenjb@chromium.org
 per-file feedback.gypi=bsimonnet@chromium.org
 per-file feedback.gypi=zork@chromium.org
 
-per-file gcm*=dimich@chromium.org
-per-file gcm*=jianli@chromium.org
-per-file gcm*=fgorski@chromium.org
-per-file gcm*=zea@chromium.org
+per-file gcm_driver.gypi=dimich@chromium.org
+per-file gcm_driver.gypi=fgorski@chromium.org
+per-file gcm_driver.gypi=jianli@chromium.org
+per-file gcm_driver.gypi=peter@chromium.org
+per-file gcm_driver.gypi=zea@chromium.org
 
 per-file google*=isherman@chromium.org
 per-file google*=pkasting@chromium.org
@@ -128,8 +137,6 @@ per-file infobars.gypi=pkasting@chromium.org
 
 per-file invalidation.gypi=dcheng@chromium.org
 per-file invalidation.gypi=nyquist@chromium.org
-per-file invalidation.gypi=rlarocque@chromium.org
-per-file invalidation.gypi=tim@chromium.org
 per-file invalidation.gypi=pavely@chromium.org
 
 per-file json_schema.gypi=asargent@chromium.org
@@ -140,15 +147,18 @@ per-file json_schema.gypi=mpcomplete@chromium.org
 per-file keyed_service.gypi=erg@chromium.org
 per-file keyed_service.gypi=phajdan.jr@chromium.org
 
-per-file leveldb_proto*=cjhopman@chromium.org
 per-file leveldb_proto*=mathp@chromium.org
+per-file leveldb_proto*=nyquist@chromium.org
 
 per-file login*=alemate@chromium.org
 per-file login*=antrim@chromium.org
-per-file login*=dpolukhin@chromium.org
 per-file login*=dzhioev@chromium.org
 per-file login*=nkostylev@chromium.org
 per-file login*=achuith@chromium.org
+
+per-file memory_pressure*=chrisha@chromium.org
+per-file memory_pressure*=shrike@chromium.org
+per-file memory_pressure*=skuhne@chromium.org
 
 per-file metrics*=asvitkine@chromium.org
 per-file metrics*=mpearson@chromium.org
@@ -164,7 +174,6 @@ per-file nacl*=noelallen@chromium.org
 per-file navigation_interception.gypi=mnaganov@chromium.org
 
 per-file network_time.gypi=zea@chromium.org
-per-file network_time.gypi=haitaol@chromium.org
 
 per-file offline_pages*=dimich@chromium.org
 per-file offline_pages*=fgorski@chromium.org
@@ -181,10 +190,12 @@ per-file onc.gypi=stevenjb@chromium.org
 per-file open_from_clipboard.gypi=jif@chromium.org
 
 per-file ownership.gypi=alemate@chromium.org
-per-file ownership.gypi=dpolukhin@chromium.org
 
 per-file packed_ct_ev_whitelist.gypi=eranm@chromium.org
 per-file packed_ct_ev_whitelist.gypi=rsleevi@chromium.org
+
+per-file page_load_metrics.gypi=rdsmith@chromium.org
+per-file page_load_metrics.gypi=ttuttle@chromium.org
 
 per-file pairing.gypi=achuith@chromium.org
 per-file pairing.gypi=dzhioev@chromium.org
@@ -209,14 +220,12 @@ per-file plugins.gypi=tommycli@chromium.org
 
 per-file precache*=bengr@chromium.org
 per-file precache*=sclittle@chromium.org
-per-file precache*=jeremyim@chromium.org
 
 per-file printing*=alekseys@chromium.org
 per-file printing*=gene@chromium.org
 per-file printing*=thestig@chromium.org
 per-file printing*=vitalybuka@chromium.org
 
-per-file policy*=mnissler@chromium.org
 per-file policy*=bartfab@chromium.org
 per-file policy*=atwilson@chromium.org
 per-file policy*=pneubeck@chromium.org
@@ -226,7 +235,6 @@ per-file proximity_auth*=tbarzic@chromium.org
 per-file proximity_auth*=tengs@chromium.org
 per-file proximity_auth*=xiyuan@chromium.org
 
-per-file proxy_config*=mnissler@chromium.org
 per-file proxy_config*=pneubeck@chromium.org
 per-file proxy_config*=stevenjb@chromium.org
 
@@ -252,7 +260,6 @@ per-file search_provider_logos*=newt@chromium.org
 per-file search_provider_logos*=justincohen@chromium.org
 
 per-file session_manager.gypi=antrim@chromium.org
-per-file session_manager.gypi=dpolukhin@chromium.org
 per-file session_manager.gypi=dzhioev@chromium.org
 per-file session_manager.gypi=nkostylev@chromium.org
 
@@ -260,19 +267,14 @@ per-file sessions.gypi=marja@chromium.org
 per-file sessions.gypi=sky@chromium.org
 
 per-file signin*=atwilson@chromium.org
-per-file signin*=tim@chromium.org
 per-file signin*=rogerta@chromium.org
 
 per-file storage_monitor.gypi=gbillock@chromium.org
 per-file storage_monitor.gypi=thestig@chromium.org
 per-file storage_monitor.gypi=vandebo@chromium.org
 
-per-file sync_driver*=haitaol@chromium.org
-per-file sync_driver*=maniscalco@chromium.org
 per-file sync_driver*=pavely@chromium.org
-per-file sync_driver*=rlarocque@chromium.org
 per-file sync_driver*=stanisc@chromium.org
-per-file sync_driver*=tim@chromium.org
 per-file sync_driver*=zea@chromium.org
 
 per-file timers*=chirantan@chromium.org
@@ -300,7 +302,6 @@ per-file undo_strings.grdp=sky@chromium.org
 per-file undo_strings.grdp=tom.cassiotis@gmail.com
 
 per-file user_manager.gypi=antrim@chromium.org
-per-file user_manager.gypi=dpolukhin@chromium.org
 per-file user_manager.gypi=dzhioev@chromium.org
 per-file user_manager.gypi=nkostylev@chromium.org
 
@@ -308,7 +309,7 @@ per-file url_formatter.gypi=pkasting@chromium.org
 
 per-file user_prefs.gypi=battre@chromium.org
 per-file user_prefs.gypi=bauerb@chromium.org
-per-file user_prefs.gypi=mnissler@chromium.org
+per-file user_prefs.gypi=gab@chromium.org
 per-file user_prefs.gypi=pam@chromium.org
 
 per-file variations.gypi=asvitkine@chromium.org
@@ -331,6 +332,10 @@ per-file web_resource.gypi=asvitkine@chromium.org
 per-file web_resource.gypi=dbeam@chromium.org
 per-file web_resource.gypi=rsesek@chromium.org
 per-file web_resource.gypi=stevet@chromium.org
+
+per-file webusb.gypi=juncai@chromium.org
+per-file webusb.gypi=reillyg@chromium.org
+per-file webusb.gypi=rockot@chromium.org
 
 per-file wifi.gypi=mef@chromium.org
 

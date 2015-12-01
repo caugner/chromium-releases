@@ -62,7 +62,7 @@ Background = function() {
    * @type {ChromeVoxMode}
    * @private
    */
-  this.mode_ = ChromeVoxMode.CLASSIC;
+  this.mode_ = ChromeVoxMode.COMPAT;
 
   /** @type {!ClassicCompatibility} @private */
   this.compat_ = new ClassicCompatibility();
@@ -78,17 +78,22 @@ Background = function() {
    * @type {!Object<EventType, function(Object) : void>}
    */
   this.listeners_ = {
-    alert: this.onEventDefault,
+    alert: this.onAlert,
     focus: this.onFocus,
     hover: this.onEventDefault,
     loadComplete: this.onLoadComplete,
     menuStart: this.onEventDefault,
     menuEnd: this.onEventDefault,
-    menuListValueChanged: this.onEventDefault,
     textChanged: this.onTextOrTextSelectionChanged,
     textSelectionChanged: this.onTextOrTextSelectionChanged,
     valueChanged: this.onValueChanged
   };
+
+  /**
+   * The object that speaks changes to an editable text field.
+   * @type {?cvox.ChromeVoxEditableTextBase}
+   */
+  this.editableTextHandler_ = null;
 
   chrome.automation.getDesktop(this.onGotDesktop);
 
@@ -271,10 +276,10 @@ Background.prototype = {
         predErrorMsg = 'no_previous_visited_link';
         break;
       case 'nextElement':
-        current = current.move(cursors.Unit.NODE, Dir.FORWARD);
+        current = current.move(cursors.Unit.DOM_NODE, Dir.FORWARD);
         break;
       case 'previousElement':
-        current = current.move(cursors.Unit.NODE, Dir.BACKWARD);
+        current = current.move(cursors.Unit.DOM_NODE, Dir.BACKWARD);
         break;
       case 'goToBeginning':
         var node =
@@ -345,7 +350,7 @@ Background.prototype = {
         current = cursors.Range.fromNode(node);
       } else {
         if (predErrorMsg) {
-          cvox.ChromeVox.tts.speak(cvox.ChromeVox.msgs.getMsg(predErrorMsg),
+          cvox.ChromeVox.tts.speak(Msgs.getMsg(predErrorMsg),
                                    cvox.QueueMode.FLUSH);
         }
         return;
@@ -449,26 +454,58 @@ Background.prototype = {
   },
 
   /**
+   * Makes an announcement without changing focus.
+   * @param {Object} evt
+   */
+  onAlert: function(evt) {
+    var node = evt.target;
+    if (!node)
+      return;
+
+    // Don't process nodes inside of web content if ChromeVox Next is inactive.
+    if (node.root.role != RoleType.desktop &&
+        this.mode_ === ChromeVoxMode.CLASSIC) {
+      return;
+    }
+
+    var range = cursors.Range.fromNode(node);
+
+    new Output().withSpeechAndBraille(range, null, evt.type).go();
+  },
+
+  /**
    * Provides all feedback once a focus event fires.
    * @param {Object} evt
    */
   onFocus: function(evt) {
+    // Invalidate any previous editable text handler state.
+    this.editableTextHandler_ = null;
+
     var node = evt.target;
+
+
+    // Discard focus events on embeddedObject nodes.
+    if (node.role == RoleType.embeddedObject)
+      return;
 
     // It almost never makes sense to place focus directly on a rootWebArea.
     if (node.role == RoleType.rootWebArea) {
-      // Try to find a focusable descendant.
-      node = AutomationUtil.findNodePost(node,
-                                         Dir.FORWARD,
-                                         AutomationPredicate.focused) || node;
+      // Discard focus events for root web areas when focus was previously
+      // placed on a descendant.
+      if (this.currentRange_.start.node.root == node)
+        return;
 
-      // Fall back to the first leaf node in the document.
-      if (node.role == RoleType.rootWebArea) {
-        node = AutomationUtil.findNodePost(node,
-                                           Dir.FORWARD,
-                                           AutomationPredicate.leaf);
-      }
+      // Discard focused root nodes without focused state set.
+      if (!node.state.focused)
+        return;
+
+      // Try to find a focusable descendant.
+      node = node.find({state: {focused: true}}) || node;
     }
+
+    if (evt.target.role == RoleType.textField)
+      this.createEditableTextHandlerIfNeeded_(evt.target);
+
     this.onEventDefault({target: node, type: 'focus'});
   },
 
@@ -526,28 +563,23 @@ Background.prototype = {
     if (!evt.target.state.focused)
       return;
 
+    if (evt.target.role != RoleType.textField)
+      return;
+
     if (!this.currentRange_) {
       this.onEventDefault(evt);
       this.currentRange_ = cursors.Range.fromNode(evt.target);
     }
 
+    this.createEditableTextHandlerIfNeeded_(evt.target);
     var textChangeEvent = new cvox.TextChangeEvent(
         evt.target.value,
         evt.target.textSelStart,
         evt.target.textSelEnd,
         true);  // triggered by user
-    if (!this.editableTextHandler ||
-        evt.target != this.currentRange_.start.node) {
-      this.editableTextHandler =
-          new cvox.ChromeVoxEditableTextBase(
-              textChangeEvent.value,
-              textChangeEvent.start,
-              textChangeEvent.end,
-              evt.target.state['protected'],
-              cvox.ChromeVox.tts);
-    }
 
-    this.editableTextHandler.changed(textChangeEvent);
+    this.editableTextHandler_.changed(textChangeEvent);
+
     new Output().withBraille(
             this.currentRange_, null, evt.type)
         .go();
@@ -580,6 +612,9 @@ Background.prototype = {
    * @param {chrome.automation.TreeChange} treeChange
    */
   onTreeChange: function(treeChange) {
+    if (this.mode_ === ChromeVoxMode.CLASSIC)
+      return;
+
     var node = treeChange.target;
     if (!node.containerLiveStatus)
       return;
@@ -631,6 +666,7 @@ Background.prototype = {
    */
   isWhitelistedForCompat_: function(url) {
     return url.indexOf('chrome://md-settings') != -1 ||
+          url.indexOf('chrome://downloads') != -1 ||
           url.indexOf('chrome://oobe/login') != -1 ||
           url.indexOf(
               'https://accounts.google.com/embedded/setup/chromeos') === 0 ||
@@ -685,10 +721,12 @@ Background.prototype = {
     if (mode === ChromeVoxMode.NEXT ||
         mode === ChromeVoxMode.COMPAT ||
         mode === ChromeVoxMode.FORCE_NEXT) {
-      if (!chrome.commands.onCommand.hasListener(this.onGotCommand))
+      if (chrome.commands &&
+          !chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.addListener(this.onGotCommand);
     } else {
-      if (chrome.commands.onCommand.hasListener(this.onGotCommand))
+      if (chrome.commands &&
+          chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.removeListener(this.onGotCommand);
     }
 
@@ -738,6 +776,30 @@ Background.prototype = {
     if (selectionSpan) {
       var start = text.getSpanStart(selectionSpan);
       actionNode.setSelection(position - start, position - start);
+    }
+  },
+
+  /**
+   * Create an editable text handler for the given node if needed.
+   * @param {Object} node
+   */
+  createEditableTextHandlerIfNeeded_: function(node) {
+    if (!this.editableTextHandler_ || node != this.currentRange_.start.node) {
+      var start = node.textSelStart;
+      var end = node.textSelEnd;
+      if (start > end) {
+        var tempOffset = end;
+        end = start;
+        start = tempOffset;
+      }
+
+      this.editableTextHandler_ =
+          new cvox.ChromeVoxEditableTextBase(
+              node.value,
+              start,
+              end,
+              node.state.protected,
+              cvox.ChromeVox.tts);
     }
   }
 };

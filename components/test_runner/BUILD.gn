@@ -56,6 +56,8 @@ component("test_runner") {
     "spell_check_client.h",
     "test_common.cc",
     "test_common.h",
+    "test_info_extractor.cc",
+    "test_info_extractor.h",
     "test_interfaces.cc",
     "test_interfaces.h",
     "test_plugin.cc",
@@ -90,8 +92,10 @@ component("test_runner") {
     "//base:base",
     "//base:i18n",
     "//cc",
+    "//cc/blink",
     "//gin",
     "//gpu",
+    "//net",
     "//skia",
     "//third_party/WebKit/public:blink",
     "//ui/events:dom_keycode_converter",
@@ -179,5 +183,9 @@ if (is_mac || is_win) {
     if (is_mac) {
       libs = [ "AppKit.framework" ]
     }
+
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 }

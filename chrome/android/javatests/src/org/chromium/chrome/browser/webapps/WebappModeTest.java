@@ -107,6 +107,17 @@ public class WebappModeTest extends MultiActivityTestBase {
         ApplicationTestUtils.waitUntilChromeInForeground();
     }
 
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+
+        // Register the webapps so when the data storage is opened, the test doesn't crash. There is
+        // no race condition with the retrival as AsyncTasks are run sequentially on the background
+        // thread.
+        WebappRegistry.registerWebapp(getInstrumentation().getTargetContext(), WEBAPP_1_ID);
+        WebappRegistry.registerWebapp(getInstrumentation().getTargetContext(), WEBAPP_2_ID);
+    }
+
     /**
      * Tests that WebappActivities are started properly.
      */
@@ -187,7 +198,7 @@ public class WebappModeTest extends MultiActivityTestBase {
 
         if (viaActivateContents) {
             // Bring it back via the Tab.
-            activity.getActivityTab().getChromeWebContentsDelegateAndroid().activateContents();
+            activity.getActivityTab().getTabWebContentsDelegateAndroid().activateContents();
         } else {
             // Bring the WebappActivity back via an Intent.
             int webappTabId = activity.getActivityTab().getId();

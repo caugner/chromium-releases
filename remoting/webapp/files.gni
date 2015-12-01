@@ -90,9 +90,11 @@ remoting_webapp_unittests_js_files = [
   "base/js/dns_blackhole_checker_unittest.js",
   "base/js/error_unittest.js",
   "base/js/fallback_signal_strategy_unittest.js",
+  "base/js/host_options_unittest.js",
   "base/js/identity_unittest.js",
   "base/js/ipc_unittest.js",
   "base/js/l10n_unittest.js",
+  "base/js/network_connectivity_detector_unittest.js",
   "base/js/platform_unittest.js",
   "base/js/protocol_extension_manager_unittest.js",
   "base/js/session_logger_unittest.js",
@@ -173,7 +175,6 @@ remoting_webapp_shared_js_client_files = [
   "base/js/credentials_provider.js",
   "base/js/experiments.js",
   "base/js/host_desktop.js",
-  "base/js/smart_reconnector.js",
   "base/js/telemetry_event_writer.js",
   "base/js/xmpp_error_cache.js",
 ]
@@ -190,6 +191,7 @@ remoting_webapp_shared_js_core_files = [
   "base/js/protocol_extension_manager.js",
   "base/js/protocol_extension.js",
   "base/js/error.js",
+  "base/js/network_connectivity_detector.js",
   "base/js/plugin_settings.js",
   "base/js/suspend_detector.js",
   "base/js/typecheck.js",
@@ -201,7 +203,7 @@ remoting_webapp_shared_js_core_files = [
 # Host JavaScript files.
 remoting_webapp_shared_js_host_files = [
   "base/js/host.js",
-  "base/js/host_settings.js",
+  "base/js/host_options.js",
 ]
 
 # Logging and stats JavaScript files.
@@ -284,6 +286,18 @@ remoting_webapp_js_host_control_files = [
   "crd/js/it2me_host_facade.js",
   "crd/js/native_message_host_log_message_handler.js",
   "crd/js/paired_client_manager.js",
+]
+
+# Files for controlling the local it2me host.
+# Included by public_session.html.
+remoting_webapp_js_it2me_host_control_files = [
+  "crd/js/buffered_signal_strategy.js",
+  "crd/js/host_screen.js",
+  "crd/js/host_session.js",
+  "crd/js/host_install_dialog.js",
+  "crd/js/host_installer.js",
+  "crd/js/it2me_host_facade.js",
+  "crd/js/native_message_host_log_message_handler.js",
 ]
 
 # Files for displaying (in the client) info about available hosts.
@@ -387,6 +401,32 @@ remoting_webapp_template_files = [
 ]
 
 #
+# DesktopRemoting public_session.html generation files.
+#
+remoting_webapp_template_public_session =
+    "crd/html/template_public_session.html"
+
+# The shared JavaScript files required by public_session.html.
+remoting_webapp_public_session_html_all_js_files =
+    # Include the core files first as it is required by the other files.
+    # Otherwise, Jscompile will complain.
+    remoting_webapp_shared_js_core_files +
+    remoting_webapp_shared_js_auth_google_files +
+    remoting_webapp_shared_js_client_files +
+    remoting_webapp_shared_js_host_files +
+    remoting_webapp_shared_js_logging_files +
+    remoting_webapp_shared_js_ui_files +
+    remoting_webapp_shared_js_signaling_files +
+    remoting_webapp_js_it2me_host_control_files +
+    [
+      "crd/js/crd_auth_dialog.js",
+      "crd/js/public_session_main.js",
+    ]
+
+# These template files are used to construct public_session.html.
+remoting_webapp_public_session_template_files = [ "crd/html/dialog_host.html" ]
+
+#
 # DesktopRemoting background.html generation files.
 #
 
@@ -419,9 +459,6 @@ remoting_webapp_background_html_all_js_files += [
   "base/js/typecheck.js",
   "base/js/xhr.js",
   "base/js/xhr_event_writer.js",
-  "crd/js/host_installer.js",
-  "crd/js/host_session.js",
-  "crd/js/it2me_host_facade.js",
 ]
 
 #
@@ -523,13 +560,15 @@ remoting_webapp_resource_files = [
   "crd/html/crd_main.css",
   "crd/html/toolbar.css",
   "crd/html/menu_button.css",
+  "crd/html/public_session.css",
   "crd/html/window_frame.css",
   "crd/resources/scale-to-fit.webp",
 ]
 
 remoting_webapp_crd_files =
     remoting_webapp_info_files + remoting_webapp_crd_js_files +
-    remoting_webapp_resource_files
+    remoting_webapp_resource_files +
+    remoting_webapp_public_session_html_all_js_files
 
 # Files that contain localizable strings.
 desktop_remoting_webapp_localizable_files =

@@ -66,15 +66,22 @@ class RendererAccessibilityTest : public RenderViewTest {
     frame()->OnSetAccessibilityMode(mode);
   }
 
-  void GetLastAccEvent(
-      AccessibilityHostMsg_EventParams* params) {
+  void GetAllAccEvents(
+      std::vector<AccessibilityHostMsg_EventParams>* param_list) {
     const IPC::Message* message =
         sink_->GetUniqueMessageMatching(AccessibilityHostMsg_Events::ID);
     ASSERT_TRUE(message);
     base::Tuple<std::vector<AccessibilityHostMsg_EventParams>, int> param;
     AccessibilityHostMsg_Events::Read(message, &param);
-    ASSERT_GE(base::get<0>(param).size(), 1U);
-    *params = base::get<0>(param)[0];
+    *param_list = base::get<0>(param);
+  }
+
+  void GetLastAccEvent(
+      AccessibilityHostMsg_EventParams* params) {
+    std::vector<AccessibilityHostMsg_EventParams> param_list;
+    GetAllAccEvents(&param_list);
+    ASSERT_GE(param_list.size(), 1U);
+    *params = param_list[0];
   }
 
   int CountAccessibilityNodesSentToBrowser() {

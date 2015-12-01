@@ -18,8 +18,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/mac/bluetooth_utility.h"
-#include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/shell_integration.h"
+#include "components/flags_ui/pref_service_flags_storage.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/touch/touch_device.h"
 #include "ui/base/ui_base_switches.h"
@@ -136,13 +136,13 @@ void RecordStartupMetricsOnBlockingPool() {
   GoogleUpdateSettings::RecordChromeUpdatePolicyHistograms();
 #endif  // defined(OS_WIN)
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   bluetooth_utility::BluetoothAvailability availability =
       bluetooth_utility::GetBluetoothAvailability();
   UMA_HISTOGRAM_ENUMERATION("OSX.BluetoothAvailability",
                             availability,
                             bluetooth_utility::BLUETOOTH_AVAILABILITY_COUNT);
-#endif   // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif   // defined(OS_MACOSX)
 
   // Record whether Chrome is the default browser or not.
   ShellIntegration::DefaultWebClientState default_state =
@@ -300,7 +300,7 @@ void ChromeBrowserMainExtraPartsMetrics::PreProfileInit() {
 }
 
 void ChromeBrowserMainExtraPartsMetrics::PreBrowserStart() {
-  about_flags::PrefServiceFlagsStorage flags_storage_(
+  flags_ui::PrefServiceFlagsStorage flags_storage_(
       g_browser_process->local_state());
   about_flags::RecordUMAStatistics(&flags_storage_);
 }
@@ -327,9 +327,9 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
   RecordTouchEventState();
 #endif  // defined(USE_OZONE) || defined(USE_X11)
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   RecordMacMetrics();
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif  // defined(OS_MACOSX)
 
   const int kStartupMetricsGatheringDelaySeconds = 45;
   content::BrowserThread::GetBlockingPool()->PostDelayedTask(
@@ -363,9 +363,11 @@ void ChromeBrowserMainExtraPartsMetrics::OnDisplayMetricsChanged(
     uint32_t changed_metrics) {
 }
 
+#if !defined(OS_ANDROID)
 void ChromeBrowserMainExtraPartsMetrics::ProfilerFinishedCollectingMetrics() {
   first_web_contents_profiler_.reset();
 }
+#endif  // !defined(OS_ANDROID)
 
 void ChromeBrowserMainExtraPartsMetrics::EmitDisplaysChangedMetric() {
   int display_count = gfx::Screen::GetNativeScreen()->GetNumDisplays();

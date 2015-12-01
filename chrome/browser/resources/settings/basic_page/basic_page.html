@@ -1,7 +1,9 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/polymer/polymer.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/image-icons.html">
 <link rel="import" href="chrome://md-settings/appearance_page/appearance_page.html">
 <link rel="import" href="chrome://md-settings/search_page/search_page.html">
 <link rel="import" href="chrome://md-settings/settings_page/settings_section.html">
+<link rel="import" href="chrome://md-settings/on_startup_page/on_startup_page.html">
 
 <if expr="chromeos">
 <link rel="import" href="chrome://md-settings/internet_page/internet_page.html">
@@ -9,31 +11,39 @@
 </if>
 
 <dom-module id="cr-settings-basic-page">
+  <link rel="import" type="css" href="basic_page.css">
   <template>
 <if expr="chromeos">
-    <cr-settings-section route="internet" icon="settings-ethernet"
-        i18n-values="page-title:internetPageTitle">
-      <cr-settings-internet-page></cr-settings-internet-page>
-    </cr-settings-section>
+    <settings-section i18n-values="page-title:internetPageTitle"
+        current-route="[[currentRoute]]" section="internet">
+      <cr-settings-internet-page current-route="{{currentRoute}}">
+      </cr-settings-internet-page>
+    </settings-section>
 </if>
-    <cr-settings-section route="appearance" icon="home"
-        i18n-values="page-title:appearancePageTitle">
+    <settings-section i18n-values="page-title:appearancePageTitle"
+        current-route="[[currentRoute]]" section="appearance">
       <cr-settings-appearance-page prefs="{{prefs}}">
       </cr-settings-appearance-page>
-    </cr-settings-section>
+    </settings-section>
 
-    <cr-settings-section route="search" icon="search"
-        i18n-values="page-title:searchPageTitle"
-        expanded="{{searchExpanded}}" expand-container="{{expandContainer}}">
-      <cr-settings-search-page in-subpage="{{searchExpanded}}">
+    <settings-section i18n-values="page-title:onStartup"
+        current-route="[[currentRoute]]" section="on-startup">
+      <cr-settings-on-startup-page
+          prefs="{{prefs}}" current-route="{{currentRoute}}">
+      </cr-settings-on-startup-page>
+    </settings-section>
+
+    <settings-section i18n-values="page-title:searchPageTitle"
+        current-route="[[currentRoute]]" section="search">
+      <cr-settings-search-page current-route="{{currentRoute}}">
       </cr-settings-search-page>
-    </cr-settings-section>
+    </settings-section>
 
 <if expr="chromeos">
-    <cr-settings-section route="users" icon="person"
-        i18n-values="page-title:usersPageTitle">
+    <settings-section i18n-values="page-title:usersPageTitle"
+        current-route="[[currentRoute]]" section="users">
       <cr-settings-users-page prefs="{{prefs}}"></cr-settings-users-page>
-    </cr-settings-section>
+    </settings-section>
 </if>
   </template>
   <script src="basic_page.js"></script>

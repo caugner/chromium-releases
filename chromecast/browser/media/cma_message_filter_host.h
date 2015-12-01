@@ -24,7 +24,6 @@ class SingleThreadTaskRunner;
 }
 
 namespace gfx {
-class PointF;
 class Size;
 }
 
@@ -40,6 +39,7 @@ namespace media {
 class MediaPipelineBackend;
 struct MediaPipelineDeviceParams;
 class MediaPipelineHost;
+class CmaMediaPipelineClient;
 
 class CmaMessageFilterHost
     : public content::BrowserMessageFilter {
@@ -48,9 +48,8 @@ class CmaMessageFilterHost
   typedef base::Callback<scoped_ptr<MediaPipelineBackend>(
       const MediaPipelineDeviceParams&)> CreateDeviceComponentsCB;
 
-  CmaMessageFilterHost(
-      int render_process_id,
-      const CreateDeviceComponentsCB& create_device_components_cb);
+  CmaMessageFilterHost(int render_process_id,
+                       scoped_refptr<CmaMediaPipelineClient> client);
 
   // content::BrowserMessageFilter implementation.
   void OnChannelClosing() override;
@@ -89,9 +88,6 @@ class CmaMessageFilterHost
   void SetPlaybackRate(int media_id, double playback_rate);
   void SetVolume(int media_id, TrackId track_id, float volume);
   void NotifyPipeWrite(int media_id, TrackId track_id);
-  void NotifyExternalSurface(int surface_id,
-                             const gfx::PointF& p0, const gfx::PointF& p1,
-                             const gfx::PointF& p2, const gfx::PointF& p3);
 
   // Audio/Video callbacks.
   void OnMediaStateChanged(int media_id,
@@ -120,6 +116,7 @@ class CmaMessageFilterHost
 
   // Factory function for device-specific part of media pipeline creation
   CreateDeviceComponentsCB create_device_components_cb_;
+  scoped_refptr<CmaMediaPipelineClient> client_;
 
   // List of media pipeline and message loop media pipelines are running on.
   MediaPipelineMap media_pipelines_;

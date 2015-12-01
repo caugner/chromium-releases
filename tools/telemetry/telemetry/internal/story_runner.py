@@ -11,6 +11,7 @@ import time
 from catapult_base import cloud_storage
 from telemetry.core import exceptions
 from telemetry.internal.actions import page_action
+from telemetry.internal.browser import browser_finder
 from telemetry.internal.results import results_options
 from telemetry.internal.util import exception_formatter
 from telemetry import page
@@ -227,7 +228,7 @@ def Run(test, story_set, finder_options, results, max_failures=None):
                 # Later finally-blocks use state, so ensure it is cleared.
                 state = None
             finally:
-              has_existing_exception = sys.exc_info() is not None
+              has_existing_exception = sys.exc_info() != (None, None, None)
               try:
                 if state:
                   _CheckThermalThrottling(state.platform)
@@ -244,7 +245,7 @@ def Run(test, story_set, finder_options, results, max_failures=None):
             return
     finally:
       if state:
-        has_existing_exception = sys.exc_info() is not None
+        has_existing_exception = sys.exc_info() != (None, None, None)
         try:
           state.TearDownState()
         except Exception:
@@ -263,6 +264,10 @@ def RunBenchmark(benchmark, finder_options):
     exception.
   """
   benchmark.CustomizeBrowserOptions(finder_options.browser_options)
+
+  possible_browser = browser_finder.FindBrowser(finder_options)
+  if possible_browser and benchmark.ShouldDisable(possible_browser):
+    return 1
 
   pt = benchmark.CreatePageTest(finder_options)
   pt.__name__ = benchmark.__class__.__name__

@@ -63,7 +63,6 @@ const int32 kRouteId = 5;
 const int32 kMainFrameRouteId = 6;
 const int32 kNewWindowRouteId = 7;
 const int32 kNewFrameRouteId = 10;
-const int32 kSurfaceId = 42;
 
 // Converts |ascii_character| into |key_code| and returns true on success.
 // Handles only the characters needed by tests.
@@ -102,9 +101,7 @@ class RendererBlinkPlatformImplNoSandboxImpl
       scheduler::RendererScheduler* scheduler)
       : RendererBlinkPlatformImpl(scheduler) {}
 
-  virtual blink::WebSandboxSupport* sandboxSupport() {
-    return NULL;
-  }
+  blink::WebSandboxSupport* sandboxSupport() override { return NULL; }
 };
 
 RenderViewTest::RendererBlinkPlatformImplNoSandbox::
@@ -123,9 +120,9 @@ blink::Platform*
   return blink_platform_impl_.get();
 }
 
-scheduler::RendererScheduler*
-    RenderViewTest::RendererBlinkPlatformImplNoSandbox::Scheduler() const {
-  return renderer_scheduler_.get();
+void RenderViewTest::RendererBlinkPlatformImplNoSandbox::Shutdown() {
+  renderer_scheduler_->Shutdown();
+  blink_platform_impl_->Shutdown();
 }
 
 RenderViewTest::RenderViewTest()
@@ -207,7 +204,6 @@ void RenderViewTest::SetUp() {
   if (!render_thread_)
     render_thread_.reset(new MockRenderThread());
   render_thread_->set_routing_id(kRouteId);
-  render_thread_->set_surface_id(kSurfaceId);
   render_thread_->set_new_window_routing_id(kNewWindowRouteId);
   render_thread_->set_new_frame_routing_id(kNewFrameRouteId);
 
@@ -246,7 +242,6 @@ void RenderViewTest::SetUp() {
   view_params.web_preferences = WebPreferences();
   view_params.view_id = kRouteId;
   view_params.main_frame_routing_id = kMainFrameRouteId;
-  view_params.surface_id = kSurfaceId;
   view_params.session_storage_namespace_id = kInvalidSessionStorageNamespaceId;
   view_params.swapped_out = false;
   view_params.replicated_frame_state = FrameReplicationState();
@@ -270,19 +265,16 @@ void RenderViewTest::SetUp() {
 }
 
 void RenderViewTest::TearDown() {
-  // Try very hard to collect garbage before shutting down.
-  // "5" was chosen following http://crbug.com/46571#c9
-  const int kGCIterations = 5;
-  for (int i = 0; i < kGCIterations; i++)
-    GetMainFrame()->collectGarbage();
-
   // Run the loop so the release task from the renderwidget executes.
   ProcessPendingMessages();
 
-  for (int i = 0; i < kGCIterations; i++)
-    GetMainFrame()->collectGarbage();
-
   render_thread_->SendCloseMessage();
+
+  scoped_ptr<blink::WebLeakDetector> leak_detector =
+      make_scoped_ptr(blink::WebLeakDetector::create(this));
+
+  leak_detector->collectGarbageAndGetDOMCounts(GetMainFrame());
+
   view_ = NULL;
   mock_process_.reset();
 
@@ -296,13 +288,25 @@ void RenderViewTest::TearDown() {
   autorelease_pool_.reset(NULL);
 #endif
 
-  blink_platform_impl_.Scheduler()->Shutdown();
+  blink_platform_impl_.Shutdown();
   blink::shutdown();
 
   platform_->PlatformUninitialize();
   platform_.reset();
   params_.reset();
   command_line_.reset();
+}
+
+void RenderViewTest::onLeakDetectionComplete(const Result& result) {
+  EXPECT_EQ(0u, result.numberOfLiveAudioNodes);
+  EXPECT_EQ(0u, result.numberOfLiveDocuments);
+  EXPECT_EQ(0u, result.numberOfLiveNodes);
+  EXPECT_EQ(0u, result.numberOfLiveLayoutObjects);
+  EXPECT_EQ(0u, result.numberOfLiveResources);
+  EXPECT_EQ(0u, result.numberOfLiveActiveDOMObjects);
+  EXPECT_EQ(0u, result.numberOfLiveScriptPromises);
+  EXPECT_EQ(0u, result.numberOfLiveFrames);
+  EXPECT_EQ(0u, result.numberOfLiveV8PerContextData);
 }
 
 void RenderViewTest::SendNativeKeyEvent(

@@ -92,11 +92,11 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
   // Sets up the |TestURLRequestContext| with the provided |ProxyService|.
-  void ConfigureTestDependencies(ProxyService* proxy_service) {
+  void ConfigureTestDependencies(scoped_ptr<ProxyService> proxy_service) {
     // Create a context with delayed initialization.
     context_.reset(new TestURLRequestContext(true));
 
-    proxy_service_.reset(proxy_service);
+    proxy_service_ = proxy_service.Pass();
     context_->set_client_socket_factory(&mock_socket_factory_);
     context_->set_proxy_service(proxy_service_.get());
     network_delegate_.reset(new net::TestNetworkDelegate());
@@ -259,7 +259,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
   // Returns the key to the |ProxyRetryInfoMap|.
-  std::string GetProxyKey(std::string proxy) {
+  std::string GetProxyKey(const std::string& proxy) {
     net::ProxyServer proxy_server = net::ProxyServer::FromURI(
         proxy, net::ProxyServer::SCHEME_HTTP);
     if (!proxy_server.is_valid())

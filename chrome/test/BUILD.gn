@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/chrome_build.gni")
+import("//build/config/compiler/compiler.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
@@ -55,6 +56,8 @@ source_set("test_support") {
     "base/scoped_bundle_swizzler_mac.mm",
     "base/scoped_testing_local_state.cc",
     "base/scoped_testing_local_state.h",
+    "base/search_test_utils.cc",
+    "base/search_test_utils.h",
     "base/test_browser_window.cc",
     "base/test_browser_window.h",
     "base/test_launcher_utils.cc",
@@ -67,8 +70,6 @@ source_set("test_support") {
     "base/testing_browser_process_platform_part.h",
     "base/testing_io_thread_state.cc",
     "base/testing_io_thread_state.h",
-    "base/testing_pref_service_syncable.cc",
-    "base/testing_pref_service_syncable.h",
     "base/testing_profile.cc",
     "base/testing_profile.h",
     "base/testing_profile_manager.cc",
@@ -118,6 +119,7 @@ source_set("test_support") {
     "//components/search_engines:test_support",
     "//components/signin/core/browser:test_support",
     "//components/sync_driver:test_support",
+    "//components/syncable_prefs:test_support",
     "//components/update_client:test_support",
     "//content/public/app:both",
     "//ui/gfx:test_support",
@@ -160,6 +162,19 @@ source_set("test_support") {
       "//ui/base",
       "//ui/events:events_base",
       "//ui/gl",
+    ]
+  }
+
+  if (is_android) {
+    sources -= [
+      "base/dialog_test_browser_window.cc",
+      "base/dialog_test_browser_window.h",
+      "base/in_process_browser_test.cc",
+      "base/in_process_browser_test.h",
+      "base/test_browser_window.cc",
+      "base/test_browser_window.h",
+      "base/ui_test_utils.cc",
+      "base/ui_test_utils.h",
     ]
   }
 
@@ -339,6 +354,16 @@ if (!is_android) {
         # TODO(gbillock): aura linux does not support the automation for
         # SendMouseMoveNotifyWhenDone
         sources -= [ "../browser/ui/views/toolbar/toolbar_button_test.cc" ]
+
+        if (!is_chromeos) {
+          # Desktop linux.
+          sources -= [
+            # TODO(port): This times out. Attempts have been made to fix the
+            # individual failures, but each time I disable a test from these
+            # suites, it seems like one or another starts timing out too.
+            "../browser/ui/views/keyboard_access_browsertest.cc",
+          ]
+        }
       }
       if (is_chromeos || !use_x11) {
         sources -= [
@@ -351,15 +376,7 @@ if (!is_android) {
       }
     }
 
-    if (is_linux && !is_chromeos) {
-      # Desktop linux.
-      sources -= [
-        # TODO(port): This times out. Attempts have been made to fix the
-        # individual failures, but each time I disable a test from these
-        # suites, it seems like one or another starts timing out too.
-        "../browser/ui/views/keyboard_access_browsertest.cc",
-      ]
-    } else {
+    if (!is_desktop_linux) {
       # Everything but desktop Linux.
       sources += rebase_path(
               chrome_tests_gypi_values.chrome_interactive_ui_test_non_desktop_linux_sources,
@@ -503,7 +520,7 @@ if (!is_android) {
       }
     }  # enable_notifications
 
-    if (use_aura || is_chromeos) {
+    if (!use_aura || is_chromeos) {
       sources -=
           [ "../../ui/views/corewm/desktop_capture_controller_unittest.cc" ]
     }
@@ -590,6 +607,95 @@ if (!is_android) {
 
   # TODO(GYP): Delete this after we've converted everything to GN.
   # The _run targets exist only for compatibility w/ GYP.
+  group("telemetry_gpu_test_run") {
+    testonly = true
+    deps = [
+      ":telemetry_gpu_test",
+    ]
+  }
+
+  group("telemetry_gpu_test") {
+    data_deps = [
+      # TODO(kbr): this used to be "//chrome". Had to change this to
+      # chrome_initial temporarily to work around crbug.com/536192.
+      "//chrome:chrome_initial",
+      "//tools/telemetry:bitmaptools",
+    ]
+
+    data = [
+      "//content/test/gpu/",
+      "//content/test/data/gpu/",
+
+      # For GpuProcess.video
+      "//content/test/data/media/bear.ogv",
+      "//third_party/catapult/",
+
+      # For webgl_conformance
+      "//third_party/webgl/",
+      "//content/test/gpu/run_gpu_test.py",
+
+      # Generic telemetry deps
+      # TODO(GYP): These should probably be specified somewhere else
+      # and pulled in via a deps entry.
+      "//build/android/devil/",
+      "//build/android/pylib/",
+      "//build/util/",
+      "//third_party/WebKit/PerformanceTests/resources/jquery.tablesorter.min.js",
+      "//third_party/WebKit/PerformanceTests/resources/statistics.js",
+      "//third_party/flot/jquery.flot.min.js",
+      "//third_party/webpagereplay/",
+      "//tools/telemetry/",
+    ]
+
+    if (is_win && (symbol_level == 1 || symbol_level == 2)) {
+      # TODO(GYP): These should be provided automatically through data_deps.
+      data += [ "$root_out_dir/chrome.exe.pdb" ]
+      if (is_component_build) {
+        data += [
+          "$root_out_dir/base.dll.pdb",
+          "$root_out_dir/blink_platform.dll.pdb",
+          "$root_out_dir/blink_web.dll.pdb",
+          "$root_out_dir/content.dll.pdb",
+        ]
+      }
+    }
+  }
+
+  group("telemetry_gpu_unittests_run") {
+    testonly = true
+    deps = [
+      ":telemetry_gpu_unittests",
+    ]
+  }
+
+  group("telemetry_gpu_unittests") {
+    data = [
+      # TODO(kbr): refactor the telemetry dependencies more cleanly.
+      "//content/test/gpu/",
+      "//content/test/data/gpu/",
+
+      # For GpuProcess.video
+      "//content/test/data/media/bear.ogv",
+
+      # For webgl_conformance_expectations_unittest
+      "//third_party/webgl/src/sdk/tests/",
+
+      # Generic telemetry deps
+      "//third_party/catapult/",
+      "//build/android/devil/",
+      "//build/android/pylib/",
+      "//build/util/",
+      "//tools/telemetry/",
+
+      # From telemetry_gpu_unittests.isolate
+      "//third_party/typ/",
+      "//testing/scripts/common.py",
+      "//testing/scripts/run_telemetry_as_googletest.py",
+    ]
+  }
+
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
   group("tab_capture_end2end_tests_run") {
     testonly = true
     deps = [
@@ -601,7 +707,7 @@ if (!is_android) {
   # The _run targets exist only for compatibility w/ GYP.
   group("browser_tests_run") {
     testonly = true
-    deps = [
+    data_deps = [
       ":browser_tests",
     ]
   }
@@ -682,6 +788,7 @@ if (!is_android) {
       "//components/autofill/content/renderer:test_support",
       "//components/captive_portal:test_support",
       "//components/dom_distiller/content:content_browser",
+      "//components/dom_distiller/content:content_renderer",
       "//components/dom_distiller/core:test_support",
       "//components/guest_view/browser:test_support",
       "//components/resources",
@@ -765,6 +872,10 @@ if (!is_android) {
       ]
       deps += [ "//components/nacl/renderer/plugin:nacl_trusted_plugin" ]
 
+      data += [
+        #        "$root_out_dir/nacl_helper",
+      ]
+
       if (enable_nacl_untrusted) {
         sources += [
           "nacl/nacl_browsertest.cc",
@@ -775,14 +886,11 @@ if (!is_android) {
           "nacl/pnacl_header_test.h",
         ]
 
-        # TODO(GYP): Make NaCl work in other configs and update the irt
-        # dependency as appropriate. We should probably push this
-        # dependency into ppapi/native_client so that clients don't need
-        # to know all of the different toolchain options.
-        assert(current_cpu == "x64")
         data_deps += [
           # "test/data/nacl:shared_test_files",  # TODO(GYP) bug 512902
-          "//ppapi/native_client:nacl_irt(//native_client/build/toolchain/nacl:irt_x64)",
+          "//ppapi/native_client:irt",
+          "//ppapi:ppapi_nacl_tests_all",
+
           # "../ppapi/ppapi_nacl.gyp:ppapi_nacl_tests",  # TODO(GYP) bug 512901
           # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_background_keepalive",  # TODO(GYP) bug 512900
           # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_media_galleries",  # TODO(GYP) bug 512900
@@ -812,7 +920,7 @@ if (!is_android) {
             [ "//build/config/win:default_large_module_incremental_linking" ]
       }
       if (is_linux) {
-        deps += [
+        data_deps += [
           "//native_client/src/trusted/service_runtime/linux:munge_nacl_helper_bootstrap",
           "//components/nacl:nacl_helper",
 
@@ -944,8 +1052,11 @@ if (!is_android) {
         "../browser/ui/ash/launcher/chrome_launcher_controller_browsertest.cc",
         "../browser/ui/ash/launcher/launcher_favicon_loader_browsertest.cc",
         "../browser/ui/ash/shelf_browsertest.cc",
-        "../browser/ui/views/frame/browser_non_client_frame_view_ash_browsertest.cc",
       ]
+
+      if (toolkit_views) {
+        sources -= [ "../browser/ui/views/frame/browser_non_client_frame_view_ash_browsertest.cc" ]
+      }
     }
     if (is_mac) {
       # TODO(mark): We really want this for all non-static library
@@ -1013,6 +1124,7 @@ if (!is_android) {
       sources -= [
         "../browser/policy/cloud/component_cloud_policy_browsertest.cc",
         "../browser/prefs/pref_hash_browsertest.cc",
+        "../common/spellcheck_common_unittest.cc",
         "../renderer/spellchecker/spellcheck_provider_hunspell_unittest.cc",
         "../renderer/spellchecker/spellcheck_unittest.cc",
       ]
@@ -1064,7 +1176,7 @@ if (!is_android) {
       sources += [ "../browser/ui/webui/local_discovery/local_discovery_ui_browsertest.cc" ]
     }
     if (use_brlapi) {
-      deps += [ "//build/config/linux:libbrlapi" ]
+      deps += [ "//build/linux:libbrlapi" ]
     } else {
       sources -= [ "../browser/extensions/api/braille_display_private/braille_display_private_apitest.cc" ]
     }
@@ -1147,7 +1259,9 @@ if (!is_android) {
       "//third_party/WebKit/public:blink",
     ]
 
-    data_deps = [ "//third_party/mesa:osmesa" ]
+    data_deps = [
+      "//third_party/mesa:osmesa",
+    ]
 
     if (cld_version == 2) {
       # Language detection is irrelevant to sync, so it can depend on any
@@ -1397,8 +1511,9 @@ if (!is_android) {
         "//components/audio_modem:test_support",
         "//components/autofill/content/browser/wallet:test_support",
         "//components/autofill/content/renderer:test_support",
-        "//components/metrics/proto",
         "//components/data_reduction_proxy/core/browser:test_support",
+        "//components/data_use_measurement/core",
+        "//components/metrics/proto",
         "//components/safe_json:test_support",
         "//components/webdata_services:test_support",
         "//components/strings",
@@ -1432,6 +1547,7 @@ if (!is_android) {
               chrome_tests_unit_gypi_values.chrome_unit_tests_non_android_sources,
               ".",
               "//chrome")
+      sources -= [ "../browser/download/download_request_infobar_delegate_unittest.cc" ]
     }
     if (is_ios || is_chromeos) {
       sources -=
@@ -1541,7 +1657,7 @@ if (!is_android) {
     if (!is_chromeos && !use_ozone && is_linux) {
       deps += [
         "//chrome/browser/ui/libgtk2ui",
-        "//build/config/linux:gio",
+        "//build/linux:gio",
       ]
     }
 
@@ -1581,6 +1697,8 @@ if (!is_android) {
       if (!is_android && !is_ios) {
         sources +=
             [ "../browser/download/download_dir_policy_handler_unittest.cc" ]
+
+        deps += [ "//components/bubble:test_support" ]
       }
     }
     if (enable_web_speech) {
@@ -1657,9 +1775,6 @@ if (!is_android) {
                 ".",
                 "//chrome")
       }
-      if (!toolkit_views) {
-        sources -= [ "../browser/ui/views/media_router/media_router_ui_browsertest.cc" ]
-      }
     }
     if (enable_webrtc) {
       sources += rebase_path(
@@ -1669,10 +1784,7 @@ if (!is_android) {
     }
     if (is_chromeos) {
       deps += [ "//chrome/browser/chromeos:unit_tests" ]
-      sources -= [
-        "../browser/signin/signin_global_error_unittest.cc",
-        "../browser/signin/signin_manager_unittest.cc",
-      ]
+      sources -= [ "../browser/signin/signin_manager_unittest.cc" ]
     }
     if (use_x11) {
       deps += [ "//ui/events/devices" ]
@@ -1732,6 +1844,24 @@ if (!is_android) {
       # other things like the ui and startup tests. *shrug*
       ldflags = [ "-Wl,-ObjC" ]
     }
+    if (is_mac || is_android) {
+      sources += rebase_path(
+              chrome_tests_unit_gypi_values.chrome_unit_tests_mac_android_sources,
+              ".",
+              "//chrome")
+    }
+    if (is_android) {
+      sources += rebase_path(
+              chrome_tests_unit_gypi_values.chrome_unit_tests_android_sources,
+              ".",
+              "//chrome")
+    }
+    if (!is_android && !is_ios) {
+      sources += rebase_path(
+              chrome_tests_unit_gypi_values.chrome_unit_tests_non_mobile_sources,
+              ".",
+              "//chrome")
+    }
     if (!is_mac && !is_ios) {
       deps += [
         "//chrome/tools/convert_dict:lib",
@@ -1767,8 +1897,6 @@ if (!is_android) {
               ".",
               "//chrome")
       deps += [
-        #'browser/safe_browsing/incident_reporting/verifier_test/verifier_unittest.gyp:verifier_test_dll_1',  TODO(GYP) bug 512919
-        #'browser/safe_browsing/incident_reporting/verifier_test/verifier_unittest.gyp:verifier_test_dll_2',  TODO(GYP) bug 512919
         "//chrome:other_version",
         "//chrome_elf:blacklist_test_dll_1",
         "//chrome/installer/util:strings",
@@ -1776,6 +1904,10 @@ if (!is_android) {
         "//third_party/isimpledom",
         "//third_party/wtl",
         "//ui/resources",
+      ]
+      data_deps += [
+        "//chrome/browser/safe_browsing/incident_reporting/verifier_test:verifier_test_dll_1",
+        "//chrome/browser/safe_browsing/incident_reporting/verifier_test:verifier_test_dll_2",
       ]
 
       libs = [
@@ -1792,10 +1924,10 @@ if (!is_android) {
     if (is_android || is_ios) {
       sources -= [
         "../browser/devtools/device/webrtc/devtools_bridge_instances_request_unittest.cc",
+        "../browser/ui/bookmarks/bookmark_ui_utils_desktop_unittest.cc",
         "../browser/ui/sync/sync_promo_ui_unittest.cc",
       ]
     } else {
-      sources -= [ "../browser/web_resource/promo_resource_service_mobile_ntp_unittest.cc" ]
       deps += [ "//chrome/tools/profile_reset:jtl_compiler_lib" ]
     }
     if (!is_android && !is_chromeos) {
@@ -1875,7 +2007,7 @@ if (!is_android) {
         "//breakpad:client",
         "//chrome/browser",
         "//chrome/child",
-        "//components/crash_keys",
+        "//components/crash/core/common",
         "//base/test:run_all_unittests",
         "//base/test:test_support",
       ]

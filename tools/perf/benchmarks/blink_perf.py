@@ -14,6 +14,7 @@ from telemetry.page import shared_page_state
 from telemetry import story
 from telemetry.value import list_of_scalar_values
 
+from benchmarks import pywebsocket_server
 from page_sets import webgl_supported_shared_state
 
 
@@ -122,7 +123,24 @@ class _BlinkPerfFullFrameMeasurement(_BlinkPerfMeasurement):
     assert 'content-shell' in options.browser_type
     options.AppendExtraBrowserArgs(['--expose-internals-for-testing'])
 
-@benchmark.Disabled  # http://crbug.com/500958
+
+class _BlinkPerfPywebsocketMeasurement(_BlinkPerfMeasurement):
+  def CustomizeBrowserOptions(self, options):
+    super(_BlinkPerfPywebsocketMeasurement, self).CustomizeBrowserOptions(
+        options)
+    # Cross-origin accesses are needed to run benchmarks spanning two servers,
+    # the Telemetry's HTTP server and the pywebsocket server.
+    options.AppendExtraBrowserArgs(['--disable-web-security'])
+
+
+class _SharedPywebsocketPageState(shared_page_state.SharedPageState):
+  """Runs a pywebsocket server."""
+  def __init__(self, test, finder_options, user_story_set):
+    super(_SharedPywebsocketPageState, self).__init__(
+        test, finder_options, user_story_set)
+    self.platform.StartLocalServer(pywebsocket_server.PywebsocketServer())
+
+
 class BlinkPerfBindings(perf_benchmark.PerfBenchmark):
   tag = 'bindings'
   test = _BlinkPerfMeasurement
@@ -164,7 +182,6 @@ class BlinkPerfCSS(perf_benchmark.PerfBenchmark):
 
 
 @benchmark.Disabled('xp',  # http://crbug.com/488059
-                    'win7',  # http://crbug.com/522972
                     'android',  # http://crbug.com/496707
                     'reference')  # http://crbug.com/520092
 class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
@@ -188,6 +205,7 @@ class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
     return story_set
 
 
+@benchmark.Disabled  # http://crbug.com/532093
 class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
   tag = 'dom'
   test = _BlinkPerfMeasurement
@@ -201,7 +219,6 @@ class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
     return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-@benchmark.Disabled('release_x64')  # http://crbug.com/480999
 class BlinkPerfEvents(perf_benchmark.PerfBenchmark):
   tag = 'events'
   test = _BlinkPerfMeasurement
@@ -239,20 +256,8 @@ class BlinkPerfLayoutFullLayout(BlinkPerfLayout):
     return 'blink_perf.layout_full_frame'
 
 
-class BlinkPerfMutation(perf_benchmark.PerfBenchmark):
-  tag = 'mutation'
-  test = _BlinkPerfMeasurement
-
-  @classmethod
-  def Name(cls):
-    return 'blink_perf.mutation'
-
-  def CreateStorySet(self, options):
-    path = os.path.join(BLINK_PERF_BASE_DIR, 'Mutation')
-    return CreateStorySetFromPath(path, SKIPPED_FILE)
-
-
-@benchmark.Disabled('win')  # crbug.com/488493
+@benchmark.Disabled('win',     # crbug.com/488493
+                    'android') # crbug.com/527156
 class BlinkPerfParser(perf_benchmark.PerfBenchmark):
   tag = 'parser'
   test = _BlinkPerfMeasurement
@@ -315,3 +320,20 @@ class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
   def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'XMLHttpRequest')
     return CreateStorySetFromPath(path, SKIPPED_FILE)
+
+
+# Disabled on Windows and ChromeOS due to https://crbug.com/521887
+# Disabled on reference builds due to https://crbug.com/530374
+@benchmark.Disabled('win', 'chromeos', 'reference')
+class BlinkPerfPywebsocket(perf_benchmark.PerfBenchmark):
+  tag = 'pywebsocket'
+  test = _BlinkPerfPywebsocketMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'blink_perf.pywebsocket'
+
+  def CreateStorySet(self, options):
+    path = os.path.join(BLINK_PERF_BASE_DIR, 'Pywebsocket')
+    return CreateStorySetFromPath(path, SKIPPED_FILE,
+        shared_page_state_class=_SharedPywebsocketPageState)

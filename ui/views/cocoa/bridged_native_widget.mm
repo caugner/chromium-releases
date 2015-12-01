@@ -11,6 +11,7 @@
 #include "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/thread_task_runner_handle.h"
+#include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #import "ui/base/cocoa/constrained_window/constrained_window_animation.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
@@ -31,6 +32,16 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_aura_utils.h"
 #include "ui/views/widget/widget_delegate.h"
+
+extern "C" {
+
+typedef int32_t CGSConnection;
+CGSConnection _CGSDefaultConnection();
+CGError CGSSetWindowBackgroundBlurRadius(CGSConnection connection,
+                                         NSInteger windowNumber,
+                                         int radius);
+
+}
 
 // The NSView that hosts the composited CALayer drawing the UI. It fills the
 // window but is not hittable so that accessibility hit tests always go to the
@@ -69,6 +80,10 @@
 @end
 
 namespace {
+
+const CGFloat kMavericksMenuOpacity = 251.0 / 255.0;
+const CGFloat kYosemiteMenuOpacity = 194.0 / 255.0;
+const int kYosemiteMenuBlur = 80;
 
 int kWindowPropertiesKey;
 
@@ -197,6 +212,18 @@ void SetupDragEventMonitor() {
       handler:^NSEvent*(NSEvent* ns_event) {
         return RepostEventIfHandledByWindow(ns_event);
       }];
+}
+
+// Returns a task runner for creating a ui::Compositor. This allows compositor
+// tasks to be funneled through ui::WindowResizeHelper's task runner to allow
+// resize operations to coordinate with frames provided by the GPU process.
+scoped_refptr<base::SingleThreadTaskRunner> GetCompositorTaskRunner() {
+  // If the WindowResizeHelper's pumpable task runner is set, it means the GPU
+  // process is directing messages there, and the compositor can synchronize
+  // with it. Otherwise, just use the UI thread.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      ui::WindowResizeHelperMac::Get()->task_runner();
+  return task_runner ? task_runner : base::ThreadTaskRunnerHandle::Get();
 }
 
 }  // namespace
@@ -430,14 +457,7 @@ void BridgedNativeWidget::SetVisibilityState(WindowVisibilityState new_state) {
     return;
 
   if (native_widget_mac_->IsWindowModalSheet()) {
-    NSWindow* parent_window = parent_->GetNSWindow();
-    DCHECK(parent_window);
-
-    [NSApp beginSheet:window_
-        modalForWindow:parent_window
-         modalDelegate:[window_ delegate]
-        didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:)
-           contextInfo:nullptr];
+    ShowAsModalSheet();
     return;
   }
 
@@ -605,8 +625,11 @@ void BridgedNativeWidget::ToggleDesiredFullscreenState() {
 void BridgedNativeWidget::OnSizeChanged() {
   gfx::Size new_size = GetClientAreaSize();
   native_widget_mac_->GetWidget()->OnNativeWidgetSizeChanged(new_size);
-  if (layer())
+  if (layer()) {
     UpdateLayerProperties();
+    if ([window_ inLiveResize])
+      MaybeWaitForFrame(new_size);
+  }
 }
 
 void BridgedNativeWidget::OnVisibilityChanged() {
@@ -778,7 +801,14 @@ void BridgedNativeWidget::CreateLayer(ui::LayerType layer_type,
   // Transparent window support.
   layer()->GetCompositor()->SetHostHasTransparentBackground(translucent);
   layer()->SetFillsBoundsOpaquely(!translucent);
-  if (translucent) {
+
+  // Use the regular window background for window modal sheets. The layer() will
+  // still paint over most of it, but the native -[NSApp beginSheet:] animation
+  // blocks the UI thread, so there's no way to invalidate the shadow to match
+  // the composited layer. This assumes the native window shape is a good match
+  // for the composited NonClientFrameView, which should be the case since the
+  // native shape is what's most appropriate for displaying sheets on Mac.
+  if (translucent && !native_widget_mac_->IsWindowModalSheet()) {
     [window_ setOpaque:NO];
     [window_ setBackgroundColor:[NSColor clearColor]];
   }
@@ -996,9 +1026,10 @@ void BridgedNativeWidget::CreateCompositor() {
 
   compositor_widget_.reset(
       new ui::AcceleratedWidgetMac(needs_gl_finish_workaround));
-  compositor_.reset(new ui::Compositor(compositor_widget_->accelerated_widget(),
-                                       context_factory,
-                                       base::ThreadTaskRunnerHandle::Get()));
+  compositor_.reset(
+      new ui::Compositor(context_factory, GetCompositorTaskRunner()));
+  compositor_->SetAcceleratedWidgetAndStartCompositor(
+      compositor_widget_->accelerated_widget());
   compositor_widget_->SetNSView(this);
 }
 
@@ -1051,6 +1082,22 @@ void BridgedNativeWidget::AddCompositorSuperview() {
   [background_layer
       setAutoresizingMask:kCALayerWidthSizable | kCALayerHeightSizable];
 
+  if (widget_type_ == Widget::InitParams::TYPE_MENU) {
+    // Giving the canvas opacity messes up subpixel font rendering, so use a
+    // solid background, but make the CALayer transparent.
+    if (base::mac::IsOSYosemiteOrLater()) {
+      [background_layer setOpacity:kYosemiteMenuOpacity];
+      CGSSetWindowBackgroundBlurRadius(
+          _CGSDefaultConnection(), [window_ windowNumber], kYosemiteMenuBlur);
+      // The blur effect does not occur with a fully transparent (or fully
+      // layer-backed) window. Setting a window background will use square
+      // corners, so ask the contentView to draw one instead.
+      [bridged_view_ setDrawMenuBackgroundForBlur:YES];
+    } else {
+      [background_layer setOpacity:kMavericksMenuOpacity];
+    }
+  }
+
   // Set the layer first to create a layer-hosting view (not layer-backed).
   [compositor_superview_ setLayer:background_layer];
   [compositor_superview_ setWantsLayer:YES];
@@ -1075,6 +1122,47 @@ void BridgedNativeWidget::UpdateLayerProperties() {
   // after the frame from the compositor arrives.
   if (![window_ isOpaque])
     invalidate_shadow_on_frame_swap_ = true;
+}
+
+void BridgedNativeWidget::MaybeWaitForFrame(const gfx::Size& size_in_dip) {
+  if (!layer()->IsDrawn() || compositor_widget_->HasFrameOfSize(size_in_dip))
+    return;
+
+  const int kPaintMsgTimeoutMS = 50;
+  const base::TimeTicks start_time = base::TimeTicks::Now();
+  const base::TimeTicks timeout_time =
+      start_time + base::TimeDelta::FromMilliseconds(kPaintMsgTimeoutMS);
+
+  ui::WindowResizeHelperMac* resize_helper = ui::WindowResizeHelperMac::Get();
+  for (base::TimeTicks now = start_time; now < timeout_time;
+       now = base::TimeTicks::Now()) {
+    if (!resize_helper->WaitForSingleTaskToRun(timeout_time - now))
+      return;  // Timeout.
+
+    // Since the UI thread is blocked, the size shouldn't change.
+    DCHECK(size_in_dip == GetClientAreaSize());
+    if (compositor_widget_->HasFrameOfSize(size_in_dip))
+      return;  // Frame arrived.
+  }
+}
+
+void BridgedNativeWidget::ShowAsModalSheet() {
+  // -[NSApp beginSheet:] will block the UI thread while the animation runs.
+  // So that it doesn't animate a fully transparent window, first wait for a
+  // frame. The first step is to pretend that the window is already visible.
+  window_visible_ = true;
+  layer()->SetVisible(true);
+  native_widget_mac_->GetWidget()->OnNativeWidgetVisibilityChanged(true);
+  MaybeWaitForFrame(GetClientAreaSize());
+
+  NSWindow* parent_window = parent_->GetNSWindow();
+  DCHECK(parent_window);
+
+  [NSApp beginSheet:window_
+      modalForWindow:parent_window
+       modalDelegate:[window_ delegate]
+      didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:)
+         contextInfo:nullptr];
 }
 
 NSMutableDictionary* BridgedNativeWidget::GetWindowProperties() const {

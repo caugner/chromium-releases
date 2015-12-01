@@ -79,6 +79,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // Notifies the observers that a provisional navigation has started.
   void OnProvisionalNavigationStarted(const GURL& url);
 
+  // Called when a navigation is committed.
+  void OnNavigationCommitted(const GURL& url);
+
   // Notifies the observers that the URL hash of the current page changed.
   void OnUrlHashChanged();
 
@@ -171,6 +174,11 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // called.
   void OnHttpResponseHeadersReceived(net::HttpResponseHeaders* response_headers,
                                      const GURL& resource_url);
+
+  // Explicitly sets the MIME type, overwriting any MIME type that was set by
+  // headers. Note that this should be called after OnNavigationCommitted, as
+  // that is the point where MIME type is set from HTTP headers.
+  void SetContentsMimeType(const std::string& mime_type);
 
   // Executes a JavaScript string on the page asynchronously.
   // TODO(shreyasv): Rename this to ExecuteJavaScript for consitency with

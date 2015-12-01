@@ -191,9 +191,6 @@ are declared in build/common.gypi.
       <!-- Bookmarks specific strings -->
       <part file="bookmarks_strings.grdp" />
 
-      <!-- Settings specific strings -->
-      <part file="settings_strings.grdp" />
-
       <!-- ChromeOS-specific strings -->
       <if expr="chromeos">
         <part file="chromeos_strings.grdp" />
@@ -286,7 +283,7 @@ are declared in build/common.gypi.
         Permissions
       </message>
       <message name="IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA" desc="Title of the site data section of the website settings popup.">
-        Cookies and site data
+        Cookies
       </message>
       <message name="IDS_WEBSITE_SETTINGS_PERMISSION_ALLOW" desc="The label used in the permissions dropdowns for the option that grants a permissions.">
         allow
@@ -324,9 +321,6 @@ are declared in build/common.gypi.
       <message name="IDS_WEBSITE_SETTINGS_TYPE_MOUSELOCK" desc="The label used for mouse lock permission controls in the Website Settings popup.">
         Mouse Lock
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_TYPE_MEDIASTREAM" desc="The label used for media stream permission controls in the Website Settings popup.">
-        Media
-      </message>
       <message name="IDS_WEBSITE_SETTINGS_TYPE_MIC" desc="The label used for the microphone permission controls in the Website Settings popup.">
         Microphone
       </message>
@@ -338,9 +332,6 @@ are declared in build/common.gypi.
       </message>
       <message name="IDS_WEBSITE_SETTINGS_TYPE_STORAGE" desc="The label used for the local storage type in the Manage Sites settings.">
         Storage
-      </message>
-      <message name="IDS_WEBSITE_SETTINGS_SHOW_SITE_DATA" desc="The label of the Show Cookies and Site Data link in the site data section of the Website Settings popup.">
-        Show cookies and site data
       </message>
       <message name="IDS_WEBSITE_SETTINGS_TAB_LABEL_CONNECTION" desc="The label of the connection tab of the Website Settings popup.">
         Connection
@@ -382,11 +373,11 @@ are declared in build/common.gypi.
       <message name="IDS_WEBSITE_SETTINGS_PHISHING" desc="Text that is displayed in the header of the Website Settings popup if the SafeBrowsing reports that the website is being used to conduct phishing attacks.">
         This site might try to trick you to steal your information (examples: passwords, messages, or credit cards).
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_THIRD_PARTY_SITE_DATA" desc="The label of the counts for allowed and blocked third party cookies and site data.">
-        Others
+      <message name="IDS_WEBSITE_SETTINGS_FIRST_PARTY_SITE_DATA" desc="The label of the counts for allowed and blocked cookies and site data for the top-level origin (i.e. the origin in the Omnibox).">
+        <ph name="COUNT">$1<ex>6</ex></ph> from this site
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_SITE_DATA_STATS_LINE" desc="The label text with the number of allowed and blocked cookies and site data objects.">
-        <ph name="DATA_SOURCE">$1<ex>foo.bar.org</ex></ph> (<ph name="ALLOWED_COUNT">$2<ex>6</ex></ph> allowed / <ph name="BLOCKED_COUNT">$3<ex>0</ex></ph> blocked)
+      <message name="IDS_WEBSITE_SETTINGS_THIRD_PARTY_SITE_DATA" desc="The label of the counts for allowed and blocked third party cookies and site data.">
+        <ph name="COUNT">$1<ex>6</ex></ph> from other sites
       </message>
       <message name="IDS_WEBSITE_SETTINGS_MENU_ITEM_DEFAULT_ALLOW" desc="The text of the menu item of a permissions menu on the Website Settings UI that resets the setting to the default setting which is allow.">
         Use global default (Allow)
@@ -654,6 +645,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
 
       <!-- content area context menus. Android does not use it -->
       <if expr="not is_android">
+        <message name="IDS_CONTENT_CONTEXT_INSPECTELEMENT" desc="The name of the Inspect Element command in the content area context menu">
+          I&amp;nspect
+        </message>
         <if expr="is_macosx">
             <message name="IDS_CONTENT_CONTEXT_LOOK_UP" desc="The name of the 'Look Up “string”' item in the content area context menu. To translate, launch /Applications/TextEdit.app in an appropriately localized version of OS X, right-click on the text entry area and use the translation from there.">
               Look Up “<ph name="LOOKUP_STRING">$1<ex>orthogonal</ex></ph>”
@@ -683,9 +677,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
           </message>
           <message name="IDS_CONTENT_CONTEXT_VIEWPAGEINFO" desc="The name of the View Page Info command in the content area context menu">
             View page &amp;info
-          </message>
-          <message name="IDS_CONTENT_CONTEXT_INSPECTELEMENT" desc="The name of the Inspect Element command in the content area context menu">
-            I&amp;nspect element
           </message>
           <message name="IDS_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE" desc="The name of the Inspect Background Page command in the packaged app content area context menu">
             Inspect &amp;background page
@@ -744,7 +735,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             Sa&amp;ve image as...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYIMAGELOCATION" desc="The name of the Copy Image Location command in the content area context menu">
-            C&amp;opy image URL
+            C&amp;opy image address
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYIMAGE" desc="The name of the Copy Image command in the content area context menu">
             Cop&amp;y image
@@ -788,7 +779,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             Sa&amp;ve video as...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION" desc="The name of the Copy Video Location command in the content area context menu">
-            C&amp;opy video URL
+            C&amp;opy video address
           </message>
           <message name="IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB" desc="The name of the Open Video in New Tab command in the content area context menu">
             &amp;Open video in new tab
@@ -798,7 +789,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             Sa&amp;ve audio as...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION" desc="The name of the Copy Audio Location command in the content area context menu">
-            C&amp;opy audio URL
+            C&amp;opy audio address
           </message>
           <message name="IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB" desc="The name of the Open Audio in New Tab command in the content area context menu">
             &amp;Open audio in new tab
@@ -856,16 +847,16 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for “<ph name="SEARCH_TERMS">$2<ex>flowers</ex></ph>”
           </message>
           <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE" desc="The name of the Search For Image command in the content area context menu">
-            &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for this image
+            &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for image
           </message>
           <message name="IDS_CONTENT_CONTEXT_GOTOURL" desc="The name of the Go to 'url' command in the content area context menu">
             &amp;Go to <ph name="URL">$1<ex>http://www.google.com/</ex></ph>
           </message>
-          <message name="IDS_CONTENT_CONTEXT_ADDSEARCHENGINE" desc="The name of the Add as Search Engine command in the content area context menu">
-            Add as search en&amp;gine...
-          </message>
           <message name="IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD" desc="The name of the Save Password command in the content area context menu">
             Save password
+          </message>
+          <message name="IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS" desc="The name of the Language Settings command in the content area context menu">
+            &amp;Language settings...
           </message>
         </if>
         <if expr="use_titlecase">
@@ -892,9 +883,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
           </message>
           <message name="IDS_CONTENT_CONTEXT_VIEWPAGEINFO" desc="In Title Case: The name of the View Page Info command in the content area context menu">
             View Page &amp;Info
-          </message>
-          <message name="IDS_CONTENT_CONTEXT_INSPECTELEMENT" desc="In Title Case: The name of the Inspect Element command in the content area context menu">
-            I&amp;nspect Element
           </message>
           <message name="IDS_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE" desc="In Title Case: The name of the Inspect Background Page command in the packaged app content area context menu">
             Inspect &amp;Background Page
@@ -953,7 +941,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             Sa&amp;ve Image As...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYIMAGELOCATION" desc="In Title Case: The name of the Copy Image Location command in the content area context menu">
-            C&amp;opy Image URL
+            C&amp;opy Image Address
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYIMAGE" desc="In Title Case: The name of the Copy Image command in the content area context menu">
             Cop&amp;y Image
@@ -997,7 +985,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
            Sa&amp;ve Video As...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION" desc="In Title Case: The name of the Copy Video Location command in the content area context menu">
-            C&amp;opy Video URL
+            C&amp;opy Video Address
           </message>
           <message name="IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB" desc="In Title Case: The name of the Open Video in New Tab command in the content area context menu">
             &amp;Open Video in New Tab
@@ -1007,7 +995,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             Sa&amp;ve Audio As...
           </message>
           <message name="IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION" desc="In Title Case: The name of the Copy Audio Location command in the content area context menu">
-            C&amp;opy Audio URL
+            C&amp;opy Audio Address
           </message>
           <message name="IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB" desc="In Title Case: The name of the Open Audio in New Tab command in the content area context menu">
             &amp;Open Audio in New Tab
@@ -1076,16 +1064,16 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
             &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for “<ph name="SEARCH_TERMS">$2<ex>flowers</ex></ph>”
           </message>
           <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE" desc="In Title Case: The name of the Search For Image command in the content area context menu">
-            &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for this Image
+            &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for Image
           </message>
           <message name="IDS_CONTENT_CONTEXT_GOTOURL" desc="In Title Case: The name of the Go to url for 'string' command in the content area context menu">
             &amp;Go to <ph name="URL">$1<ex>http://www.google.com/</ex></ph>
           </message>
-          <message name="IDS_CONTENT_CONTEXT_ADDSEARCHENGINE" desc="In Title Case: The name of the Add as Search Engine command in the content area context menu">
-            Add As Search En&amp;gine...
-          </message>
           <message name="IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD" desc="In Title Case: The name of the Save Password command in the content area context menu">
             Save Password
+          </message>
+          <message name="IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS" desc="In Title Case: The name of the Language Settings command in the content area context menu">
+            &amp;Language Settings...
           </message>
         </if>
       </if>
@@ -1120,43 +1108,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         </message>
         <message name="IDS_VISIT_DESKTOP_WARNING_SHOW_DISMISS" desc="Label for checkbox dismissing show of teleportation warning dialog.">
           Got it, don't show me again.
-        </message>
-      </if>
-
-      <!-- Spelling submenu -->
-      <if expr="is_macosx">
-        <message name="IDS_CONTENT_CONTEXT_SPELLCHECK_MENU" desc="In Title Case: The name of the Spellcheck Options submenu in the spelling context menu">
-          Spelling and Grammar
-        </message>
-        <message name="IDS_CONTENT_CONTEXT_CHECK_SPELLING_WHILE_TYPING" desc="The name of the Check Spelling while Typing field command in the spelling context menu">
-          Check Spelling While Typing
-        </message>
-        <message name="IDS_CONTENT_CONTEXT_SHOW_SPELLING_PANEL" desc="The name of the Show Spelling Panel command in the spelling context menu">
-          Show Spelling and Grammar
-        </message>
-        <message name="IDS_CONTENT_CONTEXT_HIDE_SPELLING_PANEL" desc="The name of the Hide Spelling Panel command in the spelling context menu">
-          Hide Spelling and Grammar
-        </message>
-      </if>
-      <if expr="not is_macosx">
-        <if expr="not use_titlecase">
-          <message name="IDS_CONTENT_CONTEXT_SPELLCHECK_MENU" desc="The name of the Spellcheck Options submenu in the content area context menu">
-            Spell-checker &amp;options
-          </message>
-          <message name="IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS" desc="The name of the Language Settings command in the content area context menu">
-            &amp;Language settings...
-          </message>
-        </if>
-        <if expr="use_titlecase">
-          <message name="IDS_CONTENT_CONTEXT_SPELLCHECK_MENU" desc="In Title Case: The name of the Spellcheck Options submenu in the content area context menu">
-            Spell-checker &amp;Options
-          </message>
-          <message name="IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS" desc="In Title Case: The name of the Language Settings command in the content area context menu">
-            &amp;Language Settings...
-          </message>
-        </if>
-        <message name="IDS_CONTENT_CONTEXT_CHECK_SPELLING_WHILE_TYPING" desc="The name of the Check Spelling while Typing field command in the spelling context menu">
-          Check the spelling of text fields
         </message>
       </if>
 
@@ -1476,6 +1427,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
           Request tablet site
         </message>
       </if>
+      <message name="IDS_HELP_MENU" desc="The text label of the Help sub-menu item in the wrench menu">
+        H&amp;elp
+      </message>
       <if expr="not use_titlecase">
         <message name="IDS_SHOW_HISTORY" desc="The show history menu in the app menu">
           &amp;History
@@ -1509,9 +1463,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         </message>
         <message name="IDS_GET_HELP" desc="The text label of the Get Help menu item">
           Get H&amp;elp
-        </message>
-        <message name="IDS_HELP_MENU" desc="The text label of the Help sub-menu item">
-          H&amp;elp and about
         </message>
         <message name="IDS_EXIT" desc="The text label of the Exit menu item">
           E&amp;xit
@@ -1550,9 +1501,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         </message>
         <message name="IDS_GET_HELP" desc="The text label of the Get Help menu item">
           Get H&amp;elp
-        </message>
-        <message name="IDS_HELP_MENU" desc="In Title Case: The text label of the Help sub-menu item">
-          H&amp;elp and About
         </message>
         <message name="IDS_EXIT" desc="In Title Case: The text label of the Exit menu item">
           E&amp;xit
@@ -1657,6 +1605,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
       <message name="IDS_SHOW_ALL_DOWNLOADS"
                desc="Link label shown at the corner of the download shelf">
         Show all downloads...
+      </message>
+      <message name="IDS_SHOW_ALL_DOWNLOADS_MD" desc="Button label shown at the corner of the download shelf">
+        Show all
       </message>
       <!-- Download Error Messages-->
       <!-- *_STATUS_*: Short message in the download on the shelf.-->
@@ -1826,47 +1777,41 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         Access to this resource was forbidden by the server.
       </message>
 
+      <message name="IDS_DOWNLOAD_NOTIFICATION_LABEL_OPEN_WHEN_COMPLETE"
+               desc="Download notifications: Label for 'Open when download is complete' action button on notification">
+        Open when done
+      </message>
+      <message name="IDS_DOWNLOAD_NOTIFICATION_LABEL_OPEN"
+               desc="Download notifications: Label for 'Open download' action button on notification">
+        Open
+      </message>
       <!-- Download Shelf Items -->
       <message name="IDS_DOWNLOAD_STATUS_STARTING"
                desc="When starting a download, let the user know we're starting the download.">
         Starting...
       </message>
-      <message name="IDS_DOWNLOAD_STATUS_IN_PROGRESS_TITLE"
-               desc=".">
-               Downloading <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph>
-      </message>
-      <message name="IDS_DOWNLOAD_STATUS_DOWNLOADED_TITLE"
-               desc=".">
-               <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph> downloaded
-      </message>
-      <message name="IDS_DOWNLOAD_STATUS_DOWNLOAD_FAILED_TITLE"
-               desc=".">
-               <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph> download unsuccessful
-      </message>
-      <message name="IDS_DOWNLOAD_STATUS_GROUP_IN_PROGRESS_TITLE"
-               desc="Title of download group notification which shows the combined progress of multiple downloads.">
-        {NUM_DOWNLOADS, plural,
-         =1 {Downloading a file}
-         other {Downloading # files}}
-      </message>
-      <message name="IDS_DOWNLOAD_STATUS_GROUP_DONE_TITLE"
-               desc="Title of download group notification which shows the combined progress of multiple downloads. [ICU Syntax]">
-        {NUM_DOWNLOADS, plural,
-         =1 {Downloaded a file}
-         other {Downloaded # files}}
-      </message>
-      <message name="IDS_DOWNLOAD_NOTIFICATION_STATUS"
-               desc="Size and units downloaded and total, the origin domain, and the current status od download.">
-        <ph name="DOWNLOAD_RECEIVED_AND_TOTAL">$1<ex>54/154 MB</ex></ph> from <ph name="DOWNLOAD_DOMAIN">$2<ex>example.com</ex></ph>, <ph name="SUB_STATUS_TEXT">$3<ex>24 secs remaining</ex></ph>
-      </message>
-      <message name="IDS_DOWNLOAD_NOTIFICATION_STATUS_COMPLETED"
-               desc="Size and units downloaded, and the origin domain.">
-        <ph name="DOWNLOAD_RECEIVED_AND_TOTAL">$1<ex>154/154 MB</ex></ph> from <ph name="DOWNLOAD_DOMAIN">$2<ex>example.com</ex></ph>
-      </message>
-      <message name="IDS_DOWNLOAD_STATUS_COMBINED_IN_PROGRESS"
-               desc="Status text of download notification which shows the combined progres of multiple downloads">
-               <ph name="PERCENT">$1<ex>30</ex></ph>% complete, <ph name="TIME_LEFT">$2<ex>20 secs left</ex></ph>,
-      </message>
+      <if expr="chromeos">
+        <message name="IDS_DOWNLOAD_STATUS_IN_PROGRESS_TITLE"
+                 desc=".">
+                 Downloading <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph>
+        </message>
+        <message name="IDS_DOWNLOAD_STATUS_DOWNLOADED_TITLE"
+                 desc=".">
+                 <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph> downloaded
+        </message>
+        <message name="IDS_DOWNLOAD_STATUS_DOWNLOAD_FAILED_TITLE"
+                 desc=".">
+                 <ph name="FILE_NAME">$1<ex>somedocument.pdf</ex></ph> download unsuccessful
+        </message>
+        <message name="IDS_DOWNLOAD_NOTIFICATION_STATUS"
+                 desc="Size and units downloaded and total, the origin domain, and the current status od download.">
+          <ph name="DOWNLOAD_RECEIVED_AND_TOTAL">$1<ex>54/154 MB</ex></ph> from <ph name="DOWNLOAD_DOMAIN">$2<ex>example.com</ex></ph>, <ph name="SUB_STATUS_TEXT">$3<ex>24 secs remaining</ex></ph>
+        </message>
+        <message name="IDS_DOWNLOAD_NOTIFICATION_STATUS_COMPLETED"
+                 desc="Size and units downloaded, and the origin domain.">
+          <ph name="DOWNLOAD_RECEIVED_AND_TOTAL">$1<ex>154/154 MB</ex></ph> from <ph name="DOWNLOAD_DOMAIN">$2<ex>example.com</ex></ph>
+        </message>
+      </if>
       <message name="IDS_DOWNLOAD_STATUS_IN_PROGRESS"
                desc="Size and units downloaded, time remaining.">
         <ph name="DOWNLOAD_RECEIVED">$1<ex>54/154 MB</ex></ph>, <ph name="TIME_LEFT">$2<ex>5s</ex></ph>
@@ -1897,6 +1842,7 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
       <message name="IDS_DOWNLOAD_STATUS_CANCELLED" desc="Text that appears under the downloaded files that have been canceled.">
         Canceled
       </message>
+      <!-- TODO(dbeam): can this be merged with IDS_DOWNLOAD_FILE_REMOVED? -->
       <message name="IDS_DOWNLOAD_STATUS_REMOVED" desc="Text that appears under the downloaded files that have been removed.">
         Removed
       </message>
@@ -1933,10 +1879,12 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
          desc="Message shown to the user to validate the download when the download content is classified as uncommon by safebrowsing.">
         <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> is not commonly downloaded and could be dangerous.
       </message>
-      <message name="IDS_PROMPT_BLOCKED_MALICIOUS_DOWNLOAD_TITLE"
-               desc="In the download notification, a title of message shown for blocked download">
-        Malicious download blocked
-      </message>
+      <if expr="chromeos">
+        <message name="IDS_PROMPT_BLOCKED_MALICIOUS_DOWNLOAD_TITLE"
+                 desc="In the download notification, a title of message shown for blocked download">
+          Malicious download blocked
+        </message>
+      </if>
       <message name="IDS_CONFIRM_KEEP_DANGEROUS_DOWNLOAD_TITLE"
                desc="Title for the confirmation dialog asking whether the user really meant to keep a dangerous download">
         Confirm Download
@@ -1995,11 +1943,17 @@ Even if you have downloaded files from this website before, the website might ha
                desc="In the download view, 'Pause' link text">
         Pause
       </message>
-      <message name="IDS_DOWNLOAD_SEARCH_BUTTON" desc="Title of the button in the download page that triggers a search">
+      <message name="IDS_DOWNLOAD_SEARCH_BUTTON"
+               desc="Title of the button in the download page that triggers a search">
         Search downloads
       </message>
-      <message name="IDS_MD_DOWNLOAD_SEARCH" desc="Placeholder text/label for the search input in the download page">
+      <message name="IDS_MD_DOWNLOAD_SEARCH"
+               desc="Placeholder text/label for the search input in the download page">
         Search
+      </message>
+      <message name="IDS_DOWNLOAD_CLEAR_SEARCH"
+               desc="Tooltip text for the button that clears the search term on the downloads page.">
+        Clear search
       </message>
       <message name="IDS_DOWNLOAD_SEARCHRESULTSFOR" desc="Format string for search results">
         Search results for '<ph name="SEARCH_STRING">$1</ph>'
@@ -2049,17 +2003,19 @@ Even if you have downloaded files from this website before, the website might ha
                desc="In the download notification, 'Show all downloads' button text.">
         Show all downloads
       </message>
-      <message name="IDS_DOWNLOAD_LINK_LEARN_MORE_SCANNING"
-               desc="In the download notification, a label of the button to show information about download scanning">
-        Learn more
-      </message>
+      <if expr="chromeos">
+        <message name="IDS_DOWNLOAD_LINK_LEARN_MORE_SCANNING"
+                 desc="In the download notification, a label of the button to show information about download scanning">
+          Learn more
+        </message>
+      </if>
       <message name="IDS_DOWNLOAD_TAB_CANCELLED"
                desc="Text that appears next to the downloaded files that have been canceled">
         Canceled
       </message>
       <message name="IDS_DOWNLOAD_FILE_REMOVED"
-               desc="Text that appears next to the downloaded files that have been removed">
-        Removed
+               desc="Text that appears when a downloaded file has been deleted from the user's computer.">
+        Deleted
       </message>
       <message name="IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN"
                desc="The status text for a download in progress in the download manager. This includes information such as speed and received byte counts and is used when we do not know the remaining time">
@@ -2085,9 +2041,21 @@ Even if you have downloaded files from this website before, the website might ha
                desc="Open downloads folder link">
         Open downloads folder
       </message>
+      <message name="IDS_DOWNLOAD_MORE_ACTIONS"
+               desc="Tooltip of a button on the downloads page that shows a menu with actions like 'Open downloads folder' or 'Clear all'">
+        More actions...
+      </message>
       <message name="IDS_DOWNLOAD_BY_EXTENSION"
                desc="Indicates which extension downloaded this file.">
         Downloaded by &lt;a&gt;<ph name="EXTENSION">$1<ex>The Best Chrome Extension Ever</ex></ph>&lt;/a&gt;
+      </message>
+      <message name="IDS_DOWNLOAD_BY_EXTENSION_URL"
+               desc="Indicates which extension downloaded this file by name and URL.">
+        Downloaded by &lt;a href=&quot;<ph name="URL">$1<ex>adblock.com</ex></ph>&quot;&gt;<ph name="EXTENSION">$2<ex>The Best Chrome Extension Ever</ex></ph>&lt;/a&gt;
+      </message>
+      <message name="IDS_DOWNLOAD_IN_INCOGNITO"
+               desc="Indicates a download was started in Incognito mode.">
+        Downloaded in Incognito
       </message>
 
       <!-- Download Context Menu Items -->
@@ -2656,112 +2624,6 @@ Even if you have downloaded files from this website before, the website might ha
         Run all plugins this time
       </message>
 
-      <!-- Certificate error strings -->
-      <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_DETAILS" desc="Details for an unsafe common name in an X509 certificate">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is from <ph name="DOMAIN2">&lt;strong&gt;$2<ex>fakepaypal.com</ex>&lt;/strong&gt;</ph>. This may be caused by a misconfiguration or an attacker intercepting your connection.
-      </message>
-      <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_DESCRIPTION" desc="Description for an unsafe common name in an X509 certificate">
-        Server's certificate does not match the URL.
-      </message>
-
-      <message name="IDS_CERT_ERROR_EXPIRED_DETAILS" desc="Details for an expired X509 certificate [ICU Syntax]">
-        {1, plural,
-         =1 {This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;{0}<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate expired yesterday. This may be caused by a misconfiguration or an attacker intercepting your connection. Your computer's clock is currently set to <ph name="CURRENT_DATE">{2, date, full}<ex>Monday, July 16, 2012</ex></ph>. Does that look right? If not, you should correct your system's clock and then refresh this page.}
-         other {This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;{0}<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate expired # days ago. This may be caused by a misconfiguration or an attacker intercepting your connection. Your computer's clock is currently set to <ph name="CURRENT_DATE">{2, date, full}<ex>Monday, July 16, 2012</ex></ph>. Does that look right? If not, you should correct your system's clock and then refresh this page.}}
-      </message>
-      <message name="IDS_CERT_ERROR_EXPIRED_DESCRIPTION" desc="Description for an expired X509 certificate">
-        Server's certificate has expired.
-      </message>
-
-      <message name="IDS_CERT_ERROR_NOT_YET_VALID_DETAILS" desc="Details for an X509 certificate that is not yet valid [ICU Syntax]">
-        {1, plural,
-         =1 {This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;{0}<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is supposedly from tomorrow. This may be caused by a misconfiguration or an attacker intercepting your connection.}
-         other {This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;{0}<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is supposedly from # days in the future. This may be caused by a misconfiguration or an attacker intercepting your connection.}}
-      </message>
-      <message name="IDS_CERT_ERROR_NOT_YET_VALID_DESCRIPTION" desc="Description for an X509 certificate that is not yet valid">
-        Server's certificate is not yet valid.
-      </message>
-
-      <message name="IDS_CERT_ERROR_NOT_VALID_AT_THIS_TIME_DETAILS" desc="Details for a chain with a X509 certificate that is not valid at this time.">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is not valid at this time. This may be caused by a misconfiguration or an attacker intercepting your connection.
-      </message>
-      <message name="IDS_CERT_ERROR_NOT_VALID_AT_THIS_TIME_DESCRIPTION" desc="Description for a chain with a X509 certificate that is not valid at this time.">
-        Server's certificate is not valid at this time.
-      </message>
-
-      <message name="IDS_CERT_ERROR_CHAIN_EXPIRED_DETAILS" desc="Details for an expired root or intermediate cert in chain">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate expired. This may be caused by a misconfiguration or an attacker intercepting your connection. Your computer's clock is currently set to <ph name="CURRENT_TIME">$3<ex>July 18, 2012</ex></ph>. Does that look right? If not, you should correct your system's clock and then refresh this page.
-      </message>
-      <message name="IDS_CERT_ERROR_CHAIN_EXPIRED_DESCRIPTION" desc="Description for an expired intermediate/root certificate in chain">
-        A root or intermediate certificate has expired.
-      </message>
-
-      <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DESCRIPTION" desc="Description for an X509 certificate with an invalid authority">
-        Server's certificate is not trusted.
-      </message>
-
-      <message name="IDS_CERT_ERROR_CONTAINS_ERRORS_DETAILS" desc="Details of the error page for an X509 certificate that contains errors">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate contains errors. This may be caused by a misconfiguration or an attacker intercepting your connection.
-      </message>
-      <message name="IDS_CERT_ERROR_CONTAINS_ERRORS_DESCRIPTION" desc="Description of the error page for an X509 certificate that contains errors">
-        Server's certificate contains errors.
-      </message>
-
-      <message name="IDS_CERT_ERROR_NO_REVOCATION_MECHANISM_DETAILS" desc="Details for not finding a revocation mechanism in an X509 certificate">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate might be revoked. This may be caused by a misconfiguration or an attacker intercepting your connection.
-      </message>
-      <message name="IDS_CERT_ERROR_NO_REVOCATION_MECHANISM_DESCRIPTION" desc="Description for not finding a revocation mechanism in an X509 certificate">
-        No revocation mechanism found.
-      </message>
-
-      <message name="IDS_CERT_ERROR_REVOKED_CERT_DETAILS" desc="Details of the error page for a revoked certificate">
-        You attempted to reach <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>, but the certificate that the server presented has been revoked by its issuer. This means that the security credentials the server presented absolutely should not be trusted. You may be communicating with an attacker.
-      </message>
-      <message name="IDS_CERT_ERROR_REVOKED_CERT_DESCRIPTION" desc="Description of the error page for a revoked certificate">
-        Server's certificate has been revoked.
-      </message>
-
-      <message name="IDS_CERT_ERROR_INVALID_CERT_DETAILS" desc="Details of the error page for an X509 certificate that is invalid">
-        You attempted to reach <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>, but the server presented an invalid certificate.
-      </message>
-      <message name="IDS_CERT_ERROR_INVALID_CERT_DESCRIPTION" desc="Description of the error page for an X509 certificate that is invalid">
-        Server's certificate is invalid.
-      </message>
-
-      <message name="IDS_CERT_ERROR_WEAK_SIGNATURE_ALGORITHM_DETAILS" desc="Details of the error page for a certificate signed using a weak signature algorithm">
-        You attempted to reach <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>, but the server presented a certificate signed using a weak signature algorithm. This means that the security credentials the server presented could have been forged, and the server may not be the server you expected (you may be communicating with an attacker).
-      </message>
-      <message name="IDS_CERT_ERROR_WEAK_SIGNATURE_ALGORITHM_DESCRIPTION" desc="Description of the error page for a certificate signed using a weak signature algorithm">
-        Server's certificate is signed using a weak signature algorithm.
-      </message>
-
-      <message name="IDS_CERT_ERROR_WEAK_KEY_DETAILS" desc="Details of the error page for a certificate containing a weak key">
-        You attempted to reach <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>, but the server presented a certificate containing a weak key. An attacker could have broken the private key, and the server may not be the server you expected (you may be communicating with an attacker).
-      </message>
-      <message name="IDS_CERT_ERROR_WEAK_KEY_DESCRIPTION" desc="Description of the error page for a certificate containing a weak key">
-        The server certificate contains a weak cryptographic key.
-      </message>
-
-      <message name="IDS_CERT_ERROR_NAME_CONSTRAINT_VIOLATION_DETAILS" desc="Details of the error page for a certificate that contains a name outside of its scope">
-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate might have been issued fraudulently. This may be caused by a misconfiguration or an attacker intercepting your connection.
-      </message>
-      <message name="IDS_CERT_ERROR_NAME_CONSTRAINT_VIOLATION_DESCRIPTION" desc="Description of the error page for a certificate that contains a name outside of its scope">
-        Server's certificate violates name constraints.
-      </message>
-      <message name="IDS_CERT_ERROR_VALIDITY_TOO_LONG_DETAILS" desc="Details of the error page for a certificate whose validity period is too long">
-        You attempted to reach <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>, but the server presented a certificate whose validity period is too long to be trustworthy.
-      </message>
-      <message name="IDS_CERT_ERROR_VALIDITY_TOO_LONG_DESCRIPTION" desc="Description of the error page for a certificate whose validity period is too long">
-        The server certificate has a validity period that is too long.
-      </message>
-
-      <message name="IDS_CERT_ERROR_UNKNOWN_ERROR_DETAILS" desc="Details of the error page for an unknown ssl error">
-        An unknown error has occurred.
-      </message>
-      <message name="IDS_CERT_ERROR_UNKNOWN_ERROR_DESCRIPTION" desc="Description of the error page for an unknown ssl error">
-        Unknown server certificate error.
-      </message>
-
       <!-- Administrator-provided certificate notifications -->
       <message name="IDS_CERT_POLICY_PROVIDED_CERT_HEADER" desc="Text that is displayed in the header of the Website Settings popup when using an administrator-provided certificate">
         Using an administrator-provided certificate
@@ -2772,8 +2634,14 @@ Even if you have downloaded files from this website before, the website might ha
 
       <!-- Win certificate selector dialog strings.  -->
       <if expr="toolkit_views">
-        <message name="IDS_CERT_SELECTOR_TABLE_CERT_FORMAT" desc="Format for a certificate row in the certificate selector table.">
-          <ph name="SUBJECT">$1<ex>FOAF ME Cert http://foaf.me/test</ex></ph> (<ph name="ISSUER">$2<ex>FOAF.ME</ex></ph>)
+        <message name="IDS_CERT_SELECTOR_SUBJECT_COLUMN" desc="The text of the header for the certificate subject column in the certificate selector dialog.">
+          Subject
+        </message>
+        <message name="IDS_CERT_SELECTOR_ISSUER_COLUMN" desc="The text of the header for the certificate issuer column in the certificate selector dialog.">
+          Issuer
+        </message>
+        <message name="IDS_CERT_SELECTOR_PROVIDER_COLUMN" desc="The text of the header for the certificate provider column in the certificate selector dialog.">
+          Provider
         </message>
       </if>
 
@@ -3513,8 +3381,8 @@ Even if you have downloaded files from this website before, the website might ha
       </if>
 
       <!-- DevTools attached infobar -->
-      <message name="IDS_DEV_TOOLS_INFOBAR_LABEL" desc="Label displayed in an infobar when external debugger is attached to the page">
-        "<ph name="CLIENT_NAME">$1<ex>Extension Foo</ex></ph>" is debugging this tab.
+      <message name="IDS_DEV_TOOLS_INFOBAR_LABEL" desc="Label displayed in an infobar when external debugger is attached to the browser">
+        "<ph name="CLIENT_NAME">$1<ex>Extension Foo</ex></ph>" is debugging this browser.
       </message>
 
       <!-- DevTools file system access -->
@@ -4063,164 +3931,273 @@ Even if you have downloaded files from this website before, the website might ha
          other {Communicate with # USB devices}}
       </message>
 
-      <if expr="is_android">
-        <message name="IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS" desc="Mobile: Permission string for full access to the device and all websites.">
-          Read and change all your data on your device and the websites you visit
-        </message>
-      </if>
-      <if expr="not is_android">
+      <if expr="enable_extensions">
         <message name="IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS" desc="Permission string for full access to the computer and all websites.">
           Read and change all your data on your computer and the websites you visit
         </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS" desc="Permission string for access to data on all websites.">
+          Read and change all your data on the websites you visit
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS_READ_ONLY" desc="Permission string for read-only access to data on all websites.">
+          Read all your data on the websites you visit
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_AUDIO_CAPTURE" desc="Permission string for access to audio capture devices.">
+          Use your microphone
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_VIDEO_CAPTURE" desc="Permission string for access to video capture devices.">
+          Use your camera
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_AUDIO_AND_VIDEO_CAPTURE" desc="Permission string for access to both audio and video capture devices.">
+          Use your microphone and camera
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH" desc="Permission string for general access to the Bluetooth API.">
+          Access information about Bluetooth devices paired with your system and discover nearby Bluetooth devices.
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_DEVICES" desc="Permission string for implementing Bluetooth profiles.">
+          Send messages to and receive messages from Bluetooth devices.
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_PRIVATE" desc="Permission string for Bluetooth Private API.">
+          Control Bluetooth adapter state and pairing
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_SERIAL" desc="Permission string for access to Bluetooth and serial connected devices.">
+          Access your Bluetooth and Serial devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS" desc="Permission string for access to bookmarks.">
+          Read and change your bookmarks
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD" desc="Permission string for access to clipboard.">
+          Read data you copy and paste
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_COPRESENCE" desc="Permission string for access to bookmarks.">
+          Communicate with nearby devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DEBUGGER" desc="Permission string for access to debugger.">
+          Access the page debugger backend
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DECLARATIVE_WEB_REQUEST" desc="Permission string for Declarative Web Request API.">
+          Block parts of web pages
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DOCUMENT_SCAN" desc="Permission string for access to document scanning.">
+          Access document scanners attached via USB or on the local network
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_FAVICON" desc="Permission string for access to favicons.">
+          Read the icons of the websites you visit
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION" desc="Permisson string for access to geolocation.">
+          Detect your physical location
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ" desc="Permission string for access to browsing history.">
+          Read your browsing history
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_AND_SESSIONS" desc="Permission string for access to both browsing history and signed in sessions.">
+          Read your browsing history on all your signed-in devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE" desc="Permission string for access to modify browsing history.">
+          Read and change your browsing history
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_AND_SESSIONS" desc="Permission string for access to modify both browsing history and signed in sessions.">
+          Read and change your browsing history on all your signed-in devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HOME_PAGE_SETTING_OVERRIDE" desc="Permission string for home page override.">
+          Change your home page to: <ph name="HOME_PAGE">$1<ex>home.page.com/home.html</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_1_HOST" desc="Permission string for access to data on one website.">
+          Read and change your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_1_HOST_READ_ONLY" desc="Permission string for read-only access to data on one website.">
+          Read your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_2_HOSTS" desc="Permission string for access to data on two websites.">
+          Read and change your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph> and <ph name="WEBSITE_2">$2<ex>www.reddit.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_2_HOSTS_READ_ONLY" desc="Permission string for read-only access to data on two websites.">
+          Read your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph> and <ph name="WEBSITE_2">$2<ex>www.reddit.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_3_HOSTS" desc="Permission string for access to data on three websites.">
+          Read and change your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>, <ph name="WEBSITE_2">$2<ex>www.reddit.com</ex></ph>, and <ph name="WEBSITE_3">$3<ex>news.ycombinator.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_3_HOSTS_READ_ONLY" desc="Permission string for read-only access to data on three websites.">
+          Read your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>, <ph name="WEBSITE_2">$2<ex>www.reddit.com</ex></ph>, and <ph name="WEBSITE_3">$3<ex>news.ycombinator.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HOSTS_LIST" desc="Permission string for access to data for an arbitrary list of websites.">
+          Read and change your data on a number of websites
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_HOSTS_LIST_READ_ONLY" desc="Permission string for read-only access to data for an arbitrary list of websites.">
+          Read your data on a number of websites
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_INPUT" desc="Permission string for access to input.">
+          Read and change anything you type
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT" desc="Permisson string for access to extension management.">
+          Manage your apps, extensions, and themes
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MDNS" desc="Permisson string for access to list of mDNS services on a network.">
+          Discover devices on your local network
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORK_STATE" desc="Permission string for network list access.">
+          Access list of network connections
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORKING_CONFIG" desc="Permission string for Networking Config API.">
+          Configure network connections
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORKING_PRIVATE" desc="Permission string for Networking Private API.">
+          Manage network connections
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SEARCH_SETTINGS_OVERRIDE" desc="Permission string for search settings override.">
+          Change your search settings to: <ph name="SEARCH_HOST">$1<ex>url.search.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SERIAL" desc="Permission string for access to serial devices.">
+          Access your serial devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_ANY_HOST" desc="Permission string for access to any device on the local network or internet.">
+          Exchange data with any device on the local network or internet
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_HOSTS_IN_DOMAIN" desc="Permission string for access to any device within a single domains on the local network or internet.">
+          Exchange data with any device in the domain <ph name="DOMAIN">$1<ex>example.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_HOSTS_IN_DOMAINS" desc="Permission string for access to any device within multiple domains on the local network or internet.">
+          Exchange data with any device in the domains: <ph name="DOMAINS">$1<ex>example.com example.org</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_SPECIFIC_HOST" desc="Permission string for access to a single specific device on the local network or internet.">
+          Exchange data with the device named <ph name="HOSTNAME">$1<ex>foo.example.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SOCKET_SPECIFIC_HOSTS" desc="Permission string for access to multiple specific devices on the local network or internet.">
+          Exchange data with the devices named: <ph name="HOSTNAMES">$1<ex>foo.example.com bar.example.com</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_START_PAGE_SETTING_OVERRIDE" desc="Permission string for start page override.">
+          Change your start page to: <ph name="START_PAGE">$1<ex>start.page.com/start.html</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_TOPSITES" desc="Permission string for access to the list of most frequently visited websites.">
+          Read a list of your most frequently visited websites
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_TTS_ENGINE" desc="Permission string for access to text-to-speech.">
+          Read all text spoken using synthesized speech
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_U2F_DEVICES" desc="Warning message which indicates that an extension has access to Universal 2nd Factor devices.">
+          Access your Universal 2nd Factor devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE" desc="Permission string for access to a specific USB device.">
+          Access any <ph name="DEVICE_NAME_AND_VENDOR">$1<ex>SoundKnob from Griffin Technology</ex></ph> via USB
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST" desc="Permission string for access to a list of USB devices.">
+          Access any of these USB devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM" desc="Line item for a USB device listed under IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST.">
+          <ph name="DEVICE_NAME_AND_VENDOR">$1<ex>SoundKnob from Griffin Technology</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM_UNKNOWN_PRODUCT" desc="Line item for a USB device listed under IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST that has an unknown product ID.">
+          unknown devices from <ph name="VENDOR_NAME">$1<ex>Griffin Technology</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST_ITEM_UNKNOWN_VENDOR" desc="Line item for a USB device listed under IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST that has an unknown vendor ID.">
+          devices from an unknown vendor
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_PRODUCT" desc="Permission string for access to a specific USB device with an unknown product ID.">
+          Access USB devices from <ph name="VENDOR_NAME">$1<ex>Griffin Technology</ex></ph>
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_VENDOR" desc="Permission string for acceess to a specific USB device with an unknown vendor ID.">
+          Access USB devices from an unknown vendor
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_VPN" desc="Permission string for access to VPN API.">
+          Access your network traffic
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_WEB_CONNECTABLE" desc="Permission string for allowing websites to connect to extensions.">
+          Communicate with cooperating websites
+        </message>
+
+        <message name="IDS_EXTENSION_PROMPT_WARNING_CONTENT_SETTINGS" desc="Permission string for access to content settings.">
+          Change your settings that control websites' access to features such as cookies, JavaScript, plugins, geolocation, microphone, camera etc.
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_PRIVACY" desc="Permission string for access to privacy settings.">
+          Change your privacy-related settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SIGNED_IN_DEVICES" desc="Permission string for access to privacy settings.">
+          Read the list of your signed-in devices
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS" desc="Permission string for access to downloads.">
+          Manage your downloads
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS_OPEN" desc="Permission string for access to downloads.">
+          Open downloaded files
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_IDENTITY_EMAIL" desc="Permission string for access to profile email address.">
+          Know your email address
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_WALLPAPER" desc="Permission string for access to wallpaper.">
+          Change your wallpaper
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_DIRECTORY" desc="Permission string for read access to directories and their contents.">
+          Read folders that you open in the application
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_WRITE_DIRECTORY" desc="Permission string for write access to directories and their contents.">
+          Write to files and folders that you open in the application
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ" desc="Permission string for access to read all of the user's media galleries.">
+          Access photos, music, and other media from your computer
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE" desc="Permission string for access to read and write to all of the user's media galleries.">
+          Read and change photos, music, and other media from your computer
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_DELETE" desc="Permission string for access to read and delete all of the user's media galleries.">
+          Read and delete photos, music, and other media from your computer
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE_DELETE" desc="Permission string for access to read, write and delete to all of the user's media galleries.">
+          Read, change and delete photos, music, and other media from your computer
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SYNCFILESYSTEM" desc="Permission string for synchronizing files to the user's Google Drive">
+          Store data in your Google Drive account
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_MUSIC_MANAGER_PRIVATE" desc="Permission string for accessing a unique device identifier">
+          Read a unique identifier for this computer
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_NATIVE_MESSAGING" desc="Permission string for Native Messaging API.">
+          Communicate with cooperating native applications
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SCREENLOCK_PRIVATE" desc="Permission string for locking an unlocking the screen.">
+          Lock and unlock the screen
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_OVERRIDE_BOOKMARKS_UI" desc="Permission string for overriding elements of the bookmarks user interface.">
+          Change the bookmarks user interface
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ACTIVITY_LOG_PRIVATE" desc="Permission string for the observing other extensions' API calls">
+          Monitor the behavior of other extensions, including visited URLs
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_DESKTOP_CAPTURE" desc="Permission string for Desktop Capture API.">
+          Capture content of your screen
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_MODIFY" desc="Permission string for modifying acccessibility settings via extension API shown when an extension utilizing the API is installed.">
+          Change your accessibility settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ" desc="Permission string for modifying acccessibility settings via extension API shown when a extension utilizing the API is installed.">
+          Read your accessibility settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ_MODIFY" desc="Permission string for reading and modifying acccessibility settings via extension API shown when an extension utilizing the API is installed.">
+          Read and change your accessibility settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_EXPERIENCE_SAMPLING_PRIVATE" desc="Permission string for Experience Sampling Private API.">
+          Monitor when you take actions in Chrome
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_PLATFORMKEYS" desc="Permission string for access to client certificates.">
+          Use your client certificates
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_CERTIFICATEPROVIDER" desc="Permission string for providing certificates that can be used for authentication.">
+          Provide certificates for authentication
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SETTINGS_PRIVATE" desc="Permission string for access to settings.">
+          Read and change user and device settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_SEARCH_ENGINES_PRIVATE" desc="Permission string for access to search engines.">
+          Read and change default and custom search engines
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_AUTOFILL_PRIVATE" desc="Permission string for access to autofill settings.">
+          Read and change autofill settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_PASSWORDS_PRIVATE" desc="Permission string for access to passwords settings.">
+          Read and change saved password settings
+        </message>
+        <message name="IDS_EXTENSION_PROMPT_WARNING_USERS_PRIVATE" desc="Permission string for access to user accounts.">
+          Read and change whitelisted users
+        </message>
       </if>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS" desc="Permission string for access to data on all websites.">
-        Read and change all your data on the websites you visit
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS_READ_ONLY" desc="Permission string for read-only access to data on all websites.">
-        Read all your data on the websites you visit
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_FAVICON" desc="Permission string for access to favicons.">
-        Read the icons of the websites you visit
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_INPUT" desc="Permission string for access to input.">
-        Read and change anything you type
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS" desc="Permission string for access to bookmarks.">
-        Read and change your bookmarks
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_COPRESENCE" desc="Permission string for access to bookmarks.">
-        Communicate with nearby devices
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE" desc="Permission string for access to modify browsing history.">
-        Read and change your browsing history
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_AND_SESSIONS" desc="Permission string for access to modify both browsing history and signed in sessions.">
-        Read and change your browsing history on all your signed-in devices
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION" desc="Permisson string for access to geolocation.">
-        Detect your physical location
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT" desc="Permisson string for access to extension management.">
-        Manage your apps, extensions, and themes
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MDNS" desc="Permisson string for access to list of mDNS services on a network.">
-        Discover devices on your local network
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_TOPSITES" desc="Permission string for access to the list of most frequently visited websites.">
-        Read a list of your most frequently visited websites
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ" desc="Permission string for access to browsing history.">
-        Read your browsing history
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_AND_SESSIONS" desc="Permission string for access to both browsing history and signed in sessions.">
-        Read your browsing history on all your signed-in devices
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_DEBUGGER" desc="Permission string for access to debugger.">
-        Access the page debugger backend
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_TTS_ENGINE" desc="Permission string for access to text-to-speech.">
-        Read all text spoken using synthesized speech
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_CONTENT_SETTINGS" desc="Permission string for access to content settings.">
-        Change your settings that control websites' access to features such as cookies, JavaScript, plugins, geolocation, microphone, camera etc.
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_PRIVACY" desc="Permission string for access to privacy settings.">
-        Change your privacy-related settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_SIGNED_IN_DEVICES" desc="Permission string for access to privacy settings.">
-        Read the list of your signed-in devices
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_SERIAL" desc="Permission string for access to Bluetooth and serial connected devices.">
-        Access your Bluetooth and Serial devices
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS" desc="Permission string for access to downloads.">
-        Manage your downloads
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS_OPEN" desc="Permission string for access to downloads.">
-        Open downloaded files
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_IDENTITY_EMAIL" desc="Permission string for access to profile email address.">
-        Know your email address
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_WALLPAPER" desc="Permission string for access to wallpaper.">
-        Change your wallpaper
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_DIRECTORY" desc="Permission string for read access to directories and their contents.">
-        Read folders that you open in the application
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_WRITE_DIRECTORY" desc="Permission string for write access to directories and their contents.">
-        Write to files and folders that you open in the application
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE" desc="Permission string for access to read and write to all of the user's media galleries.">
-        Read and change photos, music, and other media from your computer
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_DELETE" desc="Permission string for access to read and delete all of the user's media galleries.">
-        Read and delete photos, music, and other media from your computer
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE_DELETE" desc="Permission string for access to read, write and delete to all of the user's media galleries.">
-        Read, change and delete photos, music, and other media from your computer
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_SYNCFILESYSTEM" desc="Permission string for synchronizing files to the user's Google Drive">
-        Store data in your Google Drive account
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MUSIC_MANAGER_PRIVATE" desc="Permission string for accessing a unique device identifier">
-        Read a unique identifier for this computer
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_NATIVE_MESSAGING" desc="Permission string for Native Messaging API.">
-        Communicate with cooperating native applications
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_SCREENLOCK_PRIVATE" desc="Permission string for locking an unlocking the screen.">
-        Lock and unlock the screen
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_OVERRIDE_BOOKMARKS_UI" desc="Permission string for overriding elements of the bookmarks user interface.">
-        Change the bookmarks user interface
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ACTIVITY_LOG_PRIVATE" desc="Permission string for the observing other extensions' API calls">
-        Monitor the behavior of other extensions, including visited URLs
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_DESKTOP_CAPTURE" desc="Permission string for Desktop Capture API.">
-        Capture content of your screen
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_MODIFY" desc="Permission string for modifying acccessibility settings via extension API shown when an extension utilizing the API is installed.">
-        Change your accessibility settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ" desc="Permission string for modifying acccessibility settings via extension API shown when a extension utilizing the API is installed.">
-        Read your accessibility settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ_MODIFY" desc="Permission string for reading and modifying acccessibility settings via extension API shown when an extension utilizing the API is installed.">
-        Read and change your accessibility settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_EXPERIENCE_SAMPLING_PRIVATE" desc="Permission string for Experience Sampling Private API.">
-        Monitor when you take actions in Chrome
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_PLATFORMKEYS" desc="Permission string for access to client certificates.">
-        Use your client certificates
-      </message>
-      <if expr="is_macosx">
-        <message name="IDS_EXTENSION_PROMPT_WARNING_INTERCEPT_ALL_KEYS" desc="Permission string for intercept all keyboard keys via packaged app extension APIs">
-        Read and change anything you type including task switching keys like CMD+TAB
-      </message>
-      </if>
-      <if expr="not is_macosx">
-      <message name="IDS_EXTENSION_PROMPT_WARNING_INTERCEPT_ALL_KEYS" desc="Permission string for intercept all keyboard keys via packaged app extension APIs">
-        Read and change anything you type including task switching keys like ALT+TAB
-      </message>
-      </if>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_SETTINGS_PRIVATE" desc="Permission string for access to settings.">
-        Read and change user and device settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_SEARCH_ENGINES_PRIVATE" desc="Permission string for access to search engines.">
-        Read and change default and custom search engines
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_AUTOFILL_PRIVATE" desc="Permission string for access to autofill settings.">
-        Read and change autofill settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_PASSWORDS_PRIVATE" desc="Permission string for access to passwords settings.">
-        Read and change saved password settings
-      </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_USERS_PRIVATE" desc="Permission string for access to user accounts.">
-        Read and change whitelisted users
-      </message>
 
       <!-- Extension/App error messages -->
       <message name="IDS_EXTENSION_CANT_GET_ABSOLUTE_PATH" desc="Warning displayed in pack dialog when the absolute path to the extension directory can not be found.">
@@ -4334,9 +4311,6 @@ Even if you have downloaded files from this website before, the website might ha
       </message>
       <message name="IDS_EXTENSION_INSTALL_KIOSK_MODE_ONLY" desc="Error displayed during installation of an app with 'kiosk_only' attribute but user is not in Chrome OS kiosk mode.">
         App with 'kiosk_only' manifest attribute must be installed in Chrome OS kiosk mode.
-      </message>
-      <message name="IDS_EXTENSION_INSTALL_DISALLOW_UNTRUSTED_EXTENSION" desc="Error displayed during installation of a side-loaded extension from an untrusted source.">
-        Cannot install untrusted extension with ID "<ph name="IMPORT_ID">$1<ex>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</ex></ph>."
       </message>
       <message name="IDS_EXTENSION_OVERLAPPING_WEB_EXTENT" desc="Error message when a user tries to install an app with a web extent that overlaps another installed app.">
         Could not add application because it conflicts with "<ph name="APP_NAME">$1<ex>Google Mail</ex></ph>".
@@ -4590,6 +4564,30 @@ Even if you have downloaded files from this website before, the website might ha
         </message>
         <message name="IDS_EXTENSIONS_SHOW_BUTTON" desc="The text for the Show link.">
           Show button
+        </message>
+        <message name="IDS_MD_EXTENSIONS_TOOLBAR_TITLE" desc="The text displayed in the toolbar of the chrome://extensions page.">
+          Extensions &amp; Apps
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SEARCH" desc="The text displayed in the search box on the chrome://extensions page.">
+          Search
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_EXTENSIONS" desc="The text displayed in the sidebar to go to the extensions section of the page.">
+          Extensions
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_APPS" desc="The text displayed in the sidebar to go to the apps section of the page.">
+          Chrome Apps
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_WEBSITES" desc="The text displayed in the sidebar to go to the websites section of the page.">
+          Websites
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_DEVELOPER_MODE" desc="The text displayed next to the checkbox to toggle developer mode in the extensions page.">
+          Developer mode
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_GET_MORE_EXTENSIONS" desc="The text for the link to get more extensions in the extensions page.">
+          Get more extensions
+        </message>
+        <message name="IDS_MD_EXTENSIONS_SIDEBAR_KEYBOARD_SHORTCUTS" desc="The text for the link to manage keyboard shortcuts for extensions.">
+          Keyboard shortcuts
         </message>
         <if expr="not use_titlecase">
           <message name="IDS_EXTENSIONS_ALWAYS_RUN" desc="The text for the 'always run' item in context menus (sentence case).">
@@ -5017,14 +5015,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
       </if>
 
-      <!-- chrome://md-settings/ - the Material Design Settings page -->
-      <message name="IDS_FLAGS_ENABLE_MATERIAL_DESIGN_SETTINGS_NAME" desc="Name for the flag to enable the material design Settings page.">
-          Enable Material Design settings
-      </message>
-      <message name="IDS_FLAGS_ENABLE_MATERIAL_DESIGN_SETTINGS_DESCRIPTION" desc="Description for the flag to enable the material design Settings page.">
-          If enabled, the chrome://md-settings/ URL loads the Material Design settings page.
-      </message>
-
       <!-- Material Design version of chrome://downloads -->
       <message name="IDS_FLAGS_ENABLE_MATERIAL_DESIGN_DOWNLOADS_NAME" desc="Name for the flag to enable the material design downloads page.">
           Enable Material Design downloads
@@ -5198,60 +5188,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
       </if>
 
-      <!-- about:flags -->
-      <message name="IDS_FLAGS_LONG_TITLE" desc="Long version of the title for the about:flags page.">
-        Careful, these experiments may bite
-      </message>
-      <message name="IDS_FLAGS_TABLE_TITLE" desc="Title for the experiments table on the about:flags page.">
-        Experiments
-      </message>
-      <message name="IDS_FLAGS_WARNING_HEADER" desc="Text right before the warning body text.">
-        WARNING
-      </message>
-      <message name="IDS_FLAGS_WARNING_TEXT" desc="Text at the top of the about:flags page, warning users that the about:flags contents are volatile.">
-        These experimental features may change, break, or disappear at any time. We make absolutely no guarantees about what may happen if you turn one of these experiments on, and your browser may even spontaneously combust. Jokes aside, your browser may delete all your data, or your security and privacy could be compromised in unexpected ways. Any experiments you enable will be enabled for all users of this browser. Please proceed with caution.
-      </message>
-      <message name="IDS_FLAGS_PROMOTE_BETA_CHANNEL" desc="Shown on the about:flags page when we want to promote the Chrome beta channel">
-        Interested in cool new Chrome features? Try our beta channel at chrome.com/beta.
-      </message>
-      <message name="IDS_FLAGS_PROMOTE_DEV_CHANNEL" desc="Shown on the about:flags page when we want to promote the Chrome developer channel">
-        Interested in cool new Chrome features? Try our dev channel at chrome.com/dev.
-      </message>
-
-      <message name="IDS_FLAGS_NO_EXPERIMENTS_AVAILABLE" desc="Shown if no experiments are available">
-        Aww, it looks like there are currently no experiments available.
-      </message>
-      <message name="IDS_FLAGS_UNSUPPORTED_TABLE_TITLE" desc="Title for the unsupported experiments table on the about:flags page. It lists all experiments that are not available on the current platform.">
-        Unavailable Experiments
-      </message>
-      <message name="IDS_FLAGS_NO_UNSUPPORTED_EXPERIMENTS" desc="Show if there are no unavailable experiments.">
-        All experiments are available on your platform!
-      </message>
-      <message name="IDS_FLAGS_NOT_AVAILABLE" desc="Shown instead of the Enable/Disable link, to let the user know that an experiment is not available on the current platform.">
-        Sorry, this experiment is not available on your platform.
-      </message>
-      <if expr="not chromeos">
-        <message name="IDS_FLAGS_RELAUNCH_BUTTON" desc="Text on a button that relaunches Chrome when clicked. ">
-          Relaunch Now
-        </message>
-      </if>
-      <if expr="chromeos">
-        <message name="IDS_FLAGS_RELAUNCH_BUTTON" desc="Text on a button that restarts Chrome OS when clicked. ">
-          Restart Now
-        </message>
-        <message name="IDS_SYSTEM_FLAGS_OWNER_ONLY" desc="A warning that flags that apply system-wide can only be set by the owner.">
-          Flags that apply system-wide can only be set by the owner: <ph name="OWNER_EMAIL">$1<ex>owner@example.com</ex></ph>.
-        </message>
-      </if>
-      <message name="IDS_FLAGS_RESET_ALL_BUTTON" desc="Text on a button that resets all experiments to their default state when clicked.">
-        Reset all to default
-      </message>
-      <message name="IDS_FLAGS_DISABLE" desc="The link for disabling a labs experiment.">
-        Disable
-      </message>
-      <message name="IDS_FLAGS_ENABLE" desc="The link for enabling a labs experiment.">
-        Enable
-      </message>
       <message name="IDS_FLAGS_ENABLE_NACL_NAME" desc="Name of the 'Enable Native Client' lab.">
         Native Client
       </message>
@@ -5376,18 +5312,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <message name="IDS_FLAGS_ENABLE_ACCESSIBILITY_TAB_SWITCHER_DESCRIPTION" desc="Description of the flag to enable the accessibility tab switcher.">
           Enable the accessibility tab switcher for Android.
         </message>
-        <message name="IDS_FLAGS_ENABLE_ACCESSIBILITY_SCRIPT_INJECTION_NAME" desc="Name of the flag to enable script injection for accessibility.">
-          Enable Script Injection For Accessibility.
-        </message>
-        <message name="IDS_FLAGS_ENABLE_ACCESSIBILITY_SCRIPT_INJECTION_DESCRIPTION" desc="Description of the flag to enable script injection for accessibility.">
-          Enable script injection instead of native Android accessibility.
-        </message>
-        <message name="IDS_FLAGS_DISABLE_CAST_NAME" desc="Name of the flag to disable Chromecast support.">
-          Disable experimental Chromecast support
-        </message>
-        <message name="IDS_FLAGS_DISABLE_CAST_DESCRIPTION" desc="Description of the flag to disable Chromecast support.">
-          Disable experimental Chromecast support allowing to play and control videos from the Web on Chromecast devices.
-        </message>
       </if>
       <message name="IDS_TOUCH_EVENTS_NAME" desc="Title of the touch-events flag." >
         Enable touch events
@@ -5421,6 +5345,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_FLAGS_IGNORE_GPU_BLACKLIST_DESCRIPTION" desc="Description of the 'Ignore GPU blacklist' lab.">
         Overrides the built-in software rendering list and enables GPU-acceleration on unsupported system configurations.
+      </message>
+      <message name="IDS_FLAGS_INERT_VISUAL_VIEWPORT_NAME" desc="Title of the flag to enable the inert visual viewport experiment.">
+        Inert visual viewport.
+      </message>
+      <message name="IDS_FLAGS_INERT_VISUAL_VIEWPORT_DESCRIPTION" desc="Description of the flag to enable the inert visual viewport experiment.">
+        Experiment to have all APIs reflect the layout viewport. This will make window.scroll properties relative to the layout viewport.
       </message>
       <message name="IDS_FLAGS_THREADED_COMPOSITING_MODE_NAME" desc="Name of the 'Threaded compositing mode' lab.">
         Threaded compositing
@@ -5596,18 +5526,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_WEBGL_DRAFT_EXTENSIONS_DESCRIPTION" desc="Description for the flag to enable WebGL Draft Extensions.">
         Enabling this option allows web applications to access the WebGL Extensions that are still in draft status.
       </message>
-      <message name="IDS_FLAGS_DISABLE_WEBGL_NAME" desc="Name of the 'Disable WebGL' lab.">
-        Disable WebGL
-      </message>
-      <message name="IDS_FLAGS_DISABLE_WEBGL_DESCRIPTION" desc="Description for the flag to disable WebGL.">
-        Enabling this option prevents web applications from accessing the WebGL API.
-      </message>
-      <message name="IDS_FLAGS_DISABLE_WEBRTC_NAME" desc="Name of the 'Disable WebRTC' lab.">
-        Disable WebRTC
-      </message>
-      <message name="IDS_FLAGS_DISABLE_WEBRTC_DESCRIPTION" desc="Description for the flag to disable WebRTC.">
-        Enabling this option prevents web applications from accessing the WebRTC API.
-      </message>
       <message name="IDS_FLAGS_DISABLE_WEBRTC_HW_DECODING_NAME" desc="Name of chrome:flags option to turn off WebRTC hardware video decoding support.">
         Disable support for WebRTC hardware video decoding.
       </message>
@@ -5667,6 +5585,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_QUIC_DESCRIPTION" desc="Description for the flag to enable QUIC.">
         Enable experimental QUIC protocol support.
       </message>
+      <message name="IDS_FLAGS_ENABLE_ALTSVC_NAME" desc="Title for the flag to enable alternative services.">
+        Alternative services.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_ALTSVC_DESCRIPTION" desc="Description for the flag to enable alternative services.">
+        Enable support for Alternative Services, an experimental HTTP feature.
+      </message>
       <message name="IDS_FLAGS_DISABLE_MEDIA_SOURCE_NAME" desc="Title for the flag to disable the Media Source API.">
         Disable Media Source API.
       </message>
@@ -5679,11 +5603,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_DISABLE_ENCRYPTED_MEDIA_DESCRIPTION" desc="Description for the flag to disable the Encrypted Media Extensions APIs.">
         Disable Encrypted Media Extensions on video and audio elements.
       </message>
-      <message name="IDS_FLAGS_DISABLE_PREFIXED_ENCRYPTED_MEDIA_NAME" desc="Title for the flag to disable the prefixed Encrypted Media Extensions APIs (e.g. webkitGenerateKeyRequest()).">
-        Disable prefixed Encrypted Media Extensions.
+      <message name="IDS_FLAGS_ENABLE_PREFIXED_ENCRYPTED_MEDIA_NAME" desc="Title for the flag to enable the prefixed Encrypted Media Extensions APIs (e.g. webkitGenerateKeyRequest()).">
+        Enable prefixed Encrypted Media Extensions.
       </message>
-      <message name="IDS_FLAGS_DISABLE_PREFIXED_ENCRYPTED_MEDIA_DESCRIPTION" desc="Description for the flag to disable the prefixed Encrypted Media Extensions APIs (e.g. webkitGenerateKeyRequest()).">
-        Disable the experimental version of Encrypted Media Extensions on video and audio elements.
+      <message name="IDS_FLAGS_ENABLE_PREFIXED_ENCRYPTED_MEDIA_DESCRIPTION" desc="Description for the flag to enable the prefixed Encrypted Media Extensions APIs (e.g. webkitGenerateKeyRequest()).">
+        Enable the deprecated version of Encrypted Media Extensions on video and audio elements.
       </message>
       <message name="IDS_FLAGS_DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK_NAME" desc="Title for the flag to disable gesture requiment for media playback">
         Disable gesture requirement for media playback.
@@ -5703,18 +5627,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_FLAGS_ASH_DISABLE_SCREEN_ORIENTATION_LOCK_DESCRIPTION" desc="Description for the flag which can be used to disable support for javascript locking rotation">
           Disables the ability for javascript to lock the screen orienation.
-        </message>
-        <message name="IDS_FLAGS_ASH_ENABLE_SCREEN_ROTATION_ANIMATION_NAME" desc="Title for the flag which can be used to select screen rotation animations.">
-          Screen rotation animation.
-        </message>
-        <message name="IDS_FLAGS_ASH_ENABLE_SCREEN_ROTATION_ANIMATION_DESCRIPTION" desc="Description for the flag which can be used to select screen rotation animations.">
-          Experimental screen rotation animations.
-        </message>
-        <message name="IDS_ASH_SCREEN_ROTATION_ANIMATION_PARTIAL_ROTATION" desc="Screen rotation animation option.">
-          Partial Rotation
-        </message>
-        <message name="IDS_ASH_SCREEN_ROTATION_ANIMATION_FULL_ROTATION" desc="Screen rotation animation option.">
-          Full Rotation
         </message>
         <message name="IDS_FLAGS_ASH_STABLE_OVERVIEW_ORDER_NAME" desc="Title for the flag which enables a stable window order in overview mode.">
           Use a stable window order in overview.
@@ -5745,18 +5657,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_FLAGS_DISABLE_TOUCH_FEEDBACK_DESCRIPTION" desc="Description for the flag that disables additional visual feedback for touch.">
           Certain UI components will stop displaying visual feedback upon touch interactions.
-        </message>
-        <message name="IDS_FLAGS_MATERIAL_DESIGN_INK_DROP_CIRCLE" desc="Description for the flag that sets material design ink drop to a circle.">
-          Circle Ink Drop
-        </message>
-        <message name="IDS_FLAGS_MATERIAL_DESIGN_INK_DROP_SQUARE" desc="Description for the flag that sets material design ink drop to a square.">
-          Square Ink Drop
-        </message>
-        <message name="IDS_FLAGS_MATERIAL_DESIGN_INK_DROP_NAME" desc="Name for the flag that sets the material design ink drop.">
-          Material Design Ink Drop
-        </message>
-        <message name="IDS_FLAGS_MATERIAL_DESIGN_INK_DROP_DESCRIPTION" desc="Description for the flag that sets the material design ink drop.">
-          Experimental touch feedback animations for material design.
         </message>
         <message name="IDS_FLAGS_MATERIAL_DESIGN_INK_DROP_ANIMATION_FAST" desc="Description for the flag that sets material design ink drop animation speed of fast.">
           Fast
@@ -5856,23 +5756,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_GPU_RASTERIZATION_MSAA_SAMPLE_COUNT_SIXTEEN" desc="">
         16
       </message>
-      <message name="IDS_FLAGS_ENABLE_SLIMMING_PAINT_NAME" desc="Title for the flag to enable slimming paint.">
-        Enable slimming paint.
-      </message>
-      <message name="IDS_FLAGS_ENABLE_SLIMMING_PAINT_DESCRIPTION" desc="Description for the flag to enable slimming paint.">
-        Use the slimming paint display lists for all drawing. Takes precedence over the disable-slimming-paint flag if both are present.
-      </message>
-      <message name="IDS_FLAGS_DISABLE_SLIMMING_PAINT_NAME" desc="Title for the flag to disable slimming paint.">
-        Disable slimming paint.
-      </message>
-      <message name="IDS_FLAGS_DISABLE_SLIMMING_PAINT_DESCRIPTION" desc="Description for the flag to disable slimming paint.">
-        Do not use the slimming paint display lists for drawing. Note the enable-slimming-paint flag takes precedence over this flag if both are present.
-      </message>
       <message name="IDS_FLAGS_ENABLE_SLIMMING_PAINT_V2_NAME" desc="Title for the flag to enable slimming paint phase 2.">
         Enable slimming paint phase 2.
       </message>
       <message name="IDS_FLAGS_ENABLE_SLIMMING_PAINT_V2_DESCRIPTION" desc="Description for the flag to enable slimming paint phase 2.">
-        Enable slimming paint phase 2 (display list based layerization, sub-tree painting optimization, etc.) Requires slimming paint enabled.
+        Enable slimming paint phase 2 (display list based layerization, sub-tree painting optimization, etc.)
       </message>
       <message name="IDS_FLAGS_EXPERIMENTAL_SECURITY_FEATURES_NAME" desc="Name for the flag to enable experimental security features.">
         Enable potentially annoying security features.
@@ -5891,6 +5779,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_FLAGS_WEB_BLUETOOTH_DESCRIPTION" desc="Description for the flag to enable Web Bluetooth.">
         Enables Web Bluetooth which could allow websites to connect to and control Bluetooth devices around you. Including keyboards, cameras, microphones, etc.
+      </message>
+      <message name="IDS_FLAGS_BLE_ADVERTISING_IN_EXTENSIONS_NAME" desc="Name for the flag to enable BLE Advertising">
+        Enable BLE Advertising in Chrome Apps.
+      </message>
+      <message name="IDS_FLAGS_BLE_ADVERTISING_IN_EXTENSIONS_DESCRIPTION" desc="Description of the flag to enable BLE Advertising">
+        Enables BLE Advertising in Chrome Apps. BLE Advertising might interfere with regular use of Bluetooth Low Energy features.
       </message>
       <message name="IDS_FLAGS_ENABLE_DEVTOOLS_EXPERIMENTS_NAME" desc="Name for the flag to enable experiments in Developer Tools">
         Enable Developer Tools experiments.
@@ -5957,17 +5851,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_PINCH_VIRTUAL_VIEWPORT_DESCRIPTION" desc="Description of the flag to turn on experimental pinch virtual viewport.">
         When zoomed in, fixed-position elements and scaled scrollbars attach to this viewport.
       </message>
-      <message name="IDS_FLAGS_ENABLE_VIEWPORT_META_NAME" desc="Name of the flag to turn on viewport meta tag support.">
-        Enable viewport meta tag.
-      </message>
-      <message name="IDS_FLAGS_ENABLE_VIEWPORT_META_DESCRIPTION" desc="Description of the flag to turn on viewport meta tag support.">
-        Enables handling of the viewport meta tag to allow pages to set the layout width and user zoom properties.
-      </message>
       <message name="IDS_FLAGS_CREDENTIAL_MANAGER_API_NAME" desc="Name for the flag to enable 'navigator.credentials'.">
         Enable the experimental Credential Manager API.
       </message>
       <message name="IDS_FLAGS_CREDENTIAL_MANAGER_API_DESCRIPTION" desc="Description for the flag to enable 'navigator.credentials'.">
-        Enables an experimental implementation of the Credential Manager API. No promises that this won't expose all your passwords to every site on the web; don't enable this unless you know what you're doing.
+        Enables an experimental implementation of the Credential Manager API. Don't enable this unless you know what you're doing.
       </message>
       <message name="IDS_FLAGS_REDUCED_REFERRER_GRANULARITY_NAME" desc="Name for the flag to reduce referer granularity.">
         Reduce default 'referer' header granularity.
@@ -6068,6 +5956,15 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_PASSWORD_MANAGER_LINK_DESCRIPTION" desc="Description of the flag to enable showing a link to account central on password settings page">
         Show a link in the password manager settings page to manage your synced passwords online.
       </message>
+      <message name="IDS_PASSWORD_MANAGER_ACCOUNT_CHOOSER_TITLE_SMART_LOCK" desc="The title of the account chooser infobar for Smart Lock users.">
+        Choose an account from your <ph name="LINK_TEXT">$1<ex>Google Smart Lock</ex></ph>
+      </message>
+      <message name="IDS_PASSWORD_MANAGER_ACCOUNT_CHOOSER_TITLE" desc="The title of the password bubble when a credential should be chosen.">
+        Choose an account to login
+      </message>
+      <message name="IDS_PASSWORD_MANAGER_SAVE_PROMPT_FIRST_RUN_EXPERIENCE" desc="The message which explains to the user what is Smart Lock, when the user sees the branded title of the Save prompt for the first time.">
+        Smart Lock helps you quickly sign in to apps and sites using passwords you have saved with Google.
+      </message>
       <message name="IDS_SAVE_PASSWORD" desc="The title of the save password bubble when a password can be saved.">
         Do you want <ph name="PASSWORD_MANAGER_BRAND">$1<ex>Google Chrome</ex></ph> to save your password for this site?
       </message>
@@ -6079,6 +5976,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_PASSWORD_MANAGER_SMART_LOCK_FOR_PASSWORDS" desc="The more descriptive brand name of the password manager when the user is signed in. Used in various UI elements, can be in link format.">
         Google Smart Lock for Passwords
+      </message>
+      <message name="IDS_PASSWORD_MANAGER_SMART_LOCK_WELCOME" desc="A warm welcome message displayed once in the Save password bubble for users which are signed-in to Chrome.">
+        Smart Lock helps you quickly sign in to apps and sites using passwords you have saved with Google.
       </message>
       <message name="IDS_PASSWORD_MANAGER_SMART_LOCK_PAGE" desc="URL of the passwords dashboard.">
         https://passwords.google.com/?hl=[GRITLANGCODE]
@@ -6116,8 +6016,40 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_ICON_NTP_DESCRIPTION" desc="Description for the flag to enable large icons on the NTP.">
         Enable the experimental New Tab page using large icons.
       </message>
+      <message name="IDS_FLAGS_ENABLE_PUSH_API_BACKGROUND_MODE_NAME" desc="Name of the flag to enable background mode for the Push API.">
+        Enable Push API background mode
+      </message>
+      <message name="IDS_FLAGS_ENABLE_PUSH_API_BACKGROUND_MODE_DESCRIPTION" desc="Description for the flag to enable background mode for the Push API.">
+        Enable background mode for the Push API. This allows Chrome to continue running after the last window is closed, and to launch at OS startup, if the Push API needs it.
+      </message>
       <message name="IDS_FLAGS_ENABLE_STALE_WHILE_REVALIDATE_NAME" desc="Name of the flag to enable the stale-while-revalidate cache directive.">
         Enable the stale-while-revalidate cache directive
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NAVIGATION_TRACING" desc="Name of the flag to enable navigation tracing">
+        Enable navigation tracing
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NAVIGATION_TRACING_DESCRIPTION" desc="Description of the flag to enable navigation tracing">
+        This is to be used in conjunction with the trace-upload-url flag.
+        WARNING: When enabled, Chrome will record performance data for every navigation and upload it to the URL specified by the trace-upload-url flag. The trace may include personally identifiable information (PII) such as the titles and URLs of websites you visit.
+      </message>
+      <message name="IDS_FLAGS_TRACE_UPLOAD_URL" desc="Name of the flag to set the trace upload url">
+        Trace label for navigation tracing
+      </message>
+      <message name="IDS_FLAGS_TRACE_UPLOAD_URL_DESCRIPTION" desc="Description of the flag to set the trace upload url">
+        This is to be used in conjunction with the enable-navigation-tracing flag.
+        Please select the label that best describes the recorded traces. This will choose the destination the traces are uploaded to. If you are not sure, select other. If left empty, no traces will be uploaded.
+      </message>
+      <message name="IDS_TRACE_UPLOAD_URL_CHOICE_OTHER">
+        Other
+      </message>
+      <message name="IDS_TRACE_UPLOAD_URL_CHOICE_EMLOADING">
+        emloading
+      </message>
+      <message name="IDS_TRACE_UPLOAD_URL_CHOICE_QA">
+        QA
+      </message>
+      <message name="IDS_TRACE_UPLOAD_URL_CHOICE_TESTING">
+        Testing
       </message>
       <message name="IDS_FLAGS_ENABLE_STALE_WHILE_REVALIDATE_DESCRIPTION" desc="Description for the flag to enable the stale-while-revalidate cache directive.">
         Enable the experimental implementation of the Cache-Control: stale-while-revalidate directive. This permits servers to specify that some resources may be revalidated in the background to improve latency.
@@ -6248,20 +6180,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_DISTANCE_FIELD_TEXT_DESCRIPTION" desc="Description of about:flags option for distance field text.">
         If enabled, text is rendered with signed distance fields rather than bitmap alpha masks.
       </message>
-      <if expr="is_android or is_macosx">
-        <message name="IDS_FLAGS_DELEGATED_RENDERER_NAME" desc="Name of about:flags option for delegated renderer.">
-          Delegated Renderer (AKA Übercompositor).
-        </message>
-        <message name="IDS_FLAGS_DELEGATED_RENDERER_DESCRIPTION" desc="Description of about:flags option for delegated renderer.">
-          If enabled, the renderer delegates compositing to the browser, merging both compositing passes.
-        </message>
-      </if>
-      <message name="IDS_FLAGS_DISABLE_ONE_COPY_NAME" desc="Name of about:flags option for one-copy rasterizer.">
-        Disable one-copy rasterizer
-      </message>
-      <message name="IDS_FLAGS_DISABLE_ONE_COPY_DESCRIPTION" desc="Description of about:flags option for one-copy rasterizer.">
-        If disabled, raster threads won't write to GPU memory.
-      </message>
       <message name="IDS_FLAGS_ENABLE_ZERO_COPY_NAME" desc="Name of about:flags option for zero-copy rasterizer.">
         Enable zero-copy rasterizer
       </message>
@@ -6374,12 +6292,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <message name="IDS_FLAGS_ENABLE_NEW_APP_LIST_MIXER_DESCRIPTION" desc="Description of the flag to enable the new mixing algorithm in the app launcher.">
           This enables a new search result selecting and ranking algorithm in the App Launcher.
         </message>
-        <message name="IDS_FLAGS_DISABLE_DRIVE_APPS_IN_APP_LIST_NAME" desc="Name of the flag to disable Drive apps in app launcher.">
-          Disable Drive apps in App Launcher.
-        </message>
-        <message name="IDS_FLAGS_DISABLE_DRIVE_APPS_IN_APP_LIST_DESCRIPTION" desc="Description of the flag to disable Drive apps in app launcher.">
-          Do not show Drive apps side by side with Chrome apps in App Launcher.
-        </message>
       </if>
       <if expr="chromeos">
         <message name="IDS_FLAGS_ENABLE_FIRST_RUN_UI_TRANSITIONS_NAME" desc="Name of the flag to enable animated transitions for the first-run tutorial.">
@@ -6387,12 +6299,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_FLAGS_ENABLE_FIRST_RUN_UI_TRANSITIONS_DESCRIPTION" desc="Description for the flag to enable animated transition in the first-run tutorial.">
           If enabled, transitions during first-run tutorial are animated.
-        </message>
-        <message name="IDS_FLAGS_DISABLE_EASY_UNLOCK_NAME" desc="Name of the flag to disable Easy unlock.">
-          Disable Smart Lock
-        </message>
-        <message name="IDS_FLAGS_DISABLE_EASY_UNLOCK_DESCRIPTION" desc="Description of the flag to disable Easy unlock.">
-          Do not use Smart Lock, which allows you to unlock your Chromebook when in proximity to your phone. If you are the owner of the device, this also turns off Smart Lock on sign-in screen.
         </message>
       </if>
       <message name="IDS_FLAGS_NEW_BOOKMARK_APPS_NAME" desc="Name of the flag to enable the new bookmark app system.">
@@ -6485,12 +6391,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_DISABLE_THREADED_SCROLLING_DESCRIPTION" desc="Description for the flag to disable threaded scrolling.">
         Disabled threaded handling of scroll-related input events, forcing all such scroll events to be handled on the main thread. Note that this can dramatically hurt scrolling performance of most websites and is intended for testing purposes only.
       </message>
-      <message name="IDS_FLAGS_INVERT_VIEWPORT_SCROLL_ORDER_NAME" desc="Title for the flag to enable the viewport scroll order experiment.">
-        Invert Viewport Scroll Order.
-      </message>
-      <message name="IDS_FLAGS_INVERT_VIEWPORT_SCROLL_ORDER_DESCRIPTION" desc="Description for the flag to enable the viewport scroll order experiment.">
-        Enables flipped viewport scroll order in some situations. Namely, during a pinch-zoom, the visual viewport should be scrolled first, then the layout viewport.
-      </message>
       <message name="IDS_FLAGS_BLEEDING_RENDERER_NAME" desc="Name of the 'Stacked Tabs' lab.">
         Bleeding Edge Renderer Paths - LIKELY TO CRASH YOUR BROWSER
       </message>
@@ -6540,7 +6440,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Enable Smart Lock Bluetooth Low Energy Discovery.
       </message>
       <message name="IDS_FLAGS_ENABLE_EASY_UNLOCK_BLUETOOTH_LOW_ENERGY_DISCOVERY_DESCRIPTION" desc="Description for the flag to enable Smart Lock to discover phones over Bluetooth Low Energy in order to unlock the Chromebook.">
-        Enables a Smart Lock setting that allows Chromebook to discover phones over Bleutooth Low Energy in order to unlock the Chromebook when the phone is in its proximity.
+        Enables a Smart Lock setting that allows Chromebook to discover phones over Bluetooth Low Energy in order to unlock the Chromebook when the phone is in its proximity.
       </message>
       <message name="IDS_FLAGS_ENABLE_EASY_UNLOCK_PROXIMITY_DETECTION_NAME" desc="Title for the flag to enable Smart Lock to require close proximity between the phone and the Chromebook in order to unlock the Chromebook.">
         Enable Smart Lock proximity detection.
@@ -6693,6 +6593,26 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_LOW_PRIORITY_IFRAMES_UI_DESCRIPTION" desc="Description of the flag to enable the low priority iframes experiment.">
         Reduces the load priority of iframe resources.
       </message>
+      <if expr="is_win">
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_NAME" desc="Name of the flag to enable PPAPI win32k lockdown experiment.">
+          Enable PPAPI Win32k Lockdown.
+        </message>
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_DESCRIPTION" desc="Description of the flag to enable PPAPI win32k lockdown experiment.">
+          Specify the PPAPI plugins which will be run within the Win32k lockdown sandbox policy.
+        </message>
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_FLASH_ONLY" desc="Enable Win32k lockdown for Flash">
+          Flash only
+        </message>
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_PDF_ONLY" desc="Enable Win32k lockdown for PDF">
+          PDF only
+        </message>
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_FLASH_AND_PDF" desc="Enable Win32k lockdown for Flash and PDF">
+          Flash and PDF
+        </message>
+        <message name="IDS_FLAGS_PPAPI_WIN32K_LOCKDOWN_ALL" desc="Enable Win32k lockdown for all plugins">
+          All plugins
+        </message>
+      </if>
 
       <!-- Crashes -->
       <message name="IDS_CRASHES_TITLE" desc="Title for the chrome://crashes page.">
@@ -6732,9 +6652,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_WEBRTC_LOGS_LOG_LOCAL_FILE_LABEL_FORMAT" desc="Format for local log entry label on chrome://webrtc-logs">
         Local file:
-      </message>
-      <message name="IDS_WEBRTC_LOGS_LOG_LOCAL_FILE_FORMAT" desc="Format for file in local log entry on chrome://webrtc-logs">
-        <ph name="WEBRTC_LOG_LOCAL_FILE">$1<ex>/path/to/file</ex></ph>
       </message>
       <message name="IDS_WEBRTC_LOGS_NO_LOCAL_LOG_FILE_MESSAGE" desc="The explanatory message for chrome://webrtc-logs when there is no local log file">
         No local log file.
@@ -7171,12 +7088,14 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </if>
 
       <!-- chrome://voicesearch strings -->
-      <message name="IDS_VOICESEARCH_LOADING_MESSAGE" desc="Shown while loading until full list of modules is retrieved">
-        Loading...
-      </message>
-      <message name="IDS_VOICESEARCH_TITLE_MESSAGE" desc="Shown while loading until full list of modules is retrieved">
-        About Voice Search
-      </message>
+      <if expr="chromeos">
+        <message name="IDS_VOICESEARCH_LOADING_MESSAGE" desc="Shown while loading until full list of modules is retrieved">
+          Loading...
+        </message>
+        <message name="IDS_VOICESEARCH_TITLE_MESSAGE" desc="Shown while loading until full list of modules is retrieved">
+          About Voice Search
+        </message>
+      </if>
 
       <!-- About box strings -->
       <if expr="is_win">
@@ -7185,6 +7104,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_ABOUT_BOX_ERROR_UPDATE_CHECK_FAILED" desc="The error message for the specific case when we cannot create the Google Update component">
           Update check failed to start (error code <ph name="ERROR">$1<ex>0x80000005</ex></ph>).
+        </message>
+        <message name="IDS_ABOUT_BOX_EXTERNAL_UPDATE_IS_RUNNING" desc="The external updater is running independently.">
+          The updater is currently running. Refresh in a minute to check again.
         </message>
         <message name="IDS_ABOUT_BOX_GOOGLE_UPDATE_ERROR" desc="An error message from Google Update with details.">
           <ph name="ERROR">$1<ex>An error message from Google Update.</ex></ph> (error code <ph name="ERROR_CODE">$2<ex>7: 0x80000005</ex></ph>).
@@ -7237,6 +7159,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
           Search or type URL
         </message>
       </if>
+      <message name="IDS_OMNIBOX_ACCESSIBLE_ANSWER" desc="Readable text represening a query typed by the user in the omnibox, followed by an indication that an answer to that query will follow, followed by the answer. The commas are significant as they will introduce a pause in the spoken text.">
+        <ph name="QUERY">$1<ex>weather in los angeles</ex></ph>, answer, <ph name="ANSWER">$2<ex>sunny and 84 degrees</ex></ph>
+      </message>
 
       <!--Tooltip strings-->
       <message name="IDS_TOOLTIP_BACK" desc="The tooltip for back button">
@@ -7271,9 +7196,16 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_TOOLTIP_LOCATION_ICON" desc="The tooltip for location icon in the omnibox">
         View site information
       </message>
-      <message name="IDS_TOOLTIP_NEW_TAB" desc="The tooltip for the new tab button">
-        New tab
-      </message>
+      <if expr="not use_titlecase">
+        <message name="IDS_TOOLTIP_NEW_TAB" desc="The tooltip for the new tab button">
+          New tab
+        </message>
+      </if>
+      <if expr="use_titlecase">
+        <message name="IDS_TOOLTIP_NEW_TAB" desc="The tooltip for the new tab button">
+          New Tab
+        </message>
+       </if>
       <message name="IDS_TOOLTIP_MIC_SEARCH" desc="The tooltip for search-by-voice button">
         Search by voice
       </message>
@@ -7412,6 +7344,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
         =1 {The following page has become unresponsive. You can wait for it to become responsive or kill it.}
         other {The following pages have become unresponsive. You can wait for them to become responsive or kill them.}}
       </message>
+      <message name="IDS_BROWSER_HANGMONITOR_RENDERER_INFOBAR" desc="The text of the infobar notifying the user that the renderer is unresponsive.">
+        The page has become unresponsive. You can wait for it to become responsive or close it.
+      </message>
+      <message name="IDS_BROWSER_HANGMONITOR_RENDERER_INFOBAR_END" desc="The label of the 'close' button for the hung renderer infobar">
+        Close
+      </message>
       <message name="IDS_BROWSER_HANGMONITOR_RENDERER_WAIT" desc="The label of the 'wait' button">
         Wait
       </message>
@@ -7428,9 +7366,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <!-- Passwords and Exceptions Dialog -->
       <message name="IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE" desc="Title for 'Passwords and exceptions dialog'">
         Passwords
-      </message>
-      <message name="IDS_PASSWORDS_EXCEPTIONS_SMART_LOCK_WINDOW_TITLE" desc="Title for 'Passwords and exceptions dialog'">
-        Google Smart Lock for Passwords
       </message>
       <message name="IDS_PASSWORDS_AUTO_SIGNIN_TITLE" desc="Title for 'Auto sign-in' checkbox in the password dialog">
         Auto Sign-in
@@ -7501,25 +7436,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <message name="IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON" desc="Button text for the 'Save Password' infobar's 'Never remember for this site' option">
           Never for this site
         </message>
-        <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON1" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
+        <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
           Never
         </message>
-        <if expr="use_titlecase">
-          <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON2" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
-            No Thanks
-          </message>
-          <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON3" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
-            Don't Ask
-          </message>
-        </if>
-        <if expr="not use_titlecase">
-          <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON2" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
-            No thanks
-          </message>
-          <message name="IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON3" desc="Button text for the 'Save Password' bubble's 'Never remember for this site' option">
-            Don't ask
-          </message>
-        </if>
         <message name="IDS_PASSWORD_MANAGER_CANCEL_BUTTON" desc="Text for the 'Manage Passwords' bubble's 'Not now' option">
           Nope
         </message>
@@ -7633,11 +7552,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_CONFIRM_TO_QUIT_OPTION" desc="The label of the checkbox preference that enables the confirm-to-quit feature.">
           Warn Before Quitting (<ph name="KEY_EQUIVALENT">$1<ex>⌘Q</ex></ph>)
-        </message>
-
-        <!-- Show/Hide notifications menubar extra -->
-        <message name="IDS_HIDE_NOTIFICATION_CENTER_OPTION" desc="The label of the checkbox preference that disables the notification center feature.">
-          Hide Notifications Icon
         </message>
       </if>
 
@@ -7770,6 +7684,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_CLEAR_BROWSING_DATA_SOME_STUFF_REMAINS" desc="Information that some data may remain even though the user clears their browsing history. The text in '|'s and '#'s will be turned into buttons. The translated text should contain exactly one phrase in '|'s and one in '#'s.">
         Saved |content settings| and #search engines# will not be cleared and may reflect your browsing habits.
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_SOME_STUFF_REMAINS_SIMPLE" desc="Information that some data may remain even though the user clears their browsing history. The text in '|'s will be turned into a button. The translated text should contain exactly one phrase in '|'s.">
+        Some settings that may reflect browsing habits |will not be cleared|.
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_SYNCED_DELETION" desc="Information that data which is synced across user's devices will be deleted from all those devices.">
+        This clears synced data from all devices.
+      </message>
+      <message name="IDS_FLAGS_SIMPLE_CLEAR_BROWSING_DATA_SUPPORT_STRING_NAME" desc="Name of the flag that simplifies the support string in the Clear browsing data dialog.">
+        Use a simple support string in the Clear browsing data dialog.
+      </message>
+      <message name="IDS_FLAGS_SIMPLE_CLEAR_BROWSING_DATA_SUPPORT_STRING_DESCRIPTION" desc="Description of the flag that simplifies the support string in the Clear browsing data dialog.">
+        Instead of enumerating data types that are not deleted in the dialog, use a simple support string linking to an article with more information.
       </message>
       <message name="IDS_FLAGS_ENABLE_CLEAR_BROWSING_DATA_COUNTERS_NAME" desc="Name of the flag that enables the data volume counters in the Clear browsing data dialog.">
         Enable Clear browsing data counters.
@@ -7964,32 +7890,6 @@ I don't think this site should be blocked!
       <message name="IDS_CONTENT_SETTING_CHANGED_INFOBAR_BUTTON" desc="The string used in the infobar button allowing the user to reload the page directly from the infobar.">
         Reload
       </message>
-
-      <!-- Mac and Chrome OS users do not close their browser. Mac users quit it and Chrome OS users log out. -->
-      <if expr="not is_macosx and not chromeos">
-        <message name="IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-          Clear cookies and other site data when you close your browser
-        </message>
-        <message name="IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-          Clear cookies and other site and plugin data when you close your browser
-        </message>
-      </if>
-      <if expr="is_macosx">
-        <message name="IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is quit (Mac).">
-          Clear cookies and other site data when you quit your browser
-        </message>
-        <message name="IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is quit (Mac).">
-          Clear cookies and other site and plugin data when you quit your browser
-        </message>
-      </if>
-      <if expr="chromeos">
-        <message name="IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-          Clear cookies and other site data when you log out
-        </message>
-        <message name="IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-          Clear cookies and other site and plugin data when you log out
-        </message>
-      </if>
 
       <message name="IDS_IMAGES_TAB_LABEL" desc="Label for Images tab on Content Settings dialog">
         Images
@@ -8310,6 +8210,21 @@ I don't think this site should be blocked!
       </message>
       <message name="IDS_SRT_BUBBLE_TEXT" desc="Text for the Chrome Cleanup Tool bubble view full description.">
           Is Chrome crashing, showing unusual startup pages, toolbars, or unexpected ads you can't get rid of, or otherwise changing your browsing experience? You may be able to fix the problem by running the Chrome Cleanup Tool.
+      </message>
+      <message name="IDS_SRT_BUBBLE_TEXT_WITH_UWS_NAME" desc="Text for the Chrome Cleanup Tool bubble view stating that a single piece of Unwanted Software was found.">
+          Chrome found an unwanted program (<ph name="UWS_NAME">$1<ex>SoftwareName</ex></ph>) installed on your computer. You may be able to remove it by running the Chrome Cleanup Tool.
+      </message>
+      <message name="IDS_SRT_BUBBLE_TEXT_WITH_UWS_NAMES" desc="Text for the Chrome Cleanup Tool bubble view stating that two or more pieces of Unwanted Software were found.">
+          Chrome found <ph name="NUMBER_OF_UWS_GREATER_THAN_ONE">$1<ex>3</ex></ph> unwanted programs (<ph name="IDS_SRT_BUBBLE_TEXT_2_UWS_NAMES">$1<ex>Software1 and Software2</ex></ph>) installed on your computer. You may be able to remove these programs by running the Chrome Cleanup Tool.
+      </message>
+      <message name="IDS_SRT_BUBBLE_TEXT_2_UWS_NAMES" desc="Text to put within IDS_SRT_BUBBLE_TEXT_WITH_UWS_NAME when there are 2 UwS found, e.g., Software1 and Software2.">
+          <ph name="UWS_NAME">$1<ex>SoftwareName</ex></ph> and <ph name="UWS_NAME">$2<ex>Software2</ex></ph>
+      </message>
+      <message name="IDS_SRT_BUBBLE_TEXT_1_MORE_UWS_NAME" desc="Text to replace IDS_SRT_BUBBLE_TEXT_2_UWS_NAMES above when there are 3 found unwanted software, e.g., Software1, Software2, and one more.">
+          <ph name="UWS_NAME">$1<ex>Software1</ex></ph>, <ph name="UWS_NAME">$2<ex>Software2</ex></ph>, and one more
+      </message>
+      <message name="IDS_SRT_BUBBLE_TEXT_MORE_UWS_NAMES" desc="Text to replace IDS_SRT_BUBBLE_TEXT_2_UWS_NAMES above when there are more than 2 found unwanted software, e.g., Software1, Software2, and 3 others.">
+          <ph name="UWS_NAME">$1<ex>Software1</ex></ph>, <ph name="UWS_NAME">$2<ex>Software2</ex></ph>, and <ph name="NUMBER_OF_UWS_GREATER_THAN_ONE">$1<ex>3</ex></ph> others
       </message>
       <if expr="use_titlecase">
         <message name="IDS_SRT_MENU_ITEM" desc="In Title Case: Text for the Chrome menu option to be shown when unusual behavior was detected.">
@@ -9240,10 +9155,6 @@ I don't think this site should be blocked!
         Trying to diagnose the problem...
       </message>
 
-      <message name="IDS_ERRORPAGES_ERROR_CODE" desc="At the bottom of error pages, a non-internationalized string or numeric code is displayed for debugging purposes">
-        <ph name="ERROR_NAME">$1<ex>ERR_FILE_NOT_FOUND</ex></ph>
-      </message>
-
       <message name="IDS_ERRORPAGES_DETAILS_TIMED_OUT" desc="The error message displayed when a page takes too long to load.">
         The operation timed out.
       </message>
@@ -9417,12 +9328,6 @@ I don't think this site should be blocked!
       <message name="IDS_ERRORPAGES_HEADING_PINNING_FAILURE" desc="Title of the error page for a certificate which doesn't match the built-in pins for that name">
         Incorrect certificate for host.
       </message>
-      <message name="IDS_ERRORPAGES_SUMMARY_PINNING_FAILURE" desc="Details of the error page for a certificate which doesn't match the built-in pins for that name">
-        The server presented a certificate that doesn't match built-in expectations. These expectations are included for certain, high-security websites in order to protect you.
-      </message>
-      <message name="IDS_ERRORPAGES_DETAILS_PINNING_FAILURE" desc="Description of the error page for a certificate which doesn't match the built-in pins for that name">
-        The server's certificate appears to be a forgery.
-      </message>
 
       <message name="IDS_ERRORPAGES_HEADING_BAD_SSL_CLIENT_AUTH_CERT" desc="Heading in the error page for SSL client certificate authentication failure.">
         Certificate-based authentication failed
@@ -9583,6 +9488,13 @@ I don't think this site should be blocked!
       </message>
       <message name="IDS_PAGE_INFO_SECURITY_TAB_NO_REVOCATION_MECHANISM" desc="The text of the identity section when there is no certificate revocation mechanism.">
         The certificate does not specify a mechanism to check whether it has been revoked.
+      </message>
+
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_DEPRECATED_SIGNATURE_ALGORITHM_MINOR" desc="The security summary phrase in the page information panel for a security problem where the site's certificate expires in 2016 and contains a SHA1 signature in the chain (as opposed to 2017 or later). Such certificates will not be supported in a future version of Chrome.">
+        The certificate for this site expires in 2016, and the certificate chain contains a certificate signed using SHA-1.
+      </message>
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_DEPRECATED_SIGNATURE_ALGORITHM_MAJOR" desc="The security summary phrase in the page information panel for a security problem where the site's certificate expires in 2017 or later and contains a SHA1 signature in the chain (as opposed to 2016). Such certificates will not be supported in a future version of Chrome.">
+        The certificate for this site expires in 2017 or later, and the certificate chain contains a certificate signed using SHA-1.
       </message>
 
       <message name="IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT" desc="The text of the connection section when the connection is encrypted.">
@@ -9781,12 +9693,6 @@ I don't think this site should be blocked!
       <message name="IDS_SSL_V2_PRIMARY_PARAGRAPH" desc="The primary explanatory paragraph for the SSL interstitial.">
         Attackers might be trying to steal your information from <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="SITE">$1<ex>google.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> (for example, passwords, messages, or credit cards).
       </message>
-      <message name="IDS_SSL_V2_OPEN_DETAILS_BUTTON" desc="The text for the button that expands the details.">
-        Advanced
-      </message>
-      <message name="IDS_SSL_V2_CLOSE_DETAILS_BUTTON" desc="The text for the button that hides the details.">
-        Hide advanced
-      </message>
 
       <!-- SSL Interstitial V2: Overridable -->
       <message name="IDS_SSL_OVERRIDABLE_SAFETY_BUTTON" desc="The text for the button that takes the user back to the previous page.">
@@ -9809,42 +9715,6 @@ I don't think this site should be blocked!
       <message name="IDS_SSL_NONOVERRIDABLE_REVOKED" desc="A sentence to explain why the user can't proceed, plus a link to a help page about certificate revocation.">
       You cannot visit <ph name="SITE">$1<ex>google.com</ex></ph> right now because <ph name="BEGIN_LINK">&lt;a href="#" id="help-link"&gt;</ph>this certificate has been revoked<ph name="END_LINK">&lt;/a&gt;</ph>. Network errors and attacks are usually temporary, so this page will probably work later.
       </message>
-
-      <!-- SSL Interstitial V2: Clock Errors -->
-      <message name="IDS_SSL_V2_CLOCK_TITLE" desc="The tab title for the SSL clock interstitial (shown when an SSL error is probably caused by an incorrect clock).">
-        Clock error
-      </message>
-
-      <message name="IDS_SSL_V2_CLOCK_AHEAD_HEADING" desc="The large heading of the SSL clock interstitial, shown when the clock is too far in the future.">
-        Your clock is ahead
-      </message>
-
-      <message name="IDS_SSL_V2_CLOCK_BEHIND_HEADING" desc="The large heading of the SSL clock interstitial, shown when the clock is too far in the past.">
-        Your clock is behind
-      </message>
-
-      <message name="IDS_SSL_V2_CLOCK_UPDATE_DATE_AND_TIME" desc="Text for the button on the SSL clock interstitial page, which takes the user to their operating system panel for setting date and time, if possible.">
-        Update date and time
-      </message>
-
-
-      <if expr="not is_android and not is_ios">
-        <message name="IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH" desc="Paragraph explaining that the SSL clock interstitial is probably caused by an incorrect clock.">
-          A private connection to <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN">$1<ex>paypal.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> can't be established because your computer's date and time (<ph name="DATE_AND_TIME">$2<ex>Monday, January 1, 1970 2:44:30 PM</ex></ph>) are incorrect.
-        </message>
-      </if>
-      <if expr="is_android">
-        <message name="IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH" desc="Paragraph explaining that the SSL clock interstitial is probably caused by an incorrect clock. (The string is slightly customized for mobile.)">
-          A private connection to <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN">$1<ex>paypal.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> can't be established because your device's date and time (<ph name="DATE_AND_TIME">$2<ex>Monday, January 1, 1970 2:44:30 PM</ex></ph>) are incorrect.
-        </message>
-      </if>
-      <if expr="is_ios">
-        <message name="IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH" desc="Paragraph explaining that the SSL clock interstitial is probably caused by an incorrect clock. On iOS, we can't send the user directly to the date and time panel, so we give them concise instructions.">
-          &lt;p&gt;A private connection to <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN">$1<ex>paypal.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> can't be established because your device's date and time (<ph name="DATE_AND_TIME">$2<ex>Monday, January 1, 1970 2:44:30 PM</ex></ph>) are incorrect.&lt;/p&gt;
-
-          &lt;p&gt;Please adjust the date and time from the &lt;strong&gt;General&lt;/strong&gt; section of the &lt;strong&gt;Settings&lt;/strong&gt; app.&lt;/p&gt;
-        </message>
-      </if>
 
       <!-- Captive portal interstitial -->
       <message name="IDS_CAPTIVE_PORTAL_HEADING_WIRED" desc="Heading in the error page when a secure request is blocked because a captive portal is manipulating a wired connection (e.g. ethernet)">
@@ -9973,7 +9843,7 @@ I don't think this site should be blocked!
         Aw, Snap!
       </message>
       <message name="IDS_SAD_TAB_MESSAGE" desc="The message displayed on the sad tab page." formatter_data="android_java">
-        Something went wrong while displaying this webpage. Closing the apps and tabs that you don’t need may help by making more memory available.
+        Something went wrong while displaying this webpage.
       </message>
       <message name="IDS_SAD_TAB_HELP_MESSAGE" desc="The help message displayed on the sad tab page, with IDS_SAD_TAB_HELP_LINK embedded as a link to help.">
         If you're seeing this frequently, try these <ph name="HELP_LINK">$1<ex>suggestions</ex></ph>.
@@ -10366,11 +10236,6 @@ I don't think this site should be blocked!
         <message name="IDS_AUTOFILL_OPTIONS_TITLE" desc="The title of the Autofill dialog.">
           Autofill settings
         </message>
-        <if expr="is_macosx">
-          <message name="IDS_AUTOFILL_USE_MAC_ADDRESS_BOOK" desc="Checkbox label to enable access to the user's Address Book on Mac. On Mac 10.8+ the application that manages the Address Book is called Contacts.">
-            Include addresses from your Contacts card
-          </message>
-        </if>
         <message name="IDS_AUTOFILL_ADDRESSES_GROUP_NAME" desc="The name of the Addresses group of the Autofill dialog.">
           Addresses
         </message>
@@ -10688,9 +10553,6 @@ I don't think this site should be blocked!
         <message name="IDS_RESET_PROFILE_SETTINGS_LOCALE" desc="Locale field in the feedback details of the Reset Profile Settings dialog">
           Locale
         </message>
-        <message name="IDS_RESET_PROFILE_SETTINGS_USER_AGENT" desc="User Agent field in the feedback details of the Reset Profile Settings dialog">
-          User Agent
-        </message>
         <message name="IDS_RESET_PROFILE_SETTINGS_STARTUP_URLS" desc="Startup URLs tag in the feedback details of the Reset Profile Settings dialog">
           Startup URLs
         </message>
@@ -10703,20 +10565,14 @@ I don't think this site should be blocked!
         <message name="IDS_RESET_PROFILE_SETTINGS_HOMEPAGE_IS_NTP" desc="Tag in the feedback details of the Reset Profile Settings dialog">
           Homepage is the New Tab page
         </message>
-        <message name="IDS_RESET_PROFILE_SETTINGS_HOMEPAGE_IS_NTP_TRUE" desc="Value of HOMEPAGE_IS_NTP in the feedback details of the Reset Profile Settings dialog">
+        <message name="IDS_RESET_PROFILE_SETTINGS_YES" desc="'Yes' value for 'Homepage is NTP' and 'Show homebutton' in the feedback details of the Reset Profile Settings dialog">
           Yes
         </message>
-        <message name="IDS_RESET_PROFILE_SETTINGS_HOMEPAGE_IS_NTP_FALSE" desc="Value of HOMEPAGE_IS_NTP in the feedback details of the Reset Profile Settings dialog">
+        <message name="IDS_RESET_PROFILE_SETTINGS_NO" desc="'No' value for 'Homepage is NTP' and 'Show homebutton' in the feedback details of the Reset Profile Settings dialog">
           No
         </message>
         <message name="IDS_RESET_PROFILE_SETTINGS_SHOW_HOME_BUTTON" desc="Tag in the feedback details of the Reset Profile Settings dialog">
           Show Home button
-        </message>
-        <message name="IDS_RESET_PROFILE_SETTINGS_SHOW_HOME_BUTTON_TRUE" desc="Value of SHOW_HOME_BUTTON in the feedback details of the Reset Profile Settings dialog">
-          Yes
-        </message>
-        <message name="IDS_RESET_PROFILE_SETTINGS_SHOW_HOME_BUTTON_FALSE" desc="Value of SHOW_HOME_BUTTON in the feedback details of the Reset Profile Settings dialog">
-          No
         </message>
         <message name="IDS_RESET_PROFILE_SETTINGS_DSE" desc="Default search engine in the feedback details of the Reset Profile Settings dialog">
           Default search engine
@@ -11400,6 +11256,9 @@ I don't think this site should be blocked!
       <message name="IDS_COOKIES_SERVICE_WORKER_SCOPES_LABEL" desc="Label for list of Service Worker (name of an HTML standard) patterns">
         Scopes:
       </message>
+      <message name="IDS_COOKIES_CACHE_STORAGE" desc="The text shown when there is Cache Storage (name of a Web standard) in the Cookies table">
+        Cache Storage
+      </message>
       <message name="IDS_CLIENT_CERT_ECDSA_SIGN" translateable="false" desc="">
         ecdsa_sign
       </message>
@@ -11460,11 +11319,6 @@ I don't think this site should be blocked!
                  desc="Help message for screenreader users, spoken when navigating to a tile grid for the first time.">
           Use left and right arrow keys to navigate.
         </message>
-        <if expr="chromeos">
-        <message name="IDS_NEW_TAB_CLOSE_MENU_EXPAND" desc="Text for the closed section menu footer that will restore the section.">
-            Expand
-          </message>
-        </if>
         <message name="IDS_NEW_TAB_APP_INSTALL_HINT_LABEL" desc="Text for the plus icon on the NTP that links to the web store.">
           Add more apps
         </message>
@@ -11733,7 +11587,7 @@ I don't think this site should be blocked!
         Exit Guest
       </message>
       <message name="IDS_PROFILES_SIGNIN_PROMO" desc="Text describing the benefits of signing in.">
-        Sign in to get your tabs, bookmarks, history, and other settings on all your devices.
+        Sign in to get your bookmarks, history, passwords, and other settings on all your devices.
       </message>
       <if expr="not use_titlecase">
         <message name="IDS_PROFILES_PROFILE_ADD_ACCOUNT_BUTTON" desc="Button in the avatar menu bubble view used to add an account to a profile.">
@@ -12178,9 +12032,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
       </message>
 
       <if expr="use_titlecase">
-        <message name="IDS_HISTORY_RECENT_TABS_MENU" desc="In Title Case: The title of the History and Recent Tabs menu in the wrench menu.">
-          &amp;History and Recent Tabs
-        </message>
         <message name="IDS_RECENT_TABS_MENU" desc="In Title Case: The title of the Recent Tabs menu in the wrench menu.">
           Recent Tabs
         </message>
@@ -12195,9 +12046,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
         </message>
       </if>
       <if expr="not use_titlecase">
-        <message name="IDS_HISTORY_RECENT_TABS_MENU" desc="The title of the History and Recent Tabs menu in the wrench menu.">
-          &amp;History and recent tabs
-        </message>
         <message name="IDS_RECENT_TABS_MENU" desc="The title of the Recent Tabs menu in the wrench menu.">
           Recent tabs
         </message>
@@ -12212,6 +12060,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
         </message>
       </if>
 
+      <message name="IDS_HISTORY_MENU" desc="The text label of the History (and recent tabs) sub-menu in the wrench menu.">
+        &amp;History
+      </message>
       <message name="IDS_RECENT_TABS_MORE" desc="The label in the Recent Tabs menu in the wrench menu to open the other devices and history page.">
         More...
       </message>
@@ -12337,7 +12188,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
         </message>
         <if expr="not chromeos">
           <message name="IDS_SYNC_OVERVIEW" desc="The message that appears in the options dialog when sync has not been set up by the user.">
-            Sign in to get your tabs, bookmarks, history, and other settings on all your devices. You'll also automatically be signed in to your Google services.
+            Sign in to get your bookmarks, history, passwords and other settings on all your devices. You'll also automatically be signed in to your Google services.
           </message>
         </if>
         <message name="IDS_SYNC_START_SYNC_BUTTON_LABEL" desc="The label that appears on the sync button in the options dialog when sync has not been set up by the user.">
@@ -12689,7 +12540,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <!-- Translate Bubble -->
       <if expr="toolkit_views or is_macosx">
         <message name="IDS_TRANSLATE_BUBBLE_BEFORE_TRANSLATE" desc="Text to show for the translate bubble label when that page is in specified language and ask if should translate.">
-          Do you want to translate this page?
+          Would you like to translate this page?
         </message>
         <message name="IDS_TRANSLATE_BUBBLE_ADVANCED" desc="Text to show for the translate bubble link label to jump to the advanced panel.">
           Options
@@ -12761,11 +12612,11 @@ Some features may be unavailable.  Please check that the profile exists and you 
         <message name="IDS_NOTIFICATION_WELCOME_TITLE" desc="Notification title for the Welcome Notification">
           Google Now for Chrome!
         </message>
+        <message name="IDS_NOTIFICATION_SETTINGS" desc="Button label to go to the notification settings panel">
+          Notification settings
+        </message>
         <message name="IDS_MESSAGE_CENTER_FOOTER_WITH_PRODUCT_TITLE" desc="The label in the footer of the message center tray, with the product title.">
           <ph name="product_name">$1<ex>Chrome</ex></ph> Notifications
-        </message>
-        <message name="IDS_NOTIFIER_WELCOME_BODY" desc="Notification body for when a new notifier service is introduced.">
-          Now on your desktop
         </message>
         <message name="IDS_NOTIFIER_WELCOME_BUTTON" desc="Notification body for when a new notifier service is introduced.">
           Turn off these notifications
@@ -13315,12 +13166,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
         <message name="IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION" desc="Question asked on the infobar whenever URL wants to access protected media identifier. It shows the origin of the URL.">
           <ph name="URL">$1<ex>https://www.youtube.com</ex></ph> needs to uniquely identify your device to play premium content.
         </message>
-        <message name="IDS_PROTECTED_MEDIA_IDENTIFIER_ALLOW_BUTTON" desc="A button in the protected media identifier infobar for allowing access to a protected media identifier for a given origin.">
-          Allow
-        </message>
-        <message name="IDS_PROTECTED_MEDIA_IDENTIFIER_DENY_BUTTON" desc="A button in the protected media identifier infobar for denying access to a protected media identifier for a given origin.">
-          Deny
-        </message>
       </if>
 
       <!-- Fullscreen infobar -->
@@ -13333,6 +13178,19 @@ Some features may be unavailable.  Please check that the profile exists and you 
         </message>
         <message name="IDS_FULLSCREEN_INFOBAR_ALLOW_BUTTON" desc="Label for choosing 'Allow' on fullscreen infobar. [CHAR-LIMIT=32]">
           Allow
+        </message>
+      </if>
+
+      <!-- Media throttle infobar -->
+      <if expr="is_android">
+        <message name="IDS_MEDIA_THROTTLE_INFOBAR_TEXT" desc="Text to display on the info bar whenever user wants to playback a video after being throttled.">
+          Android is having trouble playing media.
+        </message>
+        <message name="IDS_MEDIA_THROTTLE_INFOBAR_BLOCK_BUTTON" desc="Label for choosing 'Block' on media throttle infobar.[CHAR-LIMIT=32]">
+          Wait
+        </message>
+        <message name="IDS_MEDIA_THROTTLE_INFOBAR_ALLOW_BUTTON" desc="Label for choosing 'Allow' on media throttle infobar. [CHAR-LIMIT=32]">
+          Try again
         </message>
       </if>
 
@@ -13373,14 +13231,8 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_MANAGE_PASSWORDS_CHOOSE_TITLE" desc="The title of the password bubble when a credential should be chosen.">
         Choose an account from your Google Smart Lock
       </message>
-      <message name="IDS_MANAGE_ACCOUNTS_TITLE" desc="The title of the password bubble when a list of credentials for the site is shown.">
-        Saved accounts for <ph name="ORIGIN">$1<ex>facebook.com</ex></ph>
-      </message>
-      <message name="IDS_MANAGE_PASSWORDS_IDENTITY_PROVIDER" desc="The description of an identity provider in the Account Chooser dialog.">
-        via <ph name="PROVIDER">$1<ex>facebook.com</ex></ph>
-      </message>
       <message name="IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE" desc="The title of the auto-signin toast.">
-        Signing in with Google Smart Lock as '<ph name="FULL_NAME">$1<ex>Brad Pitt</ex></ph>'
+        Signed in as <ph name="username">$1<ex>chef@google.com</ex></ph>
       </message>
       <message name="IDS_MANAGE_PASSWORDS_DELETED_ACCOUNT" desc="The text that is used in the manage accounts bubble when an account is deleted.">
         Account removed
@@ -14004,12 +13856,6 @@ After you create a new supervised user, you can manage their settings at any tim
 
       <!-- Aura strings -->
       <if expr="use_ash">
-        <message name="IDS_LAUNCHER_CONTEXT_MENU_NEW_TAB" desc="Title text for the 'open new' context menu item of the launcher for apps configured to open in a tab">
-          New tab
-        </message>
-        <message name="IDS_LAUNCHER_CONTEXT_MENU_NEW_WINDOW" desc="Title text for the 'open new' context menu item of the launcher for apps configured to open windowed">
-          New window
-        </message>
         <message name="IDS_LAUNCHER_CONTEXT_MENU_CLOSE" desc="Title text for the 'close' context menu item of the launcher">
           Close
         </message>
@@ -14018,12 +13864,6 @@ After you create a new supervised user, you can manage their settings at any tim
         </message>
         <message name="IDS_LAUNCHER_CONTEXT_MENU_UNPIN" desc="Title text for the 'unpin' context menu item of the launcher">
           Unpin
-        </message>
-        <message name="IDS_LAUNCHER_NEW_WINDOW" desc="The text label of the New Window menu item">
-          New window
-        </message>
-        <message name="IDS_LAUNCHER_NEW_INCOGNITO_WINDOW" desc="The text label of the New incognito window menu item">
-          New incognito window
         </message>
       </if>
 
@@ -14433,16 +14273,6 @@ After you create a new supervised user, you can manage their settings at any tim
         </message>
       </if>
 
-      <!-- iOS Net-Export strings -->
-      <if expr="is_ios">
-        <message name="IDS_NET_EXPORT_NO_EMAIL_ACCOUNTS_ALERT_MESSAGE" desc="The message of the alert informing a user with no email accounts that he or she needs to configure an email account to send net-export data. [Length: 70em]">
-          To send net-export data, please configure your email account in the Settings app.
-        </message>
-        <message name="IDS_NET_EXPORT_NO_EMAIL_ACCOUNTS_ALERT_TITLE" desc="The title of the alert informing a user with no email accounts that he or she needs to configure an email account to send net-export data. [Length: 20em]">
-          No Email Accounts
-        </message>
-      </if>
-
       <!-- Pepper 3D and WebGL (client 3D APIs) infobar strings -->
       <message name="IDS_3D_APIS_BLOCKED_TEXT" desc="Infobar message when 3D graphics APIs are blocked because the graphics processor was reset recently. NOTE that 'rats' here is being used like 'darn'.">
         Rats! <ph name="API_NAME">$1<ex>WebGL</ex></ph> hit a snag.
@@ -14714,22 +14544,6 @@ After you create a new supervised user, you can manage their settings at any tim
         Share
       </message>
 
-      <!-- Zero suggest experiment flags -->
-      <if expr="is_android">
-        <message name="IDS_FLAGS_ZERO_SUGGEST_EXPERIMENT_NAME" desc="An about:flags experiment for zero suggest">
-          Zero Suggest
-        </message>
-        <message name="IDS_FLAGS_ZERO_SUGGEST_EXPERIMENT_DESCRIPTION" desc="Describes about:flags experiment options for zero suggest">
-          NOTE: Only works dev and canary channels. Turns on suggestions in the omnibox that are shown on focus before typing.
-        </message>
-        <message name="IDS_FLAGS_ZERO_SUGGEST_MOST_VISITED" desc="A choice in dropdown dialog on about:flags page for the most visited sites option">
-          Most visited
-        </message>
-        <message name="IDS_FLAGS_ZERO_SUGGEST_MOST_VISITED_WITHOUT_SERP" desc="A choice in dropdown dialog on about:flags page to show most visited option on non-search pages">
-          Most visited excl. search pages
-        </message>
-      </if>
-
       <!-- Autofill experiment flags -->
       <message name="IDS_FLAGS_ENABLE_SINGLE_CLICK_AUTOFILL_NAME" desc="Name of the single click autofill lab">
         Enable single-click autofill
@@ -14766,12 +14580,6 @@ After you create a new supervised user, you can manage their settings at any tim
         </message>
         <message name="IDS_FLAGS_READER_MODE_HEURISTICS_ALWAYS_ON" desc="A choice in dropdown dialog on about:flags page to show the reader mode button on all pages">
           Always
-        </message>
-        <message name="IDS_FLAGS_READER_MODE_EXPERIMENT_NAME" desc="An about:flags experiment for reading mode UI">
-          Enable Reader Mode Toolbar Icon
-        </message>
-        <message name="IDS_FLAGS_READER_MODE_EXPERIMENT_DESCRIPTION" desc="Describes about:flags experiment options for reading mode UI">
-          Adds a button to the toolbar for viewing a more readable version of the current page.
         </message>
         <message name="IDS_FLAGS_READER_MODE_BUTTON_ANIMATION" desc="Title for flag enabling the reader mode button animation">
           Enable Reader Mode Button Animation
@@ -14867,6 +14675,9 @@ After you create a new supervised user, you can manage their settings at any tim
       <if expr="enable_notifications">
         <message name="IDS_PUSH_MESSAGING_GENERIC_NOTIFICATION_BODY" desc="Body text of an auto-generated notification informing the user that the site may have received an update in the background, in case the site did not satisfy the visible notification requirement itself.">
           This site has been updated in the background.
+        </message>
+        <message name="IDS_NOTIFICATIONS_BACKGROUND_SERVICE_NAME" desc="The name of the Notifications service that can run in the background">
+          Notifications
         </message>
       </if>
 
@@ -15401,16 +15212,16 @@ After you create a new supervised user, you can manage their settings at any tim
       </if>
 
       <!-- Strings describing Chrome security policy for DevTools security panel -->
-      <message name="IDS_BROKEN_SHA1" desc="Summary phrase for a security problem where the site's certificate expires in 2017 or later and contains a SHA1 signature in the chain.">
+      <message name="IDS_MAJOR_SHA1" desc="Summary phrase for a security problem where the site's certificate expires in 2017 or later and contains a SHA1 signature in the chain.">
         SHA-1 Certificate
       </message>
-      <message name="IDS_BROKEN_SHA1_DESCRIPTION" desc="Description of a security problem where the site's certificate expires in 2017 or later and contains a SHA1 signature in the chain.">
+      <message name="IDS_MAJOR_SHA1_DESCRIPTION" desc="Description of a security problem where the site's certificate expires in 2017 or later and contains a SHA1 signature in the chain.">
         The certificate for this site expires in 2017 or later, and the certificate chain contains a certificate signed using SHA-1.
       </message>
-      <message name="IDS_WARNING_SHA1" desc="Summary phrase for a security problem where the site's certificate expires in 2016 and contains a SHA1 signature in the chain.">
+      <message name="IDS_MINOR_SHA1" desc="Summary phrase for a security problem where the site's certificate expires in 2016 and contains a SHA1 signature in the chain.">
         SHA-1 Certificate
       </message>
-      <message name="IDS_WARNING_SHA1_DESCRIPTION" desc="Description of a security problem where the site's certificate expires in 2016 and contains a SHA1 signature in the chain.">
+      <message name="IDS_MINOR_SHA1_DESCRIPTION" desc="Description of a security problem where the site's certificate expires in 2016 and contains a SHA1 signature in the chain.">
         The certificate for this site expires in 2016, and the certificate chain contains a certificate signed using SHA-1.
       </message>
       <message name="IDS_PASSIVE_MIXED_CONTENT" desc="Summary phrase of a security problem where the site displayed passive mixed content.">
@@ -15446,6 +15257,9 @@ After you create a new supervised user, you can manage their settings at any tim
       <message name="IDS_SAVE_PASSWORD_TITLE" desc="The title of the save password bubble when a password can be saved.">
         Do you want <ph name="PASSWORD_MANAGER_BRAND">$1<ex>Google Chrome</ex></ph> to save your password for <ph name="ORIGIN">$2<ex>example.com</ex></ph>?
       </message>
+      <message name="IDS_MANAGE_PASSWORDS_TITLE_DIFFERENT_DOMAIN" desc="The title text that is used in the manage passwords bubble when a password is autofilled or after a user has stored a password.">
+        Saved passwords for <ph name="ORIGIN">$1<ex>example.com</ex></ph>:
+      </message>
 
     <if expr="is_win or is_macosx">
       <!-- Tab discarding -->
@@ -15464,13 +15278,25 @@ After you create a new supervised user, you can manage their settings at any tim
       <message name="IDS_FLAGS_OFFLINE_PAGES_DESCRIPTION" desc="Description for the flag to enable offline pages.">
         Enable storing pages locally for offline use. Requires Enhanced Bookmarks to be enabled.
       </message>
-      <message name="IDS_FLAGS_NTP_POPULAR_SITES_NAME" desc="Name for the flag to enable showing popular sites on the NTP">
-        Show popular sites on the NTP
+      <message name="IDS_FLAGS_NTP_POPULAR_SITES_NAME" desc="Name for the flag to enable showing non-personalized popular suggestions on the New Tab Page, when no personal suggestions are available yet.">
+        Show popular sites on the New Tab page
       </message>
-      <message name="IDS_FLAGS_NTP_POPULAR_SITES_DESCRIPTION" desc="Description for the flag to enable showing popular sites on the NTP">
-        Pre-populate the NTP with popular sites.
+      <message name="IDS_FLAGS_NTP_POPULAR_SITES_DESCRIPTION" desc="Description for the flag to enable showing non-personalized popular suggestions on the New Tab Page, when no personal suggestions are available yet.">
+        Pre-populate the New Tab page with popular sites.
       </message>
-    </if>
+      <message name="IDS_FLAGS_USE_ANDROID_MIDI_API_NAME" desc="Name for the flag to use android midi api.">
+        Use Android Midi API
+      </message>
+      <message name="IDS_FLAGS_USE_ANDROID_MIDI_API_DESCRIPTION" desc="Description for the flag to use android midi api.">
+        Use Android Midi API for WebMIDI (effective only with Android M+ devices).
+      </message>
+      <message name="IDS_FLAGS_THEME_COLOR_IN_TABBED_MODE_NAME" desc="Name for the flag to enable theme-color in tabbed mode of Chrome.">
+        Enable <ph name="META_TAG_NAME">theme-color<ex>theme-color</ex></ph> in tabbed mode.
+      </message>
+      <message name="IDS_FLAGS_THEME_COLOR_IN_TABBED_MODE_DESCRIPTION" desc="Description for the flag to enable theme-color in tabbed mode of Chrome.">
+        Allows websites to set the color of the omnibox in tabbed mode ("Merge Apps and Tabs" off) via <ph name="META_TAG_NAME">theme-color<ex>theme-color</ex></ph> meta tag.
+      </message>
+   </if>
 
     <if expr="is_win">
       <!-- Exporting tracing events to ETW -->
@@ -15478,9 +15304,53 @@ After you create a new supervised user, you can manage their settings at any tim
         Enable exporting of tracing events to ETW.
       </message>
       <message name="IDS_FLAGS_TRACE_EXPORT_EVENTS_TO_ETW_DESRIPTION" desc="Description for the flag to enable exporting of tracing events to ETW.">
-        If enabled, trace events are exported to ETW and can be captured by either UIForETW or Xperf.
+        If enabled, trace events will be exported to the Event Tracing for Windows (ETW) and can then be captured by tools such as UIForETW or Xperf.
       </message>
     </if>
+
+    <if expr="not is_android and not is_ios">
+      <!-- WebUsb Notifications Flag -->
+      <message name="IDS_FLAGS_ENABLE_WEBUSB_NOTIFICATIONS_NAME" desc="Title for the flag which enables WebUsb notifications.">
+        WebUsb notifications.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_WEBUSB_NOTIFICATIONS_DESCRIPTION" desc="Description for the flag which enables WebUsb notifications.">
+        Experimental WebUsb notifications.
+      </message>
+
+      <!-- WebUSB permission bypass flag. -->
+      <message name="IDS_FLAGS_ENABLE_WEBUSB_ON_ANY_ORIGIN_NAME" desc="Title for the flag that bypasses WebUSB permission prompts.">
+        Allow WebUSB from any origin.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_WEBUSB_ON_ANY_ORIGIN_DESCRIPTION" desc="Description for the flag that bypasses WebUSB permission prompts.">
+        If enabled, any origin is allowed to use connected WebUSB devices without prompting the user.
+      </message>
+
+      <!-- WebUsb Notification -->
+      <message name="IDS_WEBUSB_DEVICE_DETECTED_NOTIFICATION" desc="Content for notification shown to the user when a USB device gets plugged in.">
+        Go to <ph name="LANDING_PAGE">$1<ex>www.google.com</ex></ph> to connect.
+      </message>
+      <message name="IDS_WEBUSB_DEVICE_DETECTED_NOTIFICATION_TITLE" desc="Title for notification shown to the user when a USB device gets plugged in.">
+        <ph name="USB_DEVICE_NAME">$1<ex>Nexus 5</ex></ph> detected
+      </message>
+    </if>
+
+      <!-- Audio device strings. -->
+      <message name="IDS_DEFAULT_AUDIO_DEVICE_NAME" desc="System default audio device (microphone or loudspeaker). This is typically presented to users in a drop-down list of device choices.">
+          Default
+      </message>
+      <if expr="is_win">
+        <message name="IDS_COMMUNICATIONS_AUDIO_DEVICE_NAME" desc="System default communications audio device (microphone or loudspeaker). This is typically presented to users in a drop-down list of device choices.">
+          Communications
+        </message>
+      </if>
+      <if expr="chromeos">
+        <message name="IDS_BEAMFORMING_ON_DEFAULT_AUDIO_INPUT_DEVICE_NAME" desc="Default audio input device (microphone) with a narrow angle coverage. Only the user in front of the device (i.e. you) will be listened to. This is typically presented to users in a drop-down list of device choices.">
+          Default (pick up just you)
+        </message>
+        <message name="IDS_BEAMFORMING_OFF_DEFAULT_AUDIO_INPUT_DEVICE_NAME" desc="Default audio input device (microphone) with a wide angle coverage. All the sounds in the vicinity will be listend to. This is typically presented to users in a drop-down list of device choices.">
+          Default (pick up everything)
+        </message>
+      </if>
 
     </messages>
   </release>

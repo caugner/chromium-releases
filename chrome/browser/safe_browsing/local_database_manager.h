@@ -16,6 +16,7 @@
 
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -101,6 +102,9 @@ class LocalSafeBrowsingDatabaseManager
   // SafeBrowsingDatabaseManager overrides
   //
 
+  bool IsSupported() const override;
+  bool ChecksAreAlwaysAsync() const override;
+  bool CanCheckResourceType(content::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
 
   bool CheckBrowseUrl(const GURL& url, Client* client) override;

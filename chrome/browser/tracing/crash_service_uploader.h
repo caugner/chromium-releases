@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -21,13 +20,6 @@ namespace net {
 class URLFetcher;
 class URLRequestContextGetter;
 }  // namespace net
-
-namespace {
-
-// Allow up to 10MB for trace upload
-const int kMaxUploadBytes = 10000000;
-
-}  // namespace
 
 // TraceCrashServiceUploader uploads traces to the Chrome crash service.
 class TraceCrashServiceUploader : public content::TraceUploader,
@@ -77,7 +69,7 @@ class TraceCrashServiceUploader : public content::TraceUploader,
                 int* compressed_bytes);
   void CreateAndStartURLFetcher(const std::string& upload_url,
                                 const std::string& post_data);
-  void OnUploadError(std::string error_message);
+  void OnUploadError(const std::string& error_message);
 
   scoped_ptr<net::URLFetcher> url_fetcher_;
   UploadProgressCallback progress_callback_;

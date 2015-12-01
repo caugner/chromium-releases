@@ -244,12 +244,10 @@ class BrowserActionsContainer
                         int target_width,
                         bool suppress_chevron) override;
   void SetChevronVisibility(bool chevron_visible) override;
-  int GetWidth() const override;
+  int GetWidth(GetWidthTime get_width_time) const override;
   bool IsAnimating() const override;
   void StopAnimating() override;
   int GetChevronWidth() const override;
-  void OnOverflowedActionWantsToRunChanged(
-      bool overflowed_action_wants_to_run) override;
   void ShowExtensionMessageBubble(
       scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
       ToolbarActionViewController* anchor_action) override;
@@ -263,6 +261,8 @@ class BrowserActionsContainer
       override;
 
   views::BubbleDelegateView* active_bubble() { return active_bubble_; }
+
+  ChevronMenuButton* chevron_for_testing() { return chevron_; }
 
  protected:
   // Overridden from views::View:

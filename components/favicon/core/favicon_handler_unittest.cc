@@ -199,11 +199,6 @@ class TestFaviconDriver : public FaviconDriver {
                   << "should never be called in tests.";
   }
 
-  void SaveFavicon() override {
-    ADD_FAILURE() << "TestFaviconDriver::SaveFavicon() "
-                  << "should never be called in tests.";
-  }
-
   gfx::Image GetFavicon() const override {
     ADD_FAILURE() << "TestFaviconDriver::GetFavicon() "
                   << "should never be called in tests.";
@@ -234,8 +229,6 @@ class TestFaviconDriver : public FaviconDriver {
 
   GURL GetActiveURL() override { return url_; }
 
-  base::string16 GetActiveTitle() override { return base::string16(); }
-
   bool GetActiveFaviconValidity() override { return favicon_validity_; }
 
   void SetActiveFaviconValidity(bool favicon_validity) override {
@@ -248,14 +241,15 @@ class TestFaviconDriver : public FaviconDriver {
     favicon_url_ = favicon_url;
   }
 
-  gfx::Image GetActiveFaviconImage() override { return image_; }
+  gfx::Image GetActiveFaviconImage() { return image_; }
 
   void SetActiveFaviconImage(const gfx::Image& image) override {
     image_ = image;
   }
 
-  void OnFaviconAvailable(const gfx::Image& image,
+  void OnFaviconAvailable(const GURL& page_url,
                           const GURL& icon_url,
+                          const gfx::Image& image,
                           bool update_active_favicon) override {
     ++num_favicon_available_;
     available_image_ = image;
@@ -277,9 +271,9 @@ class TestFaviconDriver : public FaviconDriver {
 
   void SetActiveURL(GURL url) { url_ = url; }
 
-  const gfx::Image available_favicon() { return available_image_; }
+  const gfx::Image& available_favicon() { return available_image_; }
 
-  const GURL available_icon_url() { return available_icon_url_; }
+  const GURL& available_icon_url() { return available_icon_url_; }
 
   bool update_active_favicon() { return update_active_favicon_; }
 
@@ -405,7 +399,7 @@ class TestFaviconHandler : public FaviconHandler {
         page_url, icon_url, icon_type, bitmap_data, image.Size()));
   }
 
-  bool ShouldSaveFavicon(const GURL& url) override { return true; }
+  bool ShouldSaveFavicon() override { return true; }
 
   GURL page_url_;
 
@@ -509,7 +503,7 @@ class FaviconHandlerTest : public testing::Test {
     favicon_handler->FetchFavicon(page_url);
     favicon_handler->history_handler()->InvokeCallback();
 
-    favicon_handler->OnUpdateFaviconURL(candidate_icons);
+    favicon_handler->OnUpdateFaviconURL(page_url, candidate_icons);
   }
 
   void SetUp() override {
@@ -558,7 +552,7 @@ TEST_F(FaviconHandlerTest, GetFaviconFromHistory) {
   std::vector<FaviconURL> urls;
   urls.push_back(
       FaviconURL(icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status
   EXPECT_EQ(1U, helper.urls().size());
@@ -600,7 +594,7 @@ TEST_F(FaviconHandlerTest, DownloadFavicon) {
   std::vector<FaviconURL> urls;
   urls.push_back(
       FaviconURL(icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status
   EXPECT_EQ(1U, helper.urls().size());
@@ -669,7 +663,7 @@ TEST_F(FaviconHandlerTest, UpdateAndDownloadFavicon) {
   std::vector<FaviconURL> urls;
   urls.push_back(FaviconURL(
       new_icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status.
   EXPECT_EQ(1U, helper.urls().size());
@@ -756,7 +750,7 @@ TEST_F(FaviconHandlerTest, FaviconInHistoryInvalid) {
   std::vector<FaviconURL> urls;
   urls.push_back(
       FaviconURL(icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // A download for the favicon should be requested, and we should not do
   // another history request.
@@ -817,7 +811,7 @@ TEST_F(FaviconHandlerTest, UpdateFavicon) {
   std::vector<FaviconURL> urls;
   urls.push_back(FaviconURL(
       new_icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status.
   EXPECT_EQ(1U, helper.urls().size());
@@ -886,7 +880,7 @@ TEST_F(FaviconHandlerTest, Download2ndFaviconURLCandidate) {
       new_icon_url, favicon_base::TOUCH_ICON, std::vector<gfx::Size>()));
   urls.push_back(FaviconURL(
       new_icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status.
   EXPECT_EQ(2U, helper.urls().size());
@@ -997,7 +991,7 @@ TEST_F(FaviconHandlerTest, UpdateDuringDownloading) {
       new_icon_url, favicon_base::TOUCH_ICON, std::vector<gfx::Size>()));
   urls.push_back(FaviconURL(
       new_icon_url, favicon_base::FAVICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(urls);
+  helper.OnUpdateFaviconURL(page_url, urls);
 
   // Verify FaviconHandler status.
   EXPECT_EQ(2U, helper.urls().size());
@@ -1031,7 +1025,7 @@ TEST_F(FaviconHandlerTest, UpdateDuringDownloading) {
   std::vector<FaviconURL> latest_urls;
   latest_urls.push_back(FaviconURL(
       latest_icon_url, favicon_base::TOUCH_ICON, std::vector<gfx::Size>()));
-  helper.OnUpdateFaviconURL(latest_urls);
+  helper.OnUpdateFaviconURL(page_url, latest_urls);
 
   EXPECT_EQ(1U, helper.urls().size());
   EXPECT_EQ(latest_icon_url, helper.current_candidate()->icon_url);

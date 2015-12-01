@@ -15,6 +15,10 @@
 #include "chrome/browser/extensions/api/experience_sampling_private/experience_sampling.h"
 #endif
 
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+#include "chrome/browser/ssl/captive_portal_metrics_recorder.h"
+#endif
+
 ChromeMetricsHelper::ChromeMetricsHelper(
     content::WebContents* web_contents,
     const GURL& request_url,
@@ -34,6 +38,22 @@ ChromeMetricsHelper::ChromeMetricsHelper(
 }
 
 ChromeMetricsHelper::~ChromeMetricsHelper() {}
+
+void ChromeMetricsHelper::StartRecordingCaptivePortalMetrics(bool overridable) {
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  captive_portal_recorder_.reset(
+      new CaptivePortalMetricsRecorder(web_contents_, overridable));
+#endif
+}
+
+void ChromeMetricsHelper::RecordExtraShutdownMetrics() {
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // The captive portal metrics should be recorded when the interstitial is
+  // closing (or destructing).
+  if (captive_portal_recorder_)
+    captive_portal_recorder_->RecordCaptivePortalUMAStatistics();
+#endif
+}
 
 void ChromeMetricsHelper::RecordExtraUserDecisionMetrics(
     security_interstitials::MetricsHelper::Decision decision) {

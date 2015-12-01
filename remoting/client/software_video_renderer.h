@@ -9,8 +9,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "remoting/client/chromoting_stats.h"
 #include "remoting/client/video_renderer.h"
+#include "remoting/protocol/performance_tracker.h"
 #include "remoting/protocol/video_stub.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 
@@ -20,31 +20,34 @@ class SingleThreadTaskRunner;
 
 namespace webrtc {
 class DesktopFrame;
-}  // namespace webrtc;
+}  // namespace webrtc
 
 namespace remoting {
 
-class ChromotingStats;
 class FrameConsumer;
 class VideoDecoder;
+
+namespace protocol {
+class PerformanceTracker;
+}  // namespace protocol
 
 // Implementation of VideoRenderer interface that decodes frame on CPU (on a
 // decode thread) and then passes decoded frames to a FrameConsumer.
 class SoftwareVideoRenderer : public VideoRenderer,
                               public protocol::VideoStub {
  public:
-  // Creates an update decoder on |main_task_runner_| and |decode_task_runner_|,
-  // outputting to |consumer|. The |main_task_runner_| is responsible for
-  // receiving and queueing packets. The |decode_task_runner_| is responsible
-  // for decoding the video packets.
+  // All methods must be called on the same thread the renderer is created. The
+  // |decode_task_runner_| is used to decode the video packets. |perf_tracker|
+  // must outlive the renderer. |perf_tracker| may be nullptr, performance
+  // tracking is disabled in that case.
   SoftwareVideoRenderer(
       scoped_refptr<base::SingleThreadTaskRunner> decode_task_runner,
-      FrameConsumer* consumer);
+      FrameConsumer* consumer,
+      protocol::PerformanceTracker* perf_tracker);
   ~SoftwareVideoRenderer() override;
 
   // VideoRenderer interface.
   void OnSessionConfig(const protocol::SessionConfig& config) override;
-  ChromotingStats* GetStats() override;
   protocol::VideoStub* GetVideoStub() override;
 
   // protocol::VideoStub interface.
@@ -52,21 +55,19 @@ class SoftwareVideoRenderer : public VideoRenderer,
                           const base::Closure& done) override;
 
  private:
-  void RenderFrame(base::TimeTicks decode_start_time,
-                 const base::Closure& done,
-                 scoped_ptr<webrtc::DesktopFrame> frame);
-  void OnFrameRendered(base::TimeTicks paint_start_time,
-                       const base::Closure& done);
+  void RenderFrame(int32_t frame_id,
+                   const base::Closure& done,
+                   scoped_ptr<webrtc::DesktopFrame> frame);
+  void OnFrameRendered(int32_t frame_id, const base::Closure& done);
 
   scoped_refptr<base::SingleThreadTaskRunner> decode_task_runner_;
   FrameConsumer* consumer_;
+  protocol::PerformanceTracker* perf_tracker_;
 
   scoped_ptr<VideoDecoder> decoder_;
 
   webrtc::DesktopSize source_size_;
   webrtc::DesktopVector source_dpi_;
-
-  ChromotingStats stats_;
 
   base::ThreadChecker thread_checker_;
 

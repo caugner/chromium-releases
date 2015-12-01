@@ -161,7 +161,8 @@ def _CheckStyle(input_api, output_api):
     style_checker_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
         'Tools', 'Scripts', 'check-webkit-style')
     args = ([input_api.python_executable, style_checker_path, '--diff-files']
-        + [f.LocalPath() for f in input_api.AffectedFiles()])
+            + [input_api.os_path.join('..', '..', f.LocalPath())
+               for f in input_api.AffectedFiles()])
     results = []
 
     try:
@@ -336,7 +337,7 @@ def CheckChangeOnCommit(input_api, output_api):
     results.extend(_CommonChecks(input_api, output_api))
     results.extend(input_api.canned_checks.CheckTreeIsOpen(
         input_api, output_api,
-        json_url='http://blink-status.appspot.com/current?format=json'))
+        json_url='http://chromium-status.appspot.com/current?format=json'))
     results.extend(input_api.canned_checks.CheckChangeHasDescription(
         input_api, output_api))
     results.extend(_CheckSubversionConfig(input_api, output_api))

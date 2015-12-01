@@ -6,7 +6,7 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "repaintRects": [
-        [11, 61, 30, 30]
+        [10, 61, 31, 30]
       ],
       "paintInvalidationClients": [
         "LayoutBlockFlow INPUT id='checkbox'",

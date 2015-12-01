@@ -12,6 +12,11 @@ const char kAllowToCollectURLBubbleWasShown[] =
 const char kAllowToCollectURLBubbleActivePeriodStartFactor[] =
     "password_manager_url_collection_bubble.active_period_start_id";
 
+const char kWasAutoSignInFirstRunExperienceShown[] =
+    "profile.was_auto_sign_in_first_run_experience_shown";
+
+const char kCredentialsEnableService[] = "credentials_enable_service";
+
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
 const char kLocalProfileId[] = "profile.local_profile_id";
 #endif
@@ -33,6 +38,9 @@ const char kPasswordManagerAutoSignin[] =
 const char kPasswordManagerSavingEnabled[] = "profile.password_manager_enabled";
 const char kPasswordManagerGroupsForDomains[] =
     "profile.password_manager_groups_for_domains";
+
+const char kWasSavePrompFirstRunExperienceShown[] =
+    "profile.was_save_prompt_first_run_experience_shown";
 
 }  // namespace prefs
 }  // namespace password_manager

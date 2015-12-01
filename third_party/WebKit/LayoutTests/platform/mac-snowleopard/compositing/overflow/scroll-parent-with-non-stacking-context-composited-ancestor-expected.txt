@@ -24,11 +24,7 @@
                   "children": [
                     {
                       "bounds": [100, 180],
-                      "children": [
-                        {
-
-                        }
-                      ]
+                      "shouldFlattenTransform": false
                     }
                   ]
                 }

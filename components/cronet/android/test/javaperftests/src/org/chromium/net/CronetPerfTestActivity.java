@@ -352,7 +352,7 @@ public class CronetPerfTestActivity extends Activity {
                 request.start();
             }
 
-            private class Uploader implements UploadDataProvider {
+            private class Uploader extends UploadDataProvider {
                 private final ByteBuffer mBuffer;
                 private int mRemainingBytes;
 
@@ -385,7 +385,7 @@ public class CronetPerfTestActivity extends Activity {
                 }
             }
 
-            private class Listener implements UrlRequestListener {
+            private class Listener extends UrlRequestListener {
                 private final ByteBuffer mBuffer;
                 private final Runnable mCompletionCallback;
 
@@ -397,7 +397,7 @@ public class CronetPerfTestActivity extends Activity {
                 @Override
                 public void onResponseStarted(UrlRequest request, ResponseInfo info) {
                     mBuffer.clear();
-                    request.read(mBuffer);
+                    request.readNew(mBuffer);
                 }
 
                 @Override
@@ -410,7 +410,7 @@ public class CronetPerfTestActivity extends Activity {
                 public void onReadCompleted(
                         UrlRequest request, ResponseInfo info, ByteBuffer byteBuffer) {
                     mBuffer.clear();
-                    request.read(mBuffer);
+                    request.readNew(mBuffer);
                 }
 
                 @Override

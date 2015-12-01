@@ -4,6 +4,10 @@
 
 package org.chromium.chrome.browser.customtabs;
 
+import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
+import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_PHONE;
+
+import android.app.Activity;
 import android.app.Application;
 import android.app.Instrumentation;
 import android.app.PendingIntent;
@@ -14,9 +18,11 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.support.customtabs.CustomTabsCallback;
 import android.support.customtabs.CustomTabsIntent;
 import android.support.customtabs.ICustomTabsCallback;
 import android.test.suitebuilder.annotation.SmallTest;
@@ -27,15 +33,19 @@ import android.widget.ImageButton;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.document.BrandColorUtils;
+import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.CustomTabToolbar;
+import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
@@ -190,7 +200,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         Menu menu = ContextMenuUtils.openContextMenu(this, getActivity().getActivityTab(),
                 "aboutLink");
         assertEquals(expectedMenuSize, menu.size());
-        assertNotNull(menu.findItem(R.id.contextmenu_copy_link_address_text));
+        assertNotNull(menu.findItem(R.id.contextmenu_copy_link_address));
         assertNotNull(menu.findItem(R.id.contextmenu_copy_link_text));
         assertNotNull(menu.findItem(R.id.contextmenu_save_link_as));
     }
@@ -321,7 +331,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         CustomTabToolbar toolbar = (CustomTabToolbar) toolbarView;
         assertEquals(expectedColor, toolbar.getBackground().getColor());
         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP) {
-            assertEquals(BrandColorUtils.computeStatusBarColor(expectedColor),
+            assertEquals(ColorUtils.getDarkenedColorForStatusBar(expectedColor),
                     getActivity().getWindow().getStatusBarColor());
         }
     }
@@ -422,7 +432,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                         return CustomTabActivity.handleInActiveContentIfNeeded(
                                 CustomTabsTestUtils.createMinimalCustomTabIntent(context,
                                         TEST_PAGE_2,
-                                        CustomTabsTestUtils.newDummyCallback().asBinder()));
+                                        (new CustomTabsTestUtils.DummyCallback()).asBinder()));
                     }
                 }));
         assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
@@ -501,12 +511,140 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         }
     }
 
-    private IBinder warmUpAndLaunchUrlWithSession() throws InterruptedException {
+    /**
+     * Tests that the navigation callbacks are sent.
+     */
+    @SmallTest
+    public void testCallbacksAreSent() {
+        final ArrayList<Integer> navigationEvents = new ArrayList<>();
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback() {
+            @Override
+            public void onNavigationEvent(int navigationEvent, Bundle extras) {
+                navigationEvents.add(navigationEvent);
+            }
+        };
+        try {
+            warmUpAndLaunchUrlWithSession(cb);
+            assertTrue(navigationEvents.contains(CustomTabsCallback.NAVIGATION_STARTED));
+            assertTrue(navigationEvents.contains(CustomTabsCallback.NAVIGATION_FINISHED));
+            assertFalse(navigationEvents.contains(CustomTabsCallback.NAVIGATION_FAILED));
+            assertFalse(navigationEvents.contains(CustomTabsCallback.NAVIGATION_ABORTED));
+        } catch (InterruptedException e) {
+            fail();
+        }
+    }
+
+    /**
+     * Tests that when we use a pre-created renderer, the page loaded is the
+     * only one in the navigation history.
+     */
+    @SmallTest
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testPrecreatedRenderer() {
+        CustomTabsConnection connection = warmUpAndWait();
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
+        assertTrue(connection.newSession(cb));
+        Bundle extras = new Bundle();
+        extras.putBoolean(CustomTabsConnection.NO_PRERENDERING_KEY, true);
+        assertTrue(connection.mayLaunchUrl(cb, Uri.parse(TEST_PAGE), extras, null));
+        Context context = getInstrumentation().getTargetContext().getApplicationContext();
+        try {
+            startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
+                    context, TEST_PAGE, cb.asBinder()));
+        } catch (InterruptedException e) {
+            fail();
+        }
+        Tab tab = getActivity().getActivityTab();
+        assertEquals(TEST_PAGE, tab.getUrl());
+        assertFalse(tab.canGoBack());
+    }
+
+    /** Tests that calling mayLaunchUrl() without warmup() succeeds. */
+    @SmallTest
+    public void testMayLaunchUrlWithoutWarmup() {
+        mayLaunchUrlWithoutWarmup(false);
+    }
+
+    /** Tests that calling warmup() is optional without prerendering. */
+    @SmallTest
+    public void testMayLaunchUrlWithoutWarmupNoPrerendering() {
+        mayLaunchUrlWithoutWarmup(true);
+    }
+
+    /**
+     * Tests that launching a regular Chrome tab after warmup() gives the right layout.
+     *
+     * About the restrictions and switches: No FRE and no document mode to get a
+     * ChromeTabbedActivity, and no tablets to have the tab switcher button.
+     *
+     * Non-regression test for crbug.com/547121.
+     */
+    @SmallTest
+    @Restriction(RESTRICTION_TYPE_PHONE)
+    @CommandLineFlags.Add({
+            ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, ChromeSwitches.DISABLE_DOCUMENT_MODE})
+    public void testWarmupAndLaunchRegularChrome() {
+        warmUpAndWait();
+        Intent intent =
+                new Intent(getInstrumentation().getTargetContext(), ChromeLauncherActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        Instrumentation.ActivityMonitor monitor =
+                getInstrumentation().addMonitor(ChromeTabbedActivity.class.getName(), null, false);
+        Activity activity = getInstrumentation().startActivitySync(intent);
+        assertNotNull("Main activity did not start", activity);
+        ChromeTabbedActivity tabbedActivity =
+                (ChromeTabbedActivity) monitor.waitForActivityWithTimeout(
+                        ACTIVITY_START_TIMEOUT_MS);
+        assertNotNull("ChromeTabbedActivity did not start", tabbedActivity);
+        assertNotNull("Should have a tab switcher button.",
+                tabbedActivity.findViewById(R.id.tab_switcher_button));
+    }
+
+    /**
+     * Tests that launching a Custom Tab after warmup() gives the right layout.
+     *
+     * Non-regression test for crbug.com/547121.
+     */
+    @SmallTest
+    @Restriction(RESTRICTION_TYPE_PHONE)
+    @CommandLineFlags.Add({
+            ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, ChromeSwitches.DISABLE_DOCUMENT_MODE})
+    public void testWarmupAndLaunchRightToolbarLayout() {
+        warmUpAndWait();
+        startActivityCompletely(createMinimalCustomTabIntent());
+        assertNull("Should not have a tab switcher button.",
+                mActivity.findViewById(R.id.tab_switcher_button));
+    }
+
+    private void mayLaunchUrlWithoutWarmup(boolean noPrerendering) {
+        Context context = getInstrumentation().getTargetContext().getApplicationContext();
+        CustomTabsConnection connection =
+                CustomTabsTestUtils.setUpConnection((Application) context);
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
+        connection.newSession(cb);
+        Bundle extras = null;
+        if (noPrerendering) {
+            extras = new Bundle();
+            extras.putBoolean(CustomTabsConnection.NO_PRERENDERING_KEY, true);
+        }
+        assertTrue(connection.mayLaunchUrl(cb, Uri.parse(TEST_PAGE), extras, null));
+        try {
+            startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
+                    context, TEST_PAGE, cb.asBinder()));
+        } catch (InterruptedException e) {
+            fail();
+        }
+        Tab tab = getActivity().getActivityTab();
+        assertEquals(TEST_PAGE, tab.getUrl());
+    }
+
+    private CustomTabsConnection warmUpAndWait() {
         final Context context = getInstrumentation().getTargetContext().getApplicationContext();
-        CustomTabsConnection connection = CustomTabsConnection.getInstance((Application) context);
-        ICustomTabsCallback callback = CustomTabsTestUtils.newDummyCallback();
+        CustomTabsConnection connection =
+                CustomTabsTestUtils.setUpConnection((Application) context);
         final CallbackHelper startupCallbackHelper = new CallbackHelper();
-        connection.warmup(0);
+        assertTrue(connection.warmup(0));
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -527,13 +665,25 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
 
         try {
             startupCallbackHelper.waitForCallback(0);
-        } catch (TimeoutException e) {
+        } catch (TimeoutException | InterruptedException e) {
             fail();
         }
-        connection.newSession(callback);
+        return connection;
+    }
+
+    private IBinder warmUpAndLaunchUrlWithSession(ICustomTabsCallback cb)
+            throws InterruptedException {
+        CustomTabsConnection connection = warmUpAndWait();
+        connection.newSession(cb);
+        Context context = getInstrumentation().getTargetContext().getApplicationContext();
         startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
-                context, TEST_PAGE, callback.asBinder()));
-        return callback.asBinder();
+                context, TEST_PAGE, cb.asBinder()));
+        return cb.asBinder();
+    }
+
+    private IBinder warmUpAndLaunchUrlWithSession() throws InterruptedException {
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
+        return warmUpAndLaunchUrlWithSession(cb);
     }
 
     /**

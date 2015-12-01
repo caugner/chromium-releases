@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/channel_info.h"
+#include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
@@ -43,7 +44,6 @@
 #include "chrome/renderer/plugins/non_loadable_plugin_placeholder.h"
 #include "chrome/renderer/plugins/plugin_preroller.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
-#include "chrome/renderer/plugins/shadow_dom_plugin_placeholder.h"
 #include "chrome/renderer/prerender/prerender_dispatcher.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/prerender/prerenderer_client.h"
@@ -59,10 +59,12 @@
 #include "components/autofill/content/renderer/password_generation_agent.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
+#include "components/dom_distiller/content/renderer/distiller_js_render_frame_observer.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/nacl/renderer/ppb_nacl_private.h"
 #include "components/nacl/renderer/ppb_nacl_private_impl.h"
 #include "components/network_hints/renderer/prescient_networking_dispatcher.h"
+#include "components/page_load_metrics/renderer/metrics_render_frame_observer.h"
 #include "components/password_manager/content/renderer/credential_manager_client.h"
 #include "components/pdf/renderer/pepper_pdf_host.h"
 #include "components/plugins/renderer/mobile_youtube_plugin.h"
@@ -92,7 +94,6 @@
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebPluginParams.h"
-#include "third_party/WebKit/public/web/WebPluginPlaceholder.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -406,6 +407,8 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   permissions_policy_delegate_.reset(
       new extensions::RendererPermissionsPolicyDelegate(
           extension_dispatcher_.get()));
+  resource_request_policy_.reset(
+      new extensions::ResourceRequestPolicy(extension_dispatcher_.get()));
   guest_view_container_dispatcher_.reset(
       new extensions::ExtensionsGuestViewContainerDispatcher());
 #endif
@@ -513,6 +516,13 @@ void ChromeContentRendererClient::RenderThreadStarted() {
     WebSecurityPolicy::addOriginTrustworthyWhiteList(
         WebSecurityOrigin::create(origin));
   }
+
+  std::set<std::string> schemes;
+  GetSchemesBypassingSecureContextCheckWhitelist(&schemes);
+  for (const std::string& scheme : schemes) {
+    WebSecurityPolicy::addSchemeToBypassSecureContextWhitelist(
+        WebString::fromUTF8(scheme));
+  }
 }
 
 void ChromeContentRendererClient::RenderFrameCreated(
@@ -547,9 +557,15 @@ void ChromeContentRendererClient::RenderFrameCreated(
   new nacl::NaClHelper(render_frame);
 #endif
 
-  // TODO(jam): when the frame tree moves into content and parent() works at
-  // RenderFrame construction, simplify this by just checking parent().
-  if (render_frame->GetRenderView()->GetMainRenderFrame() != render_frame) {
+  if (render_frame->IsMainFrame()) {
+    // Only attach NetErrorHelper to the main frame, since only the main frame
+    // should get error pages.
+    new NetErrorHelper(render_frame);
+
+    // Only attach MainRenderFrameObserver to the main frame, since
+    // we only want to log page load metrics for the main frame.
+    new page_load_metrics::MetricsRenderFrameObserver(render_frame);
+  } else {
     // Avoid any race conditions from having the browser tell subframes that
     // they're prerendering.
     if (prerender::PrerenderHelper::IsPrerendering(
@@ -558,11 +574,9 @@ void ChromeContentRendererClient::RenderFrameCreated(
     }
   }
 
-  if (render_frame->GetRenderView()->GetMainRenderFrame() == render_frame) {
-    // Only attach NetErrorHelper to the main frame, since only the main frame
-    // should get error pages.
-    new NetErrorHelper(render_frame);
-  }
+  // Set up a mojo service to test if this page is a distiller page.
+  new dom_distiller::DistillerJsRenderFrameObserver(
+      render_frame, chrome::ISOLATED_WORLD_ID_CHROME_INTERNAL);
 
   PasswordAutofillAgent* password_autofill_agent =
       new PasswordAutofillAgent(render_frame);
@@ -625,15 +639,6 @@ const Extension* ChromeContentRendererClient::GetExtensionByOrigin(
 }
 #endif
 
-scoped_ptr<blink::WebPluginPlaceholder>
-ChromeContentRendererClient::CreatePluginPlaceholder(
-    content::RenderFrame* render_frame,
-    blink::WebLocalFrame* frame,
-    const blink::WebPluginParams& orig_params) {
-  return CreateShadowDOMPlaceholderForPluginInfo(
-      render_frame, frame, orig_params);
-}
-
 bool ChromeContentRendererClient::OverrideCreatePlugin(
     content::RenderFrame* render_frame,
     blink::WebLocalFrame* frame,
@@ -654,9 +659,10 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
   GURL url(params.url);
 #if defined(ENABLE_PLUGINS)
   ChromeViewHostMsg_GetPluginInfo_Output output;
+  WebString top_origin = frame->top()->securityOrigin().toString();
   render_frame->Send(new ChromeViewHostMsg_GetPluginInfo(
-      render_frame->GetRoutingID(), url, frame->top()->document().url(),
-      orig_mime_type, &output));
+      render_frame->GetRoutingID(), url, GURL(top_origin), orig_mime_type,
+      &output));
   *plugin = CreatePlugin(render_frame, frame, params, output);
 #else  // !defined(ENABLE_PLUGINS)
 
@@ -695,10 +701,13 @@ void ChromeContentRendererClient::DeferMediaLoad(
   // loads even when hidden to allow playlist-like functionality.
   //
   // NOTE: This is also used to defer media loading for prerender.
+  // NOTE: Switch can be used to allow autoplay, unless frame is prerendered.
   //
   // TODO(dalecurtis): Include an idle check too.  http://crbug.com/509135
-  if (render_frame->IsHidden() && !has_played_media_before) {
-    // Lifetime is tied to |render_frame| via content::RenderFrameObserver.
+  if ((render_frame->IsHidden() && !has_played_media_before &&
+       !base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kDisableGestureRequirementForMediaPlayback)) ||
+      prerender::PrerenderHelper::IsPrerendering(render_frame)) {
     new MediaLoadDeferrer(render_frame, closure);
     return;
   }
@@ -1179,6 +1188,15 @@ bool ChromeContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
 #endif
 }
 
+bool ChromeContentRendererClient::
+    AllowTimerSuspensionWhenProcessBackgrounded() {
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool ChromeContentRendererClient::AllowPopup() {
 #if defined(ENABLE_EXTENSIONS)
   extensions::ScriptContext* current_context =
@@ -1298,16 +1316,15 @@ bool ChromeContentRendererClient::WillSendRequest(
   // URL to something invalid to prevent the request and cause an error.
 #if defined(ENABLE_EXTENSIONS)
   if (url.SchemeIs(extensions::kExtensionScheme) &&
-      !extensions::ResourceRequestPolicy::CanRequestResource(url, frame,
-                                                             transition_type)) {
+      !resource_request_policy_->CanRequestResource(url, frame,
+                                                    transition_type)) {
     *new_url = GURL(chrome::kExtensionInvalidRequestURL);
     return true;
   }
 
   if (url.SchemeIs(extensions::kExtensionResourceScheme) &&
-      !extensions::ResourceRequestPolicy::CanRequestExtensionResourceScheme(
-          url,
-          frame)) {
+      !resource_request_policy_->CanRequestExtensionResourceScheme(url,
+                                                                   frame)) {
     *new_url = GURL(chrome::kExtensionResourceInvalidRequestURL);
     return true;
   }
@@ -1411,7 +1428,9 @@ bool ChromeContentRendererClient::CrossesExtensionExtents(
     // TODO(nick): Either wire this up to SiteIsolationPolicy, or to state on
     // |opener_frame|/its ancestors.
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kSitePerProcess))
+            switches::kSitePerProcess) ||
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kIsolateExtensions))
       old_url = opener_frame->document().url();
     else
       old_url = opener_frame->top()->document().url();
@@ -1654,8 +1673,22 @@ ChromeContentRendererClient::DidInitializeServiceWorkerContextOnWorkerThread(
 }
 
 void ChromeContentRendererClient::WillDestroyServiceWorkerContextOnWorkerThread(
+    v8::Local<v8::Context> context,
     const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(url);
+  extensions::Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(context,
+                                                                        url);
+#endif
+}
+
+// If we're in an extension, there is no need disabling multiple routes as
+// chrome.system.network.getNetworkInterfaces provides the same
+// information. Also, the enforcement of sending and binding UDP is already done
+// by chrome extension permission model.
+bool ChromeContentRendererClient::ShouldEnforceWebRTCRoutingPreferences() {
+#if defined(ENABLE_EXTENSIONS)
+  return !IsStandaloneExtensionProcess();
+#else
+  return true;
 #endif
 }

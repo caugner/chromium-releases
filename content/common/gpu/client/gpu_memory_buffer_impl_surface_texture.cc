@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/trace_event/trace_event.h"
 #include "content/common/android/surface_texture_manager.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace content {
@@ -26,6 +27,7 @@ int WindowFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
     case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
@@ -85,12 +87,7 @@ bool GpuMemoryBufferImplSurfaceTexture::Map(void** data) {
   }
 
   DCHECK_LE(size_.width(), buffer.stride);
-  size_t row_size_in_bytes = 0;
-  bool valid_row_size =
-      RowSizeInBytes(buffer.stride, format_, 0, &row_size_in_bytes);
-  DCHECK(valid_row_size);
-
-  stride_ = row_size_in_bytes;
+  stride_ = gfx::RowSizeForBufferFormat(buffer.stride, format_, 0);
   mapped_ = true;
   *data = buffer.bits;
   return true;

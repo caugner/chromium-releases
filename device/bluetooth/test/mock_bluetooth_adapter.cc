@@ -8,10 +8,21 @@
 
 namespace device {
 
+using testing::Invoke;
+using testing::_;
+
 MockBluetoothAdapter::Observer::Observer() {}
 MockBluetoothAdapter::Observer::~Observer() {}
 
 MockBluetoothAdapter::MockBluetoothAdapter() {
+  ON_CALL(*this, AddObserver(_))
+      .WillByDefault(Invoke([this](BluetoothAdapter::Observer* observer) {
+        this->BluetoothAdapter::AddObserver(observer);
+      }));
+  ON_CALL(*this, RemoveObserver(_))
+      .WillByDefault(Invoke([this](BluetoothAdapter::Observer* observer) {
+        this->BluetoothAdapter::RemoveObserver(observer);
+      }));
 }
 
 MockBluetoothAdapter::~MockBluetoothAdapter() {}
@@ -24,19 +35,17 @@ void MockBluetoothAdapter::Shutdown() {
 void MockBluetoothAdapter::AddDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
-}
+    const DiscoverySessionErrorCallback& error_callback) {}
 
 void MockBluetoothAdapter::RemoveDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
-}
+    const DiscoverySessionErrorCallback& error_callback) {}
 
 void MockBluetoothAdapter::SetDiscoveryFilter(
     scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+    const DiscoverySessionErrorCallback& error_callback) {
   SetDiscoveryFilterRaw(discovery_filter.get(), callback, error_callback);
 }
 

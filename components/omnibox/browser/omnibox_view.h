@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -226,11 +227,6 @@ class OmniboxView {
   // * Otherwise, users may be pasting in search data, e.g. street addresses. In
   // this case, runs of whitespace are collapsed down to single spaces.
   static base::string16 SanitizeTextForPaste(const base::string16& text);
-
-  // Returns the current clipboard contents as a string that can be pasted in.
-  // In addition to just getting CF_UNICODETEXT out, this can also extract URLs
-  // from bookmarks on the clipboard.
-  static base::string16 GetClipboardText();
 
  protected:
   OmniboxView(OmniboxEditController* controller,

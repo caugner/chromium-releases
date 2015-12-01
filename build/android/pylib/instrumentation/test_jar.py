@@ -11,10 +11,9 @@ import pickle
 import re
 import sys
 
-from pylib import cmd_helper
+from devil.android import device_utils
+from devil.android import md5sum
 from pylib import constants
-from pylib.device import device_utils
-from pylib.utils import md5sum
 from pylib.utils import proguard
 
 sys.path.insert(0,
@@ -32,6 +31,8 @@ class TestJar(object):
       ['Smoke', 'SmallTest', 'MediumTest', 'LargeTest', 'EnormousTest',
        'FlakyTest', 'DisabledTest', 'Manual', 'PerfTest', 'HostDrivenTest',
        'IntegrationTest'])
+  _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = frozenset(
+      ['DisabledTest', 'FlakyTest'])
   _DEFAULT_ANNOTATION = 'SmallTest'
   _PROGUARD_CLASS_RE = re.compile(r'\s*?- Program class:\s*([\S]+)$')
   _PROGUARD_SUPERCLASS_RE = re.compile(r'\s*?  Superclass:\s*([\S]+)$')
@@ -45,8 +46,8 @@ class TestJar(object):
     if not os.path.exists(jar_path):
       raise Exception('%s not found, please build it' % jar_path)
 
-    self._PROGUARD_PATH = os.path.join(constants.ANDROID_SDK_ROOT,
-                                       'tools/proguard/lib/proguard.jar')
+    self._PROGUARD_PATH = os.path.join(constants.PROGUARD_ROOT,
+                                       'lib', 'proguard.jar')
     if not os.path.exists(self._PROGUARD_PATH):
       self._PROGUARD_PATH = os.path.join(os.environ['ANDROID_BUILD_TOP'],
                                          'external/proguard/lib/proguard.jar')
@@ -120,7 +121,7 @@ class TestJar(object):
   def GetTestAnnotations(self, test):
     """Returns a list of all annotations for the given |test|. May be empty."""
     if not self._IsTestMethod(test) or not test in self._test_methods:
-      return []
+      return {}
     return self._test_methods[test]['annotations']
 
   @staticmethod
@@ -198,9 +199,14 @@ class TestJar(object):
       available_tests = [m for m in self.GetTestMethods()
                          if not self.IsHostDrivenTest(m)]
 
-    if exclude_annotation_list:
-      excluded_tests = self.GetAnnotatedTests(exclude_annotation_list)
-      available_tests = list(set(available_tests) - set(excluded_tests))
+    requested_annotations = set(annotation_filter_list or ())
+    exclude_annotation_list = list(exclude_annotation_list or ())
+
+    exclude_annotation_list.extend([
+        a for a in self._EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS
+        if a not in requested_annotations])
+    excluded_tests = self.GetAnnotatedTests(exclude_annotation_list)
+    available_tests = list(set(available_tests) - set(excluded_tests))
 
     tests = []
     if test_filter:

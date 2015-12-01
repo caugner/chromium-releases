@@ -8,7 +8,7 @@
 function test()
 {
     var nodeId;
-    var allRules;
+    var nodeStyles;
     var rule;
     var matchedRules;
 
@@ -35,52 +35,52 @@ function test()
                 InspectorTest.cssModel.matchedStylesPromise(nodeId, false, false).then(callback);
             }
 
-            function callback(rules)
+            function callback(matchedResult)
             {
-                if (!rules || !rules.matchedCSSRules || !rules.matchedCSSRules.length) {
+                if (!matchedResult) {
                     InspectorTest.addResult("[!] No rules found");
                     InspectorTest.completeTest();
                     return;
                 }
 
-                allRules = rules.matchedCSSRules;
+                nodeStyles = matchedResult.nodeStyles();
                 next();
             }
         },
 
         function testAddProperty(next)
         {
-            for (var i = 0; i < allRules.length; ++i) {
-                if (allRules[i].isRegular) {
-                    rule = allRules[i];
+            for (var i = 0; i < nodeStyles.length; ++i) {
+                var style = nodeStyles[i];
+                if (style.parentRule && style.parentRule.isRegular()) {
+                    rule = style.parentRule;
                     break;
                 }
             }
             rule.style.appendProperty("width", "100%", callback);
-            function callback(newStyle)
+            function callback(success)
             {
                 InspectorTest.addResult("=== Rule modified ===");
-                if (!newStyle) {
+                if (!success) {
                     InspectorTest.addResult("[!] No valid rule style received");
                     InspectorTest.completeTest();
                 } else {
-                    dumpProperties(newStyle);
-                    InspectorTest.cssModel.setRuleSelector(rule, nodeId, "body", successCallback, failureCallback);
+                    dumpProperties(rule.style);
+                    rule.setSelectorText(nodeId, "body", successCallback);
                 }
             }
 
-            function successCallback(rule, doesAffectSelectedNode)
+            function successCallback(success)
             {
+                if (!success) {
+                    InspectorTest.addResult("[!] Failed to change selector");
+                    InspectorTest.completeTest();
+                    return;
+                }
                 InspectorTest.addResult("=== Selector changed ===");
-                InspectorTest.addResult(rule.selectorText + " {" + rule.style.cssText + "}");
+                InspectorTest.addResult(rule.selectorText() + " {" + rule.style.cssText + "}");
                 InspectorTest.addResult("Selectors matching the (#inspected) node: " + InspectorTest.matchingSelectors(rule));
                 next();
-            }
-
-            function failureCallback()
-            {
-                InspectorTest.addResult("[!] Failed to change selector");
-                InspectorTest.completeTest();
             }
         }
     ]);

@@ -10,10 +10,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/about_sync_util.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/sync_driver/about_sync_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -85,11 +86,12 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   scoped_ptr<base::DictionaryValue> sync_logs(
-      sync_ui_util::ConstructAboutInformation(service));
+      sync_driver::sync_ui_util::ConstructAboutInformation(
+          service, service->signin(), chrome::GetChannel()));
 
   // Remove identity section.
   base::ListValue* details = NULL;
-  sync_logs->GetList(kDetailsKey, &details);
+  sync_logs->GetList(sync_driver::sync_ui_util::kDetailsKey, &details);
   if (!details)
     return;
   for (base::ListValue::iterator it = details->begin();
@@ -98,7 +100,7 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
     if ((*it)->GetAsDictionary(&dict)) {
       std::string title;
       dict->GetString("title", &title);
-      if (title == kIdentityTitle) {
+      if (title == sync_driver::sync_ui_util::kIdentityTitle) {
         details->Erase(it, NULL);
         break;
       }
@@ -115,7 +117,7 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
 
 void ChromeInternalLogSource::PopulateExtensionInfoLogs(
     SystemLogsResponse* response) {
-  if (!ChromeMetricsServiceAccessor::IsCrashReportingEnabled())
+  if (!ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled())
     return;
 
   Profile* primary_profile =

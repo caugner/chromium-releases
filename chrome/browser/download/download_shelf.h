@@ -53,8 +53,8 @@ class DownloadShelf {
     // Progress animation timer period, in milliseconds.
     kProgressRateMs = 30,
 
-    // Size of the space used for the progress indicator, including padding.
-    kProgressIndicatorSize = 39,
+    // Size of the space used for the progress indicator.
+    kProgressIndicatorSize = 25,
 
     // x/y offset for the file type icon.
     kFiletypeIconOffset = (kProgressIndicatorSize - 16) / 2
@@ -66,10 +66,10 @@ class DownloadShelf {
   // Paint the common download animation progress foreground and background,
   // clipping the foreground to 'percent' full. If percent is -1, then we don't
   // know the total size, so we just draw a rotating segment until we're done.
-  // |progress_start_time| is only used for these unknown size downloads.
+  // |progress_time| is only used for these unknown size downloads.
   static void PaintDownloadProgress(gfx::Canvas* canvas,
                                     const ui::ThemeProvider& theme_provider,
-                                    const base::TimeTicks& progress_start_time,
+                                    const base::TimeDelta& progress_time,
                                     int percent);
 
   static void PaintDownloadComplete(gfx::Canvas* canvas,

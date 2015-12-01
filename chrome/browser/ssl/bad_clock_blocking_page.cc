@@ -20,12 +20,13 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/interstitials/chrome_metrics_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/ssl/cert_report_helper.h"
+#include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/browser/ssl/ssl_error_classification.h"
-#include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -36,10 +37,12 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/signed_certificate_timestamp_store.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/ssl_status.h"
 #include "grit/browser_resources.h"
+#include "grit/components_strings.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -69,6 +72,8 @@ using content::NavigationController;
 using content::NavigationEntry;
 
 namespace {
+
+const char kMetricsName[] = "bad_clock";
 
 void LaunchDateAndTimeSettings() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
@@ -172,12 +177,32 @@ BadClockBlockingPage::BadClockBlockingPage(
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
     const base::Time& time_triggered,
+    scoped_ptr<SSLCertReporter> ssl_cert_reporter,
     const base::Callback<void(bool)>& callback)
     : SecurityInterstitialPage(web_contents, request_url),
       callback_(callback),
       cert_error_(cert_error),
       ssl_info_(ssl_info),
-      time_triggered_(time_triggered) {}
+      time_triggered_(time_triggered) {
+  security_interstitials::MetricsHelper::ReportDetails reporting_info;
+  reporting_info.metric_prefix = kMetricsName;
+  scoped_ptr<ChromeMetricsHelper> chrome_metrics_helper(new ChromeMetricsHelper(
+      web_contents, request_url, reporting_info, kMetricsName));
+  chrome_metrics_helper->StartRecordingCaptivePortalMetrics(false);
+  set_metrics_helper(chrome_metrics_helper.Pass());
+  metrics_helper()->RecordUserInteraction(
+      security_interstitials::MetricsHelper::TOTAL_VISITS);
+
+  cert_report_helper_.reset(new CertReportHelper(
+      ssl_cert_reporter.Pass(), web_contents, request_url, ssl_info,
+      certificate_reporting::ErrorReport::INTERSTITIAL_CLOCK,
+      false /* overridable */, metrics_helper()));
+
+  // TODO(felt): Separate the clock statistics from the main ssl statistics.
+  SSLErrorClassification classifier(time_triggered_, request_url, cert_error_,
+                                    *ssl_info_.cert.get());
+  classifier.RecordUMAStatistics(false);
+}
 
 bool BadClockBlockingPage::ShouldCreateNewNavigation() const {
   return true;
@@ -189,6 +214,7 @@ InterstitialPageDelegate::TypeID BadClockBlockingPage::GetTypeForTesting()
 }
 
 BadClockBlockingPage::~BadClockBlockingPage() {
+  metrics_helper()->RecordShutdownMetrics();
   if (!callback_.is_null()) {
     // Deny when the page is closed.
     NotifyDenyCertificate();
@@ -204,10 +230,10 @@ void BadClockBlockingPage::PopulateInterstitialStrings(
   load_time_data->SetString("type", "SSL");
   load_time_data->SetString("errorCode", net::ErrorToString(cert_error_));
   load_time_data->SetString(
-      "openDetails", l10n_util::GetStringUTF16(IDS_SSL_V2_OPEN_DETAILS_BUTTON));
+      "openDetails", l10n_util::GetStringUTF16(IDS_SSL_OPEN_DETAILS_BUTTON));
   load_time_data->SetString(
       "closeDetails",
-      l10n_util::GetStringUTF16(IDS_SSL_V2_CLOSE_DETAILS_BUTTON));
+      l10n_util::GetStringUTF16(IDS_SSL_CLOSE_DETAILS_BUTTON));
 
   // Strings for the bad clock warning specifically.
   load_time_data->SetBoolean("bad_clock", true);
@@ -220,25 +246,25 @@ void BadClockBlockingPage::PopulateInterstitialStrings(
 
   int heading_string =
       SSLErrorClassification::IsUserClockInTheFuture(time_triggered_)
-          ? IDS_SSL_V2_CLOCK_AHEAD_HEADING
-          : IDS_SSL_V2_CLOCK_BEHIND_HEADING;
+          ? IDS_CLOCK_ERROR_AHEAD_HEADING
+          : IDS_CLOCK_ERROR_BEHIND_HEADING;
 
   load_time_data->SetString("tabTitle",
-                            l10n_util::GetStringUTF16(IDS_SSL_V2_CLOCK_TITLE));
+                            l10n_util::GetStringUTF16(IDS_CLOCK_ERROR_TITLE));
   load_time_data->SetString("heading",
                             l10n_util::GetStringUTF16(heading_string));
   load_time_data->SetString(
       "primaryParagraph",
       l10n_util::GetStringFUTF16(
-          IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH, url,
+          IDS_CLOCK_ERROR_PRIMARY_PARAGRAPH, url,
           base::TimeFormatFriendlyDateAndTime(time_triggered_)));
 
   load_time_data->SetString(
       "primaryButtonText",
-      l10n_util::GetStringUTF16(IDS_SSL_V2_CLOCK_UPDATE_DATE_AND_TIME));
+      l10n_util::GetStringUTF16(IDS_CLOCK_ERROR_UPDATE_DATE_AND_TIME));
   load_time_data->SetString(
       "explanationParagraph",
-      l10n_util::GetStringUTF16(IDS_SSL_V2_CLOCK_EXPLANATION));
+      l10n_util::GetStringUTF16(IDS_CLOCK_ERROR_EXPLANATION));
 
   // The interstitial template expects this string, but we're not using it.
   load_time_data->SetString("finalParagraph", std::string());
@@ -257,18 +283,34 @@ void BadClockBlockingPage::PopulateInterstitialStrings(
   ssl_info_.cert->GetPEMEncodedChain(&encoded_chain);
   load_time_data->SetString(
       "pem", base::JoinString(encoded_chain, base::StringPiece()));
+
+  cert_report_helper_->PopulateExtendedReportingOption(load_time_data);
 }
 
 void BadClockBlockingPage::OverrideEntry(NavigationEntry* entry) {
-  int cert_id = content::CertStore::GetInstance()->StoreCert(
-      ssl_info_.cert.get(), web_contents()->GetRenderProcessHost()->GetID());
+  const int process_id = web_contents()->GetRenderProcessHost()->GetID();
+  const int cert_id = content::CertStore::GetInstance()->StoreCert(
+      ssl_info_.cert.get(), process_id);
   DCHECK(cert_id);
 
-  entry->GetSSL().security_style =
-      content::SECURITY_STYLE_AUTHENTICATION_BROKEN;
-  entry->GetSSL().cert_id = cert_id;
-  entry->GetSSL().cert_status = ssl_info_.cert_status;
-  entry->GetSSL().security_bits = ssl_info_.security_bits;
+  content::SignedCertificateTimestampStore* sct_store(
+      content::SignedCertificateTimestampStore::GetInstance());
+  content::SignedCertificateTimestampIDStatusList sct_ids;
+  for (const auto& sct_and_status : ssl_info_.signed_certificate_timestamps) {
+    const int sct_id(sct_store->Store(sct_and_status.sct.get(), process_id));
+    DCHECK(sct_id);
+    sct_ids.push_back(content::SignedCertificateTimestampIDAndStatus(
+        sct_id, sct_and_status.status));
+  }
+
+  entry->GetSSL() =
+      content::SSLStatus(content::SECURITY_STYLE_AUTHENTICATION_BROKEN, cert_id,
+                         sct_ids, ssl_info_);
+}
+
+void BadClockBlockingPage::SetSSLCertReporterForTesting(
+    scoped_ptr<SSLCertReporter> ssl_cert_reporter) {
+  cert_report_helper_->SetSSLCertReporterForTesting(ssl_cert_reporter.Pass());
 }
 
 // This handles the commands sent from the interstitial JavaScript.
@@ -294,8 +336,12 @@ void BadClockBlockingPage::CommandReceived(const std::string& command) {
       SetReportingPreference(false);
       break;
     case CMD_SHOW_MORE_SECTION:
+      metrics_helper()->RecordUserInteraction(
+          security_interstitials::MetricsHelper::SHOW_ADVANCED);
       break;
     case CMD_OPEN_DATE_SETTINGS:
+      metrics_helper()->RecordUserInteraction(
+          security_interstitials::MetricsHelper::OPEN_TIME_SETTINGS);
       content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
                                        base::Bind(&LaunchDateAndTimeSettings));
       break;
@@ -320,6 +366,8 @@ void BadClockBlockingPage::OverrideRendererPrefs(
 }
 
 void BadClockBlockingPage::OnDontProceed() {
+  cert_report_helper_->FinishCertCollection(
+      certificate_reporting::ErrorReport::USER_DID_NOT_PROCEED);
   NotifyDenyCertificate();
 }
 

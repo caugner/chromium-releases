@@ -12,7 +12,7 @@
 #import "ios/chrome/browser/autofill/form_input_accessory_view_delegate.h"
 #import "ios/chrome/browser/ui/image_util.h"
 #include "ios/chrome/browser/ui/ui_util.h"
-#include "ios/chrome/grit/ios_strings_resources.h"
+#include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -258,14 +258,15 @@ UIImage* ButtonImage(NSString* name) {
                           pressedImage:ButtonImage(@"autofill_prev_pressed")
                          disabledImage:ButtonImage(@"autofill_prev_inactive")
                                 target:_delegate
-                                action:@selector(selectPreviousElement)
+                                action:@selector(
+                                           selectPreviousElementWithButtonPress)
                                enabled:NO
                                originX:currentX
                                originY:firstRow
                                 height:CGRectGetHeight(frame)];
   [previousButton
       setAccessibilityLabel:l10n_util::GetNSString(
-                                IDS_AUTOFILL_ACCNAME_PREVIOUS_FIELD)];
+                                IDS_IOS_AUTOFILL_ACCNAME_PREVIOUS_FIELD)];
   [navView addSubview:previousButton];
   currentX += kNavigationButtonWidth;
 
@@ -282,13 +283,14 @@ UIImage* ButtonImage(NSString* name) {
                           pressedImage:ButtonImage(@"autofill_next_pressed")
                          disabledImage:ButtonImage(@"autofill_next_inactive")
                                 target:_delegate
-                                action:@selector(selectNextElement)
+                                action:@selector(
+                                           selectNextElementWithButtonPress)
                                enabled:NO
                                originX:currentX
                                originY:firstRow
                                 height:CGRectGetHeight(frame)];
   [nextButton setAccessibilityLabel:l10n_util::GetNSString(
-                                        IDS_AUTOFILL_ACCNAME_NEXT_FIELD)];
+                                        IDS_IOS_AUTOFILL_ACCNAME_NEXT_FIELD)];
   [navView addSubview:nextButton];
   currentX += kNavigationButtonWidth;
 
@@ -312,13 +314,14 @@ UIImage* ButtonImage(NSString* name) {
                             pressedImage:ButtonImage(@"autofill_close_pressed")
                            disabledImage:nil
                                   target:_delegate
-                                  action:@selector(closeKeyboard)
+                                  action:@selector(closeKeyboardWithButtonPress)
                                  enabled:YES
                                  originX:currentX
                                  originY:firstRow
                                   height:CGRectGetHeight(frame)];
-    [closeButton setAccessibilityLabel:l10n_util::GetNSString(
-                                           IDS_AUTOFILL_ACCNAME_HIDE_KEYBOARD)];
+    [closeButton
+        setAccessibilityLabel:l10n_util::GetNSString(
+                                  IDS_IOS_AUTOFILL_ACCNAME_HIDE_KEYBOARD)];
     [navView addSubview:closeButton];
     currentX += kNavigationButtonWidth;
   }

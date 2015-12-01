@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/timer/timer.h"
@@ -69,10 +70,6 @@ class Dispatcher : public content::RenderProcessObserver,
   explicit Dispatcher(DispatcherDelegate* delegate);
   ~Dispatcher() override;
 
-  const std::set<std::string>& function_names() const {
-    return function_names_;
-  }
-
   const ScriptContextSet& script_context_set() const {
     return *script_context_set_;
   }
@@ -82,6 +79,8 @@ class Dispatcher : public content::RenderProcessObserver,
   ContentWatcher* content_watcher() { return content_watcher_.get(); }
 
   RequestSender* request_sender() { return request_sender_.get(); }
+
+  const std::string& webview_partition_id() { return webview_partition_id_; }
 
   void OnRenderFrameCreated(content::RenderFrame* render_frame);
 
@@ -102,7 +101,9 @@ class Dispatcher : public content::RenderProcessObserver,
                                 int world_id);
 
   // Runs on a different thread and should not use any member variables.
-  static void WillDestroyServiceWorkerContextOnWorkerThread(const GURL& url);
+  static void WillDestroyServiceWorkerContextOnWorkerThread(
+      v8::Local<v8::Context> v8_context,
+      const GURL& url);
 
   void DidCreateDocumentElement(blink::WebLocalFrame* frame);
 
@@ -166,11 +167,11 @@ class Dispatcher : public content::RenderProcessObserver,
                        const base::ListValue& args,
                        bool user_gesture);
   void OnSetChannel(int channel);
-  void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnSetScriptingWhitelist(
       const ExtensionsClient::ScriptingWhitelist& extension_ids);
   void OnSetSystemFont(const std::string& font_family,
                        const std::string& font_size);
+  void OnSetWebViewPartitionID(const std::string& partition_id);
   void OnShouldSuspend(const std::string& extension_id, uint64 sequence_id);
   void OnSuspend(const std::string& extension_id);
   void OnTransferBlobs(const std::vector<std::string>& blob_uuids);
@@ -245,9 +246,6 @@ class Dispatcher : public content::RenderProcessObserver,
   // |context|.
   void RequireGuestViewModules(ScriptContext* context);
 
-  // Adds features that are specific to the current channel.
-  void AddChannelSpecificFeatures();
-
   // The delegate for this dispatcher. Not owned, but must extend beyond the
   // Dispatcher's own lifetime.
   DispatcherDelegate* delegate_;
@@ -271,10 +269,7 @@ class Dispatcher : public content::RenderProcessObserver,
 
   // Same as above, but on a longer timer and will run even if the process is
   // not idle, to ensure that IdleHandle gets called eventually.
-  scoped_ptr<base::RepeatingTimer<content::RenderThread> > forced_idle_timer_;
-
-  // All declared function names.
-  std::set<std::string> function_names_;
+  scoped_ptr<base::RepeatingTimer> forced_idle_timer_;
 
   // The extensions and apps that are active in this process.
   ExtensionIdSet active_extension_ids_;
@@ -304,6 +299,11 @@ class Dispatcher : public content::RenderProcessObserver,
 
   // Status of webrequest usage.
   bool webrequest_used_;
+
+  // The WebView partition ID associated with this process's storage partition,
+  // if this renderer is a WebView guest render process. Otherwise, this will be
+  // empty.
+  std::string webview_partition_id_;
 
   DISALLOW_COPY_AND_ASSIGN(Dispatcher);
 };

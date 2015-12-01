@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/rand_util.h"
 #include "base/thread_task_runner_handle.h"
+#include "net/base/socket_performance_watcher.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_verify_result.h"
@@ -21,6 +22,7 @@
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/crypto/quic_server_info.h"
+#include "net/quic/quic_packet_reader.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_chromium_client_session_peer.h"
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
@@ -50,18 +52,23 @@ class QuicChromiumClientSessionTest
                  GetSocket().Pass(),
                  /*stream_factory=*/nullptr,
                  /*crypto_client_stream_factory=*/nullptr,
+                 &clock_,
                  &transport_security_state_,
                  make_scoped_ptr((QuicServerInfo*)nullptr),
                  QuicServerId(kServerHostname,
                               kServerPort,
                               /*is_secure=*/false,
                               PRIVACY_MODE_DISABLED),
+                 kQuicYieldAfterPacketsRead,
+                 QuicTime::Delta::FromMilliseconds(
+                     kQuicYieldAfterDurationMilliseconds),
                  /*cert_verify_flags=*/0,
                  DefaultQuicConfig(),
                  &crypto_config_,
                  "CONNECTION_UNKNOWN",
                  base::TimeTicks::Now(),
                  base::ThreadTaskRunnerHandle::Get().get(),
+                 /*socket_performance_watcher=*/nullptr,
                  &net_log_) {
     session_.Initialize();
     // Advance the time, because timers do not like uninitialized times.

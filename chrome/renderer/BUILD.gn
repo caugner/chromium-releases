@@ -40,10 +40,12 @@ static_library("renderer") {
     "//components/cdm/renderer",
     "//components/data_reduction_proxy/content/common",
     "//components/data_reduction_proxy/core/common",
+    "//components/dom_distiller/content:content_renderer",
     "//components/error_page/renderer",
     "//components/guest_view/renderer",
     "//components/network_hints/renderer",
     "//components/omnibox/common",
+    "//components/page_load_metrics/renderer",
     "//components/password_manager/content/renderer",
     "//components/plugins/renderer",
     "//components/printing/renderer",
@@ -70,7 +72,10 @@ static_library("renderer") {
   ]
 
   if (!is_ios) {
-    deps += [ "//chrome/common/net" ]
+    deps += [
+      "//chrome/common/net",
+      "//media",
+    ]
   }
 
   if (enable_nacl) {

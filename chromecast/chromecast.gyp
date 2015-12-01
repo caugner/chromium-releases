@@ -13,7 +13,6 @@
     'chromium_code': 1,
     'chromecast_branding%': 'public',
     'disable_display%': 0,
-    'enable_default_cast_graphics%': 1,
     'ozone_platform_cast%': 0,
     'use_chromecast_webui%': 0,
   },
@@ -81,6 +80,8 @@
         'base/android/system_time_change_notifier_android.h',
         'base/cast_paths.cc',
         'base/cast_paths.h',
+        'base/cast_resource.h',
+        'base/cast_resource.cc',
         'base/chromecast_config_android.cc',
         'base/chromecast_config_android.h',
         'base/chromecast_switches.cc',
@@ -177,6 +178,17 @@
         }],
       ],
     },  # end of target 'cast_crash_client'
+    {
+      'target_name': 'cast_crypto',
+      'type': '<(component)',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'crypto/signature_cache.cc',
+        'crypto/signature_cache.h',
+      ],
+    },
     {
       'target_name': 'cast_net',
       'type': '<(component)',
@@ -363,8 +375,8 @@
         'browser/metrics/cast_stability_metrics_provider.h',
         'browser/pref_service_helper.cc',
         'browser/pref_service_helper.h',
-        'browser/service/cast_service.cc',
-        'browser/service/cast_service.h',
+        'browser/service/cast_service_simple.cc',
+        'browser/service/cast_service_simple.h',
         'browser/url_request_context_factory.cc',
         'browser/url_request_context_factory.h',
         'common/cast_content_client.cc',
@@ -385,6 +397,8 @@
         'renderer/key_systems_cast.h',
         'renderer/media/capabilities_message_filter.cc',
         'renderer/media/capabilities_message_filter.h',
+        'service/cast_service.cc',
+        'service/cast_service.h',
       ],
       'conditions': [
         ['chromecast_branding!="public"', {
@@ -395,21 +409,9 @@
           'sources': [
             'browser/cast_content_browser_client_simple.cc',
             'browser/cast_network_delegate_simple.cc',
-            'browser/devtools/remote_debugging_server_simple.cc',
             'browser/pref_service_helper_simple.cc',
-            'browser/service/cast_service_android.cc',
-            'browser/service/cast_service_android.h',
             'common/platform_client_auth_simple.cc',
             'renderer/cast_content_renderer_client_simple.cc',
-          ],
-          'conditions': [
-            ['OS!="android"', {
-              'sources': [
-                'browser/media/cast_browser_cdm_factory_simple.cc',
-                'browser/service/cast_service_simple.cc',
-                'browser/service/cast_service_simple.h',
-              ],
-            }],
           ],
         }],
         # ExternalMetrics not necessary on Android and (as of this writing) uses
@@ -453,6 +455,7 @@
         ['OS=="android"', {
           'dependencies': [
             'cast_jni_headers',
+            'cast_version_header',
           ],
         }],
         ['chromecast_branding=="public" and OS!="android"', {
@@ -502,6 +505,18 @@
         },
       ],
     },
+    {
+      'target_name': 'libcast_graphics_1.0',
+      'type': 'shared_library',
+      'dependencies': [
+        'cast_public_api'
+      ],
+      'sources': [
+        'graphics/cast_egl_platform_default.cc',
+        'graphics/graphics_properties_default.cc',
+        'graphics/osd_plane_default.cc'
+      ],
+    }
   ],  # end of targets
 
   # Targets for Android receiver.
@@ -668,6 +683,8 @@
           'sources': [
             'browser/media/cast_browser_cdm_factory.cc',
             'browser/media/cast_browser_cdm_factory.h',
+            'browser/media/cma_media_pipeline_client.cc',
+            'browser/media/cma_media_pipeline_client.h',
             'browser/media/cma_message_filter_host.cc',
             'browser/media/cma_message_filter_host.h',
             'browser/media/media_pipeline_host.cc',
@@ -734,22 +751,6 @@
           ],
         },
       ],  # end of targets
-    }],
-    ['enable_default_cast_graphics==1', {
-      'targets': [
-        {
-          'target_name': 'libcast_graphics_1.0',
-          'type': 'shared_library',
-          'dependencies': [
-            'cast_public_api'
-          ],
-          'sources': [
-            'graphics/cast_egl_platform_default.cc',
-            'graphics/graphics_properties_default.cc',
-            'graphics/osd_plane_default.cc'
-          ],
-        }
-      ]
     }],
   ],  # end of conditions
 }

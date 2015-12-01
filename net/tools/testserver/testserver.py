@@ -154,11 +154,12 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
 
   def __init__(self, server_address, request_hander_class, pem_cert_and_key,
                ssl_client_auth, ssl_client_cas, ssl_client_cert_types,
-               ssl_bulk_ciphers, ssl_key_exchanges, enable_npn,
+               ssl_bulk_ciphers, ssl_key_exchanges, npn_protocols,
                record_resume_info, tls_intolerant,
                tls_intolerance_type, signed_cert_timestamps,
                fallback_scsv_enabled, ocsp_response,
-               alert_after_handshake):
+               alert_after_handshake, disable_channel_id, disable_ems,
+               token_binding_params):
     self.cert_chain = tlslite.api.X509CertChain()
     self.cert_chain.parsePemList(pem_cert_and_key)
     # Force using only python implementation - otherwise behavior is different
@@ -171,10 +172,7 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
     self.ssl_client_auth = ssl_client_auth
     self.ssl_client_cas = []
     self.ssl_client_cert_types = []
-    if enable_npn:
-      self.next_protos = ['http/1.1']
-    else:
-      self.next_protos = None
+    self.npn_protocols = npn_protocols
     self.signed_cert_timestamps = signed_cert_timestamps
     self.fallback_scsv_enabled = fallback_scsv_enabled
     self.ocsp_response = ocsp_response
@@ -204,6 +202,12 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
       self.ssl_handshake_settings.tlsIntoleranceType = tls_intolerance_type
     if alert_after_handshake:
       self.ssl_handshake_settings.alertAfterHandshake = True
+    if disable_channel_id:
+      self.ssl_handshake_settings.enableChannelID = False
+    if disable_ems:
+      self.ssl_handshake_settings.enableExtendedMasterSecret = False
+    self.ssl_handshake_settings.supportedTokenBindingParams = \
+        token_binding_params
 
     if record_resume_info:
       # If record_resume_info is true then we'll replace the session cache with
@@ -227,7 +231,7 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
                                     settings=self.ssl_handshake_settings,
                                     reqCAs=self.ssl_client_cas,
                                     reqCertTypes=self.ssl_client_cert_types,
-                                    nextProtos=self.next_protos,
+                                    nextProtos=self.npn_protocols,
                                     signedCertTimestamps=
                                     self.signed_cert_timestamps,
                                     fallbackSCSV=self.fallback_scsv_enabled,
@@ -2049,7 +2053,7 @@ class ServerRunner(testserver_base.TestServerRunner):
                              self.options.ssl_client_cert_type,
                              self.options.ssl_bulk_cipher,
                              self.options.ssl_key_exchange,
-                             self.options.enable_npn,
+                             self.options.npn_protocols,
                              self.options.record_resume,
                              self.options.tls_intolerant,
                              self.options.tls_intolerance_type,
@@ -2057,7 +2061,10 @@ class ServerRunner(testserver_base.TestServerRunner):
                                  "base64"),
                              self.options.fallback_scsv,
                              stapled_ocsp_response,
-                             self.options.alert_after_handshake)
+                             self.options.alert_after_handshake,
+                             self.options.disable_channel_id,
+                             self.options.disable_extended_master_secret,
+                             self.options.token_binding_params)
         print 'HTTPS server started on https://%s:%d...' % \
             (host, server.server_port)
       else:
@@ -2275,12 +2282,10 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   'multiple times, indicating multiple '
                                   'algorithms should be enabled.');
     # TODO(davidben): Add ALPN support to tlslite.
-    self.option_parser.add_option('--enable-npn', dest='enable_npn',
-                                  default=False, const=True,
-                                  action='store_const',
-                                  help='Enable server support for the NPN '
-                                  'extension. The server will advertise '
-                                  'support for exactly one protocol, http/1.1')
+    self.option_parser.add_option('--npn-protocols', action='append',
+                                  help='Specify the list of protocols sent in'
+                                  'an NPN response.  The server will not'
+                                  'support NPN if the list is empty.')
     self.option_parser.add_option('--file-root-url', default='/files/',
                                   help='Specify a root URL for files served.')
     # TODO(ricea): Generalize this to support basic auth for HTTP too.
@@ -2303,6 +2308,11 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   default=False, action='store_true',
                                   help='If set, the FTP server will not create '
                                   'an anonymous user.')
+    self.option_parser.add_option('--disable-channel-id', action='store_true')
+    self.option_parser.add_option('--disable-extended-master-secret',
+                                  action='store_true')
+    self.option_parser.add_option('--token-binding-params', action='append',
+                                  default=[], type='int')
 
 
 if __name__ == '__main__':

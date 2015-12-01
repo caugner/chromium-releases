@@ -23,6 +23,7 @@ import android.util.Log;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
@@ -93,13 +94,13 @@ public class NotificationUIManager {
     }
 
     /**
-     * Returns the current instance of the NotificationUIManager. Should only be used by tests.
+     * Returns the current instance of the NotificationUIManager.
      *
      * @return The instance of the NotificationUIManager, if any.
      */
     @Nullable
     @VisibleForTesting
-    public static NotificationUIManager getInstanceForTests() {
+    static NotificationUIManager getInstanceForTests() {
         return sInstance;
     }
 
@@ -129,11 +130,11 @@ public class NotificationUIManager {
 
         Resources resources = mAppContext.getResources();
 
-        mDensity = resources.getDisplayMetrics().density;
         mLargeIconWidthPx =
-            resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_width);
+                resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_width);
         mLargeIconHeightPx =
-            resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_height);
+                resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_height);
+        mDensity = resources.getDisplayMetrics().density;
     }
 
     /**
@@ -169,7 +170,10 @@ public class NotificationUIManager {
         String tag = intent.getStringExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG);
 
         if (NotificationConstants.ACTION_CLICK_NOTIFICATION.equals(intent.getAction())) {
-            return sInstance.onNotificationClicked(persistentNotificationId, origin, tag);
+            int actionIndex = intent.getIntExtra(
+                    NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX, -1);
+            return sInstance.onNotificationClicked(persistentNotificationId, origin, tag,
+                                                   actionIndex);
         } else if (NotificationConstants.ACTION_CLOSE_NOTIFICATION.equals(intent.getAction())) {
             return sInstance.onNotificationClosed(persistentNotificationId, origin, tag);
         }
@@ -205,6 +209,9 @@ public class NotificationUIManager {
 
         Bundle fragmentArguments;
         if (launchSingleWebsitePreferences) {
+            // Record that the user has clicked on the [Site Settings] button.
+            RecordUserAction.record("Notifications.ShowSiteSettings");
+
             // All preferences for a specific origin.
             fragmentArguments = SingleWebsitePreferences.createFragmentArgsForSite(origin);
         } else {
@@ -226,17 +233,32 @@ public class NotificationUIManager {
     }
 
     /**
+     * Returns a bogus Uri used to make each intent unique according to Intent#filterEquals.
+     * Without this, the pending intents derived from the intent may be reused, because extras are
+     * not taken into account for the filterEquals comparison.
+     *
+     * @param persistentNotificationId The persistent id of the notification.
+     * @param origin The origin to whom the notification belongs.
+     * @param actionIndex The zero-based index of the action button, or -1 if not applicable.
+     */
+    private Uri makeIntentData(long persistentNotificationId, String origin, int actionIndex) {
+        return Uri.parse(origin).buildUpon().fragment(
+                persistentNotificationId + "," + actionIndex).build();
+    }
+
+    /**
      * Returns the PendingIntent for completing |action| on the notification identified by the data
-     * in the other parameters. |intentData| is used to ensure uniqueness of the PendingIntent.
+     * in the other parameters.
      *
      * @param action The action this pending intent will represent.
      * @param persistentNotificationId The persistent id of the notification.
      * @param origin The origin to whom the notification belongs.
      * @param tag The tag of the notification. May be NULL.
-     * @param intentData URI used to ensure uniqueness of the created PendingIntent.
+     * @param actionIndex The zero-based index of the action button, or -1 if not applicable.
      */
-    private PendingIntent getPendingIntent(String action, long persistentNotificationId,
-                                           String origin, @Nullable String tag, Uri intentData) {
+    private PendingIntent makePendingIntent(String action, long persistentNotificationId,
+                                            String origin, @Nullable String tag, int actionIndex) {
+        Uri intentData = makeIntentData(persistentNotificationId, origin, actionIndex);
         Intent intent = new Intent(action, intentData);
         intent.setClass(mAppContext, NotificationService.Receiver.class);
 
@@ -244,6 +266,7 @@ public class NotificationUIManager {
                 persistentNotificationId);
         intent.putExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_ORIGIN, origin);
         intent.putExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_TAG, tag);
+        intent.putExtra(NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX, actionIndex);
 
         return PendingIntent.getBroadcast(mAppContext, PENDING_INTENT_REQUEST_CODE, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT);
@@ -375,23 +398,20 @@ public class NotificationUIManager {
      *             the platforms, whereas a default icon will be generated for invalid Bitmaps.
      * @param vibrationPattern Vibration pattern following the Web Vibration syntax.
      * @param silent Whether the default sound, vibration and lights should be suppressed.
+     * @param actionTitles Titles of actions to display alongside the notification.
      * @see https://developer.android.com/reference/android/app/Notification.html
      */
     @CalledByNative
     private void displayNotification(long persistentNotificationId, String origin, String tag,
-            String title, String body, Bitmap icon, int[] vibrationPattern, boolean silent) {
+            String title, String body, Bitmap icon, int[] vibrationPattern, boolean silent,
+            String[] actionTitles) {
         Resources res = mAppContext.getResources();
-
-        // The data used to make each intent unique according to the rules of Intent#filterEquals.
-        // Without this, the pending intents derived from them may be reused, because extras are
-        // not taken into account for the filterEquals comparison.
-        Uri intentData = Uri.parse(origin).buildUpon().fragment(
-                String.valueOf(persistentNotificationId)).build();
 
         // Set up a pending intent for going to the settings screen for |origin|.
         Intent settingsIntent = PreferencesLauncher.createIntentForSettingsPage(
                 mAppContext, SingleWebsitePreferences.class.getName());
-        settingsIntent.setData(intentData);
+        settingsIntent.setData(makeIntentData(persistentNotificationId, origin,
+                                              -1 /* actionIndex */));
         settingsIntent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS,
                 SingleWebsitePreferences.createFragmentArgsForSite(origin));
 
@@ -404,17 +424,26 @@ public class NotificationUIManager {
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
                 .setLargeIcon(ensureNormalizedIcon(icon, origin))
                 .setSmallIcon(R.drawable.ic_chrome)
-                .setContentIntent(getPendingIntent(
+                .setContentIntent(makePendingIntent(
                         NotificationConstants.ACTION_CLICK_NOTIFICATION,
-                        persistentNotificationId, origin, tag, intentData))
-                .setDeleteIntent(getPendingIntent(
+                        persistentNotificationId, origin, tag, -1 /* actionIndex */))
+                .setDeleteIntent(makePendingIntent(
                         NotificationConstants.ACTION_CLOSE_NOTIFICATION,
-                        persistentNotificationId, origin, tag, intentData))
-                .addAction(R.drawable.settings_cog,
-                           res.getString(R.string.page_info_site_settings_button),
-                           pendingSettingsIntent)
+                        persistentNotificationId, origin, tag, -1 /* actionIndex */))
                 .setTicker(createTickerText(title, body))
                 .setSubText(origin);
+
+        for (int actionIndex = 0; actionIndex < actionTitles.length; actionIndex++) {
+            notificationBuilder.addAction(
+                    0 /* actionIcon */, actionTitles[actionIndex],
+                    makePendingIntent(NotificationConstants.ACTION_CLICK_NOTIFICATION,
+                                      persistentNotificationId, origin, tag, actionIndex));
+        }
+        // Site settings button is always the last action button.
+        notificationBuilder.addAction(R.drawable.settings_cog,
+                                      // TODO(johnme): Use shorter string to avoid truncation.
+                                      res.getString(R.string.page_info_site_settings_button),
+                                      pendingSettingsIntent);
 
         notificationBuilder.setDefaults(makeDefaults(vibrationPattern.length, silent));
         if (vibrationPattern.length > 0) {
@@ -474,7 +503,8 @@ public class NotificationUIManager {
         }
 
         if (icon.getWidth() > mLargeIconWidthPx || icon.getHeight() > mLargeIconHeightPx) {
-            return icon.createScaledBitmap(icon, mLargeIconWidthPx, mLargeIconHeightPx, false);
+            return icon.createScaledBitmap(icon, mLargeIconWidthPx, mLargeIconHeightPx,
+                                           false /* not filtered */);
         }
 
         return icon;
@@ -513,10 +543,10 @@ public class NotificationUIManager {
      * @return Whether the manager could handle the click event.
      */
     private boolean onNotificationClicked(long persistentNotificationId, String origin,
-                                          String tag) {
+                                          String tag, int actionIndex) {
         mLastNotificationClickMs = System.currentTimeMillis();
         return nativeOnNotificationClicked(mNativeNotificationManager, persistentNotificationId,
-                                           origin, tag);
+                                           origin, tag, actionIndex);
     }
 
     /**
@@ -538,7 +568,7 @@ public class NotificationUIManager {
     private static native void nativeInitializeNotificationUIManager();
 
     private native boolean nativeOnNotificationClicked(long nativeNotificationUIManagerAndroid,
-            long persistentNotificationId, String origin, String tag);
+            long persistentNotificationId, String origin, String tag, int actionIndex);
     private native boolean nativeOnNotificationClosed(long nativeNotificationUIManagerAndroid,
             long persistentNotificationId, String origin, String tag);
 }

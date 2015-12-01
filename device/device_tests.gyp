@@ -62,6 +62,8 @@
         'bluetooth/test/test_bluetooth_adapter_observer.h',
         'devices_app/usb/device_impl_unittest.cc',
         'devices_app/usb/device_manager_impl_unittest.cc',
+        'devices_app/usb/fake_permission_provider.cc',
+        'devices_app/usb/fake_permission_provider.h',
         'hid/hid_connection_unittest.cc',
         'hid/hid_device_filter_unittest.cc',
         'hid/hid_report_descriptor_unittest.cc',
@@ -76,6 +78,8 @@
         "serial/serial_io_handler_posix_unittest.cc",
         'serial/serial_service_unittest.cc',
         'test/run_all_unittests.cc',
+        'test/test_device_client.cc',
+        'test/test_device_client.h',
         'test/usb_test_gadget_impl.cc',
         'usb/usb_context_unittest.cc',
         'usb/usb_descriptors_unittest.cc',
@@ -100,6 +104,7 @@
         ['OS=="android"', {
           'dependencies!': [
             '../tools/usb_gadget/usb_gadget.gyp:usb_gadget',
+            'battery/battery.gyp:device_battery',
             'devices_app/devices_app.gyp:devices_app_lib',
             'usb/usb.gyp:device_usb',
             'usb/usb.gyp:device_usb_mocks',
@@ -116,6 +121,9 @@
             ['exclude', '(^|/)hid'],
             ['exclude', '(^|/)serial'],
             ['exclude', '(^|/)usb'],
+          ],
+          'sources!': [
+            'battery/battery_status_service_unittest.cc',
           ],
         }],
         ['OS=="mac"', {
@@ -207,6 +215,25 @@
           },
           'includes': [ '../build/java.gypi' ],
         },
+      ],
+      'conditions': [
+        ['test_isolation_mode != "noop"', {
+          'targets': [
+            {
+              'target_name': 'device_unittests_apk_run',
+              'type': 'none',
+              'dependencies': [
+                'device_unittests_apk',
+              ],
+              'includes': [
+                '../build/isolate.gypi',
+              ],
+              'sources': [
+                'device_unittests_apk.isolate',
+              ],
+            },
+          ],
+        }],
       ],
     }],
     ['test_isolation_mode != "noop"', {

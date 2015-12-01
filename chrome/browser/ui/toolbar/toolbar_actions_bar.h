@@ -29,9 +29,14 @@ class ToolbarActionViewController;
 
 // A platform-independent version of the container for toolbar actions,
 // including extension actions and component actions.
-// This class manages the order of the actions, the actions' state, and owns the
-// action controllers, in addition to interfacing with the toolbar actions
-// model. Further, it manages dimensions for the bar, excluding animations.
+//
+// This is a per-window instance, unlike the ToolbarActionsModel, which is
+// per-profile. In most cases, ordering and visible count will be identical
+// between the base model and the window; however, there are exceptions in the
+// case of very small windows (which may be too narrow to display all the
+// icons), or windows in which an action is "popped out", resulting in a
+// re-ordering.
+//
 // This can come in two flavors, main and "overflow". The main bar is visible
 // next to the omnibox, and the overflow bar is visible inside the chrome
 // (fka wrench) menu. The main bar can have only a single row of icons with
@@ -101,8 +106,26 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   // Returns the number of icons that can fit within the given width.
   size_t WidthToIconCount(int width) const;
 
-  // Returns the number of icons that should be displayed.
+  // Returns the number of icons that should be displayed if space allows.
   size_t GetIconCount() const;
+
+  // Returns the starting index (inclusive) for displayable icons.
+  size_t GetStartIndexInBounds() const;
+
+  // Returns the ending index (exclusive) for displayable icons.
+  size_t GetEndIndexInBounds() const;
+
+  // Returns true if an overflow container is necessary to display any other
+  // icons for this particular window. This is different than
+  // ToolbarActionsModel::all_icons_visible() because the ToolbarActionsBar
+  // is limited to a single window, whereas the model is the underlying model
+  // of *all* windows, independent of size. As such, the model is identical
+  // between a very wide window and a very narrow window, and the user's stored
+  // preference may be to have all icons visible. But if the very narrow window
+  // doesn't have the width to display all those actions, some will need to be
+  // implicitly pushed to the overflow, even though the user's global preference
+  // has not changed.
+  bool NeedsOverflow() const;
 
   // Returns the frame (bounds) that the specified index should have, taking
   // into account if this is the main or overflow bar. If this is the overflow
@@ -123,12 +146,26 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   // Updates all the toolbar actions.
   void Update();
 
+  // Shows the popup for the action with |id|, returning true if a popup is
+  // shown. If |grant_active_tab| is true, then active tab permissions should
+  // be given to the action (only do this if this is through a user action).
+  bool ShowToolbarActionPopup(const std::string& id, bool grant_active_tab);
+
   // Sets the width for the overflow menu rows.
   void SetOverflowRowWidth(int width);
 
   // Notifies the ToolbarActionsBar that a user completed a resize gesture, and
   // the new width is |width|.
   void OnResizeComplete(int width);
+
+  // Notifies the ToolbarActionsBar that the user has started a drag-and-drop
+  // sequence.
+  void OnDragStarted();
+
+  // Notifies the ToolbarActionsBar that a drag-and-drop sequence ended. This
+  // may not coincide with OnDragDrop(), since the view may be dropped somewhere
+  // else.
+  void OnDragEnded();
 
   // Notifies the ToolbarActionsBar that a user completed a drag and drop event,
   // and dragged the view from |dragged_index| to |dropped_index|.
@@ -192,11 +229,6 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
 
   ToolbarActionsBarDelegate* delegate_for_test() { return delegate_; }
 
-  static void set_send_overflowed_action_changes_for_testing(
-      bool send_overflowed_action_changes) {
-    send_overflowed_action_changes_ = send_overflowed_action_changes;
-  }
-
   // During testing we can disable animations by setting this flag to true,
   // so that the bar resizes instantly, instead of having to poll it while it
   // animates to open/closed status.
@@ -210,12 +242,9 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   void OnToolbarActionRemoved(const std::string& action_id) override;
   void OnToolbarActionMoved(const std::string& action_id, int index) override;
   void OnToolbarActionUpdated(const std::string& action_id) override;
-  bool ShowToolbarActionPopup(const std::string& action_id,
-                              bool grant_active_tab) override;
   void OnToolbarVisibleCountChanged() override;
   void OnToolbarHighlightModeChanged(bool is_highlighting) override;
   void OnToolbarModelInitialized() override;
-  Browser* GetBrowser() override;
 
   // Resizes the delegate (if necessary) to the preferred size using the given
   // |tween_type| and optionally suppressing the chevron.
@@ -231,9 +260,6 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   // "pop out" any overflowed actions that want to run (depending on the
   // value of |pop_out_actions_to_run|.
   void ReorderActions();
-
-  // Sets |overflowed_action_wants_to_run_| to the proper value.
-  void SetOverflowedActionWantsToRun();
 
   // Shows an extension message bubble, if any should be shown.
   void MaybeShowExtensionBubble(
@@ -278,17 +304,12 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   // See also TabOrderHelper in the .cc file.
   static bool pop_out_actions_to_run_;
 
-  // If set to false, notifications for OnOverflowedActionWantsToRunChanged()
-  // will not be sent. Used because in unit tests there is no wrench menu to
-  // alter.
-  static bool send_overflowed_action_changes_;
-
-  // True if an action in the overflow menu wants to run.
-  bool overflowed_action_wants_to_run_;
-
   // True if we have checked to see if there is an extension bubble that should
   // be displayed, and, if there is, shown that bubble.
   bool checked_extension_bubble_;
+
+  // Whether or not the user is in the middle of a drag-and-drop operation.
+  bool is_drag_in_progress_;
 
   // The action, if any, which is currently "popped out" of the overflow in
   // order to show a popup.

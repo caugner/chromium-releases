@@ -9,13 +9,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/settings/appearance_handler.h"
 #include "chrome/browser/ui/webui/settings/downloads_handler.h"
+#include "chrome/browser/ui/webui/settings/languages_handler.h"
 #include "chrome/browser/ui/webui/settings/md_settings_localized_strings_provider.h"
+#include "chrome/browser/ui/webui/settings/settings_clear_browsing_data_handler.h"
+#include "chrome/browser/ui/webui/settings/settings_startup_pages_handler.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/browser_resources.h"
 #include "grit/settings_resources.h"
 #include "grit/settings_resources_map.h"
 
@@ -30,7 +31,10 @@ SettingsPageUIHandler::~SettingsPageUIHandler() {
 MdSettingsUI::MdSettingsUI(content::WebUI* web_ui)
     : content::WebUIController(web_ui) {
   AddSettingsPageUIHandler(new AppearanceHandler(web_ui));
+  AddSettingsPageUIHandler(new ClearBrowsingDataHandler(web_ui));
   AddSettingsPageUIHandler(new DownloadsHandler());
+  AddSettingsPageUIHandler(new LanguagesHandler(web_ui));
+  AddSettingsPageUIHandler(new StartupPagesHandler(web_ui));
 
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(chrome::kChromeUIMdSettingsHost);
@@ -41,9 +45,8 @@ MdSettingsUI::MdSettingsUI(content::WebUI* web_ui)
                                  kSettingsResources[i].value);
   }
 
-  AddLocalizedStrings(html_source);
-  html_source->AddResourcePath("md_settings.css", IDR_MD_SETTINGS_UI_CSS);
-  html_source->SetDefaultResource(IDR_MD_SETTINGS_UI_HTML);
+  AddLocalizedStrings(html_source, Profile::FromWebUI(web_ui));
+  html_source->SetDefaultResource(IDR_SETTINGS_SETTINGS_HTML);
 
   content::WebUIDataSource::Add(web_ui->GetWebContents()->GetBrowserContext(),
                                 html_source);

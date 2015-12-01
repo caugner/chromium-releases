@@ -27,50 +27,31 @@ void GetStartupPerformanceTimesCallbackImpl(
     tracing::StartupPerformanceTimesPtr times) {
   base::StatisticsRecorder::Initialize();
 
-  const base::Time shell_process_creation_time =
-      base::Time::FromInternalValue(times->shell_process_creation_time);
-  startup_metric_utils::RecordMainEntryPointTime(shell_process_creation_time);
+  startup_metric_utils::RecordStartupProcessCreationTime(
+      base::Time::FromInternalValue(times->shell_process_creation_time));
 
-  const base::Time browser_message_loop_start_time =
-      base::Time::FromInternalValue(times->browser_message_loop_start_time);
+  // TODO(msw): Record the MojoMain() entry point time of mojo:browser instead?
+  startup_metric_utils::RecordMainEntryPointTime(
+      base::Time::FromInternalValue(times->shell_main_entry_point_time));
+
   // TODO(msw): Determine if this is the first run.
   startup_metric_utils::RecordBrowserMainMessageLoopStart(
-      browser_message_loop_start_time, false);
+      base::Time::FromInternalValue(times->browser_message_loop_start_time),
+      false);
 
-  // TODO(msw): Consolidate with chrome's Browser::OnWindowDidShow()...
-  const base::Time browser_window_display_time =
-      base::Time::FromInternalValue(times->browser_window_display_time);
-  base::TimeDelta browser_window_display_delta =
-      browser_window_display_time - shell_process_creation_time;
-  UMA_HISTOGRAM_LONG_TIMES("Startup.BrowserWindowDisplay",
-                           browser_window_display_delta);
+  startup_metric_utils::RecordBrowserWindowDisplay(
+      base::Time::FromInternalValue(times->browser_window_display_time));
 
-  // TODO(msw): Consolidate with chrome's PreMainMessageLoopRunImpl()...
-  // TODO(msw): Need to measure the "browser_open_start" time for this delta...
-  const base::Time browser_open_tabs_time =
-      base::Time::FromInternalValue(times->browser_open_tabs_time);
-  base::TimeDelta browser_open_tabs_delta =
-      browser_open_tabs_time - shell_process_creation_time;
-  UMA_HISTOGRAM_LONG_TIMES_100("Startup.BrowserOpenTabs",
-                               browser_open_tabs_delta);
+  startup_metric_utils::RecordBrowserOpenTabsDelta(
+      base::TimeDelta::FromInternalValue(times->browser_open_tabs_time_delta));
 
-  // TODO(msw): Consolidate with chrome's first_web_contents_profiler.cc...
-  const base::Time first_web_contents_main_frame_load_time =
+  startup_metric_utils::RecordFirstWebContentsMainFrameLoad(
       base::Time::FromInternalValue(
-          times->first_web_contents_main_frame_load_time);
-  base::TimeDelta first_web_contents_main_frame_load_delta =
-      first_web_contents_main_frame_load_time - shell_process_creation_time;
-  UMA_HISTOGRAM_LONG_TIMES_100("Startup.FirstWebContents.MainFrameLoad",
-                               first_web_contents_main_frame_load_delta);
+          times->first_web_contents_main_frame_load_time));
 
-  // TODO(msw): Consolidate with chrome's first_web_contents_profiler.cc...
-  const base::Time first_visually_non_empty_layout_time =
+  startup_metric_utils::RecordFirstWebContentsNonEmptyPaint(
       base::Time::FromInternalValue(
-          times->first_visually_non_empty_layout_time);
-  base::TimeDelta first_web_contents_non_empty_paint_delta =
-      first_visually_non_empty_layout_time - shell_process_creation_time;
-  UMA_HISTOGRAM_LONG_TIMES_100("Startup.FirstWebContents.NonEmptyPaint",
-                               first_web_contents_non_empty_paint_delta);
+          times->first_visually_non_empty_layout_time));
 }
 
 }  // namespace
@@ -116,6 +97,23 @@ tracing::StartupPerformanceDataCollectorPtr StatsCollectionController::Install(
   global->Set(gin::StringToV8(isolate, "statsCollectionController"),
               controller.ToV8());
   return collector_for_caller.Pass();
+}
+
+// static
+tracing::StartupPerformanceDataCollectorPtr
+StatsCollectionController::ConnectToDataCollector(mojo::ApplicationImpl* app) {
+  // Only make startup tracing available when running in the context of a test.
+  if (!app ||
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          tracing::kEnableStatsCollectionBindings)) {
+    return nullptr;
+  }
+
+  mojo::URLRequestPtr request(mojo::URLRequest::New());
+  request->url = mojo::String::From("mojo:tracing");
+  tracing::StartupPerformanceDataCollectorPtr collector;
+  app->ConnectToService(request.Pass(), &collector);
+  return collector.Pass();
 }
 
 StatsCollectionController::StatsCollectionController(

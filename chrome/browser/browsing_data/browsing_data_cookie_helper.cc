@@ -4,9 +4,10 @@
 
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 
-#include "utility"
+#include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
@@ -23,8 +24,18 @@
 using content::BrowserThread;
 
 namespace {
+
 const char kGlobalCookieSetURL[] = "chrome://cookieset";
+
+void OnFetchComplete(const BrowsingDataCookieHelper::FetchCallback& callback,
+                     const net::CookieList& cookies) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(!callback.is_null());
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(callback, cookies));
 }
+
+}  // namespace
 
 BrowsingDataCookieHelper::BrowsingDataCookieHelper(
     net::URLRequestContextGetter* request_context_getter)
@@ -35,17 +46,13 @@ BrowsingDataCookieHelper::BrowsingDataCookieHelper(
 BrowsingDataCookieHelper::~BrowsingDataCookieHelper() {
 }
 
-void BrowsingDataCookieHelper::StartFetching(
-    const base::Callback<void(const net::CookieList& cookies)>& callback) {
+void BrowsingDataCookieHelper::StartFetching(const FetchCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(!is_fetching_);
   DCHECK(!callback.is_null());
-  DCHECK(completion_callback_.is_null());
-  is_fetching_ = true;
-  completion_callback_ = callback;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&BrowsingDataCookieHelper::FetchCookiesOnIOThread, this));
+      base::Bind(&BrowsingDataCookieHelper::FetchCookiesOnIOThread, this,
+                 callback));
 }
 
 void BrowsingDataCookieHelper::DeleteCookie(
@@ -57,33 +64,18 @@ void BrowsingDataCookieHelper::DeleteCookie(
                  this, cookie));
 }
 
-void BrowsingDataCookieHelper::FetchCookiesOnIOThread() {
+void BrowsingDataCookieHelper::FetchCookiesOnIOThread(
+    const FetchCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(!callback.is_null());
   scoped_refptr<net::CookieMonster> cookie_monster =
       request_context_getter_->GetURLRequestContext()->
       cookie_store()->GetCookieMonster();
   if (cookie_monster.get()) {
-    cookie_monster->GetAllCookiesAsync(
-        base::Bind(&BrowsingDataCookieHelper::OnFetchComplete, this));
+    cookie_monster->GetAllCookiesAsync(base::Bind(&OnFetchComplete, callback));
   } else {
-    OnFetchComplete(net::CookieList());
+    OnFetchComplete(callback, net::CookieList());
   }
-}
-
-void BrowsingDataCookieHelper::OnFetchComplete(const net::CookieList& cookies) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&BrowsingDataCookieHelper::NotifyInUIThread, this, cookies));
-}
-
-void BrowsingDataCookieHelper::NotifyInUIThread(
-    const net::CookieList& cookies) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(is_fetching_);
-  is_fetching_ = false;
-  completion_callback_.Run(cookies);
-  completion_callback_.Reset();
 }
 
 void BrowsingDataCookieHelper::DeleteCookieOnIOThread(

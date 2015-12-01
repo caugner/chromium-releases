@@ -172,6 +172,7 @@ DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
       window_parent_(NULL),
       custom_window_shape_(false),
       urgency_hint_set_(false),
+      activatable_(true),
       close_widget_factory_(this) {
 }
 
@@ -277,6 +278,7 @@ void DesktopWindowTreeHostX11::CleanUpWindowList(
 void DesktopWindowTreeHostX11::Init(aura::Window* content_window,
                                     const Widget::InitParams& params) {
   content_window_ = content_window;
+  activatable_ = (params.activatable == Widget::InitParams::ACTIVATABLE_YES);
 
   // TODO(erg): Check whether we *should* be building a WindowTreeHost here, or
   // whether we should be proxying requests to another DRWHL.
@@ -400,9 +402,6 @@ void DesktopWindowTreeHostX11::ShowWindowWithState(
     MapWindow(show_state);
 
   switch (show_state) {
-    case ui::SHOW_STATE_NORMAL:
-      Activate();
-      break;
     case ui::SHOW_STATE_MAXIMIZED:
       Maximize();
       break;
@@ -414,6 +413,14 @@ void DesktopWindowTreeHostX11::ShowWindowWithState(
       break;
     default:
       break;
+  }
+
+  // Makes the window activated by default if the state is not INACTIVE or
+  // MINIMIZED.
+  if (show_state != ui::SHOW_STATE_INACTIVE &&
+      show_state != ui::SHOW_STATE_MINIMIZED &&
+      activatable_) {
+    Activate();
   }
 
   native_widget_delegate_->AsWidget()->SetInitialFocus(show_state);
@@ -976,16 +983,17 @@ void DesktopWindowTreeHostX11::SetBounds(
   unsigned value_mask = 0;
 
   if (size_changed) {
+    // Update the minimum and maximum sizes in case they have changed.
+    UpdateMinAndMaxSize();
+
     if (bounds_in_pixels.width() < min_size_in_pixels_.width() ||
         bounds_in_pixels.height() < min_size_in_pixels_.height() ||
         (!max_size_in_pixels_.IsEmpty() &&
          (bounds_in_pixels.width() > max_size_in_pixels_.width() ||
           bounds_in_pixels.height() > max_size_in_pixels_.height()))) {
-      // Update the minimum and maximum sizes in case they have changed.
-      UpdateMinAndMaxSize();
-
       gfx::Size size_in_pixels = bounds_in_pixels.size();
-      size_in_pixels.SetToMin(max_size_in_pixels_);
+      if (!max_size_in_pixels_.IsEmpty())
+        size_in_pixels.SetToMin(max_size_in_pixels_);
       size_in_pixels.SetToMax(min_size_in_pixels_);
       bounds_in_pixels.set_size(size_in_pixels);
     }
@@ -1275,7 +1283,8 @@ void DesktopWindowTreeHostX11::InitX11Window(
   if (window_icon) {
     SetWindowIcons(gfx::ImageSkia(), *window_icon);
   }
-  CreateCompositor(GetAcceleratedWidget());
+  CreateCompositor();
+  OnAcceleratedWidgetAvailable();
 }
 
 gfx::Size DesktopWindowTreeHostX11::AdjustSize(
@@ -2026,14 +2035,14 @@ gfx::Rect DesktopWindowTreeHostX11::GetWorkAreaBoundsInPixels() const {
 
 gfx::Rect DesktopWindowTreeHostX11::ToDIPRect(
     const gfx::Rect& rect_in_pixels) const {
-  gfx::RectF rect_in_dip = rect_in_pixels;
+  gfx::RectF rect_in_dip = gfx::RectF(rect_in_pixels);
   GetRootTransform().TransformRectReverse(&rect_in_dip);
   return gfx::ToEnclosingRect(rect_in_dip);
 }
 
 gfx::Rect DesktopWindowTreeHostX11::ToPixelRect(
     const gfx::Rect& rect_in_dip) const {
-  gfx::RectF rect_in_pixels = rect_in_dip;
+  gfx::RectF rect_in_pixels = gfx::RectF(rect_in_dip);
   GetRootTransform().TransformRect(&rect_in_pixels);
   return gfx::ToEnclosingRect(rect_in_pixels);
 }

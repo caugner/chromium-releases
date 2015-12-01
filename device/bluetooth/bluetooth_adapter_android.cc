@@ -12,6 +12,7 @@
 #include "device/bluetooth/android/wrappers.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/bluetooth_device_android.h"
+#include "device/bluetooth/bluetooth_discovery_session_outcome.h"
 #include "jni/ChromeBluetoothAdapter_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -140,7 +141,7 @@ void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
     jobject advertised_uuids) {        // Java Type: List<ParcelUuid>
   BluetoothDevice*& device = devices_[ConvertJavaStringToUTF8(env, address)];
   if (!device) {
-    device = BluetoothDeviceAndroid::Create(bluetooth_device_wrapper);
+    device = BluetoothDeviceAndroid::Create(this, bluetooth_device_wrapper);
     static_cast<BluetoothDeviceAndroid*>(device)
         ->UpdateAdvertisedUUIDs(advertised_uuids);
     FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
@@ -165,35 +166,37 @@ BluetoothAdapterAndroid::~BluetoothAdapterAndroid() {
 void BluetoothAdapterAndroid::AddDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+    const DiscoverySessionErrorCallback& error_callback) {
   // TODO(scheib): Support filters crbug.com/490401
   if (Java_ChromeBluetoothAdapter_addDiscoverySession(AttachCurrentThread(),
                                                       j_adapter_.obj())) {
     callback.Run();
   } else {
-    error_callback.Run();
+    // TODO(scheib): Eventually wire the SCAN_FAILED result through to here.
+    error_callback.Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
   }
 }
 
 void BluetoothAdapterAndroid::RemoveDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+    const DiscoverySessionErrorCallback& error_callback) {
   if (Java_ChromeBluetoothAdapter_removeDiscoverySession(AttachCurrentThread(),
                                                          j_adapter_.obj())) {
     callback.Run();
   } else {
-    error_callback.Run();
+    // TODO(scheib): Eventually wire the SCAN_FAILED result through to here.
+    error_callback.Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
   }
 }
 
 void BluetoothAdapterAndroid::SetDiscoveryFilter(
     scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+    const DiscoverySessionErrorCallback& error_callback) {
   // TODO(scheib): Support filters crbug.com/490401
   NOTIMPLEMENTED();
-  error_callback.Run();
+  error_callback.Run(UMABluetoothDiscoverySessionOutcome::NOT_IMPLEMENTED);
 }
 
 void BluetoothAdapterAndroid::RemovePairingDelegateInternal(

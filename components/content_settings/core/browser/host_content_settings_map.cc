@@ -15,10 +15,12 @@
 #include "base/time/clock.h"
 #include "components/content_settings/core/browser/content_settings_default_provider.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/content_settings_info.h"
 #include "components/content_settings/core/browser/content_settings_observable_provider.h"
 #include "components/content_settings/core/browser/content_settings_policy_provider.h"
 #include "components/content_settings/core/browser/content_settings_pref_provider.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -33,16 +35,6 @@ namespace {
 typedef std::vector<content_settings::Rule> Rules;
 
 typedef std::pair<std::string, std::string> StringPair;
-
-// These constants are copied from extensions/common/extension_constants.h and
-// content/public/common/url_constants.h to avoid complicated dependencies.
-// TODO(vabr): Get these constants through the ContentSettingsClient.
-const char kChromeDevToolsScheme[] = "chrome-devtools";
-const char kChromeUIScheme[] = "chrome";
-
-#if defined(ENABLE_EXTENSIONS)
-const char kExtensionScheme[] = "chrome-extension";
-#endif
 
 struct ProviderNamesSourceMapEntry {
   const char* provider_name;
@@ -67,6 +59,14 @@ static_assert(
 // Resource identifiers are supported (but not required) for plugins.
 bool SupportsResourceIdentifier(ContentSettingsType content_type) {
   return content_type == CONTENT_SETTINGS_TYPE_PLUGINS;
+}
+
+bool SchemeCanBeWhitelisted(const std::string& scheme) {
+  return scheme == content_settings::kChromeDevToolsScheme ||
+#if defined(ENABLE_EXTENSIONS)
+         scheme == content_settings::kExtensionScheme ||
+#endif
+         scheme == content_settings::kChromeUIScheme;
 }
 
 }  // namespace
@@ -98,6 +98,9 @@ HostContentSettingsMap::HostContentSettingsMap(PrefService* prefs,
 // static
 void HostContentSettingsMap::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
+  // Ensure the content settings are all registered.
+  content_settings::ContentSettingsRegistry::GetInstance();
+
   registry->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex, 0);
 
   // Register the prefs for the content settings providers.
@@ -170,7 +173,8 @@ ContentSetting HostContentSettingsMap::GetContentSetting(
     const GURL& secondary_url,
     ContentSettingsType content_type,
     const std::string& resource_identifier) const {
-  DCHECK(!ContentTypeHasCompoundValue(content_type));
+  DCHECK(content_settings::ContentSettingsRegistry::GetInstance()->Get(
+      content_type));
   scoped_ptr<base::Value> value = GetWebsiteSetting(
       primary_url, secondary_url, content_type, resource_identifier, NULL);
   return content_settings::ValueToContentSetting(value.get());
@@ -230,7 +234,7 @@ void HostContentSettingsMap::SetWebsiteSetting(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     base::Value* value) {
-  DCHECK(IsValueAllowedForType(prefs_, value, content_type));
+  DCHECK(!value || IsValueAllowedForType(value, content_type));
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   UsedContentSettingsProviders();
@@ -283,7 +287,8 @@ void HostContentSettingsMap::SetContentSetting(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     ContentSetting setting) {
-  DCHECK(!ContentTypeHasCompoundValue(content_type));
+  DCHECK(content_settings::ContentSettingsRegistry::GetInstance()->Get(
+      content_type));
 
   if (setting == CONTENT_SETTING_ALLOW &&
       (content_type == CONTENT_SETTINGS_TYPE_GEOLOCATION ||
@@ -391,7 +396,8 @@ void HostContentSettingsMap::AddExceptionForURL(
   // TODO(markusheintz): Until the UI supports pattern pairs, both urls must
   // match.
   DCHECK(primary_url == secondary_url);
-  DCHECK(!ContentTypeHasCompoundValue(content_type));
+  DCHECK(content_settings::ContentSettingsRegistry::GetInstance()->Get(
+      content_type));
 
   // Make sure there is no entry that would override the pattern we are about
   // to insert for exactly this URL.
@@ -419,12 +425,6 @@ void HostContentSettingsMap::ClearSettingsForOneType(
   FlushLossyWebsiteSettings();
 }
 
-bool HostContentSettingsMap::IsValueAllowedForType(
-    PrefService* prefs, const base::Value* value, ContentSettingsType type) {
-  return ContentTypeHasCompoundValue(type) || IsSettingAllowedForType(
-      prefs, content_settings::ValueToContentSetting(value), type);
-}
-
 // static
 bool HostContentSettingsMap::IsDefaultSettingAllowedForType(
     PrefService* prefs,
@@ -449,6 +449,22 @@ bool HostContentSettingsMap::IsDefaultSettingAllowedForType(
 }
 
 // static
+bool HostContentSettingsMap::IsValueAllowedForType(const base::Value* value,
+                                                   ContentSettingsType type) {
+  if (content_settings::ContentSettingsRegistry::GetInstance()->Get(type)) {
+    ContentSetting setting = content_settings::ValueToContentSetting(value);
+    if (setting == CONTENT_SETTING_DEFAULT)
+      return false;
+    return HostContentSettingsMap::IsSettingAllowedForType(nullptr, setting,
+                                                           type);
+  }
+
+  // TODO(raymes): We should permit different types of base::Value for
+  // website settings.
+  return value->GetType() == base::Value::TYPE_DICTIONARY;
+}
+
+// static
 bool HostContentSettingsMap::IsSettingAllowedForType(
     PrefService* prefs,
     ContentSetting setting,
@@ -469,9 +485,11 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     return false;
   }
 
-  // Compound types cannot be mapped to the type |ContentSetting|.
-  if (ContentTypeHasCompoundValue(content_type))
+  // Non content settings cannot be mapped to the type |ContentSetting|.
+  if (!content_settings::ContentSettingsRegistry::GetInstance()->Get(
+          content_type)) {
     return false;
+  }
 
   // DEFAULT, ALLOW and BLOCK are always allowed.
   if (setting == CONTENT_SETTING_DEFAULT ||
@@ -503,20 +521,6 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     default:
       return false;
   }
-}
-
-// static
-bool HostContentSettingsMap::ContentTypeHasCompoundValue(
-    ContentSettingsType type) {
-  // Values for content type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
-  // CONTENT_SETTINGS_TYPE_APP_BANNER, CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT and
-  // CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS are of type dictionary/map.
-  // Compound types like dictionaries can't be mapped to the type
-  // |ContentSetting|.
-  return (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
-          type == CONTENT_SETTINGS_TYPE_APP_BANNER ||
-          type == CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT ||
-          type == CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS);
 }
 
 void HostContentSettingsMap::OnContentSettingChanged(
@@ -563,10 +567,11 @@ void HostContentSettingsMap::AddSettingsForOneType(
     const content_settings::Rule& rule = rule_iterator->Next();
     ContentSetting setting_value = CONTENT_SETTING_DEFAULT;
     // TODO(bauerb): Return rules as a list of values, not content settings.
-    // Handle the case using compound values for its exceptions and arbitrary
-    // values for its default setting. Here we assume all the exceptions
-    // are granted as |CONTENT_SETTING_ALLOW|.
-    if (ContentTypeHasCompoundValue(content_type) &&
+    // Handle the case using base::Values for its exceptions and default
+    // setting. Here we assume all the exceptions are granted as
+    // |CONTENT_SETTING_ALLOW|.
+    if (!content_settings::ContentSettingsRegistry::GetInstance()->Get(
+            content_type) &&
         rule.value.get() &&
         rule.primary_pattern != ContentSettingsPattern::Wildcard()) {
       setting_value = CONTENT_SETTING_ALLOW;
@@ -589,44 +594,6 @@ void HostContentSettingsMap::UsedContentSettingsProviders() const {
 #endif
 }
 
-bool HostContentSettingsMap::ShouldAllowAllContent(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type) {
-  if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
-      content_type == CONTENT_SETTINGS_TYPE_GEOLOCATION ||
-      content_type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
-    return false;
-  }
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  if (content_type == CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER) {
-    return false;
-  }
-#endif
-  if (secondary_url.SchemeIs(kChromeUIScheme) &&
-      content_type == CONTENT_SETTINGS_TYPE_COOKIES &&
-      primary_url.SchemeIsCryptographic()) {
-    return true;
-  }
-#if defined(ENABLE_EXTENSIONS)
-  if (primary_url.SchemeIs(kExtensionScheme)) {
-    switch (content_type) {
-      case CONTENT_SETTINGS_TYPE_PLUGINS:
-      case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-      case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-        return false;
-      case CONTENT_SETTINGS_TYPE_COOKIES:
-        return secondary_url.SchemeIs(kExtensionScheme);
-      default:
-        return true;
-    }
-  }
-#endif
-  return primary_url.SchemeIs(kChromeDevToolsScheme) ||
-         primary_url.SchemeIs(kChromeUIScheme);
-}
-
 scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSetting(
     const GURL& primary_url,
     const GURL& secondary_url,
@@ -636,15 +603,27 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSetting(
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
 
-  // Check if the scheme of the requesting url is whitelisted.
-  if (ShouldAllowAllContent(primary_url, secondary_url, content_type)) {
-    if (info) {
-      info->source = content_settings::SETTING_SOURCE_WHITELIST;
-      info->primary_pattern = ContentSettingsPattern::Wildcard();
-      info->secondary_pattern = ContentSettingsPattern::Wildcard();
+  // Check if the requested setting is whitelisted.
+  // TODO(raymes): Move this into GetContentSetting. This has nothing to do with
+  // website settings
+  const content_settings::ContentSettingsInfo* content_settings_info =
+      content_settings::ContentSettingsRegistry::GetInstance()->Get(
+          content_type);
+  if (content_settings_info) {
+    for (const std::string& scheme :
+         content_settings_info->whitelisted_schemes()) {
+      DCHECK(SchemeCanBeWhitelisted(scheme));
+
+      if (primary_url.SchemeIs(scheme.c_str())) {
+        if (info) {
+          info->source = content_settings::SETTING_SOURCE_WHITELIST;
+          info->primary_pattern = ContentSettingsPattern::Wildcard();
+          info->secondary_pattern = ContentSettingsPattern::Wildcard();
+        }
+        return scoped_ptr<base::Value>(
+            new base::FundamentalValue(CONTENT_SETTING_ALLOW));
+      }
     }
-    return scoped_ptr<base::Value>(
-        new base::FundamentalValue(CONTENT_SETTING_ALLOW));
   }
 
   return GetWebsiteSettingInternal(primary_url,

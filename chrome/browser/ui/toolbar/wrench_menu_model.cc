@@ -36,7 +36,7 @@
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
-#include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -293,6 +293,13 @@ void ToolsMenuModel::Build(Browser* browser) {
     int string_id = IDS_ADD_TO_APPLICATIONS;
 #elif defined(OS_WIN)
     int string_id = IDS_ADD_TO_TASKBAR;
+    if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
+      // This is currently non-functional on Win10 and above so change it to be
+      // a link to the generic "create shortcuts" dialog which will allow for
+      // a desktop shortcut.
+      AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
+      string_id = 0;  // Avoids AddItemWithStringId below.
+    }
 #else
     int string_id = IDS_ADD_TO_DESKTOP;
 #endif
@@ -300,7 +307,8 @@ void ToolsMenuModel::Build(Browser* browser) {
     if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
       string_id = IDS_ADD_TO_SHELF;
 #endif
-    AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
+    if (string_id)
+      AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
   } else if (show_create_shortcuts) {
     AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
   }
@@ -366,8 +374,7 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
 #elif defined(OS_WIN)
          command_id == IDC_PIN_TO_START_SCREEN ||
 #endif
-         command_id == IDC_UPGRADE_DIALOG ||
-         (!switches::IsNewAvatarMenu() && command_id == IDC_SHOW_SIGNIN);
+         command_id == IDC_UPGRADE_DIALOG;
 }
 
 base::string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
@@ -397,10 +404,6 @@ base::string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
 #endif
     case IDC_UPGRADE_DIALOG:
       return GetUpgradeDialogMenuItemName();
-    case IDC_SHOW_SIGNIN:
-      DCHECK(!switches::IsNewAvatarMenu());
-      return signin_ui_util::GetSigninMenuLabel(
-          browser_->profile()->GetOriginalProfile());
     default:
       NOTREACHED();
       return base::string16();
@@ -419,19 +422,6 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
       }
       return false;
     }
-    case IDC_SHOW_SIGNIN: {
-      DCHECK(!switches::IsNewAvatarMenu());
-      GlobalError* error = signin_ui_util::GetSignedInServiceError(
-          browser_->profile()->GetOriginalProfile());
-      if (error) {
-        int icon_id = error->MenuItemIconResourceID();
-        if (icon_id) {
-          *icon = rb.GetNativeImageNamed(icon_id);
-          return true;
-        }
-      }
-      return false;
-    }
     default:
       break;
   }
@@ -444,16 +434,6 @@ void WrenchMenuModel::ExecuteCommand(int command_id, int event_flags) {
   if (error) {
     error->ExecuteMenuItem(browser_);
     return;
-  }
-
-  if (!switches::IsNewAvatarMenu() && command_id == IDC_SHOW_SIGNIN) {
-    // If a custom error message is being shown, handle it.
-    GlobalError* error = signin_ui_util::GetSignedInServiceError(
-        browser_->profile()->GetOriginalProfile());
-    if (error) {
-      error->ExecuteMenuItem(browser_);
-      return;
-    }
   }
 
   LogMenuMetrics(command_id);
@@ -906,7 +886,7 @@ void WrenchMenuModel::Build() {
     recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
                                                                  browser_,
                                                                  NULL));
-    AddSubMenuWithStringId(IDC_RECENT_TABS_MENU, IDS_HISTORY_RECENT_TABS_MENU,
+    AddSubMenuWithStringId(IDC_RECENT_TABS_MENU, IDS_HISTORY_MENU,
                            recent_tabs_sub_menu_model_.get());
   }
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
@@ -918,6 +898,8 @@ void WrenchMenuModel::Build() {
 
   CreateZoomMenu();
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
+  if (switches::MediaRouterEnabled() && !browser()->profile()->IsOffTheRecord())
+    AddItemWithStringId(IDC_ROUTE_MEDIA, IDS_MEDIA_ROUTER_MENU_ITEM_TITLE);
   AddItemWithStringId(IDC_FIND, IDS_FIND);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableDomDistiller))
@@ -930,21 +912,6 @@ void WrenchMenuModel::Build() {
   CreateCutCopyPasteMenu();
 
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
-#if !defined(OS_CHROMEOS)
-  if (!switches::IsNewAvatarMenu()) {
-    // No "Sign in to Chromium..." menu item on ChromeOS.
-    SigninManager* signin = SigninManagerFactory::GetForProfile(
-        browser_->profile()->GetOriginalProfile());
-    if (signin && signin->IsSigninAllowed() &&
-        signin_ui_util::GetSignedInServiceErrors(
-            browser_->profile()->GetOriginalProfile()).empty()) {
-      AddItem(IDC_SHOW_SYNC_SETUP,
-              l10n_util::GetStringFUTF16(
-                  IDS_SYNC_MENU_PRE_SYNCED_LABEL,
-                  l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
-    }
-  }
-#endif
 // The help submenu is only displayed on official Chrome builds. As the
 // 'About' item has been moved to this submenu, it's reinstated here for
 // Chromium builds.
@@ -989,12 +956,6 @@ bool WrenchMenuModel::AddGlobalErrorMenuItems() {
   // window. This means that if a new error is added after the menu is built
   // it won't show in the existing wrench menu. To fix this we need to some
   // how update the menu if new errors are added.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  // GetSignedInServiceErrors() can modify the global error list, so call it
-  // before iterating through that list below.
-  std::vector<GlobalError*> signin_errors;
-  signin_errors = signin_ui_util::GetSignedInServiceErrors(
-      browser_->profile()->GetOriginalProfile());
   const GlobalErrorService::GlobalErrorList& errors =
       GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
   bool menu_items_added = false;
@@ -1003,26 +964,9 @@ bool WrenchMenuModel::AddGlobalErrorMenuItems() {
     GlobalError* error = *it;
     DCHECK(error);
     if (error->HasMenuItem()) {
-#if !defined(OS_CHROMEOS)
-      // Don't add a signin error if it's already being displayed elsewhere.
-      if (std::find(signin_errors.begin(), signin_errors.end(), error) !=
-          signin_errors.end()) {
-        MenuModel* model = this;
-        int index = 0;
-        if (MenuModel::GetModelAndIndexForCommandId(
-                IDC_SHOW_SIGNIN, &model, &index)) {
-          continue;
-        }
-      }
-#endif
-
       AddItem(error->MenuItemCommandID(), error->MenuItemLabel());
-      int icon_id = error->MenuItemIconResourceID();
-      if (icon_id) {
-        const gfx::Image& image = rb.GetNativeImageNamed(icon_id);
-        SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
-                image);
-      }
+      SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
+              error->MenuItemIcon());
       menu_items_added = true;
     }
   }
@@ -1032,7 +976,9 @@ bool WrenchMenuModel::AddGlobalErrorMenuItems() {
 void WrenchMenuModel::CreateActionToolbarOverflowMenu() {
   // We only add the extensions overflow container if there are any icons that
   // aren't shown in the main container.
-  if (!ToolbarActionsModel::Get(browser_->profile())->all_icons_visible()) {
+  // browser_->window() can return null during startup.
+  if (browser_->window() &&
+      browser_->window()->GetToolbarActionsBar()->NeedsOverflow()) {
 #if defined(OS_MACOSX)
     // There's a bug in AppKit menus, where if a menu item with a custom view
     // (like the extensions overflow menu) is the first menu item, it is not

@@ -10,6 +10,9 @@
 #endif
 
 // Common media types.
+#if defined(USE_PROPRIETARY_CODECS) && !defined(OS_ANDROID)
+const char kAAC_ADTS_AudioOnly[] = "audio/aac";
+#endif
 const char kWebMAudioOnly[] = "audio/webm; codecs=\"vorbis\"";
 #if !defined(OS_ANDROID)
 const char kWebMOpusAudioOnly[] = "audio/webm; codecs=\"opus\"";
@@ -51,12 +54,10 @@ class MediaSourceTest : public content::MediaBrowserTest {
                      false);
   }
 
-#if defined(OS_ANDROID)
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
   }
-#endif
 };
 
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_VideoAudio_WebM) {
@@ -66,6 +67,15 @@ IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_VideoAudio_WebM) {
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_VideoOnly_WebM) {
   TestSimplePlayback("bear-320x240-video-only.webm", kWebMVideoOnly, kEnded);
 }
+
+// TODO(servolk): Android is supposed to support AAC in ADTS container with
+// 'audio/aac' mime type, but for some reason playback fails on trybots due to
+// some issue in OMX AAC decoder (crbug.com/528361)
+#if defined(USE_PROPRIETARY_CODECS) && !defined(OS_ANDROID)
+IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_AudioOnly_AAC_ADTS) {
+  TestSimplePlayback("sfx.adts", kAAC_ADTS_AudioOnly, kEnded);
+}
+#endif
 
 // Opus is not supported in Android as of now.
 #if !defined(OS_ANDROID)

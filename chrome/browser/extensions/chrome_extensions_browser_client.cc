@@ -27,7 +27,6 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
-#include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_management/web_contents_tags.h"
@@ -36,6 +35,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
+#include "components/net_log/chrome_net_log.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api/generated_api_registration.h"
@@ -50,6 +50,7 @@
 #include "chrome/browser/extensions/updater/chromeos_extension_cache_delegate.h"
 #include "chrome/browser/extensions/updater/extension_cache_impl.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/user_manager/user_manager.h"
 #else
 #include "extensions/browser/updater/null_extension_cache.h"
 #endif
@@ -223,6 +224,14 @@ void ChromeExtensionsBrowserClient::PermitExternalProtocolHandler() {
 
 bool ChromeExtensionsBrowserClient::IsRunningInForcedAppMode() {
   return chrome::IsRunningInForcedAppMode();
+}
+
+bool ChromeExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
+#if defined(OS_CHROMEOS)
+  return user_manager::UserManager::Get()->IsLoggedInAsPublicAccount();
+#else
+  return false;
+#endif
 }
 
 ApiActivityMonitor* ChromeExtensionsBrowserClient::GetApiActivityMonitor(

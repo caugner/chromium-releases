@@ -36,6 +36,9 @@ public class ContextualSearchSceneLayer extends SceneLayer {
      * @param resourceManager
      */
     public void update(@Nullable ContentViewCore contentViewCore, ResourceManager resourceManager) {
+        int searchContextViewId = mSearchPanel.getSearchContextViewId();
+        int searchTermViewId = mSearchPanel.getSearchTermViewId();
+
         boolean searchPromoVisible = mSearchPanel.getPromoVisible();
         float searchPromoHeightPx = mSearchPanel.getPromoHeightPx();
         float searchPromoOpacity = mSearchPanel.getPromoOpacity();
@@ -47,7 +50,8 @@ public class ContextualSearchSceneLayer extends SceneLayer {
 
         float searchBarMarginSide = mSearchPanel.getSearchBarMarginSide();
         float searchBarHeight = mSearchPanel.getSearchBarHeight();
-        float searchBarTextOpacity = mSearchPanel.getSearchBarTextOpacity();
+        float searchContextOpacity = mSearchPanel.getSearchBarContextOpacity();
+        float searchTermOpacity = mSearchPanel.getSearchBarTermOpacity();
 
         boolean searchBarBorderVisible = mSearchPanel.isSearchBarBorderVisible();
         float searchBarBorderY = mSearchPanel.getSearchBarBorderY();
@@ -59,7 +63,6 @@ public class ContextualSearchSceneLayer extends SceneLayer {
         float arrowIconOpacity = mSearchPanel.getArrowIconOpacity();
         float arrowIconRotation = mSearchPanel.getArrowIconRotation();
 
-        boolean closeIconVisible = mSearchPanel.isCloseIconVisible();
         float closeIconOpacity = mSearchPanel.getCloseIconOpacity();
 
         boolean isProgressBarVisible = mSearchPanel.isProgressBarVisible();
@@ -70,7 +73,8 @@ public class ContextualSearchSceneLayer extends SceneLayer {
 
         nativeUpdateContextualSearchLayer(mNativePtr,
                 R.drawable.contextual_search_bar_background,
-                R.id.contextual_search_view,
+                searchContextViewId,
+                searchTermViewId,
                 R.drawable.contextual_search_bar_shadow,
                 R.drawable.google_icon,
                 R.drawable.breadcrumb_arrow,
@@ -88,7 +92,8 @@ public class ContextualSearchSceneLayer extends SceneLayer {
                 searchPanelHeight * mDpToPx,
                 searchBarMarginSide * mDpToPx,
                 searchBarHeight * mDpToPx,
-                searchBarTextOpacity,
+                searchContextOpacity,
+                searchTermOpacity,
                 searchBarBorderVisible,
                 searchBarBorderY * mDpToPx,
                 searchBarBorderHeight * mDpToPx,
@@ -96,7 +101,6 @@ public class ContextualSearchSceneLayer extends SceneLayer {
                 searchBarShadowOpacity,
                 arrowIconOpacity,
                 arrowIconRotation,
-                closeIconVisible,
                 closeIconOpacity,
                 isProgressBarVisible,
                 progressBarY * mDpToPx,
@@ -127,7 +131,8 @@ public class ContextualSearchSceneLayer extends SceneLayer {
     private native void nativeUpdateContextualSearchLayer(
             long nativeContextualSearchSceneLayer,
             int searchBarBackgroundResourceId,
-            int searchBarTextResourceId,
+            int searchContextResourceId,
+            int searchTermResourceId,
             int searchBarShadowResourceId,
             int searchProviderIconResourceId,
             int arrowUpResourceId,
@@ -145,7 +150,8 @@ public class ContextualSearchSceneLayer extends SceneLayer {
             float searchPanelHeight,
             float searchBarMarginSide,
             float searchBarHeight,
-            float searchBarTextOpacity,
+            float searchContextOpacity,
+            float searchTermOpacity,
             boolean searchBarBorderVisible,
             float searchBarBorderY,
             float searchBarBorderHeight,
@@ -153,7 +159,6 @@ public class ContextualSearchSceneLayer extends SceneLayer {
             float searchBarShadowOpacity,
             float arrowIconOpacity,
             float arrowIconRotation,
-            boolean closeIconVisible,
             float closeIconOpacity,
             boolean isProgressBarVisible,
             float progressBarY,

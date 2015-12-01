@@ -13,7 +13,6 @@
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/mount_test_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/drive/file_system_interface.h"
 #include "components/drive/service/fake_drive_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -574,8 +574,8 @@ void FileManagerBrowserTestBase::RunTestMessageLoop() {
     }
 
     // Parse the message value as JSON.
-    const scoped_ptr<const base::Value> value(
-        base::JSONReader::DeprecatedRead(entry.message));
+    const scoped_ptr<const base::Value> value =
+        base::JSONReader::Read(entry.message);
 
     // If the message is not the expected format, just ignore it.
     const base::DictionaryValue* message_dictionary = NULL;
@@ -685,7 +685,9 @@ void FileManagerBrowserTestBase::OnMessage(const std::string& name,
   }
 
   if (name == "useCellularNetwork") {
-    net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+    net::NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChangeForTests(
+        net::NetworkChangeNotifier::GetMaxBandwidthForConnectionSubtype(
+            net::NetworkChangeNotifier::SUBTYPE_HSPA),
         net::NetworkChangeNotifier::CONNECTION_3G);
     return;
   }

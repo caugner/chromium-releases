@@ -134,6 +134,7 @@ source_set("common") {
     deps = [
       "//base:prefs",
       "//base/third_party/dynamic_annotations",
+      "//components/data_use_measurement/core",
       "//components/json_schema",
       "//components/policy",
       "//google_apis",
@@ -260,8 +261,10 @@ source_set("unit_tests") {
   }
 
   deps = [
-    "//components/policy:policy_component_test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]
+  if (enable_configuration_policy) {
+    deps += [ "//components/policy:policy_component_test_support" ]
+  }
 }

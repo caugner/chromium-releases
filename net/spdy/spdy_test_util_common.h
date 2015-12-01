@@ -44,7 +44,7 @@ class SpdyStreamRequest;
 
 // Default upload data used by both, mock objects and framer when creating
 // data frames.
-const char kDefaultURL[] = "http://www.example.org";
+const char kDefaultURL[] = "http://www.example.org/";
 const char kUploadData[] = "hello!";
 const int kUploadDataSize = arraysize(kUploadData)-1;
 
@@ -189,7 +189,8 @@ struct SpdySessionDependencies {
   explicit SpdySessionDependencies(NextProto protocol);
 
   // Custom proxy service dependency.
-  SpdySessionDependencies(NextProto protocol, ProxyService* proxy_service);
+  SpdySessionDependencies(NextProto protocol,
+                          scoped_ptr<ProxyService> proxy_service);
 
   ~SpdySessionDependencies();
 
@@ -562,9 +563,7 @@ class SpdyTestUtil {
 
   NextProto protocol() const { return protocol_; }
   SpdyMajorVersion spdy_version() const { return spdy_version_; }
-  bool include_version_header() const {
-    return protocol_ < kProtoHTTP2MinimumVersion;
-  }
+  bool include_version_header() const { return protocol_ < kProtoHTTP2; }
   scoped_ptr<SpdyFramer> CreateFramer(bool compressed) const;
 
   const GURL& default_url() const { return default_url_; }

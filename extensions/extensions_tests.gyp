@@ -22,6 +22,8 @@
         '../components/components.gyp:user_prefs',
         '../content/content_shell_and_tests.gyp:test_support_content',
         '../device/bluetooth/bluetooth.gyp:device_bluetooth_mocks',
+        '../device/core/core.gyp:device_core',
+        '../device/hid/hid.gyp:device_hid',
         '../device/serial/serial.gyp:device_serial',
         '../device/serial/serial.gyp:device_serial_test_util',
         '../mojo/mojo_base.gyp:mojo_application_bindings',
@@ -60,6 +62,9 @@
         ['chromeos==1', {
           'dependencies': [
             '<(DEPTH)/chromeos/chromeos.gyp:chromeos_test_support',
+          ],
+          'sources': [
+            'browser/api/webcam_private/visca_webcam_unittest.cc',
           ],
         }],
       ],

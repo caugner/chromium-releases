@@ -104,6 +104,9 @@ class MediaRouter : public KeyedService {
       scoped_ptr<std::vector<uint8>> data,
       const SendRouteMessageCallback& callback) = 0;
 
+  // Adds a new |issue|.
+  virtual void AddIssue(const Issue& issue) = 0;
+
   // Clears the issue with the id |issue_id|.
   virtual void ClearIssue(const Issue::Id& issue_id) = 0;
 
@@ -130,7 +133,9 @@ class MediaRouter : public KeyedService {
   // in undefined behavior.
   // If the MRPM Host is not available, the registration request will fail
   // immediately.
-  virtual void RegisterMediaSinksObserver(MediaSinksObserver* observer) = 0;
+  // The implementation can reject the request to observe in which case it will
+  // notify the caller by returning |false|.
+  virtual bool RegisterMediaSinksObserver(MediaSinksObserver* observer) = 0;
 
   // Removes a previously added MediaSinksObserver. |observer| will stop
   // receiving further updates.

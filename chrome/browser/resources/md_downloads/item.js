@@ -8,203 +8,268 @@ cr.define('downloads', function() {
 
     /**
      * @param {!downloads.ThrottledIconLoader} iconLoader
-     * @param {!downloads.ActionService} actionService
      */
-    factoryImpl: function(iconLoader, actionService) {
+    factoryImpl: function(iconLoader) {
       /** @private {!downloads.ThrottledIconLoader} */
       this.iconLoader_ = iconLoader;
-
-      /** @private {!downloads.ActionService} */
-      this.actionService_ = actionService;
     },
 
     properties: {
-      hideDate: {
-        reflectToAttribute: true,
-        type: Boolean,
-        value: false,
+      data: {
+        type: Object,
       },
 
-      scrollbarWidth: {
-        type: Number,
-        value: 0,
-        observer: 'onScrollbarWidthChange_',
+      hideDate: {
+        type: Boolean,
+        value: true,
+      },
+
+      readyPromise: {
+        type: Object,
+        value: function() {
+          return new Promise(function(resolve, reject) {
+            this.resolveReadyPromise_ = resolve;
+          }.bind(this));
+        },
+      },
+
+      completelyOnDisk_: {
+        computed: 'computeCompletelyOnDisk_(' +
+            'data.state, data.file_externally_removed)',
+        type: Boolean,
+        value: true,
+      },
+
+      controlledBy_: {
+        computed: 'computeControlledBy_(data.by_ext_id, data.by_ext_name)',
+        type: String,
+        value: '',
+      },
+
+      i18n_: {
+        readOnly: true,
+        type: Object,
+        value: function() {
+          return {
+            cancel: loadTimeData.getString('controlCancel'),
+            discard: loadTimeData.getString('dangerDiscard'),
+            pause: loadTimeData.getString('controlPause'),
+            remove: loadTimeData.getString('controlRemoveFromList'),
+            resume: loadTimeData.getString('controlResume'),
+            restore: loadTimeData.getString('dangerRestore'),
+            retry: loadTimeData.getString('controlRetry'),
+            save: loadTimeData.getString('dangerSave'),
+          };
+        },
+      },
+
+      isActive_: {
+        computed: 'computeIsActive_(' +
+            'data.state, data.file_externally_removed)',
+        type: Boolean,
+        value: true,
       },
 
       isDangerous_: {
+        computed: 'computeIsDangerous_(data.state)',
         type: Boolean,
         value: false,
       },
 
-      isIncognito_: {
+      isInProgress_: {
+        computed: 'computeIsInProgress_(data.state)',
         type: Boolean,
         value: false,
       },
 
-      /** Only set when |isDangerous| is true. */
-      isMalware_: Boolean,
+      showCancel_: {
+        computed: 'computeShowCancel_(data.state)',
+        type: Boolean,
+        value: false,
+      },
+
+      showProgress_: {
+        computed: 'computeShowProgress_(showCancel_, data.percent)',
+        type: Boolean,
+        value: false,
+      },
+
+      isMalware_: {
+        computed: 'computeIsMalware_(isDangerous_, data.danger_type)',
+        type: Boolean,
+        value: false,
+      },
+    },
+
+    observers: [
+      // TODO(dbeam): this gets called way more when I observe data.by_ext_id
+      // and data.by_ext_name directly. Why?
+      'observeControlledBy_(controlledBy_)',
+    ],
+
+    ready: function() {
+      this.content = this.$.content;
+      this.resolveReadyPromise_();
     },
 
     /** @param {!downloads.Data} data */
     update: function(data) {
-      assert(!this.id_ || data.id == this.id_);
-      this.id_ = data.id;  // This is the only thing saved from |data|.
+      this.data = data;
 
-      this.isIncognito_ = data.otr;
-
-      // Danger-independent UI and controls.
-      var since = data.since_string;
-      this.ensureTextIs_(this.$.since, since);
-      this.ensureTextIs_(this.$.date, since ? '' : data.date_string);
-
-      /** @const */ var isActive =
-          data.state != downloads.States.CANCELLED &&
-          data.state != downloads.States.INTERRUPTED &&
-          !data.file_externally_removed;
-      this.$.content.classList.toggle('is-active', isActive);
-      this.$.content.elevation = isActive ? 1 : 0;
-
-      this.ensureTextIs_(this.$.name, data.file_name);
-      this.ensureTextIs_(this.$.url, data.url);
-      this.$.url.href = data.url;
-
-      // Danger-dependent UI and controls.
-      var dangerText = this.getDangerText_(data);
-      this.isDangerous_ = !!dangerText;
-      this.$.content.classList.toggle('dangerous', this.isDangerous_);
-
-      var description = dangerText || this.getStatusText_(data);
-
-      // Status goes in the "tag" (next to the file name) if there's no file.
-      this.ensureTextIs_(this.$.description, isActive ? description : '');
-      this.ensureTextIs_(this.$.tag, isActive ? '' : description);
-
-      /** @const */ var showProgress =
-          isFinite(data.percent) && !this.isDangerous_;
-      this.$.content.classList.toggle('show-progress', showProgress);
-
-      if (showProgress) {
-        this.$.progress.indeterminate = data.percent < 0;
-        this.$.progress.value = data.percent;
-      }
-
-      var hideRemove;
-
-      if (this.isDangerous_) {
-        this.isMalware_ =
-            data.danger_type == downloads.DangerType.DANGEROUS_CONTENT ||
-            data.danger_type == downloads.DangerType.DANGEROUS_HOST ||
-            data.danger_type == downloads.DangerType.DANGEROUS_URL ||
-            data.danger_type == downloads.DangerType.POTENTIALLY_UNWANTED;
-        hideRemove = true;
-      } else {
-        /** @const */ var completelyOnDisk =
-            data.state == downloads.States.COMPLETE &&
-            !data.file_externally_removed;
-
-        this.$['file-link'].href = data.url;
-        this.ensureTextIs_(this.$['file-link'], data.file_name);
-
-        this.$['file-link'].hidden = !completelyOnDisk;
-        this.$.name.hidden = completelyOnDisk;
-        this.$.show.hidden = !completelyOnDisk;
-
-        this.$.retry.hidden = !data.retry;
-
-        /** @const */ var isInProgress =
-            data.state == downloads.States.IN_PROGRESS;
-        this.$.pause.hidden = !isInProgress;
-
-        this.$.resume.hidden = !data.resume;
-
-        /** @const */ var isPaused = data.state == downloads.States.PAUSED;
-        /** @const */ var showCancel = isPaused || isInProgress;
-        this.$.cancel.hidden = !showCancel;
-
-        hideRemove = showCancel ||
-            !loadTimeData.getBoolean('allowDeletingHistory');
-
-        /** @const */ var controlledByExtension = data.by_ext_id &&
-                                                  data.by_ext_name;
-        this.$['controlled-by'].hidden = !controlledByExtension;
-        if (controlledByExtension) {
-          var link = this.$['controlled-by'].querySelector('a');
-          link.href = 'chrome://extensions#' + data.by_ext_id;
-          link.setAttribute('focus-type', 'controlled-by');
-          link.textContent = data.by_ext_name;
-        }
-
+      if (!this.isDangerous_) {
         var icon = 'chrome://fileicon/' + encodeURIComponent(data.file_path);
         this.iconLoader_.loadScaledIcon(this.$['file-icon'], icon);
       }
-
-      this.$.remove.style.visibility = hideRemove ? 'hidden' : '';
     },
 
-    /**
-     * Overwrite |el|'s textContent if it differs from |text|. This is done
-     * generally so quickly updating text can be copied via text selection.
-     * @param {!Element} el
-     * @param {string} text
-     * @private
-     */
-    ensureTextIs_: function(el, text) {
-      if (el.textContent != text)
-        el.textContent = text;
+    /** @private */
+    computeClass_: function() {
+      var classes = [];
+
+      if (this.isActive_)
+        classes.push('is-active');
+
+      if (this.isDangerous_)
+        classes.push('dangerous');
+
+      if (this.showProgress_)
+        classes.push('show-progress');
+
+      return classes.join(' ');
     },
 
-    /**
-     * @param {!downloads.Data} data
-     * @return {string} Text describing the danger of a download. Empty if not
-     *     dangerous.
-     */
-    getDangerText_: function(data) {
-      switch (data.danger_type) {
-        case downloads.DangerType.DANGEROUS_FILE:
-          return loadTimeData.getStringF('dangerFileDesc', data.file_name);
-        case downloads.DangerType.DANGEROUS_URL:
-          return loadTimeData.getString('dangerUrlDesc');
-        case downloads.DangerType.DANGEROUS_CONTENT:  // Fall through.
-        case downloads.DangerType.DANGEROUS_HOST:
-          return loadTimeData.getStringF('dangerContentDesc', data.file_name);
-        case downloads.DangerType.UNCOMMON_CONTENT:
-          return loadTimeData.getStringF('dangerUncommonDesc', data.file_name);
-        case downloads.DangerType.POTENTIALLY_UNWANTED:
-          return loadTimeData.getStringF('dangerSettingsDesc', data.file_name);
-        default:
-          return '';
-      }
+    /** @private */
+    computeCompletelyOnDisk_: function() {
+      return this.data.state == downloads.States.COMPLETE &&
+             !this.data.file_externally_removed;
     },
 
-    /**
-     * @param {!downloads.Data} data
-     * @return {string} User-visible status update text.
-     * @private
-     */
-    getStatusText_: function(data) {
+    /** @private */
+    computeControlledBy_: function() {
+      if (!this.data.by_ext_id || !this.data.by_ext_name)
+        return '';
+
+      var url = 'chrome://extensions#' + this.data.by_ext_id;
+      var name = this.data.by_ext_name;
+      return loadTimeData.getStringF('controlledByUrl', url, name);
+    },
+
+    /** @private */
+    computeDate_: function() {
+      if (this.hideDate)
+        return '';
+      return assert(this.data.since_string || this.data.date_string);
+    },
+
+    /** @private */
+    computeDescription_: function() {
+      var data = this.data;
+
       switch (data.state) {
+        case downloads.States.DANGEROUS:
+          var fileName = data.file_name;
+          switch (data.danger_type) {
+            case downloads.DangerType.DANGEROUS_FILE:
+              return loadTimeData.getStringF('dangerFileDesc', fileName);
+            case downloads.DangerType.DANGEROUS_URL:
+              return loadTimeData.getString('dangerUrlDesc');
+            case downloads.DangerType.DANGEROUS_CONTENT:  // Fall through.
+            case downloads.DangerType.DANGEROUS_HOST:
+              return loadTimeData.getStringF('dangerContentDesc', fileName);
+            case downloads.DangerType.UNCOMMON_CONTENT:
+              return loadTimeData.getStringF('dangerUncommonDesc', fileName);
+            case downloads.DangerType.POTENTIALLY_UNWANTED:
+              return loadTimeData.getStringF('dangerSettingsDesc', fileName);
+          }
+          break;
+
         case downloads.States.IN_PROGRESS:
         case downloads.States.PAUSED:  // Fallthrough.
-          assert(typeof data.progress_status_text == 'string');
           return data.progress_status_text;
-        case downloads.States.CANCELLED:
-          return loadTimeData.getString('statusCancelled');
-        case downloads.States.DANGEROUS:
-          break;  // Intentionally hit assertNotReached(); at bottom.
-        case downloads.States.INTERRUPTED:
-          assert(typeof data.last_reason_text == 'string');
-          return data.last_reason_text;
-        case downloads.States.COMPLETE:
-          return data.file_externally_removed ?
-              loadTimeData.getString('statusRemoved') : '';
       }
-      assertNotReached();
+
       return '';
     },
 
     /** @private */
+    computeIsActive_: function() {
+      return this.data.state != downloads.States.CANCELLED &&
+             this.data.state != downloads.States.INTERRUPTED &&
+             !this.data.file_externally_removed;
+    },
+
+    /** @private */
+    computeIsDangerous_: function() {
+      return this.data.state == downloads.States.DANGEROUS;
+    },
+
+    /** @private */
+    computeIsInProgress_: function() {
+      return this.data.state == downloads.States.IN_PROGRESS;
+    },
+
+    /** @private */
+    computeIsMalware_: function() {
+      return this.isDangerous_ &&
+          (this.data.danger_type == downloads.DangerType.DANGEROUS_CONTENT ||
+           this.data.danger_type == downloads.DangerType.DANGEROUS_HOST ||
+           this.data.danger_type == downloads.DangerType.DANGEROUS_URL ||
+           this.data.danger_type == downloads.DangerType.POTENTIALLY_UNWANTED);
+    },
+
+    /** @private */
+    computeRemoveStyle_: function() {
+      var canDelete = loadTimeData.getBoolean('allowDeletingHistory');
+      var hideRemove = this.isDangerous_ || this.showCancel_ || !canDelete;
+      return hideRemove ? 'visibility: hidden' : '';
+    },
+
+    /** @private */
+    computeShowCancel_: function() {
+      return this.data.state == downloads.States.IN_PROGRESS ||
+             this.data.state == downloads.States.PAUSED;
+    },
+
+    /** @private */
+    computeShowProgress_: function() {
+      return this.showCancel_ && this.data.percent >= -1;
+    },
+
+    /** @private */
+    computeTag_: function() {
+      switch (this.data.state) {
+        case downloads.States.CANCELLED:
+          return loadTimeData.getString('statusCancelled');
+
+        case downloads.States.INTERRUPTED:
+          return this.data.last_reason_text;
+
+        case downloads.States.COMPLETE:
+          return this.data.file_externally_removed ?
+              loadTimeData.getString('statusRemoved') : '';
+      }
+
+      return '';
+    },
+
+    /** @private */
+    isIndeterminate_: function() {
+      return this.data.percent == -1;
+    },
+
+    /** @private */
+    observeControlledBy_: function() {
+      this.$['controlled-by'].innerHTML = this.controlledBy_;
+    },
+
+    /** @private */
     onCancelClick_: function() {
-      this.actionService_.cancel(this.id_);
+      downloads.ActionService.getInstance().cancel(this.data.id);
+    },
+
+    /** @private */
+    onDiscardDangerous_: function() {
+      downloads.ActionService.getInstance().discardDangerous(this.data.id);
     },
 
     /**
@@ -213,7 +278,7 @@ cr.define('downloads', function() {
      */
     onDragStart_: function(e) {
       e.preventDefault();
-      this.actionService_.drag(this.id_);
+      downloads.ActionService.getInstance().drag(this.data.id);
     },
 
     /**
@@ -222,57 +287,37 @@ cr.define('downloads', function() {
      */
     onFileLinkClick_: function(e) {
       e.preventDefault();
-      this.actionService_.openFile(this.id_);
+      downloads.ActionService.getInstance().openFile(this.data.id);
     },
 
     /** @private */
     onPauseClick_: function() {
-      this.actionService_.pause(this.id_);
+      downloads.ActionService.getInstance().pause(this.data.id);
     },
 
     /** @private */
     onRemoveClick_: function() {
-      assert(!this.$.remove.disabled);
-      this.actionService_.remove(this.id_);
-    },
-
-    /** @private */
-    onSaveDangerous_: function() {
-      this.actionService_.saveDangerous(this.id_);
-    },
-
-    /** @private */
-    onDiscardDangerous_: function() {
-      this.actionService_.discardDangerous(this.id_);
+      downloads.ActionService.getInstance().remove(this.data.id);
     },
 
     /** @private */
     onResumeClick_: function() {
-      this.actionService_.resume(this.id_);
+      downloads.ActionService.getInstance().resume(this.data.id);
     },
 
     /** @private */
     onRetryClick_: function() {
-      this.actionService_.download(this.$['file-link'].href);
+      downloads.ActionService.getInstance().download(this.data.url);
     },
 
     /** @private */
-    onScrollbarWidthChange_: function() {
-      if (!this.$)
-        return;
-
-      var endCap = this.$['end-cap'];
-      endCap.style.flexBasis = '';
-
-      if (this.scrollbarWidth) {
-        var basis = parseInt(getComputedStyle(endCap).flexBasis, 10);
-        endCap.style.flexBasis = basis - this.scrollbarWidth + 'px';
-      }
+    onSaveDangerous_: function() {
+      downloads.ActionService.getInstance().saveDangerous(this.data.id);
     },
 
     /** @private */
     onShowClick_: function() {
-      this.actionService_.show(this.id_);
+      downloads.ActionService.getInstance().show(this.data.id);
     },
   });
 

@@ -55,10 +55,10 @@ base::LazyInstance<EventFilter> g_event_filter = LAZY_INSTANCE_INITIALIZER;
 std::string GetKeyForScriptContext(ScriptContext* script_context) {
   const std::string& extension_id = script_context->GetExtensionID();
   CHECK(crx_file::id_util::IdIsValid(extension_id) ||
-        script_context->GetURL().is_valid());
+        script_context->url().is_valid());
   return crx_file::id_util::IdIsValid(extension_id)
              ? extension_id
-             : script_context->GetURL().spec();
+             : script_context->url().spec();
 }
 
 // Increments the number of event-listeners for the given |event_name| and
@@ -103,6 +103,15 @@ EventFilteringInfo ParseFromObject(v8::Local<v8::Object> object,
     v8::Local<v8::Value> window_types_value(object->Get(window_types));
     info.SetWindowType(*v8::String::Utf8Value(window_types_value));
   }
+
+  v8::Local<v8::String> window_exposed(
+      v8::String::NewFromUtf8(isolate, "windowExposedByDefault"));
+  if (object->Has(window_exposed)) {
+    v8::Local<v8::Value> window_exposed_value(object->Get(window_exposed));
+    info.SetWindowExposedByDefault(
+        window_exposed_value.As<v8::Boolean>()->Value());
+  }
+
   return info;
 }
 
@@ -190,7 +199,7 @@ void EventBindings::AttachEvent(const std::string& event_name) {
   const std::string& extension_id = context()->GetExtensionID();
   if (IncrementEventListenerCount(context(), event_name) == 1) {
     content::RenderThread::Get()->Send(new ExtensionHostMsg_AddListener(
-        extension_id, context()->GetURL(), event_name));
+        extension_id, context()->url(), event_name));
   }
 
   // This is called the first time the page has added a listener. Since
@@ -218,7 +227,7 @@ void EventBindings::DetachEvent(const std::string& event_name, bool is_manual) {
 
   if (DecrementEventListenerCount(context(), event_name) == 0) {
     content::RenderThread::Get()->Send(new ExtensionHostMsg_RemoveListener(
-        extension_id, context()->GetURL(), event_name));
+        extension_id, context()->url(), event_name));
   }
 
   // DetachEvent is called when the last listener for the context is
@@ -256,7 +265,7 @@ void EventBindings::AttachFilteredEvent(
       args.GetReturnValue().Set(static_cast<int32_t>(-1));
       return;
     }
-    filter.reset(static_cast<base::DictionaryValue*>(filter_value.release()));
+    filter = base::DictionaryValue::From(filter_value.Pass());
   }
 
   // Hold onto a weak reference to |filter| so that it can be used after passing

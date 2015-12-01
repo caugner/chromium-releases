@@ -4,9 +4,7 @@
 {
   'variables': {
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
-    'about_credits_file': '<(SHARED_INTERMEDIATE_DIR)/about_credits.html',
     'additional_modules_list_file': '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/internal/additional_modules_list.txt',
-    'omnibox_mojom_file': '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/ui/webui/omnibox/omnibox.mojom.js',
   },
   'targets': [
     {
@@ -56,14 +54,6 @@
             'grit_grd_file': 'browser/resources/signin_internals_resources.grd',
             },
           'includes': ['../build/grit_action.gypi' ],
-        },
-        {
-          # GN version: //chrome/browser/resources:sync_internals_resources
-          'action_name': 'generate_sync_internals_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/sync_internals_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
         },
         {
           # GN version: //chrome/browser/resources:translate_internals_resources
@@ -189,7 +179,6 @@
       'target_name': 'chrome_resources',
       'type': 'none',
       'dependencies': [
-        'about_credits',
         'chrome_internal_resources_gen',
         'chrome_web_ui_mojo_bindings.gyp:web_ui_mojo_bindings',
       ],
@@ -200,9 +189,8 @@
           'variables': {
             'grit_grd_file': 'browser/browser_resources.grd',
             'grit_additional_defines': [
-              '-E', 'about_credits_file=<(about_credits_file)',
               '-E', 'additional_modules_list_file=<(additional_modules_list_file)',
-              '-E', 'omnibox_mojom_file=<(omnibox_mojom_file)',
+              '-E', 'root_gen_dir=<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
           'includes': [ '../build/grit_action.gypi' ],
@@ -279,6 +267,14 @@
           'action_name': 'generate_google_chrome_strings',
           'variables': {
             'grit_grd_file': 'app/google_chrome_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          # GN version: //chrome/app:settings_strings
+          'action_name': 'generate_settings_strings',
+          'variables': {
+            'grit_grd_file': 'app/settings_strings.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -454,7 +450,7 @@
           ],
         }, {  # else
           'dependencies': [  # Update duplicate logic in repack_locales.py
-            '<(DEPTH)/ios/chrome/ios_chrome_resources.gyp:ios_strings_resources_gen',
+            '<(DEPTH)/ios/chrome/ios_chrome_resources.gyp:ios_strings_gen',
           ],
           'actions': [
             {
@@ -637,36 +633,6 @@
             'pak_output': '<(PRODUCT_DIR)/browser_tests.pak',
           },
           'includes': [ '../build/repack_action.gypi' ],
-        },
-      ],
-    },
-    {
-      # GN version: //chrome/browser:about_credits
-      'target_name': 'about_credits',
-      'type': 'none',
-      'actions': [
-        {
-          'variables': {
-            'generator_path': '../tools/licenses.py',
-          },
-          'action_name': 'generate_about_credits',
-          'inputs': [
-            # TODO(phajdan.jr): make licenses.py print license input files so
-            # about:credits gets rebuilt when one changes.
-            '<(generator_path)',
-            'browser/resources/about_credits.tmpl',
-            'browser/resources/about_credits_entry.tmpl',
-          ],
-          'outputs': [
-            '<(about_credits_file)',
-          ],
-          'hard_dependency': 1,
-          'action': ['python',
-                     '<(generator_path)',
-                     'credits',
-                     '<(about_credits_file)',
-          ],
-          'message': 'Generating about:credits',
         },
       ],
     },

@@ -100,7 +100,7 @@ class AutomationEventRouter : public content::NotificationObserver {
 
   Profile* active_profile_;
 
-  friend struct DefaultSingletonTraits<AutomationEventRouter>;
+  friend struct base::DefaultSingletonTraits<AutomationEventRouter>;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationEventRouter);
 };

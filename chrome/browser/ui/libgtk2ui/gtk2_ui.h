@@ -15,17 +15,14 @@
 #include "chrome/browser/ui/libgtk2ui/gtk2_signal.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_signal_registrar.h"
 #include "chrome/browser/ui/libgtk2ui/libgtk2ui_export.h"
-#include "chrome/browser/ui/libgtk2ui/owned_widget_gtk2.h"
 #include "ui/events/linux/text_edit_key_bindings_delegate_auralinux.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/views/linux_ui/linux_ui.h"
 #include "ui/views/window/frame_buttons.h"
 
-typedef struct _GdkColor GdkColor;
 typedef struct _GtkBorder GtkBorder;
 typedef struct _GtkStyle GtkStyle;
 typedef struct _GtkWidget GtkWidget;
-typedef struct _PangoFontDescription PangoFontDescription;
 
 class SkBitmap;
 
@@ -55,12 +52,8 @@ class Gtk2UI : public views::LinuxUI {
       const std::vector<views::FrameButton>& trailing_buttons);
   void SetNonClientMiddleClickAction(NonClientMiddleClickAction action);
 
-  // Draws the GTK button border for state |gtk_state| onto a bitmap.
-  SkBitmap DrawGtkButtonBorder(int gtk_state,
-                               bool focused,
-                               bool call_to_action,
-                               int width,
-                               int height) const;
+  // Called when gtk style changes
+  void ResetStyle();
 
   // ui::LinuxInputMethodContextFactory:
   scoped_ptr<ui::LinuxInputMethodContext> CreateInputMethodContext(
@@ -132,9 +125,7 @@ class Gtk2UI : public views::LinuxUI {
   // This method returns the colors webkit will use for the scrollbars. When no
   // colors are specified by the GTK+ theme, this function averages of the
   // thumb part and of the track colors.
-  void GetScrollbarColors(GdkColor* thumb_active_color,
-                          GdkColor* thumb_inactive_color,
-                          GdkColor* track_color);
+  void SetScrollbarColors();
 
   // Extracts colors and tints from the GTK theme, both for the
   // ThemeService interface and the colors we send to webkit.
@@ -142,22 +133,13 @@ class Gtk2UI : public views::LinuxUI {
 
   // Reads in explicit theme frame colors from the ChromeGtkFrame style class
   // or generates them per our fallback algorithm.
-  GdkColor BuildFrameColors(GtkStyle* frame_style);
+  SkColor BuildFrameColors();
 
-  // Sets the underlying theme colors/tints from a GTK color.
-  void SetThemeColorFromGtk(int id, const GdkColor* color);
-  void SetThemeTintFromGtk(int id, const GdkColor* color);
+  // Sets the underlying theme tints.
+  void SetThemeTint(int id, SkColor color);
 
-  // Creates and returns a frame color, either using |gtk_base| verbatim if
-  // non-NULL, or tinting |base| with |tint|. Also sets |color_id| and
-  // |tint_id| to the returned color.
-  GdkColor BuildAndSetFrameColor(const GdkColor* base,
-                                 const GdkColor* gtk_base,
-                                 const color_utils::HSL& tint,
-                                 int color_id,
-                                 int tint_id);
-
-  // Lazily generates each bitmap used in the gtk theme.
+  // Lazily generates each image used in the gtk theme.
+  gfx::Image GenerateGtkThemeImage(int id) const;
   SkBitmap GenerateGtkThemeBitmap(int id) const;
 
   // Creates a GTK+ version of IDR_THEME_FRAME. Instead of tinting, this
@@ -173,14 +155,6 @@ class Gtk2UI : public views::LinuxUI {
   // Tints an icon based on tint.
   SkBitmap GenerateTintedIcon(int base_id,
                               const color_utils::HSL& tint) const;
-
-  // Renders a GTK icon as a SkBitmap, with prelight/active border if
-  // appropriate.
-  SkBitmap GenerateGTKIcon(int base_id) const;
-
-  // Renders a GTK button border the size of the image |sizing_idr| in
-  // |gtk_state|.
-  SkBitmap GenerateToolbarBezel(int gtk_state, int sizing_idr) const;
 
   // Returns the tint for buttons that contrasts with the normal window
   // background color.
@@ -199,19 +173,8 @@ class Gtk2UI : public views::LinuxUI {
   // Frees all calculated images and color data.
   void ClearAllThemeData();
 
-  // Updates |default_font_*| based on |desc|.
-  void UpdateDefaultFont(const PangoFontDescription* desc);
-
-  // Handles signal from GTK that our theme has been changed.
-  CHROMEGTK_CALLBACK_1(Gtk2UI, void, OnStyleSet, GtkStyle*);
-
-  GtkWidget* fake_window_;
-  GtkWidget* fake_frame_;
-  OwnedWidgetGtk fake_label_;
-  OwnedWidgetGtk fake_entry_;
-
-  // Tracks all the signals we have connected to on various widgets.
-  scoped_ptr<Gtk2SignalRegistrar> signals_;
+  // Updates |default_font_*|.
+  void UpdateDefaultFont();
 
   // Tints and colors calculated by LoadGtkValues() that are given to the
   // caller while |use_gtk_| is true.

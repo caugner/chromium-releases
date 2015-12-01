@@ -6,7 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -19,6 +19,7 @@
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
@@ -204,8 +205,14 @@ IN_PROC_BROWSER_TEST_F(PrefsFunctionalTest, TestHomepagePrefs) {
 IN_PROC_BROWSER_TEST_F(PrefsFunctionalTest, PRE_TestPrivacySecurityPrefs) {
   PrefService* prefs = browser()->profile()->GetPrefs();
 
-  EXPECT_TRUE(prefs->GetBoolean(prefs::kNetworkPredictionEnabled));
-  prefs->SetBoolean(prefs::kNetworkPredictionEnabled, false);
+  static_assert(chrome_browser_net::NETWORK_PREDICTION_DEFAULT !=
+                    chrome_browser_net::NETWORK_PREDICTION_NEVER,
+                "PrefsFunctionalTest.TestPrivacySecurityPrefs relies on "
+                "predictive network actions being enabled by default.");
+  EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_DEFAULT,
+            prefs->GetInteger(prefs::kNetworkPredictionOptions));
+  prefs->SetInteger(prefs::kNetworkPredictionOptions,
+                    chrome_browser_net::NETWORK_PREDICTION_NEVER);
 
   EXPECT_TRUE(prefs->GetBoolean(prefs::kSafeBrowsingEnabled));
   prefs->SetBoolean(prefs::kSafeBrowsingEnabled, false);
@@ -221,7 +228,8 @@ IN_PROC_BROWSER_TEST_F(PrefsFunctionalTest, PRE_TestPrivacySecurityPrefs) {
 IN_PROC_BROWSER_TEST_F(PrefsFunctionalTest, TestPrivacySecurityPrefs) {
   PrefService* prefs = browser()->profile()->GetPrefs();
 
-  EXPECT_FALSE(prefs->GetBoolean(prefs::kNetworkPredictionEnabled));
+  EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_NEVER,
+            prefs->GetInteger(prefs::kNetworkPredictionOptions));
   EXPECT_FALSE(prefs->GetBoolean(prefs::kSafeBrowsingEnabled));
   EXPECT_FALSE(prefs->GetBoolean(prefs::kAlternateErrorPagesEnabled));
   EXPECT_FALSE(prefs->GetBoolean(prefs::kSearchSuggestEnabled));

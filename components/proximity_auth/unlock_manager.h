@@ -8,8 +8,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "components/proximity_auth/client_observer.h"
-#include "components/proximity_auth/controller.h"
+#include "components/proximity_auth/messenger_observer.h"
+#include "components/proximity_auth/remote_device_life_cycle.h"
 #include "components/proximity_auth/remote_status_update.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "components/proximity_auth/screenlock_state.h"
@@ -21,13 +21,13 @@
 
 namespace proximity_auth {
 
-class Client;
+class Messenger;
 class ProximityAuthClient;
 class ProximityMonitor;
 
 // The unlock manager is responsible for controlling the lock screen UI based on
 // the authentication status of the registered remote devices.
-class UnlockManager : public ClientObserver,
+class UnlockManager : public MessengerObserver,
                       public ScreenlockBridge::Observer,
 #if defined(OS_CHROMEOS)
                       chromeos::PowerManagerClient::Observer,
@@ -54,14 +54,14 @@ class UnlockManager : public ClientObserver,
   // the remote devices is authenticated and in range.
   bool IsUnlockAllowed();
 
-  // Sets the |controller| to which local events are dispatched. A null
-  // controller indicates that proximity-based authentication is inactive.
-  void SetController(Controller* controller);
+  // Sets the |life_cycle| of the rmeote device to which local events are
+  // dispatched. A null |life_cycle| indicates that proximity-based
+  // authentication is inactive.
+  void SetRemoteDeviceLifeCycle(RemoteDeviceLifeCycle* life_cycle);
 
-  // Called when the controller's state changes.
-  void OnControllerStateChanged();
+  // Called when the life cycle's state changes.
+  void OnLifeCycleStateChanged();
 
- protected:
   // Called when the user pod is clicked for an authentication attempt of type
   // |auth_type|.
   // Exposed for testing.
@@ -76,7 +76,7 @@ class UnlockManager : public ClientObserver,
     LOCKED,
   };
 
-  // ClientObserver:
+  // MessengerObserver:
   void OnUnlockEventSent(bool success) override;
   void OnRemoteStatusUpdate(const RemoteStatusUpdate& status_update) override;
   void OnDecryptResponse(scoped_ptr<std::string> decrypted_bytes) override;
@@ -134,6 +134,11 @@ class UnlockManager : public ClientObserver,
   RemoteScreenlockState GetScreenlockStateFromRemoteUpdate(
       RemoteStatusUpdate update);
 
+  // Returns the Messenger instance associated with |life_cycle_|. This function
+  // will return nullptr if |life_cycle_| is not set or the remote device is not
+  // yet authenticated.
+  Messenger* GetMessenger();
+
   // Whether |this| manager is being used for sign-in or session unlock.
   const ScreenlockType screenlock_type_;
 
@@ -141,14 +146,9 @@ class UnlockManager : public ClientObserver,
   // update has yet been received.
   scoped_ptr<RemoteScreenlockState> remote_screenlock_state_;
 
-  // Controls the proximity auth flow logic. Not owned, and expcted to outlive
-  // |this| instance.
-  Controller* controller_;
-
-  // The client used to communicate with the remote device once a secure channel
-  // is established. Null if no secure channel has been established yet. Not
-  // owned, and expected to outlive |this| instance.
-  Client* client_;
+  // Controls the proximity auth flow logic for a remote device. Not owned, and
+  // expcted to outlive |this| instance.
+  RemoteDeviceLifeCycle* life_cycle_;
 
   // Tracks whether the remote device is currently in close enough proximity to
   // the local device to allow unlocking.

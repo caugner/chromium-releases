@@ -28,8 +28,9 @@ class ToolbarLayer : public Layer {
   scoped_refptr<cc::Layer> layer() override;
 
   void PushResource(ui::ResourceManager::Resource* resource,
+                    int toolbar_background_color,
                     bool anonymize,
-                    bool anonymize_component_is_incognito,
+                    int  toolbar_textbox_background_color,
                     bool show_debug,
                     float brightness);
 
@@ -50,6 +51,7 @@ class ToolbarLayer : public Layer {
 
  private:
   scoped_refptr<cc::Layer> layer_;
+  scoped_refptr<cc::SolidColorLayer> toolbar_background_layer_;
   scoped_refptr<cc::UIResourceLayer> bitmap_layer_;
   scoped_refptr<cc::SolidColorLayer> progress_bar_layer_;
   scoped_refptr<cc::SolidColorLayer> progress_bar_background_layer_;

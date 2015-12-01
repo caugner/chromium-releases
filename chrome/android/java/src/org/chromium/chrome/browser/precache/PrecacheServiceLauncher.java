@@ -19,7 +19,14 @@ import android.preference.PreferenceManager;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.components.precache.DeviceState;
+
+import java.util.ArrayDeque;
+import java.util.EnumSet;
+import java.util.Queue;
 
 /**
  * BroadcastReceiver that determines when conditions are right for precaching, and starts the
@@ -28,10 +35,12 @@ import org.chromium.components.precache.DeviceState;
  * |WAIT_UNTIL_NEXT_PRECACHE_MS| have passed since the last time precaching was done.
  */
 public class PrecacheServiceLauncher extends BroadcastReceiver {
-    private static final String TAG = "cr.Precache";
+    private static final String TAG = "Precache";
 
     @VisibleForTesting
     static final String PREF_IS_PRECACHING_ENABLED = "precache.is_precaching_enabled";
+
+    static final String PREF_LAST_ELAPSED_TIME = "precache.last_elapsed_time";
 
     @VisibleForTesting
     static final String PREF_PRECACHE_LAST_TIME = "precache.last_time";
@@ -47,9 +56,18 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
 
     private DeviceState mDeviceState = DeviceState.getInstance();
 
+    private PrecacheLauncher mPrecacheLauncher = PrecacheLauncher.get();
+
+    private Queue<Integer> mFailureReasonsToRecord = new ArrayDeque<Integer>();
+
     @VisibleForTesting
     void setDeviceState(DeviceState deviceState) {
         mDeviceState = deviceState;
+    }
+
+    @VisibleForTesting
+    void setPrecacheLauncher(PrecacheLauncher precacheLauncher) {
+        mPrecacheLauncher = precacheLauncher;
     }
 
     /**
@@ -58,8 +76,8 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
      * PrecacheService will be stopped, and this receiver will do nothing when it receives an
      * intent.
      *
-     * @param context The application context.
-     * @param enabled Whether or not precaching is enabled.
+     * @param context the application context
+     * @param enabled whether or not precaching is enabled
      */
     public static void setIsPrecachingEnabled(Context context, boolean enabled) {
         Log.v(TAG, "setIsPrecachingEnabled(%s)", enabled);
@@ -82,8 +100,8 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
      * alarm for a subsequent run, and updates the last precache time. If not (i.e. the precache
      * attempt aborted), sets an alarm for another attempt.
      *
-     * @param context The application context.
-     * @param tryAgainSoon Whether precaching should be attempted again.
+     * @param context the application context
+     * @param tryAgainSoon whether precaching should be attempted again
      */
     public static void precachingFinished(Context context, boolean tryAgainSoon) {
         new PrecacheServiceLauncher().precachingFinishedInternal(context, tryAgainSoon);
@@ -106,49 +124,96 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
         }
     }
 
+    /**
+     * Returns true if precaching is able to run. Set by PrecacheLauncher#updatePrecachingEnabled.
+     *
+     * @param context the application context
+     */
     @VisibleForTesting
     static boolean isPrecachingEnabled(Context context) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         return prefs.getBoolean(PREF_IS_PRECACHING_ENABLED, false);
     }
 
+    /**
+     * Returns the set of reasons that the last prefetch attempt failed to start.
+     *
+     * @param context the context passed to onReceive()
+     */
+    @VisibleForTesting
+    EnumSet<FailureReason> failureReasons(Context context) {
+        EnumSet<FailureReason> reasons = EnumSet.noneOf(FailureReason.class);
+        reasons.addAll(mPrecacheLauncher.failureReasons());
+        if (!mDeviceState.isPowerConnected(context)) reasons.add(FailureReason.NO_POWER);
+        if (!mDeviceState.isWifiAvailable(context)) reasons.add(FailureReason.NO_WIFI);
+        if (timeSinceLastPrecacheMs(context) < WAIT_UNTIL_NEXT_PRECACHE_MS) {
+            reasons.add(FailureReason.NOT_ENOUGH_TIME_SINCE_LAST_PRECACHE);
+        }
+        if (PrecacheService.isPrecaching()) reasons.add(FailureReason.CURRENTLY_PRECACHING);
+        return reasons;
+    }
+
+    /**
+     * Tries to record a histogram enumerating all of the return value of failureReasons().
+     *
+     * If the native libraries are not already loaded, no histogram is recorded.
+     *
+     * @param context the context passed to onReceive()
+     */
+    @VisibleForTesting
+    void recordFailureReasons(Context context) {
+        int reasons = FailureReason.bitValue(failureReasons(context));
+
+        // Queue up this failure reason, for the next time we are able to record it in UMA.
+        mFailureReasonsToRecord.add(reasons);
+
+        // If native libraries are loaded, then we are able to flush our queue to UMA.
+        if (LibraryLoader.isInitialized()) {
+            Integer reasonsToRecord;
+            while ((reasonsToRecord = mFailureReasonsToRecord.poll()) != null) {
+                RecordHistogram.recordSparseSlowlyHistogram(
+                        "Precache.Fetch.FailureReasons", reasonsToRecord);
+                RecordUserAction.record("Precache.Fetch.IntentReceived");
+            }
+        }
+    }
+
     @Override
     public void onReceive(Context context, Intent intent) {
-        // Do nothing if precaching is disabled.
-        if (!isPrecachingEnabled(context)) return;
+        resetLastPrecacheMsIfDeviceRebooted(context);
 
+        // TODO(twifkak): Make these triggering conditions (power, screen, wifi, time) controllable
+        // via variation parameters. Also change the cancel conditions in PrecacheService.
         boolean isPowerConnected = mDeviceState.isPowerConnected(context);
         boolean isWifiAvailable = mDeviceState.isWifiAvailable(context);
-        boolean isInteractive = mDeviceState.isInteractive(context);
-        boolean areConditionsGoodForPrecaching =
-                isPowerConnected && isWifiAvailable && !isInteractive;
+        boolean areConditionsGoodForPrecaching = isPowerConnected && isWifiAvailable;
         boolean hasEnoughTimePassedSinceLastPrecache =
                 timeSinceLastPrecacheMs(context) >= WAIT_UNTIL_NEXT_PRECACHE_MS;
 
-        // Only start precaching when an alarm action is received. This is to prevent situations
-        // such as power being connected, precaching starting, then precaching being immediately
-        // canceled because the screen turns on in response to power being connected.
-        if (ACTION_ALARM.equals(intent.getAction())
-                && areConditionsGoodForPrecaching
-                && hasEnoughTimePassedSinceLastPrecache) {
-            acquireWakeLockAndStartService(context);
-        } else {
-            if (isPowerConnected && isWifiAvailable) {
-                // If we're just waiting for non-interactivity (e.g., the screen to be off), or for
-                // enough time to pass after Wi-Fi or power has been connected, then set an alarm
-                // for the next time to check the device state. We can't receive SCREEN_ON/OFF
-                // intents as is done for detecting changes in power and connectivity, because
-                // SCREEN_ON/OFF intents are only delivered to BroadcastReceivers that are
-                // registered dynamically in code, but the PrecacheServiceLauncher is registered in
-                // the Android manifest.
+        // Do nothing if precaching is disabled.
+        if (!isPrecachingEnabled(context.getApplicationContext())) {
+            recordFailureReasons(context);
+            return;
+        }
+
+        if (areConditionsGoodForPrecaching) {
+            if (hasEnoughTimePassedSinceLastPrecache) {
+                recordFailureReasons(context); // Record success.
+                acquireWakeLockAndStartService(context);
+            } else {
+                // If we're just waiting for for enough time to pass after Wi-Fi or power has been
+                // connected, then set an alarm for the next time to check the device state.
+                // Don't call record failure reasons when setting an alarm to retry. These cases are
+                // uninteresting.
                 setAlarm(context,
                         Math.max(INTERACTIVE_STATE_POLLING_PERIOD_MS,
                                 WAIT_UNTIL_NEXT_PRECACHE_MS - timeSinceLastPrecacheMs(context)));
-            } else {
-                // If the device doesn't have connected power or doesn't have Wi-Fi, then there's no
-                // point in setting an alarm.
-                cancelAlarm(context);
             }
+        } else {
+            recordFailureReasons(context);
+            // If the device doesn't have connected power or doesn't have Wi-Fi, then there's no
+            // point in setting an alarm.
+            cancelAlarm(context);
         }
     }
 
@@ -162,7 +227,7 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     /**
      * Acquire the wakelock and start the PrecacheService.
      *
-     * @param context The Context to use to start the service.
+     * @param context the Context to use to start the service
      */
     private void acquireWakeLockAndStartService(Context context) {
         acquireWakeLock(context);
@@ -189,7 +254,7 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     /**
      * Get a PendingIntent for setting an alarm to notify the PrecacheServiceLauncher.
      *
-     * @param context The Context to use for the PendingIntent.
+     * @param context the Context to use for the PendingIntent
      * @return The PendingIntent.
      */
     private static PendingIntent getPendingAlarmIntent(Context context) {
@@ -201,8 +266,8 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     /**
      * Set an alarm to notify the PrecacheServiceLauncher in the future.
      *
-     * @param context The Context to use.
-     * @param delayMs Delay in milliseconds before the alarm goes off.
+     * @param context the Context to use
+     * @param delayMs delay in milliseconds before the alarm goes off
      */
     private void setAlarm(Context context, long delayMs) {
         setAlarmOnSystem(context, AlarmManager.ELAPSED_REALTIME_WAKEUP,
@@ -223,7 +288,7 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     /**
      * Cancel a previously set alarm, if there is one. This method can be overridden in tests.
      *
-     * @param context The Context to use.
+     * @param context the Context to use
      */
     private void cancelAlarm(Context context) {
         cancelAlarmOnSystem(context, getPendingAlarmIntent(context));
@@ -244,13 +309,27 @@ public class PrecacheServiceLauncher extends BroadcastReceiver {
     /** Returns the number of milliseconds since the last precache run completed. */
     private long timeSinceLastPrecacheMs(Context context) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-        long lastPrecacheTimeMs = prefs.getLong(PREF_PRECACHE_LAST_TIME, 0L);
-        if (lastPrecacheTimeMs > getElapsedRealtimeOnSystem()) {
-            // System.elapsedRealtime() counts milliseconds since boot, so if the device has been
-            // rebooted since the last time precaching was performed, reset lastPrecacheTimeMs to 0.
-            lastPrecacheTimeMs = 0L;
-        }
+        // If precache has never run, default to a negative number such that precache can run
+        // immediately (if conditions are good).
+        long lastPrecacheTimeMs =
+                prefs.getLong(PREF_PRECACHE_LAST_TIME, -WAIT_UNTIL_NEXT_PRECACHE_MS);
         return getElapsedRealtimeOnSystem() - lastPrecacheTimeMs;
+    }
+
+    /** Reset PREF_PRECACHE_LAST_TIME if it appears the device has rebooted. */
+    private void resetLastPrecacheMsIfDeviceRebooted(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        long lastElapsedTime = prefs.getLong(PREF_LAST_ELAPSED_TIME, 0L);
+        long elapsedTime = getElapsedRealtimeOnSystem();
+
+        Editor editor = prefs.edit();
+        if (elapsedTime < lastElapsedTime) {
+            // If the elapsed-time clock has gone backwards, this means the system has rebooted.
+            // Reset the last precache time as it is no longer valid.
+            editor.remove(PREF_PRECACHE_LAST_TIME);
+        }
+        editor.putLong(PREF_LAST_ELAPSED_TIME, elapsedTime);
+        editor.apply();
     }
 }
 

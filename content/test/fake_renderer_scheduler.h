@@ -21,6 +21,10 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   scoped_refptr<scheduler::SingleThreadIdleTaskRunner> IdleTaskRunner()
       override;
   scoped_refptr<scheduler::TaskQueue> TimerTaskRunner() override;
+  scoped_refptr<scheduler::TaskQueue> NewLoadingTaskRunner(
+      const char* name) override;
+  scoped_refptr<scheduler::TaskQueue> NewTimerTaskRunner(
+      const char* name) override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
   void DidCommitFrameToCompositor() override;
@@ -32,7 +36,11 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   void DidAnimateForInputOnCompositorThread() override;
   void OnRendererHidden() override;
   void OnRendererVisible() override;
-  void OnPageLoadStarted() override;
+  void OnRendererBackgrounded() override;
+  void OnRendererForegrounded() override;
+  void AddPendingNavigation() override;
+  void RemovePendingNavigation() override;
+  void OnNavigationStarted() override;
   bool IsHighPriorityWorkAnticipated() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   bool ShouldYieldForHighPriorityWork() override;
@@ -42,6 +50,7 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   void Shutdown() override;
   void SuspendTimerQueue() override;
   void ResumeTimerQueue() override;
+  void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeRendererScheduler);

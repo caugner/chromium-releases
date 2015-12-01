@@ -14,6 +14,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.BookmarksBridge;
@@ -59,6 +60,7 @@ public class BookmarksPage implements NativePage, InvalidationAwareThumbnailProv
     private final BookmarksPageView mPageView;
     private final String mTitle;
     private final int mBackgroundColor;
+    private final int mThemeColor;
 
     // Whether destroy() has been called.
     private boolean mIsDestroyed;
@@ -277,7 +279,9 @@ public class BookmarksPage implements NativePage, InvalidationAwareThumbnailProv
         mProfile = profile;
         mFaviconHelper = new FaviconHelper();
         mTitle = context.getResources().getString(R.string.ntp_bookmarks);
-        mBackgroundColor = context.getResources().getColor(R.color.ntp_bg);
+        mBackgroundColor = ApiCompatibilityUtils.getColor(context.getResources(), R.color.ntp_bg);
+        mThemeColor = ApiCompatibilityUtils.getColor(
+                context.getResources(), R.color.default_primary_color);
         mCurrentFolderId = new BookmarkId(BookmarkId.INVALID_FOLDER_ID, BookmarkType.NORMAL);
         mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
 
@@ -456,10 +460,7 @@ public class BookmarksPage implements NativePage, InvalidationAwareThumbnailProv
 
     private void getFaviconImageForUrl(String url, int size, FaviconImageCallback faviconCallback) {
         if (mFaviconHelper == null) return;
-        mFaviconHelper.getLocalFaviconImageForURL(mProfile, url,
-                FaviconHelper.FAVICON | FaviconHelper.TOUCH_ICON
-                        | FaviconHelper.TOUCH_PRECOMPOSED_ICON,
-                size, faviconCallback);
+        mFaviconHelper.getLocalFaviconImageForURL(mProfile, url, size, faviconCallback);
     }
 
     private void edit(BookmarkItemView item) {
@@ -534,6 +535,11 @@ public class BookmarksPage implements NativePage, InvalidationAwareThumbnailProv
     @Override
     public int getBackgroundColor() {
         return mBackgroundColor;
+    }
+
+    @Override
+    public int getThemeColor() {
+        return mThemeColor;
     }
 
     @Override

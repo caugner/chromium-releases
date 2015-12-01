@@ -60,7 +60,7 @@ a:focus {
   opacity: 0.8;
 }
 
-::-webkit-scrollbar {
+.dialog-container ::-webkit-scrollbar {
   height: 0;
   width: 0;
 }
@@ -212,8 +212,26 @@ div.splitter {
   text-overflow: ellipsis;
 }
 
+#directory-tree [renaming] > .tree-row > .label {
+  display: none;
+}
+
+#directory-tree .tree-row > input {
+  display: none;
+  margin: 0 6px;
+  overflow: hidden;
+}
+
+#directory-tree [renaming] > .tree-row > input {
+  display: block;
+}
+
 #directory-tree .tree-row > paper-ripple {
   color: rgb(19, 120, 185);
+}
+
+#directory-tree [renaming] > .tree-row > paper-ripple {
+  display: none;
 }
 
 #directory-tree .tree-item.accepts > .tree-row,
@@ -296,7 +314,8 @@ body.check-select button:hover {
   color: rgb(90, 90, 90);
 }
 
-.dialog-header .icon-button > paper-ripple {
+.dialog-header .icon-button > paper-ripple,
+.dialog-header .ripples > paper-ripple {
   color: black;
 }
 
@@ -324,7 +343,7 @@ body.check-select .dialog-header
   width: 16px;
 }
 
-.dialog-header paper-button::shadow > paper-material {
+.dialog-header paper-button {
   padding: 0 8px;
   line-height: 32px;
 }
@@ -343,6 +362,13 @@ body.check-select .dialog-header
 
 .dialog-header button.icon-button > iron-icon {
   margin: 8px;
+}
+
+.dialog-header button.icon-button > files-toggle-ripple {
+  height: 28px;
+  left: 2px;
+  top: 2px;
+  width: 28px;
 }
 
 .dialog-header button.icon-button > .icon {
@@ -762,8 +788,11 @@ html[dir='rtl'] #search-box .clear {
   margin: 0 0.29em;
   min-width: 5.14em;
   outline: none;
+  padding: 1px 16px;
+  position: relative;
   text-align: center;
   text-transform: uppercase;
+  transition: box-shadow 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 0;
 }
 
@@ -773,6 +802,12 @@ html[dir='rtl'] #search-box .clear {
 
 .dialog-footer button:hover {
   border-image: none;  /* Overrides the definition of common.css. */
+}
+
+.dialog-footer button:active {
+  box-shadow: 0 4px 5px 0 rgba(0, 0, 0, 0.14),
+              0 1px 10px 0 rgba(0, 0, 0, 0.12),
+              0 2px 4px -1px rgba(0, 0, 0, 0.4);
 }
 
 .dialog-footer paper-button,
@@ -851,9 +886,9 @@ html[dir='rtl'] #search-box .clear {
 }
 
 /* Draw outline using box-shadow to make them rounded. */
-.dialog-footer .primary:focus,
-.dialog-footer .secondary:focus,
-.dialog-footer select:focus {
+.dialog-footer .primary:focus:not(:active),
+.dialog-footer .secondary:focus:not(:active),
+.dialog-footer select:focus:not(:active) {
   box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.5);
 }
 
@@ -1000,7 +1035,8 @@ html[dir='rtl'] .breadcrumbs .separator {
 }
 
 .spinner {
-  background: url(chrome://resources/images/throbber.svg) center/100% no-repeat;
+  background: url(chrome://resources/images/throbber_small.svg) center/100%
+      no-repeat;
   height: 16px;
   left: 50%;
   margin-left: -8px;
@@ -1370,23 +1406,23 @@ html[dir='rtl'] .badge {
 /* Padding counterweights negative margins of items, thus eliminating scroll
    bar when it's not needed. Max height is set to fit 8 items before showing
    scroll bar. */
-#default-actions-list {
+#default-tasks-list {
   max-height: 328px;
   padding: 1px 0;
 }
 
-#default-actions-list > li > * {
+#default-tasks-list > li > * {
   background-position: 5px center;
   background-repeat: no-repeat;
   background-size: 16px 16px;
   padding-left: 26px;
 }
 
-#default-actions-list > li[selected] {
+#default-tasks-list > li[selected] {
   background-color: rgb(225, 225, 225);
 }
 
-#default-actions-list:focus > li[selected] {
+#default-tasks-list:focus > li[selected] {
   background-color: rgb(66, 129, 244);
   color: white;
 }
@@ -1437,7 +1473,8 @@ html[dir='rtl'] .badge {
   padding: 2px 0;
 }
 
-input.rename:focus {
+input.rename:focus,
+#directory-tree .tree-row > input:focus {
   outline-color: rgb(77, 144, 254);
 }
 
@@ -1580,7 +1617,7 @@ li[renaming=''] .badge {
   align-items: center;
 }
 
-#default-actions-list li {
+#default-tasks-list li {
   height: 32px;
   line-height: 32px;
 }
@@ -1905,7 +1942,7 @@ body[drive='error'] #unmounted-panel > .error,
   flex: none;
 }
 
-#default-action-dialog {
+#default-task-dialog {
   min-width: 300px;
   width: auto;
 }

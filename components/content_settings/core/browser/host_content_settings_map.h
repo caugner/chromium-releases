@@ -22,6 +22,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 
 class ExtensionService;
 class GURL;
@@ -42,9 +43,8 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-class HostContentSettingsMap
-    : public content_settings::Observer,
-      public base::RefCountedThreadSafe<HostContentSettingsMap> {
+class HostContentSettingsMap : public content_settings::Observer,
+                               public RefcountedKeyedService {
  public:
   enum ProviderType {
     // EXTENSION names is a layering violation when this class will move to
@@ -176,9 +176,9 @@ class HostContentSettingsMap
   // This should only be called on the UI thread.
   void ClearSettingsForOneType(ContentSettingsType content_type);
 
-  static bool IsValueAllowedForType(PrefService* prefs,
-                                    const base::Value* value,
+  static bool IsValueAllowedForType(const base::Value* value,
                                     ContentSettingsType content_type);
+  // TODO(raymes): Remove |prefs| from the below functions, it's unused.
   static bool IsSettingAllowedForType(PrefService* prefs,
                                       ContentSetting setting,
                                       ContentSettingsType content_type);
@@ -186,27 +186,14 @@ class HostContentSettingsMap
                                              ContentSetting setting,
                                              ContentSettingsType content_type);
 
-  // Returns true if the values for content type are of type dictionary/map.
-  static bool ContentTypeHasCompoundValue(ContentSettingsType type);
-
-  // Detaches the HostContentSettingsMap from all Profile-related objects like
-  // PrefService. This methods needs to be called before destroying the Profile.
-  // Afterwards, none of the methods above that should only be called on the UI
-  // thread should be called anymore.
-  void ShutdownOnUIThread();
+  // RefcountedKeyedService implementation.
+  void ShutdownOnUIThread() override;
 
   // content_settings::Observer implementation.
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
                                const ContentSettingsPattern& secondary_pattern,
                                ContentSettingsType content_type,
                                std::string resource_identifier) override;
-
-  // Returns true if we should allow all content types for this URL.  This is
-  // true for various internal objects like chrome:// URLs, so UI and other
-  // things users think of as "not webpages" don't break.
-  static bool ShouldAllowAllContent(const GURL& primary_url,
-                                    const GURL& secondary_url,
-                                    ContentSettingsType content_type);
 
   // Returns the ProviderType associated with the given source string.
   // TODO(estade): I regret adding this. At the moment there are no legitimate

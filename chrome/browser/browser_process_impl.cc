@@ -36,16 +36,16 @@
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_status_updater.h"
-#include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/metrics/thread_watcher.h"
-#include "chrome/browser/net/chrome_net_log.h"
+#include "chrome/browser/net/chrome_net_log_helper.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
@@ -64,7 +64,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -77,11 +77,14 @@
 #include "components/component_updater/component_updater_service.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/metrics/metrics_service.h"
+#include "components/net_log/chrome_net_log.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/safe_json/safe_json_parser.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/update_client/update_query_params.h"
+#include "components/web_resource/promo_resource_service.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -107,8 +110,8 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/chrome_device_client.h"
-#include "chrome/browser/services/gcm/gcm_desktop_utils.h"
 #include "components/gcm_driver/gcm_client_factory.h"
+#include "components/gcm_driver/gcm_desktop_utils.h"
 #endif
 
 #if defined(ENABLE_BACKGROUND)
@@ -144,7 +147,11 @@
 #endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-#include "chrome/browser/memory/oom_priority_manager.h"
+#include "chrome/browser/memory/tab_manager.h"
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#include "chrome/browser/first_run/upgrade_util.h"
 #endif
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -189,7 +196,12 @@ BrowserProcessImpl::BrowserProcessImpl(
   print_job_manager_.reset(new printing::PrintJobManager);
 #endif
 
-  net_log_.reset(new ChromeNetLog);
+  base::FilePath net_log_path;
+  if (command_line.HasSwitch(switches::kLogNetLog))
+    net_log_path = command_line.GetSwitchValuePath(switches::kLogNetLog);
+  net_log_.reset(new net_log::ChromeNetLog(
+      net_log_path, GetNetCaptureModeFromCommandLine(command_line),
+      command_line.GetCommandLineString(), chrome::GetChannelString()));
 
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       extensions::kExtensionScheme);
@@ -271,8 +283,7 @@ void BrowserProcessImpl::StartTearDown() {
                  "BrowserProcessImpl::StartTearDown:ProfileManager");
     // The desktop User Manager needs to be closed before the guest profile
     // can be destroyed.
-    if (switches::IsNewAvatarMenu())
-      UserManager::Hide();
+    UserManager::Hide();
     profile_manager_.reset();
   }
 
@@ -567,12 +578,13 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
   return io_thread()->system_url_request_context_getter();
 }
 
-chrome_variations::VariationsService* BrowserProcessImpl::variations_service() {
+variations::VariationsService* BrowserProcessImpl::variations_service() {
   DCHECK(CalledOnValidThread());
   return GetMetricsServicesManager()->GetVariationsService();
 }
 
-PromoResourceService* BrowserProcessImpl::promo_resource_service() {
+web_resource::PromoResourceService*
+BrowserProcessImpl::promo_resource_service() {
   DCHECK(CalledOnValidThread());
   return promo_resource_service_.get();
 }
@@ -715,7 +727,7 @@ void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
 #if defined(ENABLE_EXTENSIONS)
   extension_l10n_util::SetProcessLocale(locale);
 #endif
-  chrome::ChromeContentBrowserClient::SetApplicationLocale(locale);
+  ChromeContentBrowserClient::SetApplicationLocale(locale);
   translate::TranslateDownloadManager::GetInstance()->set_application_locale(
       locale);
 }
@@ -762,12 +774,12 @@ gcm::GCMDriver* BrowserProcessImpl::gcm_driver() {
   return gcm_driver_.get();
 }
 
-memory::OomPriorityManager* BrowserProcessImpl::GetOomPriorityManager() {
+memory::TabManager* BrowserProcessImpl::GetTabManager() {
   DCHECK(CalledOnValidThread());
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-  if (!oom_priority_manager_.get())
-    oom_priority_manager_.reset(new memory::OomPriorityManager());
-  return oom_priority_manager_.get();
+  if (!tab_manager_.get())
+    tab_manager_.reset(new memory::TabManager());
+  return tab_manager_.get();
 #else
   return nullptr;
 #endif
@@ -812,9 +824,8 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
                                std::string());
 #endif  // defined(OS_CHROMEOS)
 #if !defined(OS_CHROMEOS)
-  registry->RegisterBooleanPref(
-      prefs::kMetricsReportingEnabled,
-      GoogleUpdateSettings::GetCollectStatsConsent());
+  registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
+                                GoogleUpdateSettings::GetCollectStatsConsent());
 #endif  // !defined(OS_CHROMEOS)
 
 #if defined(OS_ANDROID)
@@ -881,7 +892,7 @@ void BrowserProcessImpl::StartAutoupdateTimer() {
 }
 #endif
 
-ChromeNetLog* BrowserProcessImpl::net_log() {
+net_log::ChromeNetLog* BrowserProcessImpl::net_log() {
   return net_log_.get();
 }
 
@@ -996,7 +1007,7 @@ void BrowserProcessImpl::CreateLocalState() {
   // whenever the preference or its controlling policy changes.
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
   pref_change_registrar_.Add(
-      prefs::kMetricsReportingEnabled,
+      metrics::prefs::kMetricsReportingEnabled,
       base::Bind(&BrowserProcessImpl::ApplyMetricsReportingPolicy,
                  base::Unretained(this)));
 #endif
@@ -1067,7 +1078,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
       *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableWebResources)) {
     DCHECK(!promo_resource_service_.get());
-    promo_resource_service_.reset(new PromoResourceService);
+    promo_resource_service_.reset(new web_resource::PromoResourceService(
+        local_state(), chrome::GetChannel(), GetApplicationLocale(),
+        system_request_context(), switches::kDisableBackgroundNetworking,
+        base::Bind(safe_json::SafeJsonParser::Parse)));
     promo_resource_service_->StartAfterDelay();
   }
 
@@ -1159,11 +1173,24 @@ void BrowserProcessImpl::CreateGCMDriver() {
 #else
   base::FilePath store_path;
   CHECK(PathService::Get(chrome::DIR_GLOBAL_GCM_STORE, &store_path));
+  base::SequencedWorkerPool* worker_pool =
+      content::BrowserThread::GetBlockingPool();
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
+      worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
+          worker_pool->GetSequenceToken(),
+          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+
   gcm_driver_ = gcm::CreateGCMDriverDesktop(
       make_scoped_ptr(new gcm::GCMClientFactory),
       local_state(),
       store_path,
-      system_request_context());
+      system_request_context(),
+      chrome::GetChannel(),
+      content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::UI),
+      content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::IO),
+      blocking_task_runner);
 #endif  // defined(OS_ANDROID)
 }
 
@@ -1186,7 +1213,7 @@ void BrowserProcessImpl::ApplyMetricsReportingPolicy() {
       BrowserThread::FILE, FROM_HERE,
       base::Bind(
           base::IgnoreResult(&GoogleUpdateSettings::SetCollectStatsConsent),
-          local_state()->GetBoolean(prefs::kMetricsReportingEnabled))));
+          ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled())));
 #endif
 }
 

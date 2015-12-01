@@ -53,9 +53,6 @@ public abstract class ChromeSwitches {
     /** Whether or not to enable the experimental tablet tab stack. */
     public static final String ENABLE_TABLET_TAB_STACK = "enable-tablet-tab-stack";
 
-    /** Disables support for playing videos remotely via Android MediaRouter API. */
-    public static final String DISABLE_CAST = "disable-cast";
-
     /** Never forward URL requests to external intents. */
     public static final String DISABLE_EXTERNAL_INTENT_REQUESTS =
             "disable-external-intent-requests";
@@ -73,10 +70,6 @@ public abstract class ChromeSwitches {
     public static final String ENABLE_CONTEXTUAL_SEARCH_FOR_TESTING =
             "enable-contextual-search-for-testing";
 
-    /** Enable new Website Settings UI, which does not have controls for editing settings */
-    public static final String DISABLE_READ_ONLY_WEBSITE_SETTINGS_POPUP =
-            "disable-read-only-website-settings-popup";
-
     // How many thumbnails should we allow in the cache (per tab stack)?
     public static final String THUMBNAILS = "thumbnails";
 
@@ -89,15 +82,19 @@ public abstract class ChromeSwitches {
      */
     public static final String DISABLE_READER_MODE_BOTTOM_BAR = "disable-reader-mode-bottom-bar";
 
+    /**
+     * Disable Lo-Fi snackbar.
+     */
+    public static final String DISABLE_LOFI_SNACKBAR = "disable-lo-fi-snackbar";
+
+    /**
+     * Enable Physical Web feature.
+     */
+    public static final String ENABLE_PHYSICAL_WEB = "enable-physical-web";
+
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Native Switches
     ///////////////////////////////////////////////////////////////////////////////////////////////
-
-    /**
-     * Sets the max number of render processes to use.
-     * Native switch - content_switches::kRendererProcessLimit.
-     */
-    public static final String RENDER_PROCESS_LIMIT = "renderer-process-limit";
 
     /**
      * Enable enhanced bookmarks feature.
@@ -139,24 +136,6 @@ public abstract class ChromeSwitches {
             "use-fake-device-for-media-stream";
 
     /**
-     * Disables the new icon-centric NTP design.
-     * Native switch - switches::kDisableIconNtp
-     */
-    public static final String DISABLE_ICON_NTP = "disable-icon-ntp";
-
-    /**
-     * Enables the new icon-centric NTP design.
-     * Native switch - switches::kEnableIconNtp
-     */
-    public static final String ENABLE_ICON_NTP = "enable-icon-ntp";
-
-    /**
-     * Enable Reader Mode button.
-     * Native switch - switches::kEnableReaderModeToolbarIcon
-     */
-    public static final String ENABLE_READER_MODE_BUTTON = "enable-reader-mode-toolbar-icon";
-
-    /**
      * Disable domain reliability
      * Native switch - switches::kDisableDomainReliability
      */
@@ -167,11 +146,6 @@ public abstract class ChromeSwitches {
      * Native switch - switches::kEnableAndroidSpellChecker
      */
     public static final String ENABLE_ANDROID_SPELLCHECKER = "enable-android-spellchecker";
-
-    /**
-     * Enable the menu trimming that removes "Bookmarks" and "Recent tabs" menu items.
-     */
-    public static final String ENABLE_MENU_TRIMMING = "enable-menu-trimming";
 
     /**
      * Disable speculative TCP/IP preconnection.
@@ -189,6 +163,18 @@ public abstract class ChromeSwitches {
      * Enable offline pages.
      */
     public static final String ENABLE_OFFLINE_PAGES = "enable-offline-pages";
+
+    /**
+     * Enable theme-color support in ChromeTabbedActivity.
+     */
+    public static final String ENABLE_THEME_COLOR_IN_TABBED_MODE =
+            "enable-theme-color-in-tabbed-mode";
+
+    /**
+     * Enables hung renderer InfoBar activation for unresponsive web content.
+     * Native switch - switches::kEnableHungRendererInfoBar
+     */
+    public static final String ENABLE_HUNG_RENDERER_INFOBAR = "enable-hung-renderer-infobar";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

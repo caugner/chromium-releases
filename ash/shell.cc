@@ -181,7 +181,7 @@ AshWindowTreeHostInitParams ShellInitParamsToAshWindowTreeHostInitParams(
 }  // namespace
 
 // static
-Shell* Shell::instance_ = NULL;
+Shell* Shell::instance_ = nullptr;
 // static
 bool Shell::initially_hide_cursor_ = false;
 
@@ -191,7 +191,7 @@ bool Shell::initially_hide_cursor_ = false;
 // static
 Shell* Shell::CreateInstance(const ShellInitParams& init_params) {
   CHECK(!instance_);
-  instance_ = new Shell(init_params.delegate);
+  instance_ = new Shell(init_params.delegate, init_params.blocking_pool);
   instance_->Init(init_params);
   return instance_;
 }
@@ -210,7 +210,7 @@ bool Shell::HasInstance() {
 // static
 void Shell::DeleteInstance() {
   delete instance_;
-  instance_ = NULL;
+  instance_ = nullptr;
 }
 
 // static
@@ -329,18 +329,19 @@ bool Shell::GetAppListTargetVisibility() const {
 }
 
 aura::Window* Shell::GetAppListWindow() {
-  return app_list_controller_.get() ? app_list_controller_->GetWindow() : NULL;
+  return app_list_controller_.get() ? app_list_controller_->GetWindow()
+                                    : nullptr;
 }
 
 app_list::AppListView* Shell::GetAppListView() {
-  return app_list_controller_.get() ? app_list_controller_->GetView() : NULL;
+  return app_list_controller_.get() ? app_list_controller_->GetView() : nullptr;
 }
 
 bool Shell::IsSystemModalWindowOpen() const {
   if (simulate_modal_window_open_for_testing_)
     return true;
   const std::vector<aura::Window*> containers = GetContainersFromAllRootWindows(
-      kShellWindowId_SystemModalContainer, NULL);
+      kShellWindowId_SystemModalContainer, nullptr);
   for (std::vector<aura::Window*>::const_iterator cit = containers.begin();
        cit != containers.end(); ++cit) {
     for (aura::Window::Windows::const_iterator wit = (*cit)->children().begin();
@@ -466,7 +467,7 @@ void Shell::DeactivateKeyboard() {
       (*iter)->DeactivateKeyboard(keyboard::KeyboardController::GetInstance());
     }
   }
-  keyboard::KeyboardController::ResetInstance(NULL);
+  keyboard::KeyboardController::ResetInstance(nullptr);
 }
 
 void Shell::ShowShelf() {
@@ -632,12 +633,12 @@ void Shell::DoInitialWorkspaceAnimation() {
 ////////////////////////////////////////////////////////////////////////////////
 // Shell, private:
 
-Shell::Shell(ShellDelegate* delegate)
-    : target_root_window_(NULL),
-      scoped_target_root_window_(NULL),
+Shell::Shell(ShellDelegate* delegate, base::SequencedWorkerPool* blocking_pool)
+    : target_root_window_(nullptr),
+      scoped_target_root_window_(nullptr),
       delegate_(delegate),
       window_positioner_(new WindowPositioner),
-      activation_client_(NULL),
+      activation_client_(nullptr),
 #if defined(OS_CHROMEOS)
       display_configurator_(new ui::DisplayConfigurator()),
 #endif  // defined(OS_CHROMEOS)
@@ -645,7 +646,8 @@ Shell::Shell(ShellDelegate* delegate)
       cursor_manager_(
           scoped_ptr<::wm::NativeCursorManager>(native_cursor_manager_)),
       simulate_modal_window_open_for_testing_(false),
-      is_touch_hud_projection_enabled_(false) {
+      is_touch_hud_projection_enabled_(false),
+      blocking_pool_(blocking_pool) {
   DCHECK(delegate_.get());
   DCHECK(aura::Env::GetInstanceDontCreate());
   gpu_support_.reset(delegate_->CreateGPUSupport());
@@ -665,12 +667,12 @@ Shell::~Shell() {
 
   delegate_->PreShutdown();
 
-  views::FocusManagerFactory::Install(NULL);
+  views::FocusManagerFactory::Install(nullptr);
 
   // Remove the focus from any window. This will prevent overhead and side
   // effects (e.g. crashes) from changing focus during shutdown.
   // See bug crbug.com/134502.
-  aura::client::GetFocusClient(GetPrimaryRootWindow())->FocusWindow(NULL);
+  aura::client::GetFocusClient(GetPrimaryRootWindow())->FocusWindow(nullptr);
 
   // Please keep in same order as in Init() because it's easy to miss one.
   if (window_modality_controller_)
@@ -838,7 +840,7 @@ Shell::~Shell() {
 #endif
 
   DCHECK(instance_ == this);
-  instance_ = NULL;
+  instance_ = nullptr;
 }
 
 void Shell::Init(const ShellInitParams& init_params) {
@@ -871,7 +873,7 @@ void Shell::Init(const ShellInitParams& init_params) {
     display_initialized = true;
   }
   display_color_manager_.reset(
-      new DisplayColorManager(display_configurator_.get()));
+      new DisplayColorManager(display_configurator_.get(), blocking_pool_));
 #endif  // defined(OS_CHROMEOS)
   if (!display_initialized)
     display_manager_->InitDefaultDisplay();
@@ -1013,7 +1015,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   event_client_.reset(new EventClientImpl);
 
   // This controller needs to be set before SetupManagedWindowMode.
-  desktop_background_controller_.reset(new DesktopBackgroundController());
+  desktop_background_controller_.reset(
+      new DesktopBackgroundController(blocking_pool_));
   user_wallpaper_delegate_.reset(delegate_->CreateUserWallpaperDelegate());
 
   session_state_delegate_.reset(delegate_->CreateSessionStateDelegate());
@@ -1172,7 +1175,7 @@ scoped_ptr<ui::EventTargetIterator> Shell::GetChildIterator() const {
 
 ui::EventTargeter* Shell::GetEventTargeter() {
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 void Shell::OnEvent(ui::Event* event) {

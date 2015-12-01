@@ -5,8 +5,10 @@
 #ifndef CONTENT_SHELL_RENDERER_LAYOUT_TEST_BLINK_TEST_RUNNER_H_
 #define CONTENT_SHELL_RENDERER_LAYOUT_TEST_BLINK_TEST_RUNNER_H_
 
+#include <deque>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/test_runner/test_preferences.h"
@@ -96,6 +98,12 @@ class BlinkTestRunner : public RenderViewObserver,
   void SetDeviceScaleFactor(float factor) override;
   void SetDeviceColorProfile(const std::string& name) override;
   void SetBluetoothMockDataSet(const std::string& name) override;
+  void SetBluetoothManualChooser() override;
+  void GetBluetoothManualChooserEvents(
+      const base::Callback<void(const std::vector<std::string>&)>& callback)
+      override;
+  void SendBluetoothManualChooserEvent(const std::string& event,
+                                       const std::string& argument) override;
   void SetGeofencingMockProvider(bool service_available) override;
   void ClearGeofencingMockProvider() override;
   void SetGeofencingMockPosition(double latitude, double longitude) override;
@@ -124,10 +132,6 @@ class BlinkTestRunner : public RenderViewObserver,
                      const GURL& origin,
                      const GURL& embedding_origin) override;
   void ResetPermissions() override;
-  scoped_refptr<cc::TextureLayer> CreateTextureLayerForMailbox(
-      cc::TextureLayerClient* client) override;
-  blink::WebLayer* InstantiateWebLayer(
-      scoped_refptr<cc::TextureLayer> layer) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void DispatchBeforeInstallPromptEvent(
       int request_id,
@@ -158,6 +162,8 @@ class BlinkTestRunner : public RenderViewObserver,
   void OnReset();
   void OnNotifyDone();
   void OnTryLeakDetection();
+  void OnReplyBluetoothManualChooserEvents(
+      const std::vector<std::string>& events);
 
   // After finishing the test, retrieves the audio, text, and pixel dumps from
   // the TestRunner library and sends them to the browser process.
@@ -176,6 +182,9 @@ class BlinkTestRunner : public RenderViewObserver,
   std::vector<int> routing_ids_;
   std::vector<std::vector<PageState> > session_histories_;
   std::vector<unsigned> current_entry_indexes_;
+
+  std::deque<base::Callback<void(const std::vector<std::string>&)>>
+      get_bluetooth_events_callbacks_;
 
   bool is_main_window_;
 

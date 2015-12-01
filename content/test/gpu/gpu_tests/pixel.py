@@ -53,7 +53,7 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-gpu-benchmarking')
 
-  def ValidateAndMeasurePageInner(self, page, tab, results):
+  def ValidateAndMeasurePage(self, page, tab, results):
     if not _DidTestSucceed(tab):
       raise page_test.Failure('Page indicated a failure')
 
@@ -146,7 +146,8 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
 
     try:
       ref_png = image_util.FromPngFile(image_path)
-    except:
+    # This can raise a couple of exceptions including IOError and ValueError.
+    except Exception:
       ref_png = None
 
     if ref_png is not None:

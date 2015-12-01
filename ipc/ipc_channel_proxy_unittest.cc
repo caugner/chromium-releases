@@ -133,7 +133,7 @@ class MessageCountFilter : public IPC::MessageFilter {
         last_filter_event_(NONE),
         message_filtering_enabled_(false) {}
 
-  MessageCountFilter(uint32 supported_message_class)
+  MessageCountFilter(uint32_t supported_message_class)
       : messages_received_(0),
         supported_message_class_(supported_message_class),
         is_global_filter_(false),
@@ -201,7 +201,7 @@ class MessageCountFilter : public IPC::MessageFilter {
   }
 
   bool GetSupportedMessageClasses(
-      std::vector<uint32>* supported_message_classes) const override {
+      std::vector<uint32_t>* supported_message_classes) const override {
     if (is_global_filter_)
       return false;
     supported_message_classes->push_back(supported_message_class_);
@@ -219,7 +219,7 @@ class MessageCountFilter : public IPC::MessageFilter {
   ~MessageCountFilter() override {}
 
   size_t messages_received_;
-  uint32 supported_message_class_;
+  uint32_t supported_message_class_;
   bool is_global_filter_;
 
   FilterEvent last_filter_event_;
@@ -438,7 +438,7 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(ChannelProxyClient) {
   base::MessageLoopForIO main_message_loop;
   ChannelReflectorListener listener;
   scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
-      IPCTestBase::GetChannelName("ChannelProxyClient"), &listener, nullptr));
+      IPCTestBase::GetChannelName("ChannelProxyClient"), &listener));
   CHECK(channel->Connect());
   listener.Init(channel.get());
 

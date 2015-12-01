@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/sessions/session_id.h"
+#include "components/sessions/core/session_id.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -242,6 +242,13 @@ class AppWindow : public content::WebContentsDelegate,
   // is on startup and from within UpdateWindowTitle().
   base::string16 GetTitle() const;
 
+  // |callback| will then be called when the first navigation in the window is
+  // ready to commit.
+  void SetOnFirstCommitCallback(const base::Closure& callback);
+
+  // Called when the first navigation in the window is ready to commit.
+  void OnReadyToCommitFirstNavigation();
+
   // Call to notify ShellRegistry and delete the window. Subclasses should
   // invoke this method instead of using "delete this".
   void OnNativeClose();
@@ -331,10 +338,6 @@ class AppWindow : public content::WebContentsDelegate,
 
   // Restores the always-on-top property according to |cached_always_on_top_|.
   void RestoreAlwaysOnTop();
-
-  // Set whether the window should get even reserved keys (modulo platform
-  // restrictions).
-  void SetInterceptAllKeys(bool want_all_keys);
 
   // Retrieve the current state of the app window as a dictionary, to pass to
   // the renderer.
@@ -554,6 +557,9 @@ class AppWindow : public content::WebContentsDelegate,
 
   // Whether |is_ime_window| was set in the CreateParams.
   bool is_ime_window_;
+
+  // PlzNavigate: this is called when the first navigation is ready to commit.
+  base::Closure on_first_commit_callback_;
 
   base::WeakPtrFactory<AppWindow> image_loader_ptr_factory_;
 

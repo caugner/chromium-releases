@@ -32,6 +32,9 @@ config("media_config") {
   if (use_cras) {
     defines += [ "USE_CRAS" ]
   }
+  if (proprietary_codecs && enable_hevc_demuxing) {
+    defines += [ "ENABLE_HEVC_DEMUXING" ]
+  }
 }
 
 config("media_implementation") {
@@ -204,8 +207,6 @@ component("media") {
     "filters/ivf_parser.h",
     "filters/jpeg_parser.cc",
     "filters/jpeg_parser.h",
-    "filters/source_buffer_platform.cc",
-    "filters/source_buffer_platform.h",
     "filters/source_buffer_range.cc",
     "filters/source_buffer_range.h",
     "filters/source_buffer_stream.cc",
@@ -327,6 +328,21 @@ component("media") {
     }
   }
 
+  if (proprietary_codecs && enable_hevc_demuxing) {
+    sources += [
+      "filters/h265_parser.cc",
+      "filters/h265_parser.h",
+      "formats/mp4/hevc.cc",
+      "formats/mp4/hevc.h",
+    ]
+    if (media_use_ffmpeg) {
+      sources += [
+        "filters/ffmpeg_h265_to_annex_b_bitstream_converter.cc",
+        "filters/ffmpeg_h265_to_annex_b_bitstream_converter.h",
+      ]
+    }
+  }
+
   if (current_cpu == "arm" && arm_use_neon) {
     defines += [ "USE_NEON" ]
   }
@@ -336,7 +352,7 @@ component("media") {
       "filters/vpx_video_decoder.cc",
       "filters/vpx_video_decoder.h",
     ]
-    deps += [ "//third_party/libvpx" ]
+    deps += [ "//third_party/libvpx_new" ]
   }
 
   if (media_use_libwebm) {
@@ -487,6 +503,18 @@ component("media") {
     ]
   }
 
+  if (use_low_memory_buffer) {
+    sources += [
+      "filters/source_buffer_platform.h",
+      "filters/source_buffer_platform_lowmem.cc",
+    ]
+  } else {
+    sources += [
+      "filters/source_buffer_platform.cc",
+      "filters/source_buffer_platform.h",
+    ]
+  }
+
   public_deps = [
     "//media/base",
     "//media/audio",
@@ -593,6 +621,7 @@ test("media_unittests") {
     "renderers/audio_renderer_impl_unittest.cc",
     "renderers/renderer_impl_unittest.cc",
     "renderers/video_renderer_impl_unittest.cc",
+    "video/gpu_memory_buffer_video_frame_pool_unittest.cc",
     "video/h264_poc_unittest.cc",
   ]
 
@@ -609,6 +638,8 @@ test("media_unittests") {
     ":test_support",
     "//base/allocator",
     "//base/test:test_support",
+    "//gpu/command_buffer/common",
+    "//gpu:test_support",
     "//media/audio:unittests",
     "//media/audio:test_support",
     "//media/base:unittests",
@@ -644,6 +675,11 @@ test("media_unittests") {
     ]
   }
 
+  if (media_use_libwebm) {
+    sources += [ "capture/webm_muxer_unittest.cc" ]
+    deps += [ "//third_party/libwebm" ]
+  }
+
   if (current_cpu != "arm" && is_chromeos) {
     sources += [ "filters/h264_bitstream_buffer_unittest.cc" ]
   }
@@ -677,6 +713,9 @@ test("media_unittests") {
         "filters/ffmpeg_aac_bitstream_converter_unittest.cc",
         "filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc",
       ]
+    }
+    if (enable_hevc_demuxing) {
+      sources += [ "filters/h265_parser_unittest.cc" ]
     }
   }
 
@@ -764,6 +803,8 @@ component("shared_memory_support") {
   sources = [
     "audio/audio_parameters.cc",
     "audio/audio_parameters.h",
+    "audio/point.cc",
+    "audio/point.h",
     "base/audio_bus.cc",
     "base/audio_bus.h",
     "base/channel_layout.cc",
@@ -779,6 +820,7 @@ component("shared_memory_support") {
   ]
   deps = [
     "//base",
+    "//ui/gfx/geometry",
   ]
 }
 

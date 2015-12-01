@@ -42,7 +42,8 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
                       RenderWidgetHostDelegate* rwh_delegate,
                       FrameTree* frame_tree,
                       FrameTreeNode* frame_tree_node,
-                      int routing_id,
+                      int32 routing_id,
+                      int32 widget_routing_id,
                       int flags);
   ~TestRenderFrameHost() override;
 
@@ -98,7 +99,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   void SendRendererInitiatedNavigationRequest(const GURL& url,
                                               bool has_user_gesture);
 
-  void DidDisownOpener();
+  void DidChangeOpener(int opener_routing_id);
 
   // If set, navigations will appear to have cleared the history list in the
   // RenderFrame

@@ -333,8 +333,14 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
   }
 
   void CommitComplete() override {
+    test_hooks_->WillCommitCompleteOnThread(this);
     LayerTreeHostImpl::CommitComplete();
     test_hooks_->CommitCompleteOnThread(this);
+  }
+
+  bool PrepareTiles() override {
+    test_hooks_->WillPrepareTiles(this);
+    return LayerTreeHostImpl::PrepareTiles();
   }
 
   DrawResult PrepareToDraw(FrameData* frame) override {
@@ -398,8 +404,8 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->DidActivateTreeOnThread(this);
   }
 
-  bool InitializeRenderer(scoped_ptr<OutputSurface> output_surface) override {
-    bool success = LayerTreeHostImpl::InitializeRenderer(output_surface.Pass());
+  bool InitializeRenderer(OutputSurface* output_surface) override {
+    bool success = LayerTreeHostImpl::InitializeRenderer(output_surface);
     test_hooks_->InitializedRendererOnThread(this, success);
     return success;
   }
@@ -797,8 +803,8 @@ void LayerTreeTest::SetupTree() {
   }
 
   gfx::Size root_bounds = layer_tree_host_->root_layer()->bounds();
-  gfx::Size device_root_bounds = gfx::ToCeiledSize(
-      gfx::ScaleSize(root_bounds, layer_tree_host_->device_scale_factor()));
+  gfx::Size device_root_bounds = gfx::ScaleToCeiledSize(
+      root_bounds, layer_tree_host_->device_scale_factor());
   layer_tree_host_->SetViewportSize(device_root_bounds);
 }
 

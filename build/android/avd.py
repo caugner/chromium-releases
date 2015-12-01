@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-from pylib import cmd_helper
+from devil.utils import cmd_helper
 from pylib import constants
 from pylib.utils import emulator
 
@@ -75,7 +75,7 @@ def main(argv):
     try:
       avd_index = names.index(options.name)
     except ValueError:
-      logging.critical('ERROR: Specified AVD %s does not exist.' % options.name)
+      logging.critical('ERROR: Specified AVD %s does not exist.', options.name)
       return 1
     api_level = int(api_levels[avd_index])
 

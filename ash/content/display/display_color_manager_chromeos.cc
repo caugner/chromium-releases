@@ -8,11 +8,13 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,14 +25,14 @@
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 
-using content::BrowserThread;
-
 namespace ash {
 
 namespace {
 
 bool ParseFile(const base::FilePath& path,
                DisplayColorManager::ColorCalibrationData* data) {
+  if (!base::PathExists(path))  // No icc file for this display; not an error.
+    return false;
   qcms_profile* display_profile = qcms_profile_from_path(path.value().c_str());
 
   if (!display_profile) {
@@ -85,8 +87,11 @@ base::FilePath PathForDisplaySnapshot(const ui::DisplaySnapshot* snapshot) {
 
 }  // namespace
 
-DisplayColorManager::DisplayColorManager(ui::DisplayConfigurator* configurator)
-    : configurator_(configurator) {
+DisplayColorManager::DisplayColorManager(
+    ui::DisplayConfigurator* configurator,
+    base::SequencedWorkerPool* blocking_pool)
+    : configurator_(configurator),
+      blocking_pool_(blocking_pool) {
   configurator_->AddObserver(this);
 }
 
@@ -132,7 +137,7 @@ void DisplayColorManager::LoadCalibrationForDisplay(
   base::Callback<bool(void)> request(
       base::Bind(&ParseFile, path, base::Unretained(data.get())));
   base::PostTaskAndReplyWithResult(
-      BrowserThread::GetBlockingPool(), FROM_HERE, request,
+      blocking_pool_, FROM_HERE, request,
       base::Bind(&DisplayColorManager::UpdateCalibrationData, AsWeakPtr(),
                  display->display_id(), display->product_id(),
                  base::Passed(data.Pass())));
@@ -143,7 +148,7 @@ void DisplayColorManager::UpdateCalibrationData(
     int64_t product_id,
     scoped_ptr<ColorCalibrationData> data,
     bool success) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (success) {
     // The map takes over ownership of the underlying memory.
     calibration_map_[product_id] = data.release();

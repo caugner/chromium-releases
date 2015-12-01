@@ -24,7 +24,6 @@
  * @param {!DimmableUIController} dimmableUIController Dimmable UI controller.
  * @constructor
  * @struct
- * @suppress {checkStructDictInheritance}
  * @extends {cr.EventTarget}
  */
 function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
@@ -188,6 +187,11 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
   this.active_ = false;
 
   /**
+   * @private {Gallery.SubMode}
+   */
+  this.subMode_ = Gallery.SubMode.BROWSE;
+
+  /**
    * @type {boolean}
    * @private
    */
@@ -223,7 +227,7 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @const
    */
   this.imageContainer_ = util.createChild(queryRequiredElement(
-      this.document_, '.content'), 'image-container');
+      '.content', this.document_), 'image-container');
 
   this.document_.addEventListener('click', this.onDocumentClick_.bind(this));
 
@@ -233,21 +237,21 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.options_ = queryRequiredElement(this.bottomToolbar_, '.options');
+  this.options_ = queryRequiredElement('.options', this.bottomToolbar_);
 
   /**
    * @type {!HTMLElement}
    * @private
    * @const
    */
-  this.savedLabel_ = queryRequiredElement(this.options_, '.saved');
+  this.savedLabel_ = queryRequiredElement('.saved', this.options_);
 
   /**
    * @private {!PaperCheckboxElement}
    * @const
    */
   this.overwriteOriginalCheckbox_ = /** @type {!PaperCheckboxElement} */
-      (queryRequiredElement(this.options_, '.overwrite-original'));
+      (queryRequiredElement('.overwrite-original', this.options_));
   this.overwriteOriginalCheckbox_.addEventListener('change',
       this.onOverwriteOriginalCheckboxChanged_.bind(this));
 
@@ -256,19 +260,19 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @const
    */
   this.filesToast_ = /** @type {!FilesToast} */
-      (queryRequiredElement(document, 'files-toast'));
+      (queryRequiredElement('files-toast'));
 
   /**
    * @private {!HTMLElement}
    * @const
    */
-  this.bubble_ = queryRequiredElement(this.bottomToolbar_, '.bubble');
+  this.bubble_ = queryRequiredElement('.bubble', this.bottomToolbar_);
 
-  var bubbleContent = queryRequiredElement(this.bubble_, '.content');
+  var bubbleContent = queryRequiredElement('.content', this.bubble_);
   // GALLERY_OVERWRITE_BUBBLE contains <br> tag inside message.
   bubbleContent.innerHTML = strf('GALLERY_OVERWRITE_BUBBLE');
 
-  var bubbleClose = queryRequiredElement(this.bubble_, '.close-x');
+  var bubbleClose = queryRequiredElement('.close-x', this.bubble_);
   bubbleClose.addEventListener('click', this.onCloseBubble_.bind(this));
 
   /**
@@ -306,8 +310,8 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.ribbonSpacer_ = queryRequiredElement(this.bottomToolbar_,
-      '.ribbon-spacer');
+  this.ribbonSpacer_ = queryRequiredElement('.ribbon-spacer',
+      this.bottomToolbar_);
 
   /**
    * @type {!Ribbon}
@@ -324,8 +328,8 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @type {!HTMLElement}
    * @const
    */
-  var slideShowButton = queryRequiredElement(this.topToolbar_,
-      'paper-button.slideshow');
+  var slideShowButton = queryRequiredElement('paper-button.slideshow',
+      this.topToolbar_);
   slideShowButton.addEventListener('click',
       this.startSlideshow.bind(this, SlideMode.SLIDESHOW_INTERVAL_FIRST));
 
@@ -346,7 +350,7 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.editButton_ = queryRequiredElement(this.topToolbar_, 'button.edit');
+  this.editButton_ = queryRequiredElement('button.edit', this.topToolbar_);
   GalleryUtil.decorateMouseFocusHandling(this.editButton_);
   this.editButton_.addEventListener('click', this.toggleEditor.bind(this));
 
@@ -362,8 +366,8 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.printButton_ = queryRequiredElement(
-      this.topToolbar_, 'paper-button.print');
+  this.printButton_ = queryRequiredElement('paper-button.print',
+      this.topToolbar_);
   this.printButton_.addEventListener('click', this.print_.bind(this));
 
   /**
@@ -371,8 +375,8 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.editBarSpacer_ = queryRequiredElement(this.bottomToolbar_,
-      '.edit-bar-spacer');
+  this.editBarSpacer_ = queryRequiredElement('.edit-bar-spacer',
+      this.bottomToolbar_);
 
   /**
    * @type {!HTMLElement}
@@ -441,16 +445,6 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @const
    */
   this.touchHandlers_ = new TouchHandler(this.imageContainer_, this);
-
-  /**
-   * @private {!ChromeVoxStateWatcher}
-   * @const
-   */
-  this.chromeVoxStateWatcher_ = new ChromeVoxStateWatcher();
-  this.chromeVoxStateWatcher_.addEventListener('chromevox-navigation-begin',
-      this.onChromeVoxNavigationBegin_.bind(this));
-  this.chromeVoxStateWatcher_.addEventListener('chromevox-navigation-end',
-      this.onChromeVoxNavigationEnd_.bind(this));
 }
 
 /**
@@ -481,26 +475,43 @@ SlideMode.KEY_OFFSET_MAP = {
 };
 
 /**
+ * Returns editor warning message if it should be shown.
+ * @param {!Gallery.Item} item
+ * @param {string} readonlyDirName Name of read only volume. Pass empty string
+ *     if volume is writable.
+ * @param {!DirectoryEntry} fallbackSaveDirectory
+ * @return {!Promise<?string>} Warning message. null if no warning message
+ *     should be shown.
+ */
+SlideMode.getEditorWarningMessage = function(
+    item, readonlyDirName, fallbackSaveDirectory) {
+  var isReadOnlyVolume = !!readonlyDirName;
+  var isWritableFormat = item.isWritableFormat();
+
+  if (isReadOnlyVolume && !isWritableFormat) {
+    return item.getCopyName(fallbackSaveDirectory).then(function(copyName) {
+      return strf('GALLERY_READONLY_AND_NON_WRITABLE_FORMAT_WARNING',
+          readonlyDirName, copyName);
+    });
+  } else if (isReadOnlyVolume) {
+    return Promise.resolve(/** @type {?string} */
+        (strf('GALLERY_READONLY_WARNING', readonlyDirName)));
+  } else if (!isWritableFormat) {
+    var entry = item.getEntry();
+    return new Promise(entry.getParent.bind(entry)).then(function(parentDir) {
+      return item.getCopyName(parentDir);
+    }).then(function(copyName) {
+      return strf('GALLERY_NON_WRITABLE_FORMAT_WARNING', copyName);
+    });
+  } else {
+    return Promise.resolve(/** @type {?string} */ (null));
+  }
+};
+
+/**
  * SlideMode extends cr.EventTarget.
  */
 SlideMode.prototype.__proto__ = cr.EventTarget.prototype;
-
-/**
- * Handles chromevox-navigation-begin event. While user is navigating with
- * ChromeVox, we should not hide the tools.
- * @private
- */
-SlideMode.prototype.onChromeVoxNavigationBegin_ = function() {
-  this.dimmableUIController_.setDisabled(true);
-};
-
-/**
- * Handles chromevox-navigation-end event.
- * @private
- */
-SlideMode.prototype.onChromeVoxNavigationEnd_ = function() {
-  this.dimmableUIController_.setDisabled(false);
-};
 
 /**
  * Handles exit-clicked event.
@@ -1323,6 +1334,7 @@ SlideMode.OVERWRITE_BUBBLE_MAX_TIMES = 5;
 
 /**
  * Handles change event of overwrite original checkbox.
+ * @private
  */
 SlideMode.prototype.onOverwriteOriginalCheckboxChanged_ = function() {
   var items = {};
@@ -1415,6 +1427,8 @@ SlideMode.prototype.startSlideshow = function(opt_interval, opt_event) {
   this.dimmableUIController_.setCursorOutOfTools();
 
   this.resumeSlideshow_(opt_interval);
+
+  this.setSubMode_(Gallery.SubMode.SLIDESHOW);
 };
 
 /**
@@ -1446,6 +1460,8 @@ SlideMode.prototype.stopSlideshow_ = function(opt_event) {
 
   // Re-enable touch operation.
   this.touchHandlers_.enabled = true;
+
+  this.setSubMode_(Gallery.SubMode.BROWSE);
 };
 
 /**
@@ -1524,6 +1540,30 @@ SlideMode.prototype.stopEditing_ = function() {
 };
 
 /**
+ * Sets current sub mode.
+ * @param {Gallery.SubMode} subMode
+ * @private
+ */
+SlideMode.prototype.setSubMode_ = function(subMode) {
+  if (this.subMode_ === subMode)
+    return;
+
+  this.subMode_ = subMode;
+
+  var event = new Event('sub-mode-change');
+  event.subMode = this.subMode_;
+  this.dispatchEvent(event);
+};
+
+/**
+ * Returns current sub mode.
+ * @return {Gallery.SubMode}
+ */
+SlideMode.prototype.getSubMode = function() {
+  return this.subMode_;
+};
+
+/**
  * Activate/deactivate editor.
  * @param {Event=} opt_event Event.
  */
@@ -1551,25 +1591,19 @@ SlideMode.prototype.toggleEditor = function(opt_event) {
 
     this.imageView_.applyViewportChange();
 
-    // TODO(yawano): Integarate this warning message to the non writable format
-    //     warning message.
-    if (this.context_.readonlyDirName) {
-      this.editor_.getPrompt().showAt(
-          'top', 'GALLERY_READONLY_WARNING', 0, this.context_.readonlyDirName);
-    } else {
-      // If image format is not writable format, show toast to let user know
-      // that edits will be saved to a copy.
-      var item = this.getItem(this.getSelectedIndex());
-      if (!item.isWritableFormat()) {
-        item.getCopyName().then(function(copyName) {
-          this.filesToast_.show(
-              strf('GALLERY_NON_WRITABLE_FORMAT_WARNING', copyName));
-        }.bind(this));
-      }
-    }
-
     this.touchHandlers_.enabled = false;
-    this.dimmableUIController_.setDisabled(true);
+
+    // Show editor warning message.
+    SlideMode.getEditorWarningMessage(
+        assert(this.getItem(this.getSelectedIndex())),
+        this.context_.readonlyDirName,
+        assert(this.dataModel_.fallbackSaveDirectory)
+        ).then(function(warningMessage) {
+      if (!warningMessage)
+        return;
+
+      this.filesToast_.show(warningMessage);
+    }.bind(this));
 
     // Show overwrite original bubble if it hasn't been shown for max times.
     this.getOverwriteBubbleCount_().then(function(count) {
@@ -1579,9 +1613,11 @@ SlideMode.prototype.toggleEditor = function(opt_event) {
       this.setOverwriteBubbleCount_(count + 1);
       this.bubble_.hidden = false;
     }.bind(this));
+
+    this.setSubMode_(Gallery.SubMode.EDIT);
   } else {
     this.editor_.getPrompt().hide();
-    this.editor_.leaveModeGently();
+    this.editor_.leaveMode(false /* not to switch mode */);
 
     this.viewport_.setScreenTop(0);
     this.viewport_.setScreenBottom(0);
@@ -1590,7 +1626,8 @@ SlideMode.prototype.toggleEditor = function(opt_event) {
     this.bubble_.hidden = true;
 
     this.touchHandlers_.enabled = true;
-    this.dimmableUIController_.setDisabled(false);
+
+    this.setSubMode_(Gallery.SubMode.BROWSE);
   }
 };
 

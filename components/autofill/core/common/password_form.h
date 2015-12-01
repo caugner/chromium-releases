@@ -53,12 +53,14 @@ struct PasswordForm {
   // Enum to differentiate between HTML form based authentication, and dialogs
   // using basic or digest schemes. Default is SCHEME_HTML. Only PasswordForms
   // of the same Scheme will be matched/autofilled against each other.
-  enum Scheme {
+  enum Scheme : int {
     SCHEME_HTML,
     SCHEME_BASIC,
     SCHEME_DIGEST,
     SCHEME_OTHER,
-    SCHEME_LAST = SCHEME_OTHER
+    SCHEME_USERNAME_ONLY,
+
+    SCHEME_LAST = SCHEME_USERNAME_ONLY
   } scheme;
 
   // During form parsing, Chrome tries to partly understand the type of the form
@@ -83,24 +85,6 @@ struct PasswordForm {
   // The signon_realm is effectively the primary key used for retrieving
   // data from the database, so it must not be empty.
   std::string signon_realm;
-
-  // The original "Realm" for the sign-on (scheme, host, port for SCHEME_HTML,
-  // and contains the HTTP realm for dialog-based forms). This realm is only set
-  // when two PasswordForms are matched when trying to find a login/pass pair
-  // for a site. It is only set to a non-empty value during a match of the
-  // original stored login/pass and the current observed form if all these
-  // statements are true:
-  // 1) The full signon_realm is not the same.
-  // 2) The registry controlled domain is the same. For example; example.com,
-  // m.example.com, foo.login.example.com and www.example.com would all resolve
-  // to example.com since .com is the public suffix.
-  // 3) The scheme is the same.
-  // 4) The port is the same.
-  // For example, if there exists a stored password for http://www.example.com
-  // (where .com is the public suffix) and the observed form is
-  // http://m.example.com, |original_signon_realm| must be set to
-  // http://www.example.com.
-  std::string original_signon_realm;
 
   // An origin URL consists of the scheme, host, port and path; the rest is
   // stripped. This is the primary data used by the PasswordManager to decide
@@ -166,12 +150,20 @@ struct PasswordForm {
   // When parsing an HTML form, this is typically empty.
   base::string16 password_value;
 
+  // Whether the password value is the same as specified in the "value"
+  // attribute of the input element. Only used in the renderer.
+  bool password_value_is_default;
+
   // If the form was a sign-up or a change password form, the name of the input
   // element corresponding to the new password. Optional, and not persisted.
   base::string16 new_password_element;
 
   // The new password. Optional, and not persisted.
   base::string16 new_password_value;
+
+  // Whether the password value is the same as specified in the "value"
+  // attribute of the input element. Only used in the renderer.
+  bool new_password_value_is_default;
 
   // Whether the |new_password_element| has an autocomplete=new-password
   // attribute. This is only used in parsed HTML forms.
@@ -271,8 +263,12 @@ struct PasswordForm {
   // TODO(vabr): Remove |is_alive| once http://crbug.com/486931 is fixed.
   bool is_alive;  // Set on construction, reset on destruction.
 
-  // Returns true if this match was found using public suffix matching.
-  bool IsPublicSuffixMatch() const;
+  // If true, this match was found using public suffix matching.
+  bool is_public_suffix_match;
+
+  // If true, this is a credential saved through an Android application, and
+  // found using affiliation-based match.
+  bool is_affiliation_based_match;
 
   // Return true if we consider this form to be a change password form.
   // We use only client heuristics, so it could include signup forms.

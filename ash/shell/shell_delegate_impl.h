@@ -39,6 +39,7 @@ class ShellDelegateImpl : public ash::ShellDelegate {
   bool IsMultiProfilesEnabled() const override;
   bool IsRunningInForcedAppMode() const override;
   bool IsMultiAccountEnabled() const override;
+  bool CanShowWindowForUser(aura::Window* window) const override;
   bool IsForceMaximizeOnFirstRun() const override;
   void PreInit() override;
   void PreShutdown() override;
@@ -63,6 +64,7 @@ class ShellDelegateImpl : public ash::ShellDelegate {
                                    ash::ShelfItem* item) override;
   GPUSupport* CreateGPUSupport() override;
   base::string16 GetProductName() const override;
+  gfx::Image GetDeprecatedAcceleratorImage() const override;
 
  private:
   // Used to update Launcher. Owned by main.

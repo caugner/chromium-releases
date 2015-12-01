@@ -15,6 +15,7 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_log.h"
+#include "media/base/timestamp_constants.h"
 #include "media/blink/webmediaplayer_util.h"
 #include "media/blink/webmediasource_impl.h"
 #include "media/filters/chunk_demuxer.h"
@@ -735,8 +736,7 @@ bool MediaSourceDelegate::GetDemuxerConfigFromStream(
         media::ChannelLayoutToChannelCount(config.channel_layout());
     configs->audio_sampling_rate = config.samples_per_second();
     configs->is_audio_encrypted = config.is_encrypted();
-    configs->audio_extra_data = std::vector<uint8>(
-        config.extra_data(), config.extra_data() + config.extra_data_size());
+    configs->audio_extra_data = config.extra_data();
     configs->audio_codec_delay_ns = static_cast<int64_t>(
         config.codec_delay()  *
         (static_cast<double>(base::Time::kNanosecondsPerSecond) /
@@ -751,8 +751,7 @@ bool MediaSourceDelegate::GetDemuxerConfigFromStream(
     configs->video_codec = config.codec();
     configs->video_size = config.natural_size();
     configs->is_video_encrypted = config.is_encrypted();
-    configs->video_extra_data = std::vector<uint8>(
-        config.extra_data(), config.extra_data() + config.extra_data_size());
+    configs->video_extra_data = config.extra_data();
     return true;
   }
   return false;

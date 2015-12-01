@@ -5,11 +5,14 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -18,7 +21,6 @@
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
 #include "chrome/common/chrome_switches.h"
@@ -54,6 +56,22 @@ using content_settings::SETTING_SOURCE_NONE;
 namespace {
 
 const int kAllowButtonIndex = 0;
+
+// static
+const ContentSettingsType kSupportedBubbleTypes[] = {
+    CONTENT_SETTINGS_TYPE_COOKIES,
+    CONTENT_SETTINGS_TYPE_IMAGES,
+    CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+    CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
+    CONTENT_SETTINGS_TYPE_PLUGINS,
+    CONTENT_SETTINGS_TYPE_POPUPS,
+    CONTENT_SETTINGS_TYPE_GEOLOCATION,
+    CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
+    CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS,
+    CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+    CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+    CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+};
 
 // These states must match the order of appearance of the radio buttons
 // in the XIB file for the Mac port.
@@ -359,7 +377,8 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
         url, url, true, &setting_source);
   } else {
     SettingInfo info;
-    HostContentSettingsMap* map = profile()->GetHostContentSettingsMap();
+    HostContentSettingsMap* map =
+        HostContentSettingsMapFactory::GetForProfile(profile());
     scoped_ptr<base::Value> value =
         map->GetWebsiteSetting(url, url, content_type(), std::string(), &info);
     setting = content_settings::ValueToContentSetting(value.get());
@@ -397,7 +416,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
 
 void ContentSettingSingleRadioGroup::AddException(ContentSetting setting) {
   if (profile()) {
-    profile()->GetHostContentSettingsMap()->AddExceptionForURL(
+    HostContentSettingsMapFactory::GetForProfile(profile())->AddExceptionForURL(
         bubble_content().radio_group.url,
         bubble_content().radio_group.url,
         content_type(),
@@ -784,7 +803,7 @@ void ContentSettingMediaStreamBubbleModel::UpdateSettings(
     ContentSetting setting) {
   if (profile()) {
     HostContentSettingsMap* content_settings =
-        profile()->GetHostContentSettingsMap();
+        HostContentSettingsMapFactory::GetForProfile(profile());
     TabSpecificContentSettings* tab_content_settings =
         TabSpecificContentSettings::FromWebContents(web_contents());
     // The same patterns must be used as in other places (e.g. the infobar) in
@@ -998,7 +1017,7 @@ void ContentSettingDomainListBubbleModel::OnCustomLinkClicked() {
   const ContentSettingsUsagesState::StateMap& state_map =
       content_settings->geolocation_usages_state().state_map();
   HostContentSettingsMap* settings_map =
-      profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(profile());
 
   for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
     settings_map->SetContentSetting(
@@ -1252,7 +1271,7 @@ void ContentSettingMidiSysExBubbleModel::OnCustomLinkClicked() {
   const ContentSettingsUsagesState::StateMap& state_map =
       content_settings->midi_usages_state().state_map();
   HostContentSettingsMap* settings_map =
-      profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(profile());
 
   for (const std::pair<GURL, ContentSetting>& map_entry : state_map) {
     settings_map->SetContentSetting(
@@ -1264,12 +1283,23 @@ void ContentSettingMidiSysExBubbleModel::OnCustomLinkClicked() {
 }
 
 // static
+const std::set<ContentSettingsType>&
+ContentSettingBubbleModel::GetSupportedBubbleTypes() {
+  CR_DEFINE_STATIC_LOCAL(
+      const std::set<ContentSettingsType>, supported_bubble_types,
+      (kSupportedBubbleTypes,
+       kSupportedBubbleTypes + arraysize(kSupportedBubbleTypes)));
+  return supported_bubble_types;
+}
+
+// static
 ContentSettingBubbleModel*
     ContentSettingBubbleModel::CreateContentSettingBubbleModel(
         Delegate* delegate,
         WebContents* web_contents,
         Profile* profile,
         ContentSettingsType content_type) {
+  DCHECK(ContainsKey(GetSupportedBubbleTypes(), content_type));
   if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
     return new ContentSettingCookiesBubbleModel(delegate, web_contents,
                                                 profile);

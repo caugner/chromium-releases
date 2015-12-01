@@ -18,6 +18,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLeakDetector.h"
 
 struct ViewMsg_Resize_Params;
 
@@ -45,7 +46,7 @@ class RendererMainPlatformDelegate;
 class RendererBlinkPlatformImplNoSandboxImpl;
 class RenderView;
 
-class RenderViewTest : public testing::Test {
+class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
  public:
   // A special BlinkPlatformImpl class for getting rid off the dependency to the
   // sandbox, which is not available in RenderViewTest.
@@ -54,7 +55,7 @@ class RenderViewTest : public testing::Test {
     RendererBlinkPlatformImplNoSandbox();
     ~RendererBlinkPlatformImplNoSandbox();
     blink::Platform* Get() const;
-    scheduler::RendererScheduler* Scheduler() const;
+    void Shutdown();
 
    private:
     scoped_ptr<scheduler::RendererScheduler> renderer_scheduler_;
@@ -171,6 +172,9 @@ class RenderViewTest : public testing::Test {
   void SetUp() override;
 
   void TearDown() override;
+
+  // blink::WebLeakDetectorClient implementation.
+  void onLeakDetectionComplete(const Result& result) override;
 
   base::MessageLoop msg_loop_;
   scoped_ptr<FakeCompositorDependencies> compositor_deps_;

@@ -206,7 +206,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             } else {
                 Log.w(TAG, msg);
                 TextView warningLabel = new TextView(mContext);
-                warningLabel.setText(mContext.getString(R.string.private_browsing_warning));
+                warningLabel.setText(mContext.getString(
+                        org.chromium.android_webview.R.string.private_browsing_warning));
                 mWebView.addView(warningLabel);
             }
         }
@@ -256,6 +257,9 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     private void initForReal() {
+        AwContentsStatics.setRecordFullDocument(sRecordWholeDocumentEnabledByApi
+                || mAppTargetSdkVersion < Build.VERSION_CODES.LOLLIPOP);
+
         mAwContents = new AwContents(mFactory.getBrowserContext(), mWebView, mContext,
                 new InternalAccessAdapter(), new WebViewNativeGLDelegate(), mContentsClientAdapter,
                 mWebSettings.getAwSettings());
@@ -265,9 +269,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             // old apps use to enable that behavior is deprecated.
             AwContents.setShouldDownloadFavicons();
         }
-
-        AwContentsStatics.setRecordFullDocument(sRecordWholeDocumentEnabledByApi
-                || mAppTargetSdkVersion < Build.VERSION_CODES.LOLLIPOP);
 
         if (mAppTargetSdkVersion < Build.VERSION_CODES.LOLLIPOP) {
             // Prior to Lollipop, JavaScript objects injected via addJavascriptInterface

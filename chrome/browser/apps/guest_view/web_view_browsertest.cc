@@ -14,6 +14,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/pdf/pdf_extension_test_util.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
@@ -37,6 +38,7 @@
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_switches.h"
@@ -62,6 +64,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/events/event_switches.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/views/view.h"
@@ -910,6 +913,15 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAPIMethodExistence) {
 // object, on the webview element, and hanging directly off webview.
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIExistence) {
   TestHelper("testWebRequestAPIExistence", "web_view/shim", NO_TEST_SERVER);
+}
+
+// Tests that addListener call succeeds on webview's WebRequest API events.
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIAddListener) {
+  TestHelper("testWebRequestAPIAddListener", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIErrorOccurred) {
+  TestHelper("testWebRequestAPIErrorOccurred", "web_view/shim", NO_TEST_SERVER);
 }
 
 // http://crbug.com/315920
@@ -2429,8 +2441,9 @@ IN_PROC_BROWSER_TEST_F(WebViewCaptureTest,
 // Tests that browser process does not crash when loading plugin inside
 // <webview> with content settings set to CONTENT_SETTING_BLOCK.
 IN_PROC_BROWSER_TEST_F(WebViewTest, TestPlugin) {
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+    ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                               CONTENT_SETTING_BLOCK);
   TestHelper("testPlugin", "web_view/shim", NEEDS_TEST_SERVER);
 }
 
@@ -2516,6 +2529,223 @@ IN_PROC_BROWSER_TEST_F(WebViewTest,
                        Shim_TestRendererNavigationRedirectWhileUnattached) {
   TestHelper("testRendererNavigationRedirectWhileUnattached",
              "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+// Tests that a WebView accessible resource can actually be loaded from a
+// webpage in a WebView.
+IN_PROC_BROWSER_TEST_F(WebViewTest, LoadWebviewAccessibleResource) {
+  TestHelper("testLoadWebviewAccessibleResource",
+             "web_view/load_webview_accessible_resource", NEEDS_TEST_SERVER);
+}
+
+class WebViewGuestScrollTest : public WebViewTest,
+                               public ::testing::WithParamInterface<bool> {
+ protected:
+  WebViewGuestScrollTest() {}
+  ~WebViewGuestScrollTest() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(WebViewGuestScrollTest);
+};
+
+class WebViewGuestScrollTouchTest : public WebViewGuestScrollTest {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(switches::kTouchEvents,
+                                    switches::kTouchEventsEnabled);
+
+    WebViewTest::SetUpCommandLine(command_line);
+  }
+};
+
+namespace {
+
+class ScrollWaiter {
+ public:
+  explicit ScrollWaiter(content::RenderWidgetHostView* host_view)
+      : host_view_(host_view) {}
+  ~ScrollWaiter() {}
+
+  void WaitForScrollChange(gfx::Vector2dF target_offset) {
+    while (target_offset != host_view_->GetLastScrollOffset())
+      base::MessageLoop::current()->RunUntilIdle();
+  }
+
+ private:
+  content::RenderWidgetHostView* host_view_;
+};
+
+}  // namespace
+
+// Tests that scrolls bubble from guest to embedder.
+// Create two test instances, one where the guest body is scrollable and the
+// other where the body is not scrollable: fast-path scrolling will generate
+// different ack results in between these two cases.
+INSTANTIATE_TEST_CASE_P(WebViewScrollBubbling,
+                        WebViewGuestScrollTest,
+                        ::testing::Bool());
+
+IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest, TestGuestWheelScrollsBubble) {
+  LoadAppWithGuest("web_view/scrollable_embedder_and_guest");
+
+  if (GetParam())
+    SendMessageToGuestAndWait("set_overflow_hidden", "overflow_is_hidden");
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+
+  std::vector<content::WebContents*> guest_web_contents_list;
+  GetGuestViewManager()->WaitForNumGuestsCreated(1u);
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_web_contents_list);
+  ASSERT_EQ(1u, guest_web_contents_list.size());
+
+  content::WebContents* guest_contents = guest_web_contents_list[0];
+
+  gfx::Rect embedder_rect = embedder_contents->GetContainerBounds();
+  gfx::Rect guest_rect = guest_contents->GetContainerBounds();
+
+  guest_rect.set_x(guest_rect.x() - embedder_rect.x());
+  guest_rect.set_y(guest_rect.y() - embedder_rect.y());
+  embedder_rect.set_x(0);
+  embedder_rect.set_y(0);
+
+  // Send scroll gesture to embedder & verify.
+  content::RenderWidgetHostView* embedder_host_view =
+      embedder_contents->GetRenderWidgetHostView();
+  EXPECT_EQ(gfx::Vector2dF(), embedder_host_view->GetLastScrollOffset());
+
+  // Make sure wheel events don't get filtered.
+  float scroll_magnitude = 15.f;
+
+  {
+    // Scroll the embedder from a position in the embedder that is not over
+    // the guest.
+    gfx::Point embedder_scroll_location(
+        embedder_rect.x() + embedder_rect.width() / 2,
+        (embedder_rect.y() + guest_rect.y()) / 2);
+
+    gfx::Vector2dF expected_offset(0.f, scroll_magnitude);
+
+    ScrollWaiter waiter(embedder_host_view);
+
+    content::SimulateMouseEvent(embedder_contents,
+                                blink::WebInputEvent::MouseMove,
+                                embedder_scroll_location);
+    content::SimulateMouseWheelEvent(embedder_contents,
+                                     embedder_scroll_location,
+                                     gfx::Vector2d(0, -scroll_magnitude));
+    waiter.WaitForScrollChange(expected_offset);
+  }
+
+  content::RenderWidgetHostView* guest_host_view =
+      guest_contents->GetRenderWidgetHostView();
+  EXPECT_EQ(gfx::Vector2dF(), guest_host_view->GetLastScrollOffset());
+
+  // Send scroll gesture to guest and verify embedder scrolls.
+  // Perform a scroll gesture of the same magnitude, but in the opposite
+  // direction and centered over the GuestView this time.
+  guest_rect = guest_contents->GetContainerBounds();
+  embedder_rect = embedder_contents->GetContainerBounds();
+  guest_rect.set_x(guest_rect.x() - embedder_rect.x());
+  guest_rect.set_y(guest_rect.y() - embedder_rect.y());
+  {
+    gfx::Point guest_scroll_location(guest_rect.x() + guest_rect.width() / 2,
+                                     guest_rect.y());
+    ScrollWaiter waiter(embedder_host_view);
+
+    content::SimulateMouseEvent(embedder_contents,
+                                blink::WebInputEvent::MouseMove,
+                                guest_scroll_location);
+    content::SimulateMouseWheelEvent(embedder_contents, guest_scroll_location,
+                                     gfx::Vector2d(0, scroll_magnitude));
+
+    waiter.WaitForScrollChange(gfx::Vector2dF());
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(WebViewScrollBubbling,
+                        WebViewGuestScrollTouchTest,
+                        ::testing::Bool());
+
+IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTouchTest,
+                       TestGuestGestureScrollsBubble) {
+  // Just in case we're running ChromeOS tests, we need to make sure the
+  // debounce interval is set to zero so our back-to-back gesture-scrolls don't
+  // get munged together. Since the first scroll will be put on the fast
+  // (compositor) path, while the second one should always be slow-path so it
+  // gets to BrowserPlugin, having them merged is definitely an error.
+  ui::GestureConfiguration* gesture_config =
+      ui::GestureConfiguration::GetInstance();
+  gesture_config->set_scroll_debounce_interval_in_ms(0);
+
+  LoadAppWithGuest("web_view/scrollable_embedder_and_guest");
+
+  if (GetParam())
+    SendMessageToGuestAndWait("set_overflow_hidden", "overflow_is_hidden");
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+
+  std::vector<content::WebContents*> guest_web_contents_list;
+  GetGuestViewManager()->WaitForNumGuestsCreated(1u);
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_web_contents_list);
+  ASSERT_EQ(1u, guest_web_contents_list.size());
+
+  content::WebContents* guest_contents = guest_web_contents_list[0];
+
+  gfx::Rect embedder_rect = embedder_contents->GetContainerBounds();
+  gfx::Rect guest_rect = guest_contents->GetContainerBounds();
+
+  guest_rect.set_x(guest_rect.x() - embedder_rect.x());
+  guest_rect.set_y(guest_rect.y() - embedder_rect.y());
+  embedder_rect.set_x(0);
+  embedder_rect.set_y(0);
+
+  // Send scroll gesture to embedder & verify.
+  content::RenderWidgetHostView* embedder_host_view =
+      embedder_contents->GetRenderWidgetHostView();
+  EXPECT_EQ(gfx::Vector2dF(), embedder_host_view->GetLastScrollOffset());
+
+  float gesture_distance = 15.f;
+  {
+    // Scroll the embedder from a position in the embedder that is not over
+    // the guest.
+    gfx::Point embedder_scroll_location(
+        embedder_rect.x() + embedder_rect.width() / 2,
+        (embedder_rect.y() + guest_rect.y()) / 2);
+
+    gfx::Vector2dF expected_offset(0.f, gesture_distance);
+
+    content::SimulateGestureScrollSequence(
+        embedder_contents, embedder_scroll_location,
+        gfx::Vector2dF(0, -gesture_distance));
+
+    ScrollWaiter waiter(embedder_host_view);
+
+    waiter.WaitForScrollChange(expected_offset);
+  }
+
+  content::RenderWidgetHostView* guest_host_view =
+      guest_contents->GetRenderWidgetHostView();
+  EXPECT_EQ(gfx::Vector2dF(), guest_host_view->GetLastScrollOffset());
+
+  // Send scroll gesture to guest and verify embedder scrolls.
+  // Perform a scroll gesture of the same magnitude, but in the opposite
+  // direction and centered over the GuestView this time.
+  guest_rect = guest_contents->GetContainerBounds();
+  embedder_rect = embedder_contents->GetContainerBounds();
+  guest_rect.set_x(guest_rect.x() - embedder_rect.x());
+  guest_rect.set_y(guest_rect.y() - embedder_rect.y());
+  {
+    gfx::Point guest_scroll_location(guest_rect.x() + guest_rect.width() / 2,
+                                     guest_rect.y());
+
+    ScrollWaiter waiter(embedder_host_view);
+
+    content::SimulateGestureScrollSequence(embedder_contents,
+                                           guest_scroll_location,
+                                           gfx::Vector2dF(0, gesture_distance));
+
+    waiter.WaitForScrollChange(gfx::Vector2dF());
+  }
 }
 
 #if defined(USE_AURA)
@@ -2674,6 +2904,23 @@ const std::vector<task_management::WebContentsTag*>& GetTrackedTags() {
       tracked_tags();
 }
 
+bool HasExpectedGuestTask(
+    const task_management::MockWebContentsTaskManager& task_manager,
+    content::WebContents* guest_contents) {
+  bool found = false;
+  for (auto* task: task_manager.tasks()) {
+    if (task->GetType() != task_management::Task::GUEST)
+      continue;
+    EXPECT_FALSE(found);
+    found = true;
+    const base::string16 title = task->title();
+    const base::string16 expected_prefix = GetExpectedPrefix(guest_contents);
+    EXPECT_TRUE(base::StartsWith(title, expected_prefix,
+                                 base::CompareCase::INSENSITIVE_ASCII));
+  }
+  return found;
+}
+
 }  // namespace
 
 // Tests that the pre-existing WebViews are provided to the task manager.
@@ -2691,20 +2938,13 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagementPreExistingWebViews) {
   task_manager.StartObserving();
 
   // The pre-existing tab and guest tasks are provided.
-  // 4 tasks expected in the following order:
+  // 4 tasks expected. The order is arbitrary.
   // Tab: about:blank,
   // Background Page: <webview> task manager test,
   // App: <webview> task manager test,
   // Webview: WebViewed test content.
   EXPECT_EQ(4U, task_manager.tasks().size());
-
-  const task_management::Task* task = task_manager.tasks().back();
-  EXPECT_EQ(task_management::Task::GUEST, task->GetType());
-  const base::string16 title = task->title();
-  const base::string16 expected_prefix = GetExpectedPrefix(guest_contents);
-  EXPECT_TRUE(base::StartsWith(title,
-                               expected_prefix,
-                               base::CompareCase::INSENSITIVE_ASCII));
+  EXPECT_TRUE(HasExpectedGuestTask(task_manager, guest_contents));
 }
 
 // Tests that the post-existing WebViews are provided to the task manager.
@@ -2727,20 +2967,13 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagementPostExistingWebViews) {
   content::WebContents* guest_contents =
       LoadGuest("/extensions/platform_apps/web_view/task_manager/guest.html",
                 "web_view/task_manager");
-  // 4 tasks expected in the following order:
+  // 4 tasks expected. The order is arbitrary.
   // Tab: about:blank,
   // Background Page: <webview> task manager test,
   // App: <webview> task manager test,
   // Webview: WebViewed test content.
   EXPECT_EQ(4U, task_manager.tasks().size());
-
-  const task_management::Task* task = task_manager.tasks().back();
-  EXPECT_EQ(task_management::Task::GUEST, task->GetType());
-  const base::string16 title = task->title();
-  const base::string16 expected_prefix = GetExpectedPrefix(guest_contents);
-  EXPECT_TRUE(base::StartsWith(title,
-                               expected_prefix,
-                               base::CompareCase::INSENSITIVE_ASCII));
+  EXPECT_TRUE(HasExpectedGuestTask(task_manager, guest_contents));
 }
 
 #endif  // defined(ENABLE_TASK_MANAGER)

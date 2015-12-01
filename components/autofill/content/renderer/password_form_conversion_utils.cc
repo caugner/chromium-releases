@@ -4,32 +4,55 @@
 
 #include "components/autofill/content/renderer/password_form_conversion_utils.h"
 
-#include <vector>
+#include <string>
 
 #include "base/i18n/case_conversion.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
 
 using blink::WebDocument;
 using blink::WebFormControlElement;
 using blink::WebFormElement;
+using blink::WebFrame;
 using blink::WebInputElement;
 using blink::WebString;
-using blink::WebVector;
 
 namespace autofill {
 namespace {
+
+// PasswordForms can be constructed for both WebFormElements and for collections
+// of WebInputElements that are not in a WebFormElement. This intermediate
+// aggregating structure is provided so GetPasswordForm() only has one
+// view of the underlying data, regardless of its origin.
+struct SyntheticForm {
+  SyntheticForm();
+  ~SyntheticForm();
+
+  std::vector<blink::WebElement> fieldsets;
+  std::vector<blink::WebFormControlElement> control_elements;
+  blink::WebDocument document;
+  blink::WebString action;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SyntheticForm);
+};
+
+SyntheticForm::SyntheticForm() {}
+SyntheticForm::~SyntheticForm() {}
 
 // Layout classification of password forms
 // A layout sequence of a form is the sequence of it's non-password and password
@@ -106,13 +129,19 @@ PasswordForm::Layout SequenceToLayout(base::StringPiece layout_sequence) {
   return PasswordForm::Layout::LAYOUT_OTHER;
 }
 
-// Checks in a case-insensitive way if the autocomplete attribute for the given
-// |element| is present and has the specified |value_in_lowercase|.
-bool HasAutocompleteAttributeValue(const WebInputElement& element,
-                                   const char* value_in_lowercase) {
-  return base::LowerCaseEqualsASCII(
-      base::StringPiece16(element.getAttribute("autocomplete")),
-      value_in_lowercase);
+void PopulateSyntheticFormFromWebForm(const WebFormElement& web_form,
+                                      SyntheticForm* synthetic_form) {
+  // TODO(vabr): The fact that we are actually passing all form fields, not just
+  // autofillable ones (cause of http://crbug.com/537396, see also
+  // http://crbug.com/543006) is not tested yet, due to difficulties to fake
+  // test frame origin to match GAIA login page. Once this code gets moved to
+  // browser, we need to add tests for this as well.
+  blink::WebVector<blink::WebFormControlElement> web_control_elements;
+  web_form.getFormControlElements(web_control_elements);
+  synthetic_form->control_elements.assign(web_control_elements.begin(),
+                                          web_control_elements.end());
+  synthetic_form->action = web_form.action();
+  synthetic_form->document = web_form.document();
 }
 
 // Helper to determine which password is the main (current) one, and which is
@@ -214,22 +243,16 @@ bool MapContainsPrediction(
 }
 
 void FindPredictedElements(
-    const WebFormElement& form,
-    const std::map<FormData, PasswordFormFieldPredictionMap>& form_predictions,
-    WebVector<WebFormControlElement>* control_elements,
+    const SyntheticForm& form,
+    const FormData& form_data,
+    const FormsPredictionsMap& form_predictions,
     std::map<WebInputElement, PasswordFormFieldPredictionType>*
         predicted_elements) {
-  FormData form_data;
-  if (!WebFormElementToFormData(form, WebFormControlElement(), EXTRACT_NONE,
-                                &form_data, nullptr)) {
-    return;
-  }
-
   // Matching only requires that action and name of the form match to allow
   // the username to be updated even if the form is changed after page load.
   // See https://crbug.com/476092 for more details.
   auto predictions_iterator = form_predictions.begin();
-  for (;predictions_iterator != form_predictions.end();
+  for (; predictions_iterator != form_predictions.end();
        ++predictions_iterator) {
     if (predictions_iterator->first.action == form_data.action &&
         predictions_iterator->first.name == form_data.name) {
@@ -241,7 +264,7 @@ void FindPredictedElements(
     return;
 
   std::vector<blink::WebFormControlElement> autofillable_elements =
-      ExtractAutofillableElementsFromSet(*control_elements);
+      form_util::ExtractAutofillableElementsFromSet(form.control_elements);
 
   const PasswordFormFieldPredictionMap& field_predictions =
       predictions_iterator->second;
@@ -253,7 +276,7 @@ void FindPredictedElements(
 
     for (size_t i = 0; i < autofillable_elements.size(); ++i) {
       if (autofillable_elements[i].nameForAutofill() == target_field.name) {
-        WebInputElement* input_element =
+        const WebInputElement* input_element =
             toWebInputElement(&autofillable_elements[i]);
         // TODO(sebsg): Investigate why this guard is necessary, see
         // https://crbug.com/517490 for more details.
@@ -280,47 +303,46 @@ struct PasswordSiteUrlLazyInstanceTraits
 base::LazyInstance<icu::RegexMatcher, PasswordSiteUrlLazyInstanceTraits>
     password_site_matcher = LAZY_INSTANCE_INITIALIZER;
 
+// Returns the |input_field| name if its non-empty; otherwise a |dummy_name|.
+base::string16 FieldName(const WebInputElement& input_field,
+                         const char dummy_name[]) {
+  base::string16 field_name = input_field.nameForAutofill();
+  return field_name.empty() ? base::ASCIIToUTF16(dummy_name) : field_name;
+}
+
 // Get information about a login form encapsulated in a PasswordForm struct.
 // If an element of |form| has an entry in |nonscript_modified_values|, the
 // associated string is used instead of the element's value to create
 // the PasswordForm.
-void GetPasswordForm(
-    const WebFormElement& form,
-    PasswordForm* password_form,
-    const std::map<const blink::WebInputElement, blink::WebString>*
-        nonscript_modified_values,
-    const std::map<FormData, PasswordFormFieldPredictionMap>*
-        form_predictions) {
+bool GetPasswordForm(const SyntheticForm& form,
+                     PasswordForm* password_form,
+                     const ModifiedValues* nonscript_modified_values,
+                     const FormsPredictionsMap* form_predictions) {
   WebInputElement latest_input_element;
   WebInputElement username_element;
   password_form->username_marked_by_site = false;
   std::vector<WebInputElement> passwords;
   std::vector<base::string16> other_possible_usernames;
 
-  WebVector<WebFormControlElement> control_elements;
-  form.getFormControlElements(control_elements);
-
   // Bail if this is a GAIA passwords site reauthentication form, so that
   // the form will be ignored.
   // TODO(msramek): Move this logic to the browser, and disable filling only
   // for the sync credential and if passwords are being synced.
-  if (IsGaiaReauthenticationForm(
-          GURL(form.document().url()).GetOrigin(), control_elements)) {
-    return;
+  if (IsGaiaReauthenticationForm(GURL(form.document.url()).GetOrigin(),
+                                 form.control_elements)) {
+    return false;
   }
 
   std::map<WebInputElement, PasswordFormFieldPredictionType> predicted_elements;
   if (form_predictions) {
-    FindPredictedElements(form, *form_predictions, &control_elements,
+    FindPredictedElements(form, password_form->form_data, *form_predictions,
                           &predicted_elements);
   }
 
   std::string layout_sequence;
-  layout_sequence.reserve(control_elements.size());
-  for (size_t i = 0; i < control_elements.size(); ++i) {
-    WebFormControlElement control_element = control_elements[i];
-    if (control_element.isActivatedSubmit())
-      password_form->submit_element = control_element.formControlName();
+  layout_sequence.reserve(form.control_elements.size());
+  for (size_t i = 0; i < form.control_elements.size(); ++i) {
+    WebFormControlElement control_element = form.control_elements[i];
 
     WebInputElement* input_element = toWebInputElement(&control_element);
     if (!input_element || !input_element->isEnabled())
@@ -448,7 +470,8 @@ void GetPasswordForm(
   }
 
   if (!username_element.isNull()) {
-    password_form->username_element = username_element.nameForAutofill();
+    password_form->username_element =
+        FieldName(username_element, "anonymous_username");
     base::string16 username_value = username_element.value();
     if (nonscript_modified_values != nullptr) {
       auto username_iterator =
@@ -472,13 +495,10 @@ void GetPasswordForm(
   WebInputElement password;
   WebInputElement new_password;
   if (!LocateSpecificPasswords(passwords, &password, &new_password))
-    return;
+    return false;
 
-  password_form->action = GetCanonicalActionForForm(form);
-  if (!password_form->action.is_valid())
-    return;
-
-  password_form->origin = GetCanonicalOriginForDocument(form.document());
+  password_form->origin =
+      form_util::GetCanonicalOriginForDocument(form.document);
   GURL::Replacements rep;
   rep.SetPathStr("");
   password_form->signon_realm =
@@ -486,7 +506,7 @@ void GetPasswordForm(
   password_form->other_possible_usernames.swap(other_possible_usernames);
 
   if (!password.isNull()) {
-    password_form->password_element = password.nameForAutofill();
+    password_form->password_element = FieldName(password, "anonymous_password");
     blink::WebString password_value = password.value();
     if (nonscript_modified_values != nullptr) {
       auto password_iterator = nonscript_modified_values->find(password);
@@ -496,8 +516,11 @@ void GetPasswordForm(
     password_form->password_value = password_value;
   }
   if (!new_password.isNull()) {
-    password_form->new_password_element = new_password.nameForAutofill();
+    password_form->new_password_element =
+        FieldName(new_password, "anonymous_new_password");
     password_form->new_password_value = new_password.value();
+    password_form->new_password_value_is_default =
+        new_password.getAttribute("value") == new_password.value();
     if (HasAutocompleteAttributeValue(new_password, kAutocompleteNewPassword))
       password_form->new_password_marked_by_site = true;
   }
@@ -519,37 +542,15 @@ void GetPasswordForm(
   password_form->preferred = false;
   password_form->blacklisted_by_user = false;
   password_form->type = PasswordForm::TYPE_MANUAL;
-}
 
-GURL StripAuthAndParams(const GURL& gurl) {
-  // We want to keep the path but strip any authentication data, as well as
-  // query and ref portions of URL, for the form action and form origin.
-  GURL::Replacements rep;
-  rep.ClearUsername();
-  rep.ClearPassword();
-  rep.ClearQuery();
-  rep.ClearRef();
-  return gurl.ReplaceComponents(rep);
+  return true;
 }
 
 }  // namespace
 
-GURL GetCanonicalActionForForm(const WebFormElement& form) {
-  WebString action = form.action();
-  if (action.isNull())
-    action = WebString(""); // missing 'action' attribute implies current URL
-  GURL full_action(form.document().completeURL(action));
-  return StripAuthAndParams(full_action);
-}
-
-GURL GetCanonicalOriginForDocument(const WebDocument& document) {
-  GURL full_origin(document.url());
-  return StripAuthAndParams(full_origin);
-}
-
 bool IsGaiaReauthenticationForm(
     const GURL& origin,
-    const WebVector<blink::WebFormControlElement>& control_elements) {
+    const std::vector<blink::WebFormControlElement>& control_elements) {
   if (origin != GaiaUrls::GetInstance()->gaia_url().GetOrigin())
     return false;
 
@@ -579,29 +580,65 @@ bool IsGaiaReauthenticationForm(
   return has_rart_field && has_continue_field;
 }
 
-scoped_ptr<PasswordForm> CreatePasswordForm(
+scoped_ptr<PasswordForm> CreatePasswordFormFromWebForm(
     const WebFormElement& web_form,
-    const std::map<const blink::WebInputElement, blink::WebString>*
-        nonscript_modified_values,
-    const std::map<FormData, PasswordFormFieldPredictionMap>*
-        form_predictions) {
+    const ModifiedValues* nonscript_modified_values,
+    const FormsPredictionsMap* form_predictions) {
   if (web_form.isNull())
     return scoped_ptr<PasswordForm>();
 
   scoped_ptr<PasswordForm> password_form(new PasswordForm());
-  GetPasswordForm(web_form, password_form.get(), nonscript_modified_values,
-                  form_predictions);
-
+  password_form->action = form_util::GetCanonicalActionForForm(web_form);
   if (!password_form->action.is_valid())
     return scoped_ptr<PasswordForm>();
 
-  WebFormElementToFormData(web_form,
-                           blink::WebFormControlElement(),
-                           EXTRACT_NONE,
-                           &password_form->form_data,
+  SyntheticForm synthetic_form;
+  PopulateSyntheticFormFromWebForm(web_form, &synthetic_form);
+
+  WebFormElementToFormData(web_form, blink::WebFormControlElement(),
+                           form_util::EXTRACT_NONE, &password_form->form_data,
                            NULL /* FormFieldData */);
 
+  if (!GetPasswordForm(synthetic_form, password_form.get(),
+                       nonscript_modified_values, form_predictions))
+    return scoped_ptr<PasswordForm>();
+
   return password_form.Pass();
+}
+
+scoped_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
+    const WebFrame& frame,
+    const ModifiedValues* nonscript_modified_values,
+    const FormsPredictionsMap* form_predictions) {
+  SyntheticForm synthetic_form;
+  synthetic_form.control_elements =
+      form_util::GetUnownedAutofillableFormFieldElements(
+          frame.document().all(), &synthetic_form.fieldsets);
+  synthetic_form.document = frame.document();
+
+  if (synthetic_form.control_elements.empty())
+    return scoped_ptr<PasswordForm>();
+
+  scoped_ptr<PasswordForm> password_form(new PasswordForm());
+  UnownedPasswordFormElementsAndFieldSetsToFormData(
+      synthetic_form.fieldsets, synthetic_form.control_elements, nullptr,
+      frame.document(), form_util::EXTRACT_NONE, &password_form->form_data,
+      nullptr /* FormFieldData */);
+  if (!GetPasswordForm(synthetic_form, password_form.get(),
+                       nonscript_modified_values, form_predictions))
+    return scoped_ptr<PasswordForm>();
+
+  // No actual action on the form, so use the the origin as the action.
+  password_form->action = password_form->origin;
+
+  return password_form.Pass();
+}
+
+bool HasAutocompleteAttributeValue(const blink::WebInputElement& element,
+                                   const char* value_in_lowercase) {
+  return base::LowerCaseEqualsASCII(
+      base::StringPiece16(element.getAttribute("autocomplete")),
+      value_in_lowercase);
 }
 
 }  // namespace autofill

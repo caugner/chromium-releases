@@ -43,6 +43,10 @@ remoting.ChromotingEvent = function(type) {
   this.browser_version;
   /** @private {string} */
   this.webapp_version;
+  /** @type {remoting.ChromotingEvent.Os} */
+  this.host_os;
+  /** @type {string} */
+  this.host_os_version;
   /** @type {string} */
   this.host_version;
   /** @private {string} */
@@ -85,6 +89,11 @@ remoting.ChromotingEvent = function(type) {
   this.xmpp_error;
   /** @type {remoting.ChromotingEvent.SessionEntryPoint} */
   this.session_entry_point;
+  /** @type {number} */
+  this.host_status_update_elapsed_time;
+
+  /** @type {remoting.ChromotingEvent.AuthMethod} */
+  this.auth_method;
 
   this.init_();
 };
@@ -176,6 +185,32 @@ remoting.ChromotingEvent.Os = {
   IOS: 7
 };
 
+/**
+ * Convert the OS type String into the enum value.
+ *
+ * @param {string} type
+ * @return {remoting.ChromotingEvent.Os}
+ */
+remoting.ChromotingEvent.toOs = function(type) {
+  type = type.toLowerCase();
+  switch (type) {
+    case 'linux':
+      return remoting.ChromotingEvent.Os.LINUX;
+    case 'chromeos':
+      return remoting.ChromotingEvent.Os.CHROMEOS;
+    case 'mac':
+      return remoting.ChromotingEvent.Os.MAC
+    case 'windows':
+      return remoting.ChromotingEvent.Os.WINDOWS;
+    case 'android':
+      return remoting.ChromotingEvent.Os.ANDROID;
+    case 'ios':
+      return remoting.ChromotingEvent.Os.IOS;
+    default:
+      return remoting.ChromotingEvent.Os.OTHER;
+  }
+};
+
 /** @enum {number} */
 remoting.ChromotingEvent.SessionState = {
   UNKNOWN: 1, // deprecated.
@@ -223,11 +258,12 @@ remoting.ChromotingEvent.ConnectionError = {
   INVALID_ACCESS_CODE: 7,
   MISSING_PLUGIN: 8,
   AUTHENTICATION_FAILED: 9,
-  ERROR_BAD_PLUGIN_VERSION: 10,
+  BAD_VERSION: 10,
   HOST_OVERLOAD: 11,
   P2P_FAILURE: 12,
   UNEXPECTED: 13,
-  CLIENT_SUSPENDED: 14
+  CLIENT_SUSPENDED: 14,
+  NACL_DISABLED: 15,
 };
 
 /** @enum {number} */
@@ -250,4 +286,12 @@ remoting.ChromotingEvent.SignalStrategyProgress = {
   TIMED_OUT: 3,
   SUCCEEDED_LATE: 4,
   FAILED_LATE: 5
+};
+
+/** @enum {number} */
+remoting.ChromotingEvent.AuthMethod = {
+  PIN: 1,
+  ACCESS_CODE: 2,
+  PINLESS: 3,
+  THIRD_PARTY: 4,
 };

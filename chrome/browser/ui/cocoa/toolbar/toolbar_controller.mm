@@ -9,6 +9,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/sdk_forward_declarations.h"
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/sync/sync_global_error_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -190,8 +192,6 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     [controller_ prefChanged:pref_name];
   }
 
-  WrenchMenuBadgeController* badge_controller() { return &badge_controller_; }
-
  private:
   ToolbarController* controller_;  // weak, owns us
 
@@ -242,14 +242,30 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
                              profile:profile
                              browser:browser
                         nibFileNamed:@"Toolbar"])) {
+    // Start global error services now so we badge the menu correctly.
+    SyncGlobalErrorFactory::GetForProfile(profile);
   }
   return self;
 }
 
 // Called after the view is done loading and the outlets have been hooked up.
-// Now we can hook up bridges that rely on UI objects such as the location
-// bar and button state.
+// Now we can hook up bridges that rely on UI objects such as the location bar
+// and button state. -viewDidLoad is the recommended way to do this in 10.10
+// SDK. When running on 10.10 or above -awakeFromNib still works but for some
+// reason is not guaranteed to be called (http://crbug.com/526276), so implement
+// both.
 - (void)awakeFromNib {
+  [self viewDidLoad];
+}
+
+- (void)viewDidLoad {
+  // When linking and running on 10.10+, both -awakeFromNib and -viewDidLoad may
+  // be called, don't initialize twice.
+  if (locationBarView_) {
+    DCHECK(base::mac::IsOSYosemiteOrLater());
+    return;
+  }
+
   [[backButton_ cell] setImageID:IDR_BACK
                   forButtonState:image_button_cell::kDefaultState];
   [[backButton_ cell] setImageID:IDR_BACK_H
@@ -548,16 +564,6 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 - (void)setTranslateIconLit:(BOOL)on {
   locationBarView_->SetTranslateIconLit(on);
-}
-
-- (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun {
-  notificationBridge_->badge_controller()->SetOverflowedToolbarActionWantsToRun(
-      overflowedActionWantsToRun);
-}
-
-- (BOOL)overflowedToolbarActionWantsToRun {
-  return notificationBridge_->badge_controller()->
-      overflowed_toolbar_action_wants_to_run();
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {

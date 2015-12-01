@@ -562,6 +562,27 @@ function testWebRequestAPIExistence() {
   document.body.appendChild(webview);
 }
 
+// Tests that calling addListener() succeeds on all WebRequest API events.
+function testWebRequestAPIAddListener() {
+  var webview = new WebView();
+
+  [webview.request.onBeforeRequest,
+   webview.request.onBeforeSendHeaders,
+   webview.request.onSendHeaders,
+   webview.request.onHeadersReceived,
+   webview.request.onAuthRequired,
+   webview.request.onBeforeRedirect,
+   webview.request.onCompleted,
+   webview.request.onErrorOccurred,
+  ].forEach(function(event) {
+    event.addListener(function(){}, {urls: ['<all_urls>']});
+  });
+
+  webview.onloadstop = function() { embedder.test.succeed(); };
+  webview.src = 'about:blank';
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the loadstart, loadstop, and exit events fire as
 // expected.
 function testEventName() {
@@ -1681,6 +1702,20 @@ function testWebRequestAPIWithHeaders() {
   document.body.appendChild(webview);
 }
 
+function testWebRequestAPIErrorOccurred() {
+  var webview = new WebView();
+
+  webview.request.onErrorOccurred.addListener(function(details) {
+    embedder.test.succeed();
+  }, {urls: ['<all_urls>']});
+  webview.request.onBeforeRequest.addListener(function(e) {
+    return {cancel: true};
+  }, {urls: ['<all_urls>']}, ['blocking']) ;
+
+  webview.src = 'http://nonexistent.com';
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the basic use cases of the declarative WebRequest API
 // work as expected. This test demonstrates that rules can be added prior to
 // navigation and attachment.
@@ -2197,6 +2232,10 @@ function testResizeWebviewResizesContent() {
     if (data[0] == 'resize') {
       var width = data[1];
       var height = data[2];
+      // If the 'resize' event was because of the initial size, ignore it.
+      if (width == 300 && height == 300) {
+        return;
+      }
       embedder.test.assertEq(400, width);
       embedder.test.assertEq(300, height);
       embedder.test.succeed();
@@ -2261,6 +2300,10 @@ function testResizeWebviewWithDisplayNoneResizesContent() {
     if (data[0] == 'resize') {
       var width = data[1];
       var height = data[2];
+      // If the 'resize' event was because of the initial size, ignore it.
+      if (width == 300 && height == 300) {
+        return;
+      }
       embedder.test.assertEq(400, width);
       embedder.test.assertEq(300, height);
       embedder.test.succeed();
@@ -2434,13 +2477,22 @@ function testFindAPI() {
 
   var loadstopListener2 = function(e) {
     embedder.test.assertEq(webview.src, "about:blank");
-    embedder.test.succeed();
+    // Test find results when looking for nothing.
+    webview.find("", {}, function(results) {
+      embedder.test.assertEq(results.numberOfMatches, 0);
+      embedder.test.assertEq(results.activeMatchOrdinal, 0);
+      embedder.test.assertEq(results.selectionRect.left, 0);
+      embedder.test.assertEq(results.selectionRect.top, 0);
+      embedder.test.assertEq(results.selectionRect.width, 0);
+      embedder.test.assertEq(results.selectionRect.height, 0);
+
+      embedder.test.succeed();
+    });
   }
 
   var loadstopListener1 = function(e) {
     // Test find results.
     webview.find("dog", {}, function(results) {
-      callbackTest = true;
       embedder.test.assertEq(results.numberOfMatches, 100);
       embedder.test.assertTrue(results.selectionRect.width > 0);
       embedder.test.assertTrue(results.selectionRect.height > 0);
@@ -2582,27 +2634,30 @@ function testResizeEvents() {
   webview.style.width = '600px';
   webview.style.height = '400px';
 
-  var checkSizes = function(e) {
-    embedder.test.assertEq(e.oldWidth, 600)
-    embedder.test.assertEq(e.oldHeight, 400)
-    embedder.test.assertEq(e.newWidth, 500)
-    embedder.test.assertEq(e.newHeight, 400)
-  }
-
-  var contentResizeListener = function(e) {
-    webview.oncontentresize = null;
-
-    console.log('oncontentresize');
-    checkSizes(e);
-    embedder.test.succeed();
-  };
-
   var loadstopListener = function(e) {
     webview.removeEventListener('loadstop', loadstopListener);
-    webview.oncontentresize = contentResizeListener;
 
-    console.log('Resizing <webview> width from 600px to 500px.');
-    webview.style.width = '500px';
+    // Observer to look for window.resize event inside <webview>.
+    webview.onconsolemessage = function(e) {
+      if (e.message === 'ONRESIZE: 500X400') {
+        embedder.test.succeed();
+      }
+    };
+
+    webview.executeScript(
+        {
+           code: 'window.onresize=function(){' +
+                 '  console.log("ONRESIZE: " + window.innerWidth + "X" +' +
+                 '              window.innerHeight);' +
+                 '}'
+        }, function(results) {
+          if (!results || !results.length) {
+            embedder.test.fail();
+            return;
+          }
+          console.log('Resizing <webview> width from 600px to 500px.');
+          webview.style.width = '500px';
+        });
   };
 
   webview.addEventListener('loadstop', loadstopListener);
@@ -2869,6 +2924,7 @@ embedder.test.testList = {
       testInlineScriptFromAccessibleResources,
   'testInvalidChromeExtensionURL': testInvalidChromeExtensionURL,
   'testWebRequestAPIExistence': testWebRequestAPIExistence,
+  'testWebRequestAPIAddListener': testWebRequestAPIAddListener,
   'testEventName': testEventName,
   'testOnEventProperties': testOnEventProperties,
   'testLoadProgressEvent': testLoadProgressEvent,
@@ -2917,6 +2973,7 @@ embedder.test.testList = {
       testDeclarativeWebRequestAPISendMessage,
   'testDisplayBlock': testDisplayBlock,
   'testWebRequestAPI': testWebRequestAPI,
+  'testWebRequestAPIErrorOccurred': testWebRequestAPIErrorOccurred,
   'testWebRequestAPIWithHeaders': testWebRequestAPIWithHeaders,
   'testWebRequestAPIGoogleProperty': testWebRequestAPIGoogleProperty,
   'testWebRequestListenerSurvivesReparenting':

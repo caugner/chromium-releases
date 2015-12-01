@@ -258,11 +258,14 @@ void MediaRouterMojoImpl::SendRouteBinaryMessage(
                         base::Passed(data.Pass()), callback));
 }
 
+void MediaRouterMojoImpl::AddIssue(const Issue& issue) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  issue_manager_.AddIssue(issue);
+}
+
 void MediaRouterMojoImpl::ClearIssue(const Issue::Id& issue_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
   issue_manager_.ClearIssue(issue_id);
-  RunOrDefer(base::Bind(&MediaRouterMojoImpl::DoClearIssue,
-                        base::Unretained(this), issue_id));
 }
 
 void MediaRouterMojoImpl::OnPresentationSessionDetached(
@@ -272,7 +275,7 @@ void MediaRouterMojoImpl::OnPresentationSessionDetached(
                         base::Unretained(this), route_id));
 }
 
-void MediaRouterMojoImpl::RegisterMediaSinksObserver(
+bool MediaRouterMojoImpl::RegisterMediaSinksObserver(
     MediaSinksObserver* observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -294,6 +297,7 @@ void MediaRouterMojoImpl::RegisterMediaSinksObserver(
   observer_list->AddObserver(observer);
   RunOrDefer(base::Bind(&MediaRouterMojoImpl::DoStartObservingMediaSinks,
                         base::Unretained(this), source_id));
+  return true;
 }
 
 void MediaRouterMojoImpl::UnregisterMediaSinksObserver(
@@ -506,11 +510,6 @@ void MediaRouterMojoImpl::OnRouteMessagesReceived(
   media_route_provider_->ListenForRouteMessages(
       route_id, base::Bind(&MediaRouterMojoImpl::OnRouteMessagesReceived,
                            base::Unretained(this), route_id));
-}
-
-void MediaRouterMojoImpl::DoClearIssue(const Issue::Id& issue_id) {
-  DVLOG_WITH_INSTANCE(1) << "DoClearIssue " << issue_id;
-  media_route_provider_->ClearIssue(issue_id);
 }
 
 void MediaRouterMojoImpl::DoOnPresentationSessionDetached(

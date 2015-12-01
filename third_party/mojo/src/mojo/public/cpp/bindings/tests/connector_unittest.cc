@@ -7,7 +7,7 @@
 
 #include "mojo/public/cpp/bindings/lib/connector.h"
 #include "mojo/public/cpp/bindings/lib/message_builder.h"
-#include "mojo/public/cpp/bindings/lib/message_queue.h"
+#include "mojo/public/cpp/bindings/tests/message_queue.h"
 #include "mojo/public/cpp/environment/environment.h"
 #include "mojo/public/cpp/system/macros.h"
 #include "mojo/public/cpp/utility/run_loop.h"
@@ -31,7 +31,7 @@ class MessageAccumulator : public MessageReceiver {
   void Pop(Message* message) { queue_.Pop(message); }
 
  private:
-  internal::MessageQueue queue_;
+  MessageQueue queue_;
 };
 
 class ConnectorDeletingMessageAccumulator : public MessageAccumulator {
@@ -85,7 +85,8 @@ class ConnectorTest : public testing::Test {
     size_t payload_size = strlen(text) + 1;  // Plus null terminator.
     internal::MessageBuilder builder(1, payload_size);
     memcpy(builder.buffer()->Allocate(payload_size), text, payload_size);
-    builder.Finish(message);
+
+    builder.message()->MoveTo(message);
   }
 
   void PumpMessages() { loop_.RunUntilIdle(); }

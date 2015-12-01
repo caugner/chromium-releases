@@ -28,7 +28,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -101,6 +100,14 @@ class FakeSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
 
   void SetURLThreatType(const GURL& url, SBThreatType threat_type) {
     badurls[url.spec()] = threat_type;
+  }
+
+  // These are called when checking URLs, so we implement them.
+  bool IsSupported() const override { return true; }
+  bool ChecksAreAlwaysAsync() const override { return false; }
+  bool CanCheckResourceType(
+      content::ResourceType /* resource_type */) const override {
+    return true;
   }
 
   // Called during startup, so must not check-fail.
@@ -372,11 +379,6 @@ class SafeBrowsingBlockingPageBrowserTest
     SafeBrowsingBlockingPage::RegisterFactory(&blocking_page_factory_);
     MalwareDetails::RegisterFactory(&details_factory_);
     InProcessBrowserTest::SetUp();
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(
-        switches::kForceFieldTrials, "UwSInterstitialStatus/On/");
   }
 
   void TearDown() override {

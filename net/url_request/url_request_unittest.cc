@@ -26,6 +26,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/power_monitor/power_monitor.h"
+#include "base/power_monitor/power_monitor_source.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -77,9 +79,11 @@
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/url_request/url_request_failed_job.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_http_job.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -257,6 +261,23 @@ void TestLoadTimingNoHttpResponse(
   EXPECT_TRUE(load_timing_info.receive_headers_end.is_null());
 }
 #endif
+
+// Test power monitor source that can simulate entering suspend mode. Can't use
+// the one in base/ because it insists on bringing its own MessageLoop.
+class TestPowerMonitorSource : public base::PowerMonitorSource {
+ public:
+  TestPowerMonitorSource() {}
+  ~TestPowerMonitorSource() override {}
+
+  void Suspend() { ProcessPowerEvent(SUSPEND_EVENT); }
+
+  void Resume() { ProcessPowerEvent(RESUME_EVENT); }
+
+  bool IsOnBatteryPowerImpl() override { return false; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestPowerMonitorSource);
+};
 
 // Do a case-insensitive search through |haystack| for |needle|.
 bool ContainsString(const std::string& haystack, const char* needle) {
@@ -666,10 +687,12 @@ class URLRequestTest : public PlatformTest {
   }
 
   virtual void SetUpFactory() {
-    job_factory_impl_->SetProtocolHandler("data", new DataProtocolHandler);
+    job_factory_impl_->SetProtocolHandler(
+        "data", make_scoped_ptr(new DataProtocolHandler));
 #if !defined(DISABLE_FILE_SUPPORT)
     job_factory_impl_->SetProtocolHandler(
-        "file", new FileProtocolHandler(base::ThreadTaskRunnerHandle::Get()));
+        "file", make_scoped_ptr(new FileProtocolHandler(
+                    base::ThreadTaskRunnerHandle::Get())));
 #endif
   }
 
@@ -685,8 +708,9 @@ class URLRequestTest : public PlatformTest {
   // Adds the TestJobInterceptor to the default context.
   TestJobInterceptor* AddTestInterceptor() {
     TestJobInterceptor* protocol_handler_ = new TestJobInterceptor();
-    job_factory_impl_->SetProtocolHandler("http", NULL);
-    job_factory_impl_->SetProtocolHandler("http", protocol_handler_);
+    job_factory_impl_->SetProtocolHandler("http", nullptr);
+    job_factory_impl_->SetProtocolHandler("http",
+                                          make_scoped_ptr(protocol_handler_));
     return protocol_handler_;
   }
 
@@ -2696,6 +2720,35 @@ TEST_F(URLRequestTest, FirstPartyOnlyCookiesDisabled) {
     EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
     EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
   }
+}
+
+// Tests that a request is cancelled while entering suspend mode. Uses mocks
+// rather than a spawned test server because the connection used to talk to
+// the test server is affected by entering suspend mode on Android.
+TEST_F(URLRequestTest, CancelOnSuspend) {
+  TestPowerMonitorSource* power_monitor_source = new TestPowerMonitorSource();
+  base::PowerMonitor power_monitor(make_scoped_ptr(power_monitor_source));
+
+  URLRequestFailedJob::AddUrlHandler();
+
+  TestDelegate d;
+  // Request that just hangs.
+  GURL url(URLRequestFailedJob::GetMockHttpUrl(ERR_IO_PENDING));
+  scoped_ptr<URLRequest> r(
+      default_context_.CreateRequest(url, DEFAULT_PRIORITY, &d));
+  r->Start();
+
+  power_monitor_source->Suspend();
+  // Wait for the suspend notification to cause the request to fail.
+  base::RunLoop().Run();
+  EXPECT_EQ(URLRequestStatus::CANCELED, r->status().status());
+  EXPECT_TRUE(d.request_failed());
+  EXPECT_EQ(1, default_network_delegate_.completed_requests());
+
+  URLRequestFilter::GetInstance()->ClearHandlers();
+
+  // Shouldn't be needed, but just in case.
+  power_monitor_source->Resume();
 }
 
 // FixedDateNetworkDelegate swaps out the server's HTTP Date response header
@@ -5462,8 +5515,10 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPAndSendReport) {
   HashValue hash2;
   // The values here don't matter, as long as they are different from
   // the mocked CertVerifyResult below.
-  ASSERT_TRUE(hash1.FromString("sha1/111111111111111111111111111="));
-  ASSERT_TRUE(hash2.FromString("sha1/222222222222222222222222222="));
+  ASSERT_TRUE(
+      hash1.FromString("sha256/1111111111111111111111111111111111111111111="));
+  ASSERT_TRUE(
+      hash2.FromString("sha256/2222222222222222222222222222222222222222222="));
   hashes.push_back(hash1);
   hashes.push_back(hash2);
   security_state.AddHPKP(test_server_hostname, expiry,
@@ -5483,7 +5538,8 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPAndSendReport) {
   verify_result.verified_cert = cert;
   verify_result.is_issued_by_known_root = true;
   HashValue hash3;
-  ASSERT_TRUE(hash3.FromString("sha1/333333333333333333333333333="));
+  ASSERT_TRUE(
+      hash3.FromString("sha256/3333333333333333333333333333333333333333333="));
   verify_result.public_key_hashes.push_back(hash3);
   cert_verifier.AddResultForCert(cert.get(), verify_result, OK);
 
@@ -5545,7 +5601,8 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKPReportOnly) {
   HashValue hash;
   // This value doesn't matter, as long as it is different from the pins
   // for the request to hpkp-headers-report-only.html.
-  ASSERT_TRUE(hash.FromString("sha1/111111111111111111111111111="));
+  ASSERT_TRUE(
+      hash.FromString("sha256/1111111111111111111111111111111111111111111="));
   verify_result.public_key_hashes.push_back(hash);
   cert_verifier.AddResultForCert(cert.get(), verify_result, OK);
 
@@ -7341,7 +7398,13 @@ TEST_F(URLRequestTestReferrerPolicy, HTTPToSameOriginHTTP) {
                               origin_server()->GetURL("path/to/file.html"));
 }
 
-TEST_F(URLRequestTestReferrerPolicy, HTTPToCrossOriginHTTP) {
+// Can't spin up more than one SpawnedTestServer on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_HTTPToCrossOriginHTTP DISABLED_HTTPToCrosOriginHTTP
+#else
+#define MAYBE_HTTPToCrossOriginHTTP HTTPToCrossOriginHTTP
+#endif
+TEST_F(URLRequestTestReferrerPolicy, MAYBE_HTTPToCrossOriginHTTP) {
   InstantiateCrossOriginServers(SpawnedTestServer::TYPE_HTTP,
                                 SpawnedTestServer::TYPE_HTTP);
 
@@ -7388,7 +7451,13 @@ TEST_F(URLRequestTestReferrerPolicy, HTTPSToSameOriginHTTPS) {
                               origin_server()->GetURL("path/to/file.html"));
 }
 
-TEST_F(URLRequestTestReferrerPolicy, HTTPSToCrossOriginHTTPS) {
+// Can't spin up more than one SpawnedTestServer on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_HTTPSToCrossOriginHTTPS DISABLED_HTTPSToCrosOriginHTTPS
+#else
+#define MAYBE_HTTPSToCrossOriginHTTPS HTTPSToCrossOriginHTTPS
+#endif
+TEST_F(URLRequestTestReferrerPolicy, MAYBE_HTTPSToCrossOriginHTTPS) {
   InstantiateCrossOriginServers(SpawnedTestServer::TYPE_HTTPS,
                                 SpawnedTestServer::TYPE_HTTPS);
 
@@ -7412,7 +7481,13 @@ TEST_F(URLRequestTestReferrerPolicy, HTTPSToCrossOriginHTTPS) {
                               origin_server()->GetURL("path/to/file.html"));
 }
 
-TEST_F(URLRequestTestReferrerPolicy, HTTPToHTTPS) {
+// Can't spin up more than one SpawnedTestServer on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_HTTPToHTTPS DISABLED_HTTPToHTTPS
+#else
+#define MAYBE_HTTPToHTTPS HTTPToHTTPS
+#endif
+TEST_F(URLRequestTestReferrerPolicy, MAYBE_HTTPToHTTPS) {
   InstantiateCrossOriginServers(SpawnedTestServer::TYPE_HTTP,
                                 SpawnedTestServer::TYPE_HTTPS);
 
@@ -7436,7 +7511,13 @@ TEST_F(URLRequestTestReferrerPolicy, HTTPToHTTPS) {
                               origin_server()->GetURL("path/to/file.html"));
 }
 
-TEST_F(URLRequestTestReferrerPolicy, HTTPSToHTTP) {
+// Can't spin up more than one SpawnedTestServer on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_HTTPSToHTTP DISABLED_HTTPSToHTTP
+#else
+#define MAYBE_HTTPSToHTTP HTTPSToHTTP
+#endif
+TEST_F(URLRequestTestReferrerPolicy, MAYBE_HTTPSToHTTP) {
   InstantiateCrossOriginServers(SpawnedTestServer::TYPE_HTTPS,
                                 SpawnedTestServer::TYPE_HTTP);
 
@@ -7600,12 +7681,7 @@ TEST_F(HTTPSRequestTest, CipherFallbackTest) {
   // No version downgrade should have been necessary.
   EXPECT_FALSE(r->ssl_info().connection_status &
                SSL_CONNECTION_VERSION_FALLBACK);
-  int expected_version = SSL_CONNECTION_VERSION_TLS1_2;
-  if (SSLClientSocket::GetMaxSupportedSSLVersion() <
-      SSL_PROTOCOL_VERSION_TLS1_2) {
-    expected_version = SSL_CONNECTION_VERSION_TLS1_1;
-  }
-  EXPECT_EQ(expected_version,
+  EXPECT_EQ(SSL_CONNECTION_VERSION_TLS1_2,
             SSLConnectionStatusToVersion(r->ssl_info().connection_status));
 
   TestNetLogEntry::List entries;
@@ -8277,11 +8353,6 @@ TEST_F(HTTPSFallbackTest, TLSv1NoFallback) {
 
 // Tests the TLS 1.1 fallback.
 TEST_F(HTTPSFallbackTest, TLSv1_1Fallback) {
-  if (SSLClientSocket::GetMaxSupportedSSLVersion() <
-      SSL_PROTOCOL_VERSION_TLS1_2) {
-    return;
-  }
-
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
   ssl_options.tls_intolerant =
@@ -8293,11 +8364,6 @@ TEST_F(HTTPSFallbackTest, TLSv1_1Fallback) {
 
 // Tests that the TLS 1.1 fallback triggers on closed connections.
 TEST_F(HTTPSFallbackTest, TLSv1_1FallbackClosed) {
-  if (SSLClientSocket::GetMaxSupportedSSLVersion() <
-      SSL_PROTOCOL_VERSION_TLS1_2) {
-    return;
-  }
-
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
   ssl_options.tls_intolerant =
@@ -8314,11 +8380,6 @@ TEST_F(HTTPSFallbackTest, TLSv1_1FallbackClosed) {
 #if !defined(OS_ANDROID)
 // Tests fallback to TLS 1.1 on connection reset.
 TEST_F(HTTPSFallbackTest, TLSv1_1FallbackReset) {
-  if (SSLClientSocket::GetMaxSupportedSSLVersion() <
-      SSL_PROTOCOL_VERSION_TLS1_2) {
-    return;
-  }
-
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
   ssl_options.tls_intolerant =
@@ -9086,7 +9147,8 @@ class URLRequestTestFTP : public URLRequestTest {
   void SetUpFactory() override {
     // Add FTP support to the default URLRequestContext.
     job_factory_impl_->SetProtocolHandler(
-        "ftp", new FtpProtocolHandler(&ftp_transaction_factory_));
+        "ftp",
+        make_scoped_ptr(new FtpProtocolHandler(&ftp_transaction_factory_)));
   }
 
   std::string GetTestFileContents() {

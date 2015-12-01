@@ -549,13 +549,13 @@ TEST(EventTest, TouchEventRadiusDefaultsToOtherAxis) {
 
   TouchEvent event1(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
                     non_zero_length1, 0, 0, 0);
-  EXPECT_EQ(non_zero_length1, event1.radius_x());
-  EXPECT_EQ(non_zero_length1, event1.radius_y());
+  EXPECT_EQ(non_zero_length1, event1.pointer_details().radius_x());
+  EXPECT_EQ(non_zero_length1, event1.pointer_details().radius_y());
 
   TouchEvent event2(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
                     0, non_zero_length2, 0, 0);
-  EXPECT_EQ(non_zero_length2, event2.radius_x());
-  EXPECT_EQ(non_zero_length2, event2.radius_y());
+  EXPECT_EQ(non_zero_length2, event2.pointer_details().radius_x());
+  EXPECT_EQ(non_zero_length2, event2.pointer_details().radius_y());
 }
 
 TEST(EventTest, TouchEventRotationAngleFixing) {
@@ -618,10 +618,6 @@ TEST(EventTest, PointerEventDetailsTouch) {
   EXPECT_EQ(0.0f, touch_event_plain.pointer_details().tilt_x());
   EXPECT_EQ(0.0f, touch_event_plain.pointer_details().tilt_y());
 
-  EXPECT_EQ(0.0f, touch_event_plain.radius_x());
-  EXPECT_EQ(0.0f, touch_event_plain.radius_y());
-  EXPECT_EQ(0.0f, touch_event_plain.force());
-
   ui::TouchEvent touch_event_with_details(ET_TOUCH_PRESSED, gfx::Point(0, 0), 0,
                                           0, ui::EventTimeForNow(), 10.0f, 5.0f,
                                           0.0f, 15.0f);
@@ -669,11 +665,14 @@ TEST(EventTest, PointerEventDetailsMouse) {
 TEST(EventTest, PointerEventDetailsStylus) {
   ui::MouseEvent stylus_event(ET_MOUSE_PRESSED, gfx::PointF(0, 0),
                               gfx::PointF(0, 0), ui::EventTimeForNow(), 0, 0);
-  stylus_event.set_pointer_type(EventPointerType::POINTER_TYPE_PEN);
-  stylus_event.set_force(21.0f);
-  stylus_event.set_tilt_x(45.0f);
-  stylus_event.set_tilt_y(-45.0f);
+  ui::PointerDetails pointer_details(EventPointerType::POINTER_TYPE_PEN,
+      /* radius_x */ 0.0f,
+      /* radius_y */ 0.0f,
+      /* force */ 21.0f,
+      /* tilt_x */ 45.0f,
+      /* tilt_y */ -45.0f);
 
+  stylus_event.set_pointer_details(pointer_details);
   EXPECT_EQ(EventPointerType::POINTER_TYPE_PEN,
             stylus_event.pointer_details().pointer_type());
   EXPECT_EQ(21.0f, stylus_event.pointer_details().force());

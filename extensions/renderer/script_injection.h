@@ -77,15 +77,18 @@ class ScriptInjection {
   // Resets the pointer of the injection host when the host is gone.
   void OnHostRemoved();
 
+  void invalidate_render_frame() { render_frame_ = nullptr; }
+
   // Accessors.
   content::RenderFrame* render_frame() const { return render_frame_; }
   const HostID& host_id() const { return injection_host_->id(); }
   int64 request_id() const { return request_id_; }
 
  private:
-  // Sends a message to the browser, either that the script injection would
-  // like to inject, or to notify the browser that it is currently injecting.
-  void SendInjectionMessage(bool request_permission);
+  class FrameWatcher;
+
+  // Sends a message to the browser to request permission to inject.
+  void RequestPermissionFromBrowser();
 
   // Injects the script. Returns INJECTION_FINISHED if injection has finished,
   // otherwise INJECTION_BLOCKED.
@@ -132,6 +135,9 @@ class ScriptInjection {
 
   // The callback to run upon completing asynchronously.
   CompletionCallback async_completion_callback_;
+
+  // A helper class to hold the render frame and watch for its deletion.
+  scoped_ptr<FrameWatcher> frame_watcher_;
 
   base::WeakPtrFactory<ScriptInjection> weak_ptr_factory_;
 

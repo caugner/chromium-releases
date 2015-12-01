@@ -32,6 +32,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -89,7 +90,8 @@ class PDFExtensionTest : public ExtensionApiTest,
 
   // Runs the extensions test at chrome/test/data/pdf/<filename> on the PDF file
   // at chrome/test/data/pdf/<pdf_filename>.
-  void RunTestsInFile(std::string filename, std::string pdf_filename) {
+  void RunTestsInFile(const std::string& filename,
+                      const std::string& pdf_filename) {
     extensions::ResultCatcher catcher;
 
     GURL url(embedded_test_server()->GetURL("/pdf/" + pdf_filename));
@@ -99,14 +101,7 @@ class PDFExtensionTest : public ExtensionApiTest,
     // being seen due to the BrowserPluginGuest not being available yet (see
     // crbug.com/498077). So instead use |LoadPdf| which ensures that the PDF is
     // loaded before continuing.
-    ASSERT_TRUE(LoadPdf(url));
-
-    content::WebContents* contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
-    content::BrowserPluginGuestManager* guest_manager =
-        contents->GetBrowserContext()->GetGuestManager();
-    content::WebContents* guest_contents =
-        guest_manager->GetFullPageGuest(contents);
+    content::WebContents* guest_contents = LoadPdfGetGuestContents(url);
     ASSERT_TRUE(guest_contents);
 
     base::FilePath test_data_dir;
@@ -137,6 +132,21 @@ class PDFExtensionTest : public ExtensionApiTest,
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     return pdf_extension_test_util::EnsurePDFHasLoaded(web_contents);
+  }
+
+  // Same as |LoadPdf|, but also returns a pointer to the guest WebContents for
+  // the loaded PDF. Returns nullptr if the load fails.
+  content::WebContents* LoadPdfGetGuestContents(const GURL& url) {
+    if (!LoadPdf(url))
+      return nullptr;
+
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    content::BrowserPluginGuestManager* guest_manager =
+        contents->GetBrowserContext()->GetGuestManager();
+    content::WebContents* guest_contents =
+        guest_manager->GetFullPageGuest(contents);
+    return guest_contents;
   }
 
   // Load all the PDFs contained in chrome/test/data/<dir_name>. This only runs
@@ -326,6 +336,18 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ZoomManager) {
   RunTestsInFile("zoom_manager_test.js", "test.pdf");
 }
 
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Title) {
+  RunTestsInFile("title_test.js", "test-title.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, WhitespaceTitle) {
+  RunTestsInFile("whitespace_title_test.js", "test-whitespace-title.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PageChange) {
+  RunTestsInFile("page_change_test.js", "test-bookmarks.pdf");
+}
+
 // Ensure that the internal PDF plugin application/x-google-chrome-pdf won't be
 // loaded if it's not loaded in the chrome extension page.
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureInternalPluginDisabled) {
@@ -367,6 +389,27 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureCrossOriginRepliesBlocked) {
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureSameOriginRepliesAllowed) {
   TestGetSelectedTextReply(embedded_test_server()->GetURL("/pdf/test.pdf"),
                            true);
+}
+
+// This test ensures that link permissions are enforced properly in PDFs.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, LinkPermissions) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  content::WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+
+  // chrome://favicon links should be allowed for PDFs, while chrome://settings
+  // links should not.
+  GURL valid_link_url("chrome://favicon/https://www.google.ca/");
+  GURL invalid_link_url("chrome://settings");
+
+  GURL unfiltered_valid_link_url(valid_link_url);
+  content::RenderProcessHost* rph = guest_contents->GetRenderProcessHost();
+  rph->FilterURL(true, &valid_link_url);
+  rph->FilterURL(true, &invalid_link_url);
+
+  // Invalid link URLs should be changed to "about:blank" when filtered.
+  EXPECT_EQ(unfiltered_valid_link_url, valid_link_url);
+  EXPECT_EQ(GURL("about:blank"), invalid_link_url);
 }
 
 class MaterialPDFExtensionTest : public PDFExtensionTest {
@@ -411,4 +454,16 @@ IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Elements) {
 
 IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, ToolbarManager) {
   RunTestsInFile("toolbar_manager_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Title) {
+  RunTestsInFile("title_test.js", "test-title.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, WhitespaceTitle) {
+  RunTestsInFile("whitespace_title_test.js", "test-whitespace-title.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, PageChange) {
+  RunTestsInFile("page_change_test.js", "test-bookmarks.pdf");
 }

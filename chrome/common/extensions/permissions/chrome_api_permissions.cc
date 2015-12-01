@@ -65,6 +65,7 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       {APIPermission::kBrailleDisplayPrivate, "brailleDisplayPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kBrowsingData, "browsingData"},
+      {APIPermission::kCertificateProvider, "certificateProvider"},
       {APIPermission::kContentSettings, "contentSettings"},
       {APIPermission::kContextMenus, "contextMenus"},
       {APIPermission::kCookie, "cookies"},
@@ -201,6 +202,8 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kLanguageSettingsPrivate, "languageSettingsPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
+      {APIPermission::kResourcesPrivate, "resourcesPrivate",
+       APIPermissionInfo::kFlagCannotBeOptional},
 
       // Full url access permissions.
       {APIPermission::kDebugger, "debugger",
@@ -239,14 +242,12 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
        "fileSystem.requestFileSystem"},
       {APIPermission::kFileSystemRetainEntries, "fileSystem.retainEntries"},
       {APIPermission::kFileSystemWrite, "fileSystem.write"},
-      {APIPermission::kFileSystemWriteDirectory, "fileSystem.writeDirectory"},
       {APIPermission::kMediaGalleries, "mediaGalleries",
        APIPermissionInfo::kFlagNone,
        &CreateAPIPermission<MediaGalleriesPermission>},
       {APIPermission::kPointerLock, "pointerLock"},
       {APIPermission::kCastStreaming, "cast.streaming"},
       {APIPermission::kBrowser, "browser"},
-      {APIPermission::kInterceptAllKeys, "app.window.interceptAllKeys"},
       {APIPermission::kLauncherSearchProvider, "launcherSearchProvider"},
 
       // Settings override permissions.

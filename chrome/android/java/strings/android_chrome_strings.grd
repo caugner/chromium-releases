@@ -161,6 +161,9 @@ CHAR-LIMIT guidelines:
       <message name="IDS_NO_THANKS" desc="Generic label to say no thanks for a feature. [CHAR-LIMIT=32]">
         No Thanks
       </message>
+      <message name="IDS_NEXT" desc="Generic label for a button to advance to the next item. [CHAR-LIMIT=20]">
+        Next
+      </message>
 
       <!-- Main Preferences -->
       <message name="IDS_PREFERENCES" desc="Title for Chrome's Settings.">
@@ -280,9 +283,6 @@ CHAR-LIMIT guidelines:
       </message>
       <message name="IDS_PASSWORDS_AUTO_SIGNIN_TITLE" desc="Title for checkbox to enable automatically signing the user in to websites">
         Auto Sign-in
-      </message>
-      <message name="IDS_PASSWORDS_AUTO_SIGNIN_MESSAGE" desc="Message shown when the user is automatically signed in to a website" meaning="Android">
-        Signed in as <ph name="USERNAME">%1$s<ex>don.john.lemon@gmail.com</ex></ph>
       </message>
       <message name="IDS_PASSWORDS_AUTO_SIGNIN_DESCRIPTION" desc="Text under 'Auto sign-in' checkbox">
         Automatically sign in to websites using stored credentials. When the feature is off, you'll be asked for verification every time before signing in to a website.
@@ -717,7 +717,7 @@ To obtain new licenses, connect to the internet and play your downloaded content
         Data Saver
       </message>
       <message name="IDS_DATA_REDUCTION_DESCRIPTION" desc="Description text for the Data Saver feature.">
-        When this feature is turned on, Chrome will use Google servers to compress pages you visit before downloading them. SSL and incognito pages will not be included.
+        When this feature is turned on, Chrome will use Google servers to compress pages you visit before downloading them. Pages accessed using private connections (HTTPS) or in Incognito tabs will not be optimized or seen by Google.
       </message>
       <message name="IDS_DATA_REDUCTION_MENU_ITEM_SUMMARY" desc="Summary text for data reduction menu item.">
         <ph name="PERCENT">%1$s<ex>49%</ex></ph> data savings
@@ -750,15 +750,21 @@ To obtain new licenses, connect to the internet and play your downloaded content
         We are testing the proxying of HTTPS pages through Google servers as part of an experiment.
       </message>
 
-      <!-- Data Saver Promo -->
+      <!-- Data Saver Promo and FRE card -->
       <message name="IDS_DATA_REDUCTION_PROMO_TITLE" desc="The title for the promo inviting users to enable Data Saver" >
         Browse more for less
       </message>
       <message name="IDS_DATA_REDUCTION_PROMO_SUMMARY" desc="Description for the promo inviting users to enable Data Saver" >
-        Spend less data by using Google to optimize the pages you visit. Pages accessed with HTTPS or Incognito will not be optimized or seen by Google.
+        Spend less on data by using Google to optimize the pages you visit. Pages accessed using private connections (HTTPS) or in Incognito tabs will not be optimized or seen by Google.
       </message>
       <message name="IDS_DATA_REDUCTION_ENABLE_BUTTON" desc="Button the user presses if they want to enable Data Saver" >
         Enable Data Saver
+      </message>
+      <message name="IDS_DATA_REDUCTION_ENABLED_SWITCH" desc="Message to show when the Data Saver feature is enabled via the switch on the First Run Experience card" >
+        Data Saver enabled
+      </message>
+      <message name="IDS_DATA_REDUCTION_DISABLED_SWITCH" desc="Message to show when the Data Saver feature is disabled via the switch on the First Run Experience card" >
+        Data Saver disabled
       </message>
       <message name="IDS_DATA_REDUCTION_ENABLED_TOAST" desc="Toast message displayed after the user enables Data Saver from the promo" >
         Data Saver is on. Manage it in Settings.
@@ -1009,6 +1015,28 @@ To obtain new licenses, connect to the internet and play your downloaded content
         Loading…
       </message>
 
+      <!-- Bluetooth Picker UI strings -->
+      <message name="IDS_BLUETOOTH_DIALOG_TITLE" desc="The header message shown on top of the dialog that lets the user pick a Bluetooth device for the site to pair with. Shown above a list of Bluetooth devices discovered. ">
+        <ph name="SITE">%1$s<ex>https://www.google.com</ex></ph> wants to <ph name="BEGIN_LINK">&lt;link&gt;</ph>pair with<ph name="END_LINK">&lt;/link&gt;</ph>:</message>
+      <message name="IDS_BLUETOOTH_SEARCHING" desc="The message shown in the Bluetooth picker dialog while scanning for devices.">
+        Searching for devices...
+      </message>
+      <message name="IDS_BLUETOOTH_CONFIRM_BUTTON" desc="The button to confirm association of a website with a Bluetooth device. Use the same term as in 'Pair this Bluetooth headset with your phone.'">
+        Pair
+      </message>
+      <message name="IDS_BLUETOOTH_NOT_SEEING_IT" desc="The message to show at the bottom of the dialog when Bluetooth scanning has uncovered some items. Allows the user to restart the scan, in case their device is not listed.">
+        Not seeing your device? <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>Search again<ph name="END_LINK1">&lt;/link1&gt;</ph> or <ph name="BEGIN_LINK2">&lt;link2&gt;</ph>Get help<ph name="END_LINK2">&lt;/link2&gt;</ph>.
+      </message>
+      <message name="IDS_BLUETOOTH_NOT_FOUND" desc="The message to show when no items were found during Bluetooth device scanning.">
+        No bluetooth devices found. <ph name="BEGIN_LINK">&lt;link&gt;</ph>Search again<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+      <message name="IDS_BLUETOOTH_ADAPTER_OFF" desc="The message to show when scanning cannot start because the bluetooth adapter is turned off.">
+        Turn on Bluetooth in <ph name="BEGIN_LINK">&lt;link&gt;</ph>device settings<ph name="END_LINK">&lt;/link&gt;</ph> to allow pairing.
+      </message>
+      <message name="IDS_BLUETOOTH_ADAPTER_OFF_HELP" desc="The status message to show along with the message when the bluetooth adapter is turned off (to get Help).">
+        <ph name="BEGIN_LINK">&lt;link&gt;</ph>Help<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+
       <!-- Sync error strings -->
       <message name="IDS_SYNC_ERROR_GENERIC" desc="Sync error string for generic error. [CHAR-LIMIT=80]">
         Sync error
@@ -1062,9 +1090,6 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_ACCESSIBILITY_TABSTRIP_BTN_CLOSE_TAB" desc="Content description for the close tab button.">
         Close tab
       </message>
-      <message name="IDS_ACCESSIBILITY_TABSTRIP_BTN_NEW_TAB" desc="Content description for the new tab button.">
-        New tab
-      </message>
       <message name="IDS_TAB_LOADING_DEFAULT_TITLE" desc="The title of a tab when we are still waiting for either the URL or the real title. This generally shows when the page is first loading.">
         Loading…
       </message>
@@ -1075,11 +1100,6 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_INFOBAR_SCREEN_POSITION" desc="Accessibility label to inform users about the InfoBar location">
         Options available near bottom of the screen
-      </message>
-
-      <!-- Account chooser infobar strings. -->
-      <message name="IDS_ACCOUNT_CHOOSER_INFOBAR_TITLE" desc="The title text for Account chooser infobar.">
-        Choose an account from your Google Smart Lock.
       </message>
 
       <!-- DownloadOverwriteInfoBar -->
@@ -1163,9 +1183,6 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_ACCESSIBILITY_MENU_FORWARD" desc="Content description for the forward navigation button.">
         Go forward
       </message>
-      <message name="IDS_ACCESSIBILITY_MENU_BACK" desc="Content description for the backard navigation button.">
-        Go back
-      </message>
       <message name="IDS_ACCESSIBILITY_MENU_INFO" desc="Content description for the button which opens the page info popup, which displays security information and permissions for the current page">
         View site information
       </message>
@@ -1173,7 +1190,7 @@ You are signing in with a managed account and giving its administrator control o
         Web View
       </message>
 
-      <!-- Runtime permission infobar strings -->
+      <!-- Runtime permission strings -->
       <message name="IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT" desc="Text shown in an infobar when a website has requested access to the camera capabilities, but Chrome is missing the Android camera permission.">
         Chrome needs camera access to share it with this site.
       </message>
@@ -1186,8 +1203,8 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_INFOBAR_MISSING_MULTIPLE_PERMISSIONS_TEXT" desc="Text shown in an infobar when a website has requested access to the multiple restricted capabilities (e.g. location, camera, microphone), but Chrome is missing the corresponding Android permissions.">
         Chrome needs permissions access to share them with this site.
       </message>
-      <message name="IDS_INFOBAR_UPDATE_PERMISSIONS_BUTTON_TEXT" desc="Button text shown when Chrome does not have the necessary permission required to complete the requested tasks (e.g. a website has request location information, but Chrome is missing that Android permission).">
-        Update permissions
+      <message name="IDS_MISSING_STORAGE_PERMISSION_DOWNLOAD_EDUCATION_TEXT" desc="Text shown educating the user that Chrome is missing the Android storage permission, which is required to download files.">
+        Chrome needs storage access to download files.
       </message>
 
       <!-- Runtime permission geolocation disclosure strings -->
@@ -1330,8 +1347,8 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_MENU_ADD_TO_HOMESCREEN" desc="Menu item for adding a shortcut to the Home screen. [CHAR-LIMIT=27]">
         Add to Home screen
       </message>
-      <message name="IDS_ADDED_TO_HOMESCREEN" desc="Indicates that the current domain was added to the user's Home screen.">
-        <ph name="DOMAIN_NAME">%1$s<ex>google.com</ex></ph> was added to your Home screen
+      <message name="IDS_ADDED_TO_HOMESCREEN" desc="Indicates that the website with the specified name was added to the user's Home screen.">
+        <ph name="NAME">%1$s<ex>Google</ex></ph> was added to your Home screen
       </message>
 
       <!-- WebsiteSettingsPopup (PageInfo dialog) -->
@@ -1398,35 +1415,26 @@ You are signing in with a managed account and giving its administrator control o
       </message>
 
       <!-- Fullscreen -->
-      <message name="IDS_FULLSCREEN_API_NOTIFICATION" desc="Notification message when a site has entered fullscreen and the directions of how to exit.">
-        This site has gone fullscreen.
-Hit the back button to exit.
+      <message name="IDS_IMMERSIVE_FULLSCREEN_API_NOTIFICATION" desc="Notification message when a site has entered immersive fullscreen and the directions of how to exit.">
+        Drag from top and touch the back button to exit fullscreen.
+      </message>
+
+      <message name="IDS_FULLSCREEN_API_NOTIFICATION" desc="Notification message when a site has entered non-immsersive fullscreen and the directions of how to exit.">
+        Touch the back button to exit fullscreen.
       </message>
 
       <!-- Download UI -->
-      <message name="IDS_DOWNLOAD_NO_SDCARD_DLG_TITLE" desc="Dialog title [CHAR LIMIT=25]">
-        No SD card
-      </message>
-      <message name="IDS_DOWNLOAD_SDCARD_BUSY_DLG_TITLE" desc="Title for a dialog informing the user that the SD card used for external storage is busy so they cannot download anything [CHAR-LIMIT=30]">
-        SD card unavailable
-      </message>
       <message name="IDS_DOWNLOAD_NOTIFICATION_FAILED" desc="Download notification to be displayed when a download fails.">
         Download failed.
       </message>
-      <message name="IDS_CANNOT_ADD_DOWNLOADED_ITEM_TO_MANAGER" desc="Toast for a download which has completed but cannot be added to the download manager">
-        Failed to add downloaded item to the download manager.
-      </message>
-      <message name="IDS_CANNOT_CREATE_DOWNLOAD_DIRECTORY_TITLE" desc="Message for a dialog informing the user that download directory cannot be created on external storage [CHAR LIMIT=75]">
-        Cannot create download directory on SD card.
-      </message>
-      <message name="IDS_CANNOT_DOWNLOAD_HTTP_OR_HTTPS" desc="Toast for a download which cannot begin because the URL is not http or https">
-        Can only download http or https URLs
-      </message>
-      <message name="IDS_CANNOT_DOWNLOAD_GENERIC" desc="Toast for a generic download failure">
-        Failed to start download
+      <message name="IDS_DOWNLOAD_FAILED_MESSAGE" desc="Transient message shown when a file download has failed." meaning="Android">
+        <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> download failed
       </message>
       <message name="IDS_DOWNLOAD_PENDING" desc="Message in the list of items which have received download requests telling their status. This message states that the download has not yet begun [CHAR LIMIT=30]">
         Downloading…
+      </message>
+      <message name="IDS_DOWNLOAD_SUCCEEDED_MESSAGE" desc="Transient message shown when a file download has succeeded." meaning="Android">
+        <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> downloaded
       </message>
       <message name="IDS_PROCEED_OMA_DOWNLOAD_MESSAGE" desc="A message within a modal dialog that confirms the user want to download an OMA DRM file.">
         Proceed to download the content?
@@ -1457,6 +1465,9 @@ Hit the back button to exit.
       </message>
       <message name="IDS_OMA_DOWNLOAD_DESCRIPTION_LABEL" desc="A text label to display the description of the OMA download.">
         Description:
+      </message>
+      <message name="IDS_OPEN_DOWNLOADED_LABEL" desc="A text label on the snackbar widget to open the downloaded file.">
+        Open
       </message>
 
       <!-- Document mode messages -->
@@ -1783,12 +1794,6 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_ENHANCED_BOOKMARK_PAGE_SAVED" desc="Message shown after user adds a new bookmark. [CHAR-LIMIT=32]">
         Bookmarked
       </message>
-      <message name="IDS_ENHANCED_BOOKMARK_PAGE_SAVED_OFFLINE_PAGES" desc="Message shown after user adds a new offline page. [CHAR-LIMIT=32]">
-        Page saved offline
-      </message>
-      <message name="IDS_ENHANCED_BOOKMARK_PAGE_SAVED_OFFLINE_PAGES_STORAGE_NEAR_FULL" desc="Message shown after user adds a new offline page and the storage is almost full. [CHAR-LIMIT=32]">
-        Page saved offline. Storage almost full.
-      </message>
       <message name="IDS_ENHANCED_BOOKMARK_DRAWER_ALL_ITEMS" desc="Menu item for showing all bookmark items in the enhanced bookmarks UI [CHAR-LIMIT=24]">
         All bookmarks
       </message>
@@ -1800,9 +1805,6 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_TITLE_BAR_ALL_ITEMS" desc="Title bar text for showing all bookmark items in the enhanced bookmarks UI [CHAR-LIMIT=32]">
         Bookmarks
-      </message>
-      <message name="IDS_ENHANCED_BOOKMARK_TITLE_BAR_ALL_ITEMS_OFFLINE_PAGES" desc="Title bar text for showing all items in the enhanced bookmarks UI when offline pages functionality is enabled [CHAR-LIMIT=32]">
-        All saved pages
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_TITLE_BAR_FILTER_OFFLINE_PAGES" desc="Title bar text for showing all save pages with offline copy in the enhanced bookmarks UI. [CHAR-LIMIT=24]">
         Saved offline
@@ -1846,14 +1848,76 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_ENHANCED_BOOKMARK_NO_RESULT" desc="Text explaining that no bookmarks are found to match a search query">
         No bookmarks found
       </message>
-      <message name="IDS_ENHANCED_BOOKMARK_VIEWING_OFFLINE_PAGE" desc="Text explaining that the user is viewing an offline copy of a web page.">
-        Viewing an offline copy of this page
-      </message>
       <message name="IDS_ACCESSIBILITY_ENHANCED_BOOKMARK_DRAWER_TOGGLE_BTN_OPEN" desc="Content description for the button to show the navigation drawer.">
         Open navigation drawer
       </message>
       <message name="IDS_ACCESSIBILITY_ENHANCED_BOOKMARK_DRAWER_TOGGLE_BTN_CLOSE" desc="Content description for the button to close the navigation drawer.">
         Close navigation drawer
+      </message>
+
+      <!-- Offline pages -->
+      <message name="IDS_OFFLINE_PAGES_ACTION_BAR_DELETE" desc="Button text to delete the saved web pages that are being selected [CHAR-LIMIT=32]">
+        Delete saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_ACTION_BAR_MOVE" desc="Button text to move the saved web pages that are being selected [CHAR-LIMIT=32]">
+        Move saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_ACTION_BAR_SEARCH" desc="Button text to search among the saved web pages [CHAR-LIMIT=32]">
+        Search saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_ALL_ITEMS" desc="Title button and text for showing the list of web pages that have been saved/bookmarked. [CHAR-LIMIT=32]">
+        All saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_EDIT_ITEM" desc="The string prompting the user to edit the content of a saved page. [CHAR-LIMIT=32]">
+        Edit saved page
+      </message>
+      <message name="IDS_OFFLINE_PAGES_FREE_UP_SPACE_TITLE" desc="Text on a button and title of the dialog offering to remove offline pages to free up storage space. [CHAR-LIMIT=32]">
+        Free up space
+      </message>
+      <message name="IDS_OFFLINE_PAGES_FREE_UP_SPACE_MESSAGE" desc="Text explaining how many pages are going to be removed and how much storage is going to be freed.">
+        Delete <ph name="PAGES_NUMBER">%1$d<ex>8</ex></ph> saved pages that are older than 1 month? This will clear <ph name="TOTAL_PAGE_SIZE">%2$s<ex>8.3 MB</ex></ph> of space.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_FOLDER_EMPTY" desc="Text explaining that the currently selected saved pages folder is empty.">
+        No saved pages here
+      </message>
+      <message name="IDS_OFFLINE_PAGES_NTP_BUTTON_NAME" desc="Text for saved pages button on the new tab page [CHAR-LIMIT=20]">
+        Saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_OPEN_STORAGE_SETTINGS_DIALOG_TEXT" desc="Text of the dialog asking if the user wants to open storage settings to remove files to make space.">
+        Your device storage is full. Please remove other media to make space.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_PAGE_SAVED" desc="Message shown after user adds a new offline page.">
+        Page saved offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_PAGE_SAVED_STORAGE_NEAR_FULL" desc="Message shown after user adds a new offline page and the storage is almost full.">
+        Page saved offline. Storage almost full.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_PAGE_FAILED_TO_SAVE" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to problems other than storage.">
+        Saved page not available offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_PAGE_FAILED_TO_SAVE_STORAGE_NEAR_FULL" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to storage problem.">
+        Saved page not available offline. Storage almost full.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_SAVED_PAGES" desc="Title in recent tasks list for showing the list of web pages that have been saved.">
+        Saved pages
+      </message>
+      <message name="IDS_OFFLINE_PAGES_SAVE_PAGE_OFFLINE" desc="Message shown after the user visited a page that was bookmarked, but didn't have an offline copy.">
+        Save this page offline?
+      </message>
+      <message name="IDS_OFFLINE_PAGES_STORAGE_SPACE_TITLE" desc="Title of the promo header for managing offline pages storage. [CHAR-LIMIT=32]">
+        Storage space
+      </message>
+      <message name="IDS_OFFLINE_PAGES_STORAGE_SPACE_MESSAGE" desc="Text explaining how much storage is currently used for offline copies of saved pages.">
+        Saved pages are currently taking up <ph name="TOTAL_OFFLINE_STORAGE_SIZE">%1$s<ex>780 MB</ex></ph>.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_STORAGE_CLEARED" desc="Text for the snackbar confirming clearing of the offline page storage space.">
+        Storage cleared
+      </message>
+      <message name="IDS_OFFLINE_PAGES_VIEWING_OFFLINE_PAGE" desc="Text explaining that the user is viewing an offline copy of a web page.">
+        Viewing an offline copy of this page
+      </message>
+      <message name="IDS_OFFLINE_PAGES_VIEW_BUTTON" desc="Label for a button to open a system settings page. [CHAR-LIMIT=20]">
+        View
       </message>
 
       <!-- Find in page -->
@@ -1957,32 +2021,6 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
         Choose a bookmark
       </message>
 
-      <!-- Bookmark importing -->
-      <message name="IDS_IMPORT_BOOKMARKS" desc="Menu item for importing bookmarks. [CHAR-LIMIT=32]">
-        Import bookmarks
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_PROMPT" desc="Message asking user if they want to import bookmarks from Android Browser.">
-        Import all local bookmarks from Android Browser?
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_OK" desc="Button to import bookmarks from Android Browser. [CHAR-LIMIT=20]">
-        Import
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_PROGRESS_HEADER" desc="Title for the progress message shown while importing bookmarks. [CHAR-LIMIT=32]">
-        Importing bookmarks
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_PROGRESS_MESSAGE" desc="Progress message shown while importing bookmarks. [CHAR-LIMIT=32]">
-        Please wait…
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_FAILED_HEADER" desc="Error title shown when importing bookmarks failed. [CHAR-LIMIT=32]">
-        Import failed
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_FAILED_MESSAGE" desc="Error message shown when importing bookmarks failed.">
-        There was a problem importing bookmarks from Android Browser.
-      </message>
-      <message name="IDS_IMPORT_BOOKMARKS_RETRY" desc="Button to retry importing bookmarks after a failed attempt. [CHAR-LIMIT=20]">
-        Retry
-      </message>
-
       <!-- Voice search -->
       <message name="IDS_VOICE_SEARCH_ERROR" desc="Toast when the voice search activity couldn't be started. [CHAR-LIMIT=40]">
         No enabled voice search available
@@ -1999,9 +2037,6 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
       <message name="IDS_MENU_OPEN_IN_PRODUCT" desc="App menu item for opening link in Chrome. [CHAR-LIMIT=30]">
         Open in <ph name="PRODUCT_NAME">%1$s<ex>Chrome</ex></ph>
-      </message>
-      <message name="IDS_ACTIONBAR_TEXTSELECTION_TITLE" desc="Title of the text selection contextual action bar. [CHAR-LIMIT=30]">
-        Text selection
       </message>
       <message name="IDS_READER_VIEW_TEXT" desc="Message shown on the reader mode button bar, to invite the user to tap to open a reader mode.">
         Make page mobile-friendly
@@ -2123,17 +2158,8 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_VIDEO_AUDIO_CALL_NOTIFICATION_TEXT_2" desc="Text to be shown as a notification when a WebRTC video and audio call is in progress">
         Accessing audio and video input
       </message>
-      <message name="IDS_AUDIO_PLAYBACK_NOTIFICATION_TEXT" desc="Text to be shown as a notification when a Chrome tab is playing audio">
-        Audio is playing
-      </message>
-      <message name="IDS_AUDIO_PLAYBACK_NOTIFICATION_TEXT_WITH_URL" desc="The notification will display this text for the user to identify the tab to return to when a Chrome tab is playing audio">
-        Audio is playing. Touch to return to <ph name="URL_OF_THE_CURRENT_TAB">%1$s<ex>https://apprtc.appspot.com</ex></ph>
-      </message>
       <message name="IDS_MEDIA_NOTIFICATION_LINK_TEXT" desc="Url of the current tab. The notification will display this text for the user to identify the tab to return to.">
         Touch to return to <ph name="URL_OF_THE_CURRENT_TAB">%1$s<ex>https://apprtc.appspot.com</ex></ph>
-      </message>
-      <message name="IDS_MEDIA_NOTIFICATION_TEXT_NO_LINK" desc="The notification will display this text for the user to identify the tab to return to when the link is unknown">
-        Touch to return to the tab
       </message>
       <message name="IDS_NEW_TAB_INCOGNITO_HEADER" desc="Header shown when a user opens an incognito tab explaining incognito mode">
         You've gone incognito.
@@ -2246,6 +2272,21 @@ However, you aren’t invisible. Going incognito doesn’t hide your browsing fr
       </message>
       <message name="IDS_HELP_CONTEXT_SAD_TAB" translateable="false">
         mobile_awsnap
+      </message>
+
+      <!-- Client certificate selection failure strings. -->
+      <message name="IDS_CLIENT_CERT_UNSUPPORTED_TITLE" desc="Title of a dialog box for when the operating system does not support client SSL certificate selection">
+        Unable to select certificate.
+      </message>
+      <message name="IDS_CLIENT_CERT_UNSUPPORTED_MESSAGE" desc="The message in a dialog box for when the operating system does not support client SSL certificate selection">
+        Client side certificate selection is not supported by the operating system.
+      </message>
+
+      <!-- Physical Web strings -->
+      <message name="IDS_PHYSICAL_WEB_NOTIFICATION_TITLE" desc="Description of quantity of discovered URLs nearby.">
+        {NUM_URLS, plural,
+         =1 {1 URL nearby}
+         other {# URLs nearby}}
       </message>
     </messages>
   </release>

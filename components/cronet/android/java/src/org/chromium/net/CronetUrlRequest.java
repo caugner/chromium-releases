@@ -9,6 +9,7 @@ import android.util.Pair;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNIAdditionalImport;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeClassQualifiedName;
 
@@ -31,6 +32,8 @@ import java.util.concurrent.RejectedExecutionException;
  * any thread it is protected by mUrlRequestAdapterLock.
  */
 @JNINamespace("cronet")
+// Qualifies UrlRequest.StatusListener which is used in onStatus, a JNI method.
+@JNIAdditionalImport(UrlRequest.class)
 final class CronetUrlRequest implements UrlRequest {
     /* Native adapter object, owned by UrlRequest. */
     private long mUrlRequestAdapter;
@@ -39,6 +42,13 @@ final class CronetUrlRequest implements UrlRequest {
     private boolean mDisableCache = false;
     private boolean mWaitingOnRedirect = false;
     private boolean mWaitingOnRead = false;
+    /*
+     * When a read call completes, should the ByteBuffer limit() be updated
+     * instead of the position(). This controls legacy read() behavior.
+     * TODO(pauljensen): remove when all callers of read() are switched over
+     * to calling readNew().
+     */
+    private boolean mLegacyReadByteBufferAdjustment = false;
 
     /*
      * Synchronize access to mUrlRequestAdapter, mStarted, mWaitingOnRedirect,
@@ -342,6 +352,7 @@ final class CronetUrlRequest implements UrlRequest {
                 throw new IllegalStateException("Unexpected read attempt.");
             }
             mWaitingOnRead = false;
+            mLegacyReadByteBufferAdjustment = true;
 
             if (isDone()) {
                 return;
@@ -360,6 +371,34 @@ final class CronetUrlRequest implements UrlRequest {
                 // not a direct ByteBuffer.
                 throw new IllegalArgumentException(
                         "byteBuffer must be a direct ByteBuffer.");
+            }
+        }
+    }
+
+    @Override
+    public void readNew(ByteBuffer buffer) {
+        synchronized (mUrlRequestAdapterLock) {
+            if (!buffer.hasRemaining()) {
+                throw new IllegalArgumentException("ByteBuffer is already full.");
+            }
+
+            if (!mWaitingOnRead) {
+                throw new IllegalStateException("Unexpected read attempt.");
+            }
+            mWaitingOnRead = false;
+            mLegacyReadByteBufferAdjustment = false;
+
+            if (isDone()) {
+                return;
+            }
+
+            if (!nativeReadData(mUrlRequestAdapter, buffer, buffer.position(), buffer.limit())) {
+                // Still waiting on read. This is just to have consistent
+                // behavior with the other error cases.
+                mWaitingOnRead = true;
+                // Since accessing byteBuffer's memory failed, it's presumably
+                // not a direct ByteBuffer.
+                throw new IllegalArgumentException("byteBuffer must be a direct ByteBuffer.");
             }
         }
     }
@@ -388,7 +427,7 @@ final class CronetUrlRequest implements UrlRequest {
     }
 
     @Override
-    public void getStatus(final StatusListener listener) {
+    public void getStatus(final UrlRequest.StatusListener listener) {
         synchronized (mUrlRequestAdapterLock) {
             if (mUrlRequestAdapter != 0) {
                 nativeGetStatus(mUrlRequestAdapter, listener);
@@ -398,7 +437,7 @@ final class CronetUrlRequest implements UrlRequest {
         Runnable task = new Runnable() {
             @Override
             public void run() {
-                listener.onStatus(RequestStatus.INVALID);
+                listener.onStatus(UrlRequest.Status.INVALID);
             }
         };
         postTaskToExecutor(task);
@@ -646,7 +685,11 @@ final class CronetUrlRequest implements UrlRequest {
         if (mOnReadCompletedTask == null) {
             mOnReadCompletedTask = new OnReadCompletedRunnable();
         }
-        byteBuffer.limit(initialPosition + bytesRead);
+        if (mLegacyReadByteBufferAdjustment) {
+            byteBuffer.limit(initialPosition + bytesRead);
+        } else {
+            byteBuffer.position(initialPosition + bytesRead);
+        }
         mOnReadCompletedTask.mByteBuffer = byteBuffer;
         postTaskToExecutor(mOnReadCompletedTask);
     }
@@ -714,11 +757,11 @@ final class CronetUrlRequest implements UrlRequest {
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    private void onStatus(final StatusListener listener, final int loadState) {
+    private void onStatus(final UrlRequest.StatusListener listener, final int loadState) {
         Runnable task = new Runnable() {
             @Override
             public void run() {
-                listener.onStatus(RequestStatus.convertLoadState(loadState));
+                listener.onStatus(UrlRequest.Status.convertLoadState(loadState));
             }
         };
         postTaskToExecutor(task);
@@ -764,7 +807,7 @@ final class CronetUrlRequest implements UrlRequest {
     private native String nativeGetProxyServer(long nativePtr);
 
     @NativeClassQualifiedName("CronetURLRequestAdapter")
-    private native void nativeGetStatus(long nativePtr, StatusListener listener);
+    private native void nativeGetStatus(long nativePtr, UrlRequest.StatusListener listener);
 
     @NativeClassQualifiedName("CronetURLRequestAdapter")
     private native boolean nativeGetWasCached(long nativePtr);

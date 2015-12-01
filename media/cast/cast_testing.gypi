@@ -68,6 +68,7 @@
         # the tools compile correctly.
         'cast_tools',
         '<(DEPTH)/base/base.gyp:test_support_base',
+        '<(DEPTH)/media/media.gyp:media_test_support',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
@@ -120,6 +121,7 @@
         'sender/fake_video_encode_accelerator_factory.h',
         'sender/video_encoder_unittest.cc',
         'sender/video_sender_unittest.cc',
+        'sender/vp8_quantizer_parser_unittest.cc',
         'test/end2end_unittest.cc',
         'test/fake_receiver_time_offset_estimator.cc',
         'test/fake_receiver_time_offset_estimator.h',
@@ -377,6 +379,15 @@
           ],
           'sources': [
             'cast_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11==1',
+              {
+                'dependencies': [
+                  '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+                ],
+              }
+            ],
           ],
         },
       ],

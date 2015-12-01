@@ -158,6 +158,12 @@ function FileManager() {
   this.namingController_ = null;
 
   /**
+   * Directory tree naming controller.
+   * @private {DirectoryTreeNamingController}
+   */
+  this.directoryTreeNamingController_ = null;
+
+  /**
    * Controller for search UI.
    * @type {SearchController}
    * @private
@@ -320,6 +326,12 @@ FileManager.prototype = /** @struct */ {
     return this.providersModel_;
   },
   /**
+   * @return {MetadataModel}
+   */
+  get metadataModel() {
+    return this.metadataModel_;
+  },
+  /**
    * @return {DirectoryTree}
    */
   get directoryTree() {
@@ -479,7 +491,7 @@ FileManager.prototype = /** @struct */ {
         this.selectionHandler_,
         this.directoryModel_);
     this.tooltipController_ = new TooltipController(
-        queryRequiredElement(this.dialogDom_, '#tooltip'),
+        queryRequiredElement('#tooltip', this.dialogDom_),
         Array.prototype.slice.call(
             this.dialogDom_.querySelectorAll('[has-tooltip]')));
     this.emptyFolderController_ = new EmptyFolderController(
@@ -529,6 +541,8 @@ FileManager.prototype = /** @struct */ {
             this.document_,
             // Whether to show any welcome banner.
             this.dialogType === DialogType.FULL_PAGE));
+
+    this.ui_.decorateFilesMenuItems();
   };
 
   /**
@@ -579,6 +593,13 @@ FileManager.prototype = /** @struct */ {
     cr.ui.contextMenuHandler.setContextMenu(this.ui_.listContainer.renameInput,
                                             this.ui_.textContextMenu);
     this.registerInputCommands_(this.ui_.listContainer.renameInput);
+
+    cr.ui.contextMenuHandler.setContextMenu(
+        this.directoryTreeNamingController_.getInputElement(),
+        this.ui_.textContextMenu);
+    this.registerInputCommands_(
+        this.directoryTreeNamingController_.getInputElement());
+
     this.document_.addEventListener(
         'command',
         this.ui_.listContainer.clearHover.bind(this.ui_.listContainer));
@@ -786,14 +807,14 @@ FileManager.prototype = /** @struct */ {
     // Initialize the dialog.
     FileManagerDialogBase.setFileManager(this);
 
-    var table = queryRequiredElement(dom, '.detail-table');
+    var table = queryRequiredElement('.detail-table', dom);
     FileTable.decorate(
         table,
         this.metadataModel_,
         this.volumeManager_,
         this.historyLoader_,
         this.dialogType == DialogType.FULL_PAGE);
-    var grid = queryRequiredElement(dom, '.thumbnail-grid');
+    var grid = queryRequiredElement('.thumbnail-grid', dom);
     FileGrid.decorate(
         grid,
         this.metadataModel_,
@@ -806,7 +827,7 @@ FileManager.prototype = /** @struct */ {
         assertInstanceof(table, FileTable),
         assertInstanceof(grid, FileGrid),
         new LocationLine(
-            queryRequiredElement(dom, '#location-breadcrumbs'),
+            queryRequiredElement('#location-breadcrumbs', dom),
             this.volumeManager_));
 
     // Handle UI events.
@@ -947,11 +968,12 @@ FileManager.prototype = /** @struct */ {
     // Create task controller.
     this.taskController_ = new TaskController(
         this.dialogType,
+        this.volumeManager_,
         this.ui_,
         this.metadataModel_,
+        this.directoryModel_,
         this.selectionHandler_,
-        this.metadataUpdateController_,
-        function() { return new FileTasks(this); }.bind(this));
+        this.metadataUpdateController_);
 
     // Create search controller.
     this.searchController_ = new SearchController(
@@ -971,6 +993,12 @@ FileManager.prototype = /** @struct */ {
         this.directoryModel_,
         this.fileFilter_,
         this.selectionHandler_);
+
+    // Create directory tree naming controller.
+    this.directoryTreeNamingController_ = new DirectoryTreeNamingController(
+        this.directoryModel_,
+        assert(this.ui_.directoryTree),
+        this.ui_.alertDialog);
 
     // Create spinner controller.
     this.spinnerController_ = new SpinnerController(
@@ -992,6 +1020,13 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
+   * @return {DirectoryTreeNamingController}
+   */
+  FileManager.prototype.getDirectoryTreeNamingController = function() {
+    return this.directoryTreeNamingController_;
+  };
+
+  /**
    * @private
    */
   FileManager.prototype.initDirectoryTree_ = function() {
@@ -1006,6 +1041,7 @@ FileManager.prototype = /** @struct */ {
                            assert(this.directoryModel_),
                            assert(this.volumeManager_),
                            assert(this.metadataModel_),
+                           assert(this.fileOperationManager_),
                            fakeEntriesVisible);
     directoryTree.dataModel = new NavigationListModel(
         assert(this.volumeManager_),
@@ -1349,13 +1385,6 @@ FileManager.prototype = /** @struct */ {
    */
   FileManager.prototype.getCurrentList = function() {
     return this.ui.listContainer.currentList;
-  };
-
-  /**
-   * @return {!MetadataModel}
-   */
-  FileManager.prototype.getMetadataModel = function() {
-    return assert(this.metadataModel_);
   };
 
   /**

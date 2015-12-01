@@ -136,9 +136,7 @@
       "internal": true,
       "channel": "stable",
       "contexts": ["webui"],
-      "matches": [
-        "chrome://media-router/*"
-      ]
+      "matches": ["chrome://media-router/*"]
     }
   ],
   "events": {
@@ -197,7 +195,10 @@
     "matches": [
       "chrome://extensions/*",
       "chrome://extensions-frame/*",
-      "chrome://chrome/extensions/*"
+      "chrome://chrome/extensions/*",
+      "chrome://md-settings/*",
+      "chrome://settings/*",
+      "chrome://settings-frame/*"
     ]
   }],
   "management.getPermissionWarningsByManifest": {

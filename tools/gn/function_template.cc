@@ -72,8 +72,8 @@ const char kTemplate_Help[] =
     "  have globally unique names, or you will get collisions.\n"
     "\n"
     "  Access the invoking name in your template via the implicit\n"
-    "  \"target_name\" variable. This should also be the basis of how other\n"
-    "  targets that a template expands to to ensure uniquness.\n"
+    "  \"target_name\" variable. This should also be the basis for how other\n"
+    "  targets that a template expands to ensure uniqueness.\n"
     "\n"
     "  A typical example would be a template that defines an action to\n"
     "  generate some source files, and a source_set to compile that source.\n"
@@ -163,6 +163,14 @@ Value RunTemplate(Scope* scope,
                   const std::vector<Value>& args,
                   BlockNode* block,
                   Err* err) {
+  // Of course you can have configs and targets in a template. But here, we're
+  // not actually executing the block, only declaring it. Marking the template
+  // declaration as non-nestable means that you can't put it inside a target,
+  // for example.
+  NonNestableBlock non_nestable(scope, function, "template");
+  if (!non_nestable.Enter(err))
+    return Value();
+
   // TODO(brettw) determine if the function is built-in and throw an error if
   // it is.
   if (args.size() != 1) {

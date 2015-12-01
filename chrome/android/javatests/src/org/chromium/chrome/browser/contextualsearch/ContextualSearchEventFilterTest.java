@@ -13,8 +13,10 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContent;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.eventfilter.MockEventFilterHost;
+import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.ContextualSearchEventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
@@ -120,6 +122,37 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
     }
 
     // --------------------------------------------------------------------------------------------
+    // MockContextualSearchPanel
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * MockContextualSearchPanel stops creation of ContentViewCores.
+     */
+    public static class MockContextualSearchPanel extends ContextualSearchPanel {
+
+        public MockContextualSearchPanel(Context context, LayoutUpdateHost updateHost) {
+            super(context, updateHost);
+        }
+
+        @Override
+        public OverlayPanelContent createNewOverlayPanelContent() {
+            return new MockOverlayPanelContent();
+        }
+
+        /**
+         * Override creation and destruction of the ContentViewCore as they rely on native methods.
+         */
+        private static class MockOverlayPanelContent extends OverlayPanelContent {
+            public MockOverlayPanelContent() {
+                super(null, null, null);
+            }
+
+            @Override
+            public void removeLastHistoryEntry(String url, long timeInMs) {}
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
     // Test Suite
     // --------------------------------------------------------------------------------------------
 
@@ -133,7 +166,7 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
         mTouchSlopDp = ViewConfiguration.get(context).getScaledTouchSlop() / mDpToPx;
 
         EventFilterHost eventFilterHost = new MockEventFilterHostWrapper(context);
-        mContextualSearchPanel = new ContextualSearchPanel(context, null);
+        mContextualSearchPanel = new MockContextualSearchPanel(context, null);
         mEventFilter = new ContextualSearchEventFilterWrapper(context, eventFilterHost, this,
                 mContextualSearchPanel);
 

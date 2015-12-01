@@ -1,4 +1,81 @@
 {
+    "AndroidSessionNotifications": [
+        {
+            "group_name": "Disabled"
+        }
+    ],
+    "AutofillClassifier": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ChromotingQUIC": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ContextualSearch": [
+        {
+            "group_name": "OptOut",
+            "params": {
+                "contextual_search_arrow_icon_enabled": "true",
+                "contextual_search_narrow_panel_supported": "true",
+                "contextual_search_side_search_provider_icon_enabled": "true",
+                "disable_for_cjk": "true",
+                "enabled": "true",
+                "promo_on_limited_taps": "true",
+                "promo_opt_out": "true",
+                "tap_preload_limit_for_decided": "50",
+                "tap_preload_limit_for_undecided": "20",
+                "tap_resolve_limit_for_decided": "50",
+                "tap_resolve_limit_for_undecided": "20",
+                "tap_triggered_promo_limit": "50"
+            }
+        }
+    ],
+    "CustomTabs": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "DisablePrerender"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
+    "DataCompressionProxyLoFi": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "hysteresis_period_seconds": "120",
+                "rtt_msec": "2000"
+            }
+        }
+    ],
+    "DataCompressionProxyPromoVisibility": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "DataReductionProxyConfigService": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "minimum_refresh_interval_on_success_msec": "21600000"
+            }
+        }
+    ],
+    "DataReductionProxyUseQuic": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "EnhancedBookmarks": [
         {
             "group_name": "EnableEnhancedBookmarks",
@@ -21,37 +98,55 @@
             }
         }
     ],
-    "CustomTabs": [
+    "IconNTP": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "state": "enabled"
+            }
+        }
+    ],
+    "InvalidationsGCMUpstream": [
         {
             "group_name": "Enabled"
         },
         {
-            "group_name": "DisablePrerender"
+            "group_name": "Control"
         },
         {
             "group_name": "Disabled"
         }
     ],
-    "DataCompressionProxyLoFi": [
-        {
-            "group_name": "Enabled",
-            "params": {
-                "rtt_msec": "2000",
-                "hysteresis_period_seconds": "120"
-            }            
-        }
-    ],
-    "DataReductionProxyUseQuic": [
+    "LimitSyncPassphrasePrompt": [
         {
             "group_name": "Enabled"
         }
     ],
-    "DataReductionProxyConfigService": [
+    "NetworkQualityEstimator": [
         {
-	    "group_name": "Enabled"
-	}
+            "group_name": "Enabled",
+            "params": {
+                "2G.DefaultMedianKbps": "81",
+                "2G.DefaultMedianRTTMsec": "1337",
+                "3G.DefaultMedianKbps": "658",
+                "3G.DefaultMedianRTTMsec": "297",
+                "4G.DefaultMedianKbps": "1756",
+                "4G.DefaultMedianRTTMsec": "159",
+                "Bluetooth.DefaultMedianKbps": "449",
+                "Bluetooth.DefaultMedianRTTMsec": "135",
+                "Ethernet.DefaultMedianKbps": "3263",
+                "Ethernet.DefaultMedianRTTMsec": "106",
+                "HalfLifeSeconds": "60",
+                "None.DefaultMedianKbps": "567",
+                "None.DefaultMedianRTTMsec": "272",
+                "Unknown.DefaultMedianKbps": "1916",
+                "Unknown.DefaultMedianRTTMsec": "121",
+                "WiFi.DefaultMedianKbps": "2736",
+                "WiFi.DefaultMedianRTTMsec": "168"
+            }
+        }
     ],
-    "LimitSyncPassphrasePrompt": [
+    "Precache": [
         {
             "group_name": "Enabled"
         }
@@ -60,7 +155,7 @@
         {
             "group_name": "Enabled",
             "params": {
-              "alternate_protocol_probability_threshold": "0.01"
+                "alternate_protocol_probability_threshold": "0.001"
             }
         }
     ],
@@ -70,25 +165,6 @@
         },
         {
             "group_name": "DoNotShow"
-        }
-    ],
-    "ContextualSearch": [
-        {
-            "group_name": "OptOut",
-            "params": {
-                "enabled": "true",
-                "disable_for_cjk": "true",
-                "promo_opt_out": "true",
-                "promo_on_limited_taps": "true",
-                "tap_triggered_promo_limit": "50",
-                "tap_preload_limit_for_undecided": "20",
-                "tap_resolve_limit_for_undecided": "20",
-                "tap_preload_limit_for_decided": "50",
-                "tap_resolve_limit_for_decided": "50",
-                "contextual_search_side_search_provider_icon_enabled": "true",
-                "contextual_search_arrow_icon_enabled": "true",
-                "contextual_search_narrow_panel_supported": "true"
-            }
         }
     ],
     "ReportCertificateErrors": [
@@ -120,96 +196,26 @@
             "group_name": "DontShowAndDontSend"
         }
     ],
-    "BackgroundHtmlParserTokenLimits": [
+    "SafeBrowsingAndroid": [
         {
-          "group_name": "Session_10",
+            "group_name": "Enabled",
             "params": {
-              "backgroundHtmlParserOutstandingTokenLimit": "10",
-                "backgroundHtmlParserPendingTokenLimit": "10"
+                "enabled": "true"
             }
         },
         {
-            "group_name": "Session_50",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "50",
-                "backgroundHtmlParserPendingTokenLimit": "50"
-            }
-        },
-        {
-            "group_name": "Session_100",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "100",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_300",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "300",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_500",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "500",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_1000",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "1000",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_2500",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "2500",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_5000",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "5000",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
-        },
-        {
-            "group_name": "Session_10000",
-            "params": {
-                "backgroundHtmlParserOutstandingTokenLimit": "10000",
-                "backgroundHtmlParserPendingTokenLimit": "100"
-            }
+            "group_name": "Control"
         }
     ],
-    "SpeculativeResourcePrefetching": [
+    "SafeBrowsingReportPhishingErrorLink": [
         {
-            "group_name": "v=1a:Prefetching=Enabled:Predictor=Url"
+            "group_name": "Enabled"
         },
         {
-            "group_name":
-                "v=1b:Prefetching=Enabled:Predictor=Url:Confidence=High"
+            "group_name": "Control"
         },
         {
-            "group_name":
-                "v=1c:Prefetching=Enabled:Predictor=Url:Confidence=Low"
-        },
-        {
-            "group_name": "v=1d:Prefetching=Enabled:Predictor=Host"
-        },
-        {
-            "group_name":
-                "v=1e:Prefetching=Enabled:Predictor=Host:Confidence=High"
-        },
-        {
-            "group_name":
-                "v=1f:Prefetching=Enabled:Predictor=Host:Confidence=Low"
-        },
-        {
-            "group_name": "v=1:Prefetching=Learning"
+            "group_name": "Disabled"
         }
     ],
     "SdchPersistence": [
@@ -217,12 +223,27 @@
             "group_name": "Enabled"
         }
     ],
-    "IconNTP": [
+    "SpeculativeResourcePrefetching": [
         {
-            "group_name": "Enabled",
-            "params": {
-                "state": "enabled"
-            }
+            "group_name": "v=1a:Prefetching=Enabled:Predictor=Url"
+        },
+        {
+            "group_name": "v=1b:Prefetching=Enabled:Predictor=Url:Confidence=High"
+        },
+        {
+            "group_name": "v=1c:Prefetching=Enabled:Predictor=Url:Confidence=Low"
+        },
+        {
+            "group_name": "v=1d:Prefetching=Enabled:Predictor=Host"
+        },
+        {
+            "group_name": "v=1e:Prefetching=Enabled:Predictor=Host:Confidence=High"
+        },
+        {
+            "group_name": "v=1f:Prefetching=Enabled:Predictor=Host:Confidence=Low"
+        },
+        {
+            "group_name": "v=1:Prefetching=Learning"
         }
     ],
     "SyncHttpContentCompression": [
@@ -233,9 +254,19 @@
             "group_name": "Disabled"
         }
     ],
-    "AutofillFieldMetadata": [
+    "TabSyncByRecency": [
         {
             "group_name": "Enabled"
+        }
+    ],
+    "UMA_EnableCellularLogUpload": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "Enabled": "true",
+                "Optimize": "true",
+                "Sample_Probability": "100"
+            }
         }
     ],
     "VarationsServiceControl": [

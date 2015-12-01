@@ -13,21 +13,21 @@ function test()
     InspectorTest.runTestSuite([
         function initFormattedStyle(next)
         {
-            function callback(styles)
+            function callback(matchedResult)
             {
-                if (!styles) {
+                if (!matchedResult) {
                     InspectorTest.addResult("empty styles");
                     InspectorTest.completeTest();
                     return;
                 }
 
-                formattedStyle = styles.matchedCSSRules[1].style;
+                formattedStyle = matchedResult.nodeStyles()[1];
                 next();
             }
 
             function nodeCallback(node)
             {
-                InspectorTest.cssModel.matchedStylesPromise(node.id, false, false).then(callback);
+                InspectorTest.cssModel.matchedStylesPromise(node.id).then(callback);
             }
             InspectorTest.selectNodeWithId("formatted", nodeCallback);
         },
@@ -121,6 +121,11 @@ function test()
             formattedStyle.insertPropertyAt(0, "-webkit-animation", "linear", dumpFormattedAndCallNext.bind(null, next));
         },
 
+        function testFormattedWithMetaValue(next)
+        {
+            formattedStyle.insertPropertyAt(1, "unicode-bidi", "webkit-isolate", dumpFormattedAndCallNext.bind(null, next));
+        },
+
         function testFormattedWithAtoms(next)
         {
             formattedStyle.insertPropertyAt(0, "border-left", "1px solid rgb(1,1,1)", dumpFormattedAndCallNext.bind(null, next));
@@ -128,20 +133,21 @@ function test()
 
         function initUnformattedStyle(next)
         {
-            function callback(styles)
+            function callback(matchedResult)
             {
-                if (!styles) {
+                if (!matchedResult) {
                     InspectorTest.addResult("empty styles");
+                    InspectorTest.completeTest();
                     return;
                 }
 
-                unformattedStyle = styles.matchedCSSRules[1].style;
+                unformattedStyle = matchedResult.nodeStyles()[1];
                 next();
             }
 
             function nodeCallback(node)
             {
-                InspectorTest.cssModel.matchedStylesPromise(node.id, false, false).then(callback);
+                InspectorTest.cssModel.matchedStylesPromise(node.id).then(callback);
             }
             InspectorTest.selectNodeWithId("unformatted", nodeCallback);
         },
@@ -218,28 +224,28 @@ function test()
 
     // Data dumping
 
-    function dumpFormattedAndCallNext(next, style)
+    function dumpFormattedAndCallNext(next, success)
     {
-        if (!style) {
-            InspectorTest.addResult("error: empty style");
+        if (!success) {
+            InspectorTest.addResult("error: operation failed.");
             InspectorTest.completeTest();
+            return;
         }
 
-        formattedStyle = style;
-        dumpStyle(style);
+        dumpStyle(formattedStyle);
         if (next)
             next();
     }
 
-    function dumpUnformattedAndCallNext(next, style)
+    function dumpUnformattedAndCallNext(next, success)
     {
-        if (!style) {
-            InspectorTest.addResult("error: empty style");
+        if (!success) {
+            InspectorTest.addResult("error: operation failed.");
             InspectorTest.completeTest();
+            return;
         }
 
-        unformattedStyle = style;
-        dumpStyle(style);
+        dumpStyle(unformattedStyle);
         if (next)
             next();
     }
@@ -259,7 +265,7 @@ function test()
 #formatted { 
     property1: value1;
     property2: value2;
-    property3: value3;
+    property3: value3
 }
 
 #unformatted {property1:value1;property2:value2;property3:value3;}

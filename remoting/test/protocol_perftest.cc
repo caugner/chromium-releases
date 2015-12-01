@@ -119,7 +119,6 @@ class ProtocolPerfTest
 
   // VideoRenderer interface.
   void OnSessionConfig(const protocol::SessionConfig& config) override {}
-  ChromotingStats* GetStats() override { return nullptr; }
   protocol::VideoStub* GetVideoStub() override { return this; }
 
   // protocol::VideoStub interface.

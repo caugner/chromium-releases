@@ -4,17 +4,18 @@
 
 package org.chromium.chrome.browser.sync.ui;
 
+import android.app.Instrumentation.ActivityMonitor;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.test.FlakyTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.sync.FakeProfileSyncService;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.test.util.ApplicationData;
+import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.content.browser.test.NativeLibraryTestBase;
 import org.chromium.sync.signin.ChromeSigninController;
 
@@ -24,10 +25,14 @@ import org.chromium.sync.signin.ChromeSigninController;
 public class PassphraseActivityTest extends NativeLibraryTestBase {
     private static final String TEST_ACCOUNT = "test@gmail.com";
 
+    private Context mContext;
+
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        mContext = getInstrumentation().getTargetContext();
+        SigninTestUtil.setUpAuthForTest(getInstrumentation());
+        ApplicationData.clearAppData(mContext);
         loadNativeLibraryAndInitBrowserProcess();
     }
 
@@ -43,16 +48,19 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
      * @SmallTest
      * Constantly fails on M, fine on other platforms: http://crbug.com/517590
      */
-    @FlakyTest
     @Feature({"Sync"})
     public void testCallbackAfterBackgrounded() throws Exception {
-        final Context context = getInstrumentation().getTargetContext();
+        getInstrumentation().waitForIdleSync();
+        SigninTestUtil.get().addAndSignInTestAccount();
+
         // Override before creating the activity so we know initialized is false.
-        overrideProfileSyncService(context);
+        overrideProfileSyncService();
+
         // PassphraseActivity won't start if an account isn't set.
-        ChromeSigninController.get(context).setSignedInAccountName(TEST_ACCOUNT);
+        assertNotNull(ChromeSigninController.get(mContext).getSignedInAccountName());
+
         // Create the activity.
-        final PassphraseActivity activity = launchPassphraseActivity(context);
+        final PassphraseActivity activity = launchPassphraseActivity();
         assertNotNull(activity);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -62,8 +70,7 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
                 getInstrumentation().callActivityOnPause(activity);
                 getInstrumentation().callActivityOnSaveInstanceState(activity, bundle);
                 // Fake sync's backend finishing its initialization.
-                FakeProfileSyncService pss =
-                        (FakeProfileSyncService) ProfileSyncService.get(context);
+                FakeProfileSyncService pss = (FakeProfileSyncService) ProfileSyncService.get();
                 pss.setSyncInitialized(true);
                 pss.syncStateChanged();
             }
@@ -71,23 +78,26 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
         // Nothing crashed; success!
     }
 
-    private PassphraseActivity launchPassphraseActivity(Context context) {
+    private PassphraseActivity launchPassphraseActivity() {
         Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.setComponent(new ComponentName(context, PassphraseActivity.class));
+        intent.setComponent(new ComponentName(mContext, PassphraseActivity.class));
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
         // This activity will become the start of a new task on this history stack.
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // Clears the task stack above this activity if it already exists.
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        return launchActivityWithIntent(context.getPackageName(), PassphraseActivity.class, intent);
+        ActivityMonitor monitor =
+                getInstrumentation().addMonitor(PassphraseActivity.class.getName(), null, false);
+        mContext.startActivity(intent);
+        return (PassphraseActivity) getInstrumentation().waitForMonitor(monitor);
     }
 
-    private void overrideProfileSyncService(final Context context) {
+    private void overrideProfileSyncService() {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 // PSS has to be constructed on the UI thread.
-                ProfileSyncService.overrideForTests(new FakeProfileSyncService(context));
+                ProfileSyncService.overrideForTests(new FakeProfileSyncService());
             }
         });
     }

@@ -9,15 +9,17 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/process_info.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/incident_reporting/environment_data_collection.h"
@@ -46,6 +48,7 @@ enum IncidentDisposition {
   ACCEPTED,
   PRUNED,
   DISCARDED,
+  NO_DOWNLOAD,
   NUM_DISPOSITIONS
 };
 
@@ -77,6 +80,7 @@ void LogIncidentDataType(IncidentDisposition disposition,
       "SBIRS.Incident",
       "SBIRS.PrunedIncident",
       "SBIRS.DiscardedIncident",
+      "SBIRS.NoDownloadIncident",
   };
   static_assert(arraysize(kHistogramNames) == NUM_DISPOSITIONS,
                 "Keep kHistogramNames in sync with enum IncidentDisposition.");
@@ -101,15 +105,28 @@ PersistentIncidentState ComputeIncidentState(const Incident& incident) {
   return state;
 }
 
+// Returns true if the incident reporting service field trial is enabled.
+bool IsFieldTrialEnabled() {
+  std::string group_name = base::FieldTrialList::FindFullName(
+      "SafeBrowsingIncidentReportingService");
+  return base::StartsWith(group_name, "Enabled", base::CompareCase::SENSITIVE);
+}
+
 }  // namespace
 
 struct IncidentReportingService::ProfileContext {
   ProfileContext();
   ~ProfileContext();
 
+  // Returns true if the profile has incidents to be uploaded or cleared.
+  bool HasIncidents() const;
+
   // The incidents collected for this profile pending creation and/or upload.
   // Will contain null values for pruned incidents.
   ScopedVector<Incident> incidents;
+
+  // The incidents data of which should be cleared.
+  ScopedVector<Incident> incidents_to_clear;
 
   // State storage for this profile; null until PROFILE_ADDED notification is
   // received.
@@ -155,9 +172,14 @@ class IncidentReportingService::Receiver : public IncidentReceiver {
   void AddIncidentForProfile(Profile* profile,
                              scoped_ptr<Incident> incident) override;
   void AddIncidentForProcess(scoped_ptr<Incident> incident) override;
+  void ClearIncidentForProcess(scoped_ptr<Incident> incident) override;
 
  private:
   static void AddIncidentOnMainThread(
+      const base::WeakPtr<IncidentReportingService>& service,
+      Profile* profile,
+      scoped_ptr<Incident> incident);
+  static void ClearIncidentOnMainThread(
       const base::WeakPtr<IncidentReportingService>& service,
       Profile* profile,
       scoped_ptr<Incident> incident);
@@ -197,6 +219,27 @@ void IncidentReportingService::Receiver::AddIncidentForProcess(
   }
 }
 
+void IncidentReportingService::Receiver::ClearIncidentForProcess(
+    scoped_ptr<Incident> incident) {
+  if (thread_runner_->BelongsToCurrentThread()) {
+    ClearIncidentOnMainThread(service_, nullptr, incident.Pass());
+  } else {
+    thread_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(
+            &IncidentReportingService::Receiver::ClearIncidentOnMainThread,
+            service_, nullptr, base::Passed(&incident)));
+  }
+}
+
+bool IncidentReportingService::HasIncidentsToUpload() const {
+  for (const auto& profile_and_context : profiles_) {
+    if (!profile_and_context.second->incidents.empty())
+      return true;
+  }
+  return false;
+}
+
 // static
 void IncidentReportingService::Receiver::AddIncidentOnMainThread(
     const base::WeakPtr<IncidentReportingService>& service,
@@ -206,6 +249,15 @@ void IncidentReportingService::Receiver::AddIncidentOnMainThread(
     service->AddIncident(profile, incident.Pass());
   else
     LogIncidentDataType(DISCARDED, *incident);
+}
+
+// static
+void IncidentReportingService::Receiver::ClearIncidentOnMainThread(
+      const base::WeakPtr<IncidentReportingService>& service,
+      Profile* profile,
+      scoped_ptr<Incident> incident) {
+  if (service)
+    service->ClearIncident(profile, incident.Pass());
 }
 
 IncidentReportingService::ProfileContext::ProfileContext() : added(false) {
@@ -218,12 +270,28 @@ IncidentReportingService::ProfileContext::~ProfileContext() {
   }
 }
 
+bool IncidentReportingService::ProfileContext::HasIncidents() const {
+  return !incidents.empty() || !incidents_to_clear.empty();
+}
+
 IncidentReportingService::UploadContext::UploadContext(
     scoped_ptr<ClientIncidentReport> report)
     : report(report.Pass()) {
 }
 
 IncidentReportingService::UploadContext::~UploadContext() {
+}
+
+// static
+bool IncidentReportingService::IsEnabledForProfile(Profile* profile) {
+  if (profile->IsOffTheRecord())
+    return false;
+  if (!profile->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled))
+    return false;
+  if (IsFieldTrialEnabled())
+    return true;
+  return profile->GetPrefs()->GetBoolean(
+      prefs::kSafeBrowsingExtendedReportingEnabled);
 }
 
 IncidentReportingService::IncidentReportingService(
@@ -268,6 +336,8 @@ IncidentReportingService::IncidentReportingService(
             base::Bind(&IncidentReportingService::OnClientDownloadRequest,
                        base::Unretained(this)));
   }
+
+  enabled_by_field_trial_ = IsFieldTrialEnabled();
 }
 
 IncidentReportingService::~IncidentReportingService() {
@@ -343,6 +413,8 @@ IncidentReportingService::IncidentReportingService(
       download_metadata_manager_(content::BrowserThread::GetBlockingPool()),
       receiver_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
+  enabled_by_field_trial_ = IsFieldTrialEnabled();
+
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_PROFILE_ADDED,
                               content::NotificationService::AllSources());
@@ -376,21 +448,29 @@ void IncidentReportingService::OnProfileAdded(Profile* profile) {
   DCHECK(!context->added);
   context->added = true;
   context->state_store.reset(new StateStore(profile));
+  bool enabled_for_profile = IsEnabledForProfile(profile);
 
-  const bool safe_browsing_enabled =
-      profile->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled);
+  // Drop all incidents associated with this profile that were received prior to
+  // its addition if incident reporting is not enabled for it.
+  if (!context->incidents.empty() && !enabled_for_profile) {
+    for (Incident* incident : context->incidents)
+      LogIncidentDataType(DROPPED, *incident);
+    context->incidents.clear();
+  }
 
-  // Start processing delayed analysis callbacks if this new profile
-  // participates in safe browsing. Start is idempotent, so this is safe even if
-  // they're already running.
-  if (safe_browsing_enabled)
+  if (enabled_for_profile) {
+    // Start processing delayed analysis callbacks if incident reporting is
+    // enabled for this new profile. Start is idempotent, so this is safe even
+    // if they're already running.
     delayed_analysis_callbacks_.Start();
 
-  // Start a new report if this profile participates in safe browsing and there
-  // are process-wide incidents.
-  if (safe_browsing_enabled && GetProfileContext(NULL) &&
-      GetProfileContext(NULL)->incidents.size()) {
-    BeginReportProcessing();
+    // Start a new report if there are process-wide incidents, or incidents for
+    // this profile.
+    if ((GetProfileContext(nullptr) &&
+         GetProfileContext(nullptr)->HasIncidents()) ||
+        context->HasIncidents()) {
+      BeginReportProcessing();
+    }
   }
 
   // TODO(grt): register for pref change notifications to start delayed analysis
@@ -401,14 +481,10 @@ void IncidentReportingService::OnProfileAdded(Profile* profile) {
   if (!report_)
     return;
 
-  // Drop all incidents associated with this profile that were received prior to
-  // its addition if the profile is not participating in safe browsing.
-  if (!context->incidents.empty() && !safe_browsing_enabled) {
-    for (Incident* incident : context->incidents)
-      LogIncidentDataType(DROPPED, *incident);
-    context->incidents.clear();
-  }
-
+  // Environment collection is deferred until at least one profile for which the
+  // service is enabled is added. Re-initiate collection now in case this is the
+  // first such profile.
+  BeginEnvironmentCollection();
   // Take another stab at finding the most recent download if a report is being
   // assembled and one hasn't been found yet (the LastDownloadFinder operates
   // only on profiles that have been added to the ProfileManager).
@@ -483,16 +559,20 @@ Profile* IncidentReportingService::FindEligibleProfile() const {
     // process-wide incidents.
     if (!scan->second->added)
       continue;
-    PrefService* prefs = scan->first->GetPrefs();
-    if (prefs->GetBoolean(prefs::kSafeBrowsingEnabled)) {
-      if (!candidate)
-        candidate = scan->first;
-      if (prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingEnabled)) {
-        candidate = scan->first;
-        break;
-      }
+    // Also skip over profiles for which IncidentReporting is not enabled.
+    if (!IsEnabledForProfile(scan->first))
+      continue;
+    // If the current profile has Extended Reporting enabled, stop looking and
+    // use that one.
+    if (scan->first->GetPrefs()->GetBoolean(
+            prefs::kSafeBrowsingExtendedReportingEnabled)) {
+      return scan->first;
     }
+    // Otherwise, store this one as a candidate and keep looking (in case we
+    // find one with Extended Reporting enabled).
+    candidate = scan->first;
   }
+
   return candidate;
 }
 
@@ -512,10 +592,9 @@ void IncidentReportingService::AddIncident(Profile* profile,
   LogIncidentDataType(RECEIVED, *incident);
 
   // Drop the incident immediately if the profile has already been added to the
-  // manager and is not participating in safe browsing. Preference evaluation is
-  // deferred until OnProfileAdded() otherwise.
-  if (context->added &&
-      !profile->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled)) {
+  // manager and does not have incident reporting enabled. Preference evaluation
+  // is deferred until OnProfileAdded() otherwise.
+  if (context->added && !IsEnabledForProfile(profile)) {
     LogIncidentDataType(DROPPED, *incident);
     return;
   }
@@ -537,6 +616,14 @@ void IncidentReportingService::AddIncident(Profile* profile,
 
   // Start assembling a new report if this is the first incident ever or the
   // first since the last upload.
+  BeginReportProcessing();
+}
+
+void IncidentReportingService::ClearIncident(Profile* profile,
+                                             scoped_ptr<Incident> incident) {
+  ProfileContext* context = GetOrCreateProfileContext(profile);
+  context->incidents_to_clear.push_back(incident.release());
+  // Begin processing to handle cleared incidents following collation.
   BeginReportProcessing();
 }
 
@@ -563,9 +650,12 @@ void IncidentReportingService::BeginEnvironmentCollection() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(report_);
   // Nothing to do if environment collection is pending or has already
-  // completed.
-  if (environment_collection_pending_ || report_->has_environment())
+  // completed, if there are no incidents to process, or if there is no eligible
+  // profile.
+  if (environment_collection_pending_ || report_->has_environment() ||
+      !HasIncidentsToUpload() || !FindEligibleProfile()) {
     return;
+  }
 
   environment_collection_begin_ = base::TimeTicks::Now();
   ClientIncidentReport_EnvironmentData* environment_data =
@@ -614,7 +704,7 @@ void IncidentReportingService::OnEnvironmentDataCollected(
                       base::TimeTicks::Now() - environment_collection_begin_);
   environment_collection_begin_ = base::TimeTicks();
 
-  UploadIfCollectionComplete();
+  ProcessIncidentsIfCollectionComplete();
 }
 
 bool IncidentReportingService::WaitingToCollateIncidents() {
@@ -639,8 +729,7 @@ void IncidentReportingService::OnCollationTimeout() {
   for (ProfileContextCollection::iterator scan = profiles_.begin();
        scan != profiles_.end();
        ++scan) {
-    if (scan->first && !scan->second->added &&
-        !scan->second->incidents.empty()) {
+    if (scan->first && !scan->second->added && scan->second->HasIncidents()) {
       collation_timer_.Reset();
       return;
     }
@@ -648,16 +737,18 @@ void IncidentReportingService::OnCollationTimeout() {
 
   collation_timeout_pending_ = false;
 
-  UploadIfCollectionComplete();
+  ProcessIncidentsIfCollectionComplete();
 }
 
 void IncidentReportingService::BeginDownloadCollection() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(report_);
-  // Nothing to do if a search for the most recent download is already pending
-  // or if one has already been found.
-  if (last_download_finder_ || report_->has_download())
+  // Nothing to do if a search for the most recent download is already pending,
+  // if one has already been found, or if there are no incidents to process.
+  if (last_download_finder_ || report_->has_download() ||
+      !HasIncidentsToUpload()) {
     return;
+  }
 
   last_download_begin_ = base::TimeTicks::Now();
   last_download_finder_ = CreateDownloadFinder(
@@ -678,7 +769,11 @@ bool IncidentReportingService::WaitingForMostRecentDownload() {
   // The next easy case: waiting if the finder is operating.
   if (last_download_finder_)
     return true;
-  // The harder case: waiting if a non-NULL profile has not yet been added.
+  // Harder case 1: not waiting if there are no incidents to upload (only
+  // incidents to clear).
+  if (!HasIncidentsToUpload())
+    return false;
+  // Harder case 2: waiting if a non-NULL profile has not yet been added.
   for (ProfileContextCollection::const_iterator scan = profiles_.begin();
        scan != profiles_.end();
        ++scan) {
@@ -711,10 +806,10 @@ void IncidentReportingService::OnLastDownloadFound(
   if (last_download)
     report_->set_allocated_download(last_download.release());
 
-  UploadIfCollectionComplete();
+  ProcessIncidentsIfCollectionComplete();
 }
 
-void IncidentReportingService::UploadIfCollectionComplete() {
+void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
   DCHECK(report_);
   // Bail out if there are still outstanding collection tasks. Completion of any
   // of these will start another upload attempt.
@@ -729,23 +824,11 @@ void IncidentReportingService::UploadIfCollectionComplete() {
   first_incident_time_ = base::Time();
   last_incident_time_ = base::TimeTicks();
 
-  // Drop the report if no executable download was found.
-  if (!report->has_download()) {
-    UMA_HISTOGRAM_ENUMERATION("SBIRS.UploadResult",
-                              IncidentReportUploader::UPLOAD_NO_DOWNLOAD,
-                              IncidentReportUploader::NUM_UPLOAD_RESULTS);
-    return;
-  }
-
   ClientIncidentReport_EnvironmentData_Process* process =
       report->mutable_environment()->mutable_process();
 
-  // Not all platforms have a metrics reporting preference.
-  if (g_browser_process->local_state()->FindPreference(
-          prefs::kMetricsReportingEnabled)) {
-    process->set_metrics_consent(g_browser_process->local_state()->GetBoolean(
-        prefs::kMetricsReportingEnabled));
-  }
+  process->set_metrics_consent(
+      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled());
 
   // Find the profile that benefits from the strongest protections.
   Profile* eligible_profile = FindEligibleProfile();
@@ -754,41 +837,70 @@ void IncidentReportingService::UploadIfCollectionComplete() {
                              prefs::kSafeBrowsingExtendedReportingEnabled) :
                        false);
 
+  process->set_field_trial_participant(enabled_by_field_trial_);
+
   // Associate process-wide incidents with the profile that benefits from the
-  // strongest safe browsing protections.
+  // strongest safe browsing protections. If there is no such profile, drop the
+  // incidents.
   ProfileContext* null_context = GetProfileContext(NULL);
-  if (null_context && !null_context->incidents.empty() && eligible_profile) {
-    ProfileContext* eligible_context = GetProfileContext(eligible_profile);
-    // Move the incidents to the target context.
-    eligible_context->incidents.insert(eligible_context->incidents.end(),
-                                       null_context->incidents.begin(),
-                                       null_context->incidents.end());
-    null_context->incidents.weak_clear();
+  if (null_context && null_context->HasIncidents()) {
+    if (eligible_profile) {
+      ProfileContext* eligible_context = GetProfileContext(eligible_profile);
+      // Move the incidents to the target context.
+      eligible_context->incidents.insert(eligible_context->incidents.end(),
+                                         null_context->incidents.begin(),
+                                         null_context->incidents.end());
+      null_context->incidents.weak_clear();
+      eligible_context->incidents_to_clear.insert(
+          eligible_context->incidents_to_clear.end(),
+          null_context->incidents_to_clear.begin(),
+          null_context->incidents_to_clear.end());
+      null_context->incidents_to_clear.weak_clear();
+    } else {
+      for (Incident* incident : null_context->incidents)
+        LogIncidentDataType(DROPPED, *incident);
+      null_context->incidents.clear();
+    }
   }
+
+  // Clear incidents data where needed.
+  for (auto& profile_and_context : profiles_) {
+    // Bypass process-wide incidents that have not yet been associated with a
+    // profile and profiles with no incidents to clear.
+    if (!profile_and_context.first ||
+        profile_and_context.second->incidents_to_clear.empty()) {
+      continue;
+    }
+    ProfileContext* context = profile_and_context.second;
+    StateStore::Transaction transaction(context->state_store.get());
+    for (Incident* incident : context->incidents_to_clear)
+      transaction.Clear(incident->GetType(), incident->GetKey());
+    context->incidents_to_clear.clear();
+  }
+  // Abandon report if there are no incidents to upload.
+  if (!HasIncidentsToUpload())
+    return;
 
   // Collect incidents across all profiles participating in safe browsing. Drop
   // incidents if the profile stopped participating before collection completed.
   // Prune previously submitted incidents.
   // Associate the profile contexts and their incident data with the upload.
-  size_t prune_count = 0;
   UploadContext::PersistentIncidentStateCollection profiles_to_state;
-  for (ProfileContextCollection::iterator scan = profiles_.begin();
-       scan != profiles_.end();
-       ++scan) {
+  for (auto& profile_and_context : profiles_) {
     // Bypass process-wide incidents that have not yet been associated with a
     // profile.
-    if (!scan->first)
+    if (!profile_and_context.first)
       continue;
-    PrefService* prefs = scan->first->GetPrefs();
-    ProfileContext* context = scan->second;
+    ProfileContext* context = profile_and_context.second;
     if (context->incidents.empty())
       continue;
-    if (!prefs->GetBoolean(prefs::kSafeBrowsingEnabled)) {
+    if (!IsEnabledForProfile(profile_and_context.first)) {
       for (Incident* incident : context->incidents)
         LogIncidentDataType(DROPPED, *incident);
       context->incidents.clear();
       continue;
     }
+    StateStore::Transaction transaction(context->state_store.get());
     std::vector<PersistentIncidentState> states;
     // Prep persistent data and prune any incidents already sent.
     for (Incident* incident : context->incidents) {
@@ -796,7 +908,11 @@ void IncidentReportingService::UploadIfCollectionComplete() {
       if (context->state_store->HasBeenReported(state.type, state.key,
                                                 state.digest)) {
         LogIncidentDataType(PRUNED, *incident);
-        ++prune_count;
+      } else if (!report->has_download()) {
+        LogIncidentDataType(NO_DOWNLOAD, *incident);
+        // Drop the incident and mark for future pruning since no executable
+        // download was found.
+        transaction.MarkAsReported(state.type, state.key, state.digest);
       } else {
         LogIncidentDataType(ACCEPTED, *incident);
         // Ownership of the payload is passed to the report.
@@ -813,21 +929,18 @@ void IncidentReportingService::UploadIfCollectionComplete() {
   }
 
   const int count = report->incident_size();
-  // Abandon the request if all incidents were dropped with none pruned.
-  if (!count && !prune_count)
+
+  // Abandon the request if all incidents were pruned or otherwise dropped.
+  if (!count) {
+    if (!report->has_download()) {
+      UMA_HISTOGRAM_ENUMERATION("SBIRS.UploadResult",
+                                IncidentReportUploader::UPLOAD_NO_DOWNLOAD,
+                                IncidentReportUploader::NUM_UPLOAD_RESULTS);
+    }
     return;
-
-  UMA_HISTOGRAM_COUNTS_100("SBIRS.IncidentCount", count + prune_count);
-
-  {
-    double prune_pct = static_cast<double>(prune_count);
-    prune_pct = prune_pct * 100.0 / (count + prune_count);
-    prune_pct = round(prune_pct);
-    UMA_HISTOGRAM_PERCENTAGE("SBIRS.PruneRatio", static_cast<int>(prune_pct));
   }
-  // Abandon the report if all incidents were pruned.
-  if (!count)
-    return;
+
+  UMA_HISTOGRAM_COUNTS_100("SBIRS.IncidentCount", count);
 
   scoped_ptr<UploadContext> context(new UploadContext(report.Pass()));
   context->profiles_to_state.swap(profiles_to_state);
@@ -920,8 +1033,10 @@ void IncidentReportingService::OnReportUploadResult(
 void IncidentReportingService::OnClientDownloadRequest(
     content::DownloadItem* download,
     const ClientDownloadRequest* request) {
-  if (!download->GetBrowserContext()->IsOffTheRecord())
+  if (download->GetBrowserContext() &&
+      !download->GetBrowserContext()->IsOffTheRecord()) {
     download_metadata_manager_.SetRequest(download, request);
+  }
 }
 
 void IncidentReportingService::Observe(

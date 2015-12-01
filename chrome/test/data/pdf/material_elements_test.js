@@ -8,8 +8,8 @@
 var tests = [
   /**
    * Test that viewer-page-selector reacts correctly to text entry. The page
-   * selector validates that input is an integer, but does not check for
-   * document bounds.
+   * selector validates that input is an integer, and does not allow navigation
+   * past document bounds.
    */
   function testPageSelectorChange() {
     var selector =
@@ -18,13 +18,15 @@ var tests = [
     var input = selector.$.input;
     // Simulate entering text into `input` and pressing enter.
     function changeInput(newValue) {
-      input.bindValue = newValue;
+      input.value = newValue;
       input.dispatchEvent(new CustomEvent('change'));
     }
 
     var navigatedPages = [];
     selector.addEventListener('change-page', function(e) {
       navigatedPages.push(e.detail.page);
+      // A change-page handler is expected to set the pageNo to the new value.
+      selector.pageNo = e.detail.page + 1;
     });
 
     changeInput("1000");
@@ -32,6 +34,7 @@ var tests = [
     changeInput("abcd");
     changeInput("12pp");
     changeInput("3.14");
+    changeInput("3000");
 
     chrome.test.assertEq(4, navigatedPages.length);
     // The event page number is 0-based.
@@ -49,8 +52,8 @@ var tests = [
   function testPageSelectorDocLength() {
     var selector =
         Polymer.Base.create('viewer-page-selector', {docLength: 1234});
-    chrome.test.assertEq('/ 1234', selector.$.pagelength.textContent);
-    chrome.test.assertEq('2.4em', selector.$.pageselector.style.width);
+    chrome.test.assertEq('1234', selector.$.pagelength.textContent);
+    chrome.test.assertEq('4ch', selector.$.pageselector.style.width);
     chrome.test.succeed();
   },
 
@@ -109,6 +112,9 @@ var tests = [
         bookmarkContent.shadowRoot.querySelectorAll('viewer-bookmark');
     chrome.test.assertEq(1, rootBookmarks.length, "one root bookmark");
     var rootBookmark = rootBookmarks[0];
+    MockInteractions.tap(rootBookmark.$.expand);
+
+    Polymer.dom.flush();
 
     var subBookmarks =
         rootBookmark.shadowRoot.querySelectorAll('viewer-bookmark');
@@ -127,13 +133,48 @@ var tests = [
     MockInteractions.tap(subBookmarks[1].$.item);
     chrome.test.assertEq(3, lastPageChange);
 
-    var subBookmarkDiv =
-        rootBookmark.shadowRoot.querySelector('.sub-bookmark');
+    chrome.test.succeed();
+  },
 
-    chrome.test.assertTrue(subBookmarkDiv.hidden);
-    MockInteractions.tap(rootBookmark.$.expand);
-    chrome.test.assertFalse(subBookmarkDiv.hidden);
-    chrome.test.assertEq('hidden', subBookmarks[1].$.expand.style.visibility);
+  /**
+   * Test that the zoom toolbar toggles between showing the fit-to-page and
+   * fit-to-width buttons.
+   */
+  function testZoomToolbarToggle() {
+    var zoomToolbar = Polymer.Base.create('viewer-zoom-toolbar', {});
+    var fitButton = zoomToolbar.$['fit-button'];
+    var fab = fitButton.$['button'];
+
+    var fitWidthIcon = 'fullscreen';
+    var fitPageIcon = 'fullscreen-exit';
+
+    var lastEvent = null;
+    var logEvent = function(e) {
+      lastEvent = e.type;
+    }
+    var assertEvent = function(type) {
+      chrome.test.assertEq(type, lastEvent);
+      lastEvent = null;
+    }
+    zoomToolbar.addEventListener('fit-to-width', logEvent);
+    zoomToolbar.addEventListener('fit-to-page', logEvent);
+
+    // Initial: Show fit-to-page.
+    chrome.test.assertEq(fitPageIcon, fab.icon);
+
+    // Tap 1: Fire fit-to-page, show fit-to-width.
+    MockInteractions.tap(fab);
+    assertEvent('fit-to-page');
+    chrome.test.assertEq(fitWidthIcon, fab.icon);
+
+    // Tap 2: Fire fit-to-width, show fit-to-page.
+    MockInteractions.tap(fab);
+    assertEvent('fit-to-width');
+    chrome.test.assertEq(fitPageIcon, fab.icon);
+
+    // Tap 3: Fire fit-to-page again.
+    MockInteractions.tap(fab);
+    assertEvent('fit-to-page');
 
     chrome.test.succeed();
   }

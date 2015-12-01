@@ -3,46 +3,36 @@
  * found in the LICENSE file. */
 
 :host {
-  @apply(--downloads-shared-style);
   display: flex;
-  margin: 24px 0;
+  flex-direction: column;
+  margin: 12px 0;
 }
 
-:host([hide-date]) {
-  margin-top: -12px;
-}
-
-:host(:first-of-type),
-:host(:not(:first-of-type):not([hide-date])) {
-  margin-top: 30px;
-}
-
-#date-container,
-#end-cap {
-  flex: 1 0 var(--downloads-side-column-basis);
-}
-
-#date-container > * {
+#date {
   color: #7c7c7c;
+  font-size: 100%;
   font-weight: 500;
-}
-
-:host([hide-date]) #date-container {
-  visibility: hidden;
+  margin: 18px auto 16px;  /* This top margin + :host top margin = 30px. */
+  width: var(--downloads-item-width);
 }
 
 #content {
   background: white;
-  border-radius: 2px;  /* TODO(dbeam): change to paper-card instead. */
+  border-radius: 2px;
   display: flex;
   flex: none;
+  margin: 0 auto;
   min-height: 103px;
   width: var(--downloads-item-width);
 }
 
-#content[elevation='1'] {
+#content.is-active {
   box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .05), 0 1px 4px 0 rgba(0, 0, 0, .08),
               0 3px 1px -2px rgba(0, 0, 0, .2);
+}
+
+#content:not(.is-active) {
+  opacity: .6;
 }
 
 #details {
@@ -152,12 +142,8 @@
   width: auto;
 }
 
-#content:not(.show-progress) #progress {
-  display: none;
-}
-
 .controls {
-  -webkit-margin-start: -8px;
+  -webkit-margin-start: -.57em;
 }
 
 #cancel,
@@ -165,6 +151,27 @@
 .keep,
 .discard {
   color: #5a5a5a;
+}
+
+#show {
+  margin: .7em .57em;
+}
+
+#controlled-by {
+  -webkit-margin-start: 8px;
+}
+
+#controlled-by,
+#controlled-by a {
+  color: #5a5a5a;
+}
+
+.is-active #controlled-by {
+  color: #333;
+}
+
+.is-active #controlled-by a {
+  color: rgb(51, 103, 214);
 }
 
 #remove-wrapper {
@@ -175,11 +182,13 @@
 #remove {
   --iron-icon-height: 16px;
   --iron-icon-width: 16px;
-  --paper-icon-button: {
-    height: 16px;
-    padding: 8px;
-    width: 16px;
+  --layout-inline: {
+    /* HACK(dbeam): we probably shouldn't be overriding Polymer like this. */
   };
+  color: #969696;
+  height: 16px;
+  padding: 8px;
+  width: 16px;
 }
 
 #incognito {
@@ -188,38 +197,4 @@
                              url(2x/incognito_marker.png) 2x);
   position: absolute;
   right: 10px;
-}
-
-@media not all and (max-width: 1024px) {
-  /* Only show rule separators in wide mode. */
-  :host(:not(:first-of-type):not([hide-date])) {
-    border-top: 1px solid rgba(0, 0, 0, .14);
-    padding-top: 30px;
-  }
-
-  #date-container > * {
-    -webkit-margin-start: 24px;
-  }
-}
-
-@media all and (max-width: 1024px) {
-  /* In narrow windows, put the dates on top instead of on the side. */
-  :host {
-    flex-direction: column;
-  }
-
-  :host([hide-date]) #date-container,
-  #end-cap {
-    display: none;
-  }
-
-  #content {
-    margin: 0 auto;
-  }
-
-  #date-container {
-    flex: none !important;
-    margin: 0 auto 16px;
-    width: var(--downloads-item-width);
-  }
 }

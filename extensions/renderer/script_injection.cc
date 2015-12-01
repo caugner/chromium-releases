@@ -78,6 +78,25 @@ int GetIsolatedWorldIdForInstance(const InjectionHost* injection_host,
 
 }  // namespace
 
+// Watches for the deletion of a RenderFrame, after which is_valid will return
+// false.
+class ScriptInjection::FrameWatcher : public content::RenderFrameObserver {
+ public:
+  FrameWatcher(content::RenderFrame* render_frame,
+               ScriptInjection* injection)
+      : content::RenderFrameObserver(render_frame),
+        injection_(injection) {}
+  ~FrameWatcher() override {}
+
+ private:
+  void FrameDetached() override { injection_->invalidate_render_frame(); }
+  void OnDestruct() override { injection_->invalidate_render_frame(); }
+
+  ScriptInjection* injection_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameWatcher);
+};
+
 // static
 std::string ScriptInjection::GetHostIdForIsolatedWorld(int isolated_world_id) {
   const IsolatedWorldMap& isolated_worlds = g_isolated_worlds.Get();
@@ -106,13 +125,14 @@ ScriptInjection::ScriptInjection(
       request_id_(kInvalidRequestId),
       complete_(false),
       did_inject_js_(false),
+      frame_watcher_(new FrameWatcher(render_frame, this)),
       weak_ptr_factory_(this) {
   CHECK(injection_host_.get());
 }
 
 ScriptInjection::~ScriptInjection() {
   if (!complete_)
-    injector_->OnWillNotInject(ScriptInjector::WONT_INJECT);
+    NotifyWillNotInject(ScriptInjector::WONT_INJECT);
 }
 
 ScriptInjection::InjectionResult ScriptInjection::TryToInject(
@@ -140,7 +160,7 @@ ScriptInjection::InjectionResult ScriptInjection::TryToInject(
       NotifyWillNotInject(ScriptInjector::NOT_ALLOWED);
       return INJECTION_FINISHED;  // We're done.
     case PermissionsData::ACCESS_WITHHELD:
-      SendInjectionMessage(true /* request permission */);
+      RequestPermissionFromBrowser();
       return INJECTION_WAITING;  // Wait around for permission.
     case PermissionsData::ACCESS_ALLOWED:
       InjectionResult result = Inject(scripts_run_info);
@@ -169,10 +189,10 @@ void ScriptInjection::OnHostRemoved() {
   injection_host_.reset(nullptr);
 }
 
-void ScriptInjection::SendInjectionMessage(bool request_permission) {
+void ScriptInjection::RequestPermissionFromBrowser() {
   // If we are just notifying the browser of the injection, then send an
   // invalid request (which is treated like a notification).
-  request_id_ = request_permission ? g_next_pending_id++ : kInvalidRequestId;
+  request_id_ = g_next_pending_id++;
   render_frame_->Send(new ExtensionHostMsg_RequestScriptInjectionPermission(
       render_frame_->GetRoutingID(),
       host_id().id(),
@@ -183,7 +203,7 @@ void ScriptInjection::SendInjectionMessage(bool request_permission) {
 void ScriptInjection::NotifyWillNotInject(
     ScriptInjector::InjectFailureReason reason) {
   complete_ = true;
-  injector_->OnWillNotInject(reason);
+  injector_->OnWillNotInject(reason, render_frame_);
 }
 
 ScriptInjection::InjectionResult ScriptInjection::Inject(
@@ -191,9 +211,6 @@ ScriptInjection::InjectionResult ScriptInjection::Inject(
   DCHECK(injection_host_);
   DCHECK(scripts_run_info);
   DCHECK(!complete_);
-
-  if (injection_host_->ShouldNotifyBrowserOfInjection())
-    SendInjectionMessage(false /* don't request permission */);
 
   bool should_inject_js = injector_->ShouldInjectJs(run_location_);
   bool should_inject_css = injector_->ShouldInjectCss(run_location_);
@@ -208,10 +225,12 @@ ScriptInjection::InjectionResult ScriptInjection::Inject(
 
   injector_->GetRunInfo(scripts_run_info, run_location_);
 
-  if (complete_)
-    injector_->OnInjectionComplete(execution_result_.Pass(), run_location_);
-  else
+  if (complete_) {
+    injector_->OnInjectionComplete(execution_result_.Pass(), run_location_,
+                                   render_frame_);
+  } else {
     ++scripts_run_info->num_blocking_js;
+  }
 
   return complete_ ? INJECTION_FINISHED : INJECTION_BLOCKED;
 }
@@ -283,7 +302,8 @@ void ScriptInjection::OnJsInjectionCompleted(
   // If |async_completion_callback_| is set, it means the script finished
   // asynchronously, and we should run it.
   if (!async_completion_callback_.is_null()) {
-    injector_->OnInjectionComplete(execution_result_.Pass(), run_location_);
+    injector_->OnInjectionComplete(execution_result_.Pass(), run_location_,
+                                   render_frame_);
     // Warning: this object can be destroyed after this line!
     async_completion_callback_.Run(this);
   }

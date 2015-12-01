@@ -38,13 +38,19 @@ void SavePasswordInfoBarDelegate::Create(
     password_manager::CredentialSourceType source_type) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  sync_driver::SyncService* sync_service =
+      ProfileSyncServiceFactory::GetForProfile(profile);
+  bool is_smartlock_branding_enabled =
+      password_bubble_experiment::IsSmartLockBrandingEnabled(sync_service);
+  bool should_show_first_run_experience =
+      password_bubble_experiment::ShouldShowSavePromptFirstRunExperience(
+          sync_service, profile->GetPrefs());
   InfoBarService::FromWebContents(web_contents)
       ->AddInfoBar(CreateSavePasswordInfoBar(
           make_scoped_ptr(new SavePasswordInfoBarDelegate(
               web_contents, form_to_save.Pass(), uma_histogram_suffix,
-              source_type,
-              password_bubble_experiment::IsSmartLockBrandingEnabled(
-                  ProfileSyncServiceFactory::GetForProfile(profile))))));
+              source_type, is_smartlock_branding_enabled,
+              should_show_first_run_experience))));
 }
 
 SavePasswordInfoBarDelegate::~SavePasswordInfoBarDelegate() {
@@ -70,6 +76,12 @@ SavePasswordInfoBarDelegate::~SavePasswordInfoBarDelegate() {
             uma_histogram_suffix_,
         timer_.Elapsed() < kMinimumPromptDisplayTime);
   }
+  if (should_show_first_run_experience_) {
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+    password_bubble_experiment::RecordSavePromptFirstRunExperienceWasShown(
+        profile->GetPrefs());
+  }
 }
 
 SavePasswordInfoBarDelegate::SavePasswordInfoBarDelegate(
@@ -77,49 +89,39 @@ SavePasswordInfoBarDelegate::SavePasswordInfoBarDelegate(
     scoped_ptr<password_manager::PasswordFormManager> form_to_save,
     const std::string& uma_histogram_suffix,
     password_manager::CredentialSourceType source_type,
-    bool is_smartlock_branding_enabled)
-    : ConfirmInfoBarDelegate(),
+    bool is_smartlock_branding_enabled,
+    bool should_show_first_run_experience)
+    : PasswordManagerInfoBarDelegate(),
       form_to_save_(form_to_save.Pass()),
       infobar_response_(password_manager::metrics_util::NO_RESPONSE),
       uma_histogram_suffix_(uma_histogram_suffix),
-      source_type_(source_type) {
+      source_type_(source_type),
+      should_show_first_run_experience_(should_show_first_run_experience),
+      web_contents_(web_contents) {
   if (!uma_histogram_suffix_.empty()) {
     password_manager::metrics_util::LogUMAHistogramBoolean(
         "PasswordManager.SavePasswordPromptDisplayed_" + uma_histogram_suffix_,
         true);
   }
-  title_link_range_ = gfx::Range();
+  base::string16 message;
+  gfx::Range message_link_range = gfx::Range();
   GetSavePasswordDialogTitleTextAndLinkRange(
       web_contents->GetVisibleURL(), form_to_save_->observed_form().origin,
-      is_smartlock_branding_enabled, false, &title_, &title_link_range_);
+      is_smartlock_branding_enabled, false, &message, &message_link_range);
+  SetMessage(message);
+  SetMessageLinkRange(message_link_range);
 }
 
-infobars::InfoBarDelegate::Type
-SavePasswordInfoBarDelegate::GetInfoBarType() const {
-  return PAGE_ACTION_TYPE;
-}
-
-infobars::InfoBarDelegate::InfoBarAutomationType
-SavePasswordInfoBarDelegate::GetInfoBarAutomationType() const {
-  return PASSWORD_INFOBAR;
-}
-
-int SavePasswordInfoBarDelegate::GetIconID() const {
-  return IDR_INFOBAR_SAVE_PASSWORD;
-}
-
-bool SavePasswordInfoBarDelegate::ShouldExpire(
-    const NavigationDetails& details) const {
-  return !details.is_redirect && ConfirmInfoBarDelegate::ShouldExpire(details);
+base::string16 SavePasswordInfoBarDelegate::GetFirstRunExperienceMessage() {
+  return should_show_first_run_experience_
+             ? l10n_util::GetStringUTF16(
+                   IDS_PASSWORD_MANAGER_SAVE_PROMPT_FIRST_RUN_EXPERIENCE)
+             : base::string16();
 }
 
 void SavePasswordInfoBarDelegate::InfoBarDismissed() {
   DCHECK(form_to_save_.get());
   infobar_response_ = password_manager::metrics_util::INFOBAR_DISMISSED;
-}
-
-base::string16 SavePasswordInfoBarDelegate::GetMessageText() const {
-  return title_;
 }
 
 base::string16 SavePasswordInfoBarDelegate::GetButtonLabel(
@@ -145,17 +147,5 @@ bool SavePasswordInfoBarDelegate::Cancel() {
     form_to_save_->PermanentlyBlacklist();
     infobar_response_ = password_manager::metrics_util::NEVER_REMEMBER_PASSWORD;
   }
-  return true;
-}
-
-bool SavePasswordInfoBarDelegate::LinkClicked(
-    WindowOpenDisposition disposition) {
-  InfoBarService::WebContentsFromInfoBar(infobar())
-      ->OpenURL(content::OpenURLParams(
-          GURL(l10n_util::GetStringUTF16(
-              IDS_PASSWORD_MANAGER_SMART_LOCK_PAGE)),
-          content::Referrer(),
-          (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-          ui::PAGE_TRANSITION_LINK, false));
   return true;
 }

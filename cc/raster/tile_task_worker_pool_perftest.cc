@@ -12,7 +12,6 @@
 #include "cc/raster/gpu_rasterizer.h"
 #include "cc/raster/gpu_tile_task_worker_pool.h"
 #include "cc/raster/one_copy_tile_task_worker_pool.h"
-#include "cc/raster/pixel_buffer_tile_task_worker_pool.h"
 #include "cc/raster/raster_buffer.h"
 #include "cc/raster/tile_task_runner.h"
 #include "cc/raster/zero_copy_tile_task_worker_pool.h"
@@ -114,7 +113,6 @@ class PerfContextProvider : public ContextProvider {
 };
 
 enum TileTaskWorkerPoolType {
-  TILE_TASK_WORKER_POOL_TYPE_PIXEL_BUFFER,
   TILE_TASK_WORKER_POOL_TYPE_ZERO_COPY,
   TILE_TASK_WORKER_POOL_TYPE_ONE_COPY,
   TILE_TASK_WORKER_POOL_TYPE_GPU,
@@ -134,8 +132,7 @@ class PerfImageDecodeTaskImpl : public ImageDecodeTask {
 
   // Overridden from TileTask:
   void ScheduleOnOriginThread(TileTaskClient* client) override {}
-  void CompleteOnOriginThread(TileTaskClient* client) override {}
-  void RunReplyOnOriginThread() override { Reset(); }
+  void CompleteOnOriginThread(TileTaskClient* client) override { Reset(); }
 
   void Reset() {
     did_run_ = false;
@@ -153,7 +150,7 @@ class PerfRasterTaskImpl : public RasterTask {
  public:
   PerfRasterTaskImpl(scoped_ptr<ScopedResource> resource,
                      ImageDecodeTask::Vector* dependencies)
-      : RasterTask(resource.get(), dependencies), resource_(resource.Pass()) {}
+      : RasterTask(dependencies), resource_(resource.Pass()) {}
 
   // Overridden from Task:
   void RunOnWorkerThread() override {}
@@ -161,12 +158,12 @@ class PerfRasterTaskImpl : public RasterTask {
   // Overridden from TileTask:
   void ScheduleOnOriginThread(TileTaskClient* client) override {
     // No tile ids are given to support partial updates.
-    raster_buffer_ = client->AcquireBufferForRaster(resource(), 0, 0);
+    raster_buffer_ = client->AcquireBufferForRaster(resource_.get(), 0, 0);
   }
   void CompleteOnOriginThread(TileTaskClient* client) override {
     client->ReleaseBufferForRaster(raster_buffer_.Pass());
+    Reset();
   }
-  void RunReplyOnOriginThread() override { Reset(); }
 
   void Reset() {
     did_run_ = false;
@@ -250,18 +247,11 @@ class TileTaskWorkerPoolPerfTest
   // Overridden from testing::Test:
   void SetUp() override {
     switch (GetParam()) {
-      case TILE_TASK_WORKER_POOL_TYPE_PIXEL_BUFFER:
-        Create3dOutputSurfaceAndResourceProvider();
-        tile_task_worker_pool_ = PixelBufferTileTaskWorkerPool::Create(
-            task_runner_.get(), task_graph_runner_.get(),
-            context_provider_.get(), resource_provider_.get(),
-            std::numeric_limits<size_t>::max());
-        break;
       case TILE_TASK_WORKER_POOL_TYPE_ZERO_COPY:
         Create3dOutputSurfaceAndResourceProvider();
         tile_task_worker_pool_ = ZeroCopyTileTaskWorkerPool::Create(
             task_runner_.get(), task_graph_runner_.get(),
-            resource_provider_.get());
+            resource_provider_.get(), false);
         break;
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
@@ -269,7 +259,7 @@ class TileTaskWorkerPoolPerfTest
             task_runner_.get(), task_graph_runner_.get(),
             context_provider_.get(), resource_provider_.get(),
             std::numeric_limits<int>::max(), false,
-            std::numeric_limits<int>::max());
+            std::numeric_limits<int>::max(), false);
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
@@ -296,9 +286,6 @@ class TileTaskWorkerPoolPerfTest
   // Overriden from TileTaskRunnerClient:
   void DidFinishRunningTileTasks(TaskSet task_set) override {
     tile_task_worker_pool_->AsTileTaskRunner()->CheckForCompletedTasks();
-  }
-  TaskSetCollection TasksThatShouldBeForcedToComplete() const override {
-    return TaskSetCollection();
   }
 
   void RunMessageLoopUntilAllTasksHaveCompleted() {
@@ -414,8 +401,6 @@ class TileTaskWorkerPoolPerfTest
 
   std::string TestModifierString() const {
     switch (GetParam()) {
-      case TILE_TASK_WORKER_POOL_TYPE_PIXEL_BUFFER:
-        return std::string("_pixel_tile_task_worker_pool");
       case TILE_TASK_WORKER_POOL_TYPE_ZERO_COPY:
         return std::string("_zero_copy_tile_task_worker_pool");
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
@@ -461,14 +446,12 @@ TEST_P(TileTaskWorkerPoolPerfTest, ScheduleAndExecuteTasks) {
   RunScheduleAndExecuteTasksTest("32_4", 32, 4);
 }
 
-INSTANTIATE_TEST_CASE_P(
-    TileTaskWorkerPoolPerfTests,
-    TileTaskWorkerPoolPerfTest,
-    ::testing::Values(TILE_TASK_WORKER_POOL_TYPE_PIXEL_BUFFER,
-                      TILE_TASK_WORKER_POOL_TYPE_ZERO_COPY,
-                      TILE_TASK_WORKER_POOL_TYPE_ONE_COPY,
-                      TILE_TASK_WORKER_POOL_TYPE_GPU,
-                      TILE_TASK_WORKER_POOL_TYPE_BITMAP));
+INSTANTIATE_TEST_CASE_P(TileTaskWorkerPoolPerfTests,
+                        TileTaskWorkerPoolPerfTest,
+                        ::testing::Values(TILE_TASK_WORKER_POOL_TYPE_ZERO_COPY,
+                                          TILE_TASK_WORKER_POOL_TYPE_ONE_COPY,
+                                          TILE_TASK_WORKER_POOL_TYPE_GPU,
+                                          TILE_TASK_WORKER_POOL_TYPE_BITMAP));
 
 class TileTaskWorkerPoolCommonPerfTest : public TileTaskWorkerPoolPerfTestBase,
                                          public testing::Test {

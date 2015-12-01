@@ -34,7 +34,7 @@ aura::Window* GetKeyboardContainer() {
   return controller ? controller->GetContainerWindow() : nullptr;
 }
 
-std::string GenerateFeatureFlag(std::string feature, bool enabled) {
+std::string GenerateFeatureFlag(const std::string& feature, bool enabled) {
   return feature + (enabled ? "-enabled" : "-disabled");
 }
 
@@ -128,7 +128,7 @@ void ChromeVirtualKeyboardDelegate::SetHotrodKeyboard(bool enable) {
   // This reloads virtual keyboard even if it exists. This ensures virtual
   // keyboard gets the correct state of the hotrod keyboard through
   // chrome.virtualKeyboardPrivate.getKeyboardConfig.
-  if (enable && keyboard::IsKeyboardEnabled())
+  if (keyboard::IsKeyboardEnabled())
     ash::Shell::GetInstance()->CreateKeyboard();
 }
 

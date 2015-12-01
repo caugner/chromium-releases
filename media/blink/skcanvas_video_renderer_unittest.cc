@@ -5,6 +5,7 @@
 #include "base/message_loop/message_loop.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface_stub.h"
+#include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "media/blink/skcanvas_video_renderer.h"
@@ -20,7 +21,7 @@ namespace media {
 
 static const int kWidth = 320;
 static const int kHeight = 240;
-static const gfx::Rect kNaturalRect(0, 0, kWidth, kHeight);
+static const gfx::RectF kNaturalRect(kWidth, kHeight);
 
 // Helper for filling a |canvas| with a solid |color|.
 void FillCanvas(SkCanvas* canvas, SkColor color) {
@@ -416,12 +417,9 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   FillCanvas(&canvas, SK_ColorMAGENTA);
 
-  PaintRotated(cropped_frame(),
-               &canvas,
-               gfx::Rect(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone,
-               SkXfermode::kSrcOver_Mode,
-               VIDEO_ROTATION_0);
+  PaintRotated(cropped_frame(), &canvas,
+               gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
+               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_0);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -439,12 +437,9 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_90) {
   FillCanvas(&canvas, SK_ColorMAGENTA);
 
   const gfx::Rect crop_rect = cropped_frame()->visible_rect();
-  PaintRotated(cropped_frame(),
-               &canvas,
-               gfx::Rect(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone,
-               SkXfermode::kSrcOver_Mode,
-               VIDEO_ROTATION_90);
+  PaintRotated(cropped_frame(), &canvas,
+               gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
+               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_90);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -461,12 +456,9 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_180) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   FillCanvas(&canvas, SK_ColorMAGENTA);
 
-  PaintRotated(cropped_frame(),
-               &canvas,
-               gfx::Rect(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone,
-               SkXfermode::kSrcOver_Mode,
-               VIDEO_ROTATION_180);
+  PaintRotated(cropped_frame(), &canvas,
+               gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
+               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_180);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -483,12 +475,9 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_270) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   FillCanvas(&canvas, SK_ColorMAGENTA);
 
-  PaintRotated(cropped_frame(),
-               &canvas,
-               gfx::Rect(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone,
-               SkXfermode::kSrcOver_Mode,
-               VIDEO_ROTATION_270);
+  PaintRotated(cropped_frame(), &canvas,
+               gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
+               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_270);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));

@@ -113,10 +113,6 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // form.
   bool IsPendingCredentialsPublicSuffixMatch() const;
 
-  // Checks if the form is a valid password form. Forms which lack password
-  // field are not considered valid.
-  bool HasValidPasswordForm() const;
-
   // Through |driver|, supply the associated frame with appropriate information
   // (fill data, whether to allow password generation, etc.). If this is called
   // before |this| has data from the PasswordStore, the execution will be
@@ -228,8 +224,6 @@ class PasswordFormManager : public PasswordStoreConsumer {
   void WipeStoreCopyIfOutdated();
 
  private:
-  friend class PasswordFormManagerTest;
-
   // ManagerAction - What does the manager do with this form? Either it
   // fills it, or it doesn't. If it doesn't fill it, that's either
   // because it has no match, or it is blacklisted, or it is disabled
@@ -292,6 +286,9 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // Through |driver|, supply the associated frame with appropriate information
   // (fill data, whether to allow password generation, etc.).
   void ProcessFrameInternal(const base::WeakPtr<PasswordManagerDriver>& driver);
+
+  // Trigger filling of HTTP auth dialog and update |manager_action_|.
+  void ProcessLoginPrompt();
 
   // Determines if we need to autofill given the results of the query.
   // Takes ownership of the elements in |result|.
@@ -388,6 +385,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // being managed by this. Use a map instead of vector, because we most
   // frequently require lookups by username value in IsNewLogin.
   autofill::PasswordFormMap best_matches_;
+
+  // Set of forms from PasswordStore that correspond to the current site and
+  // that are not in |best_matches_|.
+  ScopedVector<autofill::PasswordForm> not_best_matches_;
 
   // Set of blacklisted forms from the PasswordStore that best match the current
   // form.

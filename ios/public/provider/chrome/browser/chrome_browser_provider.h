@@ -10,6 +10,7 @@
 #include <string>
 
 class InfoBarViewDelegate;
+class PrefRegistrySimple;
 class PrefService;
 class ProfileOAuth2TokenServiceIOSProvider;
 
@@ -26,8 +27,16 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+namespace policy {
+class BrowserPolicyConnector;
+}
+
 namespace rappor {
 class RapporService;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
 }
 
 // TODO(ios): Determine the best way to interface with Obj-C code through
@@ -49,6 +58,7 @@ class ChromeBrowserStateManager;
 class ChromeIdentityService;
 class GeolocationUpdaterProvider;
 class StringProvider;
+class LiveTabContextProvider;
 class UpdatableResourceProvider;
 
 // Setter and getter for the provider. The provider should be set early, before
@@ -67,6 +77,14 @@ class ChromeBrowserProvider {
   virtual net::URLRequestContextGetter* GetSystemURLRequestContext();
   // Gets the local state.
   virtual PrefService* GetLocalState();
+  // Asserts all iOS-specific |BrowserContextKeyedServiceFactory| are built.
+  virtual void AssertBrowserContextKeyedFactoriesBuilt();
+  // Registers all prefs that will be used via the local state PrefService.
+  virtual void RegisterLocalState(PrefRegistrySimple* registry);
+  // Registers all prefs that will be used via a PrefService attached to a
+  // Profile.
+  virtual void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry);
   // Returns an instance of profile OAuth2 token service provider.
   virtual ProfileOAuth2TokenServiceIOSProvider*
   GetProfileOAuth2TokenServiceIOSProvider();
@@ -83,6 +101,8 @@ class ChromeBrowserProvider {
   virtual ChromeIdentityService* GetChromeIdentityService();
   // Returns an instance of a string provider.
   virtual StringProvider* GetStringProvider();
+  // Returns an instance of a LiveTabContextProvider.
+  virtual LiveTabContextProvider* GetLiveTabContextProvider();
   virtual GeolocationUpdaterProvider* GetGeolocationUpdaterProvider();
   // Returns the distribution brand code.
   virtual std::string GetDistributionBrandCode();
@@ -100,8 +120,12 @@ class ChromeBrowserProvider {
       autofill::CardUnmaskPromptController* controller);
   // Returns risk data used in Wallet requests.
   virtual std::string GetRiskData();
+  // Starts and manages the policy system.
+  virtual policy::BrowserPolicyConnector* GetBrowserPolicyConnector();
   // Returns the RapporService. May be null.
   virtual rappor::RapporService* GetRapporService();
+  // Returns whether there is an Off-The-Record session active.
+  virtual bool IsOffTheRecordSessionActive();
 };
 
 }  // namespace ios

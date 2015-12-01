@@ -7,7 +7,9 @@
 #include "base/logging.h"
 #include "content/browser/renderer_host/input/motion_event_android.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
-#include "content/browser/renderer_host/input/web_input_event_util_posix.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/keycodes/keyboard_code_conversion_android.h"
 #include "ui/events/keycodes/keyboard_codes_posix.h"
 
@@ -21,23 +23,39 @@ using blink::WebTouchPoint;
 
 namespace content {
 
+namespace {
+
+ui::DomKey GetDomKeyFromEvent(int keycode, int unicode_character) {
+  ui::DomKey key = ui::GetDomKeyFromAndroidEvent(keycode, unicode_character);
+  if (key != ui::DomKey::NONE)
+    return key;
+  return ui::DomKey::UNIDENTIFIED;
+}
+
+}  // namespace
+
 WebKeyboardEvent WebKeyboardEventBuilder::Build(WebInputEvent::Type type,
                                                 int modifiers,
                                                 double time_sec,
                                                 int keycode,
+                                                int scancode,
                                                 int unicode_character,
                                                 bool is_system_key) {
   DCHECK(WebInputEvent::isKeyboardEventType(type));
   WebKeyboardEvent result;
 
+  ui::DomCode dom_code = ui::DomCode::NONE;
+  if (scancode)
+    dom_code = ui::KeycodeConverter::NativeKeycodeToDomCode(scancode);
   result.type = type;
   result.modifiers = modifiers;
   result.timeStampSeconds = time_sec;
-  ui::KeyboardCode windows_key_code =
-      ui::KeyboardCodeFromAndroidKeyCode(keycode);
-  UpdateWindowsKeyCodeAndKeyIdentifier(&result, windows_key_code);
-  result.modifiers |= GetLocationModifiersFromWindowsKeyCode(windows_key_code);
+  result.windowsKeyCode = ui::LocatedToNonLocatedKeyboardCode(
+      ui::KeyboardCodeFromAndroidKeyCode(keycode));
+  result.modifiers |= DomCodeToWebInputEventModifiers(dom_code);
   result.nativeKeyCode = keycode;
+  result.domCode = static_cast<int>(dom_code);
+  result.domKey = GetDomKeyFromEvent(keycode, unicode_character);
   result.unmodifiedText[0] = unicode_character;
   if (result.windowsKeyCode == ui::VKEY_RETURN) {
     // This is the same behavior as GTK:
@@ -47,6 +65,7 @@ WebKeyboardEvent WebKeyboardEventBuilder::Build(WebInputEvent::Type type,
   }
   result.text[0] = result.unmodifiedText[0];
   result.isSystemKey = is_system_key;
+  result.setKeyIdentifierFromWindowsKeyCode();
 
   return result;
 }

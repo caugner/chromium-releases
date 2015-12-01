@@ -70,7 +70,8 @@ class ManagePasswordsUIController
   // password credentials for the current site which are stored in
   // |password_form_map|. This stores a copy of |password_form_map| and shows
   // the manage password icon.
-  void OnPasswordAutofilled(const autofill::PasswordFormMap& password_form_map);
+  void OnPasswordAutofilled(const autofill::PasswordFormMap& password_form_map,
+                            const GURL& origin);
 
   // TODO(vasilii): remove this method. It's obsolete.
   void OnBlacklistBlockedAutofill(
@@ -108,17 +109,21 @@ class ManagePasswordsUIController
   // Open a new tab, pointing to the password manager settings page.
   virtual void NavigateToPasswordManagerSettingsPage();
 
-  // Open a new tab, pointing to passwords.google.com.
-  void NavigateToExternalPasswordManager();
+  // Two different ways to open a new tab pointing to passwords.google.com.
+  // TODO(crbug.com/548259) eliminate one of them.
+  virtual void NavigateToExternalPasswordManager();
+  virtual void NavigateToSmartLockPage();
 
   // Open a new tab, pointing to the Smart Lock help article.
-  void NavigateToSmartLockPage();
+  virtual void NavigateToSmartLockHelpPage();
 
   virtual const autofill::PasswordForm& PendingPassword() const;
 
+#if !defined(OS_ANDROID)
   // Set the state of the Omnibox icon, and possibly show the associated bubble
   // without user interaction.
   virtual void UpdateIconAndBubbleState(ManagePasswordsIcon* icon);
+#endif
 
   // Called from the model when the bubble is displayed.
   void OnBubbleShown();
@@ -126,7 +131,7 @@ class ManagePasswordsUIController
   // Called from the model when the bubble is hidden.
   void OnBubbleHidden();
 
-  password_manager::ui::State state() const { return passwords_data_.state(); }
+  virtual password_manager::ui::State state() const;
 
   // True if a password is sitting around, waiting for a user to decide whether
   // or not to save it.

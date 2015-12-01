@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "extensions/common/manifest.h"
-#include "extensions/common/permissions/coalesced_permission_message.h"
+#include "extensions/common/permissions/permission_message.h"
 
 namespace extensions {
 
@@ -30,7 +30,7 @@ class PermissionMessageProvider {
   // |permissions|. This involves converting the given PermissionIDs into
   // localized messages, as well as coalescing and parameterizing any messages
   // that require the permission ID's argument in their message.
-  virtual CoalescedPermissionMessages GetPermissionMessages(
+  virtual PermissionMessages GetPermissionMessages(
       const PermissionIDSet& permissions) const = 0;
 
   // Returns true if |new_permissions| has a greater privilege level than
@@ -38,10 +38,9 @@ class PermissionMessageProvider {
   // Whether certain permissions are considered varies by extension type.
   // TODO(sashab): Add an implementation of this method that uses
   // PermissionIDSet instead, then deprecate this one.
-  virtual bool IsPrivilegeIncrease(
-      const PermissionSet* old_permissions,
-      const PermissionSet* new_permissions,
-      Manifest::Type extension_type) const = 0;
+  virtual bool IsPrivilegeIncrease(const PermissionSet& old_permissions,
+                                   const PermissionSet& new_permissions,
+                                   Manifest::Type extension_type) const = 0;
 
   // Given the permissions for an extension, finds the IDs of all the
   // permissions for that extension (including API, manifest and host
@@ -50,7 +49,7 @@ class PermissionMessageProvider {
   // this type, and make this take as little as is needed to work out the
   // PermissionIDSet.
   virtual PermissionIDSet GetAllPermissionIDs(
-      const PermissionSet* permissions,
+      const PermissionSet& permissions,
       Manifest::Type extension_type) const = 0;
 };
 

@@ -209,8 +209,7 @@ TEST(TransformOperationTest, ApplySkew) {
   TransformOperations operations;
   operations.AppendSkew(x, y);
   gfx::Transform expected;
-  expected.SkewX(x);
-  expected.SkewY(y);
+  expected.Skew(x, y);
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected, operations.Apply());
 }
 
@@ -441,6 +440,62 @@ TEST(TransformOperationTest, LargeRotationsWithDifferentAxes) {
       expected, operations_to.Blend(operations_from, progress));
 }
 
+TEST(TransformOperationTest, RotationFromZeroDegDifferentAxes) {
+  TransformOperations operations_from;
+  operations_from.AppendRotate(0, 0, 1, 0);
+
+  TransformOperations operations_to;
+  operations_to.AppendRotate(0, 1, 0, 450);
+
+  SkMScalar progress = 0.5f;
+  gfx::Transform expected;
+  expected.RotateAbout(gfx::Vector3dF(0, 1, 0), 225);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      expected, operations_to.Blend(operations_from, progress));
+}
+
+TEST(TransformOperationTest, RotationFromZeroDegSameAxes) {
+  TransformOperations operations_from;
+  operations_from.AppendRotate(0, 0, 1, 0);
+
+  TransformOperations operations_to;
+  operations_to.AppendRotate(0, 0, 1, 450);
+
+  SkMScalar progress = 0.5f;
+  gfx::Transform expected;
+  expected.RotateAbout(gfx::Vector3dF(0, 0, 1), 225);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      expected, operations_to.Blend(operations_from, progress));
+}
+
+TEST(TransformOperationTest, RotationToZeroDegDifferentAxes) {
+  TransformOperations operations_from;
+  operations_from.AppendRotate(0, 1, 0, 450);
+
+  TransformOperations operations_to;
+  operations_to.AppendRotate(0, 0, 1, 0);
+
+  SkMScalar progress = 0.5f;
+  gfx::Transform expected;
+  expected.RotateAbout(gfx::Vector3dF(0, 1, 0), 225);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      expected, operations_to.Blend(operations_from, progress));
+}
+
+TEST(TransformOperationTest, RotationToZeroDegSameAxes) {
+  TransformOperations operations_from;
+  operations_from.AppendRotate(0, 0, 1, 450);
+
+  TransformOperations operations_to;
+  operations_to.AppendRotate(0, 0, 1, 0);
+
+  SkMScalar progress = 0.5f;
+  gfx::Transform expected;
+  expected.RotateAbout(gfx::Vector3dF(0, 0, 1), 225);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      expected, operations_to.Blend(operations_from, progress));
+}
+
 TEST(TransformOperationTest, BlendRotationFromIdentity) {
   ScopedVector<TransformOperations> identity_operations;
   GetIdentityOperations(&identity_operations);
@@ -552,8 +607,7 @@ TEST(TransformOperationTest, BlendSkewFromEmpty) {
   SkMScalar progress = 0.5f;
 
   gfx::Transform expected;
-  expected.SkewX(1);
-  expected.SkewY(1);
+  expected.Skew(1, 1);
 
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected,
                                   operations.Blend(empty_operation, progress));
@@ -561,8 +615,7 @@ TEST(TransformOperationTest, BlendSkewFromEmpty) {
   progress = -0.5f;
 
   expected.MakeIdentity();
-  expected.SkewX(-1);
-  expected.SkewY(-1);
+  expected.Skew(-1, -1);
 
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected,
                                   operations.Blend(empty_operation, progress));
@@ -570,8 +623,7 @@ TEST(TransformOperationTest, BlendSkewFromEmpty) {
   progress = 1.5f;
 
   expected.MakeIdentity();
-  expected.SkewX(3);
-  expected.SkewY(3);
+  expected.Skew(3, 3);
 
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected,
                                   operations.Blend(empty_operation, progress));
@@ -658,8 +710,7 @@ TEST(TransformOperationTest, BlendSkewToEmpty) {
   SkMScalar progress = 0.5f;
 
   gfx::Transform expected;
-  expected.SkewX(1);
-  expected.SkewY(1);
+  expected.Skew(1, 1);
 
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected,
                                   empty_operation.Blend(operations, progress));

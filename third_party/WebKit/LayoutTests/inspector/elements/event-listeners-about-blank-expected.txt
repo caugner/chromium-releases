@@ -3,12 +3,14 @@ Tests event listeners output in the Elements sidebar panel when the listeners ar
 
 
 ======== click ========
-[expanded] bodyevent-listeners-about-blank.html:9
+== normal
+[expanded] bodyRemoveevent-listeners-about-blank.html:9
     useCapture: true
     handler: function f() {}
 
 ======== hover ========
-[expanded] div#div-in-iframeevent-listeners-about-blank.html:9
+== normal
+[expanded] div#div-in-iframeRemoveevent-listeners-about-blank.html:9
     useCapture: true
     handler: function f() {}
 

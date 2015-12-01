@@ -24,7 +24,6 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
-#include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/write_on_cache_file.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_util.h"
@@ -36,6 +35,7 @@
 #include "components/drive/drive.pb.h"
 #include "components/drive/drive_pref_names.h"
 #include "components/drive/file_system_core_util.h"
+#include "components/drive/file_system_interface.h"
 #include "components/drive/job_list.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -80,7 +80,7 @@ base::FilePath GetDriveMountPointPath(Profile* profile) {
 }
 
 base::FilePath GetDriveMountPointPathForUserIdHash(
-    const std::string user_id_hash) {
+    const std::string& user_id_hash) {
   static const base::FilePath::CharType kSpecialMountPointRoot[] =
       FILE_PATH_LITERAL("/special");
   static const char kDriveMountPointNameBase[] = "drive";

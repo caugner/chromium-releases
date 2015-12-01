@@ -270,19 +270,16 @@ void SupervisedUserInternalsMessageHandler::SendBasicInfo() {
   // Trigger retrieval of the user settings
   SupervisedUserSettingsService* settings_service =
       SupervisedUserSettingsServiceFactory::GetForProfile(profile);
-  // TODO(bauerb): Change interface to SupervisedUserSettingsService to allow
-  // unsubscription, otherwise the subscription remains after this object is
-  // destroyed resulting in a small memory leak.
-  settings_service->Subscribe(base::Bind(
+  user_settings_subscription_ = settings_service->Subscribe(base::Bind(
         &SupervisedUserInternalsMessageHandler::SendSupervisedUserSettings,
         weak_factory_.GetWeakPtr()));
 }
 
 void SupervisedUserInternalsMessageHandler::SendSupervisedUserSettings(
-    const base::DictionaryValue* settings){
+    const base::DictionaryValue* settings) {
   web_ui()->CallJavascriptFunction(
       "chrome.supervised_user_internals.receiveUserSettings",
-      *settings);
+      *(settings ? settings : base::Value::CreateNullValue().get()));
 }
 
 void SupervisedUserInternalsMessageHandler::OnTryURLResult(

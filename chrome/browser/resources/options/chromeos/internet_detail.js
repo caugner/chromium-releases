@@ -249,7 +249,6 @@ cr.define('options.internet', function() {
       var guid = parseQueryParams(window.location).guid;
       if (!guid || !guid.length)
         return;
-      chrome.send('loadVPNProviders');
       chrome.networkingPrivate.getManagedProperties(
           guid, DetailsInternetPage.initializeDetailsPage);
     },
@@ -725,7 +724,7 @@ cr.define('options.internet', function() {
      * Updates visibility/enabled of the login/disconnect/configure buttons.
      * @private
      */
-    updateConnectionButtonVisibilty_: function() {
+    updateConnectionButtonVisibility_: function() {
       var onc = this.onc_;
       if (this.type_ == 'Ethernet') {
         // Ethernet can never be connected or disconnected and can always be
@@ -813,8 +812,15 @@ cr.define('options.internet', function() {
     populateHeader_: function() {
       var onc = this.onc_;
 
-      $('network-details-title').textContent =
-          this.networkTitle_ || onc.getTranslatedValue('Name');
+      var name = onc.getTranslatedValue('Name');
+      if (onc.getActiveValue('Type') == 'VPN' &&
+          onc.getActiveValue('VPN.Type') == 'ThirdPartyVPN') {
+        var providerName =
+            onc.getActiveValue('VPN.ThirdPartyVPN.ProviderName') ||
+            loadTimeData.getString('defaultThirdPartyProviderName');
+        name = loadTimeData.getStringF('vpnNameTemplate', providerName, name);
+      }
+      $('network-details-title').textContent = name;
 
       var connectionStateString = onc.getTranslatedValue('ConnectionState');
       $('network-details-subtitle-status').textContent = connectionStateString;
@@ -1379,7 +1385,7 @@ cr.define('options.internet', function() {
     detailsPage.onc_ = new OncData(oncData);
 
     detailsPage.populateHeader_();
-    detailsPage.updateConnectionButtonVisibilty_();
+    detailsPage.updateConnectionButtonVisibility_();
     detailsPage.updateDetails_();
   };
 
@@ -1397,18 +1403,8 @@ cr.define('options.internet', function() {
 
     sendShowDetailsMetrics(type, onc.getActiveValue('ConnectionState'));
 
-    if (type == 'VPN') {
-      // Cache the dialog title, which will contain the provider name in the
-      // case of a third-party VPN provider. This caching is important as the
-      // provider may go away while the details dialog is being shown, causing
-      // subsequent updates to be unable to determine the correct title.
-      detailsPage.networkTitle_ = options.VPNProviders.formatNetworkName(onc);
-    } else {
-      delete detailsPage.networkTitle_;
-    }
-
     detailsPage.populateHeader_();
-    detailsPage.updateConnectionButtonVisibilty_();
+    detailsPage.updateConnectionButtonVisibility_();
     detailsPage.updateDetails_();
 
     // TODO(stevenjb): Some of the setup below should be moved to
@@ -1720,15 +1716,8 @@ cr.define('options.internet', function() {
           onc.getTranslatedValue('VPN.Type');
 
       if (isThirdPartyVPN) {
-        $('inet-provider-name').textContent = '';
-        var extensionID = onc.getActiveValue('VPN.ThirdPartyVPN.ExtensionID');
-        var providers = options.VPNProviders.getProviders();
-        for (var i = 0; i < providers.length; ++i) {
-          if (extensionID == providers[i].extensionID) {
-            $('inet-provider-name').textContent = providers[i].name;
-            break;
-          }
-        }
+        $('inet-provider-name').textContent =
+            onc.getActiveValue('VPN.ThirdPartyVPN.ProviderName');
       } else {
         var usernameKey;
         if (providerType == 'OpenVPN')

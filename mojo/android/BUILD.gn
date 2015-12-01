@@ -18,7 +18,7 @@ generate_jni("jni_headers") {
     "javatests/src/org/chromium/mojo/MojoTestCase.java",
     "javatests/src/org/chromium/mojo/bindings/ValidationTestUtil.java",
   ]
-  deps = [
+  public_deps = [
     ":system_java_jni_headers",
   ]
 
@@ -125,6 +125,7 @@ shared_library("mojo_java_unittests") {
     ":system_java_jni_headers",
     "//base",
     "//base/test/:test_support",
+    "//build/config/sanitizers:deps",
     "//mojo/message_pump",
     "//third_party/mojo/src/mojo/edk/system",
     "//third_party/mojo/src/mojo/public/cpp/bindings/tests:mojo_public_bindings_test_utils",

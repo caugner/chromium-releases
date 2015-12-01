@@ -29,6 +29,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/browser/warning_service.h"
 #include "extensions/common/extension_set.h"
@@ -400,7 +401,7 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   info->id = extension.id();
 
   // Incognito access.
-  info->incognito_access.is_enabled = extension.can_be_incognito_enabled();
+  info->incognito_access.is_enabled = util::CanBeIncognitoEnabled(&extension);
   info->incognito_access.is_active =
       util::IsIncognitoEnabled(extension.id(), browser_context_);
 
@@ -500,8 +501,7 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   info->run_on_all_urls.is_enabled =
       (FeatureSwitch::scripts_require_action()->IsEnabled() &&
        PermissionsData::ScriptsMayRequireActionForExtension(
-           &extension,
-           extension.permissions_data()->active_permissions().get())) ||
+           &extension, extension.permissions_data()->active_permissions())) ||
       extension.permissions_data()->HasWithheldImpliedAllHosts() ||
       util::HasSetAllowedScriptingOnAllUrls(extension.id(), browser_context_);
   info->run_on_all_urls.is_active =

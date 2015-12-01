@@ -41,11 +41,6 @@ class WindowControllerList {
       int id,
       WindowController::TypeFilter filter) const;
 
-  // Returns a window matching the context the function was invoked in.
-  WindowController* FindWindowForFunctionById(
-      const UIThreadExtensionFunction* function,
-      int id) const;
-
   // Returns a window matching the context the function was invoked in
   // using |filter|.
   WindowController* FindWindowForFunctionByIdWithFilter(
@@ -69,7 +64,7 @@ class WindowControllerList {
   static WindowControllerList* GetInstance();
 
  private:
-  friend struct DefaultSingletonTraits<WindowControllerList>;
+  friend struct base::DefaultSingletonTraits<WindowControllerList>;
 
   // Entries are not owned by this class and must be removed when destroyed.
   ControllerList windows_;

@@ -75,7 +75,7 @@ void TestScreen::SetUIScale(float ui_scale) {
   ui_scale_ = ui_scale;
   gfx::Rect bounds_in_pixel(display_.GetSizeInPixel());
   gfx::Rect new_bounds = gfx::ToNearestRect(
-      gfx::ScaleRect(bounds_in_pixel, 1.0f / ui_scale));
+      gfx::ScaleRect(gfx::RectF(bounds_in_pixel), 1.0f / ui_scale));
   display_.SetScaleAndBounds(display_.device_scale_factor(), new_bounds);
   host_->SetRootTransform(GetRotationTransform() * GetUIScaleTransform());
 }
@@ -116,8 +116,8 @@ gfx::Transform TestScreen::GetUIScaleTransform() const {
 void TestScreen::OnWindowBoundsChanged(
     Window* window, const gfx::Rect& old_bounds, const gfx::Rect& new_bounds) {
   DCHECK_EQ(host_->window(), window);
-  display_.SetSize(gfx::ToFlooredSize(
-      gfx::ScaleSize(new_bounds.size(), display_.device_scale_factor())));
+  display_.SetSize(gfx::ScaleToFlooredSize(new_bounds.size(),
+                                           display_.device_scale_factor()));
 }
 
 void TestScreen::OnWindowDestroying(Window* window) {

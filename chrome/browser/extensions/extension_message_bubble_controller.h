@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_MESSAGE_BUBBLE_CONTROLLER_H_
 
 #include <string>
-#include "chrome/browser/extensions/extension_message_bubble.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/common/extension.h"
 
@@ -87,7 +86,7 @@ class ExtensionMessageBubbleController {
     const ExtensionRegistry* registry() const { return registry_; }
 
     std::string get_acknowledged_flag_pref_name() const;
-    void set_acknowledged_flag_pref_name(std::string pref_name);
+    void set_acknowledged_flag_pref_name(const std::string& pref_name);
 
    private:
     // A weak pointer to the profile we are associated with. Not owned by us.
@@ -133,8 +132,9 @@ class ExtensionMessageBubbleController {
   // times.
   void HighlightExtensionsIfNecessary();
 
-  // Sets up the callbacks and shows the bubble.
-  virtual void Show(ExtensionMessageBubble* bubble);
+  // Called when the bubble is actually shown. Because some bubbles are delayed
+  // (in order to weather the "focus storm"), they are not shown immediately.
+  void OnShown();
 
   // Callbacks from bubble. Declared virtual for testing purposes.
   virtual void OnBubbleAction();

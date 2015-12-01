@@ -21,7 +21,6 @@
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/java/gin_java_bridge_dispatcher_host.h"
 #include "content/browser/android/load_url_params.h"
-#include "content/browser/android/popup_touch_handle_drawable.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
 #include "content/browser/geolocation/geolocation_service_context.h"
 #include "content/browser/media/media_web_contents_observer.h"
@@ -67,9 +66,12 @@ using base::android::ScopedJavaLocalRef;
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
 
-// Describes the type and enabled state of a select popup item.
+namespace content {
+
 namespace {
 
+// Describes the type and enabled state of a select popup item.
+//
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.content.browser.input
 enum PopupItemType {
@@ -83,13 +85,7 @@ enum PopupItemType {
   POPUP_ITEM_TYPE_ENABLED,
 };
 
-} //namespace
-
-namespace content {
-
-namespace {
-
-const void* kContentViewUserDataKey = &kContentViewUserDataKey;
+const void* const kContentViewUserDataKey = &kContentViewUserDataKey;
 
 int GetRenderProcessIdFromRenderViewHost(RenderViewHost* host) {
   DCHECK(host);
@@ -97,8 +93,7 @@ int GetRenderProcessIdFromRenderViewHost(RenderViewHost* host) {
   DCHECK(render_process);
   if (render_process->HasConnection())
     return render_process->GetHandle();
-  else
-    return 0;
+  return 0;
 }
 
 ScopedJavaLocalRef<jobject> CreateJavaRect(
@@ -151,7 +146,7 @@ int ToGestureEventType(WebInputEvent::Type type) {
       NOTREACHED() << "Invalid source gesture type: "
                    << WebInputEventTraits::GetName(type);
       return -1;
-  };
+  }
 }
 
 }  // namespace
@@ -435,7 +430,8 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
     const gfx::Rect& bounds,
     const std::vector<MenuItem>& items,
     int selected_item,
-    bool multiple) {
+    bool multiple,
+    bool right_aligned) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
@@ -479,14 +475,10 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
   }
   ScopedJavaLocalRef<jobjectArray> items_array(
       base::android::ToJavaArrayOfStrings(env, labels));
-  Java_ContentViewCore_showSelectPopup(env,
-                                       j_obj.obj(),
-                                       reinterpret_cast<intptr_t>(frame),
-                                       bounds_rect.obj(),
-                                       items_array.obj(),
-                                       enabled_array.obj(),
-                                       multiple,
-                                       selected_array.obj());
+  Java_ContentViewCore_showSelectPopup(
+      env, j_obj.obj(), reinterpret_cast<intptr_t>(frame), bounds_rect.obj(),
+      items_array.obj(), enabled_array.obj(), multiple, selected_array.obj(),
+      right_aligned);
 }
 
 void ContentViewCoreImpl::HideSelectPopupMenu() {
@@ -515,13 +507,6 @@ void ContentViewCoreImpl::OnGestureEventAck(const blink::WebGestureEvent& event,
         // However, if that fling went unconsumed, we still need to let the
         // listeners know that scrolling has ended.
         Java_ContentViewCore_onScrollEndEventAck(env, j_obj.obj());
-      }
-
-      if (ack_result == INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS) {
-        // The view expects the fling velocity in pixels/s.
-        Java_ContentViewCore_onFlingStartEventHadNoConsumer(env, j_obj.obj(),
-            event.data.flingStart.velocityX * dpi_scale(),
-            event.data.flingStart.velocityY * dpi_scale());
       }
       break;
     case WebInputEvent::GestureFlingCancel:
@@ -621,19 +606,6 @@ void ContentViewCoreImpl::OnSelectionEvent(ui::SelectionEventType event,
       selection_rect_pix.right(), selection_rect_pix.bottom());
 }
 
-scoped_ptr<ui::TouchHandleDrawable>
-ContentViewCoreImpl::CreatePopupTouchHandleDrawable() {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null()) {
-    NOTREACHED();
-    return scoped_ptr<ui::TouchHandleDrawable>();
-  }
-  return scoped_ptr<ui::TouchHandleDrawable>(new PopupTouchHandleDrawable(
-      Java_ContentViewCore_createPopupTouchHandleDrawable(env, obj.obj()),
-      dpi_scale_));
-}
-
 void ContentViewCoreImpl::ShowPastePopup(int x_dip, int y_dip) {
   RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
   if (!view)
@@ -654,7 +626,7 @@ void ContentViewCoreImpl::GetScaledContentBitmap(
     float scale,
     SkColorType preferred_color_type,
     const gfx::Rect& src_subrect,
-    ReadbackRequestCallback& result_callback) {
+    const ReadbackRequestCallback& result_callback) {
   RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
   if (!view || preferred_color_type == kUnknown_SkColorType) {
     result_callback.Run(SkBitmap(), READBACK_FAILED);
@@ -773,8 +745,7 @@ int ContentViewCoreImpl::GetTopControlsHeightPix() const {
 }
 
 gfx::Size ContentViewCoreImpl::GetViewportSizeDip() const {
-  return gfx::ToCeiledSize(
-      gfx::ScaleSize(GetViewportSizePix(), 1.0f / dpi_scale()));
+  return gfx::ScaleToCeiledSize(GetViewportSizePix(), 1.0f / dpi_scale());
 }
 
 bool ContentViewCoreImpl::DoTopControlsShrinkBlinkSize() const {
@@ -1450,11 +1421,11 @@ void ContentViewCoreImpl::PullReset() {
 
 // This is called for each ContentView.
 jlong Init(JNIEnv* env,
-           jobject obj,
-           jobject web_contents,
-           jobject view_android_delegate,
+           const JavaParamRef<jobject>& obj,
+           const JavaParamRef<jobject>& web_contents,
+           const JavaParamRef<jobject>& view_android_delegate,
            jlong window_android,
-           jobject retained_objects_set) {
+           const JavaParamRef<jobject>& retained_objects_set) {
   ContentViewCoreImpl* view = new ContentViewCoreImpl(
       env, obj, WebContents::FromJavaWebContents(web_contents),
       view_android_delegate,
@@ -1463,19 +1434,19 @@ jlong Init(JNIEnv* env,
   return reinterpret_cast<intptr_t>(view);
 }
 
-static jobject FromWebContentsAndroid(
+static ScopedJavaLocalRef<jobject> FromWebContentsAndroid(
     JNIEnv* env,
-    jclass clazz,
-    jobject jweb_contents) {
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jobject>& jweb_contents) {
   WebContents* web_contents = WebContents::FromJavaWebContents(jweb_contents);
   if (!web_contents)
-    return NULL;
+    return ScopedJavaLocalRef<jobject>();
 
   ContentViewCore* view = ContentViewCore::FromWebContents(web_contents);
   if (!view)
-    return NULL;
+    return ScopedJavaLocalRef<jobject>();
 
-  return view->GetJavaObject().Release();
+  return view->GetJavaObject();
 }
 
 bool RegisterContentViewCore(JNIEnv* env) {

@@ -193,6 +193,15 @@
     "dependencies": ["permission:cast.streaming"],
     "contexts": ["blessed_extension"]
   },
+  "certificateProvider": {
+    "dependencies": ["permission:certificateProvider"],
+    "contexts": ["blessed_extension"]
+  },
+  "certificateProviderInternal": {
+    "internal": true,
+    "dependencies": ["permission:certificateProvider"],
+    "contexts": ["blessed_extension"]
+  },
   "chromeosInfoPrivate": {
     "dependencies": ["permission:chromeosInfoPrivate"],
     "contexts": ["blessed_extension"]
@@ -482,13 +491,14 @@
     "channel": "stable",
     "contexts": ["blessed_extension"],
     "whitelist": [
-      // http://crbug.com/309737
-      "nckgahadagoaajjgafhacjanaoiihapd",
-      "ljclpkphhpbpinifbeabbhlfddcpfdde",
-      "ppleadejekpmccmnpjdimmlfljlkdfej",
-      "eggnbpckecmjlblplehfpjjdhhidfdoj",
-      "jfjjdfefebklmdbmenmlehlopoocnoeh",
-      "knipolnnllmklapflnccelgolnpehhpl"
+      // http://crbug.com/309737.
+      // Keep this list in sync with extensions_misc::kHangoutsExtensionIds.
+      "nckgahadagoaajjgafhacjanaoiihapd",  // Hangouts Production.
+      "ljclpkphhpbpinifbeabbhlfddcpfdde",  // Hangouts Debug.
+      "ppleadejekpmccmnpjdimmlfljlkdfej",  // Hangouts Alpha.
+      "eggnbpckecmjlblplehfpjjdhhidfdoj",  // Hangouts Beta.
+      "jfjjdfefebklmdbmenmlehlopoocnoeh",  // Hangouts Packaged App Debug.
+      "knipolnnllmklapflnccelgolnpehhpl"   // Hangouts Packaged App Prod.
     ]
   },
   "history": {
@@ -681,6 +691,16 @@
     "dependencies": ["permission:readingListPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "resourcesPrivate": [{
+    "dependencies": ["permission:resourcesPrivate"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://print/*"
+    ]
+  }],
   "rtcPrivate": {
     "dependencies": ["permission:rtcPrivate"],
     "contexts": ["blessed_extension"]

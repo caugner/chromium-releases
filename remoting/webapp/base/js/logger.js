@@ -28,6 +28,25 @@ remoting.Logger.prototype.setAuthTotalTime = function(totalTime) {};
 remoting.Logger.prototype.setHostVersion = function(hostVersion) {};
 
 /**
+ * @param {remoting.ChromotingEvent.Os} hostOs Type of the OS the host
+ *        for the current session.
+ * @return {void} Nothing.
+ */
+remoting.Logger.prototype.setHostOs = function(hostOs) {};
+
+/**
+ * @param {string} hostOsVersion Version of the host Os for current session.
+ * @return {void} Nothing.
+ */
+remoting.Logger.prototype.setHostOsVersion = function(hostOsVersion) {};
+
+/**
+ * @param {number} time Time in milliseconds since the last host status update.
+ * @return {void} Nothing.
+ */
+remoting.Logger.prototype.setHostStatusUpdateElapsedTime = function(time) {};
+
+/**
  * Set the connection type (direct, stun relay).
  *
  * @param {string} connectionType
@@ -39,6 +58,10 @@ remoting.Logger.prototype.setConnectionType = function(connectionType) {};
  */
 remoting.Logger.prototype.setLogEntryMode = function(mode) {};
 
+/**
+ * @param {remoting.ChromotingEvent.AuthMethod} method
+ */
+remoting.Logger.prototype.setAuthMethod = function(method) {};
 
 /**
  * @param {remoting.SignalStrategy.Type} strategyType

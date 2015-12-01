@@ -5,6 +5,7 @@
 #include "chrome/browser/sync/glue/sync_backend_host_mock.h"
 
 #include "components/sync_driver/sync_frontend.h"
+#include "sync/internal_api/public/activation_context.h"
 
 namespace browser_sync {
 
@@ -16,6 +17,8 @@ SyncBackendHostMock::~SyncBackendHostMock() {}
 void SyncBackendHostMock::Initialize(
     sync_driver::SyncFrontend* frontend,
     scoped_ptr<base::Thread> sync_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& file_thread,
     const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
     const GURL& service_url,
     const std::string& sync_user_agent,
@@ -68,10 +71,18 @@ syncer::ModelTypeSet SyncBackendHostMock::ConfigureDataTypes(
 
 void SyncBackendHostMock::EnableEncryptEverything() {}
 
-void SyncBackendHostMock::ActivateDataType(
-    syncer::ModelType type, syncer::ModelSafeGroup group,
+void SyncBackendHostMock::ActivateDirectoryDataType(
+    syncer::ModelType type,
+    syncer::ModelSafeGroup group,
     sync_driver::ChangeProcessor* change_processor) {}
-void SyncBackendHostMock::DeactivateDataType(syncer::ModelType type) {}
+void SyncBackendHostMock::DeactivateDirectoryDataType(syncer::ModelType type) {}
+
+void SyncBackendHostMock::ActivateNonBlockingDataType(
+    syncer::ModelType type,
+    scoped_ptr<syncer_v2::ActivationContext> activation_context) {}
+
+void SyncBackendHostMock::DeactivateNonBlockingDataType(
+    syncer::ModelType type) {}
 
 syncer::UserShare* SyncBackendHostMock::GetUserShare() const {
   return NULL;
@@ -142,7 +153,7 @@ void SyncBackendHostMock::set_fail_initial_download(bool should_fail) {
 
 void SyncBackendHostMock::ClearServerData(
     const syncer::SyncManager::ClearServerDataCallback& callback) {
-  NOTIMPLEMENTED();
+  callback.Run();
 }
 
 }  // namespace browser_sync

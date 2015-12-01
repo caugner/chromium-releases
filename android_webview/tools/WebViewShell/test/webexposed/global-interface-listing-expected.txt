@@ -259,6 +259,10 @@ interface CSSKeyframesRule
 interface CSSMediaRule
     getter media
     method constructor
+interface CSSNamespaceRule
+    getter namespaceURI
+    getter prefix
+    method constructor
 interface CSSPageRule
     getter selectorText
     getter style
@@ -271,6 +275,7 @@ interface CSSRule
     attribute KEYFRAMES_RULE
     attribute KEYFRAME_RULE
     attribute MEDIA_RULE
+    attribute NAMESPACE_RULE
     attribute PAGE_RULE
     attribute STYLE_RULE
     attribute SUPPORTS_RULE
@@ -329,6 +334,7 @@ interface Cache
     method delete
     method keys
     method match
+    method matchAll
     method put
 interface CacheStorage
     method constructor
@@ -928,11 +934,6 @@ interface Element
     getter localName
     getter namespaceURI
     getter nextElementSibling
-    getter offsetHeight
-    getter offsetLeft
-    getter offsetParent
-    getter offsetTop
-    getter offsetWidth
     getter onbeforecopy
     getter onbeforecut
     getter onbeforepaste
@@ -1229,30 +1230,6 @@ interface HTMLAnchorElement
     setter text
     setter type
     setter username
-interface HTMLAppletElement
-    getter align
-    getter alt
-    getter archive
-    getter code
-    getter codeBase
-    getter height
-    getter hspace
-    getter name
-    getter object
-    getter vspace
-    getter width
-    method constructor
-    setter align
-    setter alt
-    setter archive
-    setter code
-    setter codeBase
-    setter height
-    setter hspace
-    setter name
-    setter object
-    setter vspace
-    setter width
 interface HTMLAreaElement
     getter alt
     getter coords
@@ -2710,6 +2687,9 @@ interface ImageData
     getter height
     getter width
     method constructor
+interface InputDeviceCapabilities
+    getter firesTouchEvents
+    method constructor
 interface KeyboardEvent
     attribute DOM_KEY_LOCATION_LEFT
     attribute DOM_KEY_LOCATION_NUMPAD
@@ -2783,6 +2763,9 @@ interface MIDIPort
     method constructor
     method open
     setter onstatechange
+interface MediaDevices
+    method constructor
+    method enumerateDevices
 interface MediaElementAudioSourceNode
     getter mediaElement
     method constructor
@@ -2963,6 +2946,7 @@ interface MouseEvent
     getter x
     getter y
     method constructor
+    method getModifierState
     method initMouseEvent
 interface MutationEvent
     attribute ADDITION
@@ -3013,6 +2997,7 @@ interface Navigator
     getter language
     getter languages
     getter maxTouchPoints
+    getter mediaDevices
     getter mimeTypes
     getter onLine
     getter platform
@@ -3333,6 +3318,7 @@ interface Request
     getter bodyUsed
     getter credentials
     getter headers
+    getter integrity
     getter method
     getter mode
     getter redirect
@@ -4375,11 +4361,7 @@ interface SVGSVGElement
     getter currentTranslate
     getter currentView
     getter height
-    getter pixelUnitToMillimeterX
-    getter pixelUnitToMillimeterY
     getter preserveAspectRatio
-    getter screenPixelToMillimeterX
-    getter screenPixelToMillimeterY
     getter useCurrentView
     getter viewBox
     getter viewport
@@ -4655,8 +4637,6 @@ interface ServiceWorkerRegistration
     getter onupdatefound
     getter scope
     method constructor
-    method getNotifications
-    method showNotification
     method unregister
     method update
     setter onupdatefound
@@ -4844,6 +4824,7 @@ interface TreeWalker
     setter currentNode
 interface UIEvent
     getter detail
+    getter sourceCapabilities
     getter view
     getter which
     method constructor

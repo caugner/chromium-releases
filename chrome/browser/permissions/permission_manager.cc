@@ -5,16 +5,21 @@
 #include "chrome/browser/permissions/permission_manager.h"
 
 #include "base/callback.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/permissions/permission_context.h"
 #include "chrome/browser/permissions/permission_context_base.h"
 #include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#include "chrome/browser/tab_contents/tab_util.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#endif
 
 using content::PermissionStatus;
 using content::PermissionType;
@@ -64,6 +69,10 @@ ContentSettingsType PermissionTypeToContentSetting(PermissionType permission) {
     case PermissionType::MIDI:
       // This will hit the NOTREACHED below.
       break;
+    case PermissionType::AUDIO_CAPTURE:
+      return CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC;
+    case PermissionType::VIDEO_CAPTURE:
+      return CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
     case PermissionType::NUM:
       // This will hit the NOTREACHED below.
       break;
@@ -72,14 +81,6 @@ ContentSettingsType PermissionTypeToContentSetting(PermissionType permission) {
   NOTREACHED() << "Unknown content setting for permission "
                << static_cast<int>(permission);
   return CONTENT_SETTINGS_TYPE_DEFAULT;
-}
-
-// Helper method that wraps a callback a void(PermissionStatus)
-// callback into a void(ContentSetting) callback.
-void PermissionStatusCallbackWrapper(
-    const base::Callback<void(PermissionStatus)>& callback,
-    ContentSetting content_setting) {
-  callback.Run(ContentSettingToPermissionStatus(content_setting));
 }
 
 // Returns whether the permission has a constant PermissionStatus value (i.e.
@@ -117,6 +118,19 @@ PermissionStatus GetPermissionStatusForConstantPermission(PermissionType type) {
 
 }  // anonymous namespace
 
+struct PermissionManager::PendingRequest {
+  PendingRequest(PermissionType permission,
+                 content::RenderFrameHost* render_frame_host)
+    : permission(permission),
+      render_process_id(render_frame_host->GetProcess()->GetID()),
+      render_frame_id(render_frame_host->GetRoutingID()) {
+  }
+
+  PermissionType permission;
+  int render_process_id;
+  int render_frame_id;
+};
+
 struct PermissionManager::Subscription {
   PermissionType permission;
   GURL requesting_origin;
@@ -126,30 +140,31 @@ struct PermissionManager::Subscription {
 };
 
 PermissionManager::PermissionManager(Profile* profile)
-    : profile_(profile) {
+    : profile_(profile),
+      weak_ptr_factory_(this) {
 }
 
 PermissionManager::~PermissionManager() {
   if (!subscriptions_.IsEmpty())
-    profile_->GetHostContentSettingsMap()->RemoveObserver(this);
+    HostContentSettingsMapFactory::GetForProfile(profile_)
+        ->RemoveObserver(this);
 }
 
-void PermissionManager::RequestPermission(
+int PermissionManager::RequestPermission(
     PermissionType permission,
     content::RenderFrameHost* render_frame_host,
-    int request_id,
     const GURL& requesting_origin,
     bool user_gesture,
     const base::Callback<void(PermissionStatus)>& callback) {
   if (IsConstantPermission(permission)) {
     callback.Run(GetPermissionStatusForConstantPermission(permission));
-    return;
+    return kNoPendingOperation;
   }
 
   PermissionContextBase* context = PermissionContext::Get(profile_, permission);
   if (!context) {
     callback.Run(content::PERMISSION_STATUS_DENIED);
-    return;
+    return kNoPendingOperation;
   }
 
   content::WebContents* web_contents =
@@ -158,43 +173,56 @@ void PermissionManager::RequestPermission(
     callback.Run(
         GetPermissionStatus(permission, requesting_origin,
                             web_contents->GetLastCommittedURL().GetOrigin()));
-    return;
+    return kNoPendingOperation;
   }
 
-  int render_process_id = render_frame_host->GetProcess()->GetID();
-  int render_frame_id = render_frame_host->GetRoutingID();
-  const PermissionRequestID request(render_process_id,
-                                    render_frame_id,
-                                    request_id,
-                                    requesting_origin);
+  PendingRequest* pending_request = new PendingRequest(
+      permission, render_frame_host);
+  int request_id = pending_requests_.Add(pending_request);
+  const PermissionRequestID request(pending_request->render_process_id,
+                                    pending_request->render_frame_id,
+                                    request_id);
 
   context->RequestPermission(
       web_contents, request, requesting_origin, user_gesture,
-      base::Bind(&PermissionStatusCallbackWrapper, callback));
+      base::Bind(&PermissionManager::OnPermissionRequestResponse,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 request_id,
+                 callback));
+  return request_id;
 }
 
-void PermissionManager::CancelPermissionRequest(
-    PermissionType permission,
-    content::RenderFrameHost* render_frame_host,
+void PermissionManager::OnPermissionRequestResponse(
     int request_id,
-    const GURL& requesting_origin) {
-  PermissionContextBase* context = PermissionContext::Get(profile_, permission);
+    const base::Callback<void(PermissionStatus)>& callback,
+    ContentSetting content_setting) {
+  pending_requests_.Remove(request_id);
+  callback.Run(ContentSettingToPermissionStatus(content_setting));
+}
+
+void PermissionManager::CancelPermissionRequest(int request_id) {
+  PendingRequest* pending_request = pending_requests_.Lookup(request_id);
+  if (!pending_request)
+    return;
+
+  PermissionContextBase* context = PermissionContext::Get(
+      profile_, pending_request->permission);
   if (!context)
     return;
 
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host);
-  if (IsPermissionBubbleManagerMissing(web_contents))
+  content::WebContents* web_contents = tab_util::GetWebContentsByFrameID(
+      pending_request->render_process_id, pending_request->render_frame_id);
+  DCHECK(web_contents);
+  if (IsPermissionBubbleManagerMissing(web_contents)) {
+    pending_requests_.Remove(request_id);
     return;
+  }
 
-  int render_process_id = render_frame_host->GetProcess()->GetID();
-  int render_frame_id = render_frame_host->GetRoutingID();
-  const PermissionRequestID request(render_process_id,
-                                    render_frame_id,
-                                    request_id,
-                                    requesting_origin);
-
+  const PermissionRequestID request(pending_request->render_process_id,
+                                    pending_request->render_frame_id,
+                                    request_id);
   context->CancelPermissionRequest(web_contents, request);
+  pending_requests_.Remove(request_id);
 }
 
 void PermissionManager::ResetPermission(PermissionType permission,
@@ -219,9 +247,8 @@ PermissionStatus PermissionManager::GetPermissionStatus(
   if (!context)
     return content::PERMISSION_STATUS_DENIED;
 
-  return ContentSettingToPermissionStatus(
-      context->GetPermissionStatus(requesting_origin.GetOrigin(),
-                                   embedding_origin.GetOrigin()));
+  return ContentSettingToPermissionStatus(context->GetPermissionStatus(
+      requesting_origin.GetOrigin(), embedding_origin.GetOrigin()));
 }
 
 void PermissionManager::RegisterPermissionUsage(PermissionType permission,
@@ -232,7 +259,7 @@ void PermissionManager::RegisterPermissionUsage(PermissionType permission,
   if (IsConstantPermission(permission))
     return;
 
-  profile_->GetHostContentSettingsMap()->UpdateLastUsage(
+  HostContentSettingsMapFactory::GetForProfile(profile_)->UpdateLastUsage(
       requesting_origin,
       embedding_origin,
       PermissionTypeToContentSetting(permission));
@@ -244,7 +271,7 @@ int PermissionManager::SubscribePermissionStatusChange(
     const GURL& embedding_origin,
     const base::Callback<void(PermissionStatus)>& callback) {
   if (subscriptions_.IsEmpty())
-    profile_->GetHostContentSettingsMap()->AddObserver(this);
+    HostContentSettingsMapFactory::GetForProfile(profile_)->AddObserver(this);
 
   Subscription* subscription = new Subscription();
   subscription->permission = permission;
@@ -269,7 +296,8 @@ void PermissionManager::UnsubscribePermissionStatusChange(int subscription_id) {
   subscriptions_.Remove(subscription_id);
 
   if (subscriptions_.IsEmpty())
-    profile_->GetHostContentSettingsMap()->RemoveObserver(this);
+    HostContentSettingsMapFactory::GetForProfile(profile_)
+        ->RemoveObserver(this);
 }
 
 bool PermissionManager::IsPermissionBubbleManagerMissing(

@@ -46,9 +46,10 @@ source_set("sources") {
     "//base",
     "//components/clipboard:lib",
     "//components/filesystem:lib",
-    "//mandoline/tab:lib",
+    "//components/web_view:lib",
     "//mojo/application/public/cpp",
     "//mojo/common:tracing_impl",
+    "//mojo/logging",
     "//mojo/message_pump",
     "//mojo/services/tracing:lib",
     "//third_party/icu",
@@ -59,8 +60,8 @@ source_set("sources") {
   if (!is_android) {
     sources += [ "application_delegate_factory_notandroid.cc" ]
     deps += [
+      "//components/mus:lib",
       "//components/resource_provider:lib",
-      "//components/view_manager:lib",
       "//mojo/services/network:lib",
     ]
   }
@@ -73,7 +74,7 @@ source_set("sources") {
 
   if (use_aura) {
     deps += [
-      "//components/view_manager/public/cpp",
+      "//components/mus/public/cpp",
       "//mandoline/ui/desktop_ui:lib",
       "//mandoline/ui/omnibox:lib",
     ]

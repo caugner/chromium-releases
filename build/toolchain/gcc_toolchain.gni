@@ -2,6 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/nacl/config.gni")
+import("//build/config/sanitizers/sanitizers.gni")
+import("//build/toolchain/ccache.gni")
+import("//build/toolchain/goma.gni")
 import("//build/toolchain/toolchain.gni")
 
 # This value will be inherited in the toolchain below.
@@ -21,7 +25,8 @@ concurrent_links = exec_script("get_concurrent_links.py", [], "value")
 #  - toolchain_os  (What "current_os" should be set to when invoking a
 #                   build using this toolchain.)
 #
-# Optional parameters:
+# Optional parameters that control the tools:
+#
 #  - libs_section_prefix
 #  - libs_section_postfix
 #      The contents of these strings, if specified, will be placed around
@@ -30,17 +35,52 @@ concurrent_links = exec_script("get_concurrent_links.py", [], "value")
 #  - solink_libs_section_prefix
 #  - solink_libs_section_postfix
 #      Same as libs_section_{pre,post}fix except used for solink instead of link.
-#  - post_solink
-#      The content of this string, if specified, will be appended to the solink
-#      command.
+#  - link_outputs
+#      The content of this array, if specified, will be added to the list of
+#      outputs from the link command. This can be useful in conjunction with
+#      the post_link parameter.
+#  - post_link
+#      The content of this string, if specified, will be run as a separate
+#      command following the the link command.
 #  - deps
 #      Just forwarded to the toolchain definition.
-#  - is_clang
-#      Whether to use clang instead of gcc.
+#  - executable_extension
+#      If this string is specified it will be used for the file extension
+#      for an executable, rather than using no extension; targets will
+#      still be able to override the extension using the output_extension
+#      variable.
+#  - rebuild_define
+#      The contents of this string, if specified, will be passed as a #define
+#      to the toolchain. It can be used to force recompiles whenever a
+#      toolchain is updated.
+#  - shlib_extension
+#      If this string is specified it will be used for the file extension
+#      for a shared library, rather than default value specified in
+#      toolchain.gni
 #  - strip
 #      Location of the strip executable. When specified, strip will be run on
 #      all shared libraries and executables as they are built. The pre-stripped
 #      artifacts will be put in lib.stripped/ and exe.stripped/.
+#
+# Optional build argument contols.
+#
+#  - clear_sanitizers
+#      When set to true, is_asan, is_msan, etc.will all be set to false. Often
+#      secondary toolchains do not want to run with sanitizers.
+#  - is_clang
+#      Whether to use clang instead of gcc.
+#  - is_component_build
+#      Whether to forcibly enable or disable component builds for this
+#      toolchain; if not specified, the toolchain will inherit the
+#      default setting.
+#  - is_nacl_glibc
+#      Whether NaCl code is built using Glibc instead of Newlib.
+#  - use_ccache
+#      Override the global use_ccache setting, useful to opt-out of ccache in
+#      a particular toolchain by setting use_ccache = false in it.
+#  - use_goma
+#      Override the global use_goma setting, useful to opt-out of goma in a
+#      particular toolchain by setting use_gome = false in it.
 template("gcc_toolchain") {
   toolchain(target_name) {
     assert(defined(invoker.cc), "gcc_toolchain() must specify a \"cc\" value")
@@ -52,11 +92,31 @@ template("gcc_toolchain") {
     assert(defined(invoker.toolchain_os),
            "gcc_toolchain() must specify a \"toolchain_os\"")
 
-    # We can't do string interpolation ($ in strings) on things with dots in
-    # them. To allow us to use $cc below, for example, we create copies of
-    # these values in our scope.
-    cc = invoker.cc
-    cxx = invoker.cxx
+    if (defined(invoker.use_ccache)) {
+      use_ccache = invoker.use_ccache
+    }
+    if (defined(invoker.use_goma)) {
+      use_goma = invoker.use_goma
+    }
+    if (use_goma) {
+      assert(!use_ccache, "Goma and ccache can't be used together.")
+      compiler_prefix = "$goma_dir/gomacc "
+    } else if (use_ccache) {
+      compiler_prefix = "ccache "
+    } else {
+      compiler_prefix = ""
+    }
+
+    # This define changes when the toolchain changes, forcing a rebuild.
+    # Nothing should ever use this define.
+    if (defined(invoker.rebuild_define)) {
+      rebuild_string = "-D" + invoker.rebuild_define + " "
+    } else {
+      rebuild_string = ""
+    }
+
+    cc = compiler_prefix + invoker.cc
+    cxx = compiler_prefix + invoker.cxx
     ar = invoker.ar
     ld = invoker.ld
     if (defined(invoker.readelf)) {
@@ -68,6 +128,18 @@ template("gcc_toolchain") {
       nm = invoker.nm
     } else {
       nm = "nm"
+    }
+
+    if (defined(invoker.shlib_extension)) {
+      default_shlib_extension = invoker.shlib_extension
+    } else {
+      default_shlib_extension = shlib_extension
+    }
+
+    if (defined(invoker.executable_extension)) {
+      default_executable_extension = invoker.executable_extension
+    } else {
+      default_executable_extension = ""
     }
 
     # Bring these into our scope for string interpolation with default values.
@@ -101,7 +173,7 @@ template("gcc_toolchain") {
 
     tool("cc") {
       depfile = "{{output}}.d"
-      command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+      command = "$cc -MMD -MF $depfile ${rebuild_string}{{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "CC {{output}}"
       outputs = [
@@ -111,7 +183,7 @@ template("gcc_toolchain") {
 
     tool("cxx") {
       depfile = "{{output}}.d"
-      command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+      command = "$cxx -MMD -MF $depfile ${rebuild_string}{{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "CXX {{output}}"
       outputs = [
@@ -122,7 +194,7 @@ template("gcc_toolchain") {
     tool("asm") {
       # For GCC we can just use the C compiler to compile assembly.
       depfile = "{{output}}.d"
-      command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+      command = "$cc -MMD -MF $depfile ${rebuild_string}{{defines}} {{include_dirs}} {{asmflags}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "ASM {{output}}"
       outputs = [
@@ -132,7 +204,14 @@ template("gcc_toolchain") {
 
     tool("alink") {
       rspfile = "{{output}}.rsp"
-      command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
+      arflags = ""
+      if (is_cfi && invoker.toolchain_os != "nacl") {
+        gold_plugin_path = rebase_path(
+                "//third_party/llvm-build/Release+Asserts/lib/LLVMgold.so",
+                root_build_dir)
+        arflags = "--plugin $gold_plugin_path"
+      }
+      command = "rm -f {{output}} && $ar rcs $arflags {{output}} @$rspfile"
       description = "AR {{output}}"
       rspfile_content = "{{inputs}}"
       outputs = [
@@ -181,10 +260,7 @@ template("gcc_toolchain") {
       # Use this for {{output_extension}} expansions unless a target manually
       # overrides it (in which case {{output_extension}} will be what the target
       # specifies).
-      default_output_extension = shlib_extension
-      if (defined(invoker.default_output_extension)) {
-        default_output_extension = invoker.default_output_extension
-      }
+      default_output_extension = default_shlib_extension
 
       output_prefix = "lib"
 
@@ -211,6 +287,12 @@ template("gcc_toolchain") {
       outfile = "{{root_out_dir}}/$exename"
       rspfile = "$outfile.rsp"
       unstripped_outfile = outfile
+
+      # Use this for {{output_extension}} expansions unless a target manually
+      # overrides it (in which case {{output_extension}} will be what the target
+      # specifies).
+      default_output_extension = default_executable_extension
+
       if (defined(invoker.strip)) {
         unstripped_outfile = "{{root_out_dir}}/exe.unstripped/$exename"
       }
@@ -221,6 +303,9 @@ template("gcc_toolchain") {
             "${invoker.strip} --strip-unneeded -o $outfile $unstripped_outfile"
         command += " && " + strip_command
       }
+      if (defined(invoker.postlink)) {
+        command += " && " + invoker.postlink
+      }
       description = "LINK $outfile"
       rspfile_content = "{{inputs}}"
       outputs = [
@@ -228,6 +313,9 @@ template("gcc_toolchain") {
       ]
       if (outfile != unstripped_outfile) {
         outputs += [ unstripped_outfile ]
+      }
+      if (defined(invoker.link_outputs)) {
+        outputs += invoker.link_outputs
       }
     }
 
@@ -251,13 +339,24 @@ template("gcc_toolchain") {
       target_os = target_os
       target_cpu = target_cpu
 
-      if (defined(invoker.is_clang)) {
-        is_clang = invoker.is_clang
+      forward_variables_from(invoker,
+                             [
+                               "is_clang",
+                               "is_component_build",
+                               "is_nacl_glibc",
+                             ])
+
+      if (defined(invoker.clear_sanitizers) && invoker.clear_sanitizers) {
+        is_asan = false
+        is_cfi = false
+        is_lsan = false
+        is_msan = false
+        is_syzyasan = false
+        is_tsan = false
+        is_ubsan = false
       }
     }
 
-    if (defined(invoker.deps)) {
-      deps = invoker.deps
-    }
+    forward_variables_from(invoker, [ "deps" ])
   }
 }

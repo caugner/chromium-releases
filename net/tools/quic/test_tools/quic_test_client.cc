@@ -318,11 +318,11 @@ ssize_t QuicTestClient::SendMessage(const HTTPMessage& message) {
   return ret;
 }
 
-ssize_t QuicTestClient::SendData(string data, bool last_data) {
+ssize_t QuicTestClient::SendData(const string& data, bool last_data) {
   return SendData(data, last_data, nullptr);
 }
 
-ssize_t QuicTestClient::SendData(string data,
+ssize_t QuicTestClient::SendData(const string& data,
                                  bool last_data,
                                  QuicAckNotifier::DelegateInterface* delegate) {
   return GetOrCreateStreamAndSendRequest(nullptr, StringPiece(data), last_data,
@@ -582,6 +582,10 @@ ssize_t QuicTestClient::SendAndWaitForResponse(const void *buffer,
 
 void QuicTestClient::Bind(IPEndPoint* local_address) {
   DLOG(WARNING) << "Bind will be done during connect";
+}
+
+void QuicTestClient::MigrateSocket(const IPAddressNumber& new_host) {
+  client_->MigrateSocket(new_host);
 }
 
 string QuicTestClient::SerializeMessage(const HTTPMessage& message) {

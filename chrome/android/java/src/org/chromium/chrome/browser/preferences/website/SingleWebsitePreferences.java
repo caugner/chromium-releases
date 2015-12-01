@@ -26,7 +26,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.UrlUtilities;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
 import java.net.URI;
@@ -131,7 +131,8 @@ public class SingleWebsitePreferences extends PreferenceFragment
         Bundle fragmentArgs = new Bundle();
         // TODO(mvanouwerkerk): Define a pure getOrigin method in UrlUtilities that is the
         // equivalent of the call below, because this is perfectly fine for non-display purposes.
-        String origin = UrlUtilities.getOriginForDisplay(URI.create(url), true /*  schowScheme */);
+        String origin =
+                UrlUtilities.formatUrlForSecurityDisplay(URI.create(url), true /* showScheme */);
         fragmentArgs.putString(SingleWebsitePreferences.EXTRA_ORIGIN, origin);
         return fragmentArgs;
     }
@@ -462,7 +463,7 @@ public class SingleWebsitePreferences extends PreferenceFragment
     private boolean hasXGeoLocationPermission(Context context) {
         String searchUrl = TemplateUrlService.getInstance().getUrlForSearchQuery("foo");
         return mSite.getAddress().matches(searchUrl)
-                && PrefServiceBridge.isGeoHeaderEnabledForUrl(context, searchUrl, false);
+                && GeolocationHeader.isGeoHeaderEnabledForUrl(context, searchUrl, false);
     }
 
     /**
@@ -491,7 +492,7 @@ public class SingleWebsitePreferences extends PreferenceFragment
         Drawable icon = ApiCompatibilityUtils.getDrawable(getResources(),
                 ContentSettingsResources.getIcon(contentType));
         icon.mutate();
-        int disabledColor = getResources().getColor(
+        int disabledColor = ApiCompatibilityUtils.getColor(getResources(),
                 R.color.primary_text_disabled_material_light);
         icon.setColorFilter(disabledColor, PorterDuff.Mode.SRC_IN);
         return icon;

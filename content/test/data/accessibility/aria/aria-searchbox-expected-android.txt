@@ -1,2 +1,2 @@
-android.webkit.WebView focusable focused scrollable
-++android.widget.EditText clickable name='ARIA role searchbox.'
+android.webkit.WebView focusable scrollable
+++android.widget.EditText clickable focusable focused name='ARIA role searchbox.'

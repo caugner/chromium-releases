@@ -6,20 +6,12 @@
 
 #include "base/bind.h"
 #include "components/html_viewer/global_state.h"
-#include "components/html_viewer/html_document_oopif.h"
+#include "components/html_viewer/html_document.h"
 #include "mojo/application/public/cpp/application_connection.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/connect.h"
 
 namespace html_viewer {
-
-namespace {
-
-HTMLFrame* CreateHTMLFrame(HTMLFrame::CreateParams* params) {
-  return new HTMLFrame(params);
-}
-
-}  // namespace
 
 // ServiceConnectorQueue records all incoming service requests and processes
 // them once PushRequestsTo() is called. This is useful if you need to delay
@@ -73,22 +65,17 @@ HTMLDocumentApplicationDelegate::HTMLDocumentApplicationDelegate(
       url_(response->url),
       initial_response_(response.Pass()),
       global_state_(global_state),
-      html_frame_creation_callback_(base::Bind(CreateHTMLFrame)),
+      html_factory_(this),
       weak_factory_(this) {}
 
 HTMLDocumentApplicationDelegate::~HTMLDocumentApplicationDelegate() {
   // Deleting the documents is going to trigger a callback to
   // OnHTMLDocumentDeleted() and remove from |documents_|. Copy the set so we
   // don't have to worry about the set being modified out from under us.
-  std::set<HTMLDocumentOOPIF*> documents2(documents2_);
-  for (HTMLDocumentOOPIF* doc : documents2)
+  std::set<HTMLDocument*> documents2(documents2_);
+  for (HTMLDocument* doc : documents2)
     doc->Destroy();
   DCHECK(documents2_.empty());
-}
-
-void HTMLDocumentApplicationDelegate::SetHTMLFrameCreationCallback(
-    const HTMLFrameCreationCallback& callback) {
-  html_frame_creation_callback_ = callback;
 }
 
 // Callback from the quit closure. We key off this rather than
@@ -111,8 +98,22 @@ void HTMLDocumentApplicationDelegate::Initialize(mojo::ApplicationImpl* app) {
 bool HTMLDocumentApplicationDelegate::ConfigureIncomingConnection(
     mojo::ApplicationConnection* connection) {
   if (initial_response_) {
-    OnResponseReceived(mojo::URLLoaderPtr(), connection, nullptr,
+    OnResponseReceived(nullptr, mojo::URLLoaderPtr(), connection, nullptr,
                        initial_response_.Pass());
+  } else if (url_ == "about:blank") {
+    // This is a little unfortunate. At the browser side, when starting a new
+    // app for "about:blank", the application manager uses
+    // mojo::runner::AboutFetcher to construct a response for "about:blank".
+    // However, when an app for "about:blank" already exists, it is reused and
+    // we end up here. We cannot fetch the URL using mojo::URLLoader because it
+    // is not an actual Web resource.
+    // TODO(yzshen): find out a better approach.
+    mojo::URLResponsePtr response(mojo::URLResponse::New());
+    response->url = url_;
+    response->status_code = 200;
+    response->mime_type = "text/html";
+    OnResponseReceived(nullptr, mojo::URLLoaderPtr(), connection, nullptr,
+                       response.Pass());
   } else {
     // HTMLDocument provides services, but is created asynchronously. Queue up
     // requests until the HTMLDocument is created.
@@ -130,39 +131,55 @@ bool HTMLDocumentApplicationDelegate::ConfigureIncomingConnection(
     // callback. Because order of evaluation is undefined, a reference to the
     // raw pointer is needed.
     mojo::URLLoader* raw_loader = loader.get();
+    // The app needs to stay alive while waiting for the response to be
+    // available.
+    scoped_ptr<mojo::AppRefCount> app_retainer(
+        app_.app_lifetime_helper()->CreateAppRefCount());
     raw_loader->Start(
         request.Pass(),
         base::Bind(&HTMLDocumentApplicationDelegate::OnResponseReceived,
-                   weak_factory_.GetWeakPtr(), base::Passed(&loader),
-                   connection, base::Passed(&service_connector_queue)));
+                   weak_factory_.GetWeakPtr(), base::Passed(&app_retainer),
+                   base::Passed(&loader), connection,
+                   base::Passed(&service_connector_queue)));
   }
   return true;
 }
 
 void HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted2(
-    HTMLDocumentOOPIF* document) {
+    HTMLDocument* document) {
   DCHECK(documents2_.count(document) > 0);
   documents2_.erase(document);
 }
 
 void HTMLDocumentApplicationDelegate::OnResponseReceived(
+    scoped_ptr<mojo::AppRefCount> app_refcount,
     mojo::URLLoaderPtr loader,
     mojo::ApplicationConnection* connection,
     scoped_ptr<ServiceConnectorQueue> connector_queue,
     mojo::URLResponsePtr response) {
   // HTMLDocument is destroyed when the hosting view is destroyed, or
   // explicitly from our destructor.
-  HTMLDocumentOOPIF* document = new HTMLDocumentOOPIF(
+  HTMLDocument* document = new HTMLDocument(
       &app_, connection, response.Pass(), global_state_,
       base::Bind(&HTMLDocumentApplicationDelegate::OnHTMLDocumentDeleted2,
                  base::Unretained(this)),
-      html_frame_creation_callback_);
+      html_factory_);
   documents2_.insert(document);
 
   if (connector_queue) {
     connector_queue->PushRequestsTo(connection);
     connection->SetServiceConnector(nullptr);
   }
+}
+
+HTMLFrame* HTMLDocumentApplicationDelegate::CreateHTMLFrame(
+    HTMLFrame::CreateParams* params) {
+  return new HTMLFrame(params);
+}
+
+HTMLWidgetRootLocal* HTMLDocumentApplicationDelegate::CreateHTMLWidgetRootLocal(
+    HTMLWidgetRootLocal::CreateParams* params) {
+  return new HTMLWidgetRootLocal(params);
 }
 
 }  // namespace html_viewer

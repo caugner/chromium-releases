@@ -8,6 +8,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include "base/i18n/rtl.h"
 #include "base/mac/bind_objc_block.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
@@ -105,6 +106,10 @@ const CGFloat kTabLabelTopPadding = 6;
 
 // The amount of padding to leave on either side of the tab label.
 const CGFloat kTabLabelXPadding = 12;
+
+// The amount of padding to *remove* when placing
+// |IDS_WEBSITE_SETTINGS_{FIRST,THIRD}_PARTY_SITE_DATA| next to each other.
+const CGFloat kTextLabelXPadding = 5;
 
 // Takes in the parent window, which should be a BrowserWindow, and gets the
 // proper anchor point for the bubble. The returned point is in screen
@@ -523,15 +528,6 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   [contentView addSubview:cookiesView_];
   [contentView addSubview:permissionsView_];
 
-  // Create the link button to view cookies and site data. Its position will be
-  // set in performLayout.
-  NSString* cookieButtonText = l10n_util::GetNSString(
-      IDS_WEBSITE_SETTINGS_SHOW_SITE_DATA);
-  cookiesButton_ = [self addLinkButtonWithText:cookieButtonText
-                                        toView:contentView];
-  [cookiesButton_ setTarget:self];
-  [cookiesButton_ setAction:@selector(showCookiesAndSiteData:)];
-
   // Create the link button to view site settings. Its position will be set in
   // performLayout.
   NSString* siteSettingsButtonText =
@@ -683,15 +679,13 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
   yPos = [self setYPositionOfView:cookiesView_ to:kFramePadding];
 
-  // Put the link button for cookies and site data just below the cookie info.
-  [cookiesButton_ setFrameOrigin:NSMakePoint(kFramePadding, yPos)];
-
   // Put the permission info just below the link button.
-  yPos =
-      [self setYPositionOfView:permissionsView_
-                            to:NSMaxY([cookiesButton_ frame]) + kFramePadding];
+  yPos = [self setYPositionOfView:permissionsView_
+                               to:NSMaxY([cookiesView_ frame]) + kFramePadding];
 
   // Put the link button for site settings just below the permissions.
+  // TODO(palmer): set the position of this based on RTL/LTR.
+  // http://code.google.com/p/chromium/issues/detail?id=525304
   [siteSettingsButton_ setFrameOrigin:NSMakePoint(kFramePadding, yPos)];
 
   // Lay out the Connection tab.
@@ -949,44 +943,83 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   [tabView_ selectTabViewItemAtIndex:index];
 }
 
-// Adds a new row to the UI listing the permissions. Returns the amount of
-// vertical space that was taken up by the row.
+// Adds a new row to the UI listing the permissions. Returns the NSPoint of the
+// last UI element added (either the permission button, in LTR, or the text
+// label, in RTL).
 - (NSPoint)addPermission:
     (const WebsiteSettingsUI::PermissionInfo&)permissionInfo
                   toView:(NSView*)view
                  atPoint:(NSPoint)point {
-  base::scoped_nsobject<NSImage> image(
-      [WebsiteSettingsUI::GetPermissionIcon(permissionInfo).ToNSImage()
-          retain]);
-  NSImageView* imageView = [self addImageWithSize:[image size]
-                                           toView:view
-                                          atPoint:point];
-  [imageView setImage:image];
-  point.x += kPermissionImageSize + kPermissionImageSpacing;
-
   base::string16 labelText =
       WebsiteSettingsUI::PermissionTypeToUIString(permissionInfo.type) +
       base::ASCIIToUTF16(":");
+  bool isRTL =
+      base::i18n::RIGHT_TO_LEFT == base::i18n::GetStringDirection(labelText);
+  base::scoped_nsobject<NSImage> image(
+      [WebsiteSettingsUI::GetPermissionIcon(permissionInfo).ToNSImage()
+          retain]);
 
-  NSTextField* label = [self addText:labelText
-                            withSize:[NSFont smallSystemFontSize]
-                                bold:NO
-                              toView:view
-                             atPoint:point];
-  [label sizeToFit];
-  NSPoint popUpPosition = NSMakePoint(NSMaxX([label frame]), point.y);
-  NSPopUpButton* button = [self addPopUpButtonForPermission:permissionInfo
-                                                     toView:view
-                                                    atPoint:popUpPosition];
+  NSPoint position;
+  NSImageView* imageView;
+  NSPopUpButton* button;
+  NSTextField* label;
+
+  CGFloat viewWidth = NSWidth([view frame]);
+
+  if (isRTL) {
+    point.x = NSWidth([view frame]) - kPermissionImageSize -
+              kPermissionImageSpacing - kFramePadding;
+    imageView = [self addImageWithSize:[image size] toView:view atPoint:point];
+    [imageView setImage:image];
+    point.x -= kPermissionImageSpacing;
+
+    label = [self addText:labelText
+                 withSize:[NSFont smallSystemFontSize]
+                     bold:NO
+                   toView:view
+                  atPoint:point];
+    [label sizeToFit];
+    point.x -= NSWidth([label frame]);
+    [label setFrameOrigin:point];
+
+    position = NSMakePoint(point.x, point.y);
+    button = [self addPopUpButtonForPermission:permissionInfo
+                                        toView:view
+                                       atPoint:position];
+    position.x -= NSWidth([button frame]);
+    [button setFrameOrigin:position];
+  } else {
+    imageView = [self addImageWithSize:[image size] toView:view atPoint:point];
+    [imageView setImage:image];
+    point.x += kPermissionImageSize + kPermissionImageSpacing;
+
+    label = [self addText:labelText
+                 withSize:[NSFont smallSystemFontSize]
+                     bold:NO
+                   toView:view
+                  atPoint:point];
+    [label sizeToFit];
+
+    position = NSMakePoint(NSMaxX([label frame]), point.y);
+    button = [self addPopUpButtonForPermission:permissionInfo
+                                        toView:view
+                                       atPoint:position];
+  }
+
+  [view setFrameSize:NSMakeSize(viewWidth, NSHeight([view frame]))];
 
   // Adjust the vertical position of the button so that its title text is
   // aligned with the label. Assumes that the text is the same size in both.
   // Also adjust the horizontal position to remove excess space due to the
   // invisible bezel.
   NSRect titleRect = [[button cell] titleRectForBounds:[button bounds]];
-  popUpPosition.x -= titleRect.origin.x - kPermissionPopUpXSpacing;
-  popUpPosition.y -= titleRect.origin.y;
-  [button setFrameOrigin:popUpPosition];
+  if (isRTL) {
+    position.x += kPermissionPopUpXSpacing;
+  } else {
+    position.x -= titleRect.origin.x - kPermissionPopUpXSpacing;
+  }
+  position.y -= titleRect.origin.y;
+  [button setFrameOrigin:position];
 
   // Align the icon with the text.
   [self alignPermissionIcon:imageView withTextField:label];
@@ -1015,38 +1048,6 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   NSRect frame = [imageView frame];
   frame.origin.y -= offset;
   [imageView setFrame:frame];
-}
-
-- (CGFloat)addCookieInfo:
-    (const WebsiteSettingsUI::CookieInfo&)cookieInfo
-                  toView:(NSView*)view
-                 atPoint:(NSPoint)point {
-  WebsiteSettingsUI::PermissionInfo info;
-  info.type = CONTENT_SETTINGS_TYPE_COOKIES;
-  info.setting = CONTENT_SETTING_ALLOW;
-  NSImage* image = WebsiteSettingsUI::GetPermissionIcon(info).ToNSImage();
-  NSImageView* imageView = [self addImageWithSize:[image size]
-                                           toView:view
-                                          atPoint:point];
-  [imageView setImage:image];
-  point.x += kPermissionImageSize + kPermissionImageSpacing;
-
-  base::string16 labelText = l10n_util::GetStringFUTF16(
-      IDS_WEBSITE_SETTINGS_SITE_DATA_STATS_LINE,
-      base::UTF8ToUTF16(cookieInfo.cookie_source),
-      base::IntToString16(cookieInfo.allowed),
-      base::IntToString16(cookieInfo.blocked));
-
-  NSTextField* label = [self addText:labelText
-                            withSize:[NSFont smallSystemFontSize]
-                                bold:NO
-                              toView:view
-                             atPoint:point];
-
-  // Align the icon with the text.
-  [self alignPermissionIcon:imageView withTextField:label];
-
-  return NSHeight([label frame]);
 }
 
 // Set the content of the identity and identity status fields.
@@ -1101,29 +1102,107 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // that sometimes permissions may not be displayed at all, so it's
   // incorrect to check they are set before the cookie info.
 
+  // |cookieInfoList| should only ever have 2 items: first- and third-party
+  // cookies.
+  DCHECK_EQ(cookieInfoList.size(), 2u);
+  base::string16 firstPartyLabelText;
+  base::string16 thirdPartyLabelText;
+  for (const auto& i : cookieInfoList) {
+    if (i.is_first_party) {
+      firstPartyLabelText =
+          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_FIRST_PARTY_SITE_DATA,
+                                     base::IntToString16(i.allowed));
+    } else {
+      thirdPartyLabelText =
+          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_THIRD_PARTY_SITE_DATA,
+                                     base::IntToString16(i.allowed));
+    }
+  }
+
+  base::string16 sectionTitle =
+      l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA);
+  bool isRTL = base::i18n::RIGHT_TO_LEFT ==
+               base::i18n::GetStringDirection(firstPartyLabelText);
+
   [cookiesView_ setSubviews:[NSArray array]];
   NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
 
-  base::string16 sectionTitle = l10n_util::GetStringUTF16(
-      IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA);
+  NSTextField* label;
+
+  CGFloat viewWidth = NSWidth([cookiesView_ frame]);
+
   NSTextField* header = [self addText:sectionTitle
                              withSize:[NSFont smallSystemFontSize]
                                  bold:YES
                                toView:cookiesView_
                               atPoint:controlOrigin];
-  controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
+  [header sizeToFit];
 
-  for (CookieInfoList::const_iterator it = cookieInfoList.begin();
-       it != cookieInfoList.end();
-       ++it) {
-    controlOrigin.y += kPermissionsTabSpacing;
-    CGFloat rowHeight = [self addCookieInfo:*it
-                                     toView:cookiesView_
-                                    atPoint:controlOrigin];
-    controlOrigin.y += rowHeight;
+  if (isRTL) {
+    controlOrigin.x = viewWidth - kFramePadding - NSWidth([header frame]);
+    [header setFrameOrigin:controlOrigin];
+  }
+  controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
+  controlOrigin.y += kPermissionsTabSpacing;
+
+  // Reset X for the cookie image.
+  if (isRTL) {
+    controlOrigin.x = viewWidth - kPermissionImageSize -
+                      kPermissionImageSpacing - kFramePadding;
   }
 
-  controlOrigin.y += kPermissionsTabSpacing;
+  WebsiteSettingsUI::PermissionInfo info;
+  info.type = CONTENT_SETTINGS_TYPE_COOKIES;
+  info.setting = CONTENT_SETTING_ALLOW;
+  NSImage* image = WebsiteSettingsUI::GetPermissionIcon(info).ToNSImage();
+  NSImageView* imageView = [self addImageWithSize:[image size]
+                                           toView:cookiesView_
+                                          atPoint:controlOrigin];
+  [imageView setImage:image];
+
+  base::string16 comma = base::ASCIIToUTF16(", ");
+  NSString* cookieButtonText = base::SysUTF16ToNSString(firstPartyLabelText);
+
+  if (isRTL) {
+    NSButton* cookiesButton =
+        [self addLinkButtonWithText:cookieButtonText toView:cookiesView_];
+    [cookiesButton setTarget:self];
+    [cookiesButton setAction:@selector(showCookiesAndSiteData:)];
+    controlOrigin.x -= NSWidth([cookiesButton frame]);
+    [cookiesButton setFrameOrigin:controlOrigin];
+
+    label = [self addText:comma + thirdPartyLabelText
+                 withSize:[NSFont smallSystemFontSize]
+                     bold:NO
+                   toView:cookiesView_
+                  atPoint:controlOrigin];
+    [label sizeToFit];
+    controlOrigin.x -= NSWidth([label frame]) - kTextLabelXPadding;
+    [label setFrameOrigin:controlOrigin];
+  } else {
+    controlOrigin.x += kPermissionImageSize + kPermissionImageSpacing;
+
+    NSButton* cookiesButton =
+        [self addLinkButtonWithText:cookieButtonText toView:cookiesView_];
+    [cookiesButton setTarget:self];
+    [cookiesButton setAction:@selector(showCookiesAndSiteData:)];
+    [cookiesButton setFrameOrigin:controlOrigin];
+
+    controlOrigin.x += NSWidth([cookiesButton frame]) - kTextLabelXPadding;
+
+    label = [self addText:comma + thirdPartyLabelText
+                 withSize:[NSFont smallSystemFontSize]
+                     bold:NO
+                   toView:cookiesView_
+                  atPoint:controlOrigin];
+    [label sizeToFit];
+  }
+
+  // Align the icon with the text.
+  [self alignPermissionIcon:imageView withTextField:label];
+
+  controlOrigin.y += NSHeight([label frame]) + kPermissionsTabSpacing;
+
   [cookiesView_ setFrameSize:
       NSMakeSize(NSWidth([cookiesView_ frame]), controlOrigin.y)];
 
@@ -1137,12 +1216,19 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   if (permissionInfoList.size() > 0) {
     base::string16 sectionTitle = l10n_util::GetStringUTF16(
         IDS_WEBSITE_SETTINGS_TITLE_SITE_PERMISSIONS);
+    bool isRTL = base::i18n::RIGHT_TO_LEFT ==
+                 base::i18n::GetStringDirection(sectionTitle);
     NSTextField* header = [self addText:sectionTitle
                                withSize:[NSFont smallSystemFontSize]
                                    bold:YES
                                  toView:permissionsView_
                                 atPoint:controlOrigin];
-    [self sizeTextFieldHeightToFit:header];
+    [header sizeToFit];
+    if (isRTL) {
+      controlOrigin.x = NSWidth([permissionsView_ frame]) - kFramePadding -
+                        NSWidth([header frame]);
+      [header setFrameOrigin:controlOrigin];
+    }
     controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
 
     for (PermissionInfoList::const_iterator permission =
@@ -1171,9 +1257,11 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
 @end
 
-WebsiteSettingsUIBridge::WebsiteSettingsUIBridge()
-  : bubble_controller_(nil) {
-}
+WebsiteSettingsUIBridge::WebsiteSettingsUIBridge(
+    content::WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
+      web_contents_(web_contents),
+      bubble_controller_(nil) {}
 
 WebsiteSettingsUIBridge::~WebsiteSettingsUIBridge() {
 }
@@ -1183,22 +1271,23 @@ void WebsiteSettingsUIBridge::set_bubble_controller(
   bubble_controller_ = controller;
 }
 
-void WebsiteSettingsUIBridge::Show(gfx::NativeWindow parent,
-                                   Profile* profile,
-                                   content::WebContents* web_contents,
-                                   const GURL& url,
-                                   const content::SSLStatus& ssl) {
+void WebsiteSettingsUIBridge::Show(
+    gfx::NativeWindow parent,
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const SecurityStateModel::SecurityInfo& security_info) {
   if (chrome::ToolkitViewsDialogsEnabled()) {
     chrome::ShowWebsiteSettingsBubbleViewsAtPoint(
         gfx::ScreenPointFromNSPoint(AnchorPointForWindow(parent)), profile,
-        web_contents, url, ssl);
+        web_contents, url, security_info);
     return;
   }
 
   bool is_internal_page = InternalChromePage(url);
 
   // Create the bridge. This will be owned by the bubble controller.
-  WebsiteSettingsUIBridge* bridge = new WebsiteSettingsUIBridge();
+  WebsiteSettingsUIBridge* bridge = new WebsiteSettingsUIBridge(web_contents);
 
   // Create the bubble controller. It will dealloc itself when it closes.
   WebsiteSettingsBubbleController* bubble_controller =
@@ -1212,13 +1301,9 @@ void WebsiteSettingsUIBridge::Show(gfx::NativeWindow parent,
     // Initialize the presenter, which holds the model and controls the UI.
     // This is also owned by the bubble controller.
     WebsiteSettings* presenter = new WebsiteSettings(
-        bridge,
-        profile,
-        TabSpecificContentSettings::FromWebContents(web_contents),
-        InfoBarService::FromWebContents(web_contents),
-        url,
-        ssl,
-        content::CertStore::GetInstance());
+        bridge, profile,
+        TabSpecificContentSettings::FromWebContents(web_contents), web_contents,
+        url, security_info, content::CertStore::GetInstance());
     [bubble_controller setPresenter:presenter];
   }
 
@@ -1228,6 +1313,13 @@ void WebsiteSettingsUIBridge::Show(gfx::NativeWindow parent,
 void WebsiteSettingsUIBridge::SetIdentityInfo(
     const WebsiteSettingsUI::IdentityInfo& identity_info) {
   [bubble_controller_ setIdentityInfo:identity_info];
+}
+
+void WebsiteSettingsUIBridge::RenderFrameDeleted(
+    content::RenderFrameHost* render_frame_host) {
+  if (render_frame_host == web_contents_->GetMainFrame()) {
+    [bubble_controller_ close];
+  }
 }
 
 void WebsiteSettingsUIBridge::SetCookieInfo(

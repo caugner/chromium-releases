@@ -9,11 +9,14 @@
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
 #include "base/strings/stringprintf.h"
+#include "cc/blink/web_layer_impl.h"
+#include "cc/layers/texture_layer.h"
 #include "cc/resources/shared_bitmap_manager.h"
 #include "components/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebCompositorSupport.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/public/platform/WebTaskRunner.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
 #include "third_party/WebKit/public/platform/WebTraceLocation.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -125,7 +128,7 @@ blink::WebPluginContainer::TouchEventRequestType ParseTouchEventRequestType(
   return blink::WebPluginContainer::TouchEventRequestTypeNone;
 }
 
-class DeferredDeleteTask : public blink::WebThread::Task {
+class DeferredDeleteTask : public blink::WebTaskRunner::Task {
  public:
   DeferredDeleteTask(scoped_ptr<TestPlugin> plugin) : plugin_(plugin.Pass()) {}
 
@@ -223,8 +226,9 @@ bool TestPlugin::initialize(blink::WebPluginContainer* container) {
   if (!InitScene())
     return false;
 
-  layer_ = delegate_->CreateTextureLayerForMailbox(this);
-  web_layer_ = make_scoped_ptr(delegate_->InstantiateWebLayer(layer_));
+  layer_ = cc::TextureLayer::CreateForMailbox(
+      cc_blink::WebLayerImpl::LayerSettings(), this);
+  web_layer_ = make_scoped_ptr(new cc_blink::WebLayerImpl(layer_));
   container_ = container;
   container_->setWebLayer(web_layer_.get());
   if (re_request_touch_events_) {
@@ -253,7 +257,7 @@ void TestPlugin::destroy() {
   container_ = 0;
   frame_ = 0;
 
-  blink::Platform::current()->mainThread()->postTask(
+  blink::Platform::current()->mainThread()->taskRunner()->postTask(
       blink::WebTraceLocation(__FUNCTION__, __FILE__),
       new DeferredDeleteTask(make_scoped_ptr(this)));
 }

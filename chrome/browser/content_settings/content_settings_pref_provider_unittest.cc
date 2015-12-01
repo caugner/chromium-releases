@@ -19,20 +19,21 @@
 #include "base/values.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service_mock_factory.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_pref.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/test/content_settings_test_utils.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/syncable_prefs/pref_service_mock_factory.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -64,13 +65,13 @@ class DeadlockCheckerObserver {
       : provider_(provider),
       notification_received_(false) {
     pref_change_registrar_.Init(prefs);
-    for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    for (const auto& pair : provider_->content_settings_prefs_) {
+      const ContentSettingsPref* pref = pair.second;
       pref_change_registrar_.Add(
-          provider_->content_settings_prefs_[i]->pref_name_,
+          pref->pref_name_,
           base::Bind(
               &DeadlockCheckerObserver::OnContentSettingsPatternPairsChanged,
-              base::Unretained(this),
-              base::Unretained(provider_->content_settings_prefs_[i])));
+              base::Unretained(this), base::Unretained(pref)));
     }
   }
   virtual ~DeadlockCheckerObserver() {}
@@ -97,6 +98,13 @@ class DeadlockCheckerObserver {
 };
 
 class PrefProviderTest : public testing::Test {
+ public:
+  PrefProviderTest() {
+    // Ensure all content settings are initialized.
+    ContentSettingsRegistry::GetInstance();
+  }
+
+ private:
   content::TestBrowserThreadBundle thread_bundle_;
 };
 
@@ -132,20 +140,20 @@ TEST_F(PrefProviderTest, Incognito) {
   OverlayUserPrefStore* otr_user_prefs =
       new OverlayUserPrefStore(user_prefs);
 
-  PrefServiceMockFactory factory;
+  syncable_prefs::PrefServiceMockFactory factory;
   factory.set_user_prefs(make_scoped_refptr(user_prefs));
   scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
       new user_prefs::PrefRegistrySyncable);
-  PrefServiceSyncable* regular_prefs =
+  syncable_prefs::PrefServiceSyncable* regular_prefs =
       factory.CreateSyncable(registry.get()).release();
 
   chrome::RegisterUserProfilePrefs(registry.get());
 
-  PrefServiceMockFactory otr_factory;
+  syncable_prefs::PrefServiceMockFactory otr_factory;
   otr_factory.set_user_prefs(make_scoped_refptr(otr_user_prefs));
   scoped_refptr<user_prefs::PrefRegistrySyncable> otr_registry(
       new user_prefs::PrefRegistrySyncable);
-  PrefServiceSyncable* otr_prefs =
+  syncable_prefs::PrefServiceSyncable* otr_prefs =
       otr_factory.CreateSyncable(otr_registry.get()).release();
 
   chrome::RegisterUserProfilePrefs(otr_registry.get());
@@ -384,7 +392,8 @@ TEST_F(PrefProviderTest, ResourceIdentifier) {
 
 TEST_F(PrefProviderTest, AutoSubmitCertificateContentSetting) {
   TestingProfile profile;
-  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
+  syncable_prefs::TestingPrefServiceSyncable* prefs =
+      profile.GetTestingPrefService();
   GURL primary_url("https://www.example.com");
   GURL secondary_url("https://www.sample.com");
 
@@ -417,7 +426,7 @@ TEST_F(PrefProviderTest, AutoSubmitCertificateContentSetting) {
 
 // http://crosbug.com/17760
 TEST_F(PrefProviderTest, Deadlock) {
-  TestingPrefServiceSyncable prefs;
+  syncable_prefs::TestingPrefServiceSyncable prefs;
   PrefProvider::RegisterProfilePrefs(prefs.registry());
 
   // Chain of events: a preference changes, |PrefProvider| notices it, and reads
@@ -476,7 +485,7 @@ TEST_F(PrefProviderTest, LastUsage) {
 }
 
 TEST_F(PrefProviderTest, IncognitoInheritsValueMap) {
-  TestingPrefServiceSyncable prefs;
+  syncable_prefs::TestingPrefServiceSyncable prefs;
   PrefProvider::RegisterProfilePrefs(prefs.registry());
 
   ContentSettingsPattern pattern_1 =
@@ -543,7 +552,7 @@ TEST_F(PrefProviderTest, IncognitoInheritsValueMap) {
 }
 
 TEST_F(PrefProviderTest, ClearAllContentSettingsRules) {
-  TestingPrefServiceSyncable prefs;
+  syncable_prefs::TestingPrefServiceSyncable prefs;
   PrefProvider::RegisterProfilePrefs(prefs.registry());
 
   ContentSettingsPattern pattern =

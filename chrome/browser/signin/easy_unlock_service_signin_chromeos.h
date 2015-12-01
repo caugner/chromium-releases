@@ -70,6 +70,7 @@ class EasyUnlockServiceSignin
   void ClearPermitAccess() override;
   const base::ListValue* GetRemoteDevices() const override;
   void SetRemoteDevices(const base::ListValue& devices) override;
+  void SetRemoteBleDevices(const base::ListValue& devices) override;
   void RunTurnOffFlow() override;
   void ResetTurnOffFlow() override;
   TurnOffFlowStatus GetTurnOffFlowStatus() const override;
@@ -84,7 +85,7 @@ class EasyUnlockServiceSignin
   void ShutdownInternal() override;
   bool IsAllowedInternal() const override;
   void OnWillFinalizeUnlock(bool success) override;
-  void OnSuspendDone() override;
+  void OnSuspendDoneInternal() override;
 
   // proximity_auth::ScreenlockBridge::Observer implementation:
   void OnScreenDidLock(proximity_auth::ScreenlockBridge::LockHandler::ScreenType

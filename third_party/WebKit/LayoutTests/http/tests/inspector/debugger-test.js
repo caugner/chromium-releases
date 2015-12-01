@@ -1,3 +1,8 @@
+function scheduleTestFunction()
+{
+    setTimeout(testFunction, 0);
+}
+
 var initialize_DebuggerTest = function() {
 
 InspectorTest.preloadPanel("sources");
@@ -71,7 +76,7 @@ InspectorTest.runDebuggerTestSuite = function(testSuite)
 
 InspectorTest.runTestFunction = function()
 {
-    InspectorTest.evaluateInPage("setTimeout(testFunction, 0)");
+    InspectorTest.evaluateInPage("scheduleTestFunction()");
     InspectorTest.addResult("Set timer for test function.");
 };
 
@@ -271,6 +276,12 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
             results.push(s);
             if (options.printReturnValue && frame.returnValue())
                 results.push("       <return>: " + frame.returnValue().description);
+            if (frame.functionName === "scheduleTestFunction") {
+                var remainingFrames = callFrames.length - 1 - i;
+                if (remainingFrames)
+                    results.push("    <... skipped remaining frames ...>");
+                break;
+            }
         }
         return printed;
     }
@@ -284,8 +295,6 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
         var printed = printCallFrames(WebInspector.DebuggerModel.CallFrame.fromPayloadArray(debuggerModel, asyncStackTrace.callFrames));
         if (!printed)
             results.pop();
-        if (asyncStackTrace.callFrames.peekLast().functionName === "testFunction")
-            break;
         asyncStackTrace = asyncStackTrace.asyncStackTrace;
     }
     return results.join("\n");
@@ -484,7 +493,7 @@ InspectorTest.createScriptMock = function(url, startLine, startColumn, isContent
 {
     target = target || WebInspector.targetManager.mainTarget();
     var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
-    var scriptId = ++InspectorTest._lastScriptId;
+    var scriptId = ++InspectorTest._lastScriptId + "";
     var lineCount = source.lineEndings().length;
     var endLine = startLine + lineCount - 1;
     var endColumn = lineCount === 1 ? startColumn + source.length : source.length - source.lineEndings()[lineCount - 2];
@@ -528,5 +537,27 @@ InspectorTest.scriptFormatter = function()
         return null;
     });
 };
+
+InspectorTest.waitForExecutionContextInTarget = function(target, callback)
+{
+    if (target.runtimeModel.executionContexts().length) {
+        callback(target.runtimeModel.executionContexts()[0]);
+        return;
+    }
+    target.runtimeModel.addEventListener(WebInspector.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
+
+    function contextCreated()
+    {
+        target.runtimeModel.removeEventListener(WebInspector.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
+        callback(target.runtimeModel.executionContexts()[0]);
+    }
+}
+
+InspectorTest.selectThread = function(target)
+{
+    var threadsPane = WebInspector.panels.sources.sidebarPanes.threads;
+    var listItem = threadsPane._debuggerModelToListItems.get(WebInspector.DebuggerModel.fromTarget(target));
+    threadsPane._onListItemClick(listItem);
+}
 
 };

@@ -4,6 +4,7 @@
 
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
+#include "base/android/build_info.h"
 #include "base/memory/singleton.h"
 #include "ui/gfx/android/view_configuration.h"
 #include "ui/gfx/screen.h"
@@ -26,17 +27,23 @@ class GestureConfigurationAndroid : public GestureConfiguration {
   }
 
   static GestureConfigurationAndroid* GetInstance() {
-    return Singleton<GestureConfigurationAndroid>::get();
+    return base::Singleton<GestureConfigurationAndroid>::get();
   }
 
  private:
   GestureConfigurationAndroid() : GestureConfiguration() {
     set_double_tap_enabled(true);
     set_double_tap_timeout_in_ms(ViewConfiguration::GetDoubleTapTimeoutInMs());
+    // TODO(jdduke): Enable this on Android M after the implicit conflict with
+    // stylus selection is resolved.
+    set_stylus_scale_enabled(false);
     set_gesture_begin_end_types_enabled(false);
     set_long_press_time_in_ms(ViewConfiguration::GetLongPressTimeoutInMs());
     set_max_distance_between_taps_for_double_tap(
         ViewConfiguration::GetDoubleTapSlopInDips());
+    // TODO(jdduke): Set this to 2 after double-click triggers selection only in
+    // editable elements, see crbug.com/522268.
+    set_max_tap_count(1);
     set_max_fling_velocity(
         ViewConfiguration::GetMaximumFlingVelocityInDipsPerSecond());
     set_max_gesture_bounds_length(kMaxGestureBoundsLengthDips);
@@ -60,7 +67,7 @@ class GestureConfigurationAndroid : public GestureConfiguration {
         ViewConfiguration::GetLongPressTimeoutInMs());
   }
 
-  friend struct DefaultSingletonTraits<GestureConfigurationAndroid>;
+  friend struct base::DefaultSingletonTraits<GestureConfigurationAndroid>;
   DISALLOW_COPY_AND_ASSIGN(GestureConfigurationAndroid);
 };
 

@@ -6,8 +6,8 @@
 // possible overrides from Experiements.  This is done inside chrome/common
 // because it is accessed by files through the chrome/ directory tree.
 
-#ifndef CHROME_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_
-#define CHROME_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_
+#ifndef COMPONENTS_SIGNIN_CORE_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_
+#define COMPONENTS_SIGNIN_CORE_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_
 
 namespace base {
 class CommandLine;
@@ -28,23 +28,16 @@ bool IsExtensionsMultiAccount();
 // Enables using GAIA information to populate profile name and icon.
 bool IsGoogleProfileInfo();
 
-// Whether the new avatar menu is enabled, either because new profile management
-// is enabled or because the new profile management preview UI is enabled.
-bool IsNewAvatarMenu();
-
 // Use new profile management system, including profile sign-out and new
 // choosers.
 bool IsNewProfileManagement();
 
 // Whether the new profile management preview has been enabled.
 bool IsNewProfileManagementPreviewEnabled();
-
 // Called in tests to force enabling different modes.
-void EnableNewAvatarMenuForTesting(base::CommandLine* command_line);
-void DisableNewAvatarMenuForTesting(base::CommandLine* command_line);
 void EnableNewProfileManagementForTesting(base::CommandLine* command_line);
 void EnableAccountConsistencyForTesting(base::CommandLine* command_line);
 
 }  // namespace switches
 
-#endif  // CHROME_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_
+#endif  // COMPONENTS_SIGNIN_CORE_COMMON_PROFILE_MANAGEMENT_SWITCHES_H_

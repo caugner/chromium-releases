@@ -89,9 +89,9 @@ class QuicTestClient : public SimpleClient,
   void SetUserAgentID(const std::string& user_agent_id);
 
   // Wraps data in a quic packet and sends it.
-  ssize_t SendData(std::string data, bool last_data);
+  ssize_t SendData(const std::string& data, bool last_data);
   // As above, but |delegate| will be notified when |data| is ACKed.
-  ssize_t SendData(std::string data,
+  ssize_t SendData(const std::string& data,
                    bool last_data,
                    QuicAckNotifier::DelegateInterface* delegate);
 
@@ -132,6 +132,7 @@ class QuicTestClient : public SimpleClient,
   // DFATAL if called by users of SimpleClient.
   ssize_t SendAndWaitForResponse(const void* buffer, size_t size) override;
   void Bind(IPEndPoint* local_address) override;
+  void MigrateSocket(const IPAddressNumber& new_host) override;
   std::string SerializeMessage(const HTTPMessage& message) override;
   IPAddressNumber bind_to_address() const override;
   void set_bind_to_address(IPAddressNumber address) override;

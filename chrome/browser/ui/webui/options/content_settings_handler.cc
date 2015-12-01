@@ -18,6 +18,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -68,6 +69,35 @@ using content_settings::ContentSettingFromString;
 using extensions::APIPermission;
 
 namespace {
+
+struct ContentSettingWithExceptions {
+  ContentSettingsType type;
+  bool has_otr_exceptions;
+};
+
+const ContentSettingWithExceptions kContentTypesWithExceptions[] = {
+    // With OTR exceptions.
+    {CONTENT_SETTINGS_TYPE_COOKIES, true},
+    {CONTENT_SETTINGS_TYPE_IMAGES, true},
+    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, true},
+    {CONTENT_SETTINGS_TYPE_PLUGINS, true},
+    {CONTENT_SETTINGS_TYPE_POPUPS, true},
+    {CONTENT_SETTINGS_TYPE_FULLSCREEN, true},
+    {CONTENT_SETTINGS_TYPE_MOUSELOCK, true},
+    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, true},
+    {CONTENT_SETTINGS_TYPE_PUSH_MESSAGING, true},
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    {CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, true},
+#endif
+
+    // Without OTR exceptions.
+    {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, false},
+    {CONTENT_SETTINGS_TYPE_GEOLOCATION, false},
+    {CONTENT_SETTINGS_TYPE_NOTIFICATIONS, false},
+    {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, false},
+    {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, false},
+    {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, false},
+};
 
 struct ContentSettingsTypeNameEntry {
   ContentSettingsType type;
@@ -324,8 +354,6 @@ void ContentSettingsHandler::GetLocalizedValues(
     {"cookiesBlock", IDS_COOKIES_BLOCK_RADIO},
     {"cookiesSession", IDS_COOKIES_SESSION_ONLY_RADIO},
     {"cookiesBlock3rdParty", IDS_COOKIES_BLOCK_3RDPARTY_CHKBOX},
-    {"cookiesClearWhenClose", IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX},
-    {"cookiesLsoClearWhenClose", IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX},
     {"cookiesShowCookies", IDS_COOKIES_SHOW_COOKIES_BUTTON},
     {"flashStorageSettings", IDS_FLASH_STORAGE_SETTINGS},
     {"flashStorageUrl", IDS_FLASH_STORAGE_URL},
@@ -442,7 +470,7 @@ void ContentSettingsHandler::GetLocalizedValues(
   int default_value = CONTENT_SETTING_DEFAULT;
   bool success = default_pref->GetAsInteger(&default_value);
   DCHECK(success);
-  DCHECK_NE(default_value, CONTENT_SETTING_DEFAULT);
+  DCHECK_NE(CONTENT_SETTING_DEFAULT, default_value);
 
   int plugin_ids = default_value == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT ?
       IDS_PLUGIN_DETECT_RECOMMENDED_RADIO : IDS_PLUGIN_DETECT_RADIO;
@@ -566,9 +594,10 @@ void ContentSettingsHandler::InitializeHandler() {
   flash_settings_manager_.reset(new PepperFlashSettingsManager(this, context));
 
   Profile* profile = Profile::FromWebUI(web_ui());
-  observer_.Add(profile->GetHostContentSettingsMap());
+  observer_.Add(HostContentSettingsMapFactory::GetForProfile(profile));
   if (profile->HasOffTheRecordProfile()) {
-    auto map = profile->GetOffTheRecordProfile()->GetHostContentSettingsMap();
+    auto map = HostContentSettingsMapFactory::GetForProfile(
+        profile->GetOffTheRecordProfile());
     if (!observer_.IsObserving(map))
       observer_.Add(map);
   }
@@ -591,10 +620,17 @@ void ContentSettingsHandler::OnContentSettingChanged(
   const ContentSettingsDetails details(
       primary_pattern, secondary_pattern, content_type, resource_identifier);
   // TODO(estade): we pretend update_all() is always true.
-  if (details.update_all_types())
+  if (details.update_all_types()) {
     UpdateAllExceptionsViewsFromModel();
-  else
-    UpdateExceptionsViewFromModel(details.type());
+  } else {
+    for (ContentSettingWithExceptions content_setting_with_exceptions :
+         kContentTypesWithExceptions) {
+      if (content_setting_with_exceptions.type == details.type()) {
+        UpdateExceptionsViewFromModel(details.type());
+        break;
+      }
+    }
+  }
 }
 
 void ContentSettingsHandler::Observe(
@@ -604,11 +640,13 @@ void ContentSettingsHandler::Observe(
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
       Profile* profile = content::Source<Profile>(source).ptr();
+      HostContentSettingsMap* settings_map =
+          HostContentSettingsMapFactory::GetForProfile(profile);
       if (profile->IsOffTheRecord() &&
-          observer_.IsObserving(profile->GetHostContentSettingsMap())) {
+          observer_.IsObserving(settings_map)) {
         web_ui()->CallJavascriptFunction(
             "ContentSettingsExceptionsArea.OTRProfileDestroyed");
-        observer_.Remove(profile->GetHostContentSettingsMap());
+        observer_.Remove(settings_map);
       }
       break;
     }
@@ -617,7 +655,7 @@ void ContentSettingsHandler::Observe(
       Profile* profile = content::Source<Profile>(source).ptr();
       if (profile->IsOffTheRecord()) {
         UpdateAllOTRExceptionsViewsFromModel();
-        observer_.Add(profile->GetHostContentSettingsMap());
+        observer_.Add(HostContentSettingsMapFactory::GetForProfile(profile));
       }
       break;
     }
@@ -714,9 +752,9 @@ void ContentSettingsHandler::UpdateHandlersEnabledRadios() {
 }
 
 void ContentSettingsHandler::UpdateAllExceptionsViewsFromModel() {
-  for (int type = CONTENT_SETTINGS_TYPE_DEFAULT + 1;
-       type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
-    UpdateExceptionsViewFromModel(static_cast<ContentSettingsType>(type));
+  for (ContentSettingWithExceptions content_setting_with_exceptions :
+       kContentTypesWithExceptions) {
+    UpdateExceptionsViewFromModel(content_setting_with_exceptions.type);
   }
   // Zoom levels are not actually a content type so we need to handle them
   // separately.
@@ -724,96 +762,37 @@ void ContentSettingsHandler::UpdateAllExceptionsViewsFromModel() {
 }
 
 void ContentSettingsHandler::UpdateAllOTRExceptionsViewsFromModel() {
-  for (int type = CONTENT_SETTINGS_TYPE_DEFAULT + 1;
-       type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
-    UpdateOTRExceptionsViewFromModel(static_cast<ContentSettingsType>(type));
+  for (ContentSettingWithExceptions content_setting_with_exceptions :
+       kContentTypesWithExceptions) {
+    if (content_setting_with_exceptions.has_otr_exceptions) {
+      UpdateExceptionsViewFromOTRHostContentSettingsMap(
+          content_setting_with_exceptions.type);
+    }
   }
 }
 
 void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     ContentSettingsType type) {
-  switch (type) {
-    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      UpdateGeolocationExceptionsView();
-      break;
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      UpdateNotificationExceptionsView();
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-      // The content settings type CONTENT_SETTINGS_TYPE_MEDIASSTREAM
-      // is deprecated.
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      CompareMediaExceptionsWithFlash(type);
-      UpdateExceptionsViewFromHostContentSettingsMap(type);
-      break;
-    case CONTENT_SETTINGS_TYPE_MIXEDSCRIPT:
-      // We don't yet support exceptions for mixed scripting.
-      break;
-    case CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE:
-      // The content settings type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE
-      // is supposed to be set by policy only. Hence there is no user facing UI
-      // for this content type and we skip it here.
-      break;
-    case CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS:
-      // The RPH settings are retrieved separately.
-      break;
-    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-      UpdateMIDISysExExceptionsView();
-      break;
-    case CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS:
-      // The content settings type CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS is
-      // supposed to be set by flags and field trials only, thus there is no
-      // user facing UI for this content type and we skip it here.
-      break;
-    case CONTENT_SETTINGS_TYPE_APP_BANNER:
-      // The content settings type CONTENT_SETTINGS_TYPE_APP_BANNER is used to
-      // track whether app banners should be shown or not, and is not a user
-      // visible content setting.
-      break;
-    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
-      // The content settings type CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT is used
-      // to track engagement with various origins, and is not a user visible
-      // content setting.
-      break;
-    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
-      // Durable storage is not yet user visible. TODO(dgrogan): Make it so.
-      // https://crbug.com/482814
-      break;
-    default:
-      UpdateExceptionsViewFromHostContentSettingsMap(type);
-      break;
-  }
-}
-
-void ContentSettingsHandler::UpdateOTRExceptionsViewFromModel(
-    ContentSettingsType type) {
-  switch (type) {
-    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE:
-    case CONTENT_SETTINGS_TYPE_MIXEDSCRIPT:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
-    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-    case CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS:
-    case CONTENT_SETTINGS_TYPE_APP_BANNER:
-    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
-    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
-      break;
-    default:
-      UpdateExceptionsViewFromOTRHostContentSettingsMap(type);
-      break;
+  if (type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+    UpdateGeolocationExceptionsView();
+  } else if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    UpdateNotificationExceptionsView();
+  } else if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
+             type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
+    CompareMediaExceptionsWithFlash(type);
+    UpdateExceptionsViewFromHostContentSettingsMap(type);
+  } else if (type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
+    UpdateMIDISysExExceptionsView();
+  } else {
+    UpdateExceptionsViewFromHostContentSettingsMap(type);
   }
 }
 
 // TODO(estade): merge with GetExceptionsFromHostContentSettingsMap.
 void ContentSettingsHandler::UpdateGeolocationExceptionsView() {
   Profile* profile = Profile::FromWebUI(web_ui());
-  HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
 
   ContentSettingsForOneType all_settings;
   map->GetSettingsForOneType(
@@ -1353,20 +1332,12 @@ void ContentSettingsHandler::SetContentFilter(const base::ListValue* args) {
     profile = profile->GetOriginalProfile();
 #endif
 
-  HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
 
-  // MEDIASTREAM is deprecated and the two separate settings MEDIASTREAM_CAMERA
-  // and MEDIASTREAM_MIC should be used instead. However, we still only have
-  // one pair of radio buttons that sets both settings.
-  // TODO(msramek): Clean this up once we have the new UI for media.
-  if (content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
-    map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, default_setting);
-    map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, default_setting);
-  } else {
-    map->SetDefaultContentSetting(content_type, default_setting);
-  }
+  // The MEDIASTREAM setting is deprecated and has no UI.
+  DCHECK_NE(CONTENT_SETTINGS_TYPE_MEDIASTREAM, content_type);
+  map->SetDefaultContentSetting(content_type, default_setting);
 
   switch (content_type) {
     case CONTENT_SETTINGS_TYPE_COOKIES:
@@ -1401,9 +1372,13 @@ void ContentSettingsHandler::SetContentFilter(const base::ListValue* args) {
       content::RecordAction(
           UserMetricsAction("Options_DefaultMouseLockSettingChanged"));
       break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
       content::RecordAction(
           UserMetricsAction("Options_DefaultMediaStreamMicSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+      content::RecordAction(
+          UserMetricsAction("Options_DefaultMediaStreamCameraSettingChanged"));
       break;
     case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
       content::RecordAction(
@@ -1452,9 +1427,11 @@ void ContentSettingsHandler::SetException(const base::ListValue* args) {
   CHECK(args->GetString(3, &setting));
 
   ContentSettingsType type = ContentSettingsTypeFromGroupName(type_string);
+
+  // The MEDIASTREAM setting is deprecated and has no UI.
+  DCHECK_NE(CONTENT_SETTINGS_TYPE_MEDIASTREAM, type);
+
   if (type == CONTENT_SETTINGS_TYPE_GEOLOCATION ||
-      type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
-      type == CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
       type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
       type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
     NOTREACHED();
@@ -1508,7 +1485,8 @@ std::string ContentSettingsHandler::ContentSettingsTypeToGroupName(
 }
 
 HostContentSettingsMap* ContentSettingsHandler::GetContentSettingsMap() {
-  return Profile::FromWebUI(web_ui())->GetHostContentSettingsMap();
+  return HostContentSettingsMapFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()));
 }
 
 ProtocolHandlerRegistry* ContentSettingsHandler::GetProtocolHandlerRegistry() {
@@ -1520,7 +1498,8 @@ HostContentSettingsMap*
     ContentSettingsHandler::GetOTRContentSettingsMap() {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (profile->HasOffTheRecordProfile())
-    return profile->GetOffTheRecordProfile()->GetHostContentSettingsMap();
+    return HostContentSettingsMapFactory::GetForProfile(
+        profile->GetOffTheRecordProfile());
   return NULL;
 }
 

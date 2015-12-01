@@ -17,6 +17,7 @@ import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
 import org.chromium.chrome.browser.dom_distiller.ReaderModeButtonView.ReaderModeButtonViewDelegate;
 import org.chromium.chrome.browser.tab.ChromeTab;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.content.browser.ContentView;
@@ -181,6 +182,16 @@ public class ReaderModePanel implements ChromeAnimation.Animatable<ReaderModePan
 
     public ReaderModePanel(ReaderModePanelHost readerModeHost) {
         mReaderModeHost = readerModeHost;
+
+        // Make sure all WebContents are destroyed when a tab is closed: crbug.com/496653
+        mReaderModeHost.getTab().addObserver(new EmptyTabObserver() {
+            @Override
+            public void onDestroyed(Tab tab) {
+                destroyCachedOriginalWebContent();
+                destroyDistilledContentViewCore();
+            }
+        });
+
         mAllowAnimatedButton = mReaderModeHost.allowReaderModeButtonAnimation();
 
         mLayoutWidth = 0.0f;
@@ -630,7 +641,7 @@ public class ReaderModePanel implements ChromeAnimation.Animatable<ReaderModePan
         boolean isHostTabIncognito =
                 mReaderModeHost.getTab().getContentViewCore().getWebContents().isIncognito();
         ContentViewCore cvc = new ContentViewCore(context);
-        ContentView cv = new ContentView(context, cvc);
+        ContentView cv = ContentView.createContentView(context, cvc);
         cvc.initialize(cv, cv, WebContentsFactory.createWebContents(isHostTabIncognito, true),
                 windowAndroid);
         cvc.setContentViewClient(new ContentViewClient() {

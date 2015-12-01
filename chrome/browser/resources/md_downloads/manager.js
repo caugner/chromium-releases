@@ -6,22 +6,11 @@ cr.define('downloads', function() {
   var Manager = Polymer({
     is: 'downloads-manager',
 
-    created: function() {
-      /** @private {!downloads.ActionService} */
-      this.actionService_ = new downloads.ActionService;
-    },
-
     properties: {
       hasDownloads_: {
         type: Boolean,
         value: false,
       },
-    },
-
-    ready: function() {
-      window.addEventListener('resize', this.onResize_.bind(this));
-      // onResize_() doesn't need to be called immediately here because it's
-      // guaranteed to be called again shortly when items are received.
     },
 
     /**
@@ -55,31 +44,46 @@ cr.define('downloads', function() {
      */
     onCommand_: function(e) {
       if (e.command.id == 'clear-all-command')
-        this.actionService_.clearAll();
+        downloads.ActionService.getInstance().clearAll();
       else if (e.command.id == 'undo-command')
-        this.actionService_.undo();
+        downloads.ActionService.getInstance().undo();
     },
 
     /** @private */
     onLoad_: function() {
-      this.$.toolbar.setActionService(this.actionService_);
-
       cr.ui.decorate('command', cr.ui.Command);
       document.addEventListener('canExecute', this.onCanExecute_.bind(this));
       document.addEventListener('command', this.onCommand_.bind(this));
 
       // Shows all downloads.
-      this.actionService_.search('');
+      downloads.ActionService.getInstance().search('');
     },
 
     /** @private */
-    onResize_: function() {
-      // TODO(dbeam): expose <paper-header-panel>'s #mainContainer in Polymer.
-      var container = this.$.panel.$.mainContainer;
-      var scrollbarWidth = container.offsetWidth - container.clientWidth;
+    rebuildFocusGrid_: function() {
+      var activeElement = this.shadowRoot.activeElement;
+
+      var activeItem;
+      if (activeElement && activeElement.tagName == 'downloads-item')
+        activeItem = activeElement;
+
+      var activeControl = activeItem && activeItem.shadowRoot.activeElement;
+
+      /** @private {!cr.ui.FocusGrid} */
+      this.focusGrid_ = this.focusGrid_ || new cr.ui.FocusGrid;
+      this.focusGrid_.destroy();
+
+      var boundary = this.$['downloads-list'];
+
       this.items_.forEach(function(item) {
-        item.scrollbarWidth = scrollbarWidth;
-      });
+        var focusRow = new downloads.FocusRow(item.content, boundary);
+        this.focusGrid_.addRow(focusRow);
+
+        if (item == activeItem && !cr.ui.FocusRow.isFocusable(activeControl))
+          focusRow.getEquivalentElement(activeControl).focus();
+      }, this);
+
+      this.focusGrid_.ensureRowActive();
     },
 
     /**
@@ -115,8 +119,7 @@ cr.define('downloads', function() {
         var id = data.id;
 
         // Re-use old items when possible (saves work, preserves focus).
-        var item = oldIdMap[id] ||
-            new downloads.Item(this.iconLoader_, this.actionService_);
+        var item = oldIdMap[id] || new downloads.Item(this.iconLoader_);
 
         this.idMap_[id] = item;  // Associated by ID for fast lookup.
         this.items_.push(item);  // Add to sorted list for order.
@@ -154,13 +157,22 @@ cr.define('downloads', function() {
         this.$['downloads-list'].insertBefore(item, before);
       }
 
-      this.hasDownloads_ = this.size_() > 0;
+      var hasDownloads = this.size_() > 0;
+      if (!hasDownloads) {
+        var isSearching = downloads.ActionService.getInstance().isSearching();
+        var messageToShow = isSearching ? 'noSearchResults' : 'noDownloads';
+        this.$['no-downloads'].querySelector('span').textContent =
+            loadTimeData.getString(messageToShow);
+      }
+      this.hasDownloads_ = hasDownloads;
 
       if (loadTimeData.getBoolean('allowDeletingHistory'))
         this.$.toolbar.downloadsShowing = this.hasDownloads_;
 
-      this.onResize_();
       this.$.panel.classList.remove('loading');
+
+      var allReady = this.items_.map(function(i) { return i.readyPromise; });
+      Promise.all(allReady).then(this.rebuildFocusGrid_.bind(this));
     },
 
     /**
@@ -168,8 +180,19 @@ cr.define('downloads', function() {
      * @private
      */
     updateItem_: function(data) {
-      this.idMap_[data.id].update(data);
-      this.onResize_();
+      var item = this.idMap_[data.id];
+
+      var activeControl = this.shadowRoot.activeElement == item ?
+          item.shadowRoot.activeElement : null;
+
+      item.update(data);
+
+      this.async(function() {
+        if (activeControl && !cr.ui.FocusRow.isFocusable(activeControl)) {
+          var focusRow = this.focusGrid_.getRowForRoot(item.content);
+          focusRow.getEquivalentElement(activeControl).focus();
+        }
+      }.bind(this));
     },
   });
 

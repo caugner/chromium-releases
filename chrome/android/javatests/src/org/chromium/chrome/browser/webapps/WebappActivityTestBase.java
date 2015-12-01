@@ -32,17 +32,30 @@ public abstract class WebappActivityTestBase extends ChromeActivityTestCaseBase<
         super(WebappActivity0.class);
     }
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-
-        // Default to a webapp that just loads about:blank to avoid a network load.  This results
-        // in the URL bar showing since {@link UrlUtils} cannot parse this type of URL.
+    /**
+     * Creates the Intent that starts the WebAppActivity. This is meant to be overriden by other
+     * tests in order for them to pass some specific values.
+     */
+    protected Intent createIntent() {
         Intent intent = new Intent(getInstrumentation().getTargetContext(), WebappActivity0.class);
         intent.setData(Uri.parse(WebappActivity.WEBAPP_SCHEME + "://" + WEBAPP_ID));
         intent.putExtra(ShortcutHelper.EXTRA_ID, WEBAPP_ID);
         intent.putExtra(ShortcutHelper.EXTRA_URL, "about:blank");
-        setActivityIntent(intent);
+        return intent;
+    }
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+
+        // Register the webapp so when the data storage is opened, the test doesn't crash. There is
+        // no race condition with the retrival as AsyncTasks are run sequentially on the background
+        // thread.
+        WebappRegistry.registerWebapp(getInstrumentation().getTargetContext(), WEBAPP_ID);
+
+        // Default to a webapp that just loads about:blank to avoid a network load.  This results
+        // in the URL bar showing since {@link UrlUtils} cannot parse this type of URL.
+        setActivityIntent(createIntent());
 
         waitUntilIdle();
 

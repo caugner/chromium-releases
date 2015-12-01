@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Rect;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
@@ -75,8 +76,8 @@ public class TabListSceneLayer extends SceneLayer {
                     R.drawable.tabswitcher_border_frame_decoration, R.drawable.logo_card_back,
                     borderResource, t.canUseLiveTexture(),
                     (t.getFallbackThumbnailId() == ChromeTab.NTP_TAB_ID), t.getBackgroundColor(),
-                    context.getResources().getColor(R.color.tab_switcher_background),
-                    res.getColor(borderColorResource), t.isIncognito(),
+                    ApiCompatibilityUtils.getColor(res, R.color.tab_switcher_background),
+                    ApiCompatibilityUtils.getColor(res, borderColorResource), t.isIncognito(),
                     layout.getOrientation() == Orientation.PORTRAIT, t.getRenderX() * dpToPx,
                     t.getRenderY() * dpToPx, t.getScaledContentWidth() * dpToPx,
                     t.getScaledContentHeight() * dpToPx, t.getOriginalContentWidth() * dpToPx,
@@ -91,8 +92,10 @@ public class TabListSceneLayer extends SceneLayer {
                     t.getBorderCloseButtonAlpha() * decoration,
                     LayoutTab.CLOSE_BUTTON_WIDTH_DP * dpToPx, t.getStaticToViewBlend(),
                     t.getBorderScale(), t.getSaturation(), t.getBrightness(), t.showToolbar(),
-                    t.anonymizeToolbar(), t.getToolbarAlpha(), t.getToolbarYOffset() * dpToPx,
-                    t.getSideBorderScale(), true, t.insetBorderVertical(), layerTitleCache,
+                    t.getToolbarBackgroundColor(), t.anonymizeToolbar(),
+                    t.getTextBoxBackgroundColor(), t.getToolbarAlpha(),
+                    t.getToolbarYOffset() * dpToPx, t.getSideBorderScale(), true,
+                    t.insetBorderVertical(), layerTitleCache,
                     tabContentManager, resourceManager);
         }
         nativeFinishBuildingFrame(mNativePtr);
@@ -130,7 +133,8 @@ public class TabListSceneLayer extends SceneLayer {
             float pivotY, float rotationX, float rotationY, float alpha, float borderAlpha,
             float contourAlpha, float shadowAlpha, float closeAlpha, float closeBtnWidth,
             float staticToViewBlend, float borderScale, float saturation, float brightness,
-            boolean showToolbar, boolean anonymizeToolbar, float toolbarAlpha, float toolbarYOffset,
+            boolean showToolbar, int toolbarBackgroundColor, boolean anonymizeToolbar,
+            int toolbarTextBoxBackgroundColor, float toolbarAlpha, float toolbarYOffset,
             float sideBorderScale, boolean attachContent, boolean insetVerticalBorder,
             LayerTitleCache layerTitleCache, TabContentManager tabContentManager,
             ResourceManager resourceManager);

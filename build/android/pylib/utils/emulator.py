@@ -14,17 +14,13 @@ import signal
 import subprocess
 import time
 
-# TODO(craigdh): Move these pylib dependencies to pylib/utils/.
-from pylib import cmd_helper
+from devil.android import device_errors
+from devil.android import device_utils
+from devil.android.sdk import adb_wrapper
+from devil.utils import cmd_helper
 from pylib import constants
 from pylib import pexpect
-from pylib.device import adb_wrapper
-from pylib.device import device_errors
-from pylib.device import device_utils
 from pylib.utils import time_profile
-
-import errors
-import run_command
 
 # SD card size
 SDCARD_SIZE = '512M'
@@ -117,7 +113,7 @@ def DeleteAllTempAVDs():
     if 'run_tests_avd' in avd_name:
       cmd = ['android', '-s', 'delete', 'avd', '--name', avd_name]
       cmd_helper.RunCmd(cmd)
-      logging.info('Delete AVD %s' % avd_name)
+      logging.info('Delete AVD %s', avd_name)
 
 
 class PortPool(object):

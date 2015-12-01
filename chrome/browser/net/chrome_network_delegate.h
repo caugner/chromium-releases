@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_NET_CHROME_NETWORK_DELEGATE_H_
 #define CHROME_BROWSER_NET_CHROME_NETWORK_DELEGATE_H_
 
+#include <stdint.h>
+
 #include <string>
 
 #include "base/basictypes.h"
@@ -15,6 +17,10 @@
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "net/base/network_delegate_impl.h"
+
+#if !defined(OS_IOS)
+#include "components/data_use_measurement/content/data_use_measurement.h"
+#endif
 
 class ChromeExtensionsNetworkDelegate;
 class PrefService;
@@ -147,9 +153,11 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   void OnBeforeRedirect(net::URLRequest* request,
                         const GURL& new_location) override;
   void OnResponseStarted(net::URLRequest* request) override;
-  void OnRawBytesRead(const net::URLRequest& request, int bytes_read) override;
+  void OnNetworkBytesReceived(const net::URLRequest& request,
+                              int64_t bytes_received) override;
   void OnCompleted(net::URLRequest* request, bool started) override;
   void OnURLRequestDestroyed(net::URLRequest* request) override;
+  void OnURLRequestJobOrphaned(net::URLRequest* request) override;
   void OnPACScriptError(int line_number, const base::string16& error) override;
   net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       net::URLRequest* request,
@@ -198,6 +206,11 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   // When true, allow access to all file:// URLs.
   static bool g_allow_file_access_;
+
+// Component to measure data use.
+#if !defined(OS_IOS)
+  data_use_measurement::DataUseMeasurement data_use_measurement_;
+#endif
 
   bool experimental_web_platform_features_enabled_;
 

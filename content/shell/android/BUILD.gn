@@ -21,9 +21,10 @@ shared_library("libcontent_shell_content_view") {
   testonly = true
   deps = [
     ":content_shell_jni_headers",
+    "//build/config/sanitizers:deps",
     "//content/shell:content_shell_lib",
     "//content/shell:pak",
-    "//components/crash/browser",
+    "//components/crash/content/browser",
     "//skia",
     "//media/base/android",
   ]
@@ -166,7 +167,7 @@ instrumentation_test_apk("content_shell_test_apk") {
   isolate_file = "../../content_shell_test_apk.isolate"
 }
 
-if (current_cpu != "x64" && current_cpu != "arm64") {
+if (current_cpu != "x64") {
   chromium_linker_test_manifest =
       "$target_gen_dir/linker_test_apk/AndroidManifest.xml"
 
@@ -217,11 +218,13 @@ if (current_cpu != "x64" && current_cpu != "arm64") {
 
     deps = [
       ":linker_test_jni_headers",
+      "//build/config/sanitizers:deps",
       "//content/shell:content_shell_lib",
 
       # Required to include "content/public/browser/android/compositor.h"
       # in chromium_linker_test_android.cc :-(
       "//skia",
+      "//third_party/re2",
     ]
   }
 

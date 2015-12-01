@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ash/autoclick/autoclick_controller.h"
+#include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -27,7 +28,7 @@
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
@@ -36,6 +37,7 @@
 #include "components/drive/drive_pref_names.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
@@ -119,6 +121,10 @@ void Preferences::RegisterProfilePrefs(
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   registry->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerClick, false);
+  // This preference can only be set to true by policy or command_line flag
+  // and it should not carry over to sessions were neither of these is set.
+  registry->RegisterBooleanPref(prefs::kUnifiedDesktopEnabledByDefault, false,
+                                PrefRegistry::NO_REGISTRATION_FLAGS);
   registry->RegisterBooleanPref(
       prefs::kNaturalScroll, base::CommandLine::ForCurrentProcess()->HasSwitch(
                                  switches::kNaturalScrollDefault),
@@ -279,7 +285,7 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kForceMaximizeOnFirstRun, false);
 }
 
-void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
+void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
   prefs_ = prefs;
 
   BooleanPrefMember::NamedChangeCallback callback =
@@ -290,7 +296,9 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, callback);
   tap_dragging_enabled_.Init(prefs::kTapDraggingEnabled, prefs, callback);
   three_finger_click_enabled_.Init(prefs::kEnableTouchpadThreeFingerClick,
-      prefs, callback);
+                                   prefs, callback);
+  unified_desktop_enabled_by_default_.Init(
+      prefs::kUnifiedDesktopEnabledByDefault, prefs, callback);
   natural_scroll_.Init(prefs::kNaturalScroll, prefs, callback);
   mouse_sensitivity_.Init(prefs::kMouseSensitivity, prefs, callback);
   touchpad_sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, callback);
@@ -325,7 +333,8 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
 void Preferences::Init(Profile* profile, const user_manager::User* user) {
   DCHECK(profile);
   DCHECK(user);
-  PrefServiceSyncable* prefs = PrefServiceSyncable::FromProfile(profile);
+  syncable_prefs::PrefServiceSyncable* prefs =
+      PrefServiceSyncableFromProfile(profile);
   // This causes OnIsSyncingChanged to be called when the value of
   // PrefService::IsSyncing() changes.
   prefs->AddObserver(this);
@@ -362,7 +371,7 @@ void Preferences::Init(Profile* profile, const user_manager::User* user) {
 }
 
 void Preferences::InitUserPrefsForTesting(
-    PrefServiceSyncable* prefs,
+    syncable_prefs::PrefServiceSyncable* prefs,
     const user_manager::User* user,
     scoped_refptr<input_method::InputMethodManager::State> ime_state) {
   user_ = user;
@@ -439,6 +448,14 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Changed", enabled);
     else if (reason == REASON_INITIALIZATION)
       UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Started", enabled);
+  }
+  if (reason != REASON_PREF_CHANGED ||
+      pref_name == prefs::kUnifiedDesktopEnabledByDefault) {
+    const bool enabled = unified_desktop_enabled_by_default_.GetValue();
+    if (ash::Shell::HasInstance()) {
+      ash::Shell::GetInstance()->display_manager()
+          ->SetUnifiedDesktopEnabled(enabled);
+    }
   }
   if (reason != REASON_PREF_CHANGED || pref_name == prefs::kNaturalScroll) {
     // Force natural scroll default if we've sync'd and if the cmd line arg is

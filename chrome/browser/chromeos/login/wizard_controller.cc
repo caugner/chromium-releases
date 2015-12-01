@@ -75,7 +75,7 @@
 #include "chromeos/settings/cros_settings_provider.h"
 #include "chromeos/settings/timezone_settings.h"
 #include "chromeos/timezone/timezone_provider.h"
-#include "components/crash/app/breakpad_linux.h"
+#include "components/crash/content/app/breakpad_linux.h"
 #include "components/pairing/bluetooth_controller_pairing_controller.h"
 #include "components/pairing/bluetooth_host_pairing_controller.h"
 #include "components/pairing/shark_connection_listener.h"
@@ -795,7 +795,7 @@ void WizardController::PerformPostEulaActions() {
       NetworkStateHandler::kDefaultCheckPortalList);
   host_->GetAutoEnrollmentController()->Start();
   host_->PrewarmAuthentication();
-  NetworkPortalDetector::Get()->Enable(true);
+  network_portal_detector::GetInstance()->Enable(true);
 }
 
 void WizardController::PerformOOBECompletedActions() {

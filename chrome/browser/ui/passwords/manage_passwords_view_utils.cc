@@ -19,7 +19,18 @@
 #include "ui/gfx/range/range.h"
 #include "url/gurl.h"
 
-const int kAvatarImageSize = 50;
+namespace {
+
+// Checks whether two URLs are from the same domain or host.
+bool SameDomainOrHost(const GURL& gurl1, const GURL& gurl2) {
+  return net::registry_controlled_domains::SameDomainOrHost(
+      gurl1, gurl2,
+      net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+}
+
+}  // namespace
+
+const int kAvatarImageSize = 40;
 
 gfx::ImageSkia ScaleImageForAccountAvatar(gfx::ImageSkia skia_image) {
   gfx::Size size = skia_image.size();
@@ -50,12 +61,10 @@ void GetSavePasswordDialogTitleTextAndLinkRange(
   // Check whether the registry controlled domains for user-visible URL (i.e.
   // the one seen in the omnibox) and the password form post-submit navigation
   // URL differs or not.
-  bool target_domain_differs =
-      !net::registry_controlled_domains::SameDomainOrHost(
-          user_visible_url, form_origin_url,
-          net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
-  if (target_domain_differs) {
+  if (!SameDomainOrHost(user_visible_url, form_origin_url)) {
     title_id = IDS_SAVE_PASSWORD_TITLE;
+    // TODO(palmer): Look into passing real language prefs here, not "".
+    // crbug.com/498069.
     replacements.push_back(url_formatter::FormatUrlForSecurityDisplay(
         form_origin_url, std::string()));
   }
@@ -73,5 +82,40 @@ void GetSavePasswordDialogTitleTextAndLinkRange(
         replacements.begin(),
         l10n_util::GetStringUTF16(IDS_SAVE_PASSWORD_TITLE_BRAND));
     *title = l10n_util::GetStringFUTF16(title_id, replacements, &offsets);
+  }
+}
+
+void GetManagePasswordsDialogTitleText(const GURL& user_visible_url,
+                                       const GURL& password_origin_url,
+                                       base::string16* title) {
+  // Check whether the registry controlled domains for user-visible URL
+  // (i.e. the one seen in the omnibox) and the managed password origin URL
+  // differ or not.
+  if (!SameDomainOrHost(user_visible_url, password_origin_url)) {
+    // TODO(palmer): Look into passing real language prefs here, not "".
+    base::string16 formatted_url = url_formatter::FormatUrlForSecurityDisplay(
+        password_origin_url, std::string());
+    *title = l10n_util::GetStringFUTF16(
+        IDS_MANAGE_PASSWORDS_TITLE_DIFFERENT_DOMAIN, formatted_url);
+  } else {
+    *title = l10n_util::GetStringUTF16(IDS_MANAGE_PASSWORDS_TITLE);
+  }
+}
+
+void GetAccountChooserDialogTitleTextAndLinkRange(
+    bool is_smartlock_branding_enabled,
+    base::string16* title,
+    gfx::Range* title_link_range) {
+  if (is_smartlock_branding_enabled) {
+    size_t offset;
+    base::string16 title_link =
+        l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK);
+    *title = l10n_util::GetStringFUTF16(
+        IDS_PASSWORD_MANAGER_ACCOUNT_CHOOSER_TITLE_SMART_LOCK, title_link,
+        &offset);
+    *title_link_range = gfx::Range(offset, offset + title_link.length());
+  } else {
+    *title =
+        l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_ACCOUNT_CHOOSER_TITLE);
   }
 }

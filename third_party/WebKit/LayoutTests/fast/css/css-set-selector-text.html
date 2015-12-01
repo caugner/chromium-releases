@@ -88,6 +88,8 @@ testSelectorRoundTrip(":focus");
 testSelectorRoundTrip(":hover");
 testSelectorRoundTrip(":indeterminate");
 testSelectorRoundTrip(":link");
+testSelectorRoundTrip(":not(:placeholder-shown)");
+testSelectorRoundTrip(":placeholder-shown");
 testSelectorRoundTrip(":root");
 testSelectorRoundTrip(":target");
 testSelectorRoundTrip(":visited");
@@ -154,7 +156,7 @@ testSelectorRoundTrip(':-webkit-any(a.class1.class2.class3:hover)');
 debug('');
 
 shouldBe("setThenReadSelectorText('*:active')", "':active'");
-shouldBe("setThenReadSelectorText('|a')", "'a'");
+testSelectorRoundTrip("|a");
 
 debug('');
 

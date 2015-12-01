@@ -38,6 +38,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/downloads_util.h"
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -62,7 +63,9 @@ namespace {
 
 // Maximum number of downloads to show. TODO(glen): Remove this and instead
 // stuff the downloads down the pipe slowly.
-static const size_t kMaxDownloads = 150;
+size_t MaxNumberOfDownloads() {
+  return MdDownloadsEnabled() ? 50 : 150;
+}
 
 enum DownloadsDOMEvent {
   DOWNLOADS_DOM_EVENT_GET_DOWNLOADS = 0,
@@ -146,7 +149,7 @@ base::DictionaryValue* CreateDownloadItemValue(
           download_item->GetStartTime(), NULL));
 
   base::Time start_time = download_item->GetStartTime();
-  base::string16 date_string = switches::MdDownloadsEnabled() ?
+  base::string16 date_string = MdDownloadsEnabled() ?
       TimeFormatLongDate(start_time) : base::TimeFormatShortDate(start_time);
   file_value->SetString("date_string", date_string);
 
@@ -159,9 +162,13 @@ base::DictionaryValue* CreateDownloadItemValue(
 
   extensions::DownloadedByExtension* by_ext =
       extensions::DownloadedByExtension::Get(download_item);
+  std::string by_ext_id;
+  std::string by_ext_name;
   if (by_ext) {
-    file_value->SetString("by_ext_id", by_ext->id());
-    file_value->SetString("by_ext_name", by_ext->name());
+    by_ext_id = by_ext->id();
+    // TODO(dbeam): why doesn't DownloadsByExtension::name() return a string16?
+    by_ext_name = by_ext->name();
+
     // Lookup the extension's current name() in case the user changed their
     // language. This won't work if the extension was uninstalled, so the name
     // might be the wrong language.
@@ -172,6 +179,8 @@ base::DictionaryValue* CreateDownloadItemValue(
     if (extension)
       file_value->SetString("by_ext_name", extension->name());
   }
+  file_value->SetString("by_ext_id", by_ext_id);
+  file_value->SetString("by_ext_name", by_ext_name);
 
   // Keep file names as LTR.
   base::string16 file_name =
@@ -184,13 +193,20 @@ base::DictionaryValue* CreateDownloadItemValue(
       download_item->GetTotalBytes()));
   file_value->SetBoolean("file_externally_removed",
                          download_item->GetFileExternallyRemoved());
-  file_value->SetBoolean("retry", false); // Overridden below if needed.
   file_value->SetBoolean("resume", download_item->CanResume());
+
+  const char* danger_type = "";
+  base::string16 last_reason_text;
+  // -2 is invalid, -1 means indeterminate, and 0-100 are in-progress.
+  int percent = -2;
+  base::string16 progress_status_text;
+  bool retry = false;
+  const char* state = nullptr;
 
   switch (download_item->GetState()) {
     case content::DownloadItem::IN_PROGRESS: {
       if (download_item->IsDangerous()) {
-        file_value->SetString("state", "DANGEROUS");
+        state = "DANGEROUS";
         // These are the only danger states that the UI is equipped to handle.
         DCHECK(download_item->GetDangerType() ==
                    content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
@@ -204,59 +220,57 @@ base::DictionaryValue* CreateDownloadItemValue(
                    content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST ||
                download_item->GetDangerType() ==
                    content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED);
-        const char* danger_type_value =
-            GetDangerTypeString(download_item->GetDangerType());
-        file_value->SetString("danger_type", danger_type_value);
+        danger_type = GetDangerTypeString(download_item->GetDangerType());
       } else if (download_item->IsPaused()) {
-        file_value->SetString("state", "PAUSED");
+        state = "PAUSED";
       } else {
-        file_value->SetString("state", "IN_PROGRESS");
+        state = "IN_PROGRESS";
       }
-      file_value->SetString("progress_status_text",
-                            download_model.GetTabProgressStatusText());
+      progress_status_text = download_model.GetTabProgressStatusText();
 
-      int percent = download_item->PercentComplete();
-      if (!switches::MdDownloadsEnabled())
+      percent = download_item->PercentComplete();
+      if (!MdDownloadsEnabled())
         percent = std::max(0, percent);
-      file_value->SetInteger("percent", percent);
 
-      file_value->SetInteger("received",
-          static_cast<int>(download_item->GetReceivedBytes()));
       break;
     }
 
     case content::DownloadItem::INTERRUPTED:
-      file_value->SetString("state", "INTERRUPTED");
+      state = "INTERRUPTED";
+      progress_status_text = download_model.GetTabProgressStatusText();
 
-      file_value->SetString("progress_status_text",
-                            download_model.GetTabProgressStatusText());
+      if (download_item->CanResume())
+        percent = download_item->PercentComplete();
 
-      if (download_item->CanResume()) {
-        file_value->SetInteger("percent",
-            static_cast<int>(download_item->PercentComplete()));
-      }
-      file_value->SetInteger("received",
-          static_cast<int>(download_item->GetReceivedBytes()));
-      file_value->SetString("last_reason_text",
-                            download_model.GetInterruptReasonText());
+      last_reason_text = download_model.GetInterruptReasonText();
       if (content::DOWNLOAD_INTERRUPT_REASON_CRASH ==
-          download_item->GetLastReason() && !download_item->CanResume())
-        file_value->SetBoolean("retry", true);
+          download_item->GetLastReason() && !download_item->CanResume()) {
+        retry = true;
+      }
       break;
 
     case content::DownloadItem::CANCELLED:
-      file_value->SetString("state", "CANCELLED");
-      file_value->SetBoolean("retry", true);
+      state = "CANCELLED";
+      retry = true;
       break;
 
     case content::DownloadItem::COMPLETE:
       DCHECK(!download_item->IsDangerous());
-      file_value->SetString("state", "COMPLETE");
+      state = "COMPLETE";
       break;
 
     case content::DownloadItem::MAX_DOWNLOAD_STATE:
       NOTREACHED();
   }
+
+  DCHECK(state);
+
+  file_value->SetString("danger_type", danger_type);
+  file_value->SetString("last_reason_text", last_reason_text);
+  file_value->SetInteger("percent", percent);
+  file_value->SetString("progress_status_text", progress_status_text);
+  file_value->SetBoolean("retry", retry);
+  file_value->SetString("state", state);
 
   return file_value;
 }
@@ -639,7 +653,7 @@ void DownloadsDOMHandler::SendCurrentDownloads() {
     query.AddFilter(DownloadQuery::FILTER_QUERY, *search_terms_);
   query.AddFilter(base::Bind(&IsDownloadDisplayable));
   query.AddSorter(DownloadQuery::SORT_START_TIME, DownloadQuery::DESCENDING);
-  query.Limit(kMaxDownloads);
+  query.Limit(MaxNumberOfDownloads());
   query.Search(all_items.begin(), all_items.end(), &filtered_items);
 
   base::ListValue results_value;

@@ -84,9 +84,10 @@ class MediaRouterWebUIMessageHandlerTest : public MediaRouterTest {
 TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateSinks) {
   MediaSink::Id sink_id("sinkId123");
   std::string sink_name("The sink");
+
   std::vector<MediaSinkWithCastModes> media_sink_with_cast_modes_list;
   MediaSinkWithCastModes media_sink_with_cast_modes(
-      MediaSink(sink_id, sink_name));
+      MediaSink(sink_id, sink_name, MediaSink::IconType::CAST));
   media_sink_with_cast_modes.cast_modes.insert(MediaCastMode::TAB_MIRROR);
   media_sink_with_cast_modes_list.push_back(media_sink_with_cast_modes);
 
@@ -117,13 +118,13 @@ TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateSinks) {
 TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateRoutes) {
   MediaRoute::Id route_id("routeId123");
   MediaSink::Id sink_id("sinkId123");
-  MediaSink sink(sink_id, "The sink");
+  MediaSink sink(sink_id, "The sink", MediaSink::IconType::CAST);
   std::string description("This is a route");
   bool is_local = true;
   std::vector<MediaRoute> routes;
-  routes.push_back(MediaRoute(route_id, MediaSource("mediaSource"),
-                              MediaSink(sink_id, "The sink"), description,
-                              is_local, kControllerPathForTesting));
+  routes.push_back(MediaRoute(route_id, MediaSource("mediaSource"), sink_id,
+                              description, is_local, kControllerPathForTesting,
+                              true));
 
   EXPECT_CALL(*mock_media_router_ui_, GetRouteProviderExtensionId()).WillOnce(
       ReturnRef(provider_extension_id()));
@@ -142,7 +143,7 @@ TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateRoutes) {
   EXPECT_EQ(route_id, value);
   EXPECT_TRUE(route_value->GetString("sinkId", &value));
   EXPECT_EQ(sink_id, value);
-  EXPECT_TRUE(route_value->GetString("title", &value));
+  EXPECT_TRUE(route_value->GetString("description", &value));
   EXPECT_EQ(description, value);
 
   bool actual_is_local = false;
@@ -162,11 +163,11 @@ TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateRoutes) {
 TEST_F(MediaRouterWebUIMessageHandlerTest, OnCreateRouteResponseReceived) {
   MediaRoute::Id route_id("routeId123");
   MediaSink::Id sink_id("sinkId123");
-  MediaSink sink(sink_id, "The sink");
+  MediaSink sink(sink_id, "The sink", MediaSink::IconType::CAST);
   std::string description("This is a route");
   bool is_local = true;
-  MediaRoute route(route_id, MediaSource("mediaSource"),
-                   MediaSink(sink_id, "The sink"), description, is_local, "");
+  MediaRoute route(route_id, MediaSource("mediaSource"), sink_id, description,
+                   is_local, "", true);
 
   EXPECT_CALL(*mock_media_router_ui_, GetRouteProviderExtensionId()).WillOnce(
       ReturnRef(provider_extension_id()));
@@ -189,7 +190,7 @@ TEST_F(MediaRouterWebUIMessageHandlerTest, OnCreateRouteResponseReceived) {
   EXPECT_EQ(route_id, value);
   EXPECT_TRUE(route_value->GetString("sinkId", &value));
   EXPECT_EQ(sink_id, value);
-  EXPECT_TRUE(route_value->GetString("title", &value));
+  EXPECT_TRUE(route_value->GetString("description", &value));
   EXPECT_EQ(description, value);
 
   bool actual_is_local = false;
@@ -200,7 +201,7 @@ TEST_F(MediaRouterWebUIMessageHandlerTest, OnCreateRouteResponseReceived) {
 TEST_F(MediaRouterWebUIMessageHandlerTest, UpdateIssue) {
   std::string issue_title("An issue");
   std::string issue_message("This is an issue");
-  IssueAction default_action(IssueAction::TYPE_OK);
+  IssueAction default_action(IssueAction::TYPE_LEARN_MORE);
   std::vector<IssueAction> secondary_actions;
   secondary_actions.push_back(IssueAction(IssueAction::TYPE_DISMISS));
   MediaRoute::Id route_id("routeId123");

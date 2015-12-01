@@ -163,8 +163,7 @@ bool TestWebContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host,
     int opener_frame_routing_id,
     int proxy_routing_id,
-    const FrameReplicationState& replicated_frame_state,
-    bool for_main_frame) {
+    const FrameReplicationState& replicated_frame_state) {
   UpdateMaxPageIDIfNecessary(render_view_host);
   // This will go to a TestRenderViewHost.
   static_cast<RenderViewHostImpl*>(render_view_host)
@@ -308,14 +307,12 @@ void TestWebContents::CreateNewWindow(
     SessionStorageNamespace* session_storage_namespace) {
 }
 
-void TestWebContents::CreateNewWidget(int render_process_id,
-                                      int route_id,
-                                      blink::WebPopupType popup_type) {
-}
+void TestWebContents::CreateNewWidget(int32 render_process_id,
+                                      int32 route_id,
+                                      blink::WebPopupType popup_type) {}
 
-void TestWebContents::CreateNewFullscreenWidget(int render_process_id,
-                                                int route_id) {
-}
+void TestWebContents::CreateNewFullscreenWidget(int32 render_process_id,
+                                                int32 route_id) {}
 
 void TestWebContents::ShowCreatedWindow(int route_id,
                                         WindowOpenDisposition disposition,

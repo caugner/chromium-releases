@@ -16,6 +16,7 @@ I computer remoti con tastiere diverse dall'inglese americano potrebbero ricever
 Per informazioni sulla privacy, leggi le Norme sulla privacy di Google (http://goo.gl/SyrVzj) e le Norme sulla privacy di Chrome (http://goo.gl/0uXE5d).</translation>
 <translation id="1324095856329524885">(questa funzione non è ancora disponibile per il tuo computer)</translation>
 <translation id="1342297293546459414">Visualizza e controlla un computer condiviso.</translation>
+<translation id="1389790901665088353">Scarica il programma di installazione di Chrome Remote Desktop Host</translation>
 <translation id="1450760146488584666">L'oggetto richiesto non esiste.</translation>
 <translation id="1480046233931937785">Riconoscimenti</translation>
 <translation id="1520828917794284345">Adatta dimensioni desktop</translation>
@@ -64,6 +65,7 @@ Per informazioni sulla privacy, leggi le Norme sulla privacy di Google (http://g
 <translation id="2353140552984634198">Puoi accedere a questo computer in sicurezza utilizzando Chromoting.</translation>
 <translation id="2359808026110333948">Continua</translation>
 <translation id="2366718077645204424">Impossibile raggiungere l'host. Il problema potrebbe essere dovuto alla configurazione della rete in uso.</translation>
+<translation id="2370754117186920852"><ph name="OPTIONAL_OFFLINE_REASON" />  Visto l'ultima volta online <ph name="RELATIVE_TIMESTAMP" />.</translation>
 <translation id="2498359688066513246">Guida e feedback</translation>
 <translation id="2499160551253595098">Aiutaci a migliorare Chrome Remote Desktop consentendo l'acquisizione di dati per statistiche di utilizzo e rapporti sugli arresti anomali.</translation>
 <translation id="2512228156274966424">NOTA. Per assicurarti che siano disponibili tutte le scorciatoie da tastiera, puoi configurare l'opzione "Apri in una finestra" per Chrome Remote Desktop.</translation>
@@ -83,6 +85,7 @@ Per informazioni sulla privacy, leggi le Norme sulla privacy di Google (http://g
 <translation id="2919669478609886916">Stai condividendo questo computer con un altro utente. Continuare la condivisione?</translation>
 <translation id="2921543551052660690">Hai già eseguito l'accesso come <ph name="USER_NAME" /> (<ph name="USER_EMAIL" />). Per accedere ai tuoi computer nell'account in questione, <ph name="LINK_BEGIN" />accedi a Chromium<ph name="LINK_END" /> con tale account e installa di nuovo Chromoting.</translation>
 <translation id="2926340305933667314">Impossibile disattivare l'accesso remoto a questo computer. Riprova più tardi.</translation>
+<translation id="2930135165929238380">Mancano alcuni componenti obbligatori. Visita la pagina chrome://plugins e assicurati che il plug-in Native Client sia attivo.</translation>
 <translation id="2939145106548231838">Esegui autenticazione host</translation>
 <translation id="2998137343848432918">• Aggiunta la schermata Riconoscimenti.
 • Risolto un problema relativo alla modalità a schermo intero con la tastiera visibile.</translation>
@@ -109,6 +112,7 @@ Per informazioni sulla privacy, leggi le Norme sulla privacy di Google (http://g
 <translation id="3596628256176442606">Questo servizio consente connessioni in entrata da client Chromoting.</translation>
 <translation id="3606997049964069799">Non hai eseguito l'accesso a Chromium. Accedi e riprova.</translation>
 <translation id="3649256019230929621">Riduci la finestra</translation>
+<translation id="369442766917958684">Offline.</translation>
 <translation id="3776024066357219166">La sessione Chrome Remote Desktop è terminata.</translation>
 <translation id="3785447812627779171">Host
 Chromoting</translation>
@@ -144,6 +148,7 @@ Chromoting</translation>
 <translation id="4572065712096155137">Accesso</translation>
 <translation id="4573676252416618192">Host Chrome
 Remote Desktop</translation>
+<translation id="4619978527973181021">Accetta e installa</translation>
 <translation id="4703799847237267011">La sessione Chromoting è terminata.</translation>
 <translation id="4736223761657662401">Cronologia connessioni</translation>
 <translation id="4741792197137897469">Autenticazione non riuscita. Accedi di nuovo a Chrome.</translation>
@@ -156,6 +161,7 @@ Remote Desktop</translation>
 <translation id="4913529628896049296">In attesa di connessione...</translation>
 <translation id="4918086044614829423">Accetto</translation>
 <translation id="492843737083352574">Ho difficoltà con la tastiera o il mouse.</translation>
+<translation id="4973800994433240357">Se scarichi il programma di installazione di Chromoting Host, accetti i <ph name="LINK_BEGIN" />Termini di servizio<ph name="LINK_END" /> di Google.</translation>
 <translation id="5064360042339518108"><ph name="HOSTNAME" /> (offline)</translation>
 <translation id="5070121137485264635">L'host remoto richiede l'autenticazione su un sito web di terze parti. Per continuare, devi concedere a Chrome Remote Desktop ulteriori autorizzazioni per accedere a questo indirizzo:</translation>
 <translation id="5156271271724754543">Inserisci lo stesso PIN in entrambe le caselle.</translation>
@@ -168,6 +174,7 @@ Remote Desktop</translation>
 <translation id="5308380583665731573">Connessione</translation>
 <translation id="5363265567587775042">Chiedi al proprietario del computer a cui vuoi accedere di fare clic su "<ph name="SHARE" />" e fornirti il codice di accesso.</translation>
 <translation id="5379087427956679853">Chrome Remote Desktop ti consente di condividere in modo sicuro il computer sul Web. Entrambi gli utenti devono eseguire l'app Chrome Remote Desktop, reperibile all'indirizzo <ph name="URL" />.</translation>
+<translation id="5394895745784982830">Per Mac (OS X 10.6 e versioni successive)</translation>
 <translation id="5397086374758643919">Programma di disinstallazione host Chrome Remote Desktop</translation>
 <translation id="5419185025274123272">Impossibile ripristinare l'applicazione. Puoi comunque inviare una segnalazione di bug.</translation>
 <translation id="544077782045763683">L'host è stato chiuso.</translation>
@@ -183,6 +190,7 @@ Remote Desktop</translation>
 <translation id="579702532610384533">Riconnetti</translation>
 <translation id="5843054235973879827">Perché questa operazione è sicura?</translation>
 <translation id="5859141382851488196">Nuova finestra…</translation>
+<translation id="5885438903806970186">Online.</translation>
 <translation id="6001953797859482435">Preferenze host Chrome Remote Desktop</translation>
 <translation id="6011539954251327702">Chromoting ti consente di condividere in modo sicuro il computer sul Web. Entrambi gli utenti devono eseguire l'app Chromoting, reperibile all'indirizzo <ph name="URL" />.</translation>
 <translation id="6040143037577758943">Chiudi</translation>
@@ -219,6 +227,7 @@ Remote Desktop</translation>
 <translation id="6930242544192836755">Durata</translation>
 <translation id="6939719207673461467">Mostra/nascondi tastiera.</translation>
 <translation id="6944854424004126054">Ripristina finestra</translation>
+<translation id="6962773374262604195">Per Windows (XP e versioni successive)</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6985691951107243942">Vuoi disattivare le connessioni remote a <ph name="HOSTNAME" />? Se cambi idea, dovrai utilizzare il computer in questione per riattivare le connessioni.</translation>
 <translation id="6998989275928107238">A</translation>
@@ -248,6 +257,7 @@ Remote Desktop</translation>
 <translation id="7869445566579231750">Non sei autorizzato a eseguire questa applicazione.</translation>
 <translation id="7948001860594368197">Opzioni schermo</translation>
 <translation id="7970576581263377361">Autenticazione non riuscita. Accedi di nuovo a Chromium.</translation>
+<translation id="8041721485428375115">Se scarichi il programma di installazione di Chrome Remote Desktop Host, accetti i <ph name="LINK_BEGIN" />Termini di servizio<ph name="LINK_END" /> di Google.</translation>
 <translation id="8073845705237259513">Per poter utilizzare Chrome Remote Desktop devi aggiungere un account Google sul dispositivo.</translation>
 <translation id="80739703311984697">L'host remoto richiede l'autenticazione su un sito web di terze parti. Per continuare, devi concedere a Chromoting ulteriori autorizzazioni per accedere a questo indirizzo:</translation>
 <translation id="809687642899217504">I miei computer</translation>
@@ -271,6 +281,7 @@ Remote Desktop</translation>
 <translation id="8642984861538780905">Media</translation>
 <translation id="8712909229180978490">Non riesco a trovare i miei file salvati online su Google Drive.</translation>
 <translation id="8759753423332885148">Ulteriori informazioni.</translation>
+<translation id="8791202241915690908">Scarica il programma di installazione di Chromoting Host</translation>
 <translation id="894763922177556086">Buona</translation>
 <translation id="897805526397249209">Per attivare connessioni remote su un altro computer, installa Chromoting sul computer e fai clic su "<ph name="BUTTON_NAME" />".</translation>
 <translation id="8998327464021325874">Controller host Chrome Remote Desktop</translation>

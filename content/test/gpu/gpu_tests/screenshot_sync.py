@@ -5,22 +5,22 @@ import os
 import random
 
 import gpu_test_base
+import path_util
 import screenshot_sync_expectations as expectations
 
 from telemetry import benchmark
-from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.story import story_set as story_set_module
 from telemetry.util import image_util
 
 data_path = os.path.join(
-    util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
+    path_util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
 
 class ScreenshotSyncValidator(gpu_test_base.ValidatorBase):
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--force-gpu-rasterization')
 
-  def ValidateAndMeasurePageInner(self, page, tab, results):
+  def ValidateAndMeasurePage(self, page, tab, results):
     if not tab.screenshot_supported:
       raise page_test.Failure('Browser does not support screenshot capture')
 

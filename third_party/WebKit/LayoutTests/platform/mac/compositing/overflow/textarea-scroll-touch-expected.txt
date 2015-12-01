@@ -19,13 +19,9 @@
               "bounds": [189, 124],
               "children": [
                 {
-                  "bounds": [189, 308],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "bounds": [189, 270],
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -56,13 +52,9 @@
               "bounds": [189, 124],
               "children": [
                 {
-                  "bounds": [189, 308],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "bounds": [189, 270],
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },

@@ -40,7 +40,6 @@ namespace extensions {
 
 class AppSorting;
 class ExtensionPrefsObserver;
-class ExtensionPrefsUninstallExtension;
 class URLPatternSet;
 
 // Class for managing global and per-extension preferences.
@@ -169,6 +168,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
   // Checks whether |extension_id| is disabled. If there's no state pref for
   // the extension, this will return false. Generally you should use
   // ExtensionService::IsExtensionEnabled instead.
+  // Note that blacklisted extensions are NOT marked as disabled!
   bool IsExtensionDisabled(const std::string& id) const;
 
   // Get/Set the order that the browser actions appear in the toolbar.
@@ -200,8 +200,14 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
                               const Manifest::Location& location,
                               bool external_uninstall);
 
-  // Called to change the extension's state when it is enabled/disabled.
-  void SetExtensionState(const std::string& extension_id, Extension::State);
+  // Sets the extension's state to enabled and clears disable reasons.
+  void SetExtensionEnabled(const std::string& extension_id);
+
+  // Sets the extension's state to disabled and sets the disable reasons.
+  // However, if the current state is EXTERNAL_EXTENSION_UNINSTALLED then that
+  // is preserved (but the disable reasons are still set).
+  void SetExtensionDisabled(const std::string& extension_id,
+                            int disable_reasons);
 
   // Called to change the extension's BlacklistState. Currently only used for
   // non-malicious extensions.
@@ -251,6 +257,10 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
   bool DidExtensionEscalatePermissions(const std::string& id) const;
 
   // Getters and setters for disabled reason.
+  // Note that you should rarely need to modify disable reasons directly -
+  // pass the proper value to SetExtensionState instead when you enable/disable
+  // an extension. In particular, AddDisableReason(s) is only legal when the
+  // extension is not enabled.
   int GetDisableReasons(const std::string& extension_id) const;
   bool HasDisableReason(const std::string& extension_id,
                         Extension::DisableReason disable_reason) const;
@@ -343,26 +353,28 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
   // Returns the granted permission set for the extension with |extension_id|,
   // and NULL if no preferences were found for |extension_id|.
   // This passes ownership of the returned set to the caller.
-  PermissionSet* GetGrantedPermissions(const std::string& extension_id) const;
+  scoped_ptr<const PermissionSet> GetGrantedPermissions(
+      const std::string& extension_id) const;
 
   // Adds |permissions| to the granted permissions set for the extension with
   // |extension_id|. The new granted permissions set will be the union of
   // |permissions| and the already granted permissions.
   void AddGrantedPermissions(const std::string& extension_id,
-                             const PermissionSet* permissions);
+                             const PermissionSet& permissions);
 
   // As above, but subtracts the given |permissions| from the granted set.
   void RemoveGrantedPermissions(const std::string& extension_id,
-                                const PermissionSet* permissions);
+                                const PermissionSet& permissions);
 
   // Gets the active permission set for the specified extension. This may
   // differ from the permissions in the manifest due to the optional
   // permissions API. This passes ownership of the set to the caller.
-  PermissionSet* GetActivePermissions(const std::string& extension_id) const;
+  scoped_ptr<const PermissionSet> GetActivePermissions(
+      const std::string& extension_id) const;
 
   // Sets the active |permissions| for the extension with |extension_id|.
   void SetActivePermissions(const std::string& extension_id,
-                            const PermissionSet* permissions);
+                            const PermissionSet& permissions);
 
   // Records whether or not this extension is currently running.
   void SetExtensionRunning(const std::string& extension_id, bool is_running);
@@ -593,14 +605,15 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
 
   // Interprets |pref_key| in |extension_id|'s preferences as an
   // PermissionSet, and passes ownership of the set to the caller.
-  PermissionSet* ReadPrefAsPermissionSet(const std::string& extension_id,
-                                         const std::string& pref_key) const;
+  scoped_ptr<const PermissionSet> ReadPrefAsPermissionSet(
+      const std::string& extension_id,
+      const std::string& pref_key) const;
 
   // Converts the |new_value| to its value and sets the |pref_key| pref
   // belonging to |extension_id|.
   void SetExtensionPrefPermissionSet(const std::string& extension_id,
                                      const std::string& pref_key,
-                                     const PermissionSet* new_value);
+                                     const PermissionSet& new_value);
 
   // Returns an immutable dictionary for extension |id|'s prefs, or NULL if it
   // doesn't exist.

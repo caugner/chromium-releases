@@ -45,14 +45,15 @@ DataReductionProxyService::DataReductionProxyService(
                             base::Bind(&DBDataOwner::InitializeOnDBThread,
                                        db_data_owner_->GetWeakPtr()));
   if (prefs_) {
-    compression_stats_.reset(new DataReductionProxyCompressionStats(
-        this, prefs_, ui_task_runner, commit_delay));
+    compression_stats_.reset(
+        new DataReductionProxyCompressionStats(this, prefs_, commit_delay));
   }
   event_store_.reset(new DataReductionProxyEventStore());
 }
 
 DataReductionProxyService::~DataReductionProxyService() {
   DCHECK(CalledOnValidThread());
+  compression_stats_.reset();
   db_task_runner_->DeleteSoon(FROM_HERE, db_data_owner_.release());
 }
 
@@ -76,8 +77,6 @@ void DataReductionProxyService::SetIOData(
               io_data_, config_value));
     }
   }
-
-  InitializeLoFiPrefs();
 }
 
 void DataReductionProxyService::Shutdown() {
@@ -93,8 +92,8 @@ void DataReductionProxyService::EnableCompressionStatisticsLogging(
   DCHECK(!compression_stats_);
   DCHECK(!prefs_);
   prefs_ = prefs;
-  compression_stats_.reset(new DataReductionProxyCompressionStats(
-      this, prefs_, ui_task_runner, commit_delay));
+  compression_stats_.reset(
+      new DataReductionProxyCompressionStats(this, prefs_, commit_delay));
 }
 
 void DataReductionProxyService::UpdateContentLengths(
@@ -163,72 +162,70 @@ void DataReductionProxyService::SetLoFiModeOff() {
 
 void DataReductionProxyService::InitializeLoFiPrefs() {
   DCHECK(CalledOnValidThread());
-  if (prefs_) {
-    int lo_fi_user_requests_for_images_per_session =
-        params::GetFieldTrialParameterAsInteger(
-            params::GetLoFiFieldTrialName(), "load_images_requests_per_session",
-            3, 0);
+  if (!prefs_)
+    return;
 
-    int lo_fi_implicit_opt_out_epoch = params::GetFieldTrialParameterAsInteger(
-        params::GetLoFiFieldTrialName(), "implicit_opt_out_epoch", 0, 0);
+  int lo_fi_user_requests_for_images_per_session =
+      params::GetFieldTrialParameterAsInteger(
+          params::GetLoFiFieldTrialName(), "load_images_requests_per_session",
+          3, 0);
 
-    int lo_fi_consecutive_session_disables =
-        params::GetFieldTrialParameterAsInteger(params::GetLoFiFieldTrialName(),
-                                                "consecutive_session_disables",
-                                                3, 0);
+  int lo_fi_implicit_opt_out_epoch = params::GetFieldTrialParameterAsInteger(
+      params::GetLoFiFieldTrialName(), "implicit_opt_out_epoch", 0, 0);
 
-    // Record if Lo-Fi was used during the last session. Do not record if Lo-Fi
-    // was enabled as a result of a command-line flag.
-    if (params::IsLoFiAlwaysOnViaFlags() ||
-        params::IsLoFiCellularOnlyViaFlags() ||
-        params::IsLoFiDisabledViaFlags()) {
-      // Don't record the session state.
-    } else if (prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables) >=
-               lo_fi_consecutive_session_disables) {
-      RecordLoFiSessionState(LO_FI_SESSION_STATE_OPTED_OUT);
-    } else if (prefs_->GetInteger(prefs::kLoFiLoadImagesPerSession) >=
-               lo_fi_user_requests_for_images_per_session) {
-      DCHECK(prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession));
-      DCHECK_GT(prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables), 0);
-      // Consider the session as temporary opt out only if the number of
-      // requests for images were more than the threshold.
-      RecordLoFiSessionState(LO_FI_SESSION_STATE_TEMPORARILY_OPTED_OUT);
-    } else if (prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession)) {
-      RecordLoFiSessionState(LO_FI_SESSION_STATE_USED);
-    } else {
-      DCHECK(!prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession));
-      RecordLoFiSessionState(LO_FI_SESSION_STATE_NOT_USED);
-    }
+  int lo_fi_consecutive_session_disables =
+      params::GetFieldTrialParameterAsInteger(params::GetLoFiFieldTrialName(),
+                                              "consecutive_session_disables", 3,
+                                              0);
 
-    if (prefs_->GetInteger(prefs::kLoFiImplicitOptOutEpoch) <
-        lo_fi_implicit_opt_out_epoch) {
-      // We have a new implicit opt out epoch, reset the consecutive session
-      // disables count so that Lo-Fi can be enabled again.
-      prefs_->SetInteger(prefs::kLoFiConsecutiveSessionDisables, 0);
-      prefs_->SetInteger(prefs::kLoFiImplicitOptOutEpoch,
-                         lo_fi_implicit_opt_out_epoch);
-      settings_->RecordLoFiImplicitOptOutAction(
-          LO_FI_OPT_OUT_ACTION_NEXT_EPOCH);
-    } else if (!params::IsLoFiAlwaysOnViaFlags() &&
-               (prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables) >=
-                lo_fi_consecutive_session_disables)) {
-      // If Lo-Fi isn't always on and and the number of
-      // |consecutive_session_disables| has been met, turn Lo-Fi off for this
-      // session.
-      SetLoFiModeOff();
-    } else if (prefs_->GetInteger(prefs::kLoFiLoadImagesPerSession) <
-                   lo_fi_user_requests_for_images_per_session &&
-               prefs_->GetInteger(prefs::kLoFiSnackbarsShownPerSession) >=
-                   lo_fi_user_requests_for_images_per_session) {
-      // If the last session didn't have
-      // |lo_fi_user_requests_for_images_per_session|, but the user saw at least
-      // that many "Load image" snackbars, reset the consecutive sessions count.
-      prefs_->SetInteger(prefs::kLoFiConsecutiveSessionDisables, 0);
-    }
-    prefs_->SetInteger(prefs::kLoFiLoadImagesPerSession, 0);
-    prefs_->SetInteger(prefs::kLoFiSnackbarsShownPerSession, 0);
-    prefs_->SetBoolean(prefs::kLoFiWasUsedThisSession, false);
+  // Record if Lo-Fi was used during the last session. Do not record if the
+  // Data Reduction Proxy is disabled.
+  if (!settings_->IsDataReductionProxyEnabled()) {
+    // Don't record the session state.
+  } else if (prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables) >=
+             lo_fi_consecutive_session_disables) {
+    RecordLoFiSessionState(LO_FI_SESSION_STATE_OPTED_OUT);
+  } else if (prefs_->GetInteger(prefs::kLoFiLoadImagesPerSession) >=
+             lo_fi_user_requests_for_images_per_session) {
+    DCHECK(prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession));
+    DCHECK_GT(prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables), 0);
+    // Consider the session as temporary opt out only if the number of
+    // requests for images were more than the threshold.
+    RecordLoFiSessionState(LO_FI_SESSION_STATE_TEMPORARILY_OPTED_OUT);
+  } else if (prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession)) {
+    RecordLoFiSessionState(LO_FI_SESSION_STATE_USED);
+  } else {
+    DCHECK(!prefs_->GetBoolean(prefs::kLoFiWasUsedThisSession));
+    RecordLoFiSessionState(LO_FI_SESSION_STATE_NOT_USED);
   }
+
+  if (prefs_->GetInteger(prefs::kLoFiImplicitOptOutEpoch) <
+      lo_fi_implicit_opt_out_epoch) {
+    // We have a new implicit opt out epoch, reset the consecutive session
+    // disables count so that Lo-Fi can be enabled again.
+    prefs_->SetInteger(prefs::kLoFiConsecutiveSessionDisables, 0);
+    prefs_->SetInteger(prefs::kLoFiImplicitOptOutEpoch,
+                       lo_fi_implicit_opt_out_epoch);
+    settings_->RecordLoFiImplicitOptOutAction(LO_FI_OPT_OUT_ACTION_NEXT_EPOCH);
+  } else if (!params::IsLoFiAlwaysOnViaFlags() &&
+             (prefs_->GetInteger(prefs::kLoFiConsecutiveSessionDisables) >=
+              lo_fi_consecutive_session_disables)) {
+    // If Lo-Fi isn't always on and and the number of
+    // |consecutive_session_disables| has been met, turn Lo-Fi off for this
+    // session.
+    SetLoFiModeOff();
+  } else if (prefs_->GetInteger(prefs::kLoFiLoadImagesPerSession) <
+                 lo_fi_user_requests_for_images_per_session &&
+             prefs_->GetInteger(prefs::kLoFiSnackbarsShownPerSession) >=
+                 lo_fi_user_requests_for_images_per_session) {
+    // If the last session didn't have
+    // |lo_fi_user_requests_for_images_per_session|, but the user saw at least
+    // that many "Load image" snackbars, reset the consecutive sessions count.
+    prefs_->SetInteger(prefs::kLoFiConsecutiveSessionDisables, 0);
+  }
+  prefs_->SetInteger(prefs::kLoFiLoadImagesPerSession, 0);
+  prefs_->SetInteger(prefs::kLoFiSnackbarsShownPerSession, 0);
+  prefs_->SetBoolean(prefs::kLoFiWasUsedThisSession, false);
 }
 
 void DataReductionProxyService::RecordLoFiSessionState(LoFiSessionState state) {
@@ -259,15 +256,27 @@ void DataReductionProxyService::SetProxyPrefs(bool enabled, bool at_startup) {
                             enabled, at_startup));
 }
 
+void DataReductionProxyService::LoadHistoricalDataUsage(
+    const HistoricalDataUsageCallback& load_data_usage_callback) {
+  scoped_ptr<std::vector<DataUsageBucket>> data_usage(
+      new std::vector<DataUsageBucket>());
+  std::vector<DataUsageBucket>* data_usage_ptr = data_usage.get();
+  db_task_runner_->PostTaskAndReply(
+      FROM_HERE, base::Bind(&DBDataOwner::LoadHistoricalDataUsage,
+                            db_data_owner_->GetWeakPtr(),
+                            base::Unretained(data_usage_ptr)),
+      base::Bind(load_data_usage_callback, base::Passed(&data_usage)));
+}
+
 void DataReductionProxyService::LoadCurrentDataUsageBucket(
-    const OnLoadDataUsageBucketCallback& onLoadDataUsageBucket) {
+    const LoadCurrentDataUsageCallback& load_current_data_usage_callback) {
   scoped_ptr<DataUsageBucket> bucket(new DataUsageBucket());
   DataUsageBucket* bucket_ptr = bucket.get();
   db_task_runner_->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&DBDataOwner::LoadCurrentDataUsageBucket,
                  db_data_owner_->GetWeakPtr(), base::Unretained(bucket_ptr)),
-      base::Bind(onLoadDataUsageBucket, base::Passed(&bucket)));
+      base::Bind(load_current_data_usage_callback, base::Passed(&bucket)));
 }
 
 void DataReductionProxyService::StoreCurrentDataUsageBucket(
@@ -276,6 +285,20 @@ void DataReductionProxyService::StoreCurrentDataUsageBucket(
       FROM_HERE,
       base::Bind(&DBDataOwner::StoreCurrentDataUsageBucket,
                  db_data_owner_->GetWeakPtr(), base::Passed(&current)));
+}
+
+void DataReductionProxyService::DeleteHistoricalDataUsage() {
+  db_task_runner_->PostTask(FROM_HERE,
+                            base::Bind(&DBDataOwner::DeleteHistoricalDataUsage,
+                                       db_data_owner_->GetWeakPtr()));
+}
+
+void DataReductionProxyService::DeleteBrowsingHistory(const base::Time& start,
+                                                      const base::Time& end) {
+  DCHECK_LE(start, end);
+  db_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&DBDataOwner::DeleteBrowsingHistory,
+                            db_data_owner_->GetWeakPtr(), start, end));
 }
 
 void DataReductionProxyService::AddObserver(

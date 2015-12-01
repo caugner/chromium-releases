@@ -13,8 +13,6 @@ import android.support.customtabs.ICustomTabsCallback;
 import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
-import org.chromium.base.ThreadUtils;
-
 /** Tests for CustomTabsConnection. */
 public class CustomTabsConnectionTest extends InstrumentationTestCase {
     private CustomTabsConnection mCustomTabsConnection;
@@ -22,27 +20,19 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
     private static final String URL2 = "https://www.android.com";
     private static final String INVALID_SCHEME_URL = "intent://www.google.com";
 
+    private Context mContext;
+
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        Context context = getInstrumentation().getTargetContext().getApplicationContext();
-        mCustomTabsConnection = CustomTabsConnection.getInstance((Application) context);
-        mCustomTabsConnection.resetThrottling(Process.myUid());
+        mContext = getInstrumentation().getTargetContext().getApplicationContext();
+        mCustomTabsConnection = CustomTabsTestUtils.setUpConnection((Application) mContext);
     }
 
     @Override
     protected void tearDown() throws Exception {
         super.tearDown();
-        cleanupSessions();
-    }
-
-    private void cleanupSessions() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mCustomTabsConnection.cleanupAll();
-            }
-        });
+        CustomTabsTestUtils.cleanupSessions(mCustomTabsConnection);
     }
 
     /**
@@ -52,7 +42,7 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
     @SmallTest
     public void testNewSession() {
         assertEquals(false, mCustomTabsConnection.newSession(null));
-        ICustomTabsCallback cb = CustomTabsTestUtils.newDummyCallback();
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
         assertEquals(true, mCustomTabsConnection.newSession(cb));
         assertEquals(false, mCustomTabsConnection.newSession(cb));
     }
@@ -62,9 +52,9 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
      */
     @SmallTest
     public void testSeveralSessions() {
-        ICustomTabsCallback cb = CustomTabsTestUtils.newDummyCallback();
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
         assertEquals(true, mCustomTabsConnection.newSession(cb));
-        ICustomTabsCallback cb2 = CustomTabsTestUtils.newDummyCallback();
+        ICustomTabsCallback cb2 = new CustomTabsTestUtils.DummyCallback();
         assertEquals(true, mCustomTabsConnection.newSession(cb2));
     }
 
@@ -86,7 +76,7 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
             ICustomTabsCallback cb, String url, boolean shouldSucceed) {
         mCustomTabsConnection.warmup(0);
         if (cb == null) {
-            cb = CustomTabsTestUtils.newDummyCallback();
+            cb = new CustomTabsTestUtils.DummyCallback();
             mCustomTabsConnection.newSession(cb);
         }
         boolean succeeded = mCustomTabsConnection.mayLaunchUrl(cb, Uri.parse(url), null, null);
@@ -102,7 +92,7 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
      */
     @SmallTest
     public void testNoMayLaunchUrlWithInvalidSessionId() {
-        assertWarmupAndMayLaunchUrl(CustomTabsTestUtils.newDummyCallback(), URL, false);
+        assertWarmupAndMayLaunchUrl(new CustomTabsTestUtils.DummyCallback(), URL, false);
     }
 
     /**
@@ -133,9 +123,9 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
     @SmallTest
     public void testMultipleMayLaunchUrl() {
         ICustomTabsCallback cb = assertWarmupAndMayLaunchUrl(null, URL, true);
-        mCustomTabsConnection.resetThrottling(Process.myUid());
+        mCustomTabsConnection.resetThrottling(mContext, Process.myUid());
         assertWarmupAndMayLaunchUrl(cb, URL, true);
-        mCustomTabsConnection.resetThrottling(Process.myUid());
+        mCustomTabsConnection.resetThrottling(mContext, Process.myUid());
         assertWarmupAndMayLaunchUrl(cb, URL2, true);
     }
 
@@ -145,7 +135,7 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
     @SmallTest
     public void testForgetsSession() {
         ICustomTabsCallback cb = assertWarmupAndMayLaunchUrl(null, URL, true);
-        cleanupSessions();
+        CustomTabsTestUtils.cleanupSessions(mCustomTabsConnection);
         assertWarmupAndMayLaunchUrl(cb, URL, false);
     }
 
@@ -234,9 +224,9 @@ public class CustomTabsConnectionTest extends InstrumentationTestCase {
     @SmallTest
     public void testThrottlingAcrossSessions() {
         ICustomTabsCallback cb = assertWarmupAndMayLaunchUrl(null, URL, true);
-        mCustomTabsConnection.resetThrottling(Process.myUid());
+        mCustomTabsConnection.resetThrottling(mContext, Process.myUid());
         ICustomTabsCallback cb2 = assertWarmupAndMayLaunchUrl(null, URL, true);
-        mCustomTabsConnection.resetThrottling(Process.myUid());
+        mCustomTabsConnection.resetThrottling(mContext, Process.myUid());
         for (int i = 0; i < 10; i++) {
             mCustomTabsConnection.mayLaunchUrl(cb, Uri.parse(URL), null, null);
         }

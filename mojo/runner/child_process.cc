@@ -20,16 +20,16 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/platform_channel_pair.h"
-#include "mojo/edk/embedder/process_delegate.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
-#include "mojo/edk/embedder/simple_platform_support.h"
 #include "mojo/message_pump/message_pump_mojo.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/core.h"
 #include "mojo/runner/child_process.mojom.h"
 #include "mojo/runner/native_application_support.h"
 #include "mojo/runner/switches.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "third_party/mojo/src/mojo/edk/embedder/platform_channel_pair.h"
+#include "third_party/mojo/src/mojo/edk/embedder/process_delegate.h"
+#include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 #if defined(OS_LINUX) && !defined(OS_ANDROID)
 #include "base/rand_util.h"
@@ -91,6 +91,8 @@ class Blocker {
 class ChildControllerImpl;
 
 // Should be created and initialized on the main thread.
+// TODO(use_chrome_edk)
+//class AppContext : public edk::ProcessDelegate {
 class AppContext : public embedder::ProcessDelegate {
  public:
   AppContext()
@@ -99,7 +101,7 @@ class AppContext : public embedder::ProcessDelegate {
 
   void Init() {
     // Initialize Mojo before starting any threads.
-    embedder::Init(make_scoped_ptr(new embedder::SimplePlatformSupport()));
+    embedder::Init();
 
     // Create and start our I/O thread.
     base::Thread::Options io_thread_options(base::MessageLoop::TYPE_IO, 0);
@@ -287,12 +289,8 @@ int ChildProcessMain() {
   base::NativeLibrary app_library = 0;
   if (command_line.HasSwitch(switches::kChildProcess)) {
     // Load the application library before we engage the sandbox.
-    mojo::shell::NativeApplicationCleanup cleanup =
-        command_line.HasSwitch(switches::kDeleteAfterLoad)
-            ? mojo::shell::NativeApplicationCleanup::DELETE
-            : mojo::shell::NativeApplicationCleanup::DONT_DELETE;
     app_library = mojo::runner::LoadNativeApplication(
-        command_line.GetSwitchValuePath(switches::kChildProcess), cleanup);
+        command_line.GetSwitchValuePath(switches::kChildProcess));
 
 #if defined(OS_LINUX) && !defined(OS_ANDROID)
     if (command_line.HasSwitch(switches::kEnableSandbox)) {

@@ -6,39 +6,35 @@ cr.define('downloads', function() {
   var Toolbar = Polymer({
     is: 'downloads-toolbar',
 
-    /** @param {!downloads.ActionService} actionService */
-    setActionService: function(actionService) {
-      /** @private {!downloads.ActionService} */
-      this.actionService_ = actionService;
+    attached: function() {
+      /** @private {!SearchFieldDelegate} */
+      this.searchFieldDelegate_ = new ToolbarSearchFieldDelegate(this);
+      this.$['search-input'].setDelegate(this.searchFieldDelegate_);
     },
 
     properties: {
       downloadsShowing: {
+        reflectToAttribute: true,
         type: Boolean,
         value: false,
         observer: 'onDownloadsShowingChange_',
-      },
-
-      showingSearch_: {
-        type: Boolean,
-        value: false,
       },
     },
 
     /** @return {boolean} Whether removal can be undone. */
     canUndo: function() {
-      return !this.$['search-term'].shadowRoot.activeElement;
+      return this.$['search-input'] != this.shadowRoot.activeElement;
     },
 
     /** @return {boolean} Whether "Clear all" should be allowed. */
     canClearAll: function() {
-      return !this.$['search-input'].value && this.downloadsShowing;
+      return !this.$['search-input'].getValue() && this.downloadsShowing;
     },
 
     /** @private */
     onClearAllClick_: function() {
       assert(this.canClearAll());
-      this.actionService_.clearAll();
+      downloads.ActionService.getInstance().clearAll();
     },
 
     /** @private */
@@ -46,34 +42,15 @@ cr.define('downloads', function() {
       this.updateClearAll_();
     },
 
-    /** @private */
-    onSearchTermSearch_: function() {
-      this.actionService_.search(this.$['search-input'].value);
+    /** @param {string} searchTerm */
+    onSearchTermSearch: function(searchTerm) {
+      downloads.ActionService.getInstance().search(searchTerm);
       this.updateClearAll_();
     },
 
     /** @private */
-    onSearchTermKeydown_: function(e) {
-      assert(this.showingSearch_);
-      if (e.keyIdentifier == 'U+001B')  // Escape.
-        this.toggleShowingSearch_();
-    },
-
-    /** @private */
     onOpenDownloadsFolderClick_: function() {
-      this.actionService_.openDownloadsFolder();
-    },
-
-    /** @private */
-    toggleShowingSearch_: function() {
-      this.showingSearch_ = !this.showingSearch_;
-
-      if (this.showingSearch_) {
-        this.$['search-input'].focus();
-      } else {
-        this.$['search-input'].value = '';
-        this.onSearchTermSearch_();
-      }
+      downloads.ActionService.getInstance().openDownloadsFolder();
     },
 
     /** @private */
@@ -82,6 +59,24 @@ cr.define('downloads', function() {
       this.$$('paper-menu .clear-all').hidden = !this.canClearAll();
     },
   });
+
+  /**
+   * @constructor
+   * @implements {SearchFieldDelegate}
+   */
+  // TODO(devlin): This is a bit excessive, and it would be better to just have
+  // Toolbar implement SearchFieldDelegate. But for now, we don't know how to
+  // make that happen with closure compiler.
+  function ToolbarSearchFieldDelegate(toolbar) {
+    this.toolbar_ = toolbar;
+  }
+
+  ToolbarSearchFieldDelegate.prototype = {
+    /** @override */
+    onSearchTermSearch: function(searchTerm) {
+      this.toolbar_.onSearchTermSearch(searchTerm);
+    }
+  };
 
   return {Toolbar: Toolbar};
 });

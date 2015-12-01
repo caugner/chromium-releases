@@ -10,7 +10,6 @@
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/ozone/platform/drm/gpu/gbm_buffer_base.h"
-#include "ui/ozone/platform/drm/gpu/screen_manager.h"
 #include "ui/ozone/public/native_pixmap.h"
 
 struct gbm_bo;
@@ -18,6 +17,7 @@ struct gbm_bo;
 namespace ui {
 
 class GbmDevice;
+class GbmSurfaceFactory;
 
 class GbmBuffer : public GbmBufferBase {
  public:
@@ -26,10 +26,15 @@ class GbmBuffer : public GbmBufferBase {
       gfx::BufferFormat format,
       const gfx::Size& size,
       gfx::BufferUsage usage);
+  gfx::BufferUsage GetUsage() const { return usage_; }
 
  private:
-  GbmBuffer(const scoped_refptr<GbmDevice>& gbm, gbm_bo* bo, bool scanout);
+  GbmBuffer(const scoped_refptr<GbmDevice>& gbm,
+            gbm_bo* bo,
+            gfx::BufferUsage usage);
   ~GbmBuffer() override;
+
+  gfx::BufferUsage usage_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmBuffer);
 };
@@ -37,7 +42,7 @@ class GbmBuffer : public GbmBufferBase {
 class GbmPixmap : public NativePixmap {
  public:
   GbmPixmap(const scoped_refptr<GbmBuffer>& buffer,
-            ScreenManager* screen_manager);
+            GbmSurfaceFactory* surface_manager);
   bool Initialize();
   void SetScalingCallback(const ScalingCallback& scaling_callback) override;
   scoped_refptr<NativePixmap> GetScaledPixmap(gfx::Size new_size) override;
@@ -64,7 +69,7 @@ class GbmPixmap : public NativePixmap {
   scoped_refptr<GbmBuffer> buffer_;
   int dma_buf_ = -1;
 
-  ScreenManager* screen_manager_;  // Not owned.
+  GbmSurfaceFactory* surface_manager_;
 
   ScalingCallback scaling_callback_;
 

@@ -8,6 +8,8 @@ import android.Manifest;
 import android.annotation.TargetApi;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
@@ -127,11 +129,11 @@ class Wrappers {
      */
     static class BluetoothLeScannerWrapper {
         private final BluetoothLeScanner mScanner;
-        private final HashMap<ScanCallbackWrapper, ScanCallbackImpl> mCallbacks;
+        private final HashMap<ScanCallbackWrapper, ForwardScanCallbackToWrapper> mCallbacks;
 
         public BluetoothLeScannerWrapper(BluetoothLeScanner scanner) {
             mScanner = scanner;
-            mCallbacks = new HashMap<ScanCallbackWrapper, ScanCallbackImpl>();
+            mCallbacks = new HashMap<ScanCallbackWrapper, ForwardScanCallbackToWrapper>();
         }
 
         public void startScan(
@@ -139,30 +141,31 @@ class Wrappers {
             ScanSettings settings =
                     new ScanSettings.Builder().setScanMode(scanSettingsScanMode).build();
 
-            ScanCallbackImpl callbackImpl = new ScanCallbackImpl(callback);
-            mCallbacks.put(callback, callbackImpl);
+            ForwardScanCallbackToWrapper callbackForwarder =
+                    new ForwardScanCallbackToWrapper(callback);
+            mCallbacks.put(callback, callbackForwarder);
 
-            mScanner.startScan(filters, settings, callbackImpl);
+            mScanner.startScan(filters, settings, callbackForwarder);
         }
 
         public void stopScan(ScanCallbackWrapper callback) {
-            ScanCallbackImpl callbackImpl = mCallbacks.remove(callback);
-            mScanner.stopScan(callbackImpl);
+            ForwardScanCallbackToWrapper callbackForwarder = mCallbacks.remove(callback);
+            mScanner.stopScan(callbackForwarder);
         }
     }
 
     /**
-     * Implements android.bluetooth.le.ScanCallback and passes calls through to a
+     * Implements android.bluetooth.le.ScanCallback and forwards calls through to a
      * provided ScanCallbackWrapper instance.
      *
      * This class is required so that Fakes can use ScanCallbackWrapper without
      * it extending from ScanCallback. Fakes must function even on Android
      * versions where ScanCallback class is not defined.
      */
-    static class ScanCallbackImpl extends ScanCallback {
+    static class ForwardScanCallbackToWrapper extends ScanCallback {
         final ScanCallbackWrapper mWrapperCallback;
 
-        ScanCallbackImpl(ScanCallbackWrapper wrapperCallback) {
+        ForwardScanCallbackToWrapper(ScanCallbackWrapper wrapperCallback) {
             mWrapperCallback = wrapperCallback;
         }
 
@@ -225,6 +228,12 @@ class Wrappers {
             mDevice = device;
         }
 
+        public BluetoothGattWrapper connectGatt(
+                Context context, boolean autoConnect, BluetoothGattCallbackWrapper callback) {
+            return new BluetoothGattWrapper(mDevice.connectGatt(
+                    context, autoConnect, new ForwardBluetoothGattCallbackToWrapper(callback)));
+        }
+
         public String getAddress() {
             return mDevice.getAddress();
         }
@@ -240,5 +249,53 @@ class Wrappers {
         public String getName() {
             return mDevice.getName();
         }
+    }
+
+    /**
+     * Wraps android.bluetooth.BluetoothGatt.
+     */
+    static class BluetoothGattWrapper {
+        private final BluetoothGatt mGatt;
+
+        BluetoothGattWrapper(BluetoothGatt gatt) {
+            mGatt = gatt;
+        }
+
+        public void disconnect() {
+            mGatt.disconnect();
+        }
+    }
+
+    /**
+     * Implements android.bluetooth.BluetoothGattCallback and forwards calls through
+     * to a provided BluetoothGattCallbackWrapper instance.
+     *
+     * This class is required so that Fakes can use BluetoothGattCallbackWrapper
+     * without it extending from BluetoothGattCallback. Fakes must function even on
+     * Android versions where BluetoothGattCallback class is not defined.
+     */
+    static class ForwardBluetoothGattCallbackToWrapper extends BluetoothGattCallback {
+        final BluetoothGattCallbackWrapper mWrapperCallback;
+
+        ForwardBluetoothGattCallbackToWrapper(BluetoothGattCallbackWrapper wrapperCallback) {
+            mWrapperCallback = wrapperCallback;
+        }
+
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            mWrapperCallback.onConnectionStateChange(status, newState);
+        }
+    }
+
+    /**
+     * Wrapper alternative to android.bluetooth.BluetoothGattCallback allowing clients and Fakes to
+     * work on older SDK versions without having a dependency on the class not defined there.
+     *
+     * BluetoothGatt gatt parameters are omitted from methods as each call would
+     * need to wrap them in a BluetoothGattWrapper. Client code should cache the
+     * BluetoothGattWrapper provided on the initial BluetoothDeviceWrapper.connectGatt call.
+     */
+    abstract static class BluetoothGattCallbackWrapper {
+        public abstract void onConnectionStateChange(int status, int newState);
     }
 }

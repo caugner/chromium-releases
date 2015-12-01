@@ -25,6 +25,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_network_controller.h"
@@ -34,7 +35,6 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/media/media_device_id_salt.h"
 #include "chrome/browser/net/chrome_http_user_agent_settings.h"
-#include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/net/cookie_store_util.h"
@@ -56,6 +56,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/dom_distiller/core/url_constants.h"
+#include "components/net_log/chrome_net_log.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,6 +64,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_context.h"
 #include "net/base/keygen_handler.h"
+#include "net/base/network_quality_estimator.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/http/http_transaction_factory.h"
@@ -79,6 +81,7 @@
 #include "net/url_request/ftp_protocol_handler.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -114,6 +117,9 @@
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/certificate_provider/certificate_provider.h"
+#include "chrome/browser/chromeos/certificate_provider/certificate_provider_service.h"
+#include "chrome/browser/chromeos/certificate_provider/certificate_provider_service_factory.h"
 #include "chrome/browser/chromeos/fileapi/external_file_protocol_handler.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
@@ -379,7 +385,8 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->io_thread = g_browser_process->io_thread();
 
   params->cookie_settings = CookieSettingsFactory::GetForProfile(profile);
-  params->host_content_settings_map = profile->GetHostContentSettingsMap();
+  params->host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
   params->ssl_config_service = profile->GetSSLConfigService();
 
 #if defined(ENABLE_EXTENSIONS)
@@ -412,9 +419,8 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
         new_tab_interceptor_service->CreateInterceptor();
   }
 
-  params->proxy_config_service
-      .reset(ProxyServiceFactory::CreateProxyConfigService(
-           profile->GetProxyConfigTracker()));
+  params->proxy_config_service = ProxyServiceFactory::CreateProxyConfigService(
+      profile->GetProxyConfigTracker());
 #if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
@@ -449,6 +455,14 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
           connector->GetUserAffiliation(user->email()) ==
           policy::USER_AFFILIATION_MANAGED;
     }
+  }
+
+  chromeos::CertificateProviderService* cert_provider_service =
+      chromeos::CertificateProviderServiceFactory::GetForBrowserContext(
+          profile);
+  if (cert_provider_service) {
+    params->certificate_provider =
+        cert_provider_service->CreateCertificateProvider();
   }
 #endif
 
@@ -741,7 +755,7 @@ void ProfileIOData::InstallProtocolHandlers(
        it != protocol_handlers->end();
        ++it) {
     bool set_protocol = job_factory->SetProtocolHandler(
-        it->first, it->second.release());
+        it->first, make_scoped_ptr(it->second.release()));
     DCHECK(set_protocol);
   }
   protocol_handlers->clear();
@@ -873,7 +887,7 @@ void ProfileIOData::InitializeMetricsEnabledStateOnUIThread() {
 #else
   // Prep the PrefMember and send it to the IO thread, since this value will be
   // read from there.
-  enable_metrics_.Init(prefs::kMetricsReportingEnabled,
+  enable_metrics_.Init(metrics::prefs::kMetricsReportingEnabled,
                        g_browser_process->local_state());
   enable_metrics_.MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
@@ -937,6 +951,8 @@ ProfileIOData::ResourceContext::CreateClientCertStore() {
     return io_data_->client_cert_store_factory_.Run();
 #if defined(OS_CHROMEOS)
   return scoped_ptr<net::ClientCertStore>(new chromeos::ClientCertStoreChromeOS(
+      io_data_->certificate_provider_ ? io_data_->certificate_provider_->Copy()
+                                      : nullptr,
       make_scoped_ptr(new chromeos::ClientCertFilterChromeOS(
           io_data_->use_system_key_slot(), io_data_->username_hash())),
       base::Bind(&CreateCryptoModuleBlockingPasswordDelegate,
@@ -949,11 +965,11 @@ ProfileIOData::ResourceContext::CreateClientCertStore() {
   return scoped_ptr<net::ClientCertStore>(new net::ClientCertStoreWin());
 #elif defined(OS_MACOSX)
   return scoped_ptr<net::ClientCertStore>(new net::ClientCertStoreMac());
-#elif defined(USE_OPENSSL)
-  // OpenSSL does not use the ClientCertStore infrastructure. On Android client
+#elif defined(OS_ANDROID)
+  // Android does not use the ClientCertStore infrastructure. On Android client
   // cert matching is done by the OS as part of the call to show the cert
   // selection dialog.
-  return scoped_ptr<net::ClientCertStore>();
+  return nullptr;
 #else
 #error Unknown platform.
 #endif
@@ -1054,14 +1070,12 @@ void ProfileIOData::Init(
 
   // NOTE: Proxy service uses the default io thread network delegate, not the
   // delegate just created.
-  proxy_service_.reset(
-      ProxyServiceFactory::CreateProxyService(
-          io_thread->net_log(),
-          io_thread_globals->proxy_script_fetcher_context.get(),
-          io_thread_globals->system_network_delegate.get(),
-          profile_params_->proxy_config_service.release(),
-          command_line,
-          quick_check_enabled_.GetValue()));
+  proxy_service_ = ProxyServiceFactory::CreateProxyService(
+      io_thread->net_log(),
+      io_thread_globals->proxy_script_fetcher_context.get(),
+      io_thread_globals->system_network_delegate.get(),
+      profile_params_->proxy_config_service.Pass(), command_line,
+      quick_check_enabled_.GetValue());
   transport_security_state_.reset(new net::TransportSecurityState());
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   transport_security_persister_.reset(
@@ -1102,6 +1116,8 @@ void ProfileIOData::Init(
   use_system_key_slot_ = profile_params_->use_system_key_slot;
   if (use_system_key_slot_)
     EnableNSSSystemKeySlotForResourceContext(resource_context_.get());
+
+  certificate_provider_ = profile_params_->certificate_provider.Pass();
 #endif
 
   if (g_cert_verifier_for_testing) {
@@ -1160,10 +1176,10 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
   // ProfileIOData::IsHandledProtocol().
   bool set_protocol = job_factory->SetProtocolHandler(
       url::kFileScheme,
-      new net::FileProtocolHandler(
-          content::BrowserThread::GetBlockingPool()->
-              GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+      make_scoped_ptr(new net::FileProtocolHandler(
+          content::BrowserThread::GetBlockingPool()
+              ->GetTaskRunnerWithShutdownBehavior(
+                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN))));
   DCHECK(set_protocol);
 
 #if defined(ENABLE_EXTENSIONS)
@@ -1181,13 +1197,14 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
   DCHECK(set_protocol);
 #endif
   set_protocol = job_factory->SetProtocolHandler(
-      url::kDataScheme, new net::DataProtocolHandler());
+      url::kDataScheme, make_scoped_ptr(new net::DataProtocolHandler()));
   DCHECK(set_protocol);
 #if defined(OS_CHROMEOS)
   if (profile_params_) {
     set_protocol = job_factory->SetProtocolHandler(
         content::kExternalFileScheme,
-        new chromeos::ExternalFileProtocolHandler(profile_params_->profile));
+        make_scoped_ptr(new chromeos::ExternalFileProtocolHandler(
+            profile_params_->profile)));
     DCHECK(set_protocol);
   }
 #endif  // defined(OS_CHROMEOS)
@@ -1195,18 +1212,19 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
   set_protocol = job_factory->SetProtocolHandler(
       url::kContentScheme,
       content::ContentProtocolHandler::Create(
-          content::BrowserThread::GetBlockingPool()->
-              GetTaskRunnerWithShutdownBehavior(
+          content::BrowserThread::GetBlockingPool()
+              ->GetTaskRunnerWithShutdownBehavior(
                   base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
 #endif
 
-  job_factory->SetProtocolHandler(url::kAboutScheme,
-                                  new about_handler::AboutProtocolHandler());
+  job_factory->SetProtocolHandler(
+      url::kAboutScheme,
+      make_scoped_ptr(new about_handler::AboutProtocolHandler()));
 #if !defined(DISABLE_FTP_SUPPORT)
   DCHECK(ftp_transaction_factory);
   job_factory->SetProtocolHandler(
       url::kFtpScheme,
-      new net::FtpProtocolHandler(ftp_transaction_factory));
+      make_scoped_ptr(new net::FtpProtocolHandler(ftp_transaction_factory)));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
 #if defined(DEBUG_DEVTOOLS)
@@ -1292,19 +1310,14 @@ scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
   IOThread* const io_thread = profile_params->io_thread;
 
   io_thread->InitializeNetworkSessionParams(&params);
+  net::URLRequestContextBuilder::SetHttpNetworkSessionComponents(context,
+                                                                 &params);
 
-  params.host_resolver = context->host_resolver();
-  params.cert_verifier = context->cert_verifier();
-  params.channel_id_service = context->channel_id_service();
-  params.transport_security_state = context->transport_security_state();
-  params.cert_transparency_verifier = context->cert_transparency_verifier();
-  params.proxy_service = context->proxy_service();
   params.ssl_session_cache_shard = GetSSLSessionCacheShard();
-  params.ssl_config_service = context->ssl_config_service();
-  params.http_auth_handler_factory = context->http_auth_handler_factory();
-  params.network_delegate = context->network_delegate();
-  params.http_server_properties = context->http_server_properties();
-  params.net_log = context->net_log();
+  if (!IsOffTheRecord()) {
+    params.socket_performance_watcher_factory =
+        io_thread->globals()->network_quality_estimator.get();
+  }
   if (data_reduction_proxy_io_data_.get())
     params.proxy_delegate = data_reduction_proxy_io_data_->proxy_delegate();
 

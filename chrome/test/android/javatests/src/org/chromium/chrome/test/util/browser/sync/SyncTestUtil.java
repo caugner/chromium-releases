@@ -36,7 +36,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -230,7 +229,7 @@ public final class SyncTestUtil {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                result.set(ProfileSyncService.get(context).getLastSyncedTimeForTest());
+                result.set(ProfileSyncService.get().getLastSyncedTimeForTest());
                 s.release();
             }
         });
@@ -243,16 +242,10 @@ public final class SyncTestUtil {
      */
     public static void waitForSyncActive(final Context context) throws InterruptedException {
         Assert.assertTrue("Timed out waiting for sync to become active.",
-                CriteriaHelper.pollForCriteria(new Criteria() {
+                CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
                     @Override
                     public boolean isSatisfied() {
-                        return ThreadUtils.runOnUiThreadBlockingNoException(
-                                new Callable<Boolean>() {
-                                    @Override
-                                    public Boolean call() throws Exception {
-                                        return ProfileSyncService.get(context).isSyncActive();
-                                    }
-                                });
+                        return ProfileSyncService.get().isSyncActive();
                     }
                 }, SYNC_WAIT_TIMEOUT_MS, SYNC_CHECK_INTERVAL_MS));
     }
@@ -328,7 +321,7 @@ public final class SyncTestUtil {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                result.set(ProfileSyncService.get(context).hasKeepEverythingSynced());
+                result.set(ProfileSyncService.get().hasKeepEverythingSynced());
             }
         });
         return result.get();
@@ -366,7 +359,7 @@ public final class SyncTestUtil {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                ProfileSyncService.get(context).getAllNodes(callback);
+                ProfileSyncService.get().getAllNodes(callback);
             }
         });
 
@@ -491,7 +484,7 @@ public final class SyncTestUtil {
 
         @Override
         public void run() {
-            String info = ProfileSyncService.get(mContext).getSyncInternalsInfoForTest();
+            String info = ProfileSyncService.get().getSyncInternalsInfoForTest();
             try {
                 mAboutInfo = getAboutInfoStats(info);
             } catch (JSONException e) {

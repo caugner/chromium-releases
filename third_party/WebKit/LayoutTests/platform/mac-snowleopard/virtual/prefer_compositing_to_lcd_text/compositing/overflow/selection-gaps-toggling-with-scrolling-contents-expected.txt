@@ -31,11 +31,7 @@ Lorem Ipsum
               "children": [
                 {
                   "bounds": [285, 665],
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },
@@ -139,10 +135,10 @@ Lorem Ipsum
 *** iteration 2: ***
 
 {
-  "bounds": [785, 2481],
+  "bounds": [785, 2421],
   "children": [
     {
-      "bounds": [785, 2481],
+      "bounds": [785, 2421],
       "contentsOpaque": true,
       "drawsContent": true,
       "children": [
@@ -158,12 +154,8 @@ Lorem Ipsum
               "children": [
                 {
                   "bounds": [285, 665],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -267,10 +259,10 @@ Lorem Ipsum
 *** iteration 3: ***
 
 {
-  "bounds": [785, 4401],
+  "bounds": [785, 4281],
   "children": [
     {
-      "bounds": [785, 4401],
+      "bounds": [785, 4281],
       "contentsOpaque": true,
       "drawsContent": true,
       "children": [
@@ -286,12 +278,8 @@ Lorem Ipsum
               "children": [
                 {
                   "bounds": [285, 665],
-                  "drawsContent": true,
-                  "children": [
-                    {
-
-                    }
-                  ]
+                  "shouldFlattenTransform": false,
+                  "drawsContent": true
                 }
               ]
             },
@@ -395,10 +383,10 @@ Lorem Ipsum
 *** iteration 4: ***
 
 {
-  "bounds": [785, 6321],
+  "bounds": [785, 6141],
   "children": [
     {
-      "bounds": [785, 6321],
+      "bounds": [785, 6141],
       "contentsOpaque": true,
       "drawsContent": true,
       "children": [
@@ -412,13 +400,7 @@ Lorem Ipsum
               "children": [
                 {
                   "bounds": [285, 665],
-                  "children": [
-                    {
-                      "position": [0, 195],
-                      "bounds": [285, 15],
-                      "drawsContent": true
-                    }
-                  ]
+                  "shouldFlattenTransform": false
                 }
               ]
             },

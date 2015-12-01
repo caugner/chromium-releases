@@ -7,6 +7,7 @@
 
 #include <set>
 
+#include "components/mus/public/interfaces/view_tree_host.mojom.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/launch_handler.mojom.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/application_impl.h"
@@ -35,6 +36,9 @@ class BrowserManager : public mojo::ApplicationDelegate,
 
   void BrowserWindowClosed(BrowserWindow* browser);
 
+  // Get the time recorded just before the application message loop was started.
+  const base::Time& startup_time() const { return startup_time_; }
+
  private:
   // Overridden from LaunchHandler:
   void LaunchURL(const mojo::String& url) override;
@@ -49,8 +53,10 @@ class BrowserManager : public mojo::ApplicationDelegate,
               mojo::InterfaceRequest<LaunchHandler> request) override;
 
   mojo::ApplicationImpl* app_;
+  mojo::ViewTreeHostFactoryPtr host_factory_;
   mojo::WeakBindingSet<LaunchHandler> launch_handler_bindings_;
   std::set<BrowserWindow*> browsers_;
+  base::Time startup_time_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserManager);
 };

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -17,12 +18,15 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/filename_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/base/l10n/l10n_util.h"
 
 // -----------------------------------------------------------------------------
 
@@ -39,6 +43,7 @@ class PlatformNotificationServiceBrowserTest : public InProcessBrowserTest {
 
   // InProcessBrowserTest overrides.
   void SetUp() override;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpOnMainThread() override;
   void TearDown() override;
 
@@ -95,6 +100,14 @@ PlatformNotificationServiceBrowserTest::PlatformNotificationServiceBrowserTest()
       // The test server has a base directory that doesn't exist in the
       // filesystem.
       test_page_url_(std::string("files/") + kTestFileName) {
+}
+
+void PlatformNotificationServiceBrowserTest::SetUpCommandLine(
+    base::CommandLine* command_line) {
+  const testing::TestInfo* const test_info =
+      testing::UnitTest::GetInstance()->current_test_info();
+  if (strcmp(test_info->name(), "WebNotificationSiteSettingsButton") == 0)
+    command_line->AppendSwitch(switches::kNotificationSettingsButton);
 }
 
 void PlatformNotificationServiceBrowserTest::SetUp() {
@@ -217,23 +230,66 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        WebNotificationOptionsReflection) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
 
+  // First, test the default values.
+
   std::string script_result;
-  ASSERT_TRUE(RunScript("DisplayPersistentAllOptionsNotification()",
+  ASSERT_TRUE(RunScript("DisplayPersistentNotification('Some title', {})",
                         &script_result));
   EXPECT_EQ("ok", script_result);
 
   ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
 
   // We don't use or check the notification's direction and language.
-  const Notification& notification = ui_manager()->GetNotificationAt(0);
-  EXPECT_EQ("Title", base::UTF16ToUTF8(notification.title()));
-  EXPECT_EQ("Contents", base::UTF16ToUTF8(notification.message()));
-  EXPECT_EQ("replace-id", notification.tag());
-  EXPECT_FALSE(notification.icon().IsEmpty());
-  EXPECT_TRUE(notification.silent());
+  const Notification& default_notification = ui_manager()->GetNotificationAt(0);
+  EXPECT_EQ("Some title", base::UTF16ToUTF8(default_notification.title()));
+  EXPECT_EQ("", base::UTF16ToUTF8(default_notification.message()));
+  EXPECT_EQ("", default_notification.tag());
+  EXPECT_TRUE(default_notification.icon().IsEmpty());
+  EXPECT_FALSE(default_notification.silent());
+  EXPECT_FALSE(default_notification.never_timeout());
 
-  EXPECT_EQ(kIconWidth, notification.icon().Width());
-  EXPECT_EQ(kIconHeight, notification.icon().Height());
+  // Now, test the non-default values.
+
+  ASSERT_TRUE(RunScript("DisplayPersistentAllOptionsNotification()",
+                        &script_result));
+  EXPECT_EQ("ok", script_result);
+
+  ASSERT_EQ(2u, ui_manager()->GetNotificationCount());
+
+  // We don't use or check the notification's direction and language.
+  const Notification& all_options_notification =
+      ui_manager()->GetNotificationAt(1);
+  EXPECT_EQ("Title", base::UTF16ToUTF8(all_options_notification.title()));
+  EXPECT_EQ("Contents", base::UTF16ToUTF8(all_options_notification.message()));
+  EXPECT_EQ("replace-id", all_options_notification.tag());
+  EXPECT_FALSE(all_options_notification.icon().IsEmpty());
+  EXPECT_TRUE(all_options_notification.silent());
+  EXPECT_TRUE(all_options_notification.never_timeout());
+
+  EXPECT_EQ(kIconWidth, all_options_notification.icon().Width());
+  EXPECT_EQ(kIconHeight, all_options_notification.icon().Height());
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
+                       WebNotificationSiteSettingsButton) {
+  ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
+
+  std::string script_result;
+  ASSERT_TRUE(
+      RunScript("DisplayPersistentAllOptionsNotification()", &script_result));
+  EXPECT_EQ("ok", script_result);
+
+  ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
+
+  const Notification& notification = ui_manager()->GetNotificationAt(0);
+  const std::vector<message_center::ButtonInfo>& buttons =
+      notification.buttons();
+  EXPECT_EQ(1u, buttons.size());
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_NOTIFICATION_SETTINGS),
+            buttons[0].title);
+
+  notification.delegate()->ButtonClick(0);
+  ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
@@ -261,7 +317,7 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
 
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotification('action_close')",
-      &script_result));
+                        &script_result));
   EXPECT_EQ("ok", script_result);
 
   ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
@@ -292,20 +348,10 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
             notification.origin_url().spec());
 }
 
+// TODO(felt): This DCHECKs when bubbles are enabled, when the file_url is
+// persisted. crbug.com/502057
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
-                       CheckFilePermissionNotGranted) {
-  // TODO(felt): This DCHECKs when bubbles are enabled, when the file_url is
-  // persisted. crbug.com/502057
-  if (PermissionBubbleManager::Enabled())
-    return;
-
-  // TODO(dewittj): It currently isn't possible to get the notification
-  // permission for a file:// URL. If that changes, this test will fail to
-  // remind the author that the
-  // |PlatformNotificationServiceImpl::WebOriginDisplayName| function needs
-  // to be updated to properly display file:// URL origins.
-  // See crbug.com/402191.
-
+                       DISABLED_CheckFilePermissionNotGranted) {
   // This case should succeed because a normal page URL is used.
   std::string script_result;
 

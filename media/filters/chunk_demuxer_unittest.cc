@@ -16,6 +16,7 @@
 #include "media/base/mock_demuxer_host.h"
 #include "media/base/test_data_util.h"
 #include "media/base/test_helpers.h"
+#include "media/base/timestamp_constants.h"
 #include "media/filters/chunk_demuxer.h"
 #include "media/formats/webm/cluster_builder.h"
 #include "media/formats/webm/webm_constants.h"
@@ -735,8 +736,8 @@ class ChunkDemuxerTest : public ::testing::Test {
   // bear-320x240.webm : [0-501)       [801-2736)
   // bear-640x360.webm :       [527-793)
   //
-  // bear-320x240.webm AudioDecoderConfig returns 3863 for its extra_data_size()
-  // bear-640x360.webm AudioDecoderConfig returns 3935 for its extra_data_size()
+  // bear-320x240.webm AudioDecoderConfig returns 3863 for its extra_data size.
+  // bear-640x360.webm AudioDecoderConfig returns 3935 for its extra_data size.
   // The resulting audio stream returns data from each file for the following
   // time ranges.
   // bear-320x240.webm : [0-524)       [779-2736)
@@ -758,10 +759,8 @@ class ChunkDemuxerTest : public ::testing::Test {
       return false;
 
     // Append the whole bear1 file.
-    // TODO(wolenetz/acolwell): Remove this extra SetDuration expectation once
-    // the files are fixed to have the correct duration in their init segments,
-    // and the CreateInitDoneCB() call, above, is fixed to used that duration.
-    // See http://crbug.com/354284.
+    // Expect duration adjustment since actual duration differs slightly from
+    // duration in the init segment.
     EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2746)));
     AppendData(bear1->data(), bear1->data_size());
     // Last audio frame has timestamp 2721 and duration 24 (estimated from max
@@ -1248,8 +1247,7 @@ TEST_F(ChunkDemuxerTest, Init) {
       EXPECT_EQ(32, config.bits_per_channel());
       EXPECT_EQ(CHANNEL_LAYOUT_STEREO, config.channel_layout());
       EXPECT_EQ(44100, config.samples_per_second());
-      EXPECT_TRUE(config.extra_data());
-      EXPECT_GT(config.extra_data_size(), 0u);
+      EXPECT_GT(config.extra_data().size(), 0u);
       EXPECT_EQ(kSampleFormatPlanarF32, config.sample_format());
       EXPECT_EQ(is_audio_encrypted,
                 audio_stream->audio_decoder_config().is_encrypted());
@@ -1318,8 +1316,7 @@ TEST_F(ChunkDemuxerTest, InitText) {
       EXPECT_EQ(32, config.bits_per_channel());
       EXPECT_EQ(CHANNEL_LAYOUT_STEREO, config.channel_layout());
       EXPECT_EQ(44100, config.samples_per_second());
-      EXPECT_TRUE(config.extra_data());
-      EXPECT_GT(config.extra_data_size(), 0u);
+      EXPECT_GT(config.extra_data().size(), 0u);
       EXPECT_EQ(kSampleFormatPlanarF32, config.sample_format());
       EXPECT_EQ(is_audio_encrypted,
                 audio_stream->audio_decoder_config().is_encrypted());
@@ -1985,9 +1982,8 @@ TEST_F(ChunkDemuxerTest, WebMFile_AudioAndVideo) {
     {kSkip, kSkip},
   };
 
-  // TODO(wolenetz/acolwell): Remove this SetDuration expectation and update the
-  // ParseWebMFile() call's expected duration, below, once the file is fixed to
-  // have the correct duration in the init segment. See http://crbug.com/354284.
+  // Expect duration adjustment since actual duration differs slightly from
+  // duration in the init segment.
   EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2746)));
 
   ASSERT_TRUE(ParseWebMFile("bear-320x240.webm", buffer_timestamps,
@@ -2023,9 +2019,8 @@ TEST_F(ChunkDemuxerTest, WebMFile_AudioOnly) {
     {kSkip, kSkip},
   };
 
-  // TODO(wolenetz/acolwell): Remove this SetDuration expectation and update the
-  // ParseWebMFile() call's expected duration, below, once the file is fixed to
-  // have the correct duration in the init segment. See http://crbug.com/354284.
+  // Expect duration adjustment since actual duration differs slightly from
+  // duration in the init segment.
   EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2746)));
 
   ASSERT_TRUE(ParseWebMFile("bear-320x240-audio-only.webm", buffer_timestamps,
@@ -2043,9 +2038,8 @@ TEST_F(ChunkDemuxerTest, WebMFile_VideoOnly) {
     {kSkip, kSkip},
   };
 
-  // TODO(wolenetz/acolwell): Remove this SetDuration expectation and update the
-  // ParseWebMFile() call's expected duration, below, once the file is fixed to
-  // have the correct duration in the init segment. See http://crbug.com/354284.
+  // Expect duration adjustment since actual duration differs slightly from
+  // duration in the init segment.
   EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2736)));
 
   ASSERT_TRUE(ParseWebMFile("bear-320x240-video-only.webm", buffer_timestamps,
@@ -2891,7 +2885,7 @@ TEST_F(ChunkDemuxerTest, ConfigChange_Audio) {
   const AudioDecoderConfig& audio_config_1 = audio->audio_decoder_config();
   ASSERT_TRUE(audio_config_1.IsValidConfig());
   EXPECT_EQ(audio_config_1.samples_per_second(), 44100);
-  EXPECT_EQ(audio_config_1.extra_data_size(), 3863u);
+  EXPECT_EQ(audio_config_1.extra_data().size(), 3863u);
 
   ExpectRead(DemuxerStream::AUDIO, 0);
 
@@ -2905,7 +2899,7 @@ TEST_F(ChunkDemuxerTest, ConfigChange_Audio) {
   const AudioDecoderConfig& audio_config_2 = audio->audio_decoder_config();
   ASSERT_TRUE(audio_config_2.IsValidConfig());
   EXPECT_EQ(audio_config_2.samples_per_second(), 44100);
-  EXPECT_EQ(audio_config_2.extra_data_size(), 3935u);
+  EXPECT_EQ(audio_config_2.extra_data().size(), 3935u);
 
   // The next config change is from a splice frame representing an overlap of
   // buffers from config 2 by buffers from config 1.
@@ -3028,13 +3022,13 @@ TEST_F(ChunkDemuxerTest, IsParsingMediaSegmentMidMediaSegment) {
   // Confirm we're in the middle of parsing a media segment.
   ASSERT_TRUE(demuxer_->IsParsingMediaSegment(kSourceId));
 
-  demuxer_->Abort(kSourceId,
-                  append_window_start_for_next_append_,
-                  append_window_end_for_next_append_,
-                  &timestamp_offset_map_[kSourceId]);
+  demuxer_->ResetParserState(kSourceId,
+                             append_window_start_for_next_append_,
+                             append_window_end_for_next_append_,
+                             &timestamp_offset_map_[kSourceId]);
 
-  // After Abort(), parsing should no longer be in the middle of a media
-  // segment.
+  // After ResetParserState(), parsing should no longer be in the middle of a
+  // media segment.
   ASSERT_FALSE(demuxer_->IsParsingMediaSegment(kSourceId));
 }
 
@@ -3067,14 +3061,14 @@ TEST_F(ChunkDemuxerTest, EmitBuffersDuringAbort) {
   // Confirm we're in the middle of parsing a media segment.
   ASSERT_TRUE(demuxer_->IsParsingMediaSegment(kSourceId));
 
-  // Abort on the Mpeg2 TS parser triggers the emission of the last video
-  // buffer which is pending in the stream parser.
+  // ResetParserState on the Mpeg2 TS parser triggers the emission of the last
+  // video buffer which is pending in the stream parser.
   Ranges<base::TimeDelta> range_before_abort =
       demuxer_->GetBufferedRanges(kSourceId);
-  demuxer_->Abort(kSourceId,
-                  append_window_start_for_next_append_,
-                  append_window_end_for_next_append_,
-                  &timestamp_offset_map_[kSourceId]);
+  demuxer_->ResetParserState(kSourceId,
+                             append_window_start_for_next_append_,
+                             append_window_end_for_next_append_,
+                             &timestamp_offset_map_[kSourceId]);
   Ranges<base::TimeDelta> range_after_abort =
       demuxer_->GetBufferedRanges(kSourceId);
 
@@ -3115,12 +3109,12 @@ TEST_F(ChunkDemuxerTest, SeekCompleteDuringAbort) {
   // abort.
   Seek(base::TimeDelta::FromMilliseconds(4110));
 
-  // Abort on the Mpeg2 TS parser triggers the emission of the last video
-  // buffer which is pending in the stream parser.
-  demuxer_->Abort(kSourceId,
-                  append_window_start_for_next_append_,
-                  append_window_end_for_next_append_,
-                  &timestamp_offset_map_[kSourceId]);
+  // ResetParserState on the Mpeg2 TS parser triggers the emission of the last
+  // video buffer which is pending in the stream parser.
+  demuxer_->ResetParserState(kSourceId,
+                             append_window_start_for_next_append_,
+                             append_window_end_for_next_append_,
+                             &timestamp_offset_map_[kSourceId]);
 }
 
 #endif
@@ -3682,10 +3676,8 @@ TEST_F(ChunkDemuxerTest, AppendWindow_AudioConfigUpdateRemovesPreroll) {
 
   // Set the append window such that the first file is completely before the
   // append window.
-  // TODO(wolenetz/acolwell): Update this duration once the files are fixed to
-  // have the correct duration in their init segments, and the
-  // CreateInitDoneCB() call, above, is fixed to used that duration. See
-  // http://crbug.com/354284.
+  // Expect duration adjustment since actual duration differs slightly from
+  // duration in the init segment.
   const base::TimeDelta duration_1 = base::TimeDelta::FromMilliseconds(2746);
   append_window_start_for_next_append_ = duration_1;
 

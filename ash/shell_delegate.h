@@ -25,6 +25,10 @@ namespace content {
 class BrowserContext;
 }
 
+namespace gfx {
+class Image;
+}
+
 namespace ui {
 class MenuModel;
 }
@@ -82,6 +86,10 @@ class ASH_EXPORT ShellDelegate {
 
   // Returns true if multi account is enabled.
   virtual bool IsMultiAccountEnabled() const = 0;
+
+  // Returns true if |window| can be shown for the delegate's concept of current
+  // user.
+  virtual bool CanShowWindowForUser(aura::Window* window) const = 0;
 
   // Returns true if the first window shown on first run should be
   // unconditionally maximized, overriding the heuristic that normally chooses
@@ -155,6 +163,10 @@ class ASH_EXPORT ShellDelegate {
 
   // Get the product name.
   virtual base::string16 GetProductName() const = 0;
+
+  virtual void OpenKeyboardShortcutHelpPage() const {}
+
+  virtual gfx::Image GetDeprecatedAcceleratorImage() const = 0;
 };
 
 }  // namespace ash

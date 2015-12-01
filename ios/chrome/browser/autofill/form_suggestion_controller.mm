@@ -236,7 +236,7 @@ AutofillSuggestionState::AutofillSuggestionState(const std::string& form_name,
 - (void)onSuggestionsReady:(NSArray*)suggestions
                   provider:(id<FormSuggestionProvider>)provider {
   // TODO(ios): crbug.com/249916. If we can also pass in the form/field for
-  // which |sugguestions| are, we should check here if |suggestions| are for
+  // which |suggestions| are, we should check here if |suggestions| are for
   // the current active element. If not, reset |_suggestionState|.
   if (!_suggestionState) {
     // The suggestion state was reset in between the call to Autofill API (e.g.
@@ -280,7 +280,7 @@ AutofillSuggestionState::AutofillSuggestionState(const std::string& form_name,
 }
 
 - (UIView*)suggestionViewWithSuggestions:(NSArray*)suggestions {
-  CGRect frame = [_webViewProxy getKeyboardAccessory].frame;
+  CGRect frame = [_webViewProxy keyboardAccessory].frame;
   // Force the desired height on iPads running iOS 9 or later where the height
   // of the inputAccessoryView is 0.
   if (base::ios::IsRunningOnIOS9OrLater() && IsIPadIdiom()) {
@@ -305,10 +305,12 @@ AutofillSuggestionState::AutofillSuggestionState(const std::string& form_name,
                  forField:base::SysUTF8ToNSString(_suggestionState->field_name)
                      form:base::SysUTF8ToNSString(_suggestionState->form_name)
         completionHandler:^{
-          if (autofill::AutofillFieldTrialIOS::IsFullFormAutofillEnabled())
-            [[weakSelf accessoryViewDelegate] closeKeyboard];
-          else
-            [[weakSelf accessoryViewDelegate] selectNextElement];
+          if (autofill::AutofillFieldTrialIOS::IsFullFormAutofillEnabled()) {
+            [[weakSelf accessoryViewDelegate] closeKeyboardWithoutButtonPress];
+          } else {
+            [[weakSelf accessoryViewDelegate]
+                selectNextElementWithoutButtonPress];
+          }
         }];
   _provider = nil;
 }
@@ -363,6 +365,10 @@ AutofillSuggestionState::AutofillSuggestionState(const std::string& form_name,
 
 - (void)resizeAccessoryView {
   [self updateKeyboard:_suggestionState.get()];
+}
+
+- (BOOL)getLogKeyboardAccessoryMetrics {
+  return YES;
 }
 
 @end

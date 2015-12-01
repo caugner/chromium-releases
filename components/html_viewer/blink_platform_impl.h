@@ -19,24 +19,26 @@
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebScrollbarBehavior.h"
 
+namespace mojo {
+class ApplicationImpl;
+}
+
 namespace scheduler {
 class RendererScheduler;
 class WebThreadImplForRendererScheduler;
 }
 
-namespace mojo {
-class ApplicationImpl;
-}
-
 namespace html_viewer {
 
+class GlobalState;
 class WebClipboardImpl;
 class WebCookieJarImpl;
 
 class BlinkPlatformImpl : public blink::Platform {
  public:
   // |app| may be null in tests.
-  BlinkPlatformImpl(mojo::ApplicationImpl* app,
+  BlinkPlatformImpl(GlobalState* global_state,
+                    mojo::ApplicationImpl* app,
                     scheduler::RendererScheduler* renderer_scheduler);
   virtual ~BlinkPlatformImpl();
 
@@ -75,6 +77,17 @@ class BlinkPlatformImpl : public blink::Platform {
   virtual blink::WebScrollbarBehavior* scrollbarBehavior();
   virtual const unsigned char* getTraceCategoryEnabledFlag(
       const char* category_name);
+  virtual blink::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
+      const blink::WebGraphicsContext3D::Attributes& attributes,
+      blink::WebGraphicsContext3D* share_context);
+  virtual blink::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
+      const blink::WebGraphicsContext3D::Attributes& attributes,
+      blink::WebGraphicsContext3D* share_context,
+      blink::WebGLInfo* gl_info);
+  virtual blink::WebGraphicsContext3D* createOffscreenGraphicsContext3D(
+      const blink::WebGraphicsContext3D::Attributes& attributes);
+  virtual blink::WebGraphicsContext3DProvider*
+      createSharedOffscreenGraphicsContext3DProvider();
   virtual blink::WebData loadResource(const char* name);
   virtual blink::WebGestureCurve* createFlingAnimationCurve(
       blink::WebGestureDevice device_source,
@@ -88,6 +101,8 @@ class BlinkPlatformImpl : public blink::Platform {
 
   static void DestroyCurrentThread(void*);
 
+  GlobalState* global_state_;
+  mojo::ApplicationImpl* app_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   scoped_ptr<scheduler::WebThreadImplForRendererScheduler> main_thread_;
   base::ThreadLocalStorage::Slot current_thread_slot_;

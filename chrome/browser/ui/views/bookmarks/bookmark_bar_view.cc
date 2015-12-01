@@ -32,6 +32,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -581,15 +582,6 @@ void BookmarkBarView::SetBookmarkBarState(
   bookmark_bar_state_ = state;
 }
 
-int BookmarkBarView::GetFullyDetachedToolbarOverlap() const {
-  if (!infobar_visible_ && browser_->window()->IsFullscreen()) {
-    // There is no client edge to overlap when detached in fullscreen with no
-    // infobars visible.
-    return 0;
-  }
-  return views::NonClientFrameView::kClientEdgeThickness;
-}
-
 bool BookmarkBarView::is_animating() {
   return size_animation_->is_animating();
 }
@@ -744,7 +736,7 @@ int BookmarkBarView::GetToolbarOverlap() const {
   if (!IsDetached())
     return attached_overlap;
 
-  int detached_overlap = GetFullyDetachedToolbarOverlap();
+  int detached_overlap = views::NonClientFrameView::kClientEdgeThickness;
 
   // Do not animate the overlap when the infobar is above us (i.e. when we're
   // detached), since drawing over the infobar looks weird.
@@ -1027,7 +1019,7 @@ bool BookmarkBarView::GetDropFormats(
   if (!model_ || !model_->loaded())
     return false;
   *formats = ui::OSExchangeData::URL;
-  custom_formats->insert(BookmarkNodeData::GetBookmarkCustomFormat());
+  custom_formats->insert(BookmarkNodeData::GetBookmarkFormatType());
   return true;
 }
 
@@ -1213,9 +1205,8 @@ void BookmarkBarView::OnImportBookmarks() {
   chrome::ShowImportDialog(browser_);
 }
 
-void BookmarkBarView::OnBookmarkBubbleShown(const GURL& url) {
+void BookmarkBarView::OnBookmarkBubbleShown(const BookmarkNode* node) {
   StopThrobbing(true);
-  const BookmarkNode* node = model_->GetMostRecentlyAddedUserNodeForURL(url);
   if (!node)
     return;  // Generally shouldn't happen.
   StartThrobbing(node, false);
@@ -1342,20 +1333,17 @@ void BookmarkBarView::WriteDragDataForView(View* sender,
   for (int i = 0; i < GetBookmarkButtonCount(); ++i) {
     if (sender == GetBookmarkButton(i)) {
       const BookmarkNode* node = model_->bookmark_bar_node()->GetChild(i);
-      const gfx::ImageSkia* icon = nullptr;
+      gfx::ImageSkia icon;
       if (node->is_url()) {
         const gfx::Image& image = model_->GetFavicon(node);
-        icon = image.IsEmpty() ? GetImageSkiaNamed(IDR_DEFAULT_FAVICON)
-                               : image.ToImageSkia();
+        icon = image.IsEmpty() ? *GetImageSkiaNamed(IDR_DEFAULT_FAVICON)
+                               : image.AsImageSkia();
       } else {
-        icon = GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER);
+        icon = chrome::GetBookmarkFolderIcon();
       }
 
-      button_drag_utils::SetDragImage(node->url(),
-                                      node->GetTitle(),
-                                      *icon,
-                                      &press_pt,
-                                      data,
+      button_drag_utils::SetDragImage(node->url(), node->GetTitle(), icon,
+                                      &press_pt, data,
                                       GetBookmarkButton(i)->GetWidget());
       WriteBookmarkDragData(node, data);
       return;
@@ -1624,7 +1612,7 @@ MenuButton* BookmarkBarView::CreateOtherBookmarksButton() {
       new BookmarkFolderButton(this, base::string16(), this, false);
   button->set_id(VIEW_ID_OTHER_BOOKMARKS);
   button->SetImage(views::Button::STATE_NORMAL,
-                   *GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER));
+                   chrome::GetBookmarkFolderIcon());
   button->set_context_menu_controller(this);
   button->set_tag(kOtherFolderButtonTag);
   return button;
@@ -1636,7 +1624,7 @@ MenuButton* BookmarkBarView::CreateManagedBookmarksButton() {
       new BookmarkFolderButton(this, base::string16(), this, false);
   button->set_id(VIEW_ID_MANAGED_BOOKMARKS);
   button->SetImage(views::Button::STATE_NORMAL,
-                   *GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER_MANAGED));
+                   chrome::GetBookmarkManagedFolderIcon());
   button->set_context_menu_controller(this);
   button->set_tag(kManagedFolderButtonTag);
   return button;
@@ -1648,7 +1636,7 @@ MenuButton* BookmarkBarView::CreateSupervisedBookmarksButton() {
       new BookmarkFolderButton(this, base::string16(), this, false);
   button->set_id(VIEW_ID_SUPERVISED_BOOKMARKS);
   button->SetImage(views::Button::STATE_NORMAL,
-                   *GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER_SUPERVISED));
+                   chrome::GetBookmarkSupervisedFolderIcon());
   button->set_context_menu_controller(this);
   button->set_tag(kSupervisedFolderButtonTag);
   return button;
@@ -1686,7 +1674,7 @@ views::View* BookmarkBarView::CreateBookmarkButton(const BookmarkNode* node) {
   views::MenuButton* button =
       new BookmarkFolderButton(this, node->GetTitle(), this, false);
   button->SetImage(views::Button::STATE_NORMAL,
-                   *GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER));
+                   chrome::GetBookmarkFolderIcon());
   ConfigureButton(node, button);
   return button;
 }

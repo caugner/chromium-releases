@@ -54,7 +54,7 @@ class OneClickTestProfileSyncService : public TestProfileSyncService {
         new OneClickTestProfileSyncService(static_cast<Profile*>(profile)));
   }
 
-  bool FirstSetupInProgress() const override {
+  bool IsFirstSetupInProgress() const override {
     return first_setup_in_progress_;
   }
 
@@ -71,8 +71,6 @@ class OneClickTestProfileSyncService : public TestProfileSyncService {
  private:
   explicit OneClickTestProfileSyncService(Profile* profile)
       : TestProfileSyncService(
-          scoped_ptr<ProfileSyncComponentsFactory>(
-              new ProfileSyncComponentsFactoryMock()),
           profile,
           SigninManagerFactory::GetForProfile(profile),
           ProfileOAuth2TokenServiceFactory::GetForProfile(profile),

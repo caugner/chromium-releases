@@ -117,7 +117,8 @@ v8::Local<v8::String> GenerateThumbnailURL(
           "chrome-search://thumb/%d/%d", render_view_id, most_visited_item_id));
 }
 
-v8::Local<v8::String> GenerateThumb2URL(v8::Isolate* isolate, std::string url) {
+v8::Local<v8::String> GenerateThumb2URL(v8::Isolate* isolate,
+                                        const std::string& url) {
   return UTF8ToV8String(
       isolate, base::StringPrintf("chrome-search://thumb2/%s", url.c_str()));
 }
@@ -177,6 +178,16 @@ v8::Local<v8::Object> GenerateMostVisitedItem(
   if (!mv_item.favicon.spec().empty()) {
     obj->Set(v8::String::NewFromUtf8(isolate, "faviconUrl"),
              UTF8ToV8String(isolate, mv_item.favicon.spec()));
+  }
+  // If the suggestion has an impression url, we populate the element with it.
+  if (!mv_item.impression_url.spec().empty()) {
+    obj->Set(v8::String::NewFromUtf8(isolate, "impressionUrl"),
+             UTF8ToV8String(isolate, mv_item.impression_url.spec()));
+  }
+  // If the suggestion has a click url, we populate the element with it.
+  if (!mv_item.click_url.spec().empty()) {
+    obj->Set(v8::String::NewFromUtf8(isolate, "pingUrl"),
+             UTF8ToV8String(isolate, mv_item.click_url.spec()));
   }
 
   if (IsIconNTPEnabled()) {

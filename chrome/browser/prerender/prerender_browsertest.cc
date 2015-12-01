@@ -28,6 +28,7 @@
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
@@ -56,7 +57,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -945,6 +945,7 @@ class RequestCounter : public base::SupportsWeakPtr<RequestCounter> {
 
     EXPECT_EQ(expected_count, count_);
   }
+
  private:
   int count_;
   int expected_count_;
@@ -1006,18 +1007,18 @@ void CreateMockInterceptorOnIO(const GURL& url, const base::FilePath& file) {
 }
 
 // A ContentBrowserClient that cancels all prerenderers on OpenURL.
-class TestContentBrowserClient : public chrome::ChromeContentBrowserClient {
+class TestContentBrowserClient : public ChromeContentBrowserClient {
  public:
   TestContentBrowserClient() {}
   ~TestContentBrowserClient() override {}
 
-  // chrome::ChromeContentBrowserClient implementation.
+  // ChromeContentBrowserClient:
   bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
                           const GURL& url) override {
     PrerenderManagerFactory::GetForProfile(
         Profile::FromBrowserContext(site_instance->GetBrowserContext()))
         ->CancelAllPrerenders();
-    return chrome::ChromeContentBrowserClient::ShouldAllowOpenURL(site_instance,
+    return ChromeContentBrowserClient::ShouldAllowOpenURL(site_instance,
                                                                   url);
   }
 
@@ -1026,13 +1027,12 @@ class TestContentBrowserClient : public chrome::ChromeContentBrowserClient {
 };
 
 // A ContentBrowserClient that forces cross-process navigations.
-class SwapProcessesContentBrowserClient
-    : public chrome::ChromeContentBrowserClient {
+class SwapProcessesContentBrowserClient : public ChromeContentBrowserClient {
  public:
   SwapProcessesContentBrowserClient() {}
   ~SwapProcessesContentBrowserClient() override {}
 
-  // chrome::ChromeContentBrowserClient implementation.
+  // ChromeContentBrowserClient:
   bool ShouldSwapProcessesForRedirect(
       content::ResourceContext* resource_context,
       const GURL& current_url,
@@ -1997,7 +1997,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDelayLoadPlugin) {
 // a page is being preloaded, but are loaded when the page is displayed.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderContentSettingDetect) {
   HostContentSettingsMap* content_settings_map =
-      current_browser()->profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(
+          current_browser()->profile());
   content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
 
@@ -2016,7 +2017,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderContentSettingDetect) {
 // For Content Setting BLOCK, checks that plugins are never loaded.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderContentSettingBlock) {
   HostContentSettingsMap* content_settings_map =
-      current_browser()->profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(
+          current_browser()->profile());
   content_settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
                                                  CONTENT_SETTING_BLOCK);
 

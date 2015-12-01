@@ -16,7 +16,7 @@
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/api/braille_display_private/mock_braille_controller.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -25,6 +25,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/user_names.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -628,7 +629,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest, BrailleWhenLoggedIn) {
   // the IME framework state.
   chromeos::Preferences prefs;
   prefs.InitUserPrefsForTesting(
-      PrefServiceSyncable::FromProfile(GetProfile()),
+      PrefServiceSyncableFromProfile(GetProfile()),
       user_manager::UserManager::Get()->GetActiveUser(),
       UserSessionManager::GetInstance()->GetDefaultIMEState(GetProfile()));
 

@@ -18,6 +18,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service_factory.h"
@@ -26,6 +27,8 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/media/media_device_id_salt.h"
 #include "chrome/browser/net/predictor.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -34,7 +37,6 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/pref_names.h"
@@ -43,6 +45,9 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/browsing_data/storage_partition_http_cache_data_remover.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/domain_reliability/service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/nacl/browser/nacl_browser.h"
@@ -52,6 +57,7 @@
 #include "components/power/origin_power_map.h"
 #include "components/power/origin_power_map_factory.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/sessions/core/tab_restore_service.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
@@ -71,6 +77,7 @@
 #include "url/origin.h"
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/webapps/webapp_registry.h"
 #include "chrome/browser/precache/precache_manager_factory.h"
 #include "components/precache/content/precache_manager.h"
 #endif
@@ -361,7 +368,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     if (remove_url.is_empty()) {
       // We also delete the list of recently closed tabs. Since these expire,
       // they can't be more than a day old, so we can simply clear them all.
-      TabRestoreService* tab_service =
+      sessions::TabRestoreService* tab_service =
           TabRestoreServiceFactory::GetForProfile(profile_);
       if (tab_service) {
         tab_service->ClearEntries();
@@ -435,6 +442,21 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                      base::Unretained(this)));
     }
 #endif
+
+    data_reduction_proxy::DataReductionProxySettings*
+        data_reduction_proxy_settings =
+            DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+                profile_);
+    // |data_reduction_proxy_settings| is null if |profile_| is off the record.
+    if (data_reduction_proxy_settings) {
+      data_reduction_proxy::DataReductionProxyService*
+          data_reduction_proxy_service =
+              data_reduction_proxy_settings->data_reduction_proxy_service();
+      if (data_reduction_proxy_service) {
+        data_reduction_proxy_service->compression_stats()
+            ->DeleteBrowsingHistory(delete_begin_, delete_end_);
+      }
+    }
   }
 
   if ((remove_mask & REMOVE_DOWNLOADS) && may_delete_history) {
@@ -528,6 +550,10 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     storage_partition_remove_mask |=
         content::StoragePartition::REMOVE_DATA_MASK_SERVICE_WORKERS;
   }
+  if (remove_mask & REMOVE_CACHE_STORAGE) {
+    storage_partition_remove_mask |=
+        content::StoragePartition::REMOVE_DATA_MASK_CACHE_STORAGE;
+  }
   if (remove_mask & REMOVE_FILE_SYSTEMS) {
     storage_partition_remove_mask |=
         content::StoragePartition::REMOVE_DATA_MASK_FILE_SYSTEMS;
@@ -554,10 +580,10 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
 #endif
 
   if (remove_mask & REMOVE_SITE_USAGE_DATA || remove_mask & REMOVE_HISTORY) {
-    profile_->GetHostContentSettingsMap()->ClearSettingsForOneType(
-        CONTENT_SETTINGS_TYPE_APP_BANNER);
-    profile_->GetHostContentSettingsMap()->ClearSettingsForOneType(
-        CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT);
+    HostContentSettingsMapFactory::GetForProfile(profile_)
+        ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_APP_BANNER);
+    HostContentSettingsMapFactory::GetForProfile(profile_)
+        ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT);
   }
 
   if (remove_mask & REMOVE_PASSWORDS) {
@@ -756,6 +782,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     }
   }
 
+#if defined(OS_ANDROID)
+  if (remove_mask & REMOVE_WEBAPP_DATA) {
+    waiting_for_clear_webapp_data_ = true;
+    WebappRegistry::UnregisterWebapps(
+        base::Bind(&BrowsingDataRemover::OnClearedWebappData,
+                   base::Unretained(this)));
+  }
+#endif
+
   // Record the combined deletion of cookies and cache.
   CookieOrCacheDeletionChoice choice = NEITHER_COOKIES_NOR_CACHE;
   if (remove_mask & REMOVE_COOKIES &&
@@ -836,6 +871,7 @@ bool BrowsingDataRemover::AllDone() {
          !waiting_for_clear_pnacl_cache_ &&
 #if defined(OS_ANDROID)
          !waiting_for_clear_precache_history_ &&
+         !waiting_for_clear_webapp_data_ &&
 #endif
 #if defined(ENABLE_WEBRTC)
          !waiting_for_clear_webrtc_logs_ &&
@@ -1126,6 +1162,12 @@ void BrowsingDataRemover::OnClearedWebRtcLogs() {
 void BrowsingDataRemover::OnClearedPrecacheHistory() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   waiting_for_clear_precache_history_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::OnClearedWebappData() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  waiting_for_clear_webapp_data_ = false;
   NotifyAndDeleteIfDone();
 }
 #endif

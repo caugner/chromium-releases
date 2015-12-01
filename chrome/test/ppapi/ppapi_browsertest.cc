@@ -5,10 +5,11 @@
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -65,6 +66,7 @@ using content::RenderViewHost;
 
 #define MAYBE_PPAPI_NACL(test_name) DISABLED_##test_name
 
+#define TEST_PPAPI_NACL_NATIVE(test_name)
 #define TEST_PPAPI_NACL(test_name)
 #define TEST_PPAPI_NACL_DISALLOWED_SOCKETS(test_name)
 #define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name)
@@ -74,11 +76,15 @@ using content::RenderViewHost;
 
 #define MAYBE_PPAPI_NACL(test_name) test_name
 
-// NaCl based PPAPI tests
-#define TEST_PPAPI_NACL(test_name) \
+// NaCl based PPAPI tests (direct-to-native NaCl only, no PNaCl)
+#define TEST_PPAPI_NACL_NATIVE(test_name) \
     IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
       RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
-    } \
+    }
+
+// NaCl based PPAPI tests
+#define TEST_PPAPI_NACL(test_name) \
+    TEST_PPAPI_NACL_NATIVE(test_name)                       \
     IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, test_name) { \
       RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
     } \
@@ -143,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Accept) {
   // It should also set a content settings exception for the site.
   GURL url = GetTestFileUrl("Broker_ConnectPermissionGranted");
   HostContentSettingsMap* content_settings =
-      browser()->profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             content_settings->GetContentSetting(
                 url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
@@ -163,7 +169,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Deny) {
   // It should also set a content settings exception for the site.
   GURL url = GetTestFileUrl("Broker_ConnectPermissionDenied");
   HostContentSettingsMap* content_settings =
-      browser()->profile()->GetHostContentSettingsMap();
+      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             content_settings->GetContentSetting(
                 url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
@@ -171,8 +177,9 @@ IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Deny) {
 
 IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Blocked) {
   // Block access to the PPAPI broker.
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PPAPI_BROKER, CONTENT_SETTING_BLOCK);
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
+                                 CONTENT_SETTING_BLOCK);
 
   // We shouldn't see an infobar.
   InfoBarObserver observer(this);
@@ -183,8 +190,9 @@ IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Blocked) {
 
 IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Allowed) {
   // Always allow access to the PPAPI broker.
-  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PPAPI_BROKER, CONTENT_SETTING_ALLOW);
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
+                                 CONTENT_SETTING_ALLOW);
 
   // We shouldn't see an infobar.
   InfoBarObserver observer(this);
@@ -536,6 +544,10 @@ TEST_PPAPI_NACL(DISABLED_Scrollbar)
 TEST_PPAPI_NACL(Var)
 
 TEST_PPAPI_NACL(VarResource)
+
+#if defined(__i386__)
+TEST_PPAPI_NACL_NATIVE(NaClIRTStackAlignment)
+#endif
 
 // PostMessage tests.
 #define RUN_POSTMESSAGE_SUBTESTS \
@@ -1230,6 +1242,7 @@ class PackagedAppTest : public ExtensionBrowserTest {
     LaunchTestingApp(extension_dirname);
     EXPECT_TRUE(listener.WaitUntilSatisfied());
   }
+
  protected:
   std::string toolchain_;
 };

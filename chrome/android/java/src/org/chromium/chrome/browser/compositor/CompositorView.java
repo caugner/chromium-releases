@@ -15,6 +15,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
@@ -36,7 +37,7 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
-import org.chromium.chrome.browser.tabmodel.TabModelBase;
+import org.chromium.chrome.browser.tabmodel.TabModelImpl;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.content.browser.ContentReadbackHandler;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -217,9 +218,9 @@ public class CompositorView
         mLayerTitleCache = layerTitleCache;
         mTabContentManager = tabContentManager;
 
-        mNativeCompositorView =
-                nativeInit(lowMemDevice, getResources().getColor(R.color.tab_switcher_background),
-                        windowAndroid.getNativePointer(), layerTitleCache, tabContentManager);
+        mNativeCompositorView = nativeInit(lowMemDevice,
+                ApiCompatibilityUtils.getColor(getResources(), R.color.tab_switcher_background),
+                windowAndroid.getNativePointer(), layerTitleCache, tabContentManager);
 
         assert !getHolder().getSurface().isValid()
             : "Surface created before native library loaded.";
@@ -379,9 +380,10 @@ public class CompositorView
             useTexture = false;
         }
 
-        nativeUpdateToolbarLayer(mNativeCompositorView, R.id.control_container, offset,
-                provider.getActiveLayout().getToolbarBrightness(), useTexture,
-                forceHideTopControlsAndroidView);
+        nativeUpdateToolbarLayer(mNativeCompositorView, R.id.control_container,
+                mRenderHost.getTopControlsBackgroundColor(), offset,
+                provider.getActiveLayout().getToolbarBrightness(),
+                useTexture, forceHideTopControlsAndroidView);
 
         if (progressBarDrawingInfo == null) return;
         nativeUpdateProgressBar(mNativeCompositorView,
@@ -448,7 +450,7 @@ public class CompositorView
         final LayoutTab[] tabs = layout.getLayoutTabsToRender();
         final int tabsCount = tabs != null ? tabs.length : 0;
         mLastLayerCount = tabsCount;
-        TabModelBase.flushActualTabSwitchLatencyMetric();
+        TabModelImpl.flushActualTabSwitchLatencyMetric();
         nativeFinalizeLayers(mNativeCompositorView);
         TraceEvent.end("CompositorView:finalizeLayers");
     }
@@ -483,7 +485,8 @@ public class CompositorView
             float width, float height, float visibleXOffset, float visibleYOffset,
             float overdrawBottomHeight, float dpToPixel);
     private native void nativeUpdateToolbarLayer(long nativeCompositorView, int resourceId,
-            float topOffset, float brightness, boolean visible, boolean showShadow);
+            int toolbarBackgroundColor, float topOffset, float brightness, boolean visible,
+            boolean showShadow);
     private native void nativeUpdateProgressBar(
             long nativeCompositorView,
             int progressBarX,

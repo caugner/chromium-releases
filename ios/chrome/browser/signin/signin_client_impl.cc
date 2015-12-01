@@ -20,6 +20,7 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/content_settings/cookie_settings_factory.h"
+#include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "ios/chrome/browser/signin/gaia_auth_fetcher_ios.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
 #include "ios/chrome/common/channel_info.h"
@@ -121,12 +122,14 @@ bool SigninClientImpl::AreSigninCookiesAllowed() {
 
 void SigninClientImpl::AddContentSettingsObserver(
     content_settings::Observer* observer) {
-  browser_state_->GetHostContentSettingsMap()->AddObserver(observer);
+  ios::HostContentSettingsMapFactory::GetForBrowserState(browser_state_)
+      ->AddObserver(observer);
 }
 
 void SigninClientImpl::RemoveContentSettingsObserver(
     content_settings::Observer* observer) {
-  browser_state_->GetHostContentSettingsMap()->RemoveObserver(observer);
+  ios::HostContentSettingsMapFactory::GetForBrowserState(browser_state_)
+      ->RemoveObserver(observer);
 }
 
 scoped_ptr<SigninClient::CookieChangedSubscription>
@@ -156,45 +159,6 @@ void SigninClientImpl::OnSignedIn(const std::string& account_id,
     cache->SetAuthInfoOfBrowserStateAtIndex(index, gaia_id,
                                             base::UTF8ToUTF16(username));
   }
-}
-
-// TODO(msarda): http://crbug.com/522454 The account info is seeded by the token
-// service each timea new account is added. Remove the method
-// UpdateAccountInfo| as it is now obsolete.
-bool SigninClientImpl::UpdateAccountInfo(
-    AccountTrackerService::AccountInfo* out_account_info) {
-  DCHECK(!out_account_info->account_id.empty());
-  ProfileOAuth2TokenServiceIOSProvider* provider =
-      ios::GetChromeBrowserProvider()
-          ->GetProfileOAuth2TokenServiceIOSProvider();
-  ProfileOAuth2TokenServiceIOSProvider::AccountInfo account_info;
-  if (!out_account_info->gaia.empty()) {
-    account_info = provider->GetAccountInfoForGaia(out_account_info->gaia);
-  } else if (!out_account_info->email.empty()) {
-    account_info = provider->GetAccountInfoForEmail(out_account_info->email);
-  }
-  if (account_info.gaia.empty()) {
-    // There is no account information for this account, so there is nothing
-    // to be updated here.
-    return false;
-  }
-
-  bool updated = false;
-  if (out_account_info->gaia.empty()) {
-    out_account_info->gaia = account_info.gaia;
-    updated = true;
-  } else if (out_account_info->gaia != account_info.gaia) {
-    // The GAIA id of an account never changes. Avoid updating the wrong
-    // account if this occurs somehow.
-    NOTREACHED() << "out_account_info->gaia = '" << out_account_info->gaia
-                 << "' ; account_info.gaia = '" << account_info.gaia << "'";
-    return false;
-  }
-  if (out_account_info->email != account_info.email) {
-    out_account_info->email = account_info.email;
-    updated = true;
-  }
-  return updated;
 }
 
 void SigninClientImpl::OnErrorChanged() {

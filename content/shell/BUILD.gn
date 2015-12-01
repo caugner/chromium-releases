@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build/config/win/manifest.gni")
 import("//tools/grit/repack.gni")
@@ -48,6 +49,8 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_android.h",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.cc",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.h",
+    "browser/layout_test/layout_test_bluetooth_chooser_factory.cc",
+    "browser/layout_test/layout_test_bluetooth_chooser_factory.h",
     "browser/layout_test/layout_test_browser_context.cc",
     "browser/layout_test/layout_test_browser_context.h",
     "browser/layout_test/layout_test_browser_main.cc",
@@ -198,7 +201,7 @@ static_library("content_shell_lib") {
     "//base/allocator",
     "//base/third_party/dynamic_annotations",
     "//cc",
-    "//components/crash/app",
+    "//components/crash/content/app",
     "//components/devtools_discovery",
     "//components/devtools_http_handler",
     "//components/plugins/renderer",
@@ -252,15 +255,13 @@ static_library("content_shell_lib") {
   }
 
   if (is_linux) {
-    configs += [ "//build/config/linux:fontconfig" ]
+    deps += [ "//build/linux:fontconfig" ]
   }
 
   if (use_x11) {
     # Some tests rely on this tool at runtime. Note: it might be better if
     # the tests that needed it had this as a dep instead of adding it here.
-    datadeps = [
-      "//tools/xdisplaycheck",
-    ]
+    data_deps = [ "//tools/xdisplaycheck" ]
 
     deps += [ "//ui/events/devices" ]
   }
@@ -271,7 +272,7 @@ static_library("content_shell_lib") {
   }
 
   if (is_posix && !is_mac) {
-    deps += [ "//components/crash/browser" ]
+    deps += [ "//components/crash/content/browser" ]
   }
 
   if (use_aura) {
@@ -313,7 +314,7 @@ static_library("content_shell_lib") {
     ]
   }
 
-  if (is_linux) {
+  if (is_linux && !is_chromecast) {
     deps += [ "//third_party/freetype2" ]
   }
 
@@ -416,6 +417,7 @@ if (!is_android && !is_mac) {
       ":content_shell_lib",
       ":pak",
       "//base/allocator",
+      "//build/config/sanitizers:deps",
       "//build/win:default_exe_manifest",
     ]
 
@@ -434,9 +436,7 @@ if (!is_android && !is_mac) {
     if (is_android) {
       # Some tests rely on this tool. It might be nicer if these tests relied on
       # image diff rather than having content shell depend on it.
-      datadeps = [
-        "//tools/imagediff($host_toolchain)",
-      ]
+      data_deps = [ "//tools/imagediff($host_toolchain)" ]
     }
   }
 } else {
@@ -457,7 +457,8 @@ if (is_win) {
 
     deps = [
       "//base",
-      "//components/crash/tools:crash_service",
+      "//build/config/sanitizers:deps",
+      "//components/crash/content/tools:crash_service",
     ]
 
     configs -= [ "//build/config/win:console" ]

@@ -22,6 +22,7 @@
 #include "base/threading/thread.h"
 #include "components/invalidation/impl/non_blocking_invalidator.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
+#include "components/sync_driver/invalidation_helper.h"
 #include "jingle/notifier/base/notification_method.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/base/host_port_pair.h"
@@ -34,6 +35,7 @@
 #include "sync/internal_api/public/base_node.h"
 #include "sync/internal_api/public/engine/passive_model_worker.h"
 #include "sync/internal_api/public/http_bridge.h"
+#include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/internal_components_factory_impl.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/sync_manager.h"
@@ -43,7 +45,6 @@
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_event_handler.h"
 #include "sync/test/fake_encryptor.h"
-#include "sync/tools/invalidation_helper.h"
 #include "sync/tools/null_invalidation_state_tracker.h"
 #include "url/gurl.h"
 
@@ -74,7 +75,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
     context_storage_.set_host_resolver(
         net::HostResolver::CreateDefaultResolver(NULL));
     context_storage_.set_transport_security_state(
-        new net::TransportSecurityState());
+        make_scoped_ptr(new net::TransportSecurityState()));
     Init();
   }
 
@@ -405,7 +406,7 @@ int SyncClientMain(int argc, char* argv[]) {
       new HttpBridgeFactory(context_getter.get(),
                             base::Bind(&StubNetworkTimeUpdateCallback),
                             &factory_cancelation_signal));
-  post_factory->Init(kUserAgent);
+  post_factory->Init(kUserAgent, BindToTrackerCallback());
   // Used only when committing bookmarks, so it's okay to leave this
   // as NULL.
   ExtensionsActivity* extensions_activity = NULL;

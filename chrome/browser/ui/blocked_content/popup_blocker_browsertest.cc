@@ -8,6 +8,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -21,7 +22,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/app_modal/javascript_app_modal_dialog.h"
@@ -342,7 +345,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        AllowPopupThroughContentSetting) {
   GURL url(embedded_test_server()->GetURL(
       "/popup_blocker/popup-blocked-to-post-blank.html"));
-  browser()->profile()->GetHostContentSettingsMap()
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetContentSetting(ContentSettingsPattern::FromURL(url),
                           ContentSettingsPattern::Wildcard(),
                           CONTENT_SETTINGS_TYPE_POPUPS,
@@ -356,7 +359,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        AllowPopupThroughContentSettingIFrame) {
   GURL url(embedded_test_server()->GetURL("/popup_blocker/popup-frames.html"));
-  browser()->profile()->GetHostContentSettingsMap()
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetContentSetting(ContentSettingsPattern::FromURL(url),
                           ContentSettingsPattern::Wildcard(),
                           CONTENT_SETTINGS_TYPE_POPUPS,
@@ -373,9 +376,9 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   GURL frame_url(embedded_test_server()
                      ->GetURL("/popup_blocker/popup-frames-iframe.html")
                      .ReplaceComponents(replace_host));
-  browser()->profile()->GetHostContentSettingsMap()->ClearSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_POPUPS);
-  browser()->profile()->GetHostContentSettingsMap()
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_POPUPS);
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetContentSetting(ContentSettingsPattern::FromURL(frame_url),
                           ContentSettingsPattern::Wildcard(),
                           CONTENT_SETTINGS_TYPE_POPUPS,
@@ -420,7 +423,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 
   TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
       browser()->profile());
-  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
+  search_test_utils::WaitForTemplateURLServiceToLoad(service);
   LocationBar* location_bar = browser()->window()->GetLocationBar();
   ui_test_utils::SendToOmniboxAndSubmit(location_bar, search_string);
   OmniboxEditModel* model = location_bar->GetOmniboxView()->model();
@@ -563,9 +566,12 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   GURL url(
       embedded_test_server()->GetURL("/popup_blocker/popup-window-open.html"));
-  browser()->profile()->GetHostContentSettingsMap()->SetContentSetting(
-      ContentSettingsPattern::FromURL(url), ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_POPUPS, std::string(), CONTENT_SETTING_ALLOW);
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
+                          ContentSettingsPattern::Wildcard(),
+                          CONTENT_SETTINGS_TYPE_POPUPS,
+                          std::string(),
+                          CONTENT_SETTING_ALLOW);
 
   NavigateAndCheckPopupShown(url, ExpectPopup);
 

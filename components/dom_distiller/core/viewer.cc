@@ -10,9 +10,11 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
+#include "components/dom_distiller/core/experiments.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
 #include "components/dom_distiller/core/proto/distilled_page.pb.h"
 #include "components/dom_distiller/core/task_tracker.h"
@@ -90,11 +92,6 @@ const std::string GetFontCssClass(DistilledPagePrefs::FontFamily font_family) {
   return kSansSerifCssClass;
 }
 
-void EnsureNonEmptyTitle(std::string* title) {
-  if (title->empty())
-    *title = l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_NO_DATA_TITLE);
-}
-
 void EnsureNonEmptyContent(std::string* content) {
   UMA_HISTOGRAM_BOOLEAN("DomDistiller.PageHasDistilledData", !content->empty());
   if (content->empty()) {
@@ -129,7 +126,7 @@ std::string ReplaceHtmlTemplateValues(
                           GetFontCssClass(font_family));                  // $3
 
   substitutions.push_back(
-      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_NO_DATA_TITLE));  // $4
+      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_LOADING_TITLE));  // $4
   substitutions.push_back(
       l10n_util::GetStringUTF8(
           IDS_DOM_DISTILLER_JAVASCRIPT_DISABLED_CONTENT));                // $5
@@ -180,17 +177,23 @@ const std::string GetUnsafeIncrementalDistilledPageJs(
 }
 
 const std::string GetErrorPageJs() {
+  std::string title(l10n_util::GetStringUTF8(
+      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_TITLE));
+  std::string page_update(GetSetTitleJs(title));
+
   base::StringValue value(l10n_util::GetStringUTF8(
       IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_CONTENT));
   std::string output;
   base::JSONWriter::Write(value, &output);
-  std::string page_update("addToPage(");
-  page_update += output + ");";
+  page_update += "addToPage(" + output + ");";
+  page_update += GetSetTextDirectionJs(std::string("auto"));
+  if (ShouldShowFeedbackForm()) {
+    page_update += GetShowFeedbackFormJs();
+  }
   return page_update;
 }
 
 const std::string GetSetTitleJs(std::string title) {
-  EnsureNonEmptyTitle(&title);
   base::StringValue value(title);
   std::string output;
   base::JSONWriter::Write(value, &output);
@@ -296,6 +299,10 @@ const std::string GetDistilledPageThemeJs(DistilledPagePrefs::Theme theme) {
 const std::string GetDistilledPageFontFamilyJs(
     DistilledPagePrefs::FontFamily font_family) {
   return "useFontFamily('" + GetJsFontFamily(font_family) + "');";
+}
+
+const std::string GetDistilledPageFontScalingJs(float scaling) {
+  return "useFontScaling(" + base::DoubleToString(scaling) + ");";
 }
 
 }  // namespace viewer

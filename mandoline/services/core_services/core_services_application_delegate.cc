@@ -9,11 +9,12 @@
 #include "base/threading/simple_thread.h"
 #include "components/clipboard/clipboard_application_delegate.h"
 #include "components/filesystem/file_system_app.h"
+#include "components/web_view/web_view_application_delegate.h"
 #include "mandoline/services/core_services/application_delegate_factory.h"
-#include "mandoline/tab/web_view_application_delegate.h"
 #include "mojo/application/public/cpp/application_connection.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/application/public/cpp/application_runner.h"
+#include "mojo/logging/init_logging.h"
 #include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/services/tracing/tracing_app.h"
 #include "url/gurl.h"
@@ -48,7 +49,7 @@ class ApplicationThread : public base::SimpleThread {
         new mojo::ApplicationRunner(delegate_.release()));
     if (url_ == "mojo://network_service/") {
       runner->set_message_loop_type(base::MessageLoop::TYPE_IO);
-    } else if (url_ == "mojo://view_manager/") {
+    } else if (url_ == "mojo://mus/") {
       runner->set_message_loop_type(base::MessageLoop::TYPE_UI);
     }
     runner->Run(request_.PassMessagePipe().release().value(), false);
@@ -87,6 +88,10 @@ void CoreServicesApplicationDelegate::ApplicationThreadDestroyed(
                 thread);
   DCHECK(iter != application_threads_.end());
   application_threads_.erase(iter);
+}
+
+void CoreServicesApplicationDelegate::Initialize(mojo::ApplicationImpl* app) {
+  mojo::logging::InitLogging();
 }
 
 bool CoreServicesApplicationDelegate::ConfigureIncomingConnection(

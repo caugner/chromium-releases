@@ -6,7 +6,7 @@
 
 #include "core/layout/LayoutTestHelper.h"
 #include "core/page/Page.h"
-#include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/PaintLayer.h"
 #include "platform/graphics/CompositedDisplayList.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/transforms/TransformTestHelper.h"
@@ -28,7 +28,6 @@ protected:
 private:
     void SetUp() override
     {
-        ASSERT_TRUE(RuntimeEnabledFeatures::slimmingPaintEnabled());
         RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(true);
 
         RenderingTest::SetUp();

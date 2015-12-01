@@ -68,6 +68,9 @@ config("feature_flags") {
   if (enable_plugins) {
     defines += [ "ENABLE_PLUGINS=1" ]
   }
+  if (enable_pdf) {
+    defines += [ "ENABLE_PDF=1" ]
+  }
   if (enable_basic_printing || enable_print_preview) {
     # Convenience define for ENABLE_BASIC_PRINTING || ENABLE_PRINT_PREVIEW.
     defines += [ "ENABLE_PRINTING=1" ]
@@ -164,6 +167,9 @@ config("feature_flags") {
   }
   if (is_msan) {
     defines += [ "MEMORY_SANITIZER" ]
+  }
+  if (is_ubsan) {
+    defines += [ "UNDEFINED_SANITIZER" ]
   }
   if (enable_webrtc) {
     defines += [ "ENABLE_WEBRTC=1" ]
@@ -414,11 +420,10 @@ config("default_libs") {
 
 # Add this config to your target to enable precompiled headers.
 #
-# On Windows, precompiled headers are done on a per-target basis. If you have
-# just a couple of files, the time it takes to precompile (~2 seconds) can
-# actually be longer than the time saved. On a Z620, a 100 file target compiles
-# about 2 seconds faster with precompiled headers, with greater savings for
-# larger targets.
+# Precompiled headers are done on a per-target basis. If you have just a couple
+# of files, the time it takes to precompile (~2 seconds) can actually be longer
+# than the time saved. On a Z620, a 100 file target compiles about 2 seconds
+# faster with precompiled headers, with greater savings for larger targets.
 #
 # Recommend precompiled headers for targets with more than 50 .cc files.
 config("precompiled_headers") {
@@ -446,5 +451,8 @@ config("precompiled_headers") {
     # case but forgot the other one?). To reproduce this error, do a build,
     # then delete the precompile.c.obj file, then build again.
     cflags_c = [ "/wd4206" ]
+  } else if (is_mac && !is_official_build && !use_goma) {
+    precompiled_header = "build/precompile.h"
+    precompiled_source = "//build/precompile.h"
   }
 }

@@ -30,10 +30,11 @@
 #if !defined(MAP_STACK)
 # if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY)
 #  define MAP_STACK 0x20000
+# elif defined(ARCH_CPU_MIPS_FAMILY)
+#  define MAP_STACK 0x40000
 # else
-// Note that, on other architecture, MAP_STACK has different value (e.g. mips'
-// MAP_STACK is 0x40000), though Non-SFI is not supported on such
-// architectures.
+// Note that, on other architectures, MAP_STACK has different value,
+// though Non-SFI is not supported on such architectures.
 #  error "Unknown platform."
 # endif
 #endif  // !defined(MAP_STACK)
@@ -79,16 +80,12 @@ ResultExpr RestrictClone() {
   // We allow clone only for new thread creation.
   int clone_flags =
       CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-      CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS;
+      CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS | CLONE_PARENT_SETTID;
 #if !defined(OS_NACL_NONSFI)
-  clone_flags |= CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID;
+  clone_flags |= CLONE_CHILD_CLEARTID;
 #endif
   const Arg<int> flags(0);
-  // TODO(lhchavez): Add CLONE_PARENT_SETTID unconditionally to the allowed
-  // flags after the NaCl roll.
-  return If(flags == clone_flags ||
-                flags == (clone_flags | CLONE_PARENT_SETTID),
-            Allow()).Else(CrashSIGSYSClone());
+  return If(flags == clone_flags, Allow()).Else(CrashSIGSYSClone());
 }
 
 ResultExpr RestrictFutexOperation() {

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/push_messaging/push_messaging_permission_context.h"
 
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -53,7 +54,7 @@ class PushMessagingPermissionContextTest : public testing::Test {
     ContentSettingsPattern pattern =
         ContentSettingsPattern::FromString(kOriginA);
     HostContentSettingsMap* host_content_settings_map =
-        profile->GetHostContentSettingsMap();
+        HostContentSettingsMapFactory::GetForProfile(profile);
     host_content_settings_map->SetContentSetting(pattern, pattern, setting,
                                                  std::string(), value);
   }
@@ -132,7 +133,7 @@ TEST_F(PushMessagingPermissionContextTest, HasPermissionAccept) {
 TEST_F(PushMessagingPermissionContextTest, DecidePushPermission) {
   TestingProfile profile;
   TestPushMessagingPermissionContext context(&profile);
-  PermissionRequestID request_id(-1, -1, -1, GURL(kOriginA));
+  PermissionRequestID request_id(-1, -1, -1);
   BrowserPermissionCallback callback;
 
   context.DecidePushPermission(request_id, GURL(kOriginA), GURL(kOriginA),

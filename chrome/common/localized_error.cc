@@ -19,6 +19,9 @@
 #include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/net_error_info.h"
 #include "components/url_formatter/url_formatter.h"
+#include "grit/components_chromium_strings.h"
+#include "grit/components_google_chrome_strings.h"
+#include "grit/components_strings.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -266,8 +269,8 @@ const LocalizedErrorMap net_error_options[] = {
   {net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_PINNING_FAILURE,
-   IDS_ERRORPAGES_SUMMARY_PINNING_FAILURE,
-   IDS_ERRORPAGES_DETAILS_PINNING_FAILURE,
+   IDS_CERT_ERROR_SUMMARY_PINNING_FAILURE_DETAILS,
+   IDS_CERT_ERROR_SUMMARY_PINNING_FAILURE_DESCRIPTION,
    SUGGEST_NONE,
   },
   {net::ERR_TEMPORARILY_THROTTLED,
@@ -582,7 +585,6 @@ void LocalizedError::GetStrings(int error_code,
     error_strings->SetString("primaryParagraph",
         l10n_util::GetStringUTF16(options.summary_resource_id));
 
-#if defined(OS_CHROMEOS)
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
     // Check if easter egg should be disabled.
@@ -591,8 +593,6 @@ void LocalizedError::GetStrings(int error_code,
       error_strings->SetString("disabledEasterEgg",
           l10n_util::GetStringUTF16(IDS_ERRORPAGE_FUN_DISABLED));
     }
-#endif
-
   } else {
     // Set summary message in the details.
     summary->SetString("msg",
@@ -628,8 +628,7 @@ void LocalizedError::GetStrings(int error_code,
     DCHECK_EQ(LocalizedError::kHttpErrorDomain, error_domain);
     error_string = base::IntToString16(error_code);
   }
-  error_strings->SetString("errorCode",
-      l10n_util::GetStringFUTF16(IDS_ERRORPAGES_ERROR_CODE, error_string));
+  error_strings->SetString("errorCode", error_string);
 
   // Platform specific information for diagnosing network issues on OSX and
   // Windows.

@@ -300,13 +300,6 @@ void TestVideoRenderer::OnSessionConfig(const protocol::SessionConfig& config) {
   SetCodecForDecoding(codec);
 }
 
-ChromotingStats* TestVideoRenderer::GetStats() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  VLOG(2) << "TestVideoRenderer::GetStats() Called";
-  return nullptr;
-}
-
 protocol::VideoStub* TestVideoRenderer::GetVideoStub() {
   DCHECK(thread_checker_.CalledOnValidThread());
 

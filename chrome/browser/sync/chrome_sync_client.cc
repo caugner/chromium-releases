@@ -9,10 +9,9 @@
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -27,6 +26,8 @@
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/sync_driver/sync_api_component_factory.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(ENABLE_APP_LIST)
@@ -69,47 +70,57 @@ namespace browser_sync {
 
 ChromeSyncClient::ChromeSyncClient(
     Profile* profile,
-    ProfileSyncComponentsFactoryImpl* component_factory)
-    : profile_(profile),
-      component_factory_(component_factory) {
-  // Must be called on UI thread.
-  web_data_service_ = GetWebDataService();
-  password_store_ = GetPasswordStore();
-}
+    scoped_ptr<sync_driver::SyncApiComponentFactory> component_factory)
+    : profile_(profile), component_factory_(component_factory.Pass()) {}
 ChromeSyncClient::~ChromeSyncClient() {
 }
 
+void ChromeSyncClient::Initialize(sync_driver::SyncService* sync_service) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  sync_service_ = sync_service;
+  web_data_service_ = GetWebDataService();
+  password_store_ = GetPasswordStore();
+  component_factory_->RegisterDataTypes(this);
+}
+
+sync_driver::SyncService* ChromeSyncClient::GetSyncService() {
+  // TODO(zea): bring back this DCHECK after Typed URLs are converted to
+  // SyncableService.
+  // DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return sync_service_;
+}
+
 PrefService* ChromeSyncClient::GetPrefService() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return profile_->GetPrefs();
 }
 
 bookmarks::BookmarkModel* ChromeSyncClient::GetBookmarkModel() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return BookmarkModelFactory::GetForProfile(profile_);
 }
 
 history::HistoryService* ChromeSyncClient::GetHistoryService() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 autofill::PersonalDataManager* ChromeSyncClient::GetPersonalDataManager() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return autofill::PersonalDataManagerFactory::GetForProfile(profile_);
 }
 
 scoped_refptr<password_manager::PasswordStore>
 ChromeSyncClient::GetPasswordStore() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return PasswordStoreFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 scoped_refptr<autofill::AutofillWebDataService>
 ChromeSyncClient::GetWebDataService() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return WebDataServiceFactory::GetAutofillWebDataForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
@@ -125,11 +136,13 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
           ->GetDeviceInfoSyncableService()
           ->AsWeakPtr();
     case syncer::PREFERENCES:
-      return PrefServiceSyncable::FromProfile(
-          profile_)->GetSyncableService(syncer::PREFERENCES)->AsWeakPtr();
+      return PrefServiceSyncableFromProfile(profile_)
+          ->GetSyncableService(syncer::PREFERENCES)
+          ->AsWeakPtr();
     case syncer::PRIORITY_PREFERENCES:
-      return PrefServiceSyncable::FromProfile(profile_)->GetSyncableService(
-          syncer::PRIORITY_PREFERENCES)->AsWeakPtr();
+      return PrefServiceSyncableFromProfile(profile_)
+          ->GetSyncableService(syncer::PRIORITY_PREFERENCES)
+          ->AsWeakPtr();
     case syncer::AUTOFILL:
     case syncer::AUTOFILL_PROFILE:
     case syncer::AUTOFILL_WALLET_DATA:
@@ -237,72 +250,9 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
   }
 }
 
-scoped_ptr<syncer::AttachmentService> ChromeSyncClient::CreateAttachmentService(
-    scoped_ptr<syncer::AttachmentStoreForSync> attachment_store,
-    const syncer::UserShare& user_share,
-    const std::string& store_birthday,
-    syncer::ModelType model_type,
-    syncer::AttachmentService::Delegate* delegate) {
-  return GetProfileSyncComponentsFactoryImpl()
-      ->CreateAttachmentService(attachment_store.Pass(), user_share,
-                                store_birthday, model_type, delegate)
-      .Pass();
-}
-
-void ChromeSyncClient::RegisterDataTypes(ProfileSyncService* pss) {
-  component_factory_->RegisterDataTypes(pss);
-}
-
-sync_driver::DataTypeManager* ChromeSyncClient::CreateDataTypeManager(
-    const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
-        debug_info_listener,
-    const sync_driver::DataTypeController::TypeMap* controllers,
-    const sync_driver::DataTypeEncryptionHandler* encryption_handler,
-    browser_sync::SyncBackendHost* backend,
-    sync_driver::DataTypeManagerObserver* observer) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  return component_factory_->CreateDataTypeManager(
-      debug_info_listener, controllers, encryption_handler, backend, observer);
-}
-
-browser_sync::SyncBackendHost* ChromeSyncClient::CreateSyncBackendHost(
-    const std::string& name,
-    Profile* profile,
-    invalidation::InvalidationService* invalidator,
-    const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
-    const base::FilePath& sync_folder) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  return component_factory_->CreateSyncBackendHost(name, profile, invalidator,
-                                                   sync_prefs, sync_folder);
-}
-
-scoped_ptr<sync_driver::LocalDeviceInfoProvider>
-    ChromeSyncClient::CreateLocalDeviceInfoProvider() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  return component_factory_->CreateLocalDeviceInfoProvider();
-}
-
-ProfileSyncComponentsFactory::SyncComponents
-ChromeSyncClient::CreateBookmarkSyncComponents(
-    ProfileSyncService* profile_sync_service,
-    sync_driver::DataTypeErrorHandler* error_handler) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  return component_factory_->CreateBookmarkSyncComponents(profile_sync_service,
-                                                          error_handler);
-}
-
-ProfileSyncComponentsFactory::SyncComponents
-ChromeSyncClient::CreateTypedUrlSyncComponents(
-    ProfileSyncService* profile_sync_service,
-    history::HistoryBackend* history_backend,
-    sync_driver::DataTypeErrorHandler* error_handler) {
-  return component_factory_->CreateTypedUrlSyncComponents(
-      profile_sync_service, history_backend, error_handler);
-}
-
-ProfileSyncComponentsFactoryImpl*
-ChromeSyncClient::GetProfileSyncComponentsFactoryImpl() {
-  return component_factory_;
+sync_driver::SyncApiComponentFactory*
+ChromeSyncClient::GetSyncApiComponentFactory() {
+  return component_factory_.get();
 }
 
 }  // namespace browser_sync

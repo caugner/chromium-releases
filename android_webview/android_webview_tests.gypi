@@ -81,7 +81,7 @@
     {
       # android_webview_apk creates a .jar as a side effect. Any java
       # targets that need that .jar in their classpath should depend on this
-      # target. For more details see the chrome_shell_apk_java target.
+      # target. For more details see the content_shell_apk_java target.
       'target_name': 'android_webview_apk_java',
       'type': 'none',
       'dependencies': [
@@ -224,4 +224,38 @@
       ],
     },
   ],
+  'conditions': [
+    ['test_isolation_mode != "noop"',
+      {
+        'targets': [
+          {
+            'target_name': 'android_webview_test_apk_run',
+            'type': 'none',
+            'dependencies': [
+              'android_webview_test_apk',
+            ],
+            'includes': [
+              '../build/isolate.gypi',
+            ],
+            'sources': [
+              'android_webview_test_apk_run.isolate',
+            ],
+          },
+          {
+            'target_name': 'android_webview_unittests_apk_run',
+            'type': 'none',
+            'dependencies': [
+              'android_webview_unittests_apk',
+            ],
+            'includes': [
+              '../build/isolate.gypi',
+            ],
+            'sources': [
+              'android_webview_unittests_apk.isolate',
+            ],
+          },
+        ]
+      }
+    ],
+  ]
 }

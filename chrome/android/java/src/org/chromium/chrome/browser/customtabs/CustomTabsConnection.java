@@ -6,11 +6,8 @@ package org.chromium.chrome.browser.customtabs;
 
 import android.app.ActivityManager;
 import android.app.Application;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Point;
@@ -22,13 +19,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Process;
-import android.os.RemoteException;
-import android.os.SystemClock;
 import android.support.customtabs.CustomTabsIntent;
 import android.support.customtabs.ICustomTabsCallback;
 import android.support.customtabs.ICustomTabsService;
 import android.text.TextUtils;
-import android.util.SparseArray;
 import android.view.WindowManager;
 
 import org.chromium.base.FieldTrialList;
@@ -37,7 +31,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.IntentHandler;
@@ -56,14 +49,9 @@ import org.chromium.content_public.common.Referrer;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -75,14 +63,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class CustomTabsConnection extends ICustomTabsService.Stub {
     private static final String TAG = "cr.ChromeConnection";
-    private static final String NO_PRERENDERING_KEY =
+    @VisibleForTesting
+    static final String NO_PRERENDERING_KEY =
             "android.support.customtabs.maylaunchurl.NO_PRERENDERING";
-
-    // Values for the "CustomTabs.PredictionStatus" UMA histogram. Append-only.
-    private static final int NO_PREDICTION = 0;
-    private static final int GOOD_PREDICTION = 1;
-    private static final int BAD_PREDICTION = 2;
-    private static final int PREDICTION_STATUS_COUNT = 3;
 
     private static AtomicReference<CustomTabsConnection> sInstance =
             new AtomicReference<CustomTabsConnection>();
@@ -104,102 +87,12 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         }
     }
 
-    private static final class PredictionStats {
-        private static final long MIN_DELAY = 100;
-        private static final long MAX_DELAY = 10000;
-        private long mLastRequestTimestamp = -1;
-        private long mDelayMs = MIN_DELAY;
-
-        /**
-         * Updates the prediction stats and return whether prediction is allowed.
-         *
-         * The policy is:
-         * 1. If the client does not wait more than mDelayMs, decline the request.
-         * 2. If the client waits for more than mDelayMs but less than 2*mDelayMs,
-         *    accept the request and double mDelayMs.
-         * 3. If the client waits for more than 2*mDelayMs, accept the request
-         *    and reset mDelayMs.
-         *
-         * And: 100ms <= mDelayMs <= 10s.
-         *
-         * This way, if an application sends a burst of requests, it is quickly
-         * seriously throttled. If it stops being this way, back to normal.
-         */
-        public boolean updateStatsAndReturnIfAllowed() {
-            long now = SystemClock.elapsedRealtime();
-            long deltaMs = now - mLastRequestTimestamp;
-            if (deltaMs < mDelayMs) return false;
-            mLastRequestTimestamp = now;
-            if (deltaMs < 2 * mDelayMs) {
-                mDelayMs = Math.min(MAX_DELAY, mDelayMs * 2);
-            } else {
-                mDelayMs = MIN_DELAY;
-            }
-            return true;
-        }
-    }
-
     protected final Application mApplication;
     private final AtomicBoolean mWarmupHasBeenCalled = new AtomicBoolean();
+    private final ClientManager mClientManager;
     private ExternalPrerenderHandler mExternalPrerenderHandler;
     private PrerenderedUrlParams mPrerender;
     private WebContents mSpareWebContents;
-
-    /** Per-session values. */
-    private static class SessionParams {
-        public final int mUid;
-        public final String mPackageName;
-        public final ICustomTabsCallback mCallback;
-        public final IBinder.DeathRecipient mDeathRecipient;
-        private ServiceConnection mServiceConnection;
-        private String mPredictedUrl;
-        private long mLastMayLaunchUrlTimestamp;
-
-        public SessionParams(Context context, int uid, ICustomTabsCallback callback,
-                IBinder.DeathRecipient deathRecipient) {
-            mUid = uid;
-            mCallback = callback;
-            mDeathRecipient = deathRecipient;
-            mServiceConnection = null;
-            mPredictedUrl = null;
-            mLastMayLaunchUrlTimestamp = 0;
-            mPackageName = getPackageName(context);
-        }
-
-        private String getPackageName(Context context) {
-            PackageManager packageManager = context.getPackageManager();
-            String[] packageList = packageManager.getPackagesForUid(mUid);
-            if (packageList.length != 1 || TextUtils.isEmpty(packageList[0])) return null;
-            return packageList[0];
-        }
-
-        public ServiceConnection getServiceConnection() {
-            return mServiceConnection;
-        }
-
-        public void setServiceConnection(ServiceConnection serviceConnection) {
-            mServiceConnection = serviceConnection;
-        }
-
-        public void setPredictionMetrics(String predictedUrl, long lastMayLaunchUrlTimestamp) {
-            mPredictedUrl = predictedUrl;
-            mLastMayLaunchUrlTimestamp = lastMayLaunchUrlTimestamp;
-        }
-
-        public String getPredictedUrl() {
-            return mPredictedUrl;
-        }
-
-        public long getLastMayLaunchUrlTimestamp() {
-            return mLastMayLaunchUrlTimestamp;
-        }
-    }
-
-    private final Object mLock = new Object();
-    private final Map<IBinder, SessionParams> mSessionParams = new HashMap<>();
-    // Prediction tracking is done by UID and not by session, since a
-    // mis-behaving application can create a large number of sessions.
-    private SparseArray<PredictionStats> mUidToPredictionsStats = new SparseArray<>();
 
     /**
      * <strong>DO NOT CALL</strong>
@@ -209,6 +102,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
     public CustomTabsConnection(Application application) {
         super();
         mApplication = application;
+        mClientManager = new ClientManager(mApplication);
     }
 
     /**
@@ -225,46 +119,20 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
 
     @Override
     public boolean newSession(ICustomTabsCallback callback) {
-        if (callback == null) return false;
-        final int uid = Binder.getCallingUid();
-        final IBinder session = callback.asBinder();
-        IBinder.DeathRecipient deathRecipient =
-                new IBinder.DeathRecipient() {
-                    @Override
-                    public void binderDied() {
-                        ThreadUtils.postOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                synchronized (mLock) {
-                                    cleanupAlreadyLocked(session);
-                                }
-                            }
-                        });
-                    }
-                };
-        SessionParams sessionParams =
-                new SessionParams(mApplication, uid, callback, deathRecipient);
-        synchronized (mLock) {
-            if (mSessionParams.containsKey(session)) return false;
-            try {
-                callback.asBinder().linkToDeath(deathRecipient, 0);
-            } catch (RemoteException e) {
-                // The return code doesn't matter, because this executes when
-                // the caller has died.
-                return false;
+        ClientManager.DisconnectCallback onDisconnect = new ClientManager.DisconnectCallback() {
+            @Override
+            public void run(IBinder session) {
+                cancelPrerender(session);
             }
-            mSessionParams.put(session, sessionParams);
-            if (mUidToPredictionsStats.get(uid) == null) {
-                mUidToPredictionsStats.put(uid, new PredictionStats());
-            }
-        }
-        return true;
+        };
+        return mClientManager.newSession(callback, Binder.getCallingUid(), onDisconnect);
     }
 
     @Override
     public boolean warmup(long flags) {
         // Here and in mayLaunchUrl(), don't do expensive work for background applications.
         if (!isCallerForegroundOrSelf()) return false;
+        mClientManager.recordUidHasCalledWarmup(Binder.getCallingUid());
         if (!mWarmupHasBeenCalled.compareAndSet(false, true)) return true;
         // The call is non-blocking and this must execute on the UI thread, post a task.
         ThreadUtils.postOnUiThread(new Runnable() {
@@ -290,7 +158,6 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
                 }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
                 ChromeBrowserInitializer.initNetworkChangeNotifier(context);
                 WarmupManager.getInstance().initializeViewHierarchy(app.getApplicationContext(),
-                        R.style.MainTheme, R.layout.main, R.id.control_container_stub,
                         R.layout.custom_tabs_control_container);
             }
         });
@@ -322,35 +189,31 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         // allowed, as we allow "www.example.com".
         String scheme = url.normalizeScheme().getScheme();
         if (scheme != null && !scheme.equals("http") && !scheme.equals("https")) return false;
-        if (!isCallerForegroundOrSelf()) return false;
-
         // Things below need the browser process to be initialized.
-        if (!warmup(0)) return false;
+        if (!warmup(0)) return false; // Also does the foreground check.
 
         final IBinder session = callback.asBinder();
         final String urlString = url.toString();
         final boolean noPrerendering =
                 extras != null ? extras.getBoolean(NO_PRERENDERING_KEY, false) : false;
-        int uid = Binder.getCallingUid();
-        synchronized (mLock) {
-            SessionParams sessionParams = mSessionParams.get(session);
-            if (sessionParams == null || sessionParams.mUid != uid) return false;
-            sessionParams.setPredictionMetrics(urlString, SystemClock.elapsedRealtime());
-            if (!mUidToPredictionsStats.get(uid).updateStatsAndReturnIfAllowed()) return false;
+        final int uid = Binder.getCallingUid();
+        if (!mClientManager.updateStatsAndReturnWhetherAllowed(session, uid, urlString)) {
+            return false;
         }
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (!TextUtils.isEmpty(urlString)) {
-                    WarmupManager warmupManager = WarmupManager.getInstance();
-                    warmupManager.maybePrefetchDnsForUrlInBackground(
-                            mApplication.getApplicationContext(), urlString);
-                    warmupManager.maybePreconnectUrlAndSubResources(
-                            Profile.getLastUsedProfile(), urlString);
+                if (TextUtils.isEmpty(urlString)) {
+                    cancelPrerender(session);
+                    return;
                 }
+                WarmupManager warmupManager = WarmupManager.getInstance();
+                warmupManager.maybePrefetchDnsForUrlInBackground(
+                        mApplication.getApplicationContext(), urlString);
+                warmupManager.maybePreconnectUrlAndSubResources(
+                        Profile.getLastUsedProfile(), urlString);
                 if (!noPrerendering && mayPrerender()) {
-                    // Calling with a null or empty url cancels a current prerender.
-                    prerenderUrl(session, urlString, extras);
+                    prerenderUrl(session, urlString, extras, uid);
                 } else {
                     createSpareWebContents();
                 }
@@ -411,32 +274,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
      * This is used for accounting.
      */
     void registerLaunch(IBinder session, String url) {
-        int outcome;
-        long elapsedTimeMs = -1;
-        synchronized (mLock) {
-            SessionParams sessionParams = mSessionParams.get(session);
-            if (sessionParams == null) {
-                outcome = NO_PREDICTION;
-            } else {
-                String predictedUrl = sessionParams.getPredictedUrl();
-                outcome = predictedUrl == null ? NO_PREDICTION
-                        : predictedUrl.equals(url) ? GOOD_PREDICTION : BAD_PREDICTION;
-                elapsedTimeMs = SystemClock.elapsedRealtime()
-                        - sessionParams.getLastMayLaunchUrlTimestamp();
-                sessionParams.setPredictionMetrics(null, 0);
-                if (outcome == GOOD_PREDICTION) {
-                    // If the prediction was correct, back to the smallest
-                    // throttling level.
-                    mUidToPredictionsStats.put(sessionParams.mUid, new PredictionStats());
-                }
-            }
-        }
-        RecordHistogram.recordEnumeratedHistogram(
-                "CustomTabs.PredictionStatus", outcome, PREDICTION_STATUS_COUNT);
-        if (outcome == GOOD_PREDICTION) {
-            RecordHistogram.recordCustomTimesHistogram("CustomTabs.PredictionToLaunch",
-                    elapsedTimeMs, 1, TimeUnit.MINUTES.toMillis(3), TimeUnit.MILLISECONDS, 100);
-        }
+        mClientManager.registerLaunch(session, url);
     }
 
     /**
@@ -474,33 +312,24 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         String prerenderedUrl = mPrerender.mUrl;
         String prerenderReferrer = mPrerender.mReferrer;
         if (referrer == null) referrer = "";
-        mPrerender = null;
         if (TextUtils.equals(prerenderedUrl, url)
                 && TextUtils.equals(prerenderReferrer, referrer)) {
+            mPrerender = null;
             return webContents;
+        } else {
+            cancelPrerender(session);
         }
-        mExternalPrerenderHandler.cancelCurrentPrerender();
-        webContents.destroy();
         return null;
     }
 
+    /** See {@link ClientManager#getReferrerForSession(IBinder)} */
     public Referrer getReferrerForSession(IBinder session) {
-        if (!mSessionParams.containsKey(session)) return null;
-        return IntentHandler.constructValidReferrerForAuthority(
-                mSessionParams.get(session).mPackageName);
+        return mClientManager.getReferrerForSession(session);
     }
 
-    private ICustomTabsCallback getCallbackForSession(IBinder session) {
-        synchronized (mLock) {
-            SessionParams sessionParams = mSessionParams.get(session);
-            if (sessionParams == null) return null;
-            return sessionParams.mCallback;
-        }
-    }
-
+    /** See {@link ClientManager#getClientPackageNameForSession(IBinder)} */
     public String getClientPackageNameForSession(IBinder session) {
-        if (!mSessionParams.containsKey(session)) return null;
-        return mSessionParams.get(session).mPackageName;
+        return mClientManager.getClientPackageNameForSession(session);
     }
 
     /**
@@ -514,7 +343,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
      * @return true for success.
      */
     boolean notifyNavigationEvent(IBinder session, int navigationEvent) {
-        ICustomTabsCallback callback = getCallbackForSession(session);
+        ICustomTabsCallback callback = mClientManager.getCallbackForSession(session);
         if (callback == null) return false;
         try {
             callback.onNavigationEvent(navigationEvent, null);
@@ -539,41 +368,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
      * @return true for success.
      */
     boolean keepAliveForSession(IBinder session, Intent intent) {
-        // When an application is bound to a service, its priority is raised to
-        // be at least equal to the application's one. This binds to a dummy
-        // service (no calls to this service are made).
-        if (intent == null || intent.getComponent() == null) return false;
-        SessionParams sessionParams;
-        synchronized (mLock) {
-            sessionParams = mSessionParams.get(session);
-            if (sessionParams == null) return false;
-        }
-        String packageName = intent.getComponent().getPackageName();
-        PackageManager pm = mApplication.getApplicationContext().getPackageManager();
-        // Only binds to the application associated to this session.
-        int uid = sessionParams.mUid;
-        if (!Arrays.asList(pm.getPackagesForUid(uid)).contains(packageName)) return false;
-        Intent serviceIntent = new Intent().setComponent(intent.getComponent());
-        // This ServiceConnection doesn't handle disconnects. This is on
-        // purpose, as it occurs when the remote process has died. Since the
-        // only use of this connection is to keep the application alive,
-        // re-connecting would just re-create the process, but the application
-        // state has been lost at that point, the callbacks invalidated, etc.
-        ServiceConnection connection = new ServiceConnection() {
-            @Override
-            public void onServiceConnected(ComponentName name, IBinder service) {}
-            @Override
-            public void onServiceDisconnected(ComponentName name) {}
-        };
-        boolean ok;
-        try {
-            ok = mApplication.getApplicationContext().bindService(
-                    serviceIntent, connection, Context.BIND_AUTO_CREATE);
-        } catch (SecurityException e) {
-            return false;
-        }
-        if (ok) sessionParams.setServiceConnection(connection);
-        return ok;
+        return mClientManager.keepAliveForSession(session, intent);
     }
 
     /**
@@ -584,14 +379,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
      * @param session The Binder object identifying the session.
      */
     void dontKeepAliveForSession(IBinder session) {
-        SessionParams sessionParams;
-        synchronized (mLock) {
-            sessionParams = mSessionParams.get(session);
-            if (sessionParams == null || sessionParams.getServiceConnection() == null) return;
-        }
-        ServiceConnection serviceConnection = sessionParams.getServiceConnection();
-        sessionParams.setServiceConnection(null);
-        mApplication.getApplicationContext().unbindService(serviceConnection);
+        mClientManager.dontKeepAliveForSession(session);
     }
 
     /**
@@ -658,25 +446,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
     @VisibleForTesting
     void cleanupAll() {
         ThreadUtils.assertOnUiThread();
-        synchronized (mLock) {
-            List<IBinder> sessions = new ArrayList<>(mSessionParams.keySet());
-            for (IBinder session : sessions) cleanupAlreadyLocked(session);
-        }
-    }
-
-    /**
-     * Called when a remote client has died.
-     */
-    private void cleanupAlreadyLocked(IBinder session) {
-        ThreadUtils.assertOnUiThread();
-        SessionParams params = mSessionParams.get(session);
-        if (params == null) return;
-        mSessionParams.remove(session);
-        IBinder binder = params.mCallback.asBinder();
-        binder.unlinkToDeath(params.mDeathRecipient, 0);
-        if (mPrerender != null && session.equals(mPrerender.mSession)) {
-            prerenderUrl(session, null, null); // Cancels the pre-render.
-        }
+        mClientManager.cleanupAll();
     }
 
     private boolean mayPrerender() {
@@ -688,7 +458,17 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         return !cm.isActiveNetworkMetered();
     }
 
-    private void prerenderUrl(IBinder session, String url, Bundle extras) {
+    /** Cancels a prerender for a given session, or any session if null. */
+    void cancelPrerender(IBinder session) {
+        ThreadUtils.assertOnUiThread();
+        if (mPrerender != null && (session == null || session.equals(mPrerender.mSession))) {
+            mExternalPrerenderHandler.cancelCurrentPrerender();
+            mPrerender.mWebContents.destroy();
+            mPrerender = null;
+        }
+    }
+
+    private void prerenderUrl(IBinder session, String url, Bundle extras, int uid) {
         ThreadUtils.assertOnUiThread();
         // TODO(lizeb): Prerendering through ChromePrerenderService is
         // incompatible with prerendering through this service. Remove this
@@ -698,12 +478,9 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         if (!mayPrerender() && !TextUtils.isEmpty(url)) return;
         if (!mWarmupHasBeenCalled.get()) return;
         // Last one wins and cancels the previous prerender.
-        if (mPrerender != null) {
-            mExternalPrerenderHandler.cancelCurrentPrerender();
-            mPrerender.mWebContents.destroy();
-            mPrerender = null;
-        }
+        cancelPrerender(null);
         if (TextUtils.isEmpty(url)) return;
+        if (!mClientManager.isPrerenderingAllowed(uid)) return;
         Intent extrasIntent = new Intent();
         if (extras != null) extrasIntent.putExtras(extras);
         if (IntentHandler.getExtraHeadersFromIntent(extrasIntent) != null) return;
@@ -720,6 +497,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         WebContents webContents = mExternalPrerenderHandler.addPrerender(
                 Profile.getLastUsedProfile(), url, referrer, contentSize.x, contentSize.y);
         if (webContents != null) {
+            mClientManager.registerPrerenderRequest(uid, url);
             mPrerender = new PrerenderedUrlParams(session, webContents, url, referrer, extras);
         }
     }
@@ -754,9 +532,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
     }
 
     @VisibleForTesting
-    void resetThrottling(int uid) {
-        synchronized (mLock) {
-            mUidToPredictionsStats.put(uid, new PredictionStats());
-        }
+    void resetThrottling(Context context, int uid) {
+        mClientManager.resetThrottling(uid);
     }
 }

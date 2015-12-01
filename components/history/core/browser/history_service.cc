@@ -667,6 +667,25 @@ base::CancelableTaskTracker::TaskId HistoryService::QueryURL(
                  base::Owned(query_url_result)));
 }
 
+// Statistics ------------------------------------------------------------------
+
+base::CancelableTaskTracker::TaskId HistoryService::GetHistoryCount(
+    const Time& begin_time,
+    const Time& end_time,
+    const GetHistoryCountCallback& callback,
+    base::CancelableTaskTracker* tracker) {
+  DCHECK(thread_) << "History service being called after cleanup";
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  return tracker->PostTaskAndReplyWithResult(
+      thread_->task_runner().get(), FROM_HERE,
+      base::Bind(&HistoryBackend::GetHistoryCount,
+                 history_backend_.get(),
+                 begin_time,
+                 end_time),
+      callback);
+}
+
 // Downloads -------------------------------------------------------------------
 
 // Handle creation of a download by creating an entry in the history service's

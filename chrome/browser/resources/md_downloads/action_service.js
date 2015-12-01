@@ -29,15 +29,23 @@ cr.define('downloads', function() {
     /** @param {string} id ID of the dangerous download to discard. */
     discardDangerous: chromeSendWithId('discardDangerous'),
 
-    /** @param {string} id ID of the download that the user started dragging. */
-    drag: chromeSendWithId('drag'),
-
     /** @param {string} url URL of a file to download. */
     download: function(url) {
       var a = document.createElement('a');
       a.href = url;
       a.setAttribute('download', '');
       a.click();
+    },
+
+    /** @param {string} id ID of the download that the user started dragging. */
+    drag: chromeSendWithId('drag'),
+
+    /**
+     * @return {boolean} Whether the user is currently searching for downloads
+     *     (i.e. has a non-empty search term).
+     */
+    isSearching: function() {
+      return this.searchText_.length > 0;
     },
 
     /** Opens the current local destination for downloads. */
@@ -65,6 +73,11 @@ cr.define('downloads', function() {
 
     /** @param {string} searchText What to search for. */
     search: function(searchText) {
+      if (this.searchText_ == searchText)
+        return;
+
+      this.searchText_ = searchText;
+
       // Split quoted terms (e.g., 'The "lazy" dog' => ['The', 'lazy', 'dog']).
       function trim(s) { return s.trim(); }
       chrome.send('getDownloads', searchText.split(/"([^"]*)"/).map(trim));
@@ -79,6 +92,8 @@ cr.define('downloads', function() {
     /** Undo download removal. */
     undo: chrome.send.bind(chrome, 'undo'),
   };
+
+  cr.addSingletonGetter(ActionService);
 
   return {ActionService: ActionService};
 });

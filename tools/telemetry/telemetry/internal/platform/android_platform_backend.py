@@ -35,17 +35,18 @@ import adb_install_cert
 import certutils
 import platformsettings
 
+from devil.android import battery_utils
+from devil.android import device_errors
+from devil.android import device_utils
+from devil.android.perf import cache_control
+from devil.android.perf import perf_control
+from devil.android.perf import thermal_throttle
+from devil.android.sdk import version_codes
 from pylib import constants
 from pylib import screenshot
-from pylib.device import battery_utils
-from pylib.device import device_errors
-from pylib.device import device_utils
-from pylib.perf import cache_control
-from pylib.perf import perf_control
-from pylib.perf import thermal_throttle
 
 try:
-  from pylib.perf import surface_stats_collector
+  from devil.android.perf import surface_stats_collector
 except Exception:
   surface_stats_collector = None
 
@@ -227,9 +228,11 @@ class AndroidPlatformBackend(
     if not self._surface_stats_collector:
       return
 
-    refresh_period, timestamps = self._surface_stats_collector.Stop()
-    pid = self._surface_stats_collector.GetSurfaceFlingerPid()
-    self._surface_stats_collector = None
+    try:
+      refresh_period, timestamps = self._surface_stats_collector.Stop()
+      pid = self._surface_stats_collector.GetSurfaceFlingerPid()
+    finally:
+      self._surface_stats_collector = None
     # TODO(sullivan): should this code be inline, or live elsewhere?
     events = []
     for ts in timestamps:
@@ -443,10 +446,7 @@ class AndroidPlatformBackend(
     return self._power_monitor.StopMonitoringPower()
 
   def CanMonitorNetworkData(self):
-    if (self._device.build_version_sdk <
-        constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP):
-      return False
-    return True
+    return self._device.build_version_sdk >= version_codes.LOLLIPOP
 
   def GetNetworkData(self, browser):
     return self._battery.GetNetworkData(browser._browser_backend.package)
@@ -454,7 +454,7 @@ class AndroidPlatformBackend(
   def PathExists(self, device_path, timeout=None, retries=None):
     """ Return whether the given path exists on the device.
     This method is the same as
-    android.pylib.device.device_utils.DeviceUtils.PathExists.
+    devil.android.device_utils.DeviceUtils.PathExists.
     """
     return self._device.PathExists(
         device_path, timeout=timeout, retries=retries)
@@ -518,7 +518,14 @@ class AndroidPlatformBackend(
     self._device.adb.Forward('tcp:%d' % host_port, device_port)
 
   def StopForwardingHost(self, host_port):
-    self._device.adb.ForwardRemove('tcp:%d' % host_port)
+    for line in self._device.adb.ForwardList().strip().splitlines():
+      line = line.split(' ')
+      if line[0] == self._device and line[1] == 'tcp:%s' % host_port:
+        self._device.adb.ForwardRemove('tcp:%d' % host_port)
+        break
+    else:
+      logging.warning('Port %s not found in adb forward --list for device %s',
+                      host_port, self._device)
 
   def DismissCrashDialogIfNeeded(self):
     """Dismiss any error dialogs.
@@ -797,8 +804,8 @@ class AndroidPlatformBackend(
 
   def IsScreenOn(self):
     """Determines if device screen is on."""
-    input_methods = self._device.RunShellCommand('dumpsys input_method',
-                                                 check_return=True)
+    input_methods = self._device.RunShellCommand(
+        'dumpsys input_method', check_return=True, large_output=True)
     return self._IsScreenOn(input_methods)
 
   @staticmethod

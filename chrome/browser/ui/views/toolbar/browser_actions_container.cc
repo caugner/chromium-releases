@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
-#include "chrome/browser/ui/toolbar/wrench_menu_badge_controller.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
@@ -124,9 +123,8 @@ BrowserActionsContainer::~BrowserActionsContainer() {
   // always have cleared the active bubble by now.
   DCHECK(!active_bubble_);
 
-  FOR_EACH_OBSERVER(BrowserActionsContainerObserver,
-                    observers_,
-                    OnBrowserActionsContainerDestroyed());
+  FOR_EACH_OBSERVER(BrowserActionsContainerObserver, observers_,
+                    OnBrowserActionsContainerDestroyed(this));
 
   toolbar_actions_bar_->DeleteActions();
   // All views should be removed as part of ToolbarActionsBar::DeleteActions().
@@ -189,6 +187,7 @@ bool BrowserActionsContainer::ShownInsideMenu() const {
 }
 
 void BrowserActionsContainer::OnToolbarActionViewDragDone() {
+  toolbar_actions_bar_->OnDragEnded();
   FOR_EACH_OBSERVER(BrowserActionsContainerObserver,
                     observers_,
                     OnBrowserActionDragDone());
@@ -305,8 +304,11 @@ void BrowserActionsContainer::SetChevronVisibility(bool visible) {
     chevron_->SetVisible(visible);
 }
 
-int BrowserActionsContainer::GetWidth() const {
-  return container_width_;
+int BrowserActionsContainer::GetWidth(GetWidthTime get_width_time) const {
+  return get_width_time == GET_WIDTH_AFTER_ANIMATION &&
+                 animation_target_size_ > 0
+             ? animation_target_size_
+             : width();
 }
 
 bool BrowserActionsContainer::IsAnimating() const {
@@ -322,14 +324,6 @@ int BrowserActionsContainer::GetChevronWidth() const {
   return chevron_ ? chevron_->GetPreferredSize().width() + kChevronSpacing : 0;
 }
 
-void BrowserActionsContainer::OnOverflowedActionWantsToRunChanged(
-    bool overflowed_action_wants_to_run) {
-  DCHECK(!in_overflow_mode());
-  BrowserView::GetBrowserViewForBrowser(browser_)->toolbar()->
-      wrench_menu_badge_controller()->SetOverflowedToolbarActionWantsToRun(
-          overflowed_action_wants_to_run);
-}
-
 void BrowserActionsContainer::ShowExtensionMessageBubble(
     scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
     ToolbarActionViewController* anchor_action) {
@@ -340,8 +334,6 @@ void BrowserActionsContainer::ShowExtensionMessageBubble(
       static_cast<views::View*>(GetViewForId(anchor_action->GetId())) :
       BrowserView::GetBrowserViewForBrowser(browser_)->toolbar()->app_menu();
 
-  extensions::ExtensionMessageBubbleController* weak_controller =
-      controller.get();
   extensions::ExtensionMessageBubbleView* bubble =
       new extensions::ExtensionMessageBubbleView(
           reference_view,
@@ -350,7 +342,7 @@ void BrowserActionsContainer::ShowExtensionMessageBubble(
   views::BubbleDelegateView::CreateBubble(bubble);
   active_bubble_ = bubble;
   active_bubble_->GetWidget()->AddObserver(this);
-  weak_controller->Show(bubble);
+  bubble->Show();
 }
 
 void BrowserActionsContainer::OnWidgetClosing(views::Widget* widget) {
@@ -416,13 +408,15 @@ void BrowserActionsContainer::Layout() {
   if (resize_area_)
     resize_area_->SetBounds(0, 0, platform_settings().item_spacing, height());
 
+  // The range of visible icons, from start_index (inclusive) to end_index
+  // (exclusive).
+  size_t start_index = toolbar_actions_bar_->GetStartIndexInBounds();
+  size_t end_index = toolbar_actions_bar_->GetEndIndexInBounds();
+
   // If the icons don't all fit, show the chevron (unless suppressed).
-  int max_x = GetPreferredSize().width();
-  if (toolbar_actions_bar_->IconCountToWidth(-1) > max_x &&
-      !suppress_chevron_ && chevron_) {
+  if (chevron_ && !suppress_chevron_ && toolbar_actions_bar_->NeedsOverflow()) {
     chevron_->SetVisible(true);
     gfx::Size chevron_size(chevron_->GetPreferredSize());
-    max_x -= chevron_size.width() + kChevronSpacing;
     chevron_->SetBounds(
         width() - ToolbarView::kStandardSpacing - chevron_size.width(),
         0,
@@ -431,20 +425,6 @@ void BrowserActionsContainer::Layout() {
   } else if (chevron_) {
     chevron_->SetVisible(false);
   }
-
-  // The range of visible icons, from start_index (inclusive) to end_index
-  // (exclusive).
-  size_t start_index = in_overflow_mode() ?
-      toolbar_action_views_.size() - toolbar_actions_bar_->GetIconCount() : 0u;
-  // For the main container's last visible icon, we calculate how many icons we
-  // can display with the given width. We add an extra item_spacing because the
-  // last icon doesn't need padding, but we want it to divide easily.
-  size_t end_index = in_overflow_mode() ?
-      toolbar_action_views_.size() :
-      (max_x - platform_settings().left_padding -
-          platform_settings().right_padding +
-          platform_settings().item_spacing) /
-          ToolbarActionsBar::IconWidth(true);
 
   // Now draw the icons for the actions in the available space. Once all the
   // variables are in place, the layout works equally well for the main and
@@ -604,6 +584,7 @@ void BrowserActionsContainer::GetAccessibleState(
 void BrowserActionsContainer::WriteDragDataForView(View* sender,
                                                    const gfx::Point& press_pt,
                                                    OSExchangeData* data) {
+  toolbar_actions_bar_->OnDragStarted();
   DCHECK(data);
 
   ToolbarActionViews::iterator iter = std::find(toolbar_action_views_.begin(),
@@ -639,10 +620,19 @@ void BrowserActionsContainer::OnResize(int resize_amount, bool done_resizing) {
   // We don't allow resize while the toolbar is highlighting a subset of
   // actions, since this is a temporary and entirely browser-driven sequence in
   // order to warn the user about potentially dangerous items.
-  if (toolbar_actions_bar_->is_highlighting())
+  // We also don't allow resize when the bar is already animating, since we
+  // don't want two competing size changes.
+  if (toolbar_actions_bar_->is_highlighting() || animating())
     return;
 
   if (!done_resizing) {
+    // If this is the start of the resize gesture, then set |container_width_|
+    // to be the current width. It might not have been if the container was
+    // shrunk to give room to the omnibox, but to adjust the size, it needs to
+    // be accurate.
+    if (!resize_amount_)
+      container_width_ = width();
+
     resize_amount_ = resize_amount;
     Redraw(false);
     return;

@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/permissions/permission_queue_controller.h"
 #include "chrome/browser/permissions/permission_request_id.h"
-#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -22,6 +21,12 @@
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/permissions/permission_queue_controller.h"
+#else
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
+#endif
+
 class TestPermissionContext : public PermissionContextBase {
  public:
   TestPermissionContext(Profile* profile,
@@ -33,9 +38,11 @@ class TestPermissionContext : public PermissionContextBase {
 
   ~TestPermissionContext() override {}
 
+#if defined(OS_ANDROID)
   PermissionQueueController* GetInfoBarController() {
     return GetQueueController();
   }
+#endif
 
   bool permission_granted() {
     return permission_granted_;
@@ -80,18 +87,17 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
                            const PermissionRequestID& id,
                            const GURL& url,
                            bool accept) {
-    if (!PermissionBubbleManager::Enabled()) {
-      context->GetInfoBarController()->OnPermissionSet(
-          id, url, url, accept, accept);
-      return;
-    }
-
+#if defined(OS_ANDROID)
+    context->GetInfoBarController()->OnPermissionSet(id, url, url, accept,
+                                                     accept);
+#else
     PermissionBubbleManager* manager =
         PermissionBubbleManager::FromWebContents(web_contents());
     if (accept)
       manager->Accept();
     else
       manager->Closing();
+#endif
   }
 
   void TestAskAndGrant_TestContent() {
@@ -103,7 +109,7 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     const PermissionRequestID id(
         web_contents()->GetRenderProcessHost()->GetID(),
         web_contents()->GetMainFrame()->GetRoutingID(),
-        -1, GURL());
+        -1);
     permission_context.RequestPermission(
         web_contents(),
         id, url, true,
@@ -116,9 +122,11 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     EXPECT_TRUE(permission_context.tab_context_updated());
 
     ContentSetting setting =
-        profile()->GetHostContentSettingsMap()->GetContentSetting(
-            url.GetOrigin(), url.GetOrigin(),
-            CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string());
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetContentSetting(url.GetOrigin(),
+                                url.GetOrigin(),
+                                CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                std::string());
     EXPECT_EQ(CONTENT_SETTING_ALLOW, setting);
   }
 
@@ -131,7 +139,7 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     const PermissionRequestID id(
         web_contents()->GetRenderProcessHost()->GetID(),
         web_contents()->GetMainFrame()->GetRoutingID(),
-        -1, GURL());
+        -1);
     permission_context.RequestPermission(
         web_contents(),
         id, url, true,
@@ -144,9 +152,11 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     EXPECT_TRUE(permission_context.tab_context_updated());
 
     ContentSetting setting =
-        profile()->GetHostContentSettingsMap()->GetContentSetting(
-            url.GetOrigin(), url.GetOrigin(),
-            CONTENT_SETTINGS_TYPE_MIDI_SYSEX, std::string());
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetContentSetting(url.GetOrigin(),
+                                url.GetOrigin(),
+                                CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+                                std::string());
     EXPECT_EQ(CONTENT_SETTING_ASK, setting);
   }
 
@@ -159,7 +169,7 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     const PermissionRequestID id(
         web_contents()->GetRenderProcessHost()->GetID(),
         web_contents()->GetMainFrame()->GetRoutingID(),
-        -1, GURL());
+        -1);
     permission_context.RequestPermission(
         web_contents(),
         id, url, true,
@@ -171,8 +181,11 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     EXPECT_TRUE(permission_context.tab_context_updated());
 
     ContentSetting setting =
-        profile()->GetHostContentSettingsMap()->GetContentSetting(
-            url.GetOrigin(), url.GetOrigin(), type, std::string());
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetContentSetting(url.GetOrigin(),
+                                url.GetOrigin(),
+                                type,
+                                std::string());
     EXPECT_EQ(CONTENT_SETTING_ASK, setting);
   }
 
@@ -185,7 +198,7 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     const PermissionRequestID id(
         web_contents()->GetRenderProcessHost()->GetID(),
         web_contents()->GetMainFrame()->GetRoutingID(),
-        -1, GURL());
+        -1);
     permission_context.RequestPermission(
         web_contents(),
         id, url, true,
@@ -198,20 +211,24 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
     EXPECT_TRUE(permission_context.tab_context_updated());
 
     ContentSetting setting =
-        profile()->GetHostContentSettingsMap()->GetContentSetting(
-            url.GetOrigin(), url.GetOrigin(),
-            type, std::string());
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetContentSetting(url.GetOrigin(),
+                                url.GetOrigin(),
+                                type,
+                                std::string());
     EXPECT_EQ(CONTENT_SETTING_ALLOW, setting);
 
     // Try to reset permission.
     permission_context.ResetPermission(url.GetOrigin(), url.GetOrigin());
     ContentSetting setting_after_reset =
-        profile()->GetHostContentSettingsMap()->GetContentSetting(
-            url.GetOrigin(), url.GetOrigin(),
-            type, std::string());
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetContentSetting(url.GetOrigin(),
+                                url.GetOrigin(),
+                                type,
+                                std::string());
     ContentSetting default_setting =
-        profile()->GetHostContentSettingsMap()->GetDefaultContentSetting(
-            type, nullptr);
+        HostContentSettingsMapFactory::GetForProfile(profile())
+            ->GetDefaultContentSetting(type, nullptr);
     EXPECT_EQ(default_setting, setting_after_reset);
   }
 
@@ -219,8 +236,11 @@ class PermissionContextBaseTests : public ChromeRenderViewHostTestHarness {
   // ChromeRenderViewHostTestHarness:
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
+#if defined(OS_ANDROID)
     InfoBarService::CreateForWebContents(web_contents());
+#else
     PermissionBubbleManager::CreateForWebContents(web_contents());
+#endif
   }
 
   DISALLOW_COPY_AND_ASSIGN(PermissionContextBaseTests);

@@ -90,7 +90,7 @@ bool TestAutofillClient::IsAutocompleteEnabled() {
 
 void TestAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
-    const std::vector<autofill::FormStructure*>& forms) {
+    const std::vector<FormStructure*>& forms) {
 }
 
 void TestAutofillClient::DidFillOrPreviewField(
@@ -99,10 +99,6 @@ void TestAutofillClient::DidFillOrPreviewField(
 }
 
 void TestAutofillClient::OnFirstUserGestureObserved() {
-}
-
-void TestAutofillClient::LinkClicked(const GURL& url,
-                                     WindowOpenDisposition disposition) {
 }
 
 bool TestAutofillClient::IsContextSecure(const GURL& form_origin) {

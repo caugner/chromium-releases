@@ -89,7 +89,7 @@ void WebURLLoaderMockFactory::ServeAsynchronousRequests() {
     // Follow any redirects while the loader is still active.
     while (response.httpStatusCode() >= 300 &&
            response.httpStatusCode() < 400) {
-      WebURLRequest newRequest = loader->ServeRedirect(response);
+      WebURLRequest newRequest = loader->ServeRedirect(request, response);
       if (!IsPending(loader) || loader->isDeferred())
         break;
       LoadRequest(newRequest, &response, &error, &data);
@@ -108,9 +108,7 @@ bool WebURLLoaderMockFactory::IsMockedURL(const blink::WebURL& url) {
 }
 
 void WebURLLoaderMockFactory::CancelLoad(WebURLLoaderMock* loader) {
-  LoaderToRequestMap::iterator iter = pending_loaders_.find(loader);
-  DCHECK(iter != pending_loaders_.end());
-  pending_loaders_.erase(iter);
+  pending_loaders_.erase(loader);
 }
 
 WebURLLoader* WebURLLoaderMockFactory::CreateURLLoader(
@@ -166,6 +164,11 @@ bool WebURLLoaderMockFactory::IsPending(WebURLLoaderMock* loader) {
 // static
 bool WebURLLoaderMockFactory::ReadFile(const base::FilePath& file_path,
                                        WebData* data) {
+  // If the path is empty then we return an empty file so tests can simulate
+  // requests without needing to actually load files.
+  if (file_path.empty())
+    return true;
+
   int64 file_size = 0;
   if (!base::GetFileSize(file_path, &file_size))
     return false;

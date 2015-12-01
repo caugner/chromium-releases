@@ -144,7 +144,7 @@ base::string16 GetExpectedAppId(const base::CommandLine& command_line,
 
 void MigrateChromiumShortcutsCallback() {
   // This should run on the file thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   // Get full path of chrome.
   base::FilePath chrome_exe;
@@ -293,19 +293,6 @@ bool ShellIntegration::IsSetAsDefaultAsynchronous() {
          IsAsyncSetAsDefaultEnabled();
 }
 
-ShellIntegration::DefaultWebClientSetPermission
-    ShellIntegration::CanSetAsDefaultBrowser() {
-  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
-  if (distribution->GetDefaultBrowserControlPolicy() !=
-          BrowserDistribution::DEFAULT_BROWSER_FULL_CONTROL)
-    return SET_DEFAULT_NOT_ALLOWED;
-  if (ShellUtil::CanMakeChromeDefaultUnattended())
-    return SET_DEFAULT_UNATTENDED;
-  if (IsSetAsDefaultAsynchronous())
-    return SET_DEFAULT_ASYNCHRONOUS;
-  return SET_DEFAULT_INTERACTIVE;
-}
-
 bool ShellIntegration::SetAsDefaultBrowser() {
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
@@ -322,6 +309,23 @@ bool ShellIntegration::SetAsDefaultBrowser() {
   }
 
   VLOG(1) << "Chrome registered as default browser.";
+  return true;
+}
+
+bool ShellIntegration::SetAsDefaultBrowserInteractive() {
+  base::FilePath chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
+    NOTREACHED() << "Error getting app exe path";
+    return false;
+  }
+
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  if (!ShellUtil::ShowMakeChromeDefaultSystemUI(dist, chrome_exe)) {
+    LOG(ERROR) << "Failed to launch the set-default-browser Windows UI.";
+    return false;
+  }
+
+  VLOG(1) << "Set-default-browser Windows UI completed.";
   return true;
 }
 
@@ -348,23 +352,6 @@ bool ShellIntegration::SetAsDefaultProtocolClient(const std::string& protocol) {
   return true;
 }
 
-bool ShellIntegration::SetAsDefaultBrowserInteractive() {
-  base::FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
-    NOTREACHED() << "Error getting app exe path";
-    return false;
-  }
-
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (!ShellUtil::ShowMakeChromeDefaultSystemUI(dist, chrome_exe)) {
-    LOG(ERROR) << "Failed to launch the set-default-browser Windows UI.";
-    return false;
-  }
-
-  VLOG(1) << "Set-default-browser Windows UI completed.";
-  return true;
-}
-
 bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
     const std::string& protocol) {
   base::FilePath chrome_exe;
@@ -385,20 +372,21 @@ bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
   return true;
 }
 
+ShellIntegration::DefaultWebClientSetPermission
+    ShellIntegration::CanSetAsDefaultBrowser() {
+  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
+  if (distribution->GetDefaultBrowserControlPolicy() !=
+          BrowserDistribution::DEFAULT_BROWSER_FULL_CONTROL)
+    return SET_DEFAULT_NOT_ALLOWED;
+  if (ShellUtil::CanMakeChromeDefaultUnattended())
+    return SET_DEFAULT_UNATTENDED;
+  if (IsSetAsDefaultAsynchronous())
+    return SET_DEFAULT_ASYNCHRONOUS;
+  return SET_DEFAULT_INTERACTIVE;
+}
+
 bool ShellIntegration::IsElevationNeededForSettingDefaultProtocolClient() {
   return base::win::GetVersion() < base::win::VERSION_WIN8;
-}
-
-ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
-  return GetDefaultWebClientStateFromShellUtilDefaultState(
-      ShellUtil::GetChromeDefaultState());
-}
-
-ShellIntegration::DefaultWebClientState
-    ShellIntegration::IsDefaultProtocolClient(const std::string& protocol) {
-  return GetDefaultWebClientStateFromShellUtilDefaultState(
-      ShellUtil::GetChromeDefaultProtocolClientState(
-          base::UTF8ToUTF16(protocol)));
 }
 
 base::string16 ShellIntegration::GetApplicationNameForProtocol(
@@ -408,6 +396,11 @@ base::string16 ShellIntegration::GetApplicationNameForProtocol(
     return GetAppForProtocolUsingAssocQuery(url);
   else
     return GetAppForProtocolUsingRegistry(url);
+}
+
+ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
+  return GetDefaultWebClientStateFromShellUtilDefaultState(
+      ShellUtil::GetChromeDefaultState());
 }
 
 // There is no reliable way to say which browser is default on a machine (each
@@ -441,6 +434,13 @@ bool ShellIntegration::IsFirefoxDefaultBrowser() {
       ff_default = true;
   }
   return ff_default;
+}
+
+ShellIntegration::DefaultWebClientState
+    ShellIntegration::IsDefaultProtocolClient(const std::string& protocol) {
+  return GetDefaultWebClientStateFromShellUtilDefaultState(
+      ShellUtil::GetChromeDefaultProtocolClientState(
+          base::UTF8ToUTF16(protocol)));
 }
 
 base::string16 ShellIntegration::GetAppModelIdForProfile(
@@ -617,21 +617,35 @@ base::FilePath ShellIntegration::GetStartMenuShortcut(
     base::DIR_START_MENU,
   };
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  base::string16 shortcut_name(
-      dist->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME));
+  const base::string16 shortcut_name(
+      dist->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
+      installer::kLnkExt);
+  base::FilePath programs_folder;
   base::FilePath shortcut;
 
   // Check both the common and the per-user Start Menu folders for system-level
   // installs.
   size_t folder = InstallUtil::IsPerUserInstall(chrome_exe) ? 1 : 0;
   for (; folder < arraysize(kFolderIds); ++folder) {
-    if (!PathService::Get(kFolderIds[folder], &shortcut)) {
+    if (!PathService::Get(kFolderIds[folder], &programs_folder)) {
       NOTREACHED();
       continue;
     }
 
-    shortcut = shortcut.Append(shortcut_name).Append(shortcut_name +
-                                                     installer::kLnkExt);
+    shortcut = programs_folder.Append(shortcut_name);
+    if (base::PathExists(shortcut))
+      return shortcut;
+
+    // Check in "Start Menu\Programs\<BROWSER>" if the shortcut was not found in
+    // "Start Menu\Programs". This fallback check is here to handle running
+    // instances that are updated past the change that migrates Chrome's start
+    // menu shortcut from the "Google Chrome" folder up into the main "Programs"
+    // folder. This code will become obsolete when the migration change lands,
+    // and is to be removed in that change.
+    shortcut =
+        programs_folder.Append(dist->GetStartMenuShortcutSubfolder(
+                                   BrowserDistribution::SUBFOLDER_CHROME))
+            .Append(shortcut_name);
     if (base::PathExists(shortcut))
       return shortcut;
   }
@@ -646,7 +660,7 @@ bool ShellIntegration::DefaultWebClientWorker::ShouldReportAttemptResults() {
 }
 
 bool ShellIntegration::DefaultBrowserWorker::InitializeSetAsDefault() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!IsSetAsDefaultAsynchronous())
     return false;
@@ -678,7 +692,7 @@ bool ShellIntegration::DefaultBrowserWorker::InitializeSetAsDefault() {
 
   // Start the timer.
   if (!async_timer_)
-    async_timer_.reset(new base::OneShotTimer<DefaultWebClientWorker>());
+    async_timer_.reset(new base::OneShotTimer());
   std::string value = variations::GetVariationParamValue(
       kAsyncSetAsDefaultExperimentName, "TimerDuration");
   int seconds = 0;
@@ -694,7 +708,7 @@ bool ShellIntegration::DefaultBrowserWorker::InitializeSetAsDefault() {
 }
 
 void ShellIntegration::DefaultBrowserWorker::FinalizeSetAsDefault() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(set_as_default_initialized());
 
   async_timer_.reset();

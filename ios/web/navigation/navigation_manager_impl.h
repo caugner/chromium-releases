@@ -73,18 +73,12 @@ class NavigationManagerImpl : public NavigationManager {
   // by the navigation manager and may be deleted at any time.
   NavigationItem* GetTransientItem() const;
 
-  // Returns the committed NavigationItem at |index|.
-  NavigationItem* GetItemAtIndex(size_t index) const;
-
   // Temporary accessors and content/ class pass-throughs.
   // TODO(stuartmorgan): Re-evaluate this list once the refactorings have
   // settled down.
   CRWSessionController* GetSessionController();
-  int GetCurrentEntryIndex() const;
   int GetLastCommittedEntryIndex() const;
-  int GetEntryCount() const;
   bool RemoveEntryAtIndex(int index);
-  int GetPendingEntryIndex() const;
   void LoadURL(const GURL& url,
                const Referrer& referrer,
                ui::PageTransition type);
@@ -113,8 +107,13 @@ class NavigationManagerImpl : public NavigationManager {
   NavigationItem* GetLastCommittedItem() const override;
   NavigationItem* GetPendingItem() const override;
   void DiscardNonCommittedItems() override;
+  void LoadIfNecessary() override;
   void AddTransientURLRewriter(
       BrowserURLRewriter::URLRewriter rewriter) override;
+  int GetEntryCount() const override;
+  NavigationItem* GetItemAtIndex(size_t index) const override;
+  int GetCurrentEntryIndex() const override;
+  int GetPendingItemIndex() const override;
 
   // Returns the current list of transient url rewriters, passing ownership to
   // the caller.

@@ -18,6 +18,7 @@
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/enterprise_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/http/http_request_headers.h"
@@ -27,16 +28,16 @@ namespace {
 // The maximum number of successive retries.
 const int kMaxNumRetries = 1;
 
-// String constant defining the url we upload system logs to.
-const char* kSystemLogUploadUrl =
-    "https://m.google.com/devicemanagement/data/api/upload";
+// String constant defining the url tail we upload system logs to.
+const char* kSystemLogUploadUrlTail = "/upload";
 
 // The file names of the system logs to upload.
 // Note: do not add anything to this list without checking for PII in the file.
 const char* const kSystemLogFileNames[] = {
     "/var/log/bios_info.txt", "/var/log/chrome/chrome",
-    "/var/log/eventlog.txt",  "/var/log/messages",
-    "/var/log/net.log",       "/var/log/platform_info.txt",
+    "/var/log/eventlog.txt",  "/var/log/platform_info.txt",
+    "/var/log/messages",      "/var/log/messages.1",
+    "/var/log/net.log",       "/var/log/net.1.log",
     "/var/log/ui/ui.LATEST",  "/var/log/update_engine.log"};
 
 const char kEmailAddress[] =
@@ -155,6 +156,11 @@ void RecordSystemLogPIILeak(policy::SystemLogPIIType type) {
                             policy::SYSTEM_LOG_PII_TYPE_SIZE);
 }
 
+std::string GetUploadUrl() {
+  return policy::BrowserPolicyConnector::GetDeviceManagementUrl() +
+         kSystemLogUploadUrlTail;
+}
+
 }  // namespace
 
 namespace policy {
@@ -194,7 +200,7 @@ SystemLogUploader::SystemLogUploader(
 
   // Watch for policy changes.
   upload_enabled_observer_ = chromeos::CrosSettings::Get()->AddSettingsObserver(
-      chromeos::kLogUploadEnabled,
+      chromeos::kSystemLogUploadEnabled,
       base::Bind(&SystemLogUploader::RefreshUploadSettings,
                  base::Unretained(this)));
 
@@ -293,7 +299,8 @@ void SystemLogUploader::RefreshUploadSettings() {
 
   // CrosSettings are trusted - we want to use the last trusted values, by
   // default do not upload system logs.
-  if (!settings->GetBoolean(chromeos::kLogUploadEnabled, &upload_enabled_))
+  if (!settings->GetBoolean(chromeos::kSystemLogUploadEnabled,
+                            &upload_enabled_))
     upload_enabled_ = false;
 }
 
@@ -302,7 +309,7 @@ void SystemLogUploader::UploadSystemLogs(scoped_ptr<SystemLogs> system_logs) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!upload_job_);
 
-  GURL upload_url(kSystemLogUploadUrl);
+  GURL upload_url(GetUploadUrl());
   DCHECK(upload_url.is_valid());
   upload_job_ = syslog_delegate_->CreateUploadJob(upload_url, this);
 

@@ -108,7 +108,7 @@ bool ParseChildPermissions(const std::string& base_name,
         if (error) {
           *error = ErrorUtils::FormatErrorMessageUTF16(
               errors::kInvalidPermission,
-              base_name + '.' + base::IntToString(i));
+              base_name + '.' + base::SizeTToString(i));
           return false;
         }
         LOG(WARNING) << "Permission is not a string.";
@@ -155,7 +155,7 @@ bool APIPermissionSet::ParseFromJSON(
       if (!permissions->GetDictionary(i, &dict) || dict->size() != 1) {
         if (error) {
           *error = ErrorUtils::FormatErrorMessageUTF16(
-              errors::kInvalidPermission, base::IntToString(i));
+              errors::kInvalidPermission, base::SizeTToString(i));
           return false;
         }
         LOG(WARNING) << "Permission is not a string or single key dict.";
@@ -180,17 +180,6 @@ bool APIPermissionSet::ParseFromJSON(
       return false;
   }
   return true;
-}
-
-void APIPermissionSet::AddImpliedPermissions() {
-  // The fileSystem.write and fileSystem.directory permissions imply
-  // fileSystem.writeDirectory.
-  // Has a corresponding rule in ChromePermissionMessageProvider.
-  // TODO(sammc): Remove this. See http://crbug.com/284849.
-  if (ContainsKey(map(), APIPermission::kFileSystemWrite) &&
-      ContainsKey(map(), APIPermission::kFileSystemDirectory)) {
-    insert(APIPermission::kFileSystemWriteDirectory);
-  }
 }
 
 PermissionID::PermissionID(APIPermission::ID id)

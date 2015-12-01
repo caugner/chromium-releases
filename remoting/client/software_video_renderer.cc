@@ -71,9 +71,11 @@ scoped_ptr<webrtc::DesktopFrame> DoDecodeFrame(
 
 SoftwareVideoRenderer::SoftwareVideoRenderer(
     scoped_refptr<base::SingleThreadTaskRunner> decode_task_runner,
-    FrameConsumer* consumer)
+    FrameConsumer* consumer,
+    protocol::PerformanceTracker* perf_tracker)
     : decode_task_runner_(decode_task_runner),
       consumer_(consumer),
+      perf_tracker_(perf_tracker),
       weak_factory_(this) {}
 
 SoftwareVideoRenderer::~SoftwareVideoRenderer() {
@@ -104,11 +106,6 @@ void SoftwareVideoRenderer::OnSessionConfig(
   }
 }
 
-ChromotingStats* SoftwareVideoRenderer::GetStats() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return &stats_;
-}
-
 protocol::VideoStub* SoftwareVideoRenderer::GetVideoStub() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return this;
@@ -120,7 +117,8 @@ void SoftwareVideoRenderer::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
 
   base::ScopedClosureRunner done_runner(done);
 
-  stats_.RecordVideoPacketStats(*packet);
+  if (perf_tracker_)
+    perf_tracker_->RecordVideoPacketStats(*packet);
 
   // If the video packet is empty then drop it. Empty packets are used to
   // maintain activity on the network.
@@ -151,23 +149,23 @@ void SoftwareVideoRenderer::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
       consumer_->AllocateFrame(source_size_);
   frame->set_dpi(source_dpi_);
 
+  int32_t frame_id = packet->frame_id();
   base::PostTaskAndReplyWithResult(
       decode_task_runner_.get(), FROM_HERE,
       base::Bind(&DoDecodeFrame, decoder_.get(), base::Passed(&packet),
                  base::Passed(&frame)),
       base::Bind(&SoftwareVideoRenderer::RenderFrame,
-                 weak_factory_.GetWeakPtr(), base::TimeTicks::Now(),
-                 done_runner.Release()));
+                 weak_factory_.GetWeakPtr(), frame_id, done_runner.Release()));
 }
 
 void SoftwareVideoRenderer::RenderFrame(
-    base::TimeTicks decode_start_time,
+    int32_t frame_id,
     const base::Closure& done,
     scoped_ptr<webrtc::DesktopFrame> frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  stats_.RecordDecodeTime(
-      (base::TimeTicks::Now() - decode_start_time).InMilliseconds());
+  if (perf_tracker_)
+    perf_tracker_->OnFrameDecoded(frame_id);
 
   if (!frame) {
     if (!done.is_null())
@@ -175,18 +173,17 @@ void SoftwareVideoRenderer::RenderFrame(
     return;
   }
 
-  consumer_->DrawFrame(
-      frame.Pass(),
-      base::Bind(&SoftwareVideoRenderer::OnFrameRendered,
-                 weak_factory_.GetWeakPtr(), base::TimeTicks::Now(), done));
+  consumer_->DrawFrame(frame.Pass(),
+                       base::Bind(&SoftwareVideoRenderer::OnFrameRendered,
+                                  weak_factory_.GetWeakPtr(), frame_id, done));
 }
 
-void SoftwareVideoRenderer::OnFrameRendered(base::TimeTicks paint_start_time,
+void SoftwareVideoRenderer::OnFrameRendered(int32_t frame_id,
                                             const base::Closure& done) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  stats_.RecordPaintTime(
-      (base::TimeTicks::Now() - paint_start_time).InMilliseconds());
+  if (perf_tracker_)
+    perf_tracker_->OnFramePainted(frame_id);
 
   if (!done.is_null())
     done.Run();

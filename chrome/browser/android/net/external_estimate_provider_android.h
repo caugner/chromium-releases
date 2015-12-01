@@ -10,8 +10,9 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/observer_list_threadsafe.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "net/base/external_estimate_provider.h"
@@ -33,39 +34,40 @@ class ExternalEstimateProviderAndroid
 
   ~ExternalEstimateProviderAndroid() override;
 
-  // net::ExternalEstimateProvider implementation.
+  // net::ExternalEstimateProvider implementation:
   bool GetRTT(base::TimeDelta* rtt) const override;
-
-  // net::ExternalEstimateProvider implementation.
   bool GetDownstreamThroughputKbps(
       int32_t* downstream_throughput_kbps) const override;
-
-  // net::ExternalEstimateProvider implementation.
   bool GetUpstreamThroughputKbps(
       int32_t* upstream_throughput_kbps) const override;
-
-  // net::ExternalEstimateProvider implementation.
   bool GetTimeSinceLastUpdate(
       base::TimeDelta* time_since_last_update) const override;
+  void SetUpdatedEstimateDelegate(
+      net::ExternalEstimateProvider::UpdatedEstimateDelegate* delegate)
+      override;
+  void Update() const override;
 
   // NetworkChangeNotifier::ConnectionTypeObserver implementation.
   void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
-  // net::ExternalEstimateProvider implementation.
-  void SetUpdatedEstimateDelegate(
-      net::ExternalEstimateProvider::UpdatedEstimateDelegate* delegate)
-      override;
+  // Called by Java when the external estimate provider has an updated value.
+  // This may be called on a thread different from |task_runner_|.
+  void NotifyExternalEstimateProviderAndroidUpdate(JNIEnv* env, jobject obj);
+
+ protected:
+  // Notifies the delegate that a new update to external estimate is available.
+  // Protected for testing.
+  void NotifyUpdatedEstimateAvailable() const;
 
  private:
-  // Places a requests to the provider to update the network quality. Returns
-  // true if the request was placed successfully.
-  void RequestUpdate() const;
-
   // Value returned if valid value is unavailable.
   int32_t no_value_ = -1;
 
   base::android::ScopedJavaGlobalRef<jobject> j_external_estimate_provider_;
+
+  // Task runner that accesses ExternalEstimateProviderAndroid members.
+  scoped_refptr<base::TaskRunner> task_runner_;
 
   // Notified every time there is an update available from the network quality
   // provider.
@@ -74,6 +76,9 @@ class ExternalEstimateProviderAndroid
   net::ExternalEstimateProvider::UpdatedEstimateDelegate* delegate_;
 
   base::ThreadChecker thread_checker_;
+
+  // Used for posting tasks.
+  base::WeakPtrFactory<ExternalEstimateProviderAndroid> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalEstimateProviderAndroid);
 };

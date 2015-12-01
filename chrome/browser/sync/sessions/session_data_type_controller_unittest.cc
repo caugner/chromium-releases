@@ -7,12 +7,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/sync/glue/synced_window_delegate.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/sessions/session_data_type_controller.h"
-#include "chrome/browser/sync/sessions/synced_window_delegates_getter.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/sync_driver/fake_sync_client.h"
+#include "components/sync_driver/glue/synced_window_delegate.h"
 #include "components/sync_driver/local_device_info_provider_mock.h"
+#include "components/sync_driver/sessions/synced_window_delegates_getter.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -71,6 +72,10 @@ class MockSyncedWindowDelegatesGetter : public SyncedWindowDelegatesGetter {
     return delegates_;
   }
 
+  const SyncedWindowDelegate* FindById(SessionID::id_type id) override {
+    return nullptr;
+  }
+
   void Add(SyncedWindowDelegate* delegate) {
     delegates_.insert(delegate);
   }
@@ -80,14 +85,20 @@ class MockSyncedWindowDelegatesGetter : public SyncedWindowDelegatesGetter {
 };
 
 class SessionDataTypeControllerTest
-    : public testing::Test {
+    : public testing::Test, public sync_driver::FakeSyncClient {
  public:
   SessionDataTypeControllerTest()
-      : load_finished_(false),
+      : sync_driver::FakeSyncClient(&profile_sync_factory_),
+        load_finished_(false),
         thread_bundle_(content::TestBrowserThreadBundle::DEFAULT),
         last_type_(syncer::UNSPECIFIED),
         weak_ptr_factory_(this) {}
   ~SessionDataTypeControllerTest() override {}
+
+  // FakeSyncClient overrides.
+  PrefService* GetPrefService() override {
+    return profile_.GetPrefs();
+  }
 
   void SetUp() override {
     synced_window_delegate_.reset(new MockSyncedWindowDelegate(&profile_));
@@ -103,7 +114,7 @@ class SessionDataTypeControllerTest
         "device_id"));
 
     controller_ = new SessionDataTypeController(
-        &profile_sync_factory_,
+        this,
         &profile_,
         synced_window_getter_.get(),
         local_device_.get());

@@ -10,6 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,6 +18,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/webplugininfo.h"
@@ -29,6 +31,8 @@ namespace {
 void ReleaseBrowserProcessModule() {
   g_browser_process->ReleaseModule();
 }
+
+using content_settings::PluginsFieldTrial;
 
 }  // namespace
 
@@ -69,7 +73,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
  protected:
   void CheckContentSettingsSet() {
     HostContentSettingsMap* map =
-        profile_->GetHostContentSettingsMap();
+        HostContentSettingsMapFactory::GetForProfile(profile_);
     content_settings::CookieSettings* cookie_settings =
         CookieSettingsFactory::GetForProfile(profile_).get();
 
@@ -186,7 +190,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
 
   void CheckContentSettingsDefault() {
     HostContentSettingsMap* map =
-        profile_->GetHostContentSettingsMap();
+        HostContentSettingsMapFactory::GetForProfile(profile_);
     content_settings::CookieSettings* cookie_settings =
         CookieSettingsFactory::GetForProfile(profile_).get();
 
@@ -201,7 +205,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_ALLOW,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
-    EXPECT_EQ(CONTENT_SETTING_ALLOW,
+    EXPECT_EQ(PluginsFieldTrial::GetDefaultPluginsContentSetting(),
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_PLUGINS, std::string()));
     EXPECT_EQ(CONTENT_SETTING_BLOCK,

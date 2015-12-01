@@ -6,11 +6,12 @@
 #define COMPONENTS_VARIATIONS_VARIATIONS_REQUEST_SCHEDULER_MOBILE_H_
 
 #include "base/bind.h"
+#include "base/gtest_prod_util.h"
 #include "components/variations/variations_request_scheduler.h"
 
 class PrefService;
 
-namespace chrome_variations {
+namespace variations {
 
 // A specialized VariationsRequestScheduler that manages request cycles for
 // VariationsService on mobile platforms.
@@ -39,7 +40,7 @@ class VariationsRequestSchedulerMobile : public VariationsRequestScheduler {
   PrefService* local_state_;
 
   // Timer used for triggering a delayed fetch for ScheduleFetch().
-  base::OneShotTimer<VariationsRequestSchedulerMobile> schedule_fetch_timer_;
+  base::OneShotTimer schedule_fetch_timer_;
 
   // The time the last seed request was initiated.
   base::Time last_request_time_;
@@ -47,6 +48,6 @@ class VariationsRequestSchedulerMobile : public VariationsRequestScheduler {
   DISALLOW_COPY_AND_ASSIGN(VariationsRequestSchedulerMobile);
 };
 
-}  // namespace chrome_variations
+}  // namespace variations
 
 #endif  // COMPONENTS_VARIATIONS_VARIATIONS_REQUEST_SCHEDULER_MOBILE_H_

@@ -17,27 +17,34 @@
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
+#include "android_webview/common/aw_descriptors.h"
 #include "android_webview/common/render_view_messages.h"
 #include "android_webview/common/url_constants.h"
 #include "base/android/locale_utils.h"
 #include "base/base_paths_android.h"
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "components/cdm/browser/cdm_message_filter_android.h"
+#include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "content/public/browser/access_token_store.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
 #include "net/android/network_library.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_info.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_bundle_android.h"
 #include "ui/resources/grit/ui_resources.h"
 
 using content::BrowserThread;
@@ -280,7 +287,13 @@ std::string AwContentBrowserClient::GetCanonicalEncodingNameByAliasName(
 void AwContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
-  NOTREACHED() << "Android WebView does not support multi-process yet";
+  if (command_line->HasSwitch(switches::kSingleProcess)) {
+    NOTREACHED() << "Android WebView does not support multi-process yet";
+  } else {
+    // The only kind of a child process WebView can have is renderer.
+    DCHECK_EQ(switches::kRendererProcess,
+              command_line->GetSwitchValueASCII(switches::kProcessType));
+  }
 }
 
 std::string AwContentBrowserClient::GetApplicationLocale() {
@@ -491,6 +504,19 @@ bool AwContentBrowserClient::AllowPepperSocketAPI(
   return false;
 }
 
+void AwContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      content::FileDescriptorInfo* mappings,
+      std::map<int, base::MemoryMappedFile::Region>* regions) {
+  int fd = ui::GetMainAndroidPackFd(
+      &(*regions)[kAndroidWebViewMainPakDescriptor]);
+  mappings->Share(kAndroidWebViewMainPakDescriptor, fd);
+
+  fd = ui::GetLocalePackFd(&(*regions)[kAndroidWebViewLocalePakDescriptor]);
+  mappings->Share(kAndroidWebViewLocalePakDescriptor, fd);
+}
+
 void AwContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* rvh,
     content::WebPreferences* web_prefs) {
@@ -500,6 +526,22 @@ void AwContentBrowserClient::OverrideWebkitPrefs(
   }
   preferences_populater_->PopulateFor(
       content::WebContents::FromRenderViewHost(rvh), web_prefs);
+}
+
+ScopedVector<content::NavigationThrottle>
+AwContentBrowserClient::CreateThrottlesForNavigation(
+    content::NavigationHandle* navigation_handle) {
+  ScopedVector<content::NavigationThrottle> throttles;
+  // We allow intercepting only navigations within main frames. This
+  // is used to post onPageStarted. We handle shouldOverrideUrlLoading
+  // via a sync IPC.
+  if (navigation_handle->IsInMainFrame()) {
+    throttles.push_back(
+        navigation_interception::InterceptNavigationDelegate::CreateThrottleFor(
+            navigation_handle)
+            .Pass());
+  }
+  return throttles.Pass();
 }
 
 #if defined(VIDEO_HOLE)

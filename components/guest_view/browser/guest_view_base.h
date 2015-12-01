@@ -271,7 +271,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void SetAttachParams(const base::DictionaryValue& params);
   void SetOpener(GuestViewBase* opener);
 
-  // BrowserPluginGuestDelegate implementation.
   content::WebContents* CreateNewGuestWindow(
       const content::WebContents::CreateParams& create_params) final;
   void DidAttach(int guest_proxy_routing_id) final;
@@ -341,6 +340,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
       content::WebContents* web_contents,
       SkColor color,
       const std::vector<content::ColorSuggestion>& suggestions) override;
+  void ResizeDueToAutoResize(content::WebContents* web_contents,
+                             const gfx::Size& new_size) override;
   void RunFileChooser(content::WebContents* web_contents,
                       const content::FileChooserParams& params) override;
   bool ShouldFocusPageAfterCrash() final;
@@ -369,6 +370,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // entirety of the embedder's content.
   virtual bool ShouldHandleFindRequestsForEmbedder() const;
 
+  // BrowserPluginGuestDelegate implementation.
+  void SetContextMenuPosition(const gfx::Point& position) override;
+
  private:
   class OwnerContentsObserver;
 
@@ -394,6 +398,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   void StartTrackingEmbedderZoomLevel();
   void StopTrackingEmbedderZoomLevel();
+
+  void UpdateGuestSize(const gfx::Size& new_size, bool due_to_auto_resize);
 
   // This guest tracks the lifetime of the WebContents specified by
   // |owner_web_contents_|. If |owner_web_contents_| is destroyed then this

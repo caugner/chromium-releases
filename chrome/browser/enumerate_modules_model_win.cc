@@ -748,7 +748,7 @@ void ModuleEnumerator::MatchAgainstBlacklist() {
 
 void ModuleEnumerator::ReportBack() {
   if (!limited_mode_)
-    DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
+    DCHECK_CURRENTLY_ON(callback_thread_id_);
   observer_->DoneScanning();
 }
 
@@ -838,7 +838,7 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
 
 // static
 EnumerateModulesModel* EnumerateModulesModel::GetInstance() {
-  return Singleton<EnumerateModulesModel>::get();
+  return base::Singleton<EnumerateModulesModel>::get();
 }
 
 bool EnumerateModulesModel::ShouldShowConflictWarning() const {

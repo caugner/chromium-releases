@@ -23,7 +23,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "url/gurl.h"
 
@@ -123,11 +123,6 @@ using FormsPredictionsMap =
 // Tells the render frame that a user gesture was observed somewhere in the tab
 // (including in a different frame).
 IPC_MESSAGE_ROUTED0(AutofillMsg_FirstUserGestureObservedInTab)
-
-// Instructs the renderer to immediately return an IPC acknowledging the ping.
-// This is used to correctly sequence events, since IPCs are guaranteed to be
-// processed in order.
-IPC_MESSAGE_ROUTED0(AutofillMsg_Ping)
 
 // Instructs the renderer to fill the active form with the given form data.
 IPC_MESSAGE_ROUTED2(AutofillMsg_FillForm,

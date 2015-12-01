@@ -298,8 +298,9 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface,
                          size_t len,
                          bool fin) override {
     EXPECT_EQ(header_stream_id_, stream_id);
-    if (len == 0)
+    if (len == 0) {
       ++zero_length_data_frame_count_;
+    }
 
     data_bytes_ += len;
     LOG(INFO) << "OnStreamFrameData(" << stream_id << ", \"";
@@ -998,7 +999,7 @@ TEST_P(SpdyFramerTest, MultiValueHeader) {
       control_frame->size());
 
   EXPECT_THAT(visitor.headers_,
-              testing::ElementsAre(testing::Pair("name", value)));
+              testing::ElementsAre(testing::Pair("name", StringPiece(value))));
 }
 
 TEST_P(SpdyFramerTest, BasicCompression) {
@@ -1062,14 +1063,14 @@ TEST_P(SpdyFramerTest, BasicCompression) {
 #if defined(USE_SYSTEM_ZLIB)
     EXPECT_EQ(149u, compressed_size4);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(101u, compressed_size4);
+    EXPECT_EQ(99u, compressed_size4);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   } else {
     EXPECT_EQ(165u, uncompressed_size4);
 #if defined(USE_SYSTEM_ZLIB)
     EXPECT_EQ(175u, compressed_size4);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(102u, compressed_size4);
+    EXPECT_EQ(99u, compressed_size4);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   }
 
@@ -3531,13 +3532,13 @@ TEST_P(SpdyFramerTest, CreateAltSvc) {
   const char kType = static_cast<unsigned char>(
       SpdyConstants::SerializeFrameType(spdy_version_, ALTSVC));
   const unsigned char kFrameData[] = {
-      0x00, 0x00, 0x49, kType, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x06, 'o',
+      0x00, 0x00, 0x4b, kType, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x06, 'o',
       'r',  'i',  'g',  'i',   'n',  'p',  'i',  'd',  '1',  '=',  '"',  'h',
       'o',  's',  't',  ':',   '4',  '4',  '3',  '"',  ';',  ' ',  'm',  'a',
       '=',  '5',  ',',  'p',   '%',  '2',  '2',  '%',  '3',  'D',  'i',  '%',
       '3',  'A',  'd',  '=',   '"',  'h',  '_',  '\\', '\\', 'o',  '\\', '"',
       's',  't',  ':',  '1',   '2',  '3',  '"',  ';',  ' ',  'm',  'a',  '=',
-      '4',  '2',  ';',  ' ',   'p',  '=',  '0',  '.',  '2',  '0',
+      '4',  '2',  ';',  ' ',   'p',  '=',  '"',  '0',  '.',  '2',  '0',  '"',
   };
   SpdyAltSvcIR altsvc_ir(3);
   altsvc_ir.set_origin("origin");

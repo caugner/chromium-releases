@@ -41,6 +41,7 @@ enum SubstitutionType {
   SUBSTITUTION_TARGET_OUTPUT_NAME,  // {{target_output_name}}
 
   // Valid for compiler tools.
+  SUBSTITUTION_ASMFLAGS,  // {{asmflags}}
   SUBSTITUTION_CFLAGS,  // {{cflags}}
   SUBSTITUTION_CFLAGS_C,  // {{cflags_c}}
   SUBSTITUTION_CFLAGS_CC,  // {{cflags_cc}}
@@ -69,7 +70,7 @@ extern const char* kSubstitutionNames[SUBSTITUTION_NUM_TYPES];
 // the dollar sign.
 extern const char* kSubstitutionNinjaNames[SUBSTITUTION_NUM_TYPES];
 
-// A wrapper around an array if flags indicating whether a give substitution
+// A wrapper around an array if flags indicating whether a given substitution
 // type is required in some context. By convention, the LITERAL type bit is
 // not set.
 struct SubstitutionBits {

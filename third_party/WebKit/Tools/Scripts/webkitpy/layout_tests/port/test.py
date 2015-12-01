@@ -422,11 +422,6 @@ class TestPort(Port):
         if self._operating_system == 'linux' and self._version != 'linux32':
             self._architecture = 'x86_64'
 
-    def repository_paths(self):
-        """Returns a list of (repository_name, repository_path) tuples of its depending code base."""
-        # FIXME: We override this just to keep the perf tests happy.
-        return [('blink', self.layout_tests_dir())]
-
     def buildbot_archives_baselines(self):
         return self._name != 'test-win-xp'
 
@@ -642,6 +637,12 @@ class TestDriver(Driver):
         if crashed_process_name:
             crash_logs = CrashLogs(self._port.host)
             crash_log = crash_logs.find_newest_log(crashed_process_name, None) or ''
+
+        if 'crash-reftest.html' in test_name:
+            crashed_process_name = self._port.driver_name()
+            crashed_pid = 3
+            crash = True
+            crash_log = 'reftest crash log'
 
         if stop_when_done:
             self.stop()

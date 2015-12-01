@@ -37,7 +37,6 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/download/download_test_file_activity_observer.h"
-#include "chrome/browser/download/notification/download_notification_manager.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -2753,15 +2752,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SaveImageAsReferrerPolicyDefault) {
   EXPECT_TRUE(VerifyFile(file, "", 0));
 }
 
-// Verify the multiple downloads infobar.
+// On mobile, the multiple downloads UI is an infobar. On desktop, it's a
+// bubble. Test each as appropriate.
+#if defined(OS_ANDROID) || defined(OS_IOS)
 IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
   // Ensure that infobars are being used instead of bubbles.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePermissionsBubbles);
@@ -2805,7 +2799,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
   EXPECT_EQ(2u, downloads_observer->NumDownloadsSeenInState(
       DownloadItem::COMPLETE));
 }
-
+#else
 IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsBubble) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
@@ -2814,15 +2808,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsBubble) {
     return;
 #endif
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  // Permission bubbles are not supported on mobile.
-  return;
-#endif
-
-  // Enable permision bubbles.
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnablePermissionsBubbles);
-
   // Create a downloads observer.
   scoped_ptr<content::DownloadTestObserver> downloads_observer(
         CreateWaiter(browser(), 2));
@@ -2830,7 +2815,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsBubble) {
   PermissionBubbleManager* permission_bubble_manager =
       PermissionBubbleManager::FromWebContents(
           browser()->tab_strip_model()->GetActiveWebContents());
-  permission_bubble_manager->DisplayPendingRequests(browser());
+  permission_bubble_manager->DisplayPendingRequests();
   permission_bubble_manager->set_auto_response_for_test(
       PermissionBubbleManager::ACCEPT_ALL);
 
@@ -2846,6 +2831,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsBubble) {
 
   browser()->tab_strip_model()->GetActiveWebContents()->Close();
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
   GURL url = net::URLRequestMockHTTPJob::GetMockUrl("downloads/a_zip_file.zip");
@@ -3401,8 +3387,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, FeedbackService) {
 
 class DownloadTestWithShelf : public DownloadTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
+#if defined(OS_CHROMEOS)
     command_line->AppendSwitchASCII(switches::kEnableDownloadNotification,
                                     "disabled");
+#endif
     DownloadTest::SetUpCommandLine(command_line);
   }
 };

@@ -46,7 +46,8 @@ TestRenderFrameHost::TestRenderFrameHost(SiteInstance* site_instance,
                                          RenderWidgetHostDelegate* rwh_delegate,
                                          FrameTree* frame_tree,
                                          FrameTreeNode* frame_tree_node,
-                                         int routing_id,
+                                         int32 routing_id,
+                                         int32 widget_routing_id,
                                          int flags)
     : RenderFrameHostImpl(site_instance,
                           render_view_host,
@@ -55,11 +56,11 @@ TestRenderFrameHost::TestRenderFrameHost(SiteInstance* site_instance,
                           frame_tree,
                           frame_tree_node,
                           routing_id,
+                          widget_routing_id,
                           flags),
       child_creation_observer_(delegate ? delegate->GetAsWebContents() : NULL),
       contents_mime_type_("text/html"),
-      simulate_history_list_was_cleared_(false) {
-}
+      simulate_history_list_was_cleared_(false) {}
 
 TestRenderFrameHost::~TestRenderFrameHost() {
 }
@@ -154,6 +155,13 @@ void TestRenderFrameHost::SimulateNavigationError(const GURL& url,
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBrowserSideNavigation)) {
     NavigationRequest* request = frame_tree_node_->navigation_request();
+    CHECK(request);
+    // Simulate a beforeUnload ACK from the renderer if the browser is waiting
+    // for it. If it runs it will update the request state.
+    if (request->state() == NavigationRequest::WAITING_FOR_RENDERER_RESPONSE) {
+      static_cast<TestRenderFrameHost*>(frame_tree_node()->current_frame_host())
+          ->SendBeforeUnloadACK(true);
+    }
     TestNavigationURLLoader* url_loader =
         static_cast<TestNavigationURLLoader*>(request->loader_for_testing());
     CHECK(url_loader);
@@ -339,8 +347,8 @@ void TestRenderFrameHost::SendRendererInitiatedNavigationRequest(
   }
 }
 
-void TestRenderFrameHost::DidDisownOpener() {
-  OnDidDisownOpener();
+void TestRenderFrameHost::DidChangeOpener(int opener_routing_id) {
+  OnDidChangeOpener(opener_routing_id);
 }
 
 void TestRenderFrameHost::PrepareForCommit() {
@@ -363,8 +371,10 @@ void TestRenderFrameHost::PrepareForCommitWithServerRedirect(
 
   // Simulate a beforeUnload ACK from the renderer if the browser is waiting for
   // it. If it runs it will update the request state.
-  if (request->state() == NavigationRequest::WAITING_FOR_RENDERER_RESPONSE)
-    SendBeforeUnloadACK(true);
+  if (request->state() == NavigationRequest::WAITING_FOR_RENDERER_RESPONSE) {
+    static_cast<TestRenderFrameHost*>(frame_tree_node()->current_frame_host())
+        ->SendBeforeUnloadACK(true);
+  }
 
   CHECK(request->state() == NavigationRequest::STARTED);
 

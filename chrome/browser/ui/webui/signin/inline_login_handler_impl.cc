@@ -324,7 +324,8 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
   signin_metrics::Source source = signin::GetSourceForPromoURL(current_url_);
 
   SigninManager* signin_manager = SigninManagerFactory::GetForProfile(profile_);
-  std::string primary_email = signin_manager->GetAuthenticatedUsername();
+  std::string primary_email =
+      signin_manager->GetAuthenticatedAccountInfo().email;
   if (gaia::AreEmailsSame(email_, primary_email) &&
       source == signin_metrics::SOURCE_REAUTH &&
       switches::IsNewProfileManagement() &&
@@ -355,9 +356,8 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
     SigninErrorController* error_controller =
         SigninErrorControllerFactory::GetForProfile(profile_);
 
-    bool is_new_avatar_menu = switches::IsNewAvatarMenu();
-
-    OneClickSigninSyncStarter::StartSyncMode start_mode;
+    OneClickSigninSyncStarter::StartSyncMode start_mode =
+        OneClickSigninSyncStarter::CONFIRM_SYNC_SETTINGS_FIRST;
     if (source == signin_metrics::SOURCE_SETTINGS || choose_what_to_sync_) {
       bool show_settings_without_configure =
           error_controller->HasError() &&
@@ -366,25 +366,12 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
       start_mode = show_settings_without_configure ?
           OneClickSigninSyncStarter::SHOW_SETTINGS_WITHOUT_CONFIGURE :
           OneClickSigninSyncStarter::CONFIGURE_SYNC_FIRST;
-    } else {
-      start_mode = is_new_avatar_menu ?
-          OneClickSigninSyncStarter::CONFIRM_SYNC_SETTINGS_FIRST :
-          OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS;
     }
 
-    OneClickSigninSyncStarter::ConfirmationRequired confirmation_required;
-    if (confirm_untrusted_signin_) {
-      confirmation_required =
-          OneClickSigninSyncStarter::CONFIRM_UNTRUSTED_SIGNIN;
-    } else if (is_new_avatar_menu) {
-      confirmation_required = OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN;
-    } else {
-      confirmation_required =
-          source == signin_metrics::SOURCE_SETTINGS ||
-          choose_what_to_sync_ ?
-              OneClickSigninSyncStarter::NO_CONFIRMATION :
-              OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN;
-    }
+    OneClickSigninSyncStarter::ConfirmationRequired confirmation_required =
+        confirm_untrusted_signin_ ?
+            OneClickSigninSyncStarter::CONFIRM_UNTRUSTED_SIGNIN :
+            OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN;
 
     bool start_signin = !HandleCrossAccountError(result.refresh_token, source,
         confirmation_required, start_mode);
@@ -557,7 +544,7 @@ bool InlineLoginHandlerImpl::CanOffer(Profile* profile,
     // If the signin manager already has an authenticated name, then this is a
     // re-auth scenario.  Make sure the email just signed in corresponds to
     // the one sign in manager expects.
-    std::string current_email = manager->GetAuthenticatedUsername();
+    std::string current_email = manager->GetAuthenticatedAccountInfo().email;
     const bool same_email = gaia::AreEmailsSame(current_email, email);
     if (!current_email.empty() && !same_email) {
       UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
@@ -610,10 +597,6 @@ void InlineLoginHandlerImpl::SetExtraInitParams(base::DictionaryValue& params) {
     params.SetBoolean("dontResizeNonEmbeddedPages", true);
 
   content::WebContents* contents = web_ui()->GetWebContents();
-  const GURL& current_url = contents->GetURL();
-  std::string is_constrained;
-  net::GetValueForKeyInQuery(current_url, "constrained", &is_constrained);
-
   content::WebContentsObserver::Observe(contents);
   LogHistogramValue(signin_metrics::HISTOGRAM_SHOWN);
 }
@@ -761,7 +744,8 @@ void InlineLoginHandlerImpl::FinishCompleteLogin(
     case signin_metrics::SOURCE_REAUTH: {
       std::string primary_username =
           SigninManagerFactory::GetForProfile(profile)
-          ->GetAuthenticatedUsername();
+              ->GetAuthenticatedAccountInfo()
+              .email;
       if (!gaia::AreEmailsSame(default_email, primary_username))
         can_offer_for = CAN_OFFER_FOR_SECONDARY_ACCOUNT;
       break;

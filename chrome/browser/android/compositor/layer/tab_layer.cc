@@ -10,6 +10,7 @@
 #include "cc/layers/nine_patch_layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/ui_resource_layer.h"
+#include "cc/resources/scoped_ui_resource.h"
 #include "chrome/browser/android/compositor/decoration_title.h"
 #include "chrome/browser/android/compositor/layer/content_layer.h"
 #include "chrome/browser/android/compositor/layer/toolbar_layer.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/android/compositor/tab_content_manager.h"
 #include "content/public/browser/android/compositor.h"
 #include "ui/android/resources/resource_manager.h"
-#include "ui/android/resources/ui_resource_android.h"
 #include "ui/base/l10n/l10n_util_android.h"
 #include "ui/gfx/geometry/insets_f.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -95,7 +95,9 @@ void TabLayer::SetProperties(int id,
                              float view_width,
                              float view_height,
                              bool show_toolbar,
+                             int toolbar_background_color,
                              bool anonymize_toolbar,
+                             int toolbar_textbox_background_color,
                              float toolbar_alpha,
                              float toolbar_y_offset,
                              float side_border_scale,
@@ -181,8 +183,12 @@ void TabLayer::SetProperties(int id,
     //--------------------------------------------------------------------------
 
     // TODO(kkimlabs): Tab switcher doesn't show the progress bar.
-    toolbar_layer_->PushResource(toolbar_resource, anonymize_toolbar,
-                                 incognito_, false, 1.f);
+    toolbar_layer_->PushResource(toolbar_resource,
+                                 toolbar_background_color,
+                                 anonymize_toolbar,
+                                 toolbar_textbox_background_color,
+                                 false,
+                                 1.f);
     toolbar_layer_->UpdateProgressBar(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (show_toolbar && !back_visible)

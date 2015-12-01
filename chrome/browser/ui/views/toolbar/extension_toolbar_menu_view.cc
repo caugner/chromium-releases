@@ -17,11 +17,19 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
 
+namespace {
+// The delay before we close the wrench menu if this was opened for a drop so
+// that the user can see a browser action if one was moved.
+// This can be changed for tests.
+int g_close_menu_delay = 300;
+}
+
 ExtensionToolbarMenuView::ExtensionToolbarMenuView(Browser* browser,
                                                    WrenchMenu* wrench_menu)
     : browser_(browser),
       wrench_menu_(wrench_menu),
-      container_(NULL),
+      container_(nullptr),
+      max_height_(0),
       browser_actions_container_observer_(this),
       weak_factory_(this) {
   BrowserActionsContainer* main =
@@ -29,17 +37,23 @@ ExtensionToolbarMenuView::ExtensionToolbarMenuView(Browser* browser,
           ->toolbar()->browser_actions();
   container_ = new BrowserActionsContainer(browser_, main);
   container_->Init();
-  AddChildView(container_);
+  SetContents(container_);
   // We Layout() the container here so that we know the number of actions
   // that will be visible in ShouldShow().
   container_->Layout();
 
-  // If we were opened for a drop command, we have to wait for the drop to
-  // finish so we can close the wrench menu.
-  if (wrench_menu_->for_drop()) {
-    browser_actions_container_observer_.Add(container_);
-    browser_actions_container_observer_.Add(main);
-  }
+  // Listen for the drop to finish so we can close the wrench menu, if
+  // necessary.
+  browser_actions_container_observer_.Add(container_);
+  browser_actions_container_observer_.Add(main);
+
+  // In *very* extreme cases, it's possible that there are so many overflowed
+  // actions, we won't be able to show them all. Cap the height so that the
+  // overflow won't be excessively tall (at 8 icons per row, this allows for
+  // 104 total extensions).
+  const int kMaxOverflowRows = 13;
+  max_height_ = ToolbarActionsBar::IconHeight() * kMaxOverflowRows;
+  ClipHeightTo(0, max_height_);
 }
 
 ExtensionToolbarMenuView::~ExtensionToolbarMenuView() {
@@ -51,36 +65,52 @@ bool ExtensionToolbarMenuView::ShouldShow() {
 }
 
 gfx::Size ExtensionToolbarMenuView::GetPreferredSize() const {
-  return container_->GetPreferredSize();
+  gfx::Size s = views::ScrollView::GetPreferredSize();
+  // views::ScrollView::GetPreferredSize() includes the contents' size, but
+  // not the scrollbar width. Add it in if necessary.
+  if (container_->GetPreferredSize().height() > max_height_)
+    s.Enlarge(GetScrollBarWidth(), 0);
+  return s;
 }
 
 int ExtensionToolbarMenuView::GetHeightForWidth(int width) const {
+  // The width passed in here includes the full width of the menu, so we need
+  // to omit the necessary padding.
   const views::MenuConfig& menu_config =
       static_cast<const views::MenuItemView*>(parent())->GetMenuConfig();
   int end_padding = menu_config.arrow_to_edge_padding -
       container_->toolbar_actions_bar()->platform_settings().item_spacing;
   width -= start_padding() + end_padding;
 
-  int height = container_->GetHeightForWidth(width);
-  return height;
+  return views::ScrollView::GetHeightForWidth(width);
 }
 
 void ExtensionToolbarMenuView::Layout() {
-  gfx::Size sz = GetPreferredSize();
-  SetBounds(start_padding() + 1, 0, sz.width(), sz.height());
-  container_->SetBounds(0, 0, sz.width(), sz.height());
+  SetPosition(gfx::Point(start_padding(), 0));
+  SizeToPreferredSize();
+  views::ScrollView::Layout();
+}
+
+void ExtensionToolbarMenuView::set_close_menu_delay_for_testing(int delay) {
+  g_close_menu_delay = delay;
+}
+
+void ExtensionToolbarMenuView::OnBrowserActionsContainerDestroyed(
+    BrowserActionsContainer* browser_actions_container) {
+  browser_actions_container_observer_.Remove(browser_actions_container);
 }
 
 void ExtensionToolbarMenuView::OnBrowserActionDragDone() {
-  // The delay before we close the wrench menu if this was opened for a drop so
-  // that the user can see a browser action if one was moved.
-  static const int kCloseMenuDelay = 300;
-
-  DCHECK(wrench_menu_->for_drop());
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ExtensionToolbarMenuView::CloseWrenchMenu,
-                            weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kCloseMenuDelay));
+  // We need to close the wrench menu if it was just opened for the drag and
+  // drop, or if there are no more extensions in the overflow menu after a drag
+  // and drop
+  if (wrench_menu_->for_drop() ||
+      container_->toolbar_actions_bar()->GetIconCount() == 0) {
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&ExtensionToolbarMenuView::CloseWrenchMenu,
+                              weak_factory_.GetWeakPtr()),
+        base::TimeDelta::FromMilliseconds(g_close_menu_delay));
+  }
 }
 
 void ExtensionToolbarMenuView::CloseWrenchMenu() {
@@ -89,10 +119,9 @@ void ExtensionToolbarMenuView::CloseWrenchMenu() {
 
 int ExtensionToolbarMenuView::start_padding() const {
   // We pad enough on the left so that the first icon starts at the same point
-  // as the labels. We need to subtract 1 because we want the pixel *before*
-  // the label, and we subtract kItemSpacing because there needs to be padding
+  // as the labels. We subtract kItemSpacing because there needs to be padding
   // so we can see the drop indicator.
-  return views::MenuItemView::label_start() - 1 -
+  return views::MenuItemView::label_start() -
       container_->toolbar_actions_bar()->platform_settings().item_spacing;
 }
 

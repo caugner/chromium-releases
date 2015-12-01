@@ -18,6 +18,17 @@ cr.define('media_router', function() {
   };
 
   /**
+   * This corresponds to the C++ MediaSink IconType.
+   * @enum {mumber}
+   */
+  var SinkIconType = {
+    CAST: 0,
+    CAST_AUDIO: 1,
+    GENERIC: 2,
+    HANGOUT: 3,
+  };
+
+  /**
    * @enum {string}
    */
   var SinkStatus = {
@@ -29,18 +40,14 @@ cr.define('media_router', function() {
 
   /**
    * @param {media_router.CastModeType} type The type of cast mode.
-   * @param {string} title The title of the cast mode.
    * @param {string} description The description of the cast mode.
    * @param {string} host The hostname of the site to cast.
    * @constructor
    * @struct
    */
-  var CastMode = function(type, title, description, host) {
+  var CastMode = function(type, description, host) {
     /** @type {number} */
     this.type = type;
-
-    /** @type {string} */
-    this.title = title;
 
     /** @type {string} */
     this.description = description;
@@ -95,7 +102,7 @@ cr.define('media_router', function() {
   /**
    * @param {string} id The media route ID.
    * @param {string} sinkId The ID of the media sink running this route.
-   * @param {string} title The short description of this route.
+   * @param {string} description The short description of this route.
    * @param {?number} tabId The ID of the tab in which web app is running and
    *                  accessing the route.
    * @param {boolean} isLocal True if this is a locally created route.
@@ -104,7 +111,7 @@ cr.define('media_router', function() {
    * @constructor
    * @struct
    */
-  var Route = function(id, sinkId, title, tabId, isLocal,
+  var Route = function(id, sinkId, description, tabId, isLocal,
       customControllerPath) {
     /** @type {string} */
     this.id = id;
@@ -113,7 +120,7 @@ cr.define('media_router', function() {
     this.sinkId = sinkId;
 
     /** @type {string} */
-    this.title = title;
+    this.description = description;
 
     /** @type {?number} */
     this.tabId = tabId;
@@ -129,6 +136,7 @@ cr.define('media_router', function() {
   /**
    * @param {string} id The ID of the media sink.
    * @param {string} name The name of the sink.
+   * @param {media_router.SinkIconType} iconType the type of icon for the sink.
    * @param {media_router.SinkStatus} status The readiness state of the sink.
    * @param {!Array<number>} castModes Cast modes compatible with the sink.
    * @param {boolean} isLaunching True if the Media Router is creating a route
@@ -136,12 +144,15 @@ cr.define('media_router', function() {
    * @constructor
    * @struct
    */
-  var Sink = function(id, name, status, castModes, isLaunching) {
+  var Sink = function(id, name, iconType, status, castModes, isLaunching) {
     /** @type {string} */
     this.id = id;
 
     /** @type {string} */
     this.name = name;
+
+    /** @type {SinkIconType} */
+    this.iconType = iconType;
 
     /** @type {media_router.SinkStatus} */
     this.status = status;
@@ -170,6 +181,7 @@ cr.define('media_router', function() {
 
   return {
     CastModeType: CastModeType,
+    SinkIconType: SinkIconType,
     SinkStatus: SinkStatus,
     CastMode: CastMode,
     Issue: Issue,

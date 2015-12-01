@@ -34,7 +34,11 @@ function test()
     {
         for (var resourceName in resources)
             fs.root.addFile(resourceName, resources[resourceName]);
-        fs.reportCreated();
+        fs.reportCreated(fileSystemCreated);
+    }
+
+    function fileSystemCreated()
+    {
         WebInspector.inspectorView.showViewInDrawer("search");
 
         var uiSourceCodes = InspectorTest.fileSystemUISourceCodes();
@@ -76,7 +80,7 @@ function test()
             var paths = [];
             for (var i = 0; i < names.length; ++i)
                 paths.push("/var/www/" + names[i]);
-            WebInspector.fileSystemWorkspaceBinding._onSearchCompleted({data: {requestId: requestId, fileSystemPath: path, files: paths}});
+            WebInspector.networkMapping._fileSystemWorkspaceBinding._onSearchCompleted({data: {requestId: requestId, fileSystemPath: path, files: paths}});
         }
     }
 

@@ -25,7 +25,8 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     JNIEnv* env,
     jobject object,
     jint search_bar_background_resource_id,
-    jint search_bar_text_resource_id,
+    jint search_context_resource_id,
+    jint search_term_resource_id,
     jint search_bar_shadow_resource_id,
     jint search_provider_icon_resource_id,
     jint arrow_up_resource_id,
@@ -43,7 +44,8 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jfloat search_panel_height,
     jfloat search_bar_margin_side,
     jfloat search_bar_height,
-    jfloat search_bar_text_opacity,
+    jfloat search_context_opacity,
+    jfloat search_term_opacity,
     jboolean search_bar_border_visible,
     jfloat search_bar_border_y,
     jfloat search_bar_border_height,
@@ -51,7 +53,6 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jfloat search_bar_shadow_opacity,
     jfloat arrow_icon_opacity,
     jfloat arrow_icon_rotation,
-    jboolean close_icon_visible,
     jfloat close_icon_opacity,
     jboolean progress_bar_visible,
     jfloat progress_bar_y,
@@ -80,7 +81,8 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
 
   contextual_search_layer_->SetProperties(
       search_bar_background_resource_id,
-      search_bar_text_resource_id,
+      search_context_resource_id,
+      search_term_resource_id,
       search_bar_shadow_resource_id,
       search_provider_icon_resource_id,
       arrow_up_resource_id,
@@ -98,7 +100,8 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       search_panel_height,
       search_bar_margin_side,
       search_bar_height,
-      search_bar_text_opacity,
+      search_context_opacity,
+      search_term_opacity,
       search_bar_border_visible,
       search_bar_border_y,
       search_bar_border_height,
@@ -106,7 +109,6 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       search_bar_shadow_opacity,
       arrow_icon_opacity,
       arrow_icon_rotation,
-      close_icon_visible,
       close_icon_opacity,
       progress_bar_visible,
       progress_bar_y,
@@ -115,7 +117,7 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       progress_bar_completion);
 }
 
-static jlong Init(JNIEnv* env, jobject jobj) {
+static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   ContextualSearchSceneLayer* tree_provider =
       new ContextualSearchSceneLayer(env, jobj);

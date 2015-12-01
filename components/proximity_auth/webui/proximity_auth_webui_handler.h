@@ -8,14 +8,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "components/proximity_auth/authenticator.h"
-#include "components/proximity_auth/client_observer.h"
 #include "components/proximity_auth/connection_observer.h"
 #include "components/proximity_auth/cryptauth/cryptauth_client.h"
 #include "components/proximity_auth/cryptauth/cryptauth_device_manager.h"
 #include "components/proximity_auth/cryptauth/cryptauth_enrollment_manager.h"
 #include "components/proximity_auth/cryptauth/cryptauth_gcm_manager.h"
 #include "components/proximity_auth/logging/log_buffer.h"
-#include "components/proximity_auth/webui/proximity_auth_ui_delegate.h"
+#include "components/proximity_auth/messenger_observer.h"
+#include "components/proximity_auth/proximity_auth_client.h"
+#include "components/proximity_auth/remote_device_life_cycle.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
 namespace base {
@@ -28,27 +29,22 @@ class ExternalDeviceInfo;
 
 namespace proximity_auth {
 
-class Authenticator;
-class BluetoothConnection;
-class BluetoothThrottler;
-class BluetoothLowEnergyDeviceWhitelist;
-class Connection;
-class ConnectionFinder;
-class ClientImpl;
 class ReachablePhoneFlow;
+class RemoteDeviceLifeCycle;
+class RemoteDeviceLoader;
 struct RemoteStatusUpdate;
-class SecureContext;
 
 // Handles messages from the chrome://proximity-auth page.
 class ProximityAuthWebUIHandler : public content::WebUIMessageHandler,
                                   public LogBuffer::Observer,
                                   public CryptAuthEnrollmentManager::Observer,
                                   public CryptAuthDeviceManager::Observer,
-                                  public ConnectionObserver,
-                                  public ClientObserver {
+                                  public RemoteDeviceLifeCycle::Observer,
+                                  public MessengerObserver {
  public:
-  // |delegate| is not owned and must outlive this instance.
-  explicit ProximityAuthWebUIHandler(ProximityAuthUIDelegate* delegate);
+  // |client_| is not owned and must outlive this instance.
+  explicit ProximityAuthWebUIHandler(
+      ProximityAuthClient* proximity_auth_client);
   ~ProximityAuthWebUIHandler() override;
 
   // content::WebUIMessageHandler:
@@ -100,29 +96,8 @@ class ProximityAuthWebUIHandler : public content::WebUIMessageHandler,
   void OnReachablePhonesFound(
       const std::vector<cryptauth::ExternalDeviceInfo>& reachable_phones);
 
-  // Called when the key agreement of PSK of the remote device completes.
-  void OnPSKDerived(const cryptauth::ExternalDeviceInfo& unlock_key,
-                    const std::string& persistent_symmetric_key);
-
-  // Tries to create a classic Bluetooth connection to the unlock key.
-  void FindBluetoothClassicConnection(const RemoteDevice& remote_device);
-
-  // Tries to create a Bluetooth Low Energy connection to the unlock key.
-  void FindBluetoothLowEnergyConnection(const RemoteDevice& remote_device);
-
-  // Called when |connection_finder_| finds a connection.
-  void OnConnectionFound(scoped_ptr<Connection> connection);
-
-  // Callback when |authenticator_| completes authentication.
-  void OnAuthenticationResult(Authenticator::Result result,
-                              scoped_ptr<SecureContext> secure_context);
-
-  // Creates the client which parses status updates.
-  void CreateStatusUpdateClient();
-
-  // Returns the active connection, whether it's owned the |this| instance or
-  // |client_|.
-  Connection* GetConnection();
+  // Called when the RemoteDevice is loaded so we can create a connection.
+  void OnRemoteDevicesLoaded(const std::vector<RemoteDevice>& remote_devices);
 
   // Converts an ExternalDeviceInfo proto to a JSON dictionary used in
   // JavaScript.
@@ -133,14 +108,14 @@ class ProximityAuthWebUIHandler : public content::WebUIMessageHandler,
   scoped_ptr<base::DictionaryValue> IneligibleDeviceToDictionary(
       const cryptauth::IneligibleDevice& ineligible_device);
 
-  // ConnectionObserver:
-  void OnConnectionStatusChanged(Connection* connection,
-                                 Connection::Status old_status,
-                                 Connection::Status new_status) override;
-  void OnMessageReceived(const Connection& connection,
-                         const WireMessage& message) override;
+  // Cleans up the connection to the selected remote device.
+  void CleanUpRemoteDeviceLifeCycle();
 
-  // ClientObserver:
+  // RemoteDeviceLifeCycle::Observer:
+  void OnLifeCycleStateChanged(RemoteDeviceLifeCycle::State old_state,
+                               RemoteDeviceLifeCycle::State new_state) override;
+
+  // MessengerObserver:
   void OnRemoteStatusUpdate(const RemoteStatusUpdate& status_update) override;
 
   // Returns the current enrollment state that can be used as a JSON object.
@@ -153,7 +128,7 @@ class ProximityAuthWebUIHandler : public content::WebUIMessageHandler,
   scoped_ptr<base::ListValue> GetUnlockKeysList();
 
   // The delegate used to fetch dependencies. Must outlive this instance.
-  ProximityAuthUIDelegate* delegate_;
+  ProximityAuthClient* proximity_auth_client_;
 
   // Creates CryptAuth client instances to make API calls.
   scoped_ptr<CryptAuthClientFactory> cryptauth_client_factory_;
@@ -164,26 +139,15 @@ class ProximityAuthWebUIHandler : public content::WebUIMessageHandler,
   // The flow for getting a list of reachable phones.
   scoped_ptr<ReachablePhoneFlow> reachable_phone_flow_;
 
-  // Member variables related to CryptAuth debugging.
-  // TODO(tengs): These members are temporarily used for development.
-  scoped_ptr<PrefService> pref_service;
-  scoped_ptr<CryptAuthGCMManager> gcm_manager_;
-  scoped_ptr<CryptAuthEnrollmentManager> enrollment_manager_;
-  scoped_ptr<CryptAuthDeviceManager> device_manager_;
-  std::string user_public_key_;
-  std::string user_private_key_;
+  // True if we get a message from the loaded WebContents to know that it is
+  // initialized, and we can inject JavaScript.
+  bool web_contents_initialized_;
 
   // Member variables for connecting to and authenticating the remote device.
   // TODO(tengs): Support multiple simultaenous connections.
-  scoped_ptr<SecureMessageDelegate> secure_message_delegate_;
-  scoped_ptr<BluetoothLowEnergyDeviceWhitelist> ble_device_whitelist_;
+  scoped_ptr<RemoteDeviceLoader> remote_device_loader_;
   RemoteDevice selected_remote_device_;
-  scoped_ptr<BluetoothThrottler> bluetooth_throttler_;
-  scoped_ptr<ConnectionFinder> connection_finder_;
-  scoped_ptr<Connection> connection_;
-  scoped_ptr<Authenticator> authenticator_;
-  scoped_ptr<SecureContext> secure_context_;
-  scoped_ptr<ClientImpl> client_;
+  scoped_ptr<RemoteDeviceLifeCycle> life_cycle_;
   scoped_ptr<RemoteStatusUpdate> last_remote_status_update_;
 
   base::WeakPtrFactory<ProximityAuthWebUIHandler> weak_ptr_factory_;

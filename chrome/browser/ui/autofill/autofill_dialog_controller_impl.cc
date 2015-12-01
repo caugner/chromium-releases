@@ -38,6 +38,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -1212,13 +1213,10 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
   }
 
   popup_controller_ = AutofillPopupControllerImpl::GetOrCreate(
-      popup_controller_,
-      weak_ptr_factory_.GetWeakPtr(),
-      NULL,
-      parent_view,
-      content_bounds,
-      base::i18n::IsRTL() ?
-          base::i18n::RIGHT_TO_LEFT : base::i18n::LEFT_TO_RIGHT);
+      popup_controller_, weak_ptr_factory_.GetWeakPtr(), NULL, parent_view,
+      gfx::RectF(content_bounds),
+      base::i18n::IsRTL() ? base::i18n::RIGHT_TO_LEFT
+                          : base::i18n::LEFT_TO_RIGHT);
   popup_controller_->Show(popup_suggestions);
 }
 

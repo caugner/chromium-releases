@@ -10,6 +10,11 @@
 #include "base/memory/weak_ptr.h"
 #include "gpu/command_buffer/client/context_support.h"
 
+namespace gfx {
+class Rect;
+class RectF;
+}
+
 namespace cc {
 
 class TestContextSupport : public gpu::ContextSupport {
@@ -32,6 +37,7 @@ class TestContextSupport : public gpu::ContextSupport {
                             unsigned overlay_texture_id,
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& uv_rect) override;
+  uint64_t ShareGroupTracingGUID() const override;
 
   void CallAllSyncPointCallbacks();
 

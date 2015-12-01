@@ -7,9 +7,9 @@
 #include "base/callback.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/test/ordered_simple_task_runner.h"
+#include "components/scheduler/base/task_queue.h"
+#include "components/scheduler/base/test_time_source.h"
 #include "components/scheduler/child/scheduler_task_runner_delegate_for_test.h"
-#include "components/scheduler/child/task_queue.h"
-#include "components/scheduler/child/test_time_source.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -181,6 +181,29 @@ TEST_F(SchedulerHelperTest,
   EXPECT_CALL(observer, DidProcessTask(_)).Times(0);
   scheduler_helper_->ControlAfterWakeUpTaskRunner()->PumpQueue();
   RunUntilIdle();
+}
+
+namespace {
+
+class MockObserver : public SchedulerHelper::Observer {
+ public:
+  MOCK_METHOD1(OnUnregisterTaskQueue,
+               void(const scoped_refptr<TaskQueue>& queue));
+};
+
+}  // namespace
+
+TEST_F(SchedulerHelperTest, OnUnregisterTaskQueue) {
+  MockObserver observer;
+  scheduler_helper_->SetObserver(&observer);
+
+  scoped_refptr<TaskQueue> task_queue =
+      scheduler_helper_->NewTaskQueue(TaskQueue::Spec("test_queue"));
+
+  EXPECT_CALL(observer, OnUnregisterTaskQueue(_)).Times(1);
+  task_queue->UnregisterTaskQueue();
+
+  scheduler_helper_->SetObserver(nullptr);
 }
 
 }  // namespace scheduler
