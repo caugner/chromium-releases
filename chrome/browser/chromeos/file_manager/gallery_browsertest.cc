@@ -41,7 +41,7 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_OpenSingleImageOnDownloads) {
 }
 
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
-                       OpenSingleImageOnDownloads) {
+                       MAYBE_OpenSingleImageOnDownloads) {
   set_test_case_name("openSingleImageOnDownloads");
   StartTest();
 }
@@ -81,7 +81,13 @@ IN_PROC_BROWSER_TEST_F(
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, OpenMultipleImagesOnDrive) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_OpenMultipleImagesOnDrive DISABLED_OpenMultipleImagesOnDrive
+#else
+#define MAYBE_OpenMultipleImagesOnDrive OpenMultipleImagesOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_OpenMultipleImagesOnDrive) {
   set_test_case_name("openMultipleImagesOnDrive");
   StartTest();
 }
@@ -105,7 +111,13 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideImagesOnDrive) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_TraverseSlideImagesOnDrive DISABLED_TraverseSlideImagesOnDrive
+#else
+#define MAYBE_TraverseSlideImagesOnDrive TraverseSlideImagesOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_TraverseSlideImagesOnDrive) {
   set_test_case_name("traverseSlideImagesOnDrive");
   StartTest();
 }
@@ -116,7 +128,16 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideThumbnailsOnDownloads) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_TraverseSlideThumbnailsOnDownloads \
+  DISABLED_TraverseSlideThumbnailsOnDownloads
+#else
+#define MAYBE_TraverseSlideThumbnailsOnDownloads \
+  TraverseSlideThumbnailsOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_TraverseSlideThumbnailsOnDownloads) {
   set_test_case_name("traverseSlideThumbnailsOnDownloads");
   StartTest();
 }
@@ -131,7 +152,14 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RenameImageOnDownloads) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode, RenameImageOnDownloads) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_RenameImageOnDownloads DISABLED_RenameImageOnDownloads
+#else
+#define MAYBE_RenameImageOnDownloads RenameImageOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
+                       MAYBE_RenameImageOnDownloads) {
   set_test_case_name("renameImageOnDownloads");
   StartTest();
 }
@@ -205,7 +233,13 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RotateImageOnDownloads) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_RotateImageOnDownloads DISABLED_RotateImageOnDownloads
+#else
+#define MAYBE_RotateImageOnDownloads RotateImageOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_RotateImageOnDownloads) {
   set_test_case_name("rotateImageOnDownloads");
   StartTest();
 }
@@ -215,7 +249,13 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode, RotateImageOnDownloads) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RotateImageOnDrive) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_RotateImageOnDrive DISABLED_RotateImageOnDrive
+#else
+#define MAYBE_RotateImageOnDrive RotateImageOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_RotateImageOnDrive) {
   set_test_case_name("rotateImageOnDrive");
   StartTest();
 }
@@ -299,13 +339,30 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
   StartTest();
 }
 
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_RenameImageInThumbnailModeOnDownloads \
+  DISABLED_RenameImageInThumbnailModeOnDownloads
+#else
+#define MAYBE_RenameImageInThumbnailModeOnDownloads \
+  RenameImageInThumbnailModeOnDownloads
+#endif
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
-                       RenameImageInThumbnailModeOnDownloads) {
+                       MAYBE_RenameImageInThumbnailModeOnDownloads) {
   set_test_case_name("renameImageInThumbnailModeOnDownloads");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RenameImageInThumbnailModeOnDrive) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_RenameImageInThumbnailModeOnDrive \
+  DISABLED_RenameImageInThumbnailModeOnDrive
+#else
+#define MAYBE_RenameImageInThumbnailModeOnDrive \
+  RenameImageInThumbnailModeOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_RenameImageInThumbnailModeOnDrive) {
   set_test_case_name("renameImageInThumbnailModeOnDrive");
   StartTest();
 }
@@ -424,12 +481,26 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, StopStartSlideshowOnDownloads) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_StopStartSlideshowOnDownloads \
+  DISABLED_StopStartSlideshowOnDownloads
+#else
+#define MAYBE_StopStartSlideshowOnDownloads StopStartSlideshowOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       MAYBE_StopStartSlideshowOnDownloads) {
   set_test_case_name("stopStartSlideshowOnDownloads");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, StopStartSlideshowOnDrive) {
+// http://crbug.com/508949
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_StopStartSlideshowOnDrive DISABLED_StopStartSlideshowOnDrive
+#else
+#define MAYBE_StopStartSlideshowOnDrive StopStartSlideshowOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_StopStartSlideshowOnDrive) {
   set_test_case_name("stopStartSlideshowOnDrive");
   StartTest();
 }

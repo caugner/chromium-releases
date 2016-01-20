@@ -200,19 +200,21 @@
         'native_lib_target': 'libchrome_public',
         'java_in_dir': 'java',
         'resource_dir': '../../chrome/android/java/res_chromium',
+        'enable_multidex': 1,
+        'enable_multidex_configurations': ['Debug'],
         'conditions': [
           # Only attempt loading the library from the APK for 64 bit devices
           # until the number of 32 bit devices which don't support this
           # approach falls to a minimal level -  http://crbug.com/390618.
-          ['component != "shared_library" and profiling==0 and (target_arch == "arm64" or target_arch == "x86_64")', {
-            'load_library_from_zip_file': '<(chrome_apk_load_library_from_zip)',
-            'load_library_from_zip': '<(chrome_apk_load_library_from_zip)',
+          ['chrome_apk_use_chromium_linker==1 and profiling==0 and (target_arch == "arm64" or target_arch == "x86_64")', {
+            'load_library_from_zip': 1,
           }],
         ],
       },
       'dependencies': [
         'chrome_android_paks_copy',
         'chrome_public_template_resources',
+        'libchrome_public',
         '../chrome.gyp:chrome_java',
       ],
       'includes': [ 'chrome_apk.gypi' ],
@@ -242,15 +244,15 @@
           # Only attempt loading the library from the APK for 64 bit devices
           # until the number of 32 bit devices which don't support this
           # approach falls to a minimal level -  http://crbug.com/390618.
-          ['component != "shared_library" and profiling==0 and (target_arch == "arm64" or target_arch == "x86_64")', {
-            'load_library_from_zip_file': '<(chrome_apk_load_library_from_zip)',
-            'load_library_from_zip': '<(chrome_apk_load_library_from_zip)',
+          ['chrome_apk_use_chromium_linker==1 and profiling==0 and (target_arch == "arm64" or target_arch == "x86_64")', {
+            'load_library_from_zip': 1,
           }],
         ],
       },
       'dependencies': [
         'chrome_android_paks_copy',
         'chrome_sync_shell_template_resources',
+        'libchrome_sync_shell',
         '../chrome.gyp:chrome_java',
         # This exists here because com.google.protobuf.nano is needed in tests,
         # but that code is stripped out via proguard. Adding this deps adds
@@ -293,6 +295,7 @@
         '../../net/net.gyp:net_java_test_support',
         '../../sync/sync.gyp:sync_java_test_support',
         '../../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
+        '../../third_party/android_tools/android_tools.gyp:google_play_services_javalib',
         '../../ui/android/ui_android.gyp:ui_javatests',
       ],
       'includes': [ '../../build/java.gypi' ],
@@ -380,6 +383,40 @@
         '../../build/android/test_runner.gypi',
       ],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"',
+      {
+        'targets': [
+          {
+            'target_name': 'chrome_public_test_apk_run',
+            'type': 'none',
+            'dependencies': [
+              'chrome_public_test_apk',
+            ],
+            'includes': [
+              '../../build/isolate.gypi',
+            ],
+            'sources': [
+              'chrome_public_test_apk.isolate',
+            ],
+          },
+          {
+            'target_name': 'chrome_sync_shell_test_apk_run',
+            'type': 'none',
+            'dependencies': [
+              'chrome_sync_shell_test_apk',
+            ],
+            'includes': [
+              '../../build/isolate.gypi',
+            ],
+            'sources': [
+              'chrome_sync_shell_test_apk.isolate',
+            ],
+          },
+        ]
+      }
+    ],
   ],
 }
 

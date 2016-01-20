@@ -33,7 +33,6 @@
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
-#include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -44,7 +43,6 @@ using blink::WebDataSource;
 using blink::WebElement;
 using blink::WebLocalFrame;
 using blink::WebNode;
-using blink::WebNodeList;
 using blink::WebString;
 using content::SSLStatus;
 using content::RenderFrame;
@@ -215,8 +213,6 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
                         OnPrintNodeUnderContextMenu)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_AppBannerPromptRequest,
                         OnAppBannerPromptRequest)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_AppBannerDebugMessageRequest,
-                        OnAppBannerDebugMessageRequest)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -248,7 +244,8 @@ void ChromeRenderFrameObserver::OnRequestReloadImageForContextNode() {
 
 void ChromeRenderFrameObserver::OnRequestThumbnailForContextNode(
     int thumbnail_min_area_pixels,
-    const gfx::Size& thumbnail_max_size_pixels) {
+    const gfx::Size& thumbnail_max_size_pixels,
+    int callback_id) {
   WebNode context_node = render_frame()->GetContextMenuNode();
   SkBitmap thumbnail;
   gfx::Size original_size;
@@ -279,7 +276,7 @@ void ChromeRenderFrameObserver::OnRequestThumbnailForContextNode(
   }
 
   Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(
-      routing_id(), thumbnail_data, original_size));
+      routing_id(), thumbnail_data, original_size, callback_id));
 }
 
 void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
@@ -352,12 +349,6 @@ void ChromeRenderFrameObserver::OnAppBannerPromptRequest(
 
   Send(new ChromeViewHostMsg_AppBannerPromptReply(
       routing_id(), request_id, reply, referrer));
-}
-
-void ChromeRenderFrameObserver::OnAppBannerDebugMessageRequest(
-    const std::string& message) {
-  render_frame()->GetWebFrame()->addMessageToConsole(blink::WebConsoleMessage(
-      blink::WebConsoleMessage::LevelDebug, base::UTF8ToUTF16(message)));
 }
 
 void ChromeRenderFrameObserver::DidFinishLoad() {

@@ -169,7 +169,7 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
   this.savedSelection_ = null;
 
   /**
-   * @type {Gallery.Item}
+   * @type {GalleryItem}
    * @private
    */
   this.displayedItem_ = null;
@@ -208,6 +208,16 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    */
   this.slideShowTimeout_ = null;
+
+  /**
+   * @private {string|undefined}
+   */
+  this.loadingItemUrl_ = undefined;
+
+  /**
+   * @private {number}
+   */
+  this.progressBarTimer_ = 0;
 
   /**
    * @type {?number}
@@ -328,10 +338,19 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @type {!HTMLElement}
    * @const
    */
-  var slideShowButton = queryRequiredElement('paper-button.slideshow',
-      this.topToolbar_);
+  var slideShowButton = queryRequiredElement(
+      'button.slideshow', this.topToolbar_);
   slideShowButton.addEventListener('click',
       this.startSlideshow.bind(this, SlideMode.SLIDESHOW_INTERVAL_FIRST));
+
+  /**
+   * @private {!PaperProgressElement}
+   * @const
+   */
+  this.progressBar_ = /** @type {!PaperProgressElement} */
+      (queryRequiredElement('#progress-bar', document));
+  chrome.fileManagerPrivate.onFileTransfersUpdated.addListener(
+      this.updateProgressBar_.bind(this));
 
   /**
    * @type {!HTMLElement}
@@ -366,8 +385,8 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.printButton_ = queryRequiredElement('paper-button.print',
-      this.topToolbar_);
+  this.printButton_ = queryRequiredElement('button.print', this.topToolbar_);
+  GalleryUtil.decorateMouseFocusHandling(this.printButton_);
   this.printButton_.addEventListener('click', this.print_.bind(this));
 
   /**
@@ -476,7 +495,7 @@ SlideMode.KEY_OFFSET_MAP = {
 
 /**
  * Returns editor warning message if it should be shown.
- * @param {!Gallery.Item} item
+ * @param {!GalleryItem} item
  * @param {string} readonlyDirName Name of read only volume. Pass empty string
  *     if volume is writable.
  * @param {!DirectoryEntry} fallbackSaveDirectory
@@ -675,11 +694,11 @@ SlideMode.prototype.getItemCount_ = function() {
 
 /**
  * @param {number} index Index.
- * @return {Gallery.Item} Item.
+ * @return {GalleryItem} Item.
  */
 SlideMode.prototype.getItem = function(index) {
   var item =
-      /** @type {(Gallery.Item|undefined)} */ (this.dataModel_.item(index));
+      /** @type {(GalleryItem|undefined)} */ (this.dataModel_.item(index));
   return item === undefined ? null : item;
 };
 
@@ -701,7 +720,7 @@ SlideMode.prototype.getSelectedImageRect = function() {
 };
 
 /**
- * @return {Gallery.Item} Selected item.
+ * @return {GalleryItem} Selected item.
  */
 SlideMode.prototype.getSelectedItem = function() {
   return this.getItem(this.getSelectedIndex());
@@ -782,7 +801,7 @@ SlideMode.prototype.loadSelectedItem_ = function() {
   }
 
   this.displayedItem_ = this.getSelectedItem();
-  var selectedItem = assertInstanceof(this.getSelectedItem(), Gallery.Item);
+  var selectedItem = assertInstanceof(this.getSelectedItem(), GalleryItem);
 
   function shouldPrefetch(loadType, step, sequenceLength) {
     // Never prefetch when selecting out of sequence.
@@ -948,7 +967,7 @@ SlideMode.prototype.selectLast = function() {
 /**
  * Load and display an item.
  *
- * @param {!Gallery.Item} item Item.
+ * @param {!GalleryItem} item Item.
  * @param {!ImageView.Effect} effect Transition effect object.
  * @param {function()} displayCallback Called when the image is displayed
  *     (which can happen before the image load due to caching).
@@ -958,7 +977,8 @@ SlideMode.prototype.selectLast = function() {
  */
 SlideMode.prototype.loadItem_ = function(
     item, effect, displayCallback, loadCallback) {
-  this.showSpinner_(true);
+  this.dimmableUIController_.setLoading(true);
+  this.showProgressBar_(item);
 
   var loadDone = this.itemLoaded_.bind(this, item, loadCallback);
 
@@ -977,7 +997,7 @@ SlideMode.prototype.loadItem_ = function(
 
 /**
  * A callback function when the editor opens a editing session for an image.
- * @param {!Gallery.Item} item Gallery item.
+ * @param {!GalleryItem} item Gallery item.
  * @param {function(number, number)} loadCallback Called when the image is fully
  *     loaded.
  * @param {number} loadType Load type.
@@ -989,7 +1009,9 @@ SlideMode.prototype.itemLoaded_ = function(
     item, loadCallback, loadType, delay, opt_error) {
   var entry = item.getEntry();
 
-  this.showSpinner_(false);
+  this.hideProgressBar_();
+  this.dimmableUIController_.setLoading(false);
+
   if (loadType === ImageView.LoadType.ERROR) {
     // if we have a specific error, then display it
     if (opt_error) {
@@ -1262,7 +1284,7 @@ SlideMode.prototype.updateThumbnails = function() {
 /**
  * Save the current image to a file.
  *
- * @param {!Gallery.Item} item Item to save the image.
+ * @param {!GalleryItem} item Item to save the image.
  * @param {function()} callback Callback.
  * @private
  */
@@ -1421,10 +1443,11 @@ SlideMode.prototype.startSlideshow = function(opt_interval, opt_event) {
         SlideMode.FULLSCREEN_TOGGLE_DELAY;
   }
 
-  // This is a workaround. Mouseout event is not dispatched when window becomes
+  // These are workarounds. Mouseout event is not dispatched when window becomes
   // fullscreen and cursor gets out of the element
   // TODO(yawano): Find better implementation.
   this.dimmableUIController_.setCursorOutOfTools();
+  document.querySelector('files-tooltip').hideTooltip();
 
   this.resumeSlideshow_(opt_interval);
 
@@ -1670,6 +1693,63 @@ SlideMode.prototype.setOverwriteBubbleCount_ = function(value) {
 SlideMode.prototype.print_ = function() {
   cr.dispatchSimpleEvent(this, 'useraction');
   window.print();
+};
+
+/**
+ * Shows progress bar.
+ * @param {!GalleryItem} item
+ * @private
+ */
+SlideMode.prototype.showProgressBar_ = function(item) {
+  this.loadingItemUrl_ = item.getEntry().toURL();
+
+  if (this.progressBarTimer_ !== 0) {
+    clearTimeout(this.progressBarTimer_);
+    this.progressBarTimer_ = 0;
+  }
+
+  this.progressBar_.setAttribute('indeterminate', true);
+
+  this.progressBarTimer_ = setTimeout(function() {
+    this.progressBar_.hidden = false;
+  }.bind(this), 1000);
+};
+
+/**
+ * Hides progress bar.
+ * @private
+ */
+SlideMode.prototype.hideProgressBar_ = function() {
+  if (this.progressBarTimer_ !== 0) {
+    clearTimeout(this.progressBarTimer_);
+    this.progressBarTimer_ = 0;
+  }
+
+  this.loadingItemUrl_ = undefined;
+
+  this.progressBar_.hidden = true;
+};
+
+/**
+ * Updates progress bar.
+ * @param {!FileTransferStatus} status
+ * @private
+ */
+SlideMode.prototype.updateProgressBar_ = function(status) {
+  if (status.fileUrl !== this.loadingItemUrl_ ||
+      status.num_total_jobs !== 1) {
+    // If user starts to download another image (or file), we cannot show
+    // determinate progress bar anymore since total and processed are for all
+    // current downloads.
+    this.progressBar_.setAttribute('indeterminate', true);
+    return;
+  }
+
+  // Progress begins from 5%.
+  var progress = 5 + (95 * status.processed / status.total);
+
+  this.progressBar_.removeAttribute('indeterminate');
+  this.progressBar_.value = progress;
 };
 
 /**

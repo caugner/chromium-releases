@@ -135,11 +135,12 @@ class Tab : public gfx::AnimationDelegate,
   static int leading_width_for_drag() { return 16; }
 
   // Returns the minimum possible size of a single unselected Tab.
-  static gfx::Size GetMinimumUnselectedSize();
+  static gfx::Size GetMinimumInactiveSize();
+
   // Returns the minimum possible size of a selected Tab. Selected tabs must
   // always show a close button and have a larger minimum size than unselected
   // tabs.
-  static gfx::Size GetMinimumSelectedSize();
+  static gfx::Size GetMinimumActiveSize();
   // Returns the preferred size of a single Tab, assuming space is
   // available.
   static gfx::Size GetStandardSize();
@@ -152,6 +153,11 @@ class Tab : public gfx::AnimationDelegate,
 
   // Returns the height for immersive mode tabs.
   static int GetImmersiveHeight();
+
+  // Returns the Y inset within the tab bounds for drawing the background image.
+  // This is necessary for correct vertical alignment of the frame, tab, and
+  // toolbar images with custom themes.
+  static int GetYInsetForActiveTabBackground();
 
  private:
   friend class TabTest;
@@ -238,9 +244,16 @@ class Tab : public gfx::AnimationDelegate,
   void PaintTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
-  void PaintInactiveTabBackgroundUsingResourceId(gfx::Canvas* canvas,
-                                                 int tab_id);
-  void PaintActiveTabBackground(gfx::Canvas* canvas);
+  void PaintTabBackgroundUsingFillId(gfx::Canvas* canvas,
+                                     bool is_active,
+                                     int fill_id,
+                                     bool has_custom_image,
+                                     int y_offset);
+  void PaintTabFill(gfx::Canvas* canvas,
+                    gfx::ImageSkia* fill_image,
+                    int x_offset,
+                    int y_offset,
+                    bool is_active);
 
   // Paints the favicon, mirrored for RTL if needed.
   void PaintIcon(gfx::Canvas* canvas);
@@ -275,14 +288,9 @@ class Tab : public gfx::AnimationDelegate,
   // animation.
   void SetFaviconHidingOffset(int offset);
 
-  void DisplayCrashedFavicon();
-  void ResetCrashedFavicon();
-
-  void StopCrashAnimation();
-  void StartCrashAnimation();
-
-  // Returns true if the crash animation is currently running.
-  bool IsPerformingCrashAnimation() const;
+  void set_should_display_crashed_favicon() {
+    should_display_crashed_favicon_ = true;
+  }
 
   // Recalculates the correct |button_color_| and resets the title, media
   // indicator, and close button colors if necessary.  This should be called any
@@ -292,19 +300,8 @@ class Tab : public gfx::AnimationDelegate,
   // Schedules repaint task for icon.
   void ScheduleIconPaint();
 
-  // Returns a |path| containing the region that matches the bitmap display of
-  // this tab, for input event hit testing.  Set |include_top_shadow| to include
-  // the mostly-transparent shadow pixels above the top edge of the tab in the
-  // path.
-  void GetHitTestMaskHelper(bool include_top_shadow, gfx::Path* path) const;
-
   // Returns the rectangle for the light bar in immersive mode.
   gfx::Rect GetImmersiveBarRect() const;
-
-  // Gets the tab id and frame id.
-  void GetTabIdAndFrameId(views::Widget* widget,
-                          int* tab_id,
-                          int* frame_id) const;
 
   // Performs a one-time initialization of static resources such as tab images.
   static void InitTabResources();
@@ -379,16 +376,16 @@ class Tab : public gfx::AnimationDelegate,
   // The offset used to paint the inactive background image.
   gfx::Point background_offset_;
 
-  struct TabImage {
+  struct TabImages {
     gfx::ImageSkia* image_l;
     gfx::ImageSkia* image_c;
     gfx::ImageSkia* image_r;
     int l_width;
     int r_width;
   };
-  static TabImage tab_active_;
-  static TabImage tab_inactive_;
-  static TabImage tab_alpha_;
+  static TabImages active_images_;
+  static TabImages inactive_images_;
+  static TabImages mask_images_;
 
   // Whether we're showing the icon. It is cached so that we can detect when it
   // changes and layout appropriately.

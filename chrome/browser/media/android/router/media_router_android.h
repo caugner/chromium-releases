@@ -27,18 +27,20 @@ class MediaRouterAndroid : public MediaRouter {
 
   static bool Register(JNIEnv* env);
 
+  const MediaRoute* FindRouteBySource(const MediaSource::Id& source_id) const;
+
   // MediaRouter implementation.
   void CreateRoute(
       const MediaSource::Id& source_id,
       const MediaSink::Id& sink_id,
       const GURL& origin,
-      int tab_id,
+      content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) override;
   void JoinRoute(
       const MediaSource::Id& source,
       const std::string& presentation_id,
       const GURL& origin,
-      int tab_id,
+      content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) override;
   void CloseRoute(const MediaRoute::Id& route_id) override;
   void SendRouteMessage(const MediaRoute::Id& route_id,
@@ -51,6 +53,7 @@ class MediaRouterAndroid : public MediaRouter {
   void AddIssue(const Issue& issue) override;
   void ClearIssue(const Issue::Id& issue_id) override;
   void OnPresentationSessionDetached(const MediaRoute::Id& route_id) override;
+  bool HasLocalRoute() const override;
 
   // The methods called by the Java counterpart.
 
@@ -102,6 +105,14 @@ class MediaRouterAndroid : public MediaRouter {
       PresentationSessionMessagesObserver* observer) override;
   void UnregisterPresentationSessionMessagesObserver(
       PresentationSessionMessagesObserver* observer) override;
+  void RegisterLocalMediaRoutesObserver(
+      LocalMediaRoutesObserver* observer) override;
+  void UnregisterLocalMediaRoutesObserver(
+      LocalMediaRoutesObserver* observer) override;
+  void RegisterPresentationConnectionStateObserver(
+      PresentationConnectionStateObserver* observer) override;
+  void UnregisterPresentationConnectionStateObserver(
+      PresentationConnectionStateObserver* observer) override;
 
   base::android::ScopedJavaGlobalRef<jobject> java_media_router_;
 

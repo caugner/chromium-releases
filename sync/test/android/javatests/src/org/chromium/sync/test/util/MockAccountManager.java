@@ -26,6 +26,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.text.TextUtils;
 
+import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.sync.signin.AccountManagerDelegate;
@@ -137,8 +138,7 @@ public class MockAccountManager implements AccountManagerDelegate {
     }
 
     @Override
-    public void getAccountsByType(
-            final String type, final AccountManagerDelegate.Callback<Account[]> callback) {
+    public void getAccountsByType(final String type, final Callback<Account[]> callback) {
         new AsyncTask<Void, Void, Account[]>() {
             @Override
             protected Account[] doInBackground(Void... params) {
@@ -147,7 +147,7 @@ public class MockAccountManager implements AccountManagerDelegate {
 
             @Override
             protected void onPostExecute(Account[] accounts) {
-                callback.gotResult(accounts);
+                callback.onResult(accounts);
             }
         }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
@@ -281,8 +281,8 @@ public class MockAccountManager implements AccountManagerDelegate {
     }
 
     @Override
-    public void hasFeatures(Account account, final String[] features,
-            final AccountManagerDelegate.Callback<Boolean> callback) {
+    public void hasFeatures(
+            Account account, final String[] features, final Callback<Boolean> callback) {
         final AccountHolder accountHolder = getAccountHolder(account);
         accountHolder.addFeaturesCallback(new Runnable() {
             @Override
@@ -295,7 +295,7 @@ public class MockAccountManager implements AccountManagerDelegate {
                         hasAllFeatures = false;
                     }
                 }
-                callback.gotResult(hasAllFeatures);
+                callback.onResult(hasAllFeatures);
             }
         });
     }

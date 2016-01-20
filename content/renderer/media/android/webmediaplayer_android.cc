@@ -44,6 +44,7 @@
 #include "media/base/video_frame.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/blink/webmediaplayer_delegate.h"
+#include "media/blink/webmediaplayer_util.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
@@ -86,9 +87,9 @@ const char* kMediaEme = "Media.EME.";
 void OnReleaseTexture(
     const scoped_refptr<content::StreamTextureFactory>& factories,
     uint32 texture_id,
-    uint32 release_sync_point) {
+    const gpu::SyncToken& sync_token) {
   GLES2Interface* gl = factories->ContextGL();
-  gl->WaitSyncPointCHROMIUM(release_sync_point);
+  gl->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
   gl->DeleteTextures(1, &texture_id);
   // Flush to ensure that the stream texture gets deleted in a timely fashion.
   gl->ShallowFlushCHROMIUM();
@@ -129,17 +130,19 @@ bool AllocateSkBitmapTexture(GrContext* gr,
   return true;
 }
 
-class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
+class SyncTokenClientImpl : public media::VideoFrame::SyncTokenClient {
  public:
-  explicit SyncPointClientImpl(
+  explicit SyncTokenClientImpl(
       blink::WebGraphicsContext3D* web_graphics_context)
       : web_graphics_context_(web_graphics_context) {}
-  ~SyncPointClientImpl() override {}
-  uint32 InsertSyncPoint() override {
-    return web_graphics_context_->insertSyncPoint();
+  ~SyncTokenClientImpl() override {}
+  void GenerateSyncToken(gpu::SyncToken* sync_token) override {
+    if (!web_graphics_context_->insertSyncPoint(sync_token->GetData())) {
+      sync_token->Clear();
+    }
   }
-  void WaitSyncPoint(uint32 sync_point) override {
-    web_graphics_context_->waitSyncPoint(sync_point);
+  void WaitSyncToken(const gpu::SyncToken& sync_token) override {
+    web_graphics_context_->waitSyncToken(sync_token.GetConstData());
   }
 
  private:
@@ -183,19 +186,18 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       needs_establish_peer_(true),
       has_size_info_(false),
       // Threaded compositing isn't enabled universally yet.
-      compositor_task_runner_(
-          params.compositor_task_runner()
-              ? params.compositor_task_runner()
-              : base::ThreadTaskRunnerHandle::Get()),
+      compositor_task_runner_(params.compositor_task_runner()
+                                  ? params.compositor_task_runner()
+                                  : base::ThreadTaskRunnerHandle::Get()),
       stream_texture_factory_(factory),
       needs_external_surface_(false),
       is_fullscreen_(false),
-      video_frame_provider_client_(NULL),
+      video_frame_provider_client_(nullptr),
       player_type_(MEDIA_PLAYER_TYPE_URL),
       is_remote_(false),
       media_log_(params.media_log()),
       init_data_type_(media::EmeInitDataType::UNKNOWN),
-      cdm_context_(NULL),
+      cdm_context_(nullptr),
       allow_stored_credentials_(false),
       is_local_resource_(false),
       interpolator_(&default_tick_clock_),
@@ -324,7 +326,7 @@ void WebMediaPlayerAndroid::DoLoad(LoadType load_type,
                      weak_factory_.GetWeakPtr()),
           base::Bind(&WebMediaPlayerAndroid::OnEncryptedMediaInitData,
                      weak_factory_.GetWeakPtr()),
-          base::Bind(&WebMediaPlayerAndroid::SetDecryptorReadyCB,
+          base::Bind(&WebMediaPlayerAndroid::SetCdmReadyCB,
                      weak_factory_.GetWeakPtr()),
           base::Bind(&WebMediaPlayerAndroid::UpdateNetworkState,
                      weak_factory_.GetWeakPtr()),
@@ -478,12 +480,12 @@ void WebMediaPlayerAndroid::setVolume(double volume) {
 }
 
 void WebMediaPlayerAndroid::setSinkId(
-    const blink::WebString& device_id,
-    media::WebSetSinkIdCB* raw_web_callbacks) {
+    const blink::WebString& sink_id,
+    const blink::WebSecurityOrigin& security_origin,
+    blink::WebSetSinkIdCallbacks* web_callback) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-  scoped_ptr<media::WebSetSinkIdCB> web_callbacks(raw_web_callbacks);
-  web_callbacks->onError(new blink::WebSetSinkIdError(
-      blink::WebSetSinkIdError::ErrorTypeNotSupported, "Not Supported"));
+  scoped_ptr<blink::WebSetSinkIdCallbacks> callback(web_callback);
+  callback->onError(blink::WebSetSinkIdError::NotSupported);
 }
 
 bool WebMediaPlayerAndroid::hasVideo() const {
@@ -539,10 +541,6 @@ bool WebMediaPlayerAndroid::seeking() const {
 
 double WebMediaPlayerAndroid::duration() const {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-  // HTML5 spec requires duration to be NaN if readyState is HAVE_NOTHING
-  if (ready_state_ == WebMediaPlayer::ReadyStateHaveNothing)
-    return std::numeric_limits<double>::quiet_NaN();
-
   if (duration_ == media::kInfiniteDuration())
     return std::numeric_limits<double>::infinity();
 
@@ -644,6 +642,9 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
     return;
   }
 
+  // Ensure SkBitmap to make the latest change by external source visible.
+  bitmap_.notifyPixelsChanged();
+
   // Draw the texture based bitmap onto the Canvas. If the canvas is
   // hardware based, this will do a GPU-GPU texture copy.
   // If the canvas is software based, the texture based bitmap will be
@@ -656,6 +657,7 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
   // It is not necessary to pass the dest into the drawBitmap call since all
   // the context have been set up before calling paintCurrentFrameInContext.
   canvas->drawBitmapRect(bitmap_, dest, &paint);
+  canvas->flush();
 }
 
 bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
@@ -684,7 +686,7 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
           mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES) ||
          (is_remote_ && mailbox_holder.texture_target == GL_TEXTURE_2D));
 
-  web_graphics_context->waitSyncPoint(mailbox_holder.sync_point);
+  web_graphics_context->waitSyncToken(mailbox_holder.sync_token.GetConstData());
 
   // Ensure the target of texture is set before copyTextureCHROMIUM, otherwise
   // an invalid texture target may be used for copy texture.
@@ -703,8 +705,8 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
   web_graphics_context->deleteTexture(src_texture);
   web_graphics_context->flush();
 
-  SyncPointClientImpl client(web_graphics_context);
-  video_frame->UpdateReleaseSyncPoint(&client);
+  SyncTokenClientImpl client(web_graphics_context);
+  video_frame->UpdateReleaseSyncToken(&client);
   return true;
 }
 
@@ -1229,12 +1231,12 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackText(
   gl->GenMailboxCHROMIUM(texture_mailbox.name);
   gl->ProduceTextureCHROMIUM(texture_target, texture_mailbox.name);
   gl->Flush();
-  GLuint texture_mailbox_sync_point = gl->InsertSyncPointCHROMIUM();
+  gpu::SyncToken texture_mailbox_sync_token(gl->InsertSyncPointCHROMIUM());
 
   scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
       media::PIXEL_FORMAT_ARGB,
-      gpu::MailboxHolder(texture_mailbox, texture_target,
-                         texture_mailbox_sync_point),
+      gpu::MailboxHolder(texture_mailbox, texture_mailbox_sync_token,
+                         texture_target),
       media::BindToCurrentLoop(base::Bind(&OnReleaseTexture,
                                           stream_texture_factory_,
                                           remote_playback_texture_id)),
@@ -1267,12 +1269,12 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
     GLuint texture_id_ref = gl->CreateAndConsumeTextureCHROMIUM(
         texture_target, texture_mailbox_.name);
     gl->Flush();
-    GLuint texture_mailbox_sync_point = gl->InsertSyncPointCHROMIUM();
+    gpu::SyncToken texture_mailbox_sync_token(gl->InsertSyncPointCHROMIUM());
 
     scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
         media::PIXEL_FORMAT_ARGB,
-        gpu::MailboxHolder(texture_mailbox_, texture_target,
-                           texture_mailbox_sync_point),
+        gpu::MailboxHolder(texture_mailbox_, texture_mailbox_sync_token,
+                           texture_target),
         media::BindToCurrentLoop(base::Bind(
             &OnReleaseTexture, stream_texture_factory_, texture_id_ref)),
         natural_size_, gfx::Rect(natural_size_), natural_size_,
@@ -1715,12 +1717,12 @@ void WebMediaPlayerAndroid::setContentDecryptionModule(
   cdm_context_ = media::ToWebContentDecryptionModuleImpl(cdm)->GetCdmContext();
 
   if (is_player_initialized_) {
-    SetCdmInternal(media::BindToCurrentLoop(
+    SetCdmInternal(
         base::Bind(&WebMediaPlayerAndroid::ContentDecryptionModuleAttached,
-                   weak_factory_.GetWeakPtr(), result)));
+                   weak_factory_.GetWeakPtr(), result));
   } else {
     // No pipeline/decoder connected, so resolve the promise. When something
-    // is connected, setting the CDM will happen in SetDecryptorReadyCB().
+    // is connected, setting the CDM will happen in SetCdmReadyCB().
     ContentDecryptionModuleAttached(result, true);
   }
 }
@@ -1834,70 +1836,69 @@ void WebMediaPlayerAndroid::OnCdmContextReady(media::CdmContext* cdm_context) {
 
 void WebMediaPlayerAndroid::SetCdmInternal(
     const media::CdmAttachedCB& cdm_attached_cb) {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
   DCHECK(cdm_context_ && is_player_initialized_);
   DCHECK(cdm_context_->GetDecryptor() ||
          cdm_context_->GetCdmId() != media::CdmContext::kInvalidCdmId)
       << "CDM should support either a Decryptor or a CDM ID.";
 
-  media::Decryptor* decryptor = cdm_context_->GetDecryptor();
-
-  // Note:
-  // - If |decryptor| is non-null, only handles |decryptor_ready_cb_| and
-  //   ignores the CDM ID.
-  // - If |decryptor| is null (in which case the CDM ID should be valid),
-  //   returns any pending |decryptor_ready_cb_| with null, so that
-  //   MediaSourceDelegate will fall back to use a browser side (IPC-based) CDM,
-  //   then calls SetCdm() through the |player_manager_|.
-
-  if (decryptor) {
-    if (!decryptor_ready_cb_.is_null()) {
-      base::ResetAndReturn(&decryptor_ready_cb_)
-          .Run(decryptor, cdm_attached_cb);
-    } else {
-      cdm_attached_cb.Run(true);
-    }
+  if (cdm_ready_cb_.is_null()) {
+    cdm_attached_cb.Run(true);
     return;
   }
 
-  // |decryptor| is null.
-  if (!decryptor_ready_cb_.is_null()) {
-    base::ResetAndReturn(&decryptor_ready_cb_)
-        .Run(nullptr, base::Bind(&media::IgnoreCdmAttached));
+  // Satisfy |cdm_ready_cb_|. Use BindToCurrentLoop() since the callback could
+  // be fired on other threads.
+  base::ResetAndReturn(&cdm_ready_cb_)
+      .Run(cdm_context_, media::BindToCurrentLoop(base::Bind(
+                             &WebMediaPlayerAndroid::OnCdmAttached,
+                             weak_factory_.GetWeakPtr(), cdm_attached_cb)));
+}
+
+void WebMediaPlayerAndroid::OnCdmAttached(
+    const media::CdmAttachedCB& cdm_attached_cb,
+    bool success) {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+
+  if (!success) {
+    if (cdm_context_->GetCdmId() == media::CdmContext::kInvalidCdmId) {
+      NOTREACHED() << "CDM cannot be attached to media player.";
+      cdm_attached_cb.Run(false);
+      return;
+    }
+
+    // If the CDM is not attached (e.g. the CDM does not support a Decryptor),
+    // MediaSourceDelegate will fall back to use a browser side (IPC-based) CDM.
+    player_manager_->SetCdm(player_id_, cdm_context_->GetCdmId());
   }
 
-  DCHECK(cdm_context_->GetCdmId() != media::CdmContext::kInvalidCdmId);
-  player_manager_->SetCdm(player_id_, cdm_context_->GetCdmId());
   cdm_attached_cb.Run(true);
 }
 
-void WebMediaPlayerAndroid::SetDecryptorReadyCB(
-    const media::DecryptorReadyCB& decryptor_ready_cb) {
+void WebMediaPlayerAndroid::SetCdmReadyCB(
+    const media::CdmReadyCB& cdm_ready_cb) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DCHECK(is_player_initialized_);
 
-  // Cancels the previous decryptor request.
-  if (decryptor_ready_cb.is_null()) {
-    if (!decryptor_ready_cb_.is_null()) {
-      base::ResetAndReturn(&decryptor_ready_cb_)
-          .Run(NULL, base::Bind(&media::IgnoreCdmAttached));
+  // Cancels the previous CDM request.
+  if (cdm_ready_cb.is_null()) {
+    if (!cdm_ready_cb_.is_null()) {
+      base::ResetAndReturn(&cdm_ready_cb_)
+          .Run(nullptr, base::Bind(&media::IgnoreCdmAttached));
     }
     return;
   }
 
-  // TODO(xhwang): Support multiple decryptor notification request (e.g. from
+  // TODO(xhwang): Support multiple CDM notification request (e.g. from
   // video and audio). The current implementation is okay for the current
   // media pipeline since we initialize audio and video decoders in sequence.
-  // But WebMediaPlayerImpl should not depend on media pipeline's implementation
-  // detail.
-  DCHECK(decryptor_ready_cb_.is_null());
+  // But WebMediaPlayerAndroid should not depend on media pipeline's
+  // implementation detail.
+  DCHECK(cdm_ready_cb_.is_null());
+  cdm_ready_cb_ = cdm_ready_cb;
 
-  if (cdm_context_) {
-    decryptor_ready_cb.Run(cdm_context_->GetDecryptor(),
-                           base::Bind(&media::IgnoreCdmAttached));
-    return;
-  }
-
-  decryptor_ready_cb_ = decryptor_ready_cb;
+  if (cdm_context_)
+    SetCdmInternal(base::Bind(&media::IgnoreCdmAttached));
 }
 
 bool WebMediaPlayerAndroid::supportsOverlayFullscreenVideo() {

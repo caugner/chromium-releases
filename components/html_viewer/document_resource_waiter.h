@@ -6,15 +6,12 @@
 #define COMPONENTS_HTML_VIEWER_DOCUMENT_RESOURCE_WAITER_H_
 
 #include "base/basictypes.h"
+#include "base/time/time.h"
 #include "components/html_viewer/html_frame_tree_manager_observer.h"
-#include "components/mus/public/cpp/view_observer.h"
+#include "components/mus/public/cpp/window_observer.h"
 #include "components/web_view/public/interfaces/frame.mojom.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/services/network/public/interfaces/url_loader.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
-
-namespace mojo {
-class View;
-}
 
 namespace html_viewer {
 
@@ -27,7 +24,7 @@ class GlobalState;
 // assumed HTMLDocument will call back for the FrameClient and FrameData.
 class DocumentResourceWaiter : public web_view::mojom::FrameClient,
                                public HTMLFrameTreeManagerObserver,
-                               public mus::ViewObserver {
+                               public mus::WindowObserver {
  public:
   DocumentResourceWaiter(GlobalState* global_state,
                          mojo::URLResponsePtr response,
@@ -39,9 +36,9 @@ class DocumentResourceWaiter : public web_view::mojom::FrameClient,
                    frame_client_request,
                web_view::mojom::FramePtr* frame,
                mojo::Array<web_view::mojom::FrameDataPtr>* frame_data,
-               uint32_t* view_id,
+               uint32_t* window_id,
                uint32_t* change_id,
-               web_view::mojom::ViewConnectType* view_connect_type,
+               web_view::mojom::WindowConnectType* window_connect_type,
                OnConnectCallback* on_connect_callback);
 
   uint32_t change_id() const { return change_id_; }
@@ -51,8 +48,12 @@ class DocumentResourceWaiter : public web_view::mojom::FrameClient,
   // See class description.
   bool is_ready() const { return is_ready_; }
 
-  void SetRoot(mus::View* root);
-  mus::View* root() { return root_; }
+  base::TimeTicks navigation_start_time() const {
+    return navigation_start_time_;
+  }
+
+  void SetRoot(mus::Window* root);
+  mus::Window* root() { return root_; }
 
   void Bind(mojo::InterfaceRequest<web_view::mojom::FrameClient> request);
 
@@ -63,9 +64,10 @@ class DocumentResourceWaiter : public web_view::mojom::FrameClient,
   // web_view::mojom::FrameClient:
   void OnConnect(web_view::mojom::FramePtr frame,
                  uint32_t change_id,
-                 uint32_t view_id,
-                 web_view::mojom::ViewConnectType view_connect_type,
+                 uint32_t window_id,
+                 web_view::mojom::WindowConnectType window_connect_type,
                  mojo::Array<web_view::mojom::FrameDataPtr> frame_data,
+                 int64_t navigation_start_time_ticks,
                  const OnConnectCallback& callback) override;
   void OnFrameAdded(uint32_t change_id,
                     web_view::mojom::FrameDataPtr frame_data) override;
@@ -80,13 +82,24 @@ class DocumentResourceWaiter : public web_view::mojom::FrameClient,
                       const OnWillNavigateCallback& callback) override;
   void OnFrameLoadingStateChanged(uint32_t frame_id, bool loading) override;
   void OnDispatchFrameLoadEvent(uint32_t frame_id) override;
+  void Find(int32_t request_id,
+            const mojo::String& search_text,
+            web_view::mojom::FindOptionsPtr options,
+            bool wrap_within_frame,
+            const FindCallback& callback) override;
+  void StopFinding(bool clear_selection) override;
+  void HighlightFindResults(int32_t request_id,
+                            const mojo::String& search_test,
+                            web_view::mojom::FindOptionsPtr options,
+                            bool reset) override;
+  void StopHighlightingFindResults() override;
 
-  // ViewObserver:
-  void OnViewViewportMetricsChanged(
-      mus::View* view,
-      const mojo::ViewportMetrics& old_metrics,
-      const mojo::ViewportMetrics& new_metrics) override;
-  void OnViewDestroyed(mus::View* view) override;
+  // WindowObserver:
+  void OnWindowViewportMetricsChanged(
+      mus::Window* window,
+      const mus::mojom::ViewportMetrics& old_metrics,
+      const mus::mojom::ViewportMetrics& new_metrics) override;
+  void OnWindowDestroyed(mus::Window* window) override;
 
   // HTMLFrameTreeManagerObserver:
   void OnHTMLFrameTreeManagerChangeIdAdvanced() override;
@@ -95,12 +108,13 @@ class DocumentResourceWaiter : public web_view::mojom::FrameClient,
   GlobalState* global_state_;
   HTMLDocument* document_;
   mojo::URLResponsePtr response_;
-  mus::View* root_;
+  mus::Window* root_;
   web_view::mojom::FramePtr frame_;
   mojo::Array<web_view::mojom::FrameDataPtr> frame_data_;
   uint32_t change_id_;
-  uint32_t view_id_;
-  web_view::mojom::ViewConnectType view_connect_type_;
+  uint32_t window_id_;
+  base::TimeTicks navigation_start_time_;
+  web_view::mojom::WindowConnectType window_connect_type_;
   OnConnectCallback on_connect_callback_;
 
   // Once we get OnConnect() we unbind |frame_client_binding_| and put it here.

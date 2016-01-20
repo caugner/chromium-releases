@@ -21,6 +21,7 @@ import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutHelperManager;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
+import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
@@ -128,16 +129,23 @@ public class LayoutManagerChromeTablet extends LayoutManagerChrome {
     }
 
     @Override
+    protected void tabModelSwitched(boolean incognito) {
+        super.tabModelSwitched(incognito);
+        getTabModelSelector().commitAllTabClosures();
+    }
+
+    @Override
     public void init(TabModelSelector selector, TabCreatorManager creator,
             TabContentManager content, ViewGroup androidContentContainer,
             ContextualSearchManagementDelegate contextualSearchDelegate,
+            ReaderModeManagerDelegate readerModeDelegate,
             DynamicResourceLoader dynamicResourceLoader) {
         if (mTabStripLayoutHelperManager != null) {
             mTabStripLayoutHelperManager.setTabModelSelector(selector, creator, content);
         }
 
         super.init(selector, creator, content, androidContentContainer, contextualSearchDelegate,
-                dynamicResourceLoader);
+                readerModeDelegate, dynamicResourceLoader);
 
         mTabObserver = new TabModelSelectorTabObserver(selector) {
             @Override

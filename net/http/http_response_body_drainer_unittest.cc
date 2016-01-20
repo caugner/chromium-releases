@@ -56,7 +56,7 @@ class CloseResultWaiter {
     result_ = result;
     have_result_ = true;
     if (waiting_for_result_)
-      base::MessageLoop::current()->Quit();
+      base::MessageLoop::current()->QuitWhenIdle();
   }
 
  private:
@@ -232,7 +232,7 @@ class HttpResponseBodyDrainerTest : public testing::Test {
   scoped_refptr<SSLConfigService> ssl_config_service_;
   scoped_ptr<HttpServerPropertiesImpl> http_server_properties_;
   scoped_ptr<TransportSecurityState> transport_security_state_;
-  const scoped_refptr<HttpNetworkSession> session_;
+  const scoped_ptr<HttpNetworkSession> session_;
   CloseResultWaiter result_waiter_;
   MockHttpStream* const mock_stream_;  // Owned by |drainer_|.
   HttpResponseBodyDrainer* const drainer_;  // Deletes itself.

@@ -24,6 +24,7 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="1546934824884762070">Er is een onverwachte fout opgetreden. Meld dit probleem aan de ontwikkelaars.</translation>
 <translation id="1619813076098775562">De verbinding met het Cast-apparaat is verbroken.</translation>
 <translation id="1643640058022401035">Als je deze pagina verlaat, wordt je Chromoting-sessie beëindigd.</translation>
+<translation id="1646994964686260497">Er is geen apparaat om verbinding mee te maken.</translation>
 <translation id="1654128982815600832">Externe verbindingen voor deze computer inschakelen…</translation>
 <translation id="170207782578677537">Kan deze computer niet registreren.</translation>
 <translation id="1704090719919187045">Voorkeuren voor Chromoting-host</translation>
@@ -33,7 +34,6 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="1770394049404108959">Ik kan de app niet openen.</translation>
 <translation id="177096447311351977">Kanaal-IP voor client: <ph name="CLIENT_GAIA_IDENTIFIER" /> ip='<ph name="CLIENT_IP_ADDRESS_AND_PORT" />' host_ip='<ph name="HOST_IP_ADDRESS_AND_PORT" />' channel='<ph name="CHANNEL_TYPE" />' connection='<ph name="CONNECTION_TYPE" />'.</translation>
 <translation id="1779766957982586368">Venster sluiten</translation>
-<translation id="1818475040640568770">Je hebt geen computers geregistreerd.</translation>
 <translation id="1841799852846221389">Externe verbindingen voor deze computer uitschakelen…</translation>
 <translation id="189172778771606813">Zijmenu sluiten</translation>
 <translation id="195619862187186579">Toetsenbordindeling</translation>
@@ -87,8 +87,6 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="2926340305933667314">Kan externe toegang tot deze computer niet uitschakelen. Probeer het later opnieuw.</translation>
 <translation id="2930135165929238380">Er ontbreken enkele vereiste componenten. Ga naar chrome://plugins en zorg ervoor dat Native Client is ingeschakeld.</translation>
 <translation id="2939145106548231838">Verifiëren naar host</translation>
-<translation id="2998137343848432918">• Scherm 'Credits' toegevoegd.
-• Een probleem verholpen waarbij bij overschakelen naar volledig scherm het toetsenbord zichtbaar was.</translation>
 <translation id="3020807351229499221">Kan pincode niet updaten. Probeer het later opnieuw.</translation>
 <translation id="3025388528294795783">Vertel ons wat er is misgegaan zodat we je probleem kunnen oplossen:</translation>
 <translation id="3027681561976217984">Aanraakmodus</translation>
@@ -97,7 +95,6 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="3150823315463303127">Host kan het beleid niet lezen.</translation>
 <translation id="3194245623920924351">Chrome Remote Desktop</translation>
 <translation id="3197730452537982411">Remote Desktop</translation>
-<translation id="3244258558056547981">Cardboard-weergave tonen.</translation>
 <translation id="3258789396564295715">Je kunt veilig toegang krijgen tot deze computer via Chrome Remote Desktop.</translation>
 <translation id="327263477022142889">Wil je ons helpen Chrome Remote Desktop te verbeteren? <ph name="LINK_BEGIN" />Vul de enquête in.<ph name="LINK_END" /></translation>
 <translation id="3286521253923406898">Controller voor Chromoting-host</translation>
@@ -113,6 +110,7 @@ Voor meer informatie over privacy bekijk je het Privacybeleid van Google (http:/
 <translation id="3606997049964069799">Je bent niet ingelogd bij Chromium. Log in en probeer het opnieuw.</translation>
 <translation id="3649256019230929621">Venster minimaliseren</translation>
 <translation id="369442766917958684">Offline.</translation>
+<translation id="3695446226812920698">Meer informatie</translation>
 <translation id="3776024066357219166">Je Chrome Remote Desktop-sessie is beëindigd.</translation>
 <translation id="3785447812627779171">Chromoting-
 host</translation>
@@ -125,6 +123,11 @@ host</translation>
 <translation id="3950820424414687140">Inloggen</translation>
 <translation id="3989511127559254552">Als je wilt doorgaan, moet je eerst uitgebreide toegangsrechten voor je computer verlenen. Je hoeft dit slechts één keer te doen.</translation>
 <translation id="4006787130661126000">Je moet externe verbindingen inschakelen als je Chrome Remote Desktop wilt gebruiken voor toegang tot deze computer.</translation>
+<translation id="401121182145179743">Je moet eerst je computer instellen voor toegang op afstand.</translation>
+<translation id="4028465833180158312">• Updates voor gebruikersinterface in Material design.
+• Kennisgeving voor licenties van derden.
+• Weergave van informatie voor externe computers die offline zijn.</translation>
+<translation id="405887016757208221">De externe computer kan de sessie niet initialiseren. Als het probleem blijft optreden, configureer je de host opnieuw.</translation>
 <translation id="4068946408131579958">Alle verbindingen</translation>
 <translation id="409800995205263688">OPMERKING: beleidsinstellingen staan alleen verbindingen tussen computers binnen je netwerk toe.</translation>
 <translation id="4155497795971509630">Er ontbreken enkele vereiste componenten. Controleer of de nieuwste versie van de software is geïnstalleerd en probeer het opnieuw.</translation>
@@ -149,6 +152,7 @@ host</translation>
 <translation id="4573676252416618192">Chrome Remote
 Desktop-host</translation>
 <translation id="4619978527973181021">Accepteren en installeren</translation>
+<translation id="4647791084836149355">Cardboard-weergave tonen</translation>
 <translation id="4703799847237267011">Je Chromoting-sessie is beëindigd.</translation>
 <translation id="4736223761657662401">Verbindingsgeschiedenis</translation>
 <translation id="4741792197137897469">Verificatie mislukt. Log opnieuw in bij Chrome.</translation>
@@ -170,7 +174,6 @@ Desktop-host</translation>
 <translation id="518094545883702183">Deze informatie wordt alleen gebruikt voor een diagnose van het probleem dat je meldt, is alleen beschikbaar voor iemand die je melding onderzoekt en wordt maximaal 30 dagen bewaard.</translation>
 <translation id="5222676887888702881">Uitloggen</translation>
 <translation id="5254120496627797685">Als je deze pagina verlaat, wordt je Chrome Remote Desktop-sessie beëindigd.</translation>
-<translation id="5285241842433869526">Informatie over het instellen van een computer voor externe toegang.</translation>
 <translation id="5308380583665731573">Verbinding maken</translation>
 <translation id="5363265567587775042">Vraag de gebruiker tot wiens computer je toegang wilt hebben, op <ph name="SHARE" /> te klikken en je de toegangscode te geven.</translation>
 <translation id="5379087427956679853">Met Chrome Remote Desktop kun je je computer veilig delen via internet. Beide gebruikers moeten hiervoor de app Chrome Remote Desktop uitvoeren, die beschikbaar is op <ph name="URL" />.</translation>
@@ -207,6 +210,7 @@ Desktop-host</translation>
 <translation id="6284412385303060032">De host die werd uitgevoerd op het console-inlogscherm, is uitgeschakeld om de gordijnmodus te ondersteunen door over te schakelen naar een host die in een gebruikersspecifieke sessie wordt uitgevoerd.</translation>
 <translation id="629730747756840877">Account</translation>
 <translation id="6304318647555713317">Client</translation>
+<translation id="6324708100353784493">Je hebt de integratiemodus voor Google Cardboard ingeschakeld. Als je deze modus wilt gebruiken, plaats je je apparaat in een Google Cardboard-viewer.</translation>
 <translation id="6381670701864002291">Iets anders.</translation>
 <translation id="6398765197997659313">Volledig scherm sluiten</translation>
 <translation id="6441316101718669559">Bureaubladintegratie wordt niet ondersteund op dit platform. Je kunt de app nog steeds gebruiken, maar de gebruikerservaring is beperkt.</translation>
@@ -257,6 +261,7 @@ Desktop-host</translation>
 <translation id="7869445566579231750">Je hebt geen toestemming om deze app uit te voeren.</translation>
 <translation id="7948001860594368197">Schermopties</translation>
 <translation id="7970576581263377361">Verificatie mislukt. Log opnieuw in bij Chromium.</translation>
+<translation id="7981525049612125370">De externe sessie is verlopen.</translation>
 <translation id="8041721485428375115">Door het installatieprogramma voor de Chrome Remote Desktop-host te downloaden, ga je akkoord met de <ph name="LINK_BEGIN" />Servicevoorwaarden<ph name="LINK_END" /> van Google.</translation>
 <translation id="8073845705237259513">Als je Chrome Remote Desktop wilt gebruiken, moet je een Google-account aan je apparaat toevoegen.</translation>
 <translation id="80739703311984697">De externe host vereist dat je op een website van derden wordt geverifieerd. Als je wilt doorgaan, moet je Chromoting aanvullende machtigingen geven om toegang tot dit adres te krijgen:</translation>

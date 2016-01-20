@@ -4,6 +4,11 @@
 
 package org.chromium.chrome.browser.crash;
 
+import static org.chromium.chrome.browser.crash.MinidumpUploadService.BROWSER;
+import static org.chromium.chrome.browser.crash.MinidumpUploadService.GPU;
+import static org.chromium.chrome.browser.crash.MinidumpUploadService.OTHER;
+import static org.chromium.chrome.browser.crash.MinidumpUploadService.RENDERER;
+
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -23,7 +28,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-
 /**
  * Testcase for {@link MinidumpUploadService}.
  */
@@ -163,7 +167,9 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
         List<CountedMinidumpUploadCallable> callables =
                 new ArrayList<CountedMinidumpUploadCallable>();
         callables.add(new CountedMinidumpUploadCallable(
-                "chromium_renderer-111.dmp1", true, false));
+                "chromium_renderer-111.dmp1",
+                MinidumpUploadCallable.UPLOAD_SUCCESS,
+                false));
         runUploadCrashTest(callables);
     }
 
@@ -175,7 +181,9 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
                 new ArrayList<CountedMinidumpUploadCallable>();
         for (int i = 0; i < MinidumpUploadService.MAX_TRIES_ALLOWED; i++) {
             callables.add(new CountedMinidumpUploadCallable(
-                    "chromium_renderer-111.dmp1" + (i > 0 ? ".try" + i : "") , false, true));
+                    "chromium_renderer-111.dmp1" + (i > 0 ? ".try" + i : "") ,
+                    MinidumpUploadCallable.UPLOAD_FAILURE,
+                    true));
         }
         runUploadCrashTest(callables);
     }
@@ -186,9 +194,13 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
         List<CountedMinidumpUploadCallable> callables =
                 new ArrayList<CountedMinidumpUploadCallable>();
         callables.add(new CountedMinidumpUploadCallable(
-                "chromium_renderer-111.dmp1", false, true));
+                "chromium_renderer-111.dmp1",
+                MinidumpUploadCallable.UPLOAD_FAILURE,
+                true));
         callables.add(new CountedMinidumpUploadCallable(
-                "chromium_renderer-111.dmp1.try1", true, true));
+                "chromium_renderer-111.dmp1.try1",
+                MinidumpUploadCallable.UPLOAD_SUCCESS,
+                true));
         runUploadCrashTest(callables);
     }
 
@@ -198,7 +210,9 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
         List<CountedMinidumpUploadCallable> callables =
                 new ArrayList<CountedMinidumpUploadCallable>();
         callables.add(new CountedMinidumpUploadCallable(
-                "chromium_renderer-111.dmp1", false, false));
+                "chromium_renderer-111.dmp1",
+                MinidumpUploadCallable.UPLOAD_FAILURE,
+                false));
         runUploadCrashTest(callables);
     }
 
@@ -349,6 +363,42 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
         assertTrue("Should have called startService(...)", context.isFlagSet(startServiceFlag));
     }
 
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetCrashType1() throws IOException {
+        final File minidumpFile = new File(mCrashDir, "chromium_renderer-123.dmp");
+        setUpMinidumpFile(minidumpFile, BOUNDARY, "browser");
+        assertEquals(BROWSER,
+                MinidumpUploadService.getCrashType(minidumpFile.getAbsolutePath()));
+    }
+
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetCrashType2() throws IOException {
+        final File minidumpFile = new File(mCrashDir, "chromium_renderer-123.dmp");
+        setUpMinidumpFile(minidumpFile, BOUNDARY, "renderer");
+        assertEquals(RENDERER,
+                MinidumpUploadService.getCrashType(minidumpFile.getAbsolutePath()));
+    }
+
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetCrashType3() throws IOException {
+        final File minidumpFile = new File(mCrashDir, "chromium_renderer-123.dmp");
+        setUpMinidumpFile(minidumpFile, BOUNDARY, "gpu-process");
+        assertEquals(GPU,
+                MinidumpUploadService.getCrashType(minidumpFile.getAbsolutePath()));
+    }
+
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetCrashType4() throws IOException {
+        final File minidumpFile = new File(mCrashDir, "chromium_renderer-123.dmp");
+        setUpMinidumpFile(minidumpFile, BOUNDARY, "weird test type");
+        assertEquals(OTHER,
+                MinidumpUploadService.getCrashType(minidumpFile.getAbsolutePath()));
+    }
+
     private class MinidumpPreparationContext extends AdvancedMockContext {
         /**
          * Field used in overridden versions of startService() so we can support retries.
@@ -377,7 +427,7 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
      */
     private static class CountedMinidumpUploadCallable extends MinidumpUploadCallable {
         private int mCalledCount;
-        private final boolean mResult;
+        @MinidumpUploadCallable.MinidumpUploadStatus private final int mResult;
         private final boolean mTriggerNetworkChange;
 
         /**
@@ -388,14 +438,14 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
          *     This essentially triggers a retry if result is set to fail.
          */
         private CountedMinidumpUploadCallable(
-                String fileName, boolean result, boolean networkChange) {
+                String fileName, int result, boolean networkChange) {
             super(new File(fileName), null, null, null, null);
             this.mResult = result;
             this.mTriggerNetworkChange = networkChange;
         }
 
         @Override
-        public Boolean call() {
+        public Integer call() {
             ++mCalledCount;
             return mResult;
         }

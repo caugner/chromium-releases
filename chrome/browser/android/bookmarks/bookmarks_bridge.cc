@@ -16,12 +16,12 @@
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
-#include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_match.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/browser/scoped_group_bookmark_actions.h"
 #include "components/bookmarks/common/android/bookmark_type.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/enhanced_bookmarks/enhanced_bookmark_features.h"
 #include "components/query_parser/query_parser.h"
@@ -371,6 +371,15 @@ ScopedJavaLocalRef<jobject> BookmarksBridge::GetDesktopFolderId(JNIEnv* env,
       JavaBookmarkIdCreateBookmarkId(
           env, desktop_node->id(), GetBookmarkType(desktop_node));
   return folder_id_obj;
+}
+
+jint BookmarksBridge::GetChildCount(JNIEnv* env,
+                                    jobject obj,
+                                    jlong id,
+                                    jint type) {
+  DCHECK(IsLoaded());
+  const BookmarkNode* node = GetNodeByID(id, type);
+  return node->child_count();
 }
 
 void BookmarksBridge::GetChildIDs(JNIEnv* env,

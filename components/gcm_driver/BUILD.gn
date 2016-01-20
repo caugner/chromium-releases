@@ -39,10 +39,14 @@ static_library("gcm_driver") {
     "gcm_driver.h",
     "gcm_driver_android.cc",
     "gcm_driver_android.h",
+    "gcm_driver_constants.cc",
+    "gcm_driver_constants.h",
     "gcm_driver_desktop.cc",
     "gcm_driver_desktop.h",
     "gcm_internals_constants.cc",
     "gcm_internals_constants.h",
+    "gcm_profile_service.cc",
+    "gcm_profile_service.h",
     "gcm_stats_recorder_impl.cc",
     "gcm_stats_recorder_impl.h",
     "registration_info.cc",
@@ -92,7 +96,7 @@ static_library("gcm_driver") {
 }
 
 # GYP version: components/gcm_driver.gypi:gcm_driver_test_support
-static_library("test_support") {
+source_set("test_support") {
   testonly = true
   sources = [
     "fake_gcm_app_handler.cc",
@@ -105,8 +109,10 @@ static_library("test_support") {
     "fake_gcm_driver.h",
   ]
 
-  deps = [
+  public_deps = [
     ":gcm_driver",
+  ]
+  deps = [
     "//base",
     "//google_apis/gcm:test_support",
     "//testing/gtest",
@@ -123,24 +129,28 @@ static_library("test_support") {
   }
 }
 
-if (!is_android) {
-  source_set("unit_tests") {
-    testonly = true
-    sources = [
+source_set("unit_tests") {
+  testonly = true
+
+  sources = [
+    "gcm_account_tracker_unittest.cc",
+  ]
+
+  deps = [
+    ":gcm_driver",
+    ":test_support",
+    "//testing/gtest",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+
+  if (!is_android) {
+    sources += [
       "gcm_account_mapper_unittest.cc",
-      "gcm_account_tracker_unittest.cc",
       "gcm_channel_status_request_unittest.cc",
       "gcm_client_impl_unittest.cc",
       "gcm_delayed_task_controller_unittest.cc",
       "gcm_driver_desktop_unittest.cc",
       "gcm_stats_recorder_impl_unittest.cc",
-    ]
-
-    deps = [
-      ":gcm_driver",
-      ":test_support",
-      "//testing/gtest",
-      "//third_party/protobuf:protobuf_lite",
     ]
   }
 }

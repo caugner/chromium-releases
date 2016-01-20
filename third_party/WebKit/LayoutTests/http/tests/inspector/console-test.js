@@ -140,6 +140,11 @@ InspectorTest.formatterIgnoreStackFrameUrls = function(messageFormatter, node)
     return buffer.split("\n").map(ignoreStackFrameAndMutableData).filter(isNotEmptyLine).join("\n");
 }
 
+InspectorTest.simpleFormatter = function(element, message)
+{
+    return message.messageText + ":" + message.line + ":" + message.column;
+}
+
 InspectorTest.dumpConsoleMessagesIgnoreErrorStackFrames = function(printOriginatingCommand, dumpClassNames, messageFormatter)
 {
     InspectorTest.addResults(InspectorTest.dumpConsoleMessagesIntoArray(printOriginatingCommand, dumpClassNames, InspectorTest.formatterIgnoreStackFrameUrls.bind(this, messageFormatter)));
@@ -254,6 +259,36 @@ InspectorTest.expandConsoleMessages = function(callback, deepFilter, sectionFilt
             }
         }
         InspectorTest.runAfterPendingDispatches(callback);
+    }
+}
+
+InspectorTest.expandGettersInConsoleMessages = function(callback)
+{
+    var messageViews = WebInspector.ConsolePanel._view()._visibleViewMessages;
+    var properties = [];
+    var propertiesCount  = 0;
+    InspectorTest.addSniffer(WebInspector.ObjectPropertyTreeElement.prototype, "_updateExpandable", propertyExpandableUpdated);
+    for (var i = 0; i < messageViews.length; ++i) {
+        var element = messageViews[i].contentElement();
+        for (var node = element; node; node = node.traverseNextNode(element)) {
+            if (node.classList && node.classList.contains("object-value-calculate-value-button")) {
+                ++propertiesCount;
+                node.click();
+                properties.push(node.parentElement.parentElement);
+            }
+        }
+    }
+
+    function propertyExpandableUpdated()
+    {
+        --propertiesCount;
+        if (propertiesCount === 0) {
+            for (var i = 0; i < properties.length; ++i)
+                properties[i].click();
+            InspectorTest.runAfterPendingDispatches(callback);
+        } else {
+            InspectorTest.addSniffer(WebInspector.ObjectPropertyTreeElement.prototype, "_updateExpandable", propertyExpandableUpdated);
+        }
     }
 }
 

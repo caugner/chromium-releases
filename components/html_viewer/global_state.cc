@@ -8,18 +8,20 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "components/html_viewer/blink_platform_impl.h"
+#include "components/html_viewer/blink_settings_impl.h"
 #include "components/html_viewer/media_factory.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "gin/v8_initializer.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/logging/init_logging.h"
+#include "mojo/services/tracing/public/cpp/tracing_impl.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/gfx/display.h"
 #include "ui/mojo/init/ui_init.h"
 #include "v8/include/v8.h"
 
@@ -56,15 +58,28 @@ std::set<std::string> GetResourcePaths() {
   return paths;
 }
 
+// TODO(sky): convert to using DisplayService.
+std::vector<gfx::Display> DisplaysFromSizeAndScale(
+    const gfx::Size& screen_size_in_pixels,
+    float device_pixel_ratio) {
+  std::vector<gfx::Display> displays(1);
+  displays[0].set_id(2000);
+  displays[0].SetScaleAndBounds(device_pixel_ratio,
+                                gfx::Rect(screen_size_in_pixels));
+  return displays;
+}
+
 }  // namespace
 
 GlobalState::GlobalState(mojo::ApplicationImpl* app)
     : app_(app),
-      resource_loader_(app->shell(), GetResourcePaths()),
+      resource_loader_(app, GetResourcePaths()),
       did_init_(false),
       device_pixel_ratio_(1.f),
       discardable_memory_allocator_(kDesiredMaxMemory),
-      compositor_thread_("compositor thread") {
+      compositor_thread_("compositor thread"),
+      blink_settings_(new BlinkSettingsImpl()) {
+  tracing_.Initialize(app);
 }
 
 GlobalState::~GlobalState() {
@@ -105,8 +120,8 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
   SkFontConfigInterface::SetGlobal(font_loader_.get());
 #endif
 
-  ui_init_.reset(
-      new ui::mojo::UIInit(screen_size_in_pixels, device_pixel_ratio));
+  ui_init_.reset(new ui::mojo::UIInit(
+      DisplaysFromSizeAndScale(screen_size_in_pixels_, device_pixel_ratio_)));
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
 
   mojo::URLRequestPtr request(mojo::URLRequest::New());
@@ -127,26 +142,31 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
       0u);
 #endif
   blink::initialize(blink_platform_.get());
-  base::i18n::InitializeICUWithFileDescriptor(
-      resource_loader_.GetICUFile().TakePlatformFile(),
-      base::MemoryMappedFile::Region::kWholeFile);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  base::File pak_file = resource_loader_.ReleaseFile(kResourceResourcesPak);
 
-  ui::RegisterPathProvider();
+  bool initialize_ui = true;
+#if defined(COMPONENT_BUILD)
+  if (command_line->HasSwitch("single-process"))
+    initialize_ui = false;
+#endif
+  if (initialize_ui) {
+    ui::RegisterPathProvider();
+    base::File pak_file_2 = pak_file.Duplicate();
+    ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
+      pak_file_2.Pass(), base::MemoryMappedFile::Region::kWholeFile);
+  }
 
   mojo::logging::InitLogging();
-
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   if (command_line->HasSwitch(kDisableEncryptedMedia))
     blink::WebRuntimeFeatures::enableEncryptedMedia(false);
 
-  base::File pak_file = resource_loader_.ReleaseFile(kResourceResourcesPak);
-  base::File pak_file_2 = pak_file.Duplicate();
-  ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
-      pak_file.Pass(), base::MemoryMappedFile::Region::kWholeFile);
+  blink_settings_->Init();
+
   // TODO(sky): why is this always using 100?
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-      pak_file_2.Pass(), ui::SCALE_FACTOR_100P);
+      pak_file.Pass(), ui::SCALE_FACTOR_100P);
 
   compositor_thread_.Start();
 
@@ -159,13 +179,15 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
   }
 }
 
-const mojo::GpuInfo* GlobalState::GetGpuInfo() {
+// TODO(rjkroege): These two functions probably do not interoperate correctly
+// with MUS.
+const mus::mojom::GpuInfo* GlobalState::GetGpuInfo() {
   if (gpu_service_)
     CHECK(gpu_service_.WaitForIncomingResponse()) <<"Get GPU info failed!";
   return gpu_info_.get();
 }
 
-void GlobalState::GetGpuInfoCallback(mojo::GpuInfoPtr gpu_info) {
+void GlobalState::GetGpuInfoCallback(mus::mojom::GpuInfoPtr gpu_info) {
   CHECK(gpu_info);
   gpu_info_ = gpu_info.Pass();
   gpu_service_.reset();

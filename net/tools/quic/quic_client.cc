@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "base/logging.h"
+#include "base/run_loop.h"
 #include "net/base/net_util.h"
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_connection.h"
@@ -44,19 +45,22 @@ void QuicClient::ClientQuicDataToResend::Resend() {
 QuicClient::QuicClient(IPEndPoint server_address,
                        const QuicServerId& server_id,
                        const QuicVersionVector& supported_versions,
-                       EpollServer* epoll_server)
+                       EpollServer* epoll_server,
+                       ProofVerifier* proof_verifier)
     : QuicClient(server_address,
                  server_id,
                  supported_versions,
                  QuicConfig(),
-                 epoll_server) {}
+                 epoll_server,
+                 proof_verifier) {}
 
 QuicClient::QuicClient(IPEndPoint server_address,
                        const QuicServerId& server_id,
                        const QuicVersionVector& supported_versions,
                        const QuicConfig& config,
-                       EpollServer* epoll_server)
-    : QuicClientBase(server_id, supported_versions, config),
+                       EpollServer* epoll_server,
+                       ProofVerifier* proof_verifier)
+    : QuicClientBase(server_id, supported_versions, config, proof_verifier),
       server_address_(server_address),
       local_port_(0),
       epoll_server_(epoll_server),
@@ -242,8 +246,7 @@ void QuicClient::StartConnect() {
 
   CreateQuicClientSession(new QuicConnection(
       GetNextConnectionId(), server_address_, helper_.get(), factory,
-      /* owns_writer= */ false, Perspective::IS_CLIENT, server_id().is_https(),
-      supported_versions()));
+      /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 
   // Reset |writer_| after |session()| so that the old writer outlives the old
   // session.
@@ -289,9 +292,8 @@ void QuicClient::SendRequest(const BalsaHeaders& headers,
     return;
   }
   stream->set_visitor(this);
-  stream->SendRequest(
-      SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers, stream->version()),
-      body, fin);
+  stream->SendRequest(SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers),
+                      body, fin);
   if (FLAGS_enable_quic_stateless_reject_support) {
     // Record this in case we need to resend.
     auto new_headers = new BalsaHeaders;
@@ -339,6 +341,7 @@ bool QuicClient::WaitForEvents() {
   DCHECK(connected());
 
   epoll_server_->WaitForEventsAndExecuteCallbacks();
+  base::RunLoop().RunUntilIdle();
 
   DCHECK(session() != nullptr);
   if (!connected() &&
@@ -391,13 +394,13 @@ void QuicClient::OnEvent(int fd, EpollEvent* event) {
   }
 }
 
-void QuicClient::OnClose(QuicDataStream* stream) {
+void QuicClient::OnClose(QuicSpdyStream* stream) {
   DCHECK(stream != nullptr);
   QuicSpdyClientStream* client_stream =
       static_cast<QuicSpdyClientStream*>(stream);
   BalsaHeaders headers;
   SpdyBalsaUtils::SpdyHeadersToResponseHeaders(client_stream->headers(),
-                                               &headers, stream->version());
+                                               &headers);
 
   if (response_listener_.get() != nullptr) {
     response_listener_->OnCompleteResponse(

@@ -29,17 +29,17 @@ namespace {
 blink::WebURLResponse::HTTPVersion StatusLineToHTTPVersion(
     const mojo::String& status_line) {
   if (status_line.is_null())
-    return blink::WebURLResponse::HTTP_0_9;
+    return blink::WebURLResponse::HTTPVersion_0_9;
 
   if (base::StartsWith(status_line.get(), "HTTP/1.0",
                        base::CompareCase::SENSITIVE))
-    return blink::WebURLResponse::HTTP_1_0;
+    return blink::WebURLResponse::HTTPVersion_1_0;
 
   if (base::StartsWith(status_line.get(), "HTTP/1.1",
                        base::CompareCase::SENSITIVE))
-    return blink::WebURLResponse::HTTP_1_1;
+    return blink::WebURLResponse::HTTPVersion_1_1;
 
-  return blink::WebURLResponse::Unknown;
+  return blink::WebURLResponse::HTTPVersionUnknown;
 }
 
 blink::WebURLResponse ToWebURLResponse(const URLResponsePtr& url_response) {
@@ -79,7 +79,6 @@ WebURLLoaderImpl::WebURLLoaderImpl(mojo::URLLoaderFactory* url_loader_factory,
     : client_(NULL),
       web_blob_registry_(web_blob_registry),
       referrer_policy_(blink::WebReferrerPolicyDefault),
-      handle_watcher_(15),
       weak_factory_(this) {
   url_loader_factory->CreateURLLoader(GetProxy(&url_loader_));
 }
@@ -229,10 +228,11 @@ void WebURLLoaderImpl::OnReceivedRedirect(const blink::WebURLRequest& request,
     new_request.setHTTPBody(request.httpBody());
 
   base::WeakPtr<WebURLLoaderImpl> self(weak_factory_.GetWeakPtr());
-  client_->willSendRequest(this, new_request, ToWebURLResponse(url_response));
+  client_->willFollowRedirect(
+      this, new_request, ToWebURLResponse(url_response));
   // TODO(darin): Check if new_request was rejected.
 
-  // We may have been deleted during willSendRequest.
+  // We may have been deleted during willFollowRedirect.
   if (!self)
     return;
 
@@ -310,6 +310,11 @@ void WebURLLoaderImpl::WaitToReadMore() {
 
 void WebURLLoaderImpl::OnResponseBodyStreamReady(MojoResult result) {
   ReadMore();
+}
+
+void WebURLLoaderImpl::setLoadingTaskRunner(
+    blink::WebTaskRunner* web_task_runner) {
+  // TODO(alexclarke): Consider hooking this up.
 }
 
 }  // namespace html_viewer

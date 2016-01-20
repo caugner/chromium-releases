@@ -39,11 +39,11 @@ class ForegroundPage(page_module.Page):
     self.archive_data_file = story_set.archive_data_file
 
   def _TakeMemoryMeasurement(self, action_runner, phase):
-    android_platform = action_runner.tab.browser.platform
+    action_runner.Wait(1)  # See crbug.com/540022#c17.
     with action_runner.CreateInteraction(phase):
       action_runner.Wait(DUMP_WAIT_TIME)
       action_runner.ForceGarbageCollection()
-      android_platform.RelaxMemory()
+      action_runner.tab.browser.platform.FlushEntireSystemCache()
       action_runner.Wait(DUMP_WAIT_TIME)
       if not action_runner.tab.browser.DumpMemory():
         logging.error('Unable to get a memory dump for %s.', self.name)

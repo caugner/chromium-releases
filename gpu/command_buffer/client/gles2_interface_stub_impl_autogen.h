@@ -1011,6 +1011,16 @@ GLuint GLES2InterfaceStub::InsertSyncPointCHROMIUM() {
   return 0;
 }
 void GLES2InterfaceStub::WaitSyncPointCHROMIUM(GLuint /* sync_point */) {}
+GLuint64 GLES2InterfaceStub::InsertFenceSyncCHROMIUM() {
+  return 0;
+}
+void GLES2InterfaceStub::GenSyncTokenCHROMIUM(GLuint64 /* fence_sync */,
+                                              GLbyte* /* sync_token */) {}
+void GLES2InterfaceStub::GenUnverifiedSyncTokenCHROMIUM(
+    GLuint64 /* fence_sync */,
+    GLbyte* /* sync_token */) {}
+void GLES2InterfaceStub::WaitSyncTokenCHROMIUM(const GLbyte* /* sync_token */) {
+}
 void GLES2InterfaceStub::DrawBuffersEXT(GLsizei /* count */,
                                         const GLenum* /* bufs */) {}
 void GLES2InterfaceStub::DiscardBackbufferCHROMIUM() {}
@@ -1026,6 +1036,13 @@ void GLES2InterfaceStub::ScheduleOverlayPlaneCHROMIUM(
     GLfloat /* uv_y */,
     GLfloat /* uv_width */,
     GLfloat /* uv_height */) {}
+void GLES2InterfaceStub::ScheduleCALayerCHROMIUM(
+    GLuint /* contents_texture_id */,
+    const GLfloat* /* contents_rect */,
+    GLfloat /* opacity */,
+    const GLuint /* background_color */,
+    const GLfloat* /* bounds_size */,
+    const GLfloat* /* transform */) {}
 void GLES2InterfaceStub::SwapInterval(GLint /* interval */) {}
 void GLES2InterfaceStub::FlushDriverCachesCHROMIUM() {}
 void GLES2InterfaceStub::MatrixLoadfCHROMIUM(GLenum /* matrixMode */,
@@ -1074,6 +1091,70 @@ void GLES2InterfaceStub::StencilThenCoverStrokePathCHROMIUM(
     GLint /* reference */,
     GLuint /* mask */,
     GLenum /* coverMode */) {}
+void GLES2InterfaceStub::StencilFillPathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLenum /* fillMode */,
+    GLuint /* mask */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::StencilStrokePathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLint /* reference */,
+    GLuint /* mask */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::CoverFillPathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLenum /* coverMode */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::CoverStrokePathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLenum /* coverMode */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::StencilThenCoverFillPathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLenum /* fillMode */,
+    GLuint /* mask */,
+    GLenum /* coverMode */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::StencilThenCoverStrokePathInstancedCHROMIUM(
+    GLsizei /* numPaths */,
+    GLenum /* pathNameType */,
+    const GLvoid* /* paths */,
+    GLuint /* pathBase */,
+    GLint /* reference */,
+    GLuint /* mask */,
+    GLenum /* coverMode */,
+    GLenum /* transformType */,
+    const GLfloat* /* transformValues */) {}
+void GLES2InterfaceStub::BindFragmentInputLocationCHROMIUM(
+    GLuint /* program */,
+    GLint /* location */,
+    const char* /* name */) {}
+void GLES2InterfaceStub::ProgramPathFragmentInputGenCHROMIUM(
+    GLuint /* program */,
+    GLint /* location */,
+    GLenum /* genMode */,
+    GLint /* components */,
+    const GLfloat* /* coeffs */) {}
 GLenum GLES2InterfaceStub::GetGraphicsResetStatusKHR() {
   return 0;
 }

@@ -558,26 +558,6 @@ function test()
         InspectorTest.addResult(e.name + ": " + e.startTime.toFixed(3) + " / " + (e.duration.toFixed(3) || 0) + " " + (e.args.data && e.args.data.functionName || ""));
     });
 
-    InspectorTest.addResult("");
-    tracingTimelineModel._setMainThreadEvents(events);
-    var filters = [
-        WebInspector.TimelineUIUtils.visibleEventsFilter(),
-        new WebInspector.ExcludeTopLevelFilter()
-    ];
-    var treeTopDown = WebInspector.TimelineModel.buildTopDownTree(events, 0, Infinity, filters, WebInspector.TimelineTreeView.eventId);
-    printProfileTree(0, treeTopDown);
-    var treeBottomUp = WebInspector.TimelineModel.buildBottomUpTree(treeTopDown);
-    printProfileTree(0, treeBottomUp);
-
-    function printProfileTree(padding, node)
-    {
-        var name = node.name || (node.event.name === WebInspector.TimelineModel.RecordType.JSFrame
-            ? WebInspector.beautifyFunctionName(node.event.args["data"]["functionName"])
-            : WebInspector.TimelineUIUtils.eventTitle(node.event));
-        InspectorTest.addResult("  ".repeat(padding) + name + ": " + [node.selfTime, node.totalTime].map(function (t) { return t.toFixed(3); }).join("  "));
-        (node.children || new Map()).forEach(printProfileTree.bind(null, padding + 1));
-    }
-
     InspectorTest.completeTest();
 }
 

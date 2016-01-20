@@ -77,8 +77,11 @@
 #include "url/origin.h"
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
 #include "chrome/browser/android/webapps/webapp_registry.h"
 #include "chrome/browser/precache/precache_manager_factory.h"
+#include "components/offline_pages/offline_page_feature.h"
+#include "components/offline_pages/offline_page_model.h"
 #include "components/precache/content/precache_manager.h"
 #endif
 
@@ -487,13 +490,12 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     storage_partition_remove_mask |=
         content::StoragePartition::REMOVE_DATA_MASK_COOKIES;
 
-#if defined(SAFE_BROWSING_SERVICE)
     // Clear the safebrowsing cookies only if time period is for "all time".  It
     // doesn't make sense to apply the time period of deleting in the last X
     // hours/days to the safebrowsing cookies since they aren't the result of
     // any user action.
     if (delete_begin_ == base::Time()) {
-      SafeBrowsingService* sb_service =
+      safe_browsing::SafeBrowsingService* sb_service =
           g_browser_process->safe_browsing_service();
       if (sb_service) {
         net::URLRequestContextGetter* sb_context =
@@ -505,7 +507,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                        base::Unretained(this), base::Unretained(sb_context)));
       }
     }
-#endif
+
     MediaDeviceIDSalt::Reset(profile_->GetPrefs());
 
     // TODO(mkwst): If we're not removing passwords, then clear the 'zero-click'
@@ -597,6 +599,20 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       password_store->RemoveLoginsCreatedBetween(
           delete_begin_, delete_end_,
           base::Bind(&BrowsingDataRemover::OnClearedPasswords,
+                     base::Unretained(this)));
+    }
+  }
+
+  if (remove_mask & REMOVE_HISTORY) {
+    password_manager::PasswordStore* password_store =
+        PasswordStoreFactory::GetForProfile(
+            profile_, ServiceAccessType::EXPLICIT_ACCESS).get();
+
+    if (password_store) {
+      waiting_for_clear_passwords_stats_ = true;
+      password_store->RemoveStatisticsCreatedBetween(
+          delete_begin_, delete_end_,
+          base::Bind(&BrowsingDataRemover::OnClearedPasswordsStats,
                      base::Unretained(this)));
     }
   }
@@ -789,6 +805,14 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         base::Bind(&BrowsingDataRemover::OnClearedWebappData,
                    base::Unretained(this)));
   }
+
+  if ((remove_mask & REMOVE_OFFLINE_PAGE_DATA) &&
+      offline_pages::IsOfflinePagesEnabled()) {
+    waiting_for_clear_offline_page_data_ = true;
+    offline_pages::OfflinePageModelFactory::GetForBrowserContext(profile_)->
+        ClearAll(base::Bind(&BrowsingDataRemover::OnClearedOfflinePageData,
+                 base::Unretained(this)));
+  }
 #endif
 
   // Record the combined deletion of cookies and cache.
@@ -866,12 +890,14 @@ bool BrowsingDataRemover::AllDone() {
          !waiting_for_clear_network_predictor_ &&
          !waiting_for_clear_networking_history_ &&
          !waiting_for_clear_passwords_ &&
+         !waiting_for_clear_passwords_stats_ &&
          !waiting_for_clear_platform_keys_ &&
          !waiting_for_clear_plugin_data_ &&
          !waiting_for_clear_pnacl_cache_ &&
 #if defined(OS_ANDROID)
          !waiting_for_clear_precache_history_ &&
          !waiting_for_clear_webapp_data_ &&
+         !waiting_for_clear_offline_page_data_ &&
 #endif
 #if defined(ENABLE_WEBRTC)
          !waiting_for_clear_webrtc_logs_ &&
@@ -1076,6 +1102,12 @@ void BrowsingDataRemover::OnClearedPasswords() {
   NotifyAndDeleteIfDone();
 }
 
+void BrowsingDataRemover::OnClearedPasswordsStats() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  waiting_for_clear_passwords_stats_ = false;
+  NotifyAndDeleteIfDone();
+}
+
 void BrowsingDataRemover::OnClearedCookies(int num_deleted) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
@@ -1168,6 +1200,12 @@ void BrowsingDataRemover::OnClearedPrecacheHistory() {
 void BrowsingDataRemover::OnClearedWebappData() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   waiting_for_clear_webapp_data_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::OnClearedOfflinePageData() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  waiting_for_clear_offline_page_data_ = false;
   NotifyAndDeleteIfDone();
 }
 #endif

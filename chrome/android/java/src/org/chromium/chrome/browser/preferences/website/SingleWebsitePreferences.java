@@ -25,9 +25,9 @@ import android.widget.ListView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
-import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.util.UrlUtilities;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -610,17 +610,17 @@ public class SingleWebsitePreferences extends PreferenceFragment
         }
 
         // Clear the permissions.
-        mSite.setCameraPermission(null);
-        mSite.setCookiePermission(null);
+        mSite.setCameraPermission(ContentSetting.DEFAULT);
+        mSite.setCookiePermission(ContentSetting.DEFAULT);
         WebsitePreferenceBridge.nativeClearCookieData(mSite.getAddress().getOrigin());
-        mSite.setFullscreenPermission(null);
-        mSite.setGeolocationPermission(null);
-        mSite.setJavaScriptPermission(null);
-        mSite.setMicrophonePermission(null);
-        mSite.setMidiPermission(null);
-        mSite.setPopupPermission(null);
-        mSite.setProtectedMediaIdentifierPermission(null);
-        mSite.setPushNotificationPermission(null);
+        mSite.setFullscreenPermission(ContentSetting.DEFAULT);
+        mSite.setGeolocationPermission(ContentSetting.DEFAULT);
+        mSite.setJavaScriptPermission(ContentSetting.DEFAULT);
+        mSite.setMicrophonePermission(ContentSetting.DEFAULT);
+        mSite.setMidiPermission(ContentSetting.DEFAULT);
+        mSite.setPopupPermission(ContentSetting.DEFAULT);
+        mSite.setProtectedMediaIdentifierPermission(ContentSetting.DEFAULT);
+        mSite.setPushNotificationPermission(ContentSetting.DEFAULT);
 
         // Clear the storage and finish the activity if necessary.
         if (mSite.getTotalUsage() > 0) {

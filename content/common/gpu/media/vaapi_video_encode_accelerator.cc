@@ -67,7 +67,8 @@ const int kCPBWindowSizeMs = 1500;
 // UMA errors that the VaapiVideoEncodeAccelerator class reports.
 enum VAVEAEncoderFailure {
   VAAPI_ERROR = 0,
-  VAVEA_ENCODER_FAILURES_MAX,
+  // UMA requires that max must be greater than 1.
+  VAVEA_ENCODER_FAILURES_MAX = 2,
 };
 
 }
@@ -583,11 +584,13 @@ bool VaapiVideoEncodeAccelerator::PrepareNextJob() {
   }
 
   current_encode_job_->input_surface = new VASurface(
-      available_va_surface_ids_.back(), coded_size_, va_surface_release_cb_);
+      available_va_surface_ids_.back(), coded_size_,
+      vaapi_wrapper_->va_surface_format(), va_surface_release_cb_);
   available_va_surface_ids_.pop_back();
 
   current_encode_job_->recon_surface = new VASurface(
-      available_va_surface_ids_.back(), coded_size_, va_surface_release_cb_);
+      available_va_surface_ids_.back(), coded_size_,
+      vaapi_wrapper_->va_surface_format(), va_surface_release_cb_);
   available_va_surface_ids_.pop_back();
 
   // Reference surfaces are needed until the job is done, but they get

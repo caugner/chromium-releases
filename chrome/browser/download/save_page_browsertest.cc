@@ -12,6 +12,7 @@
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -43,6 +44,7 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
@@ -55,6 +57,7 @@ using content::DownloadItem;
 using content::DownloadManager;
 using content::WebContents;
 using net::URLRequestMockHTTPJob;
+using testing::ContainsRegex;
 using testing::HasSubstr;
 
 namespace {
@@ -68,10 +71,9 @@ class DownloadPersistedObserver : public DownloadHistory::Observer {
       const history::DownloadRow&)> PersistedFilter;
 
   DownloadPersistedObserver(Profile* profile, const PersistedFilter& filter)
-    : profile_(profile),
-      filter_(filter),
-      waiting_(false),
-      persisted_(false) {
+      : profile_(profile),
+        filter_(filter),
+        persisted_(false) {
     DownloadServiceFactory::GetForBrowserContext(profile_)->
       GetDownloadHistory()->AddObserver(this);
   }
@@ -86,23 +88,24 @@ class DownloadPersistedObserver : public DownloadHistory::Observer {
   bool WaitForPersisted() {
     if (persisted_)
       return true;
-    waiting_ = true;
-    content::RunMessageLoop();
-    waiting_ = false;
+    base::RunLoop run_loop;
+    quit_waiting_callback_ = run_loop.QuitClosure();
+    run_loop.Run();
+    quit_waiting_callback_ = base::Closure();
     return persisted_;
   }
 
   void OnDownloadStored(DownloadItem* item,
                         const history::DownloadRow& info) override {
     persisted_ = persisted_ || filter_.Run(item, info);
-    if (persisted_ && waiting_)
-      base::MessageLoopForUI::current()->Quit();
+    if (persisted_ && !quit_waiting_callback_.is_null())
+      quit_waiting_callback_.Run();
   }
 
  private:
   Profile* profile_;
   PersistedFilter filter_;
-  bool waiting_;
+  base::Closure quit_waiting_callback_;
   bool persisted_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadPersistedObserver);
@@ -114,17 +117,16 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
   DownloadRemovedObserver(Profile* profile, int32 download_id)
       : DownloadPersistedObserver(profile, PersistedFilter()),
         removed_(false),
-        waiting_(false),
-        download_id_(download_id) {
-  }
+        download_id_(download_id) {}
   ~DownloadRemovedObserver() override {}
 
   bool WaitForRemoved() {
     if (removed_)
       return true;
-    waiting_ = true;
-    content::RunMessageLoop();
-    waiting_ = false;
+    base::RunLoop run_loop;
+    quit_waiting_callback_ = run_loop.QuitClosure();
+    run_loop.Run();
+    quit_waiting_callback_ = base::Closure();
     return removed_;
   }
 
@@ -133,13 +135,13 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
 
   void OnDownloadsRemoved(const DownloadHistory::IdSet& ids) override {
     removed_ = ids.find(download_id_) != ids.end();
-    if (removed_ && waiting_)
-      base::MessageLoopForUI::current()->Quit();
+    if (removed_ && !quit_waiting_callback_.is_null())
+      quit_waiting_callback_.Run();
   }
 
  private:
   bool removed_;
-  bool waiting_;
+  base::Closure quit_waiting_callback_;
   int32 download_id_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadRemovedObserver);
@@ -155,14 +157,13 @@ bool DownloadStoredProperly(
   // This function may be called multiple times for a given test. Returning
   // false doesn't necessarily mean that the test has failed or will fail, it
   // might just mean that the test hasn't passed yet.
-  if (info.target_path != expected_path) {
+  if (!expected_path.empty() && info.target_path != expected_path) {
     DVLOG(20) << __FUNCTION__ << " " << info.target_path.value()
               << " != " << expected_path.value();
     return false;
   }
   if (info.url_chain.size() != 1u) {
-    DVLOG(20) << __FUNCTION__ << " " << info.url_chain.size()
-              << " != 1";
+    DVLOG(20) << __FUNCTION__ << " " << info.url_chain.size() << " != 1";
     return false;
   }
   if (info.url_chain[0] != expected_url) {
@@ -176,8 +177,7 @@ bool DownloadStoredProperly(
     return false;
   }
   if (info.state != expected_state) {
-    DVLOG(20) << __FUNCTION__ << " " << info.state
-              << " != " << expected_state;
+    DVLOG(20) << __FUNCTION__ << " " << info.state << " != " << expected_state;
     return false;
   }
   return true;
@@ -191,7 +191,7 @@ static const char kAppendedExtension[] = ".html";
 class DownloadItemCreatedObserver : public DownloadManager::Observer {
  public:
   explicit DownloadItemCreatedObserver(DownloadManager* manager)
-      : waiting_(false), manager_(manager) {
+      : manager_(manager) {
     manager->AddObserver(this);
   }
 
@@ -213,9 +213,10 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
     }
 
     if (items_seen_.empty()) {
-      waiting_ = true;
-      content::RunMessageLoop();
-      waiting_ = false;
+      base::RunLoop run_loop;
+      quit_waiting_callback_ = run_loop.QuitClosure();
+      run_loop.Run();
+      quit_waiting_callback_ = base::Closure();
     }
 
     *items_seen = items_seen_;
@@ -229,18 +230,18 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
     DCHECK_EQ(manager, manager_);
     items_seen_.push_back(item);
 
-    if (waiting_)
-      base::MessageLoopForUI::current()->Quit();
+    if (!quit_waiting_callback_.is_null())
+      quit_waiting_callback_.Run();
   }
 
   void ManagerGoingDown(DownloadManager* manager) override {
     manager_->RemoveObserver(this);
     manager_ = NULL;
-    if (waiting_)
-      base::MessageLoopForUI::current()->Quit();
+    if (!quit_waiting_callback_.is_null())
+      quit_waiting_callback_.Run();
   }
 
-  bool waiting_;
+  base::Closure quit_waiting_callback_;
   DownloadManager* manager_;
   std::vector<DownloadItem*> items_seen_;
 
@@ -301,16 +302,20 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
   GURL NavigateToMockURL(const std::string& prefix) {
     GURL url = URLRequestMockHTTPJob::GetMockUrl(
-        base::FilePath(kTestDir).AppendASCII(prefix + ".htm"));
+        "save_page/" + prefix + ".htm");
     ui_test_utils::NavigateToURL(browser(), url);
     return url;
   }
 
   // Returns full paths of destination file and directory.
   void GetDestinationPaths(const std::string& prefix,
-                base::FilePath* full_file_name,
-                base::FilePath* dir) {
-    *full_file_name = save_dir_.path().AppendASCII(prefix + ".htm");
+                           base::FilePath* full_file_name,
+                           base::FilePath* dir,
+                           content::SavePageType save_page_type =
+                               content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML) {
+    std::string extension =
+        (save_page_type == content::SAVE_PAGE_TYPE_AS_MHTML) ? ".mht" : ".htm";
+    *full_file_name = save_dir_.path().AppendASCII(prefix + extension);
     *dir = save_dir_.path().AppendASCII(prefix + "_files");
   }
 
@@ -351,7 +356,8 @@ class SavePageBrowserTest : public InProcessBrowserTest {
                       int expected_number_of_files,
                       base::FilePath* output_dir,
                       base::FilePath* main_file_name) {
-    GetDestinationPaths(prefix_for_output_files, main_file_name, output_dir);
+    GetDestinationPaths(prefix_for_output_files, main_file_name, output_dir,
+                        save_page_type);
     DownloadPersistedObserver persisted(
         browser()->profile(),
         base::Bind(&DownloadStoredProperly, url, *main_file_name,
@@ -396,13 +402,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SavePageBrowserTest);
 };
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_SaveHTMLOnly DISABLED_SaveHTMLOnly
-#else
-#define MAYBE_SaveHTMLOnly SaveHTMLOnly
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnly) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
   GURL url = NavigateToMockURL("a");
 
   base::FilePath full_file_name, dir;
@@ -416,8 +416,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnly) {
       kTestDir)).Append(FILE_PATH_LITERAL("a.htm")), full_file_name));
 }
 
-// http://crbug.com/162323
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveHTMLOnlyCancel) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyCancel) {
   GURL url = NavigateToMockURL("a");
   DownloadManager* manager(GetDownloadManager());
   std::vector<DownloadItem*> downloads;
@@ -467,13 +466,7 @@ class DelayingDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
   DISALLOW_COPY_AND_ASSIGN(DelayingDownloadManagerDelegate);
 };
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_SaveHTMLOnlyTabDestroy DISABLED_SaveHTMLOnlyTabDestroy
-#else
-#define MAYBE_SaveHTMLOnlyTabDestroy SaveHTMLOnlyTabDestroy
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyTabDestroy) {
   GURL url = NavigateToMockURL("a");
   scoped_ptr<DelayingDownloadManagerDelegate> delaying_delegate(
       new DelayingDownloadManagerDelegate(browser()->profile()));
@@ -503,20 +496,12 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
   EXPECT_FALSE(base::PathExists(dir));
 }
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_SaveViewSourceHTMLOnly DISABLED_SaveViewSourceHTMLOnly
-#else
-#define MAYBE_SaveViewSourceHTMLOnly SaveViewSourceHTMLOnly
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
-  base::FilePath file_name(FILE_PATH_LITERAL("a.htm"));
-  GURL mock_url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(kTestDir).Append(file_name));
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
+  GURL mock_url = URLRequestMockHTTPJob::GetMockUrl("save_page/a.htm");
   GURL view_source_url =
       GURL(content::kViewSourceScheme + std::string(":") + mock_url.spec());
   GURL actual_page_url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(kTestDir).Append(file_name));
+      "save_page/a.htm");
   ui_test_utils::NavigateToURL(browser(), view_source_url);
 
   base::FilePath full_file_name, dir;
@@ -527,17 +512,11 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveViewSourceHTMLOnly) {
   EXPECT_TRUE(base::PathExists(full_file_name));
   EXPECT_FALSE(base::PathExists(dir));
   EXPECT_TRUE(base::ContentsEqual(
-      test_dir_.Append(base::FilePath(kTestDir)).Append(file_name),
+      test_dir_.Append(base::FilePath(kTestDir)).AppendASCII("a.htm"),
       full_file_name));
 }
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_SaveCompleteHTML DISABLED_SaveCompleteHTML
-#else
-#define MAYBE_SaveCompleteHTML SaveCompleteHTML
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveCompleteHTML) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
   GURL url = NavigateToMockURL("b");
 
   base::FilePath full_file_name, dir;
@@ -558,16 +537,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveCompleteHTML) {
       dir.AppendASCII("1.css")));
 }
 
-// Invoke a save page during the initial navigation.
-// (Regression test for http://crbug.com/156538).
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_SaveDuringInitialNavigationIncognito DISABLED_SaveDuringInitialNavigationIncognito
-#else
-#define MAYBE_SaveDuringInitialNavigationIncognito SaveDuringInitialNavigationIncognito
-#endif
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
-                       MAYBE_SaveDuringInitialNavigationIncognito) {
+                       SaveDuringInitialNavigationIncognito) {
   // Open an Incognito window.
   Browser* incognito = CreateIncognitoBrowser();  // Waits.
   ASSERT_TRUE(incognito);
@@ -577,8 +548,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
       BrowserContext::GetDownloadManager(incognito->profile()));
 
   // Navigate, unblocking with new tab.
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(kTestDir).AppendASCII("b.htm"));
+  GURL url = URLRequestMockHTTPJob::GetMockUrl("save_page/b.htm");
   NavigateToURLWithDisposition(incognito, url, NEW_FOREGROUND_TAB,
                                ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
@@ -608,13 +578,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
   EXPECT_FALSE(chrome::CanSavePage(browser()));
 }
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_FileNameFromPageTitle DISABLED_FileNameFromPageTitle
-#else
-#define MAYBE_FileNameFromPageTitle FileNameFromPageTitle
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_FileNameFromPageTitle) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
   GURL url = NavigateToMockURL("b");
 
   base::FilePath full_file_name = save_dir_.path().AppendASCII(
@@ -649,13 +613,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_FileNameFromPageTitle) {
       dir.AppendASCII("1.css")));
 }
 
-// Disabled on Windows due to flakiness. http://crbug.com/162323
-#if defined(OS_WIN)
-#define MAYBE_RemoveFromList DISABLED_RemoveFromList
-#else
-#define MAYBE_RemoveFromList RemoveFromList
-#endif
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
   GURL url = NavigateToMockURL("a");
 
   base::FilePath full_file_name, dir;
@@ -684,7 +642,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_RemoveFromList) {
 // We probably don't care to handle this on Linux or Mac.
 #if defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
-  const base::FilePath file_name(FILE_PATH_LITERAL("c.htm"));
   base::FilePath download_dir =
       DownloadPrefs::FromDownloadManager(GetDownloadManager())->
           DownloadPath();
@@ -693,8 +650,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
   base::FilePath dir = download_dir.AppendASCII("test.exe_files");
 
   EXPECT_FALSE(base::PathExists(full_file_name));
-  GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(kTestDir).Append(file_name));
+  GURL url = URLRequestMockHTTPJob::GetMockUrl("save_page/c.htm");
   ui_test_utils::NavigateToURL(browser(), url);
 
   SavePackageFilePicker::SetShouldPromptUser(false);
@@ -777,26 +733,38 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SavePageBrowserTest_NonMHTML) {
 
 // Test that we don't crash when the page contains an iframe that
 // was handled as a download (http://crbug.com/42212).
-// Flaky: https://crbug.com/537530.
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveDownloadableIFrame) {
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveDownloadableIFrame) {
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("downloads"))
-          .AppendASCII("iframe-src-is-a-download.htm"));
-  ui_test_utils::NavigateToURL(browser(), url);
+      "downloads/iframe-src-is-a-download.htm");
 
   // Wait for and then dismiss the non-save-page-as-related download item
   // (the one associated with downloading of "thisdayinhistory.xls" file).
-  VerifySavePackageExpectations(browser(), url);
-  GetDownloadManager()->RemoveAllDownloads();
+  {
+    GURL download_url("http://mock.http/downloads/thisdayinhistory.xls");
+    DownloadPersistedObserver persisted(
+        browser()->profile(),
+        base::Bind(&DownloadStoredProperly, download_url, base::FilePath(), -1,
+                   history::DownloadState::COMPLETE));
+
+    ui_test_utils::NavigateToURL(browser(), url);
+
+    ASSERT_TRUE(VerifySavePackageExpectations(browser(), download_url));
+    persisted.WaitForPersisted();
+    GetDownloadManager()->RemoveAllDownloads();
+  }
 
   base::FilePath full_file_name, dir;
   SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
-                 "iframe-src-is-a-download", 2, &dir, &full_file_name);
+                 "iframe-src-is-a-download", 3, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
   EXPECT_TRUE(base::PathExists(full_file_name));
+  EXPECT_TRUE(base::PathExists(dir.AppendASCII("thisdayinhistory.html")));
+  EXPECT_TRUE(base::PathExists(dir.AppendASCII("no-such-file.html")));
 }
 
+// Test suite that allows testing --site-per-process against cross-site frames.
+// See http://dev.chromium.org/developers/design-documents/site-isolation.
 class SavePageSitePerProcessBrowserTest : public SavePageBrowserTest {
  public:
   SavePageSitePerProcessBrowserTest() {}
@@ -805,12 +773,8 @@ class SavePageSitePerProcessBrowserTest : public SavePageBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     SavePageBrowserTest::SetUpCommandLine(command_line);
 
-    // TODO(lukasza): Enable --site-per-process once crbug.com/526786 is fixed.
-    // (currently, when the line below is uncommented out, the test crashes
-    // under blink::WebLocalFrameImpl::fromFrameOwnerElement called from
-    // blink::WebPageSerializerImpl::openTagToString).
-    //
-    // content::IsolateAllSitesForTesting(command_line);
+    // Append --site-per-process flag.
+    content::IsolateAllSitesForTesting(command_line);
   }
 
   void SetUpOnMainThread() override {
@@ -825,21 +789,15 @@ class SavePageSitePerProcessBrowserTest : public SavePageBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SavePageSitePerProcessBrowserTest);
 };
 
-// Test for crbug.com/526786.  Without OOPIFs fixes, the test will trigger
-// a crash in the renderer process.
-IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest, SaveCrossSitePage) {
-  // TODO(lukasza): Remove this check once crbug.com/526786 is fixed.
-  if (content::AreAllSitesIsolatedForTesting()) {
-    LOG(WARNING) << "Skipping the test.";
-    return;  // Avoid failing on Site Isolation FYI bot.
-  }
-
-  GURL url(embedded_test_server()->GetURL("a.com", "/save_page/iframes.htm"));
+// Test for crbug.com/526786.
+IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest, SaveAsCompleteHtml) {
+  GURL url(
+      embedded_test_server()->GetURL("a.com", "/save_page/frames-xsite.htm"));
   ui_test_utils::NavigateToURL(browser(), url);
 
   base::FilePath full_file_name, dir;
-  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML, "iframes", 5,
-                 &dir, &full_file_name);
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
+                 "frames-xsite-complete-html", 5, &dir, &full_file_name);
   ASSERT_FALSE(HasFailure());
 
   EXPECT_TRUE(base::DirectoryExists(dir));
@@ -864,12 +822,245 @@ IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest, SaveCrossSitePage) {
   // by this particular test).
   std::string main_contents;
   ASSERT_TRUE(base::ReadFileToString(full_file_name, &main_contents));
-  EXPECT_THAT(main_contents,
-              HasSubstr("<iframe src=\"./iframes_files/a.html\"></iframe>"));
-  EXPECT_THAT(main_contents,
-              HasSubstr("<iframe src=\"./iframes_files/b.html\"></iframe>"));
-  EXPECT_THAT(main_contents,
-              HasSubstr("<img src=\"./iframes_files/1.png\">"));
+  EXPECT_THAT(
+      main_contents,
+      HasSubstr("<iframe "
+                "src=\"./frames-xsite-complete-html_files/a.html\"></iframe>"));
+  EXPECT_THAT(
+      main_contents,
+      HasSubstr("<iframe "
+                "src=\"./frames-xsite-complete-html_files/b.html\"></iframe>"));
+  EXPECT_THAT(
+      main_contents,
+      HasSubstr("<img src=\"./frames-xsite-complete-html_files/1.png\">"));
+
+  // Verification of html contents.
+  EXPECT_THAT(
+      main_contents,
+      HasSubstr("frames-xsite.htm: 896fd88d-a77a-4f46-afd8-24db7d5af9c2"));
+  std::string a_contents;
+  ASSERT_TRUE(base::ReadFileToString(dir.AppendASCII("a.html"), &a_contents));
+  EXPECT_THAT(a_contents,
+              HasSubstr("a.htm: 1b8aae2b-e164-462f-bd5b-98aa366205f2"));
+  std::string b_contents;
+  ASSERT_TRUE(base::ReadFileToString(dir.AppendASCII("b.html"), &b_contents));
+  EXPECT_THAT(b_contents,
+              HasSubstr("b.htm: 3a35f7fa-96a9-4487-9f18-4470263907fa"));
 }
+
+// Test for crbug.com/538766.
+// Disabled because the test will fail until the bug is fixed
+// (but note that the test only fails with --site-per-process flag).
+IN_PROC_BROWSER_TEST_F(SavePageSitePerProcessBrowserTest,
+                       DISABLED_SaveAsMHTML) {
+  GURL url(
+      embedded_test_server()->GetURL("a.com", "/save_page/frames-xsite.htm"));
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  base::FilePath full_file_name, dir;
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_MHTML, "frames-xsite-mhtml",
+                 -1, &dir, &full_file_name);
+  ASSERT_FALSE(HasFailure());
+
+  std::string mhtml;
+  ASSERT_TRUE(base::ReadFileToString(full_file_name, &mhtml));
+
+  // Verify content of main frame, subframes and some savable resources.
+  EXPECT_THAT(
+      mhtml,
+      HasSubstr("frames-xsite.htm: 896fd88d-a77a-4f46-afd8-24db7d5af9c2"));
+  EXPECT_THAT(mhtml, HasSubstr("a.htm: 1b8aae2b-e164-462f-bd5b-98aa366205f2"));
+  EXPECT_THAT(mhtml, HasSubstr("b.htm: 3a35f7fa-96a9-4487-9f18-4470263907fa"));
+  EXPECT_THAT(mhtml, HasSubstr("font-size: 20px;"))
+      << "Verifying if content from 1.css is present";
+
+  // Verify presence of URLs associated with main frame, subframes and some
+  // savable resources.
+  // (note that these are single-line regexes).
+  EXPECT_THAT(mhtml,
+              ContainsRegex("Content-Location.*/save_page/frames-xsite.htm"));
+  EXPECT_THAT(mhtml, ContainsRegex("Content-Location.*/save_page/a.htm"));
+  EXPECT_THAT(mhtml, ContainsRegex("Content-Location.*/save_page/b.htm"));
+  EXPECT_THAT(mhtml, ContainsRegex("Content-Location.*/save_page/1.css"));
+  EXPECT_THAT(mhtml, ContainsRegex("Content-Location.*/save_page/1.png"));
+
+  // Verify that 1.png appears in the output only once (despite being referred
+  // to twice - from iframes.htm and from b.htm).
+  int count = 0;
+  size_t pos = 0;
+  for (;;) {
+    pos = mhtml.find("Content-Type: image/png", pos);
+    if (pos == std::string::npos)
+      break;
+    count++;
+    pos++;
+  }
+  EXPECT_EQ(1, count) << "Verify number of image/png parts in the mhtml output";
+}
+
+// Test suite that verifies that the frame tree "looks" the same before
+// and after a save-page-as.
+class SavePageMultiFrameBrowserTest
+    : public SavePageSitePerProcessBrowserTest,
+      public ::testing::WithParamInterface<content::SavePageType> {
+ protected:
+  void TestMultiFramePage(content::SavePageType save_page_type,
+                          const GURL& url,
+                          int expected_number_of_frames,
+                          const std::vector<std::string>& expected_substrings,
+                          bool skip_verification_of_original_page = false) {
+    // Navigate to the test page and verify if test expectations
+    // are met (this is mostly a sanity check - a failure to meet
+    // expectations would probably mean that there is a test bug
+    // (i.e. that we got called with wrong expected_foo argument).
+    ui_test_utils::NavigateToURL(browser(), url);
+    DLOG(INFO) << "Verifying test expectations for original page... : "
+               << GetCurrentTab(browser())->GetLastCommittedURL();
+    if (!skip_verification_of_original_page) {
+      AssertExpectationsAboutCurrentTab(expected_number_of_frames,
+                                        expected_substrings);
+    }
+
+    // Save the page.
+    base::FilePath full_file_name, dir;
+    SaveCurrentTab(url, save_page_type, "save_result", -1, &dir,
+                   &full_file_name);
+    ASSERT_FALSE(HasFailure());
+
+    // Stop the test server (to make sure the locally saved page
+    // is self-contained / won't try to open original resources).
+    ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
+
+    // Open the saved page and verify if test expectations are
+    // met (i.e. if the same expectations are met for "after"
+    // [saved version of the page] as for the "before"
+    // [the original version of the page].
+    ui_test_utils::NavigateToURL(browser(),
+                                 GURL(net::FilePathToFileURL(full_file_name)));
+    DLOG(INFO) << "Verifying test expectations for saved page... : "
+               << GetCurrentTab(browser())->GetLastCommittedURL();
+    AssertExpectationsAboutCurrentTab(expected_number_of_frames,
+                                      expected_substrings);
+  }
+
+ private:
+  void AssertExpectationsAboutCurrentTab(
+      int expected_number_of_frames,
+      const std::vector<std::string>& expected_substrings) {
+    int actual_number_of_frames = 0;
+    GetCurrentTab(browser())->ForEachFrame(base::Bind(
+        &IncrementInteger, base::Unretained(&actual_number_of_frames)));
+    EXPECT_EQ(expected_number_of_frames, actual_number_of_frames);
+
+    for (const auto& expected_substring : expected_substrings) {
+      int actual_number_of_matches = ui_test_utils::FindInPage(
+          GetCurrentTab(browser()), base::UTF8ToUTF16(expected_substring),
+          true,  // |forward|
+          true,  // |case_sensitive|
+          nullptr, nullptr);
+
+      EXPECT_EQ(1, actual_number_of_matches)
+          << "Verifying if \"" << expected_substring << "\" appears "
+          << "exactly once in the web-contents text";
+    }
+
+    int actual_number_of_errors = ui_test_utils::FindInPage(
+        GetCurrentTab(browser()), base::UTF8ToUTF16("err"),
+        true,   // |forward|
+        false,  // |case_sensitive|
+        nullptr, nullptr);
+    EXPECT_EQ(0, actual_number_of_errors);
+  }
+
+  static void IncrementInteger(int* i, content::RenderFrameHost* /* unused */) {
+    (*i)++;
+  }
+};
+
+// Test coverage for OOPIFs for CompleteHtml (crbug.com/526786) and
+// MHTML (crbug.com/538766) as well as for redirected iframes saved
+// as MHTML (crbug.com/539936).
+IN_PROC_BROWSER_TEST_P(SavePageMultiFrameBrowserTest, CrossSite) {
+  content::SavePageType save_page_type = GetParam();
+
+  std::vector<std::string> expected_substrings{
+      "frames-xsite.htm: 896fd88d-a77a-4f46-afd8-24db7d5af9c2",
+      "a.htm: 1b8aae2b-e164-462f-bd5b-98aa366205f2",
+      "b.htm: 3a35f7fa-96a9-4487-9f18-4470263907fa",
+  };
+
+  GURL url(
+      embedded_test_server()->GetURL("a.com", "/save_page/frames-xsite.htm"));
+
+  // TODO(lukasza): crbug.com/538766: Enable CrossSite testing of MHTML.
+  if (save_page_type == content::SAVE_PAGE_TYPE_AS_MHTML)
+    return;
+
+  // TODO(lukasza/paulmeyer): crbug.com/457440: Can enable verification
+  // of the original page once find-in-page works for OOP frames.
+  bool skip_verification_of_original_page = true;
+
+  TestMultiFramePage(save_page_type, url, 3, expected_substrings,
+                     skip_verification_of_original_page);
+}
+
+// Test for crbug.com/553478.
+IN_PROC_BROWSER_TEST_P(SavePageMultiFrameBrowserTest, DISABLED_ObjectElements) {
+  content::SavePageType save_page_type = GetParam();
+
+  // 4 = main frame + iframe + object w/ html doc + object w/ pdf doc
+  // (svg and png objects do not get a separate frame)
+  int expected_number_of_frames = 4;
+
+  std::vector<std::string> expected_substrings{
+      "frames-objects.htm: 8da13db4-a512-4d9b-b1c5-dc1c134234b9",
+      "a.htm: 1b8aae2b-e164-462f-bd5b-98aa366205f2",
+      "b.htm: 3a35f7fa-96a9-4487-9f18-4470263907fa",
+  };
+
+  GURL url(
+      embedded_test_server()->GetURL("a.com", "/save_page/frames-objects.htm"));
+
+  TestMultiFramePage(save_page_type, url, expected_number_of_frames,
+                     expected_substrings);
+}
+
+IN_PROC_BROWSER_TEST_P(SavePageMultiFrameBrowserTest, AboutBlank) {
+  content::SavePageType save_page_type = GetParam();
+
+  std::vector<std::string> expected_substrings{
+      "main: acb0609d-eb10-4c26-83e2-ad8afb7b0ff3",
+      "sub1: b124df3a-d39f-47a1-ae04-5bb5d0bf549e",
+      "sub2: 07014068-604d-45ae-884f-a068cfe7bc0a",
+      "sub3: 06cc8fcc-c692-4a1a-a10f-1645b746e8f4",
+  };
+
+  GURL url(embedded_test_server()->GetURL("a.com",
+                                          "/save_page/frames-about-blank.htm"));
+
+  TestMultiFramePage(save_page_type, url, 4, expected_substrings);
+}
+
+// Test for crbug.com/554666.
+IN_PROC_BROWSER_TEST_P(SavePageMultiFrameBrowserTest, NestedFrames) {
+  content::SavePageType save_page_type = GetParam();
+
+  std::vector<std::string> expected_substrings{
+      "frames-nested.htm: 4388232f-8d45-4d2e-9807-721b381be153",
+      "frames-nested2.htm: 6d23dc47-f283-4977-96ec-66bcf72301a4",
+      "b.htm: 3a35f7fa-96a9-4487-9f18-4470263907fa",
+  };
+
+  GURL url(
+      embedded_test_server()->GetURL("a.com", "/save_page/frames-nested.htm"));
+
+  TestMultiFramePage(save_page_type, url, 3, expected_substrings);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    ,
+    SavePageMultiFrameBrowserTest,
+    ::testing::Values(content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
+                      content::SAVE_PAGE_TYPE_AS_MHTML));
 
 }  // namespace

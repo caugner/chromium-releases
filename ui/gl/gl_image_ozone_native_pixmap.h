@@ -5,17 +5,17 @@
 #ifndef UI_GL_GL_IMAGE_OZONE_NATIVE_PIXMAP_H_
 #define UI_GL_GL_IMAGE_OZONE_NATIVE_PIXMAP_H_
 
-#include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gl/gl_image_egl.h"
 #include "ui/ozone/public/native_pixmap.h"
 
 namespace gfx {
 
-class GL_EXPORT GLImageOzoneNativePixmap : public GLImageEGL {
+class GL_EXPORT GLImageOzoneNativePixmap : public gl::GLImageEGL {
  public:
   GLImageOzoneNativePixmap(const Size& size, unsigned internalformat);
 
-  bool Initialize(ui::NativePixmap* pixmap, BufferFormat format);
+  bool Initialize(ui::NativePixmap* pixmap);
 
   // Overridden from GLImage:
   unsigned GetInternalFormat() override;

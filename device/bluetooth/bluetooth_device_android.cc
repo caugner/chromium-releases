@@ -7,7 +7,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/strings/stringprintf.h"
 #include "device/bluetooth/bluetooth_adapter_android.h"
+#include "device/bluetooth/bluetooth_remote_gatt_service_android.h"
 #include "jni/ChromeBluetoothDevice_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -179,7 +181,8 @@ void BluetoothDeviceAndroid::Disconnect(const base::Closure& callback,
   NOTIMPLEMENTED();
 }
 
-void BluetoothDeviceAndroid::Forget(const ErrorCallback& error_callback) {
+void BluetoothDeviceAndroid::Forget(const base::Closure& callback,
+                                    const ErrorCallback& error_callback) {
   NOTIMPLEMENTED();
 }
 
@@ -219,6 +222,33 @@ void BluetoothDeviceAndroid::OnConnectionStateChange(JNIEnv* env,
         return DidFailToConnectGatt(ERROR_UNKNOWN);
     }
   }
+}
+
+void BluetoothDeviceAndroid::OnGattServicesDiscovered(JNIEnv* env,
+                                                      jobject jcaller) {
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, GetAdapter()->GetObservers(),
+                    GattServicesDiscovered(GetAdapter(), this));
+}
+
+void BluetoothDeviceAndroid::CreateGattRemoteService(
+    JNIEnv* env,
+    jobject caller,
+    const jstring& instanceId,
+    jobject /* BluetoothGattServiceWrapper */ bluetooth_gatt_service_wrapper) {
+  std::string instanceIdString =
+      base::android::ConvertJavaStringToUTF8(env, instanceId);
+
+  if (gatt_services_.contains(instanceIdString))
+    return;
+
+  BluetoothDevice::GattServiceMap::iterator service_iterator =
+      gatt_services_.set(instanceIdString,
+                         BluetoothRemoteGattServiceAndroid::Create(
+                             GetAdapter(), this, bluetooth_gatt_service_wrapper,
+                             instanceIdString, j_device_.obj()));
+
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, GetAdapter()->GetObservers(),
+                    GattServiceAdded(adapter_, this, service_iterator->second));
 }
 
 BluetoothDeviceAndroid::BluetoothDeviceAndroid(BluetoothAdapterAndroid* adapter)

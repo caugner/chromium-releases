@@ -16,6 +16,12 @@ import org.chromium.content_public.common.ScreenOrientationValues;
  * Tests the logic in top controls visibility delegate in WebappActivity.
  */
 public class WebappVisibilityTest extends WebappActivityTestBase {
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        startWebappActivity();
+    }
+
     @MediumTest
     @Feature({"Webapps"})
     public void testShouldShowTopControls() {
@@ -23,7 +29,7 @@ public class WebappVisibilityTest extends WebappActivityTestBase {
         WebappInfo mockInfo = WebappInfo.create(WEBAPP_ID, webappUrl, null,
                 null, null, ScreenOrientationValues.DEFAULT, ShortcutSource.UNKNOWN,
                 ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING,
-                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING);
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING, false);
         getActivity().getWebappInfo().copy(mockInfo);
 
         // Show top controls for out-of-domain URLs.

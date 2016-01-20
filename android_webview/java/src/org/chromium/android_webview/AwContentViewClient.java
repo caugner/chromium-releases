@@ -5,6 +5,7 @@
 package org.chromium.android_webview;
 
 import android.content.Context;
+import android.content.Intent;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.URLUtil;
@@ -38,16 +39,10 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
     }
 
     @Override
-    public void onStartContentIntent(Context context, String contentUrl) {
-        if (mAwContentsClient.hasWebViewClient()) {
-            //  Callback when detecting a click on a content link.
-            mAwContentsClient.shouldOverrideUrlLoading(contentUrl);
-            return;
-        }
-
+    public void onStartContentIntent(Context context, String contentUrl, boolean isMainFrame) {
         // Comes from WebViewImpl::detectContentOnTouch in Blink, so must be user-initiated, and
         // isn't a redirect.
-        AwContentsClient.sendBrowsingIntent(context, contentUrl, true, false);
+        mAwContentsClient.shouldIgnoreNavigation(context, contentUrl, isMainFrame, true, false);
     }
 
     @Override
@@ -101,6 +96,21 @@ public class AwContentViewClient extends ContentViewClient implements ContentVid
 
     @Override
     public void setSystemUiVisibility(boolean enterFullscreen) {
+    }
+
+    @Override
+    public boolean doesPerformProcessText() {
+        return true;
+    }
+
+    @Override
+    public void startProcessTextIntent(Intent intent) {
+        mAwContents.startProcessTextIntent(intent);
+    }
+
+    @Override
+    public boolean isSelectActionModeAllowed(int actionModeItem) {
+        return mAwContents.isSelectActionModeAllowed(actionModeItem);
     }
 
     /**

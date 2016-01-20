@@ -12,6 +12,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 
 namespace content {
 
@@ -37,16 +38,16 @@ blink::WebPointerProperties::PointerType EventPointerTypeToWebPointerType(
     ui::EventPointerType pointer_type) {
   switch (pointer_type) {
     case ui::EventPointerType::POINTER_TYPE_UNKNOWN:
-      return blink::WebPointerProperties::PointerType::PointerTypeUnknown;
+      return blink::WebPointerProperties::PointerType::Unknown;
     case ui::EventPointerType::POINTER_TYPE_MOUSE:
-      return blink::WebPointerProperties::PointerType::PointerTypeMouse;
+      return blink::WebPointerProperties::PointerType::Mouse;
     case ui::EventPointerType::POINTER_TYPE_PEN:
-      return blink::WebPointerProperties::PointerType::PointerTypePen;
+      return blink::WebPointerProperties::PointerType::Pen;
     case ui::EventPointerType::POINTER_TYPE_TOUCH:
-      return blink::WebPointerProperties::PointerType::PointerTypeTouch;
+      return blink::WebPointerProperties::PointerType::Touch;
   }
   NOTREACHED() << "Unexpected EventPointerType";
-  return blink::WebPointerProperties::PointerType::PointerTypeUnknown;
+  return blink::WebPointerProperties::PointerType::Unknown;
 }
 
 }  // namespace
@@ -85,7 +86,11 @@ blink::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   if (webkit_event.modifiers & blink::WebInputEvent::AltKey)
     webkit_event.isSystemKey = true;
 
-  webkit_event.windowsKeyCode = event.key_code();
+  // TODO(dtapuska): crbug.com/570388. Ozone appears to deliver
+  // key_code events that aren't "located" for the keypad like
+  // Windows and X11 do and blink expects.
+  webkit_event.windowsKeyCode =
+      ui::NonLocatedToLocatedKeypadKeyboardCode(event.key_code(), event.code());
   webkit_event.nativeKeyCode =
     ui::KeycodeConverter::DomCodeToNativeKeycode(event.code());
   webkit_event.domCode = static_cast<int>(event.code());

@@ -65,7 +65,10 @@ namespace content {
 
 class WebRtcAudioDebugRecordingsBrowserTest : public WebRtcContentBrowserTest {
  public:
-  WebRtcAudioDebugRecordingsBrowserTest() {}
+  WebRtcAudioDebugRecordingsBrowserTest() {
+    // Automatically grant device permission.
+    AppendUseFakeUIForMediaStreamFlag();
+  }
   ~WebRtcAudioDebugRecordingsBrowserTest() override {}
 };
 
@@ -74,6 +77,9 @@ class WebRtcAudioDebugRecordingsBrowserTest : public WebRtcContentBrowserTest {
 #define MAYBE_CallWithAudioDebugRecordings DISABLED_CallWithAudioDebugRecordings
 #elif defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
 // Renderer crashes under Android ASAN: https://crbug.com/408496.
+#define MAYBE_CallWithAudioDebugRecordings DISABLED_CallWithAudioDebugRecordings
+#elif defined(OS_ANDROID)
+// Renderer crashes on Android M. https://crbug.com/535728.
 #define MAYBE_CallWithAudioDebugRecordings DISABLED_CallWithAudioDebugRecordings
 #else
 #define MAYBE_CallWithAudioDebugRecordings CallWithAudioDebugRecordings
@@ -92,7 +98,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     return;
   }
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // We must navigate somewhere first so that the render process is created.
   NavigateToURL(shell(), GURL(""));
@@ -158,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     return;
   }
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // We must navigate somewhere first so that the render process is created.
   NavigateToURL(shell(), GURL(""));
@@ -205,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioDebugRecordingsBrowserTest,
     return;
   }
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // We must navigate somewhere first so that the render process is created.
   NavigateToURL(shell(), GURL(""));

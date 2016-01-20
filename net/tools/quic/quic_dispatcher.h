@@ -33,8 +33,6 @@ namespace test {
 class QuicDispatcherPeer;
 }  // namespace test
 
-extern int32 FLAGS_quic_session_map_threshold_for_stateless_rejects;
-
 class ProcessPacketInterface {
  public:
   virtual ~ProcessPacketInterface() {}
@@ -133,18 +131,13 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   // sent with unique packet numbers.)
   static const QuicPacketNumber kMaxReasonableInitialPacketNumber = 100;
   static_assert(kMaxReasonableInitialPacketNumber >=
-                    kInitialCongestionWindowSecure + 10,
+                    kInitialCongestionWindow + 10,
                 "kMaxReasonableInitialPacketNumber is unreasonably small "
-                "relative to kInitialCongestionWindowSecure.");
-  static_assert(kMaxReasonableInitialPacketNumber >=
-                    kInitialCongestionWindowInsecure + 10,
-                "kMaxReasonableInitialPacketNumber is unreasonably small "
-                "relative to kInitialCongestionWindowInsecure.");
+                "relative to kInitialCongestionWindow.");
 
  protected:
   virtual QuicServerSession* CreateQuicSession(
       QuicConnectionId connection_id,
-      const IPEndPoint& server_address,
       const IPEndPoint& client_address);
 
   // Called by |framer_visitor_| when the public header has been parsed.

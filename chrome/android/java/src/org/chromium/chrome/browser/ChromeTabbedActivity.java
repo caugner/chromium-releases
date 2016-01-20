@@ -35,7 +35,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler.IntentHandlerDelegate;
 import org.chromium.chrome.browser.IntentHandler.TabOpenType;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerChrome;
@@ -70,7 +70,6 @@ import org.chromium.chrome.browser.preferences.datareduction.DataReductionPrefer
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionPromoScreen;
 import org.chromium.chrome.browser.signin.SigninPromoScreen;
 import org.chromium.chrome.browser.snackbar.undo.UndoBarPopupController;
-import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.ChromeTabCreator;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
@@ -126,13 +125,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     public static final String INTENT_EXTRA_TEST_RENDER_PROCESS_LIMIT = "render_process_limit";
 
     /**
-     * Sending an intent with this extra disable uploading of minidumps.
-     * This is only used for testing, when certain tests want to force this behaviour.
-     */
-    public static final String INTENT_EXTRA_DISABLE_CRASH_DUMP_UPLOADING =
-            "disable_crash_dump_uploading";
-
-    /**
      * Sending an intent with this action to Chrome will cause it to close all tabs
      * (iff the --enable-test-intents command line flag is set). If a URL is supplied in the
      * intent data, this will be loaded and unaffected by the close all action.
@@ -159,6 +151,8 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     private boolean mUIInitialized = false;
 
     private boolean mIsOnFirstRun = false;
+
+    private Boolean mIsAccessibilityEnabled;
 
     /**
      * Keeps track of whether or not a specific tab was created based on the startup intent.
@@ -607,9 +601,14 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 getCompositorViewHolder().onAccessibilityStatusChanged(enabled);
             }
         }
-        if (mLayoutManager != null && mLayoutManager.overviewVisible()) {
+        if (mLayoutManager != null && mLayoutManager.overviewVisible()
+                && mIsAccessibilityEnabled != enabled) {
             mLayoutManager.hideOverview(false);
+            if (getTabModelSelector().getCurrentModel().getCount() == 0) {
+                getCurrentTabCreator().launchNTP();
+            }
         }
+        mIsAccessibilityEnabled = enabled;
     }
 
     /**
@@ -673,7 +672,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 case CLOBBER_CURRENT_TAB:
                     // The browser triggered the intent. This happens when clicking links which
                     // can be handled by other applications (e.g. www.youtube.com links).
-                    ChromeTab currentTab = ChromeTab.fromTab(getActivityTab());
+                    Tab currentTab = getActivityTab();
                     if (currentTab != null) {
                         currentTab.getTabRedirectHandler().updateIntent(intent);
                         int transitionType = PageTransition.LINK | PageTransition.FROM_API;
@@ -765,8 +764,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 commandLine.appendSwitchesAndArguments(args);
             }
         }
-
-        commandLine.appendSwitch(ChromeSwitches.ENABLE_HIGH_END_UI_UNDO);
 
         supportRequestWindowFeature(Window.FEATURE_ACTION_MODE_OVERLAY);
 

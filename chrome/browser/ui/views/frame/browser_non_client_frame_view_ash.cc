@@ -59,8 +59,6 @@ namespace {
 // Space between the new avatar button and the minimize button.
 const int kNewAvatarButtonOffset = 5;
 #endif
-// Space between left edge of window and tabstrip.
-const int kTabstripLeftSpacing = 0;
 // Space between right edge of tabstrip and maximize button.
 const int kTabstripRightSpacing = 10;
 // Height of the shadow of the content area, at the top of the toolbar.
@@ -168,20 +166,18 @@ gfx::Rect BrowserNonClientFrameViewAsh::GetBoundsForTabStrip(
   int left_inset = GetTabStripLeftInset();
   int right_inset = GetTabStripRightInset();
   return gfx::Rect(left_inset,
-                   GetTopInset(),
+                   GetTopInset(false),
                    std::max(0, width() - left_inset - right_inset),
                    tabstrip->GetPreferredSize().height());
 }
 
-int BrowserNonClientFrameViewAsh::GetTopInset() const {
+int BrowserNonClientFrameViewAsh::GetTopInset(bool restored) const {
   if (!ShouldPaint() || UseImmersiveLightbarHeaderStyle())
     return 0;
 
   if (browser_view()->IsTabStripVisible()) {
-    if (frame()->IsMaximized() || frame()->IsFullscreen())
-      return kTabstripTopSpacingShort;
-    else
-      return kTabstripTopSpacingTall;
+    return ((frame()->IsMaximized() || frame()->IsFullscreen()) && !restored) ?
+        kTabstripTopSpacingShort : kTabstripTopSpacingTall;
   }
 
   if (UsePackagedAppHeaderStyle() || UseWebAppHeaderStyle())
@@ -336,14 +332,14 @@ void BrowserNonClientFrameViewAsh::Layout() {
 
   int painted_height = 0;
   if (browser_view()->IsTabStripVisible()) {
-    painted_height = GetTopInset() +
+    painted_height = GetTopInset(false) +
         browser_view()->tabstrip()->GetPreferredSize().height();
   } else if (browser_view()->IsToolbarVisible()) {
     // Paint the header so that it overlaps with the top few pixels of the
     // toolbar because the top few pixels of the toolbar are not opaque.
-    painted_height = GetTopInset() + kFrameShadowThickness * 2;
+    painted_height = GetTopInset(false) + kFrameShadowThickness * 2;
   } else {
-    painted_height = GetTopInset();
+    painted_height = GetTopInset(false);
   }
   header_painter_->SetHeaderHeightForPainting(painted_height);
 
@@ -420,7 +416,7 @@ void BrowserNonClientFrameViewAsh::OnMaximizeModeEnded() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// chrome::TabIconViewModel:
+// TabIconViewModel:
 
 bool BrowserNonClientFrameViewAsh::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
@@ -495,13 +491,14 @@ bool BrowserNonClientFrameViewAsh::DoesIntersectRect(
   }
 
   // Claim |rect| if it is above the top of the topmost view in the client area.
-  return rect.y() < GetTopInset();
+  return rect.y() < GetTopInset(false);
 }
 
 int BrowserNonClientFrameViewAsh::GetTabStripLeftInset() const {
-  const int icon_width = browser_view()->GetOTRAvatarIcon().width();
-  const int insets_width = GetLayoutInsets(AVATAR_ICON).width();
-  return avatar_button() ? (icon_width + insets_width) : kTabstripLeftSpacing;
+  const gfx::Insets insets(GetLayoutInsets(AVATAR_ICON));
+  const int avatar_right = avatar_button() ?
+      (insets.left() + browser_view()->GetOTRAvatarIcon().width()) : 0;
+  return avatar_right + insets.right();
 }
 
 int BrowserNonClientFrameViewAsh::GetTabStripRightInset() const {
@@ -527,9 +524,14 @@ bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
 }
 
 bool BrowserNonClientFrameViewAsh::UsePackagedAppHeaderStyle() const {
+  Browser* browser = browser_view()->browser();
+  // For non tabbed trusted source windows, e.g. Settings, use the packaged
+  // app style frame.
+  if (!browser->is_type_tabbed() && browser->is_trusted_source())
+    return true;
   // Use the packaged app style for apps that aren't using the newer WebApp
   // style.
-  return browser_view()->browser()->is_app() && !UseWebAppHeaderStyle();
+  return browser->is_app() && !UseWebAppHeaderStyle();
 }
 
 bool BrowserNonClientFrameViewAsh::UseWebAppHeaderStyle() const {
@@ -545,13 +547,13 @@ void BrowserNonClientFrameViewAsh::LayoutAvatar() {
 #endif
   gfx::ImageSkia incognito_icon = browser_view()->GetOTRAvatarIcon();
   gfx::Insets avatar_insets = GetLayoutInsets(AVATAR_ICON);
-  int avatar_bottom = GetTopInset() + browser_view()->GetTabStripHeight() -
+  int avatar_bottom = GetTopInset(false) + browser_view()->GetTabStripHeight() -
                       avatar_insets.bottom();
   int avatar_y = avatar_bottom - incognito_icon.height();
   if (!ui::MaterialDesignController::IsModeMaterial() &&
       browser_view()->IsTabStripVisible() &&
       (frame()->IsMaximized() || frame()->IsFullscreen())) {
-    avatar_y = GetTopInset() + kContentShadowHeight;
+    avatar_y = GetTopInset(false) + kContentShadowHeight;
   }
 
   // Hide the incognito icon in immersive fullscreen when the tab light bar is
@@ -629,7 +631,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
     canvas->TileImageInt(
         *theme_toolbar,
         x + GetThemeBackgroundXInset(),
-        y - GetTopInset(),
+        y - GetTopInset(false),
         x, y,
         w, theme_toolbar->height());
 
@@ -663,7 +665,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
     canvas->TileImageInt(
         *theme_toolbar,
         x + GetThemeBackgroundXInset(),
-        bottom_y - GetTopInset(),
+        bottom_y - GetTopInset(false),
         x, bottom_y,
         w, theme_toolbar->height());
 

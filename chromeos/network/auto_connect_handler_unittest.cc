@@ -121,7 +121,8 @@ class AutoConnectHandlerTest : public testing::Test {
     managed_config_handler_.reset(new ManagedNetworkConfigurationHandlerImpl());
     managed_config_handler_->Init(
         network_state_handler_.get(), network_profile_handler_.get(),
-        network_config_handler_.get(), nullptr /* network_device_handler */);
+        network_config_handler_.get(), nullptr /* network_device_handler */,
+        nullptr /* prohibited_technologies_handler */);
 
     client_cert_resolver_.reset(new ClientCertResolver());
     client_cert_resolver_->Init(network_state_handler_.get(),
@@ -407,6 +408,12 @@ TEST_F(AutoConnectHandlerTest, DisconnectOnPolicyLoading) {
   // Because no best service is set, the fake implementation of
   // ConnectToBestServices will be a no-op.
   SetupPolicy(kPolicy, global_config, false /* load as device policy */);
+
+  // Should not trigger any change until user policy is loaded
+  EXPECT_EQ(shill::kStateOnline, GetServiceState("wifi0"));
+  EXPECT_EQ(shill::kStateIdle, GetServiceState("wifi1"));
+
+  SetupPolicy(std::string(), base::DictionaryValue(), true);
   EXPECT_EQ(shill::kStateIdle, GetServiceState("wifi0"));
   EXPECT_EQ(shill::kStateIdle, GetServiceState("wifi1"));
 }

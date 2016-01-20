@@ -4,7 +4,7 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
-import("//build/module_args/v8.gni")
+import("//build_overrides/v8.gni")
 import("//chrome/version.gni")
 import("//third_party/icu/config.gni")
 
@@ -68,6 +68,7 @@ source_set("unit_tests") {
     ":lib",
   ]
   deps = [
+    "//base",
     "//testing/gtest",
   ]
 }
@@ -109,6 +110,9 @@ action("archive") {
     #'--last_chrome_installer=C:/Temp/base',
     #'--setup_exe_format=DIFF',
     #'--diff_algorithm=COURGETTE',
+
+    # Optional argument for verbose archiving output.
+    #'--verbose',
   ]
 
   if (enable_hidpi) {
@@ -122,7 +126,7 @@ action("archive") {
 
   if (enable_nacl) {
     inputs += [ "$root_out_dir/nacl_irt_x86_64.nexe" ]
-    if (cpu_arch == "x86") {
+    if (current_cpu == "x86") {
       inputs += [
         "$root_out_dir/nacl64.exe",
         "$root_out_dir/nacl_irt_x86_32.nexe",

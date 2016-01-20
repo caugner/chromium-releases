@@ -13,9 +13,9 @@
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_legacy.h"
+#include "ui/ozone/platform/drm/gpu/mock_drm_device.h"
 #include "ui/ozone/platform/drm/gpu/overlay_plane.h"
 #include "ui/ozone/platform/drm/gpu/scanout_buffer.h"
-#include "ui/ozone/platform/drm/test/mock_drm_device.h"
 
 namespace {
 
@@ -31,18 +31,22 @@ const uint32_t kDummyFormat = 0;
 
 class FakeScanoutBuffer : public ui::ScanoutBuffer {
  public:
-  FakeScanoutBuffer(uint32_t format) : format_(format) {}
+  FakeScanoutBuffer(uint32_t format)
+      : format_(format), size_(gfx::Size(2, 2)) {}
 
   // ui::ScanoutBuffer:
   uint32_t GetFramebufferId() const override { return 1; }
   uint32_t GetHandle() const override { return 0; }
-  gfx::Size GetSize() const override { return gfx::Size(1, 1); }
+  void SetSize(const gfx::Size& size) { size_ = size; }
+  gfx::Size GetSize() const override { return size_; }
   void SetFramebufferPixelFormat(uint32_t format) { format_ = format; }
   uint32_t GetFramebufferPixelFormat() const override { return format_; }
+  bool RequiresGlFinish() const override { return false; }
 
  protected:
   ~FakeScanoutBuffer() override {}
   uint32_t format_;
+  gfx::Size size_;
 };
 
 class FakePlaneManager : public ui::HardwareDisplayPlaneManager {
@@ -226,8 +230,12 @@ TEST_F(HardwareDisplayPlaneManagerTest, MultipleFramesDifferentPlanes) {
 
 TEST_F(HardwareDisplayPlaneManagerTest, SharedPlanes) {
   ui::OverlayPlaneList assigns;
+  scoped_refptr<FakeScanoutBuffer> buffer =
+      new FakeScanoutBuffer(DRM_FORMAT_XRGB8888);
+  buffer->SetSize(gfx::Size(1, 1));
+
   assigns.push_back(ui::OverlayPlane(fake_buffer_));
-  assigns.push_back(ui::OverlayPlane(fake_buffer_));
+  assigns.push_back(ui::OverlayPlane(buffer));
   plane_manager_->InitForTest(kOnePlanePerCrtcWithShared,
                               arraysize(kOnePlanePerCrtcWithShared),
                               default_crtcs_);
@@ -266,10 +274,13 @@ TEST(HardwareDisplayPlaneManagerLegacyTest, UnusedPlanesAreReleased) {
   crtcs.push_back(100);
   scoped_refptr<ui::MockDrmDevice> drm = new ui::MockDrmDevice(false, crtcs, 2);
   ui::OverlayPlaneList assigns;
-  scoped_refptr<FakeScanoutBuffer> fake_buffer =
+  scoped_refptr<FakeScanoutBuffer> primary_buffer =
       new FakeScanoutBuffer(DRM_FORMAT_XRGB8888);
-  assigns.push_back(ui::OverlayPlane(fake_buffer));
-  assigns.push_back(ui::OverlayPlane(fake_buffer));
+  scoped_refptr<FakeScanoutBuffer> overlay_buffer =
+      new FakeScanoutBuffer(DRM_FORMAT_XRGB8888);
+  overlay_buffer->SetSize(gfx::Size(1, 1));
+  assigns.push_back(ui::OverlayPlane(primary_buffer));
+  assigns.push_back(ui::OverlayPlane(overlay_buffer));
   ui::HardwareDisplayPlaneList hdpl;
   ui::CrtcController crtc(drm, crtcs[0], 0);
   drm->plane_manager()->BeginFrame(&hdpl);
@@ -277,7 +288,7 @@ TEST(HardwareDisplayPlaneManagerLegacyTest, UnusedPlanesAreReleased) {
                                                         crtcs[0], &crtc));
   EXPECT_TRUE(drm->plane_manager()->Commit(&hdpl, false));
   assigns.clear();
-  assigns.push_back(ui::OverlayPlane(fake_buffer));
+  assigns.push_back(ui::OverlayPlane(primary_buffer));
   drm->plane_manager()->BeginFrame(&hdpl);
   EXPECT_TRUE(drm->plane_manager()->AssignOverlayPlanes(&hdpl, assigns,
                                                         crtcs[0], &crtc));

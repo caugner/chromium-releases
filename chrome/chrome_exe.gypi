@@ -46,6 +46,7 @@
       # GN version: //chrome:chrome_initial
       'target_name': 'chrome_initial',
       'type': 'executable',
+      'dependencies' : [ '../chrome/common_constants.gyp:version_header', ],
       # Name the exe chrome.exe, not chrome_initial.exe.
       'product_name': 'chrome',
       'mac_bundle': 1,
@@ -56,19 +57,19 @@
       'sources': [
         # Note that due to InitializeSandboxInfo, this must be directly linked
         # into chrome.exe, not into a dependent.
-        '<(DEPTH)/content/app/startup_helper_win.cc',
+        '<(DEPTH)/content/app/sandbox_helper_win.cc',
         '<(DEPTH)/content/public/common/content_switches.cc',
         'app/chrome_exe_load_config_win.cc',
         'app/chrome_exe_main_aura.cc',
-        'app/chrome_exe_main_mac.cc',
+        'app/chrome_exe_main_mac.c',
         'app/chrome_exe_main_win.cc',
         'app/chrome_exe_resource.h',
         'app/chrome_watcher_client_win.cc',
         'app/chrome_watcher_client_win.h',
         'app/chrome_watcher_command_line_win.cc',
         'app/chrome_watcher_command_line_win.h',
-        'app/client_util.cc',
-        'app/client_util.h',
+        'app/main_dll_loader_win.cc',
+        'app/main_dll_loader_win.h',
         'app/kasko_client.cc',
         'app/kasko_client.h',
         'app/signature_validator_win.cc',
@@ -270,7 +271,7 @@
             'infoplist_strings_tool',
             # On Mac, make sure we've built chrome_dll, which contains all of
             # the library code with Chromium functionality.
-            'chrome_dll',
+            'chrome_dll_dependency_shim',
           ],
           'mac_bundle_resources': [
             'app/theme/<(branding_path_component)/mac/app.icns',
@@ -365,7 +366,7 @@
             # "chrome" etc.; should we try to extract from there instead?
           ],
           'dependencies': [
-            '../components/components.gyp:startup_metric_utils',
+            '../components/components.gyp:startup_metric_utils_browser',
             'chrome_resources.gyp:packed_extra_resources',
             'chrome_resources.gyp:packed_resources',
             # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
@@ -409,7 +410,7 @@
             'chrome_process_finder',
             'chrome_version_resources',
             'installer_util',
-            'image_pre_reader',
+            'file_pre_reader',
             '../base/base.gyp:base',
             '../crypto/crypto.gyp:crypto',
             '../breakpad/breakpad.gyp:breakpad_handler',
@@ -497,10 +498,6 @@
               ],
             },
           ],
-        }, {  # 'OS!="win"
-          'sources!': [
-            'app/client_util.cc',
-          ],
         }],
         ['OS=="win" and component=="shared_library"', {
           'defines': ['COMPILE_CONTENT_STATICALLY'],
@@ -512,11 +509,11 @@
     ['OS=="win"', {
       'targets': [
         {
-          'target_name': 'image_pre_reader',
+          'target_name': 'file_pre_reader',
           'type': 'static_library',
           'sources': [
-            'app/image_pre_reader_win.cc',
-            'app/image_pre_reader_win.h',
+            'app/file_pre_reader_win.cc',
+            'app/file_pre_reader_win.h',
           ],
           'dependencies': [
              '../base/base.gyp:base',
@@ -531,7 +528,7 @@
               'type': 'executable',
               'product_name': 'nacl64',
               'sources': [
-                '../content/app/startup_helper_win.cc',
+                '../content/app/sandbox_helper_win.cc',
                 '../content/common/sandbox_init_win.cc',
                 '../content/common/sandbox_win.cc',
                 '../content/public/common/content_switches.cc',

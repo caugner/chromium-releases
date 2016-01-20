@@ -42,8 +42,16 @@ std::string LocalDeviceInfoProviderMock::GetLocalSyncCacheGUID() const {
 }
 
 void LocalDeviceInfoProviderMock::Initialize(
-    const std::string& cache_guid, const std::string& signin_scoped_device_id) {
+    const std::string& cache_guid,
+    const std::string& signin_scoped_device_id,
+    const scoped_refptr<base::TaskRunner>& blocking_task_runner) {
   // Ignored for the mock provider.
+}
+
+void LocalDeviceInfoProviderMock::Initialize(
+    scoped_ptr<DeviceInfo> local_device_info) {
+  local_device_info_.swap(local_device_info);
+  SetInitialized(true);
 }
 
 scoped_ptr<LocalDeviceInfoProvider::Subscription>
@@ -61,4 +69,3 @@ void LocalDeviceInfoProviderMock::SetInitialized(bool is_initialized) {
 }
 
 }  // namespace sync_driver
-

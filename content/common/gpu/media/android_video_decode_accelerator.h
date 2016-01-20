@@ -15,7 +15,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/media/android_video_decode_accelerator_state_provider.h"
+#include "content/common/gpu/media/avda_state_provider.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "media/base/android/media_codec_bridge.h"
 #include "media/video/video_decode_accelerator.h"
@@ -33,21 +33,23 @@ namespace content {
 // otherwise handles the work of transferring data to / from MediaCodec.
 class CONTENT_EXPORT AndroidVideoDecodeAccelerator
     : public media::VideoDecodeAccelerator,
-      public AndroidVideoDecodeAcceleratorStateProvider {
+      public AVDAStateProvider {
  public:
+  typedef std::map<int32, media::PictureBuffer> OutputBufferMap;
+
   // A BackingStrategy is responsible for making a PictureBuffer's texture
   // contain the image that a MediaCodec decoder buffer tells it to.
   class BackingStrategy {
    public:
     virtual ~BackingStrategy() {}
 
-    // Notify about the state provider.
-    virtual void SetStateProvider(
-        AndroidVideoDecodeAcceleratorStateProvider*) = 0;
+    // Called after the state provider is given, but before any other
+    // calls to the BackingStrategy.
+    virtual void Initialize(AVDAStateProvider* provider) = 0;
 
     // Called before the AVDA does any Destroy() work.  This will be
     // the last call that the BackingStrategy receives.
-    virtual void Cleanup() = 0;
+    virtual void Cleanup(const OutputBufferMap& buffer_map) = 0;
 
     // Return the number of picture buffers that we can support.
     virtual uint32 GetNumPictureBuffers() const = 0;
@@ -55,10 +57,34 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
     // Return the GL texture target that the PictureBuffer textures use.
     virtual uint32 GetTextureTarget() const = 0;
 
-    // Use the provided PictureBuffer to hold the current surface.
-    virtual void AssignCurrentSurfaceToPictureBuffer(
+    // Create and return a surface texture for the MediaCodec to use.
+    virtual scoped_refptr<gfx::SurfaceTexture> CreateSurfaceTexture() = 0;
+
+    // Make the provided PictureBuffer draw the image that is represented by
+    // the decoded output buffer at codec_buffer_index.
+    virtual void UseCodecBufferForPictureBuffer(
         int32 codec_buffer_index,
-        const media::PictureBuffer&) = 0;
+        const media::PictureBuffer& picture_buffer) = 0;
+
+    // Notify strategy that a picture buffer has been assigned.
+    virtual void AssignOnePictureBuffer(
+        const media::PictureBuffer& picture_buffer) {}
+
+    // Notify strategy that a picture buffer has been reused.
+    virtual void ReuseOnePictureBuffer(
+        const media::PictureBuffer& picture_buffer) {}
+
+    // Notify strategy that we are about to dismiss a picture buffer.
+    virtual void DismissOnePictureBuffer(
+        const media::PictureBuffer& picture_buffer) {}
+
+    // Notify strategy that we have a new android MediaCodec instance.  This
+    // happens when we're starting up or re-configuring mid-stream.  Any
+    // previously provided codec should no longer be referenced.
+    // For convenience, a container of PictureBuffers is provided in case
+    // per-image cleanup is needed.
+    virtual void CodecChanged(media::VideoCodecBridge* codec,
+                              const OutputBufferMap& buffer_map) = 0;
   };
 
   AndroidVideoDecodeAccelerator(
@@ -68,8 +94,9 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
 
   ~AndroidVideoDecodeAccelerator() override;
 
-  // Does not take ownership of |client| which must outlive |*this|.
+  // media::VideoDecodeAccelerator implementation:
   bool Initialize(media::VideoCodecProfile profile, Client* client) override;
+  void SetCdm(int cdm_id) override;
   void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
   void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) override;
@@ -79,13 +106,10 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
   void Destroy() override;
   bool CanDecodeOnIOThread() override;
 
-  // AndroidVideoDecodeStateProvider
+  // AVDAStateProvider implementation:
   const gfx::Size& GetSize() const override;
   const base::ThreadChecker& ThreadChecker() const override;
-  gfx::SurfaceTexture* GetSurfaceTexture() const override;
-  uint32 GetSurfaceTextureId() const override;
-  gpu::gles2::GLES2Decoder* GetGlDecoder() const override;
-  media::VideoCodecBridge* GetMediaCodec() override;
+  base::WeakPtr<gpu::gles2::GLES2Decoder> GetGlDecoder() const override;
   void PostError(const ::tracked_objects::Location& from_here,
                  media::VideoDecodeAccelerator::Error error) override;
 
@@ -116,11 +140,15 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
   void QueueInput();
 
   // Dequeues output from |media_codec_| and feeds the decoded frame to the
-  // client.
-  void DequeueOutput();
+  // client.  Returns a hint about whether calling again might produce
+  // more output.
+  bool DequeueOutput();
 
   // Requests picture buffers from the client.
   void RequestPictureBuffers();
+
+  // Notifies the client of the CDM setting result.
+  void NotifyCdmAttached(bool success);
 
   // Notifies the client about the availability of a picture.
   void NotifyPictureReady(const media::Picture& picture);
@@ -156,7 +184,6 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
 
   // This map maintains the picture buffers passed to the client for decoding.
   // The key is the picture buffer id.
-  typedef std::map<int32, media::PictureBuffer> OutputBufferMap;
   OutputBufferMap output_picture_buffers_;
 
   // This keeps the free picture buffer ids which can be used for sending
@@ -173,9 +200,6 @@ class CONTENT_EXPORT AndroidVideoDecodeAccelerator
 
   // A container of texture. Used to set a texture to |media_codec_|.
   scoped_refptr<gfx::SurfaceTexture> surface_texture_;
-
-  // The texture id which is set to |surface_texture_|.
-  uint32 surface_texture_id_;
 
   // Set to true after requesting picture buffers to the client.
   bool picturebuffers_requested_;

@@ -20,9 +20,9 @@ source_set("lib") {
     "//device/core",
     "//device/devices_app/usb/public/interfaces",
     "//device/usb",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/bindings:callback",
     "//net",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
-    "//third_party/mojo/src/mojo/public/cpp/bindings:callback",
     "//url",
   ]
 
@@ -69,6 +69,8 @@ if (!is_component_build) {
       "//device/devices_app/usb/public/interfaces",
     ]
 
-    data_deps = [ ":devices" ]
+    data_deps = [
+      ":devices",
+    ]
   }
 }

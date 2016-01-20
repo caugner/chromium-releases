@@ -60,6 +60,9 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
     SITE_IDENTITY_STATUS_NO_CERT,
     // An error occured while verifying the site identity.
     SITE_IDENTITY_STATUS_ERROR,
+    // The website provided a valid certificate but all signed
+    // certificate timestamps failed to validate.
+    SITE_IDENTITY_STATUS_CT_ERROR,
     // The site is a trusted internal chrome page.
     SITE_IDENTITY_STATUS_INTERNAL_PAGE,
     // The profile has accessed data using an administrator-provided
@@ -85,6 +88,7 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
     // WEBSITE_SETTINGS_TRANSPARENCY_VIEWER_OPENED = 7,
     WEBSITE_SETTINGS_CONNECTION_HELP_OPENED = 8,
     WEBSITE_SETTINGS_SITE_SETTINGS_OPENED = 9,
+    WEBSITE_SETTINGS_SECURITY_DETAILS_OPENED = 10,
     WEBSITE_SETTINGS_COUNT
   };
 

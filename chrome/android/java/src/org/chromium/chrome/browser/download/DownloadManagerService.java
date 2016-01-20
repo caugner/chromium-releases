@@ -306,7 +306,8 @@ public class DownloadManagerService extends BroadcastReceiver implements
                 mOMADownloadHandler.onDownloadFailed(
                         mDownloadInfo, mFailureReason, mInstallNotifyURI);
                 removeOMADownloadFromSharedPrefs(mDownloadId);
-                onDownloadFailed(mDownloadInfo.getFileName());
+                String fileName = mDownloadInfo.getFileName();
+                onDownloadFailed(fileName, mFailureReason);
             }
         }
     }
@@ -466,7 +467,9 @@ public class DownloadManagerService extends BroadcastReceiver implements
                             boolean canResolve = canResolveDownloadItem(mContext, downloadId);
                             completionMap.put(
                                     progress.mDownloadInfo, Pair.create(downloadId, canResolve));
-                            mDownloadNotifier.notifyDownloadSuccessful(progress.mDownloadInfo);
+                            mDownloadNotifier.notifyDownloadSuccessful(
+                                    progress.mDownloadInfo,
+                                    getLaunchIntentFromDownloadId(mContext, downloadId));
                             broadcastDownloadSuccessful(progress.mDownloadInfo);
                         }
                         break;
@@ -505,10 +508,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
         try {
             downloadId = manager.addCompletedDownload(
                     downloadInfo.getFileName(), description, true, mimeType,
-                    downloadInfo.getFilePath(), downloadInfo.getContentLength(), true);
-            if (shouldOpenAfterDownload(downloadInfo)) {
-                handleAutoOpenAfterDownload(downloadInfo, downloadId);
-            }
+                    downloadInfo.getFilePath(), downloadInfo.getContentLength(), false);
         } catch (IllegalArgumentException e) {
             Log.w(TAG, "Failed to add the download item to DownloadManager: ", e);
             if (downloadInfo.getFilePath() != null) {
@@ -556,12 +556,20 @@ public class DownloadManagerService extends BroadcastReceiver implements
                                 Map<DownloadInfo, Pair<Long, Boolean>> result) {
                             for (Map.Entry<DownloadInfo, Pair<Long, Boolean>> entry :
                                     result.entrySet()) {
-                                if (entry.getValue().first == INVALID_DOWNLOAD_ID) {
-                                    onDownloadFailed(entry.getKey().getFileName());
+                                DownloadInfo info = entry.getKey();
+                                long downloadId = entry.getValue().first;
+                                if (downloadId == INVALID_DOWNLOAD_ID) {
+                                    // TODO(qinmin): get the failure message from native.
+                                    onDownloadFailed(info.getFileName(),
+                                            DownloadManager.ERROR_UNKNOWN);
                                 } else {
-                                    mDownloadSnackbarController.onDownloadSucceeded(
-                                            entry.getKey(), entry.getValue().first,
-                                            entry.getValue().second);
+                                    boolean canResolve = entry.getValue().second;
+                                    if (canResolve && shouldOpenAfterDownload(info)) {
+                                        handleAutoOpenAfterDownload(info, downloadId);
+                                    } else {
+                                        mDownloadSnackbarController.onDownloadSucceeded(
+                                                info, downloadId, canResolve);
+                                    }
                                 }
                             }
                         }
@@ -579,7 +587,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
      *
      * @param downloadId Download Identifier.
      */
-    private void removeProgressNotificationForDownload(int downloadId) {
+    void removeProgressNotificationForDownload(int downloadId) {
         mDownloadProgressMap.remove(downloadId);
         mDownloadNotifier.cancelNotification(downloadId);
         removeDownloadIdFromSharedPrefs(downloadId);
@@ -651,6 +659,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
     private class DownloadCompletionTask extends AsyncTask<Void, Void, Pair<Integer, Boolean>> {
         private final long mDownloadId;
         private final DownloadInfo mDownloadInfo;
+        private int mFailureReason;
 
         public DownloadCompletionTask(DownloadInfo info, long downloadId) {
             mDownloadInfo = info;
@@ -668,6 +677,8 @@ public class DownloadManagerService extends BroadcastReceiver implements
                 status = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_STATUS));
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     canResolve = canResolveDownloadItem(mContext, mDownloadId);
+                } else if (status == DownloadManager.STATUS_FAILED) {
+                    mFailureReason = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_REASON));
                 }
             }
             c.close();
@@ -678,7 +689,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
         protected void onPostExecute(Pair<Integer, Boolean> result) {
             switch (result.first) {
                 case DownloadManager.STATUS_SUCCESSFUL:
-                    if (shouldOpenAfterDownload(mDownloadInfo)) {
+                    if (shouldOpenAfterDownload(mDownloadInfo) && result.second) {
                         handleAutoOpenAfterDownload(mDownloadInfo, mDownloadId);
                     } else {
                         mDownloadSnackbarController.onDownloadSucceeded(
@@ -686,8 +697,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
                     }
                     break;
                 case DownloadManager.STATUS_FAILED:
-                    // TODO(qinmin): retrieve the failure reason from DownloadManager.
-                    onDownloadFailed(mDownloadInfo.getFileName());
+                    onDownloadFailed(mDownloadInfo.getFileName(), mFailureReason);
                     break;
                 default:
                     break;
@@ -718,6 +728,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
             AsyncTask<Boolean, Void, Boolean> {
         private long mDownloadId;
         private DownloadInfo mDownloadInfo;
+        private int mFailureReason;
 
         public EnqueueDownloadRequestTask(DownloadInfo downloadInfo) {
             mDownloadInfo = downloadInfo;
@@ -732,6 +743,9 @@ public class DownloadManagerService extends BroadcastReceiver implements
                 request = new DownloadManager.Request(uri);
             } catch (IllegalArgumentException e) {
                 Log.e(TAG, "Cannot download non http or https scheme");
+                // Use ERROR_UNHANDLED_HTTP_CODE so that it will be treated as
+                // a server error.
+                mFailureReason = DownloadManager.ERROR_UNHANDLED_HTTP_CODE;
                 return false;
             }
 
@@ -749,11 +763,13 @@ public class DownloadManagerService extends BroadcastReceiver implements
                         request.setDestinationUri(Uri.fromFile(file));
                     } else {
                         Log.e(TAG, "Cannot create download directory");
+                        mFailureReason = DownloadManager.ERROR_FILE_ERROR;
                         return false;
                     }
                 }
             } catch (IllegalStateException e) {
                 Log.e(TAG, "Cannot create download directory");
+                mFailureReason = DownloadManager.ERROR_FILE_ERROR;
                 return false;
             }
 
@@ -783,10 +799,12 @@ public class DownloadManagerService extends BroadcastReceiver implements
             } catch (IllegalArgumentException e) {
                 // See crbug.com/143499 for more details.
                 Log.e(TAG, "Download failed: " + e);
+                mFailureReason = DownloadManager.ERROR_UNKNOWN;
                 return false;
             } catch (RuntimeException e) {
                 // See crbug.com/490442 for more details.
                 Log.e(TAG, "Failed to create target file on the external storage: " + e);
+                mFailureReason = DownloadManager.ERROR_FILE_ERROR;
                 return false;
             }
             return true;
@@ -797,7 +815,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
             boolean isPendingOMADownload =
                     mOMADownloadHandler.isPendingOMADownload(mDownloadInfo.getDownloadId());
             if (!result) {
-                onDownloadFailed(mDownloadInfo.getFileName());
+                onDownloadFailed(mDownloadInfo.getFileName(), mFailureReason);
                 if (isPendingOMADownload) {
                     mOMADownloadHandler.onDownloadFailed(
                             mDownloadInfo, DownloadManager.ERROR_UNKNOWN, null);
@@ -930,7 +948,6 @@ public class DownloadManagerService extends BroadcastReceiver implements
 
             @Override
             protected void onPostExecute(Intent intent) {
-                // TODO(qinmin): cancel download notification if openIntent() returns true.
                 if (intent != null) {
                     openIntent(mContext, intent, true);
                 }
@@ -942,9 +959,43 @@ public class DownloadManagerService extends BroadcastReceiver implements
      * Called when a download fails.
      *
      * @param fileName Name of the download file.
+     * @param reason Reason of failure reported by android DownloadManager
      */
-    protected void onDownloadFailed(String fileName) {
-        mDownloadSnackbarController.onDownloadFailed(fileName);
+    protected void onDownloadFailed(String fileName, int reason) {
+        String reasonString = mContext.getString(R.string.download_failed_reason_unknown_error);
+        switch (reason) {
+            case DownloadManager.ERROR_FILE_ALREADY_EXISTS:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_file_already_exists, fileName);
+                break;
+            case DownloadManager.ERROR_FILE_ERROR:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_file_system_error, fileName);
+                break;
+            case DownloadManager.ERROR_INSUFFICIENT_SPACE:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_insufficient_space, fileName);
+                break;
+            case DownloadManager.ERROR_CANNOT_RESUME:
+            case DownloadManager.ERROR_HTTP_DATA_ERROR:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_network_failures, fileName);
+                break;
+            case DownloadManager.ERROR_TOO_MANY_REDIRECTS:
+            case DownloadManager.ERROR_UNHANDLED_HTTP_CODE:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_server_issues, fileName);
+                break;
+            case DownloadManager.ERROR_DEVICE_NOT_FOUND:
+                reasonString = mContext.getString(
+                        R.string.download_failed_reason_storage_not_found, fileName);
+                break;
+            case DownloadManager.ERROR_UNKNOWN:
+            default:
+                break;
+        }
+        mDownloadSnackbarController.onDownloadFailed(
+                reasonString, reason == DownloadManager.ERROR_FILE_ALREADY_EXISTS);
     }
 
     /**
@@ -954,5 +1005,19 @@ public class DownloadManagerService extends BroadcastReceiver implements
     protected void setDownloadSnackbarController(
             DownloadSnackbarController downloadSnackbarController) {
         mDownloadSnackbarController = downloadSnackbarController;
+    }
+
+    /**
+     * Open the Activity which shows a list of all downloads.
+     * @param context Application context
+     */
+    protected static void openDownloadsPage(Context context) {
+        Intent pageView = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+        pageView.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            context.startActivity(pageView);
+        } catch (ActivityNotFoundException e) {
+            Log.e(TAG, "Cannot find Downloads app", e);
+        }
     }
 }

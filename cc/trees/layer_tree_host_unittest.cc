@@ -95,7 +95,7 @@ class LayerTreeHostTestSetNeedsCommitInsideLayout : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void Layout() override {
+  void UpdateLayerTreeHost() override {
     // This shouldn't cause a second commit to happen.
     layer_tree_host()->SetNeedsCommit();
   }
@@ -141,7 +141,9 @@ class LayerTreeHostTestFrameOrdering : public LayerTreeHostTest {
 
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void Layout() override { EXPECT_TRUE(CheckStep(MAIN_LAYOUT, &main_)); }
+  void UpdateLayerTreeHost() override {
+    EXPECT_TRUE(CheckStep(MAIN_LAYOUT, &main_));
+  }
 
   void DidCommit() override {
     EXPECT_TRUE(CheckStep(MAIN_COMMIT_COMPLETE, &main_));
@@ -188,7 +190,7 @@ class LayerTreeHostTestSetNeedsUpdateInsideLayout : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
 
-  void Layout() override {
+  void UpdateLayerTreeHost() override {
     // This shouldn't cause a second commit to happen.
     layer_tree_host()->SetNeedsUpdateLayers();
   }
@@ -373,7 +375,7 @@ class LayerTreeHostTestReadyToDrawVisibility : public LayerTreeHostTest {
   void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) override {
     if (!toggled_visibility_) {
       {
-        DebugScopedSetMainThread main(proxy());
+        DebugScopedSetMainThread main(task_runner_provider());
         layer_tree_host()->SetVisible(false);
       }
       toggled_visibility_ = true;
@@ -397,7 +399,7 @@ class LayerTreeHostTestReadyToDrawVisibility : public LayerTreeHostTest {
   void DidFinishImplFrameOnThread(LayerTreeHostImpl* host_impl) override {
     if (!host_impl->visible()) {
       {
-        DebugScopedSetMainThread main(proxy());
+        DebugScopedSetMainThread main(task_runner_provider());
         layer_tree_host()->SetVisible(true);
       }
       EXPECT_TRUE(host_impl->visible());
@@ -915,7 +917,7 @@ class LayerTreeHostTestNoExtraCommitFromScrollbarInvalidate
     bool has_thumb = false;
     scrollbar_ = FakePaintedScrollbarLayer::Create(
         layer_settings(), paint_scrollbar, has_thumb, root_layer_->id());
-    scrollbar_->SetPosition(gfx::Point(0, 10));
+    scrollbar_->SetPosition(gfx::PointF(0.f, 10.f));
     scrollbar_->SetBounds(gfx::Size(10, 10));
 
     root_layer_->AddChild(scrollbar_);
@@ -1553,11 +1555,6 @@ class TestOpacityChangeLayerDelegate : public ContentLayerClient {
 
   void SetTestLayer(Layer* test_layer) { test_layer_ = test_layer; }
 
-  void PaintContents(SkCanvas* canvas,
-                     const gfx::Rect& clip,
-                     PaintingControlSetting picture_control) override {
-    NOTIMPLEMENTED();
-  }
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
       PaintingControlSetting picture_control) override {
@@ -1629,7 +1626,7 @@ class LayerTreeHostTestDeviceScaleFactorScalesViewportAndLayers
     root_layer_->SetBounds(gfx::Size(30, 30));
 
     child_layer_->SetIsDrawable(true);
-    child_layer_->SetPosition(gfx::Point(2, 2));
+    child_layer_->SetPosition(gfx::PointF(2.f, 2.f));
     child_layer_->SetBounds(gfx::Size(10, 10));
 
     layer_tree_host()->SetRootLayer(root_layer_);
@@ -1655,8 +1652,8 @@ class LayerTreeHostTestDeviceScaleFactorScalesViewportAndLayers
         impl->active_tree()->root_layer()->children()[0]);
 
     // Positions remain in layout pixels.
-    EXPECT_EQ(gfx::Point(0, 0), root->position());
-    EXPECT_EQ(gfx::Point(2, 2), child->position());
+    EXPECT_EQ(gfx::PointF(), root->position());
+    EXPECT_EQ(gfx::PointF(2.f, 2.f), child->position());
 
     // Compute all the layer transforms for the frame.
     LayerTreeHostImpl::FrameData frame_data;
@@ -2159,12 +2156,6 @@ class LayerTreeHostTestChangeLayerPropertiesInPaintContents
 
     void set_layer(Layer* layer) { layer_ = layer; }
 
-    void PaintContents(SkCanvas* canvas,
-                       const gfx::Rect& clip,
-                       PaintingControlSetting picture_control) override {
-      NOTIMPLEMENTED();
-    }
-
     scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
         const gfx::Rect& clip,
         PaintingControlSetting picture_control) override {
@@ -2296,10 +2287,6 @@ class LayerTreeHostTestIOSurfaceDrawing : public LayerTreeHostTest {
         .Times(1);
     EXPECT_CALL(*mock_context_,
                 texParameteri(GL_TEXTURE_RECTANGLE_ARB,
-                              GL_TEXTURE_POOL_CHROMIUM,
-                              GL_TEXTURE_POOL_UNMANAGED_CHROMIUM)).Times(1);
-    EXPECT_CALL(*mock_context_,
-                texParameteri(GL_TEXTURE_RECTANGLE_ARB,
                               GL_TEXTURE_WRAP_S,
                               GL_CLAMP_TO_EDGE)).Times(1);
     EXPECT_CALL(*mock_context_,
@@ -2332,7 +2319,7 @@ class LayerTreeHostTestIOSurfaceDrawing : public LayerTreeHostTest {
     EXPECT_EQ(io_surface_size_, io_surface_draw_quad->io_surface_size);
     EXPECT_NE(0u, io_surface_draw_quad->io_surface_resource_id());
     EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_RECTANGLE_ARB),
-              resource_provider->TargetForTesting(
+              resource_provider->GetResourceTextureTarget(
                   io_surface_draw_quad->io_surface_resource_id()));
 
     if (delegating_renderer()) {
@@ -2501,7 +2488,8 @@ class LayerTreeHostTestResourcelessSoftwareDraw : public LayerTreeHostTest {
   int swap_count_;
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestResourcelessSoftwareDraw);
+// Resourceless is not used for SingleThreadProxy, so it is unimplemented.
+MULTI_THREAD_TEST_F(LayerTreeHostTestResourcelessSoftwareDraw);
 
 // Test for UI Resource management.
 class LayerTreeHostTestUIResource : public LayerTreeHostTest {
@@ -3285,7 +3273,7 @@ class LayerTreeHostTestPushPropertiesRemovingChildStopsRecursion
         EXPECT_FALSE(grandchild3_->descendant_needs_push_properties());
 
         grandchild1_->RemoveFromParent();
-        grandchild1_->SetPosition(gfx::Point(1, 1));
+        grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
 
         EXPECT_FALSE(root_->needs_push_properties());
         EXPECT_FALSE(root_->descendant_needs_push_properties());
@@ -3309,7 +3297,7 @@ class LayerTreeHostTestPushPropertiesRemovingChildStopsRecursion
         EXPECT_FALSE(grandchild3_->needs_push_properties());
         EXPECT_FALSE(grandchild3_->descendant_needs_push_properties());
 
-        grandchild2_->SetPosition(gfx::Point(1, 1));
+        grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
 
         EXPECT_FALSE(root_->needs_push_properties());
         EXPECT_TRUE(root_->descendant_needs_push_properties());
@@ -3417,8 +3405,8 @@ class LayerTreeHostTestPushPropertiesSetPropertiesWhileOutsideTree
 
         // Change grandchildren while their parent is not in the tree.
         child_->RemoveFromParent();
-        grandchild1_->SetPosition(gfx::Point(1, 1));
-        grandchild2_->SetPosition(gfx::Point(1, 1));
+        grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
+        grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
         root_->AddChild(child_);
 
         EXPECT_FALSE(root_->needs_push_properties());
@@ -3483,9 +3471,9 @@ class LayerTreeHostTestPushPropertiesSetPropertyInParentThenChild
         EXPECT_FALSE(grandchild3_->needs_push_properties());
         EXPECT_FALSE(grandchild3_->descendant_needs_push_properties());
 
-        child_->SetPosition(gfx::Point(1, 1));
-        grandchild1_->SetPosition(gfx::Point(1, 1));
-        grandchild2_->SetPosition(gfx::Point(1, 1));
+        child_->SetPosition(gfx::PointF(1.f, 1.f));
+        grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
+        grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
 
         EXPECT_FALSE(root_->needs_push_properties());
         EXPECT_TRUE(root_->descendant_needs_push_properties());
@@ -3547,9 +3535,9 @@ class LayerTreeHostTestPushPropertiesSetPropertyInChildThenParent
         EXPECT_FALSE(grandchild3_->needs_push_properties());
         EXPECT_FALSE(grandchild3_->descendant_needs_push_properties());
 
-        grandchild1_->SetPosition(gfx::Point(1, 1));
-        grandchild2_->SetPosition(gfx::Point(1, 1));
-        child_->SetPosition(gfx::Point(1, 1));
+        grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
+        grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
+        child_->SetPosition(gfx::PointF(1.f, 1.f));
 
         EXPECT_FALSE(root_->needs_push_properties());
         EXPECT_TRUE(root_->descendant_needs_push_properties());
@@ -3739,17 +3727,17 @@ class LayerTreeHostTestPushHiddenLayer : public LayerTreeHostTest {
  protected:
   void SetupTree() override {
     root_layer_ = Layer::Create(layer_settings());
-    root_layer_->SetPosition(gfx::Point());
+    root_layer_->SetPosition(gfx::PointF());
     root_layer_->SetBounds(gfx::Size(10, 10));
 
     parent_layer_ = SolidColorLayer::Create(layer_settings());
-    parent_layer_->SetPosition(gfx::Point());
+    parent_layer_->SetPosition(gfx::PointF());
     parent_layer_->SetBounds(gfx::Size(10, 10));
     parent_layer_->SetIsDrawable(true);
     root_layer_->AddChild(parent_layer_);
 
     child_layer_ = SolidColorLayer::Create(layer_settings());
-    child_layer_->SetPosition(gfx::Point());
+    child_layer_->SetPosition(gfx::PointF());
     child_layer_->SetBounds(gfx::Size(10, 10));
     child_layer_->SetIsDrawable(true);
     parent_layer_->AddChild(child_layer_);
@@ -4788,8 +4776,11 @@ class LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime
   int will_begin_impl_frame_count_;
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime);
+// TODO(mithro): Re-enable the multi-threaded version of this test
+// http://crbug.com/537621
+// SINGLE_AND_MULTI_THREAD_TEST_F(
+//    LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime);
+SINGLE_THREAD_TEST_F(LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime);
 
 class LayerTreeHostTestSendBeginFramesToChildren : public LayerTreeHostTest {
  public:
@@ -4886,7 +4877,7 @@ class LayerTreeHostTestActivateOnInvisible : public LayerTreeHostTest {
     // Once invisible, we can go visible again.
     if (!visible) {
       PostSetVisibleToMainThread(true);
-    } else {
+    } else if (activation_count_) {
       EXPECT_TRUE(host_impl->RequiresHighResToDraw());
       EndTest();
     }
@@ -5796,18 +5787,20 @@ class LayerTreeTestMaskLayerForSurfaceWithClippedLayer : public LayerTreeTest {
     gfx::Size root_size(100, 100);
     root->SetBounds(root_size);
 
-    gfx::Rect clipping_rect(20, 10, 10, 20);
-    clipping_layer->SetBounds(clipping_rect.size());
-    clipping_layer->SetPosition(clipping_rect.origin());
+    gfx::PointF clipping_origin(20.f, 10.f);
+    gfx::Size clipping_size(10, 20);
+    clipping_layer->SetBounds(clipping_size);
+    clipping_layer->SetPosition(clipping_origin);
     clipping_layer->SetMasksToBounds(true);
 
     gfx::Size layer_size(50, 50);
     content_layer->SetBounds(layer_size);
-    content_layer->SetPosition(gfx::Point() - clipping_rect.OffsetFromOrigin());
+    content_layer->SetPosition(gfx::PointF() -
+                               clipping_origin.OffsetFromOrigin());
 
     gfx::Size child_size(50, 50);
     content_child_layer->SetBounds(child_size);
-    content_child_layer->SetPosition(gfx::Point(20, 0));
+    content_child_layer->SetPosition(gfx::PointF(20.f, 0.f));
 
     gfx::Size mask_size(100, 100);
     mask_layer->SetBounds(mask_size);
@@ -6392,6 +6385,29 @@ class LayerTreeHostTestDestroyWhileInitializingOutputSurface
 };
 
 MULTI_THREAD_TEST_F(LayerTreeHostTestDestroyWhileInitializingOutputSurface);
+
+// Makes sure that painted_device_scale_factor is propagated to the
+// frame's metadata.
+class LayerTreeHostTestPaintedDeviceScaleFactor : public LayerTreeHostTest {
+ protected:
+  void BeginTest() override {
+    layer_tree_host()->SetPaintedDeviceScaleFactor(2.0f);
+    EXPECT_EQ(1.0f, layer_tree_host()->device_scale_factor());
+    PostSetNeedsCommitToMainThread();
+  }
+
+  void SwapBuffersOnThread(LayerTreeHostImpl* host_impl, bool result) override {
+    EXPECT_EQ(2.0f,
+              output_surface()->last_sent_frame().metadata.device_scale_factor);
+    EXPECT_EQ(2.0f, host_impl->active_tree()->painted_device_scale_factor());
+    EXPECT_EQ(1.0f, host_impl->active_tree()->device_scale_factor());
+    EndTest();
+  }
+
+  void AfterTest() override {}
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestPaintedDeviceScaleFactor);
 
 }  // namespace
 }  // namespace cc

@@ -54,8 +54,6 @@ cr.define('login', function() {
           this.handleAddUserClick_);
       $('more-settings-button').addEventListener('click',
           this.handleMoreSettingsClick_.bind(this));
-      $('cancel-add-user-button').addEventListener('click',
-          this.handleCancelAddUserClick_);
       $('guest-user-header-bar-item').addEventListener('click',
           this.handleGuestClick_);
       $('guest-user-button').addEventListener('click',
@@ -275,20 +273,6 @@ cr.define('login', function() {
     },
 
     /**
-     * Whether the Cancel button is enabled during Gaia sign-in.
-     *
-     * @type {boolean}
-     */
-    set allowCancel(value) {
-      this.allowCancel_ = value;
-      this.updateUI_();
-    },
-
-    get allowCancel() {
-      return !!this.allowCancel_;
-    },
-
-    /**
      * Update whether there are kiosk apps.
      *
      * @type {boolean}
@@ -305,12 +289,8 @@ cr.define('login', function() {
      */
     updateUI_: function() {
       var gaiaIsActive = (this.signinUIState_ == SIGNIN_UI_STATE.GAIA_SIGNIN);
-      var gaiaIsActiveWithBackButton =
-          gaiaIsActive && !$('back-button-item').hidden;
       var enrollmentIsActive =
           (this.signinUIState_ == SIGNIN_UI_STATE.ENROLLMENT);
-      var enrollmentIsActiveWithBackButton =
-          enrollmentIsActive && !$('oauth-enroll-back-button').hidden;
       var accountPickerIsActive =
           (this.signinUIState_ == SIGNIN_UI_STATE.ACCOUNT_PICKER);
       var supervisedUserCreationDialogIsActive =
@@ -342,16 +322,6 @@ cr.define('login', function() {
           isLockScreen ||
           errorScreenIsActive ||
           supervisedUserCreationDialogIsActive;
-      $('cancel-add-user-button').hidden =
-          !this.allowCancel_ ||
-          gaiaIsActive ||
-          isPasswordChangedUI ||
-          isSamlPasswordConfirm ||
-          errorScreenIsActive ||
-          accountPickerIsActive ||
-          wrongHWIDWarningIsActive ||
-          isMultiProfilesUI ||
-          supervisedUserCreationDialogIsActive;
       $('guest-user-header-bar-item').hidden =
           !this.showGuest_ ||
           isLockScreen ||
@@ -359,15 +329,14 @@ cr.define('login', function() {
           wrongHWIDWarningIsActive ||
           isSamlPasswordConfirm ||
           isMultiProfilesUI ||
-          (this.allowCancel_ && gaiaIsActive) ||
-          enrollmentIsActiveWithBackButton ||
-          gaiaIsActiveWithBackButton;
+          (gaiaIsActive && $('gaia-signin').closable) ||
+          (enrollmentIsActive && !$('oauth-enrollment').isAtTheBeginning()) ||
+          (gaiaIsActive && !$('gaia-signin').isAtTheBeginning());
       $('restart-header-bar-item').hidden = !this.showReboot_;
       $('shutdown-header-bar-item').hidden = !this.showShutdown_;
       $('sign-out-user-item').hidden = !isLockScreen;
 
-      $('add-user-header-bar-item').hidden =
-          $('add-user-button').hidden && $('cancel-add-user-button').hidden;
+      $('add-user-header-bar-item').hidden = $('add-user-button').hidden;
       $('apps-header-bar-item').hidden = !this.hasApps_ ||
           (!gaiaIsActive && !accountPickerIsActive);
       $('cancel-multiple-sign-in-item').hidden = !isMultiProfilesUI;

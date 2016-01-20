@@ -12,6 +12,7 @@
     ['OS=="win"', {
       'targets': [
         {
+          # GN version: //chrome/installer/gcapi
           'target_name': 'gcapi_dll',
           'type': 'loadable_module',
           'dependencies': [
@@ -26,6 +27,7 @@
           ],
         },
         {
+          # GN version: //chrome/installer/gcapi:lib
           'target_name': 'gcapi_lib',
           'type': 'static_library',
           'dependencies': [
@@ -46,10 +48,9 @@
             'installer/gcapi/gcapi_reactivation.cc',
             'installer/gcapi/gcapi_reactivation.h',
           ],
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
         },
         {
+          # GN version: //chrome/installer/gcapi:gcapi_test
           'target_name': 'gcapi_test',
           'type': 'executable',
           'dependencies': [
@@ -213,13 +214,13 @@
           'target_name': 'setup',
           'type': 'executable',
           'dependencies': [
-            'chrome_version_header',
             'installer_util',
             'installer_util_strings',
             '../base/base.gyp:base',
-            '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/common_constants.gyp:common_constants',
+            '../chrome/common_constants.gyp:version_header',
             '../chrome_elf/chrome_elf.gyp:chrome_elf_constants',
+            '../components/components.gyp:crash_component',
             '../rlz/rlz.gyp:rlz_lib',
             '../third_party/zlib/zlib.gyp:zlib',
           ],
@@ -244,6 +245,8 @@
             'installer/setup/install.h',
             'installer/setup/install_worker.cc',
             'installer/setup/install_worker.h',
+            'installer/setup/installer_crash_reporter_client.cc',
+            'installer/setup/installer_crash_reporter_client.h',
             'installer/setup/setup.ico',
             'installer/setup/setup.rc',
             'installer/setup/setup_constants.cc',
@@ -306,6 +309,11 @@
                 },
               },
             }],
+            ['win_use_allocator_shim==1', {
+              'dependencies': [
+                '<(allocator_target)',
+              ],
+            }],
           ],
         },
         {
@@ -357,6 +365,7 @@
             'installer/setup/install_worker.cc',        # Move to lib
             'installer/setup/install_worker.h',         # Move to lib
             'installer/setup/install_worker_unittest.cc',
+            'installer/setup/memory_unittest.cc',
             'installer/setup/run_all_unittests.cc',
             'installer/setup/setup_constants.cc',       # Move to lib
             'installer/setup/setup_constants.h',        # Move to lib
@@ -366,6 +375,13 @@
             'installer/setup/update_active_setup_version_work_item.cc',  # Move to lib
             'installer/setup/update_active_setup_version_work_item.h',   # Move to lib
             'installer/setup/update_active_setup_version_work_item_unittest.cc',
+          ],
+          'conditions': [
+            ['win_use_allocator_shim==1', {
+              'dependencies': [
+                '<(allocator_target)',
+              ],
+            }],
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],

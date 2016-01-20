@@ -119,6 +119,11 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
                        const std::vector<std::string>& flags) override;
   void GetServerBackedStateKeys(const StateKeysCallback& callback) override;
 
+  void CheckArcAvailability(const ArcCallback& callback) override;
+  void StartArcInstance(const std::string& socket_path,
+                        const ArcCallback& callback) override;
+  void StopArcInstance(const ArcCallback& callback) override;
+
  private:
   struct PolicyState {
     bool store_result_;
@@ -170,7 +175,7 @@ class DeviceSettingsTestBase : public testing::Test {
   // |device_settings_service_| and flushes the resulting load operation.
   void ReloadDeviceSettings();
 
-  void InitOwner(const std::string& user_id, bool tpm_is_ready);
+  void InitOwner(const AccountId& account_id, bool tpm_is_ready);
 
   content::TestBrowserThreadBundle thread_bundle_;
 

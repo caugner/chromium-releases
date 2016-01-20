@@ -340,7 +340,7 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
 
 void PasswordManager::UpdateFormManagers() {
   for (PasswordFormManager* form_manager : pending_login_managers_) {
-    form_manager->FetchMatchingLoginsFromPasswordStore(
+    form_manager->FetchDataFromPasswordStore(
         client_->GetAuthorizationPromptPolicy(form_manager->observed_form()));
   }
 }
@@ -403,6 +403,9 @@ void PasswordManager::AddObserverAndDeliverCredentials(
   observers_.AddObserver(observer);
 
   observer->set_signon_realm(observed_form.signon_realm);
+  // TODO(vabr): Even though the observers do the realm check, this mechanism
+  // will still result in every observer being notified about every form. We
+  // could perhaps do better by registering an observer call-back instead.
 
   std::vector<PasswordForm> observed_forms;
   observed_forms.push_back(observed_form);
@@ -511,7 +514,7 @@ void PasswordManager::CreatePendingLoginManagers(
     PasswordStore::AuthorizationPromptPolicy prompt_policy =
         client_->GetAuthorizationPromptPolicy(*iter);
 
-    manager->FetchMatchingLoginsFromPasswordStore(prompt_policy);
+    manager->FetchDataFromPasswordStore(prompt_policy);
   }
 
   if (logger) {
@@ -755,7 +758,6 @@ void PasswordManager::AutofillHttpAuth(
 
   FOR_EACH_OBSERVER(LoginModelObserver, observers_,
                     OnAutofillDataAvailable(preferred_match));
-
   DCHECK(!best_matches.empty());
   client_->PasswordWasAutofilled(best_matches,
                                  best_matches.begin()->second->origin);

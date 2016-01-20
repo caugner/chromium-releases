@@ -16,12 +16,12 @@ test(t => { assert_true(window.testRunner instanceof Object); t.done(); },
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('GlucoseHeartRateAdapter');
   return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(function(device) {
+    .then(device => {
       assert_equals(device.constructor.name, 'BluetoothDevice');
 
       // Attempt (and fail) to overwrite all members, verifying they are
       // readonly.
-      device.instanceID = 'overwritten';
+      device.id = 'overwritten';
       device.name = 'overwritten';
       device.deviceClass = 'overwritten';
       device.vendorIDSource = 'overwritten';
@@ -30,7 +30,7 @@ promise_test(() => {
       device.productVersion = 'overwritten';
       device.paired = 'overwritten';
       device.uuids = 'overwritten';
-      assert_equals(device.instanceID, '00:00:00:00:00:03');
+      assert_equals(device.id, '00:00:00:00:00:00');
       assert_equals(device.name, 'Heart Rate Device');
       assert_equals(device.deviceClass, 0x1F00);
       assert_equals(device.vendorIDSource, 'bluetooth');
@@ -38,8 +38,8 @@ promise_test(() => {
       assert_equals(device.productID, 1);
       assert_equals(device.productVersion, 2);
       assert_equals(device.paired, true);
-      assert_equals(device.uuids[0], generic_access.uuid);
-      assert_equals(device.uuids[1], heart_rate.uuid);
+      assert_equals(device.uuids.length, 1);
+      assert_equals(device.uuids[0], heart_rate.uuid);
     });
 }, 'BluetoothDevice attributes.');
 </script>

@@ -228,7 +228,7 @@ AccessibilityMatchPredicate PredicateForSearchKey(NSString* searchKey) {
     };
   } else if ([searchKey isEqualToString:@"AXTextFieldSearchKey"]) {
     return [](BrowserAccessibility* start, BrowserAccessibility* current) {
-      return current->GetRole() == ui::AX_ROLE_TEXT_FIELD;
+      return current->IsSimpleTextControl() || current->IsRichTextControl();
     };
   } else if ([searchKey isEqualToString:@"AXUnderlineSearchKey"]) {
     // TODO(dmazzoni): implement this.
@@ -766,8 +766,8 @@ bool InitializeAccessibilityTreeSearch(
 }
 
 - (NSNumber*)loadingProgress {
-  float floatValue = browserAccessibility_->GetFloatAttribute(
-      ui::AX_ATTR_DOC_LOADING_PROGRESS);
+  BrowserAccessibilityManager* manager = browserAccessibility_->manager();
+  float floatValue = manager->GetTreeData().loading_progress;
   return [NSNumber numberWithFloat:floatValue];
 }
 
@@ -867,6 +867,9 @@ bool InitializeAccessibilityTreeSearch(
 
 // Returns a string indicating the NSAccessibility role of this object.
 - (NSString*)role {
+  if (!browserAccessibility_)
+    return nil;
+
   ui::AXRole role = [self internalRole];
   if (role == ui::AX_ROLE_CANVAS &&
       browserAccessibility_->GetBoolAttribute(
@@ -884,8 +887,10 @@ bool InitializeAccessibilityTreeSearch(
     else
       return NSAccessibilityButtonRole;
   }
-  if (role == ui::AX_ROLE_TEXT_FIELD &&
-      browserAccessibility_->HasState(ui::AX_STATE_MULTILINE)) {
+
+  if ((browserAccessibility_->IsSimpleTextControl() &&
+       browserAccessibility_->HasState(ui::AX_STATE_MULTILINE)) ||
+      browserAccessibility_->IsRichTextControl()) {
     return NSAccessibilityTextAreaRole;
   }
 
@@ -1203,16 +1208,16 @@ bool InitializeAccessibilityTreeSearch(
 }
 
 - (NSURL*)url {
-  StringAttribute urlAttribute =
-      [[self role] isEqualToString:@"AXWebArea"] ?
-          ui::AX_ATTR_DOC_URL :
-          ui::AX_ATTR_URL;
+  std::string url;
+  if ([[self role] isEqualToString:@"AXWebArea"])
+    url = browserAccessibility_->manager()->GetTreeData().url;
+  else
+    url = browserAccessibility_->GetStringAttribute(ui::AX_ATTR_URL);
 
-  std::string urlStr = browserAccessibility_->GetStringAttribute(urlAttribute);
-  if (urlStr.empty())
+  if (url.empty())
     return nil;
 
-  return [NSURL URLWithString:(base::SysUTF8ToNSString(urlStr))];
+  return [NSURL URLWithString:(base::SysUTF8ToNSString(url))];
 }
 
 - (id)value {
@@ -1251,8 +1256,7 @@ bool InitializeAccessibilityTreeSearch(
             1 :
             value;
 
-    if (browserAccessibility_->GetBoolAttribute(
-        ui::AX_ATTR_BUTTON_MIXED)) {
+    if (browserAccessibility_->GetBoolAttribute(ui::AX_ATTR_STATE_MIXED)) {
       value = 2;
     }
     return [NSNumber numberWithInt:value];
@@ -1937,9 +1941,9 @@ bool InitializeAccessibilityTreeSearch(
   }
   if ([attribute isEqualToString:NSAccessibilitySelectedTextRangeAttribute]) {
     NSRange range = [(NSValue*)value rangeValue];
-    [self delegate]->AccessibilitySetTextSelection(
-        browserAccessibility_->GetId(),
-        range.location, range.location + range.length);
+    [self delegate]->AccessibilitySetSelection(
+        browserAccessibility_->GetId(), range.location,
+        browserAccessibility_->GetId(), range.location + range.length);
   }
 }
 

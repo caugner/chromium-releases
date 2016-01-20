@@ -85,6 +85,7 @@
 #define IDC_ENCODING_MENU               35005
 #define IDC_EMAIL_PAGE_LOCATION         35006
 #define IDC_BASIC_PRINT                 35007
+#define IDC_SAVE_CREDIT_CARD_FOR_PAGE   35008
 #define IDC_TRANSLATE_PAGE              35009
 #define IDC_MANAGE_PASSWORDS_FOR_PAGE   35010
 #define IDC_ROUTE_MEDIA                 35011
@@ -245,9 +246,6 @@
 #define IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE 42100
 #define IDC_TRANSLATE_TARGET_LANGUAGE_BASE   42400
 
-// Speech input
-#define IDC_TOGGLE_SPEECH_INPUT         42500
-
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
 #define IDC_VIEW_MENU                   44000     // OSX only
@@ -276,6 +274,8 @@
 #define IDC_CONTENT_CONTEXT_COPYLINKLOCATION 50104
 #define IDC_CONTENT_CONTEXT_COPYEMAILADDRESS 50105
 #define IDC_CONTENT_CONTEXT_OPENLINKWITH 50106
+#define IDC_CONTENT_CONTEXT_COPYLINKTEXT 50107
+#define IDC_CONTENT_CONTEXT_OPENLINKINPROFILE 50108
 // Image items.
 #define IDC_CONTENT_CONTEXT_SAVEIMAGEAS 50110
 #define IDC_CONTENT_CONTEXT_COPYIMAGELOCATION 50111
@@ -365,6 +365,10 @@
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_LAST      52199
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS  52200
+
+// Open link in profile entries
+#define IDC_OPEN_LINK_IN_PROFILE_FIRST 52300
+#define IDC_OPEN_LINK_IN_PROFILE_LAST  52399
 
 // NOTE: The last valid command value is 57343 (0xDFFF)
 // See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx

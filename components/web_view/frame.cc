@@ -10,23 +10,25 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/stl_util.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_property.h"
+#include "base/trace_event/trace_event.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_property.h"
 #include "components/web_view/frame_tree.h"
 #include "components/web_view/frame_tree_delegate.h"
 #include "components/web_view/frame_user_data.h"
 #include "components/web_view/frame_utils.h"
 #include "mojo/application/public/interfaces/shell.mojom.h"
+#include "mojo/common/url_type_converters.h"
 #include "url/gurl.h"
 
-using mus::View;
+using mus::Window;
 
-DECLARE_VIEW_PROPERTY_TYPE(web_view::Frame*);
+DECLARE_WINDOW_PROPERTY_TYPE(web_view::Frame*);
 
 namespace web_view {
 
-// Used to find the Frame associated with a View.
-DEFINE_LOCAL_VIEW_PROPERTY_KEY(Frame*, kFrame, nullptr);
+// Used to find the Frame associated with a Window.
+DEFINE_LOCAL_WINDOW_PROPERTY_KEY(Frame*, kFrame, nullptr);
 
 namespace {
 
@@ -51,20 +53,20 @@ struct Frame::FrameUserDataAndBinding {
 };
 
 Frame::Frame(FrameTree* tree,
-             View* view,
+             Window* window,
              uint32_t frame_id,
              uint32_t app_id,
-             ViewOwnership view_ownership,
+             WindowOwnership window_ownership,
              mojom::FrameClient* frame_client,
              scoped_ptr<FrameUserData> user_data,
              const ClientPropertyMap& client_properties)
     : tree_(tree),
-      view_(nullptr),
+      window_(nullptr),
       embedded_connection_id_(kInvalidConnectionId),
       id_(frame_id),
       app_id_(app_id),
       parent_(nullptr),
-      view_ownership_(view_ownership),
+      window_ownership_(window_ownership),
       user_data_(user_data.Pass()),
       frame_client_(frame_client),
       loading_(false),
@@ -73,29 +75,30 @@ Frame::Frame(FrameTree* tree,
       waiting_for_on_will_navigate_ack_(false),
       embed_weak_ptr_factory_(this),
       navigate_weak_ptr_factory_(this) {
-  if (view)
-    SetView(view);
+  if (window)
+    SetWindow(window);
 }
 
 Frame::~Frame() {
   DVLOG(2) << "~Frame id=" << id_ << " this=" << this;
-  if (view_)
-    view_->RemoveObserver(this);
+  if (window_)
+    window_->RemoveObserver(this);
   while (!children_.empty())
     delete children_[0];
   if (parent_)
     parent_->Remove(this);
-  if (view_) {
-    view_->ClearLocalProperty(kFrame);
-    if (view_ownership_ == ViewOwnership::OWNS_VIEW)
-      view_->Destroy();
+  if (window_) {
+    window_->ClearLocalProperty(kFrame);
+    if (window_ownership_ == WindowOwnership::OWNS_WINDOW)
+      window_->Destroy();
   }
   tree_->delegate_->DidDestroyFrame(this);
 }
 
 void Frame::Init(Frame* parent,
-                 mojo::ViewTreeClientPtr view_tree_client,
-                 mojo::InterfaceRequest<mojom::Frame> frame_request) {
+                 mus::mojom::WindowTreeClientPtr window_tree_client,
+                 mojo::InterfaceRequest<mojom::Frame> frame_request,
+                 base::TimeTicks navigation_start_time) {
   {
     // Set the FrameClient to null so that we don't notify the client of the
     // add before OnConnect().
@@ -108,8 +111,8 @@ void Frame::Init(Frame* parent,
   const ClientType client_type = frame_request.is_pending()
                                      ? ClientType::NEW_CHILD_FRAME
                                      : ClientType::EXISTING_FRAME_NEW_APP;
-  InitClient(client_type, nullptr, view_tree_client.Pass(),
-             frame_request.Pass());
+  InitClient(client_type, nullptr, window_tree_client.Pass(),
+             frame_request.Pass(), navigation_start_time);
 
   tree_->delegate_->DidCreateFrame(this);
 
@@ -118,10 +121,10 @@ void Frame::Init(Frame* parent,
 }
 
 // static
-Frame* Frame::FindFirstFrameAncestor(View* view) {
-  while (view && !view->GetLocalProperty(kFrame))
-    view = view->parent();
-  return view ? view->GetLocalProperty(kFrame) : nullptr;
+Frame* Frame::FindFirstFrameAncestor(Window* window) {
+  while (window && !window->GetLocalProperty(kFrame))
+    window = window->parent();
+  return window ? window->GetLocalProperty(kFrame) : nullptr;
 }
 
 const Frame* Frame::FindFrame(uint32_t id) const {
@@ -161,29 +164,57 @@ double Frame::GatherProgress(int* frame_count) const {
   return progress_;
 }
 
+void Frame::Find(int32 request_id,
+                 const mojo::String& search_text,
+                 mojom::FindOptionsPtr options,
+                 bool wrap_within_frame,
+                 const FindCallback& callback) {
+  frame_client_->Find(request_id, search_text, options.Pass(),
+                      wrap_within_frame, callback);
+}
+
+void Frame::StopFinding(bool clear_selection) {
+  frame_client_->StopFinding(clear_selection);
+}
+
+void Frame::HighlightFindResults(int32_t request_id,
+                                 const mojo::String& search_text,
+                                 mojom::FindOptionsPtr options,
+                                 bool reset) {
+  frame_client_->HighlightFindResults(request_id, search_text, options.Pass(),
+                                      reset);
+}
+
+void Frame::StopHighlightingFindResults() {
+  frame_client_->StopHighlightingFindResults();
+}
+
 void Frame::InitClient(ClientType client_type,
                        scoped_ptr<FrameUserDataAndBinding> data_and_binding,
-                       mojo::ViewTreeClientPtr view_tree_client,
-                       mojo::InterfaceRequest<mojom::Frame> frame_request) {
+                       mus::mojom::WindowTreeClientPtr window_tree_client,
+                       mojo::InterfaceRequest<mojom::Frame> frame_request,
+                       base::TimeTicks navigation_start_time) {
   if (client_type == ClientType::EXISTING_FRAME_NEW_APP &&
-      view_tree_client.get()) {
+      window_tree_client.get()) {
     embedded_connection_id_ = kInvalidConnectionId;
     embed_weak_ptr_factory_.InvalidateWeakPtrs();
-    view_->Embed(
-        view_tree_client.Pass(), mojo::ViewTree::ACCESS_POLICY_DEFAULT,
+    window_->Embed(
+        window_tree_client.Pass(),
+        mus::mojom::WindowTree::ACCESS_POLICY_DEFAULT,
         base::Bind(&Frame::OnEmbedAck, embed_weak_ptr_factory_.GetWeakPtr()));
   }
 
   if (client_type == ClientType::NEW_CHILD_FRAME) {
     // Don't install an error handler. We allow for the target to only
-    // implement ViewTreeClient.
+    // implement WindowTreeClient.
     // This frame (and client) was created by an existing FrameClient. There
     // is no need to send it OnConnect().
     frame_binding_.reset(
         new mojo::Binding<mojom::Frame>(this, frame_request.Pass()));
     frame_client_->OnConnect(
-        nullptr, tree_->change_id(), id_, mojom::VIEW_CONNECT_TYPE_USE_NEW,
+        nullptr, tree_->change_id(), id_, mojom::WINDOW_CONNECT_TYPE_USE_NEW,
         mojo::Array<mojom::FrameDataPtr>(),
+        navigation_start_time.ToInternalValue(),
         base::Bind(&OnConnectAck, base::Passed(&data_and_binding)));
   } else {
     std::vector<const Frame*> frames;
@@ -195,15 +226,15 @@ void Frame::InitClient(ClientType client_type,
 
     mojom::FramePtr frame_ptr;
     // Don't install an error handler. We allow for the target to only
-    // implement ViewTreeClient.
+    // implement WindowTreeClient.
     frame_binding_.reset(
         new mojo::Binding<mojom::Frame>(this, GetProxy(&frame_ptr).Pass()));
     frame_client_->OnConnect(
         frame_ptr.Pass(), tree_->change_id(), id_,
         client_type == ClientType::EXISTING_FRAME_SAME_APP
-            ? mojom::VIEW_CONNECT_TYPE_USE_EXISTING
-            : mojom::VIEW_CONNECT_TYPE_USE_NEW,
-        array.Pass(),
+            ? mojom::WINDOW_CONNECT_TYPE_USE_EXISTING
+            : mojom::WINDOW_CONNECT_TYPE_USE_NEW,
+        array.Pass(), navigation_start_time.ToInternalValue(),
         base::Bind(&OnConnectAck, base::Passed(&data_and_binding)));
     tree_->delegate_->DidStartNavigation(this);
 
@@ -221,12 +252,13 @@ void Frame::OnConnectAck(scoped_ptr<FrameUserDataAndBinding> data_and_binding) {
 
 void Frame::ChangeClient(mojom::FrameClient* frame_client,
                          scoped_ptr<FrameUserData> user_data,
-                         mojo::ViewTreeClientPtr view_tree_client,
-                         uint32_t app_id) {
+                         mus::mojom::WindowTreeClientPtr window_tree_client,
+                         uint32_t app_id,
+                         base::TimeTicks navigation_start_time) {
   while (!children_.empty())
     delete children_[0];
 
-  ClientType client_type = view_tree_client.get() == nullptr
+  ClientType client_type = window_tree_client.get() == nullptr
                                ? ClientType::EXISTING_FRAME_SAME_APP
                                : ClientType::EXISTING_FRAME_NEW_APP;
   scoped_ptr<FrameUserDataAndBinding> data_and_binding;
@@ -246,8 +278,8 @@ void Frame::ChangeClient(mojom::FrameClient* frame_client,
   frame_binding_.reset();
   app_id_ = app_id;
 
-  InitClient(client_type, data_and_binding.Pass(), view_tree_client.Pass(),
-             nullptr);
+  InitClient(client_type, data_and_binding.Pass(), window_tree_client.Pass(),
+             nullptr, navigation_start_time);
 }
 
 void Frame::OnEmbedAck(bool success, mus::ConnectionSpecificId connection_id) {
@@ -257,24 +289,27 @@ void Frame::OnEmbedAck(bool success, mus::ConnectionSpecificId connection_id) {
     frame_binding_->ResumeIncomingMethodCallProcessing();
 }
 
-void Frame::OnWillNavigateAck(mojom::FrameClient* frame_client,
-                              scoped_ptr<FrameUserData> user_data,
-                              mojo::ViewTreeClientPtr view_tree_client,
-                              uint32 app_id) {
+void Frame::OnWillNavigateAck(
+    mojom::FrameClient* frame_client,
+    scoped_ptr<FrameUserData> user_data,
+    mus::mojom::WindowTreeClientPtr window_tree_client,
+    uint32 app_id,
+    base::TimeTicks navigation_start_time) {
   DCHECK(waiting_for_on_will_navigate_ack_);
   DVLOG(2) << "Frame::OnWillNavigateAck id=" << id_;
   waiting_for_on_will_navigate_ack_ = false;
-  ChangeClient(frame_client, user_data.Pass(), view_tree_client.Pass(), app_id);
+  ChangeClient(frame_client, user_data.Pass(), window_tree_client.Pass(),
+               app_id, navigation_start_time);
   if (pending_navigate_.get())
     StartNavigate(pending_navigate_.Pass());
 }
 
-void Frame::SetView(mus::View* view) {
-  DCHECK(!view_);
-  DCHECK_EQ(id_, view->id());
-  view_ = view;
-  view_->SetLocalProperty(kFrame, this);
-  view_->AddObserver(this);
+void Frame::SetWindow(mus::Window* window) {
+  DCHECK(!window_);
+  DCHECK_EQ(id_, window->id());
+  window_ = window;
+  window_->SetLocalProperty(kFrame, this);
+  window_->AddObserver(this);
   if (pending_navigate_.get())
     StartNavigate(pending_navigate_.Pass());
 }
@@ -314,9 +349,9 @@ void Frame::StartNavigate(mojo::URLRequestPtr request) {
 
   pending_navigate_.reset();
 
-  // We need a View to navigate. When we get the View we'll complete the
+  // We need a Window to navigate. When we get the Window we'll complete the
   // navigation.
-  if (!view_) {
+  if (!window_) {
     pending_navigate_ = request.Pass();
     return;
   }
@@ -327,33 +362,44 @@ void Frame::StartNavigate(mojo::URLRequestPtr request) {
   DVLOG(2) << "Frame::StartNavigate id=" << id_ << " url=" << request->url;
 
   const GURL requested_url(request->url);
+  base::TimeTicks navigation_start_time =
+      base::TimeTicks::FromInternalValue(request->originating_time_ticks);
   tree_->delegate_->CanNavigateFrame(
-      this, request.Pass(),
-      base::Bind(&Frame::OnCanNavigateFrame,
-                 navigate_weak_ptr_factory_.GetWeakPtr(), requested_url));
+      this, request.Pass(), base::Bind(&Frame::OnCanNavigateFrame,
+                                       navigate_weak_ptr_factory_.GetWeakPtr(),
+                                       requested_url, navigation_start_time));
 }
 
-void Frame::OnCanNavigateFrame(const GURL& url,
-                               uint32_t app_id,
-                               mojom::FrameClient* frame_client,
-                               scoped_ptr<FrameUserData> user_data,
-                               mojo::ViewTreeClientPtr view_tree_client) {
+void Frame::OnCanNavigateFrame(
+    const GURL& url,
+    base::TimeTicks navigation_start_time,
+    uint32_t app_id,
+    mojom::FrameClient* frame_client,
+    scoped_ptr<FrameUserData> user_data,
+    mus::mojom::WindowTreeClientPtr window_tree_client) {
+  TRACE_EVENT1("web_view", "Frame::OnCanNavigateFrame",
+               "url", url.possibly_invalid_spec());
+
   DVLOG(2) << "Frame::OnCanNavigateFrame id=" << id_
            << " equal=" << (AreAppIdsEqual(app_id, app_id_) ? "true" : "false");
   if (AreAppIdsEqual(app_id, app_id_)) {
     // The app currently rendering the frame will continue rendering it. In this
-    // case we do not use the ViewTreeClient (because the app has a View already
+    // case we do not use the WindowTreeClient (because the app has a Window
+    // already
     // and ends up reusing it).
-    DCHECK(!view_tree_client.get());
-    ChangeClient(frame_client, user_data.Pass(), view_tree_client.Pass(),
-                 app_id);
+    DCHECK(!window_tree_client.get());
+    ChangeClient(frame_client, user_data.Pass(), window_tree_client.Pass(),
+                 app_id, navigation_start_time);
   } else {
     waiting_for_on_will_navigate_ack_ = true;
-    DCHECK(view_tree_client.get());
+    DCHECK(window_tree_client.get());
     // TODO(sky): url isn't correct here, it should be a security origin.
-    frame_client_->OnWillNavigate(url.spec(), base::Bind(
-        &Frame::OnWillNavigateAck, base::Unretained(this), frame_client,
-        base::Passed(&user_data), base::Passed(&view_tree_client), app_id));
+    frame_client_->OnWillNavigate(
+        url.spec(),
+        base::Bind(&Frame::OnWillNavigateAck, base::Unretained(this),
+                   frame_client, base::Passed(&user_data),
+                   base::Passed(&window_tree_client), app_id,
+                   navigation_start_time));
   }
 }
 
@@ -399,37 +445,38 @@ void Frame::NotifyDispatchFrameLoadEvent(const Frame* frame) {
 void Frame::OnTreeChanged(const TreeChangeParams& params) {
   if (params.new_parent && this == tree_->root()) {
     Frame* child_frame = FindFrame(params.target->id());
-    if (child_frame && !child_frame->view_)
-      child_frame->SetView(params.target);
+    if (child_frame && !child_frame->window_)
+      child_frame->SetWindow(params.target);
   }
 }
 
-void Frame::OnViewDestroying(mus::View* view) {
+void Frame::OnWindowDestroying(mus::Window* window) {
   if (parent_)
     parent_->Remove(this);
 
-  // Reset |view_ownership_| so we don't attempt to delete |view_| in the
+  // Reset |window_ownership_| so we don't attempt to delete |window_| in the
   // destructor.
-  view_ownership_ = ViewOwnership::DOESNT_OWN_VIEW;
+  window_ownership_ = WindowOwnership::DOESNT_OWN_WINDOW;
 
   if (tree_->root() == this) {
-    view_->RemoveObserver(this);
-    view_ = nullptr;
+    window_->RemoveObserver(this);
+    window_ = nullptr;
     return;
   }
 
   delete this;
 }
 
-void Frame::OnViewEmbeddedAppDisconnected(mus::View* view) {
-  // See FrameTreeDelegate::OnViewEmbeddedAppDisconnected() for details of when
+void Frame::OnWindowEmbeddedAppDisconnected(mus::Window* window) {
+  // See FrameTreeDelegate::OnWindowEmbeddedAppDisconnected() for details of
+  // when
   // this happens.
   //
   // Currently we have no way to distinguish between the cases that lead to this
   // being called, so we assume we can continue on. Continuing on is important
   // for html as it's entirely possible for a page to create a frame, navigate
   // to a bogus url and expect the frame to still exist.
-  tree_->delegate_->OnViewEmbeddedInFrameDisconnected(this);
+  tree_->delegate_->OnWindowEmbeddedInFrameDisconnected(this);
 }
 
 void Frame::PostMessageEventToFrame(uint32_t target_frame_id,
@@ -530,7 +577,7 @@ void Frame::RequestNavigate(mojom::NavigationTargetType target_type,
 }
 
 void Frame::DidNavigateLocally(const mojo::String& url) {
-  NOTIMPLEMENTED();
+  tree_->DidNavigateLocally(this, url.To<GURL>());
 }
 
 void Frame::DispatchLoadEventToParent() {
@@ -541,6 +588,19 @@ void Frame::DispatchLoadEventToParent() {
     // from our side.
     parent_->NotifyDispatchFrameLoadEvent(this);
   }
+}
+
+void Frame::OnFindInFrameCountUpdated(int32_t request_id,
+                                      int32_t count,
+                                      bool final_update) {
+  tree_->delegate_->OnFindInFrameCountUpdated(request_id, this, count,
+                                              final_update);
+}
+
+void Frame::OnFindInPageSelectionUpdated(int32_t request_id,
+                                         int32_t active_match_ordinal) {
+  tree_->delegate_->OnFindInPageSelectionUpdated(request_id, this,
+                                                 active_match_ordinal);
 }
 
 }  // namespace web_view

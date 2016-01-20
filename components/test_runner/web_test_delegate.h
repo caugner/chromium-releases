@@ -27,13 +27,14 @@ class WebGamepads;
 class WebHistoryItem;
 class WebLayer;
 class WebLocalFrame;
+class WebMediaStream;
 class WebPlugin;
 struct WebPluginParams;
-class WebURLResponse;
-class WebView;
 struct WebRect;
 struct WebSize;
 struct WebURLError;
+class WebURLResponse;
+class WebView;
 }
 
 namespace cc {
@@ -144,6 +145,10 @@ class WebTestDelegate {
   virtual void EvaluateInWebInspector(long call_id,
                                       const std::string& script) = 0;
 
+  // Evaluate the given script in the inspector overlay page.
+  virtual std::string EvaluateInWebInspectorOverlay(
+      const std::string& script) = 0;
+
   // Controls WebSQL databases.
   virtual void ClearAllDatabases() = 0;
   virtual void SetDatabaseQuota(int quota) = 0;
@@ -243,6 +248,9 @@ class WebTestDelegate {
 
   // Clear all the permissions set via SetPermission().
   virtual void ResetPermissions() = 0;
+
+  // Add content MediaStream classes to the Blink MediaStream ones.
+  virtual bool AddMediaStreamSourceAndTrack(blink::WebMediaStream* stream) = 0;
 
   virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
 

@@ -180,6 +180,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       "copyFromDirectoryTreeWithKeyboardShortcut"),
         TestParameter(IN_GUEST_MODE,
                       "copyFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "copyFromDirectoryTreeWithoutChaningCurrentDirectory"),
         TestParameter(NOT_IN_GUEST_MODE, "cutFromDirectoryTreeWithContextMenu"),
         TestParameter(IN_GUEST_MODE, "cutFromDirectoryTreeWithContextMenu"),
         TestParameter(NOT_IN_GUEST_MODE,
@@ -187,9 +189,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(IN_GUEST_MODE,
                       "cutFromDirectoryTreeWithKeyboardShortcut"),
         TestParameter(NOT_IN_GUEST_MODE,
+                      "cutFromDirectoryTreeWithoutChaningCurrentDirectory"),
+        TestParameter(NOT_IN_GUEST_MODE,
                       "pasteIntoFolderFromDirectoryTreeWithContextMenu"),
         TestParameter(IN_GUEST_MODE,
                       "pasteIntoFolderFromDirectoryTreeWithContextMenu"),
+        TestParameter(
+            NOT_IN_GUEST_MODE,
+            "pasteIntoFolderFromDirectoryTreeWithoutChaningCurrentDirectory"),
         TestParameter(NOT_IN_GUEST_MODE,
                       "renameDirectoryFromDirectoryTreeWithContextMenu"),
         TestParameter(IN_GUEST_MODE,
@@ -198,6 +205,9 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       "renameDirectoryFromDirectoryTreeWithKeyboardShortcut"),
         TestParameter(IN_GUEST_MODE,
                       "renameDirectoryFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(
+            NOT_IN_GUEST_MODE,
+            "renameDirectoryFromDirectoryTreeWithoutChangingCurrentDirectory"),
         TestParameter(NOT_IN_GUEST_MODE,
                       "renameDirectoryToEmptyStringFromDirectoryTree"),
         TestParameter(IN_GUEST_MODE,
@@ -209,7 +219,10 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE,
                       "createDirectoryFromDirectoryTreeWithContextMenu"),
         TestParameter(NOT_IN_GUEST_MODE,
-                      "createDirectoryFromDirectoryTreeWithKeyboardShortcut")));
+                      "createDirectoryFromDirectoryTreeWithKeyboardShortcut"),
+        TestParameter(NOT_IN_GUEST_MODE,
+                      "createDirectoryFromDirectoryTreeWithoutChangingCurrentDi"
+                      "rectory")));
 
 // Fails on official build. http://crbug.com/429294
 #if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
@@ -517,6 +530,19 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "requestMountSourceDevice"),
         TestParameter(NOT_IN_GUEST_MODE, "requestMountSourceFile")));
 
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_GearMenu DISABLED_GearMenu
+#else
+#define MAYBE_GearMenu GearMenu
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_GearMenu,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "showHiddenFilesOnDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "showHiddenFilesOnDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "hideGoogleDocs")));
+
 // Structure to describe an account info.
 struct TestAccountInfo {
   const char* const gaia_id;
@@ -583,9 +609,10 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
   void AddUser(const TestAccountInfo& info, bool log_in) {
     user_manager::UserManager* const user_manager =
         user_manager::UserManager::Get();
+    const AccountId account_id(AccountId::FromUserEmail(info.email));
     if (log_in)
-      user_manager->UserLoggedIn(info.email, info.hash, false);
-    user_manager->SaveUserDisplayName(info.email,
+      user_manager->UserLoggedIn(account_id, info.hash, false);
+    user_manager->SaveUserDisplayName(account_id,
                                       base::UTF8ToUTF16(info.display_name));
     SigninManagerFactory::GetForProfile(
         chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))

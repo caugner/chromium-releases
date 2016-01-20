@@ -1,16 +1,20 @@
 #!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
 import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir, 'telemetry'))
+from core import path_util
+sys.path.append(path_util.GetTelemetryDir())
+
 from telemetry import benchmark_runner
 
-sys.path.append(os.path.join(os.path.dirname(__file__), 'core'))
-from core import project_config
+from chrome_telemetry_build import chromium_config
+
+def main():
+  config = chromium_config.ChromiumConfig()
+  return benchmark_runner.main(config)
 
 if __name__ == '__main__':
-  sys.exit(benchmark_runner.main(project_config.config))
+  sys.exit(main())

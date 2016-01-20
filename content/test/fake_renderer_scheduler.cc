@@ -4,12 +4,18 @@
 
 #include "content/test/fake_renderer_scheduler.h"
 
+#include "third_party/WebKit/public/platform/WebThread.h"
+
 namespace content {
 
 FakeRendererScheduler::FakeRendererScheduler() {
 }
 
 FakeRendererScheduler::~FakeRendererScheduler() {
+}
+
+scoped_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
+  return nullptr;
 }
 
 scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::DefaultTaskRunner() {
@@ -45,6 +51,11 @@ scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::NewTimerTaskRunner(
   return nullptr;
 }
 
+scoped_ptr<scheduler::RenderWidgetSchedulingState>
+FakeRendererScheduler::NewRenderWidgetSchedulingState() {
+  return nullptr;
+}
+
 void FakeRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {
 }
 
@@ -68,12 +79,6 @@ void FakeRendererScheduler::DidAnimateForInputOnCompositorThread() {
 
 bool FakeRendererScheduler::IsHighPriorityWorkAnticipated() {
   return false;
-}
-
-void FakeRendererScheduler::OnRendererHidden() {
-}
-
-void FakeRendererScheduler::OnRendererVisible() {
 }
 
 void FakeRendererScheduler::OnRendererBackgrounded() {
@@ -118,5 +123,13 @@ void FakeRendererScheduler::ResumeTimerQueue() {
 
 void FakeRendererScheduler::SetTimerQueueSuspensionWhenBackgroundedEnabled(
     bool enabled) {}
+
+double FakeRendererScheduler::CurrentTimeSeconds() const {
+  return 0.0;
+}
+
+double FakeRendererScheduler::MonotonicallyIncreasingTimeSeconds() const {
+  return 0.0;
+}
 
 }  // namespace content

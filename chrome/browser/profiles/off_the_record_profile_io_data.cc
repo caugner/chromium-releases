@@ -159,12 +159,10 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   // Set initialized_ to true at the beginning in case any of the objects
   // below try to get the ResourceContext pointer.
   initialized_ = true;
-#if defined(SAFE_BROWSING_SERVICE)
   io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
       profile_->GetPrefs());
   io_data_->safe_browsing_enabled()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-#endif
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -247,9 +245,9 @@ void OffTheRecordProfileIOData::InitializeInternal(
           NULL,
           profile_params->cookie_monster_delegate.get())));
 
-  net::HttpCache::BackendFactory* main_backend =
-      net::HttpCache::DefaultBackend::InMemory(0);
-  main_http_factory_ = CreateMainHttpFactory(profile_params, main_backend);
+  http_network_session_ = CreateHttpNetworkSession(*profile_params);
+  main_http_factory_ = CreateMainHttpFactory(
+      http_network_session_.get(), net::HttpCache::DefaultBackend::InMemory(0));
 
   main_context->set_http_transaction_factory(main_http_factory_.get());
 #if !defined(DISABLE_FTP_SUPPORT)
@@ -302,9 +300,8 @@ void OffTheRecordProfileIOData::
   net::CookieMonster* extensions_cookie_store =
       content::CreateCookieStore(content::CookieStoreConfig())->
           GetCookieMonster();
-  // Enable cookies for devtools and extension URLs.
+  // Enable cookies for chrome-extension URLs.
   const char* const schemes[] = {
-      content::kChromeDevToolsScheme,
       extensions::kExtensionScheme
   };
   extensions_cookie_store->SetCookieableSchemes(schemes, arraysize(schemes));
@@ -346,12 +343,9 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
       content::CreateCookieStore(content::CookieStoreConfig()));
 
   // Use a separate in-memory cache for the app.
-  net::HttpCache::BackendFactory* app_backend =
-      net::HttpCache::DefaultBackend::InMemory(0);
-  net::HttpNetworkSession* main_network_session =
-      main_http_factory_->GetSession();
   scoped_ptr<net::HttpCache> app_http_cache =
-      CreateHttpFactory(main_network_session, app_backend);
+      CreateHttpFactory(http_network_session_.get(),
+                        net::HttpCache::DefaultBackend::InMemory(0));
 
   context->SetHttpTransactionFactory(app_http_cache.Pass());
 

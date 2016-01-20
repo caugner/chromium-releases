@@ -163,17 +163,15 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   v8::Local<v8::Object> NextOnLine();
   v8::Local<v8::Object> PreviousOnLine();
 
-  // DEPRECATED accessible name and description accessors
-  std::string DeprecatedTitle();
-  std::string DeprecatedDescription();
-  std::string DeprecatedHelpText();
-  v8::Local<v8::Object> DeprecatedTitleUIElement();
-
-  // NEW accessible name and description accessors
   std::string Name();
   std::string NameFrom();
   int NameElementCount();
   v8::Local<v8::Object> NameElementAtIndex(unsigned index);
+
+  std::string Description();
+  std::string DescriptionFrom();
+  int DescriptionElementCount();
+  v8::Local<v8::Object> DescriptionElementAtIndex(unsigned index);
 
   blink::WebAXObject accessibility_object_;
   Factory* factory_;

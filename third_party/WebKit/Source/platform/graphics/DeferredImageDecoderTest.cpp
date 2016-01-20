@@ -26,7 +26,6 @@
 #include "config.h"
 #include "platform/graphics/DeferredImageDecoder.h"
 
-#include "SkBitmapDevice.h"
 #include "SkCanvas.h"
 #include "SkPicture.h"
 #include "SkPictureRecorder.h"
@@ -226,7 +225,7 @@ TEST_F(DeferredImageDecoderTest, decodeOnOtherThread)
 
     // Create a thread to rasterize SkPicture.
     OwnPtr<WebThread> thread = adoptPtr(Platform::current()->createThread("RasterThread"));
-    thread->taskRunner()->postTask(FROM_HERE, new Task(threadSafeBind(&rasterizeMain, AllowCrossThreadAccess(m_surface->getCanvas()), AllowCrossThreadAccess(picture.get()))));
+    thread->taskRunner()->postTask(BLINK_FROM_HERE, new Task(threadSafeBind(&rasterizeMain, AllowCrossThreadAccess(m_surface->getCanvas()), AllowCrossThreadAccess(picture.get()))));
     thread.clear();
     EXPECT_EQ(0, m_decodeRequestCount);
 

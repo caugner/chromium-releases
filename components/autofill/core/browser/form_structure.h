@@ -69,11 +69,13 @@ class FormStructure {
   bool EncodeFieldAssignments(const ServerFieldTypeSet& available_field_types,
                               std::string* encoded_xml) const;
 
-  // Encodes the XML query request for the set of forms.
-  // All fields are returned in one XML. For example, there are three forms,
-  // with 2, 4, and 3 fields. The returned XML would have type info for 9
-  // fields, first two of which would be for the first form, next 4 for the
-  // second, and the rest is for the third.
+  // Encodes the XML query request for the set of |forms| that are valid (see
+  // implementation for details on which forms are not included in the query).
+  // The form signatures used in the Query request are output in
+  // |encoded_signatures|. All valid fields are encoded in |encoded_xml|. For
+  // example, there are three valid forms, with 2, 4, and 3 fields. The returned
+  // XML would have type info for 9 fields, first two of which would be for the
+  // first form, next 4 for the second, and the rest is for the third.
   static bool EncodeQueryRequest(const std::vector<FormStructure*>& forms,
                                  std::vector<std::string>* encoded_signatures,
                                  std::string* encoded_xml);
@@ -127,7 +129,8 @@ class FormStructure {
   void LogQualityMetrics(const base::TimeTicks& load_time,
                          const base::TimeTicks& interaction_time,
                          const base::TimeTicks& submission_time,
-                         rappor::RapporService* rappor_service) const;
+                         rappor::RapporService* rappor_service,
+                         bool did_show_suggestions) const;
 
   // Classifies each field in |fields_| based upon its |autocomplete| attribute,
   // if the attribute is available.  The association is stored into the field's
@@ -189,8 +192,6 @@ class FormStructure {
   const base::string16& form_name() const { return form_name_; }
 
   const GURL& source_url() const { return source_url_; }
-
-  bool has_password_field() const { return has_password_field_; }
 
   void set_upload_required(UploadRequired required) {
     upload_required_ = required;

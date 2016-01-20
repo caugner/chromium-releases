@@ -4,31 +4,47 @@
 
 #include "chrome/browser/sync/chrome_sync_client.h"
 
+#include "base/bind.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/sessions/notification_service_sessions_router.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
+#include "chrome/browser/ui/sync/browser_synced_window_delegates_getter.h"
+#include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
+#include "chrome/common/url_constants.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_metadata_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
+#include "components/history/core/browser/history_model_worker.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/sync/browser/password_model_worker.h"
+#include "components/sync_driver/glue/browser_thread_model_worker.h"
+#include "components/sync_driver/glue/ui_model_worker.h"
 #include "components/sync_driver/sync_api_component_factory.h"
+#include "components/sync_sessions/sync_sessions_client.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/internal_api/public/engine/passive_model_worker.h"
 
 #if defined(ENABLE_APP_LIST)
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
@@ -61,22 +77,93 @@
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/sync/glue/synced_window_delegates_getter_android.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "components/wifi_sync/wifi_credential_syncable_service.h"
 #include "components/wifi_sync/wifi_credential_syncable_service_factory.h"
 #endif
 
+using content::BrowserThread;
+
 namespace browser_sync {
+
+// Chrome implementation of SyncSessionsClient. Needs to be in a separate class
+// due to possible multiple inheritance issues, wherein ChromeSyncClient might
+// inherit from other interfaces with same methods.
+class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
+ public:
+  explicit SyncSessionsClientImpl(Profile* profile) : profile_(profile) {
+    window_delegates_getter_.reset(
+#if defined(OS_ANDROID)
+        // Android doesn't have multi-profile support, so no need to pass the
+        // profile in.
+        new browser_sync::SyncedWindowDelegatesGetterAndroid());
+#else
+        new browser_sync::BrowserSyncedWindowDelegatesGetter(profile));
+#endif
+  }
+  ~SyncSessionsClientImpl() override {}
+
+  // SyncSessionsClient implementation.
+  bookmarks::BookmarkModel* GetBookmarkModel() override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    return BookmarkModelFactory::GetForProfile(profile_);
+  }
+  favicon::FaviconService* GetFaviconService() override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    return FaviconServiceFactory::GetForProfile(
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  }
+  history::HistoryService* GetHistoryService() override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    return HistoryServiceFactory::GetForProfile(
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  }
+  bool ShouldSyncURL(const GURL& url) const override {
+    if (url == GURL(chrome::kChromeUIHistoryURL)) {
+      // The history page is treated specially as we want it to trigger syncable
+      // events for UI purposes.
+      return true;
+    }
+    return url.is_valid() && !url.SchemeIs(content::kChromeUIScheme) &&
+           !url.SchemeIs(chrome::kChromeNativeScheme) && !url.SchemeIsFile();
+  }
+
+  SyncedWindowDelegatesGetter* GetSyncedWindowDelegatesGetter() override {
+    return window_delegates_getter_.get();
+  }
+
+  scoped_ptr<browser_sync::LocalSessionEventRouter> GetLocalSessionEventRouter()
+      override {
+    syncer::SyncableService::StartSyncFlare flare(
+        sync_start_util::GetFlareForSyncableService(profile_->GetPath()));
+    return make_scoped_ptr(
+        new NotificationServiceSessionsRouter(profile_, this, flare));
+  }
+
+ private:
+  Profile* profile_;
+  scoped_ptr<SyncedWindowDelegatesGetter> window_delegates_getter_;
+
+  DISALLOW_COPY_AND_ASSIGN(SyncSessionsClientImpl);
+};
 
 ChromeSyncClient::ChromeSyncClient(
     Profile* profile,
     scoped_ptr<sync_driver::SyncApiComponentFactory> component_factory)
-    : profile_(profile), component_factory_(component_factory.Pass()) {}
+    : profile_(profile),
+      component_factory_(component_factory.Pass()),
+      sync_sessions_client_(new SyncSessionsClientImpl(profile)),
+      browsing_data_remover_observer_(NULL) {}
+
 ChromeSyncClient::~ChromeSyncClient() {
 }
 
 void ChromeSyncClient::Initialize(sync_driver::SyncService* sync_service) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   sync_service_ = sync_service;
   web_data_service_ = GetWebDataService();
   password_store_ = GetPasswordStore();
@@ -86,43 +173,82 @@ void ChromeSyncClient::Initialize(sync_driver::SyncService* sync_service) {
 sync_driver::SyncService* ChromeSyncClient::GetSyncService() {
   // TODO(zea): bring back this DCHECK after Typed URLs are converted to
   // SyncableService.
-  // DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  // DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return sync_service_;
 }
 
 PrefService* ChromeSyncClient::GetPrefService() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return profile_->GetPrefs();
 }
 
 bookmarks::BookmarkModel* ChromeSyncClient::GetBookmarkModel() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return BookmarkModelFactory::GetForProfile(profile_);
 }
 
+favicon::FaviconService* ChromeSyncClient::GetFaviconService() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return FaviconServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+}
+
 history::HistoryService* ChromeSyncClient::GetHistoryService() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return HistoryServiceFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 autofill::PersonalDataManager* ChromeSyncClient::GetPersonalDataManager() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return autofill::PersonalDataManagerFactory::GetForProfile(profile_);
 }
 
 scoped_refptr<password_manager::PasswordStore>
 ChromeSyncClient::GetPasswordStore() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return PasswordStoreFactory::GetForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
+sync_driver::ClearBrowsingDataCallback
+ChromeSyncClient::GetClearBrowsingDataCallback() {
+  return base::Bind(&ChromeSyncClient::ClearBrowsingData,
+                    base::Unretained(this));
+}
+
+base::Closure ChromeSyncClient::GetPasswordStateChangedCallback() {
+  return base::Bind(
+      &PasswordStoreFactory::OnPasswordsSyncedStatePotentiallyChanged,
+      base::Unretained(profile_));
+}
+
 scoped_refptr<autofill::AutofillWebDataService>
 ChromeSyncClient::GetWebDataService() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return WebDataServiceFactory::GetAutofillWebDataForProfile(
       profile_, ServiceAccessType::EXPLICIT_ACCESS);
+}
+
+BookmarkUndoService* ChromeSyncClient::GetBookmarkUndoServiceIfExists() {
+  return BookmarkUndoServiceFactory::GetForProfileIfExists(profile_);
+}
+
+invalidation::InvalidationService* ChromeSyncClient::GetInvalidationService() {
+  invalidation::ProfileInvalidationProvider* provider =
+      invalidation::ProfileInvalidationProviderFactory::GetForProfile(profile_);
+  if (provider)
+    return provider->GetInvalidationService();
+  return nullptr;
+}
+
+scoped_refptr<syncer::ExtensionsActivity>
+ChromeSyncClient::GetExtensionsActivity() {
+  return extensions_activity_monitor_.GetExtensionsActivity();
+}
+
+sync_sessions::SyncSessionsClient* ChromeSyncClient::GetSyncSessionsClient() {
+  return sync_sessions_client_.get();
 }
 
 base::WeakPtr<syncer::SyncableService>
@@ -250,9 +376,69 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
   }
 }
 
+scoped_refptr<syncer::ModelSafeWorker>
+ChromeSyncClient::CreateModelWorkerForGroup(
+    syncer::ModelSafeGroup group,
+    syncer::WorkerLoopDestructionObserver* observer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  switch (group) {
+    case syncer::GROUP_DB:
+      return new BrowserThreadModelWorker(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+          syncer::GROUP_DB, observer);
+    case syncer::GROUP_FILE:
+      return new BrowserThreadModelWorker(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
+          syncer::GROUP_FILE, observer);
+    case syncer::GROUP_UI:
+      return new UIModelWorker(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          observer);
+    case syncer::GROUP_PASSIVE:
+      return new syncer::PassiveModelWorker(observer);
+    case syncer::GROUP_HISTORY: {
+      history::HistoryService* history_service = GetHistoryService();
+      if (!history_service)
+        return nullptr;
+      return new HistoryModelWorker(
+          history_service->AsWeakPtr(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          observer);
+    }
+    case syncer::GROUP_PASSWORD: {
+      scoped_refptr<password_manager::PasswordStore> password_store =
+          GetPasswordStore();
+      if (!password_store.get())
+        return nullptr;
+      return new PasswordModelWorker(password_store, observer);
+    }
+    default:
+      return nullptr;
+  }
+}
+
 sync_driver::SyncApiComponentFactory*
 ChromeSyncClient::GetSyncApiComponentFactory() {
   return component_factory_.get();
+}
+
+void ChromeSyncClient::ClearBrowsingData(base::Time start, base::Time end) {
+  // BrowsingDataRemover deletes itself when it's done.
+  BrowsingDataRemover* remover =
+      BrowsingDataRemover::CreateForRange(profile_, start, end);
+  if (browsing_data_remover_observer_)
+    remover->AddObserver(browsing_data_remover_observer_);
+  remover->Remove(BrowsingDataRemover::REMOVE_ALL, BrowsingDataHelper::ALL);
+
+  scoped_refptr<password_manager::PasswordStore> password =
+      PasswordStoreFactory::GetForProfile(profile_,
+                                          ServiceAccessType::EXPLICIT_ACCESS);
+  password->RemoveLoginsSyncedBetween(start, end);
+}
+
+void ChromeSyncClient::SetBrowsingDataRemoverObserverForTesting(
+    BrowsingDataRemover::Observer* observer) {
+  browsing_data_remover_observer_ = observer;
 }
 
 }  // namespace browser_sync

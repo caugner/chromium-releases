@@ -29,7 +29,6 @@
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
-#include "net/base/net_util.h"
 #include "ui/base/device_form_factor.h"
 #include "url/gurl.h"
 
@@ -647,13 +646,13 @@ bool TemplateURLRef::ParseParameter(size_t start,
   } else if (parameter == "yandex:searchPath") {
     switch (ui::GetDeviceFormFactor()) {
       case ui::DEVICE_FORM_FACTOR_DESKTOP:
-        url->insert(start, "yandsearch");
+        url->insert(start, "search/");
         break;
       case ui::DEVICE_FORM_FACTOR_PHONE:
-        url->insert(start, "touchsearch");
+        url->insert(start, "search/touch/");
         break;
       case ui::DEVICE_FORM_FACTOR_TABLET:
-        url->insert(start, "padsearch");
+        url->insert(start, "search/pad/");
         break;
     }
   } else if (parameter == "inputEncoding") {
@@ -1217,8 +1216,8 @@ base::string16 TemplateURL::GenerateKeyword(
   // |url|'s hostname may be IDN-encoded. Before generating |keyword| from it,
   // convert to Unicode using the user's accept-languages, so it won't look like
   // a confusing punycode string.
-  base::string16 keyword =
-      net::StripWWW(url_formatter::IDNToUnicode(url.host(), accept_languages));
+  base::string16 keyword = url_formatter::StripWWW(
+      url_formatter::IDNToUnicode(url.host(), accept_languages));
   // Special case: if the host was exactly "www." (not sure this can happen but
   // perhaps with some weird intranet and custom DNS server?), ensure we at
   // least don't return the empty string.

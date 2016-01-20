@@ -15,7 +15,7 @@
 #include "base/observer_list.h"
 
 namespace keyboard {
-class KeyboardControllerProxy;
+class KeyboardUI;
 }
 
 namespace ash {
@@ -41,13 +41,12 @@ class TestShellDelegate : public ShellDelegate {
   void PreInit() override;
   void PreShutdown() override;
   void Exit() override;
-  keyboard::KeyboardControllerProxy* CreateKeyboardControllerProxy() override;
+  keyboard::KeyboardUI* CreateKeyboardUI() override;
   void VirtualKeyboardActivated(bool activated) override;
   void AddVirtualKeyboardStateObserver(
       VirtualKeyboardStateObserver* observer) override;
   void RemoveVirtualKeyboardStateObserver(
       VirtualKeyboardStateObserver* observer) override;
-  content::BrowserContext* GetActiveBrowserContext() override;
   app_list::AppListViewDelegate* GetAppListViewDelegate() override;
   ShelfDelegate* CreateShelfDelegate(ShelfModel* model) override;
   SystemTrayDelegate* CreateSystemTrayDelegate() override;
@@ -75,7 +74,6 @@ class TestShellDelegate : public ShellDelegate {
   bool multi_profiles_enabled_;
   bool force_maximize_on_first_run_;
 
-  scoped_ptr<content::BrowserContext> active_browser_context_;
   scoped_ptr<app_list::AppListViewDelegate> app_list_view_delegate_;
 
   base::ObserverList<ash::VirtualKeyboardStateObserver>

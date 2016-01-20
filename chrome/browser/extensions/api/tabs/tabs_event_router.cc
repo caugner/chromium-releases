@@ -4,10 +4,7 @@
 
 #include "chrome/browser/extensions/api/tabs/tabs_event_router.h"
 
-#include "base/command_line.h"
-#include "base/json/json_writer.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/api/tabs/windows_event_router.h"
@@ -17,20 +14,15 @@
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "content/public/browser/favicon_status.h"
-#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 
 using base::DictionaryValue;
 using base::ListValue;
 using base::FundamentalValue;
-using content::NavigationController;
 using content::WebContents;
 using ui_zoom::ZoomController;
 
@@ -63,20 +55,21 @@ bool WillDispatchTabUpdatedEvent(
 
 }  // namespace
 
-TabsEventRouter::TabEntry::TabEntry(content::WebContents* contents)
-    : contents_(contents),
+TabsEventRouter::TabEntry::TabEntry(TabsEventRouter* router,
+                                    content::WebContents* contents)
+    : WebContentsObserver(contents),
       complete_waiting_on_load_(false),
       was_audible_(contents->WasRecentlyAudible()),
-      was_muted_(contents->IsAudioMuted()) {
-}
+      was_muted_(contents->IsAudioMuted()),
+      router_(router) {}
 
 scoped_ptr<base::DictionaryValue> TabsEventRouter::TabEntry::UpdateLoadState() {
   // The tab may go in & out of loading (for instance if iframes navigate).
   // We only want to respond to the first change from loading to !loading after
-  // the NAV_ENTRY_COMMITTED was fired.
+  // the NavigationEntryCommitted() was fired.
   scoped_ptr<base::DictionaryValue> changed_properties(
       new base::DictionaryValue());
-  if (!complete_waiting_on_load_ || contents_->IsLoading()) {
+  if (!complete_waiting_on_load_ || web_contents()->IsLoading()) {
     return changed_properties.Pass();
   }
 
@@ -95,11 +88,19 @@ scoped_ptr<base::DictionaryValue> TabsEventRouter::TabEntry::DidNavigate() {
   changed_properties->SetString(tabs_constants::kStatusKey,
                                 tabs_constants::kStatusValueLoading);
 
-  if (contents_->GetURL() != url_) {
-    url_ = contents_->GetURL();
+  if (web_contents()->GetURL() != url_) {
+    url_ = web_contents()->GetURL();
     changed_properties->SetString(tabs_constants::kUrlKey, url_.spec());
   }
 
+  return changed_properties.Pass();
+}
+
+scoped_ptr<base::DictionaryValue> TabsEventRouter::TabEntry::TitleChanged() {
+  scoped_ptr<base::DictionaryValue> changed_properties(
+      new base::DictionaryValue());
+  changed_properties->SetString(tabs_constants::kTitleKey,
+                                web_contents()->GetTitle());
   return changed_properties.Pass();
 }
 
@@ -117,85 +118,63 @@ bool TabsEventRouter::TabEntry::SetMuted(bool new_val) {
   return true;
 }
 
+void TabsEventRouter::TabEntry::NavigationEntryCommitted(
+    const content::LoadCommittedDetails& load_details) {
+  router_->TabUpdated(this, DidNavigate());
+}
+
+void TabsEventRouter::TabEntry::TitleWasSet(content::NavigationEntry* entry,
+                                            bool explicit_set) {
+  router_->TabUpdated(this, TitleChanged());
+}
+
+void TabsEventRouter::TabEntry::WebContentsDestroyed() {
+  // This is necessary because it's possible for tabs to be created, detached
+  // and then destroyed without ever having been re-attached and closed. This
+  // happens in the case of a devtools WebContents that is opened in window,
+  // docked, then closed.
+  // Warning: |this| will be deleted after this call.
+  router_->UnregisterForTabNotifications(web_contents());
+}
+
 TabsEventRouter::TabsEventRouter(Profile* profile)
-    : profile_(profile), favicon_scoped_observer_(this) {
+    : profile_(profile),
+      favicon_scoped_observer_(this),
+      browser_tab_strip_tracker_(this, this, this) {
   DCHECK(!profile->IsOffTheRecord());
 
-  BrowserList::AddObserver(this);
-
-  // Init() can happen after the browser is running, so catch up with any
-  // windows that already exist.
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    RegisterForBrowserNotifications(*it);
-
-    // Also catch up our internal bookkeeping of tab entries.
-    Browser* browser = *it;
-    if (ExtensionTabUtil::BrowserSupportsTabs(browser)) {
-      for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
-        WebContents* contents = browser->tab_strip_model()->GetWebContentsAt(i);
-        int tab_id = ExtensionTabUtil::GetTabId(contents);
-        tab_entries_[tab_id] = make_linked_ptr(new TabEntry(contents));
-      }
-    }
-  }
+  browser_tab_strip_tracker_.Init(
+      BrowserTabStripTracker::InitWith::ALL_BROWERS);
 }
 
 TabsEventRouter::~TabsEventRouter() {
-  BrowserList::RemoveObserver(this);
 }
 
-void TabsEventRouter::OnBrowserAdded(Browser* browser) {
-  RegisterForBrowserNotifications(browser);
-}
-
-void TabsEventRouter::RegisterForBrowserNotifications(Browser* browser) {
-  if (!profile_->IsSameProfile(browser->profile()) ||
-      !ExtensionTabUtil::BrowserSupportsTabs(browser))
-    return;
-  // Start listening to TabStripModel events for this browser.
-  TabStripModel* tab_strip = browser->tab_strip_model();
-  tab_strip->AddObserver(this);
-
-  for (int i = 0; i < tab_strip->count(); ++i) {
-    RegisterForTabNotifications(tab_strip->GetWebContentsAt(i));
-  }
+bool TabsEventRouter::ShouldTrackBrowser(Browser* browser) {
+  return profile_->IsSameProfile(browser->profile()) &&
+         ExtensionTabUtil::BrowserSupportsTabs(browser);
 }
 
 void TabsEventRouter::RegisterForTabNotifications(WebContents* contents) {
-  registrar_.Add(
-      this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::Source<NavigationController>(&contents->GetController()));
-
-  // Observing NOTIFICATION_WEB_CONTENTS_DESTROYED is necessary because it's
-  // possible for tabs to be created, detached and then destroyed without
-  // ever having been re-attached and closed. This happens in the case of
-  // a devtools WebContents that is opened in window, docked, then closed.
-  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                 content::Source<WebContents>(contents));
-
   favicon_scoped_observer_.Add(
       favicon::ContentFaviconDriver::FromWebContents(contents));
 
   ZoomController::FromWebContents(contents)->AddObserver(this);
+
+  int tab_id = ExtensionTabUtil::GetTabId(contents);
+  DCHECK(tab_entries_.find(tab_id) == tab_entries_.end());
+  tab_entries_[tab_id] = make_scoped_ptr(new TabEntry(this, contents));
 }
 
 void TabsEventRouter::UnregisterForTabNotifications(WebContents* contents) {
-  registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::Source<NavigationController>(&contents->GetController()));
-  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-      content::Source<WebContents>(contents));
   favicon_scoped_observer_.Remove(
       favicon::ContentFaviconDriver::FromWebContents(contents));
 
   ZoomController::FromWebContents(contents)->RemoveObserver(this);
-}
 
-void TabsEventRouter::OnBrowserRemoved(Browser* browser) {
-  if (!profile_->IsSameProfile(browser->profile()))
-    return;
-
-  // Stop listening to TabStripModel events for this browser.
-  browser->tab_strip_model()->RemoveObserver(this);
+  int tab_id = ExtensionTabUtil::GetTabId(contents);
+  int removed_count = tab_entries_.erase(tab_id);
+  DCHECK_GT(removed_count, 0);
 }
 
 void TabsEventRouter::OnBrowserSetLastActive(Browser* browser) {
@@ -240,15 +219,17 @@ void TabsEventRouter::TabCreatedAt(WebContents* contents,
 void TabsEventRouter::TabInsertedAt(WebContents* contents,
                                     int index,
                                     bool active) {
-  // If tab is new, send created event.
-  int tab_id = ExtensionTabUtil::GetTabId(contents);
-  if (GetTabEntry(contents).get() == NULL) {
-    tab_entries_[tab_id] = make_linked_ptr(new TabEntry(contents));
-
-    TabCreatedAt(contents, index, active);
+  if (!GetTabEntry(contents)) {
+    // We've never seen this tab, send create event as long as we're not in the
+    // constructor.
+    if (browser_tab_strip_tracker_.is_processing_initial_browsers())
+      RegisterForTabNotifications(contents);
+    else
+      TabCreatedAt(contents, index, active);
     return;
   }
 
+  int tab_id = ExtensionTabUtil::GetTabId(contents);
   scoped_ptr<base::ListValue> args(new base::ListValue);
   args->Append(new FundamentalValue(tab_id));
 
@@ -266,7 +247,7 @@ void TabsEventRouter::TabInsertedAt(WebContents* contents,
 }
 
 void TabsEventRouter::TabDetachedAt(WebContents* contents, int index) {
-  if (GetTabEntry(contents).get() == NULL) {
+  if (!GetTabEntry(contents)) {
     // The tab was removed. Don't send detach event.
     return;
   }
@@ -306,9 +287,6 @@ void TabsEventRouter::TabClosingAt(TabStripModel* tab_strip_model,
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
   DispatchEvent(profile, events::TABS_ON_REMOVED, tabs::OnRemoved::kEventName,
                 args.Pass(), EventRouter::USER_GESTURE_UNKNOWN);
-
-  int removed_count = tab_entries_.erase(tab_id);
-  DCHECK_GT(removed_count, 0);
 
   UnregisterForTabNotifications(contents);
 }
@@ -411,7 +389,7 @@ void TabsEventRouter::TabMoved(WebContents* contents,
 }
 
 void TabsEventRouter::TabUpdated(
-    linked_ptr<TabEntry> entry,
+    TabEntry* entry,
     scoped_ptr<base::DictionaryValue> changed_properties) {
   CHECK(entry->web_contents());
 
@@ -493,46 +471,18 @@ void TabsEventRouter::DispatchTabUpdatedEvent(
   EventRouter::Get(profile)->BroadcastEvent(event.Pass());
 }
 
-linked_ptr<TabsEventRouter::TabEntry> TabsEventRouter::GetTabEntry(
-    WebContents* contents) {
-  int tab_id = ExtensionTabUtil::GetTabId(contents);
+TabsEventRouter::TabEntry* TabsEventRouter::GetTabEntry(WebContents* contents) {
+  const auto it = tab_entries_.find(ExtensionTabUtil::GetTabId(contents));
 
-  TabEntryMap::iterator i = tab_entries_.find(tab_id);
-  if (tab_entries_.end() == i)
-    return linked_ptr<TabEntry>(NULL);
-  return i->second;
-}
-
-void TabsEventRouter::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    NavigationController* source_controller =
-        content::Source<NavigationController>(source).ptr();
-    linked_ptr<TabEntry> entry =
-        GetTabEntry(source_controller->GetWebContents());
-    CHECK(entry.get());
-    TabUpdated(entry, (entry.get())->DidNavigate());
-  } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
-    // Tab was destroyed after being detached (without being re-attached).
-    WebContents* contents = content::Source<WebContents>(source).ptr();
-    registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::Source<NavigationController>(&contents->GetController()));
-    registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-        content::Source<WebContents>(contents));
-    favicon_scoped_observer_.Remove(
-        favicon::ContentFaviconDriver::FromWebContents(contents));
-  } else {
-    NOTREACHED();
-  }
+  return it == tab_entries_.end() ? nullptr : it->second.get();
 }
 
 void TabsEventRouter::TabChangedAt(WebContents* contents,
                                    int index,
                                    TabChangeType change_type) {
-  linked_ptr<TabEntry> entry = GetTabEntry(contents);
-  CHECK(entry.get());
-  TabUpdated(entry, (entry.get())->UpdateLoadState());
+  TabEntry* entry = GetTabEntry(contents);
+  CHECK(entry);
+  TabUpdated(entry, entry->UpdateLoadState());
 }
 
 void TabsEventRouter::TabReplacedAt(TabStripModel* tab_strip_model,
@@ -551,15 +501,10 @@ void TabsEventRouter::TabReplacedAt(TabStripModel* tab_strip_model,
                 events::TABS_ON_REPLACED, tabs::OnReplaced::kEventName,
                 args.Pass(), EventRouter::USER_GESTURE_UNKNOWN);
 
-  // Update tab_entries_.
-  const int removed_count = tab_entries_.erase(old_tab_id);
-  DCHECK_GT(removed_count, 0);
   UnregisterForTabNotifications(old_contents);
 
-  if (GetTabEntry(new_contents).get() == NULL) {
-    tab_entries_[new_tab_id] = make_linked_ptr(new TabEntry(new_contents));
+  if (!GetTabEntry(new_contents))
     RegisterForTabNotifications(new_contents);
-  }
 }
 
 void TabsEventRouter::TabPinnedStateChanged(WebContents* contents, int index) {

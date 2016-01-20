@@ -20,7 +20,7 @@
 // needed.
 // The class forwards some of the methods onto the UIScrollView. For more
 // information look at the UIScrollView documentation.
-// TODO(kkhorimoto): rename class to CRWContentViewScrollViewProxy.
+// TODO(crbug.com/546152): rename class to CRWContentViewScrollViewProxy.
 @interface CRWWebViewScrollViewProxy : NSObject<UIScrollViewDelegate>
 @property(nonatomic, assign) CGPoint contentOffset;
 @property(nonatomic, assign) UIEdgeInsets contentInset;
@@ -33,6 +33,12 @@
 @property(nonatomic, readonly) UIPanGestureRecognizer* panGestureRecognizer;
 // Returns the scrollview's gesture recognizers.
 @property(nonatomic, readonly) NSArray* gestureRecognizers;
+
+// Returns YES if the UIScrollView is currently being updated through the proxy.
+// This can be used by CRWWebViewScrollViewObserver to differentiate renderer-
+// initiated updates from those caused by the proxy API.
+@property(nonatomic, readonly, getter=isUpdatingThroughProxy)
+    BOOL updatingThroughProxy;
 
 // Calls UIScrollView's implementation of setContentInset: directly. This
 // bypasses a very slow update path in UIWebView.
@@ -78,6 +84,8 @@
         (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 - (void)webViewScrollViewDidZoom:
         (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
+- (void)webViewScrollViewDidResetContentSize:
+    (CRWWebViewScrollViewProxy*)webViewScrollViewProxy;
 @end
 
 // A protocol to be implemented by objects to listen for changes to the

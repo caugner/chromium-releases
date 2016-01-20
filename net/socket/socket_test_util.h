@@ -649,6 +649,7 @@ class MockClientSocket : public SSLClientSocket {
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
   void ClearConnectionAttempts() override {}
   void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
+  int64_t GetTotalReceivedBytes() const override;
 
   // SSLClientSocket implementation.
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
@@ -823,6 +824,7 @@ class DeterministicMockUDPClientSocket
   const BoundNetLog& NetLog() const override;
 
   // DatagramClientSocket implementation.
+  int BindToNetwork(NetworkChangeNotifier::NetworkHandle network) override;
   int Connect(const IPEndPoint& address) override;
 
   void set_source_port(uint16 port) { source_port_ = port; }
@@ -945,6 +947,7 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
   const BoundNetLog& NetLog() const override;
 
   // DatagramClientSocket implementation.
+  int BindToNetwork(NetworkChangeNotifier::NetworkHandle network) override;
   int Connect(const IPEndPoint& address) override;
 
   // AsyncSocket implementation.

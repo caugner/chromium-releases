@@ -13,7 +13,9 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeClassQualifiedName;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.net.NetworkChangeNotifierAutoDetect;
+import org.chromium.net.RegistrationPolicyAlwaysRegister;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,13 +70,17 @@ class BackgroundSyncNetworkObserver implements NetworkChangeNotifierAutoDetect.O
     private void registerObserver(final long nativePtr) {
         ThreadUtils.assertOnUiThread();
         if (!canCreateObserver(mContext)) {
+            RecordHistogram.recordBooleanHistogram(
+                    "BackgroundSync.NetworkObserver.HasPermission", false);
             return;
         }
 
         // Create the NetworkChangeNotifierAutoDetect if it does not exist already.
         if (mNotifier == null) {
-            mNotifier =
-                    new NetworkChangeNotifierAutoDetect(this, mContext, true /* always listen */);
+            mNotifier = new NetworkChangeNotifierAutoDetect(this, mContext,
+                                new RegistrationPolicyAlwaysRegister());
+            RecordHistogram.recordBooleanHistogram(
+                    "BackgroundSync.NetworkObserver.HasPermission", true);
         }
         mNativePtrs.add(nativePtr);
 
@@ -103,6 +109,14 @@ class BackgroundSyncNetworkObserver implements NetworkChangeNotifierAutoDetect.O
 
     @Override
     public void onMaxBandwidthChanged(double maxBandwidthMbps) {}
+    @Override
+    public void onNetworkConnect(int netId, int connectionType) {}
+    @Override
+    public void onNetworkSoonToDisconnect(int netId) {}
+    @Override
+    public void onNetworkDisconnect(int netId) {}
+    @Override
+    public void updateActiveNetworkList(int[] activeNetIds) {}
 
     @NativeClassQualifiedName("BackgroundSyncNetworkObserverAndroid::Observer")
     private native void nativeNotifyConnectionTypeChanged(long nativePtr, int newConnectionType);

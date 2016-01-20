@@ -15,6 +15,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -24,7 +25,6 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.metrics.WebappUma;
@@ -33,9 +33,9 @@ import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.util.ColorUtils;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content.browser.ScreenOrientationProvider;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.PageTransition;
 
@@ -54,8 +54,6 @@ public class WebappActivity extends FullScreenActivity {
     private final WebappDirectoryManager mDirectoryManager;
 
     private boolean mOldWebappCleanupStarted;
-
-    private WebContentsObserver mWebContentsObserver;
 
     private ViewGroup mSplashScreen;
     private WebappUrlBar mUrlBar;
@@ -103,7 +101,6 @@ public class WebappActivity extends FullScreenActivity {
             if (NetworkChangeNotifier.isOnline()) getActivityTab().reloadIgnoringCache();
         }
 
-        mWebContentsObserver = createWebContentsObserver();
         getActivityTab().addObserver(createTabObserver());
         getActivityTab().getTabWebContentsDelegateAndroid().setDisplayMode(
                 (int) WebDisplayMode.Standalone);
@@ -199,9 +196,10 @@ public class WebappActivity extends FullScreenActivity {
         final int backgroundColor = ColorUtils.getOpaqueColor(mWebappInfo.backgroundColor(
                 ApiCompatibilityUtils.getColor(getResources(), R.color.webapp_default_bg)));
 
-        ViewGroup contentView = (ViewGroup) findViewById(android.R.id.content);
-        mSplashScreen = createSplashScreen(contentView);
+        mSplashScreen = new FrameLayout(this);
         mSplashScreen.setBackgroundColor(backgroundColor);
+
+        ViewGroup contentView = (ViewGroup) findViewById(android.R.id.content);
         contentView.addView(mSplashScreen);
 
         mWebappUma.splashscreenVisible();
@@ -212,63 +210,74 @@ public class WebappActivity extends FullScreenActivity {
                 ? WebappUma.SPLASHSCREEN_COLOR_STATUS_CUSTOM
                 : WebappUma.SPLASHSCREEN_COLOR_STATUS_DEFAULT);
 
-        WebappDataStorage.open(this, mWebappInfo.id())
-                .getSplashScreenImage(new WebappDataStorage.FetchCallback<Bitmap>() {
+        WebappDataStorage.open(this, mWebappInfo.id()).getSplashScreenImage(
+                new WebappDataStorage.FetchCallback<Bitmap>() {
                     @Override
-                    public void onDataRetrieved(Bitmap splashIcon) {
-                        setSplashScreenIconAndText(mSplashScreen, splashIcon, backgroundColor);
+                    public void onDataRetrieved(Bitmap splashImage) {
+                        initializeSplashScreenWidgets(backgroundColor, splashImage);
                     }
                 });
+    }
+
+    private void initializeSplashScreenWidgets(int backgroundColor, Bitmap splashImage) {
+        Bitmap displayIcon = splashImage == null ? mWebappInfo.icon() : splashImage;
+        int minimiumSizeThreshold = getResources().getDimensionPixelSize(
+                R.dimen.webapp_splash_image_size_minimum);
+        int bigThreshold = getResources().getDimensionPixelSize(
+                R.dimen.webapp_splash_image_size_threshold);
+
+        // Inflate the correct layout for the image.
+        int layoutId;
+        if (displayIcon == null || displayIcon.getWidth() < minimiumSizeThreshold
+                || (displayIcon == mWebappInfo.icon() && mWebappInfo.isIconGenerated())) {
+            mWebappUma.recordSplashscreenIconType(WebappUma.SPLASHSCREEN_ICON_TYPE_NONE);
+            layoutId = R.layout.webapp_splash_screen_no_icon;
+        } else {
+            // The size of the splash screen image determines which layout to use.
+            boolean isUsingSmallSplashImage = displayIcon.getWidth() <= bigThreshold
+                    || displayIcon.getHeight() <= bigThreshold;
+            if (isUsingSmallSplashImage) {
+                layoutId = R.layout.webapp_splash_screen_small;
+            } else {
+                layoutId = R.layout.webapp_splash_screen_large;
+            }
+
+            // Record stats about the splash screen.
+            int splashScreenIconType;
+            if (splashImage == null) {
+                splashScreenIconType = WebappUma.SPLASHSCREEN_ICON_TYPE_FALLBACK;
+            } else if (isUsingSmallSplashImage) {
+                splashScreenIconType = WebappUma.SPLASHSCREEN_ICON_TYPE_CUSTOM_SMALL;
+            } else {
+                splashScreenIconType = WebappUma.SPLASHSCREEN_ICON_TYPE_CUSTOM;
+            }
+            mWebappUma.recordSplashscreenIconType(splashScreenIconType);
+            mWebappUma.recordSplashscreenIconSize(
+                    Math.round((float) displayIcon.getWidth()
+                            / getResources().getDisplayMetrics().density));
+        }
+
+        ViewGroup subLayout = (ViewGroup) LayoutInflater.from(WebappActivity.this)
+                .inflate(layoutId, mSplashScreen, true);
+
+        // Set up the elements of the splash screen.
+        TextView appNameView = (TextView) subLayout.findViewById(
+                R.id.webapp_splash_screen_name);
+        ImageView splashIconView = (ImageView) subLayout.findViewById(
+                R.id.webapp_splash_screen_icon);
+        appNameView.setText(mWebappInfo.name());
+        if (splashIconView != null) splashIconView.setImageBitmap(displayIcon);
+
+        if (ColorUtils.shoudUseLightForegroundOnBackground(backgroundColor)) {
+            appNameView.setTextColor(ApiCompatibilityUtils.getColor(getResources(),
+                    R.color.webapp_splash_title_light));
+        }
     }
 
     private void updateUrlBar() {
         Tab tab = getActivityTab();
         if (tab == null || mUrlBar == null) return;
         mUrlBar.update(tab.getUrl(), tab.getSecurityLevel());
-    }
-
-    private WebContentsObserver createWebContentsObserver() {
-        // TODO: Move to TabObserver eventually.
-        return new WebContentsObserver(getActivityTab().getWebContents()) {
-            @Override
-            public void didNavigateMainFrame(String url, String baseUrl,
-                    boolean isNavigationToDifferentPage, boolean isNavigationInPage,
-                    int statusCode) {
-                updateUrlBar();
-            }
-
-            @Override
-            public void didAttachInterstitialPage() {
-                updateUrlBar();
-
-                int state = ApplicationStatus.getStateForActivity(WebappActivity.this);
-                if (state == ActivityState.PAUSED || state == ActivityState.STOPPED
-                        || state == ActivityState.DESTROYED) {
-                    return;
-                }
-
-                // Kick the interstitial navigation to Chrome.
-                Intent intent = new Intent(
-                        Intent.ACTION_VIEW, Uri.parse(getActivityTab().getUrl()));
-                intent.setPackage(getPackageName());
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
-
-                // Pretend like the navigation never happened.  We delay so that this happens while
-                // the Activity is in the background.
-                mHandler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        getActivityTab().goBack();
-                    }
-                }, MS_BEFORE_NAVIGATING_BACK_FROM_INTERSTITIAL);
-            }
-
-            @Override
-            public void didDetachInterstitialPage() {
-                updateUrlBar();
-            }
-        };
     }
 
     private boolean isWebappDomain() {
@@ -307,6 +316,45 @@ public class WebappActivity extends FullScreenActivity {
             public void onFaviconUpdated(Tab tab) {
                 if (!isWebappDomain()) return;
                 updateTaskDescription();
+            }
+
+            @Override
+            public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
+                    boolean isNavigationToDifferentPage, boolean isNavigationInPage,
+                    int statusCode) {
+                updateUrlBar();
+            }
+
+            @Override
+            public void onDidAttachInterstitialPage(Tab tab) {
+                updateUrlBar();
+
+                int state = ApplicationStatus.getStateForActivity(WebappActivity.this);
+                if (state == ActivityState.PAUSED || state == ActivityState.STOPPED
+                        || state == ActivityState.DESTROYED) {
+                    return;
+                }
+
+                // Kick the interstitial navigation to Chrome.
+                Intent intent = new Intent(
+                        Intent.ACTION_VIEW, Uri.parse(getActivityTab().getUrl()));
+                intent.setPackage(getPackageName());
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+
+                // Pretend like the navigation never happened.  We delay so that this happens while
+                // the Activity is in the background.
+                mHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        getActivityTab().goBack();
+                    }
+                }, MS_BEFORE_NAVIGATING_BACK_FROM_INTERSTITIAL);
+            }
+
+            @Override
+            public void onDidDetachInterstitialPage(Tab tab) {
+                updateUrlBar();
             }
 
             @Override
@@ -383,42 +431,6 @@ public class WebappActivity extends FullScreenActivity {
         return mDirectoryManager.getWebappDirectory(this, getId());
     }
 
-    @VisibleForTesting
-    ViewGroup createSplashScreen(ViewGroup parentView) {
-        return (ViewGroup) LayoutInflater.from(this)
-                .inflate(R.layout.webapp_splash_screen, parentView, false);
-    }
-
-    @VisibleForTesting
-    void setSplashScreenIconAndText(View splashScreen, Bitmap splashIcon, int backgroundColor) {
-        if (splashScreen == null) return;
-
-        Bitmap displayIcon = splashIcon == null ? mWebappInfo.icon() : splashIcon;
-        if (displayIcon == null || displayIcon.getWidth() < getResources()
-                .getDimensionPixelSize(R.dimen.webapp_splash_image_min_size)) {
-            mWebappUma.recordSplashscreenIconType(WebappUma.SPLASHSCREEN_ICON_TYPE_NONE);
-            return;
-        }
-
-        mWebappUma.recordSplashscreenIconType(splashIcon != null
-                ? WebappUma.SPLASHSCREEN_ICON_TYPE_CUSTOM
-                : WebappUma.SPLASHSCREEN_ICON_TYPE_FALLBACK);
-        mWebappUma.recordSplashscreenIconSize(Math.round(
-                (float) displayIcon.getWidth() / getResources().getDisplayMetrics().density));
-
-        TextView appNameView = (TextView) splashScreen.findViewById(
-                R.id.webapp_splash_screen_name);
-        ImageView splashIconView = (ImageView) splashScreen.findViewById(
-                R.id.webapp_splash_screen_icon);
-        appNameView.setText(mWebappInfo.name());
-        splashIconView.setImageBitmap(displayIcon);
-
-        if (ColorUtils.shoudUseLightForegroundOnBackground(backgroundColor)) {
-            appNameView.setTextColor(ApiCompatibilityUtils.getColor(getResources(),
-                    R.color.webapp_splash_title_light));
-        }
-    }
-
     private void hideSplashScreen(final int reason) {
         if (mSplashScreen == null) return;
 
@@ -435,6 +447,16 @@ public class WebappActivity extends FullScreenActivity {
                         mWebappUma.splashscreenHidden(reason);
                     }
                 });
+    }
+
+    @VisibleForTesting
+    boolean isSplashScreenVisibleForTests() {
+        return mSplashScreen != null;
+    }
+
+    @VisibleForTesting
+    ViewGroup getSplashScreenForTests() {
+        return mSplashScreen;
     }
 
     @VisibleForTesting

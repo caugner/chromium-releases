@@ -81,7 +81,7 @@ void AwContentRendererClient::RenderThreadStarted() {
 
 bool AwContentRendererClient::HandleNavigation(
     content::RenderFrame* render_frame,
-    content::DocumentState* document_state,
+    bool is_content_initiated,
     int opener_id,
     blink::WebFrame* frame,
     const blink::WebURLRequest& request,
@@ -101,18 +101,18 @@ bool AwContentRendererClient::HandleNavigation(
   // works fine. This will stop working if android_webview starts swapping out
   // renderers on navigation.
   bool application_initiated =
-      !document_state->navigation_state()->IsContentInitiated() ||
-      type == blink::WebNavigationTypeBackForward;
+      !is_content_initiated || type == blink::WebNavigationTypeBackForward;
 
   // Don't offer application-initiated navigations unless it's a redirect.
   if (application_initiated && !is_redirect)
     return false;
 
+  bool is_main_frame = !frame->parent();
   const GURL& gurl = request.url();
   // For HTTP schemes, only top-level navigations can be overridden. Similarly,
   // WebView Classic lets app override only top level about:blank navigations.
   // So we filter out non-top about:blank navigations here.
-  if (frame->parent() &&
+  if (!is_main_frame &&
       (gurl.SchemeIs(url::kHttpScheme) || gurl.SchemeIs(url::kHttpsScheme) ||
        gurl.SchemeIs(url::kAboutScheme)))
     return false;
@@ -129,7 +129,8 @@ bool AwContentRendererClient::HandleNavigation(
 
   int render_frame_id = render_frame->GetRoutingID();
   RenderThread::Get()->Send(new AwViewHostMsg_ShouldOverrideUrlLoading(
-      render_frame_id, url, has_user_gesture, is_redirect, &ignore_navigation));
+      render_frame_id, url, has_user_gesture, is_redirect, is_main_frame,
+      &ignore_navigation));
   return ignore_navigation;
 }
 
@@ -174,8 +175,7 @@ bool AwContentRendererClient::HasErrorPage(int http_status_code,
 }
 
 void AwContentRendererClient::GetNavigationErrorStrings(
-    content::RenderView* /* render_view */,
-    blink::WebFrame* /* frame */,
+    content::RenderFrame* /* render_frame */,
     const blink::WebURLRequest& failed_request,
     const blink::WebURLError& error,
     std::string* error_html,

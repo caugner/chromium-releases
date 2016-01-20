@@ -46,10 +46,13 @@ ToolbarActionsModel::ToolbarActionsModel(
       prefs_(profile_->GetPrefs()),
       extension_action_api_(extensions::ExtensionActionAPI::Get(profile_)),
       extension_registry_(extensions::ExtensionRegistry::Get(profile_)),
+      extension_action_manager_(
+          extensions::ExtensionActionManager::Get(profile_)),
       actions_initialized_(false),
       use_redesign_(extensions::FeatureSwitch::extension_action_redesign()
                         ->IsEnabled()),
       highlight_type_(HIGHLIGHT_NONE),
+      highlighting_for_toolbar_redesign_(false),
       extension_action_observer_(this),
       extension_registry_observer_(this),
       weak_ptr_factory_(this) {
@@ -120,7 +123,6 @@ void ToolbarActionsModel::MoveActionIcon(const std::string& id, size_t index) {
   }
 
   FOR_EACH_OBSERVER(Observer, observers_, OnToolbarActionMoved(id, index));
-  MaybeUpdateVisibilityPref(action, index);
   UpdatePrefs();
 }
 
@@ -132,13 +134,6 @@ void ToolbarActionsModel::SetVisibleIconCount(size_t count) {
   // not persist across browser restarts (though it may be re-entered), and we
   // don't store anything in incognito.
   if (!is_highlighting() && !profile_->IsOffTheRecord()) {
-    // Additionally, if we are using the new toolbar, any icons which are in the
-    // overflow menu are considered "hidden". But it so happens that the times
-    // we are likely to call SetVisibleIconCount() are also those when we are
-    // in flux. So wait for things to cool down before setting the prefs.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&ToolbarActionsModel::MaybeUpdateVisibilityPrefs,
-                              weak_ptr_factory_.GetWeakPtr()));
     prefs_->SetInteger(extensions::pref_names::kToolbarSize,
                        visible_icon_count_);
   }
@@ -166,97 +161,55 @@ ScopedVector<ToolbarActionViewController> ToolbarActionsModel::CreateActions(
   DCHECK(bar);
   ScopedVector<ToolbarActionViewController> action_list;
 
-  // Get the component action list.
-  ScopedVector<ToolbarActionViewController> component_actions =
-      ComponentToolbarActionsFactory::GetInstance()->GetComponentToolbarActions(
-          browser);
-
-  extensions::ExtensionActionManager* action_manager =
-      extensions::ExtensionActionManager::Get(profile_);
-
   // toolbar_items() might not equate to toolbar_items_ in the case where a
-  // subset are highlighted.
-  for (const ToolbarItem& item : toolbar_items()) {
-    switch (item.type) {
-      case EXTENSION_ACTION: {
-        // Get the extension.
-        const extensions::Extension* extension = GetExtensionById(item.id);
-        DCHECK(extension);
-
-        // Create and add an ExtensionActionViewController for the extension.
-        action_list.push_back(new ExtensionActionViewController(
-            extension, browser, action_manager->GetExtensionAction(*extension),
-            bar));
-        break;
-      }
-      case COMPONENT_ACTION: {
-        DCHECK(use_redesign_);
-        // Find the index of the component action with the id.
-        auto iter = std::find_if(
-            component_actions.begin(), component_actions.end(),
-            [&item](const ToolbarActionViewController* action) {
-          return action->GetId() == item.id;
-        });
-        // We should always find a corresponding action.
-        DCHECK(iter != component_actions.end());
-        action_list.push_back(*iter);
-
-        // We have moved ownership of the action from |component_actions| to
-        // |action_list|.
-        component_actions.weak_erase(iter);
-        break;
-      }
-      case UNKNOWN_ACTION:
-        NOTREACHED();  // Should never have an UNKNOWN_ACTION in toolbar_items.
-        break;
-    }
-  }
-
-  // We've moved ownership of the subset of the component actions that we
-  // kept track of via toolbar_items() from |component_actions| to
-  // |action_list|. The rest will be deleted when |component_actions| goes out
-  // of scope.
+  // subset is highlighted.
+  for (const ToolbarItem& item : toolbar_items())
+    action_list.push_back(CreateActionForItem(browser, bar, item).release());
 
   return action_list.Pass();
+}
+
+scoped_ptr<ToolbarActionViewController>
+ToolbarActionsModel::CreateActionForItem(Browser* browser,
+                                         ToolbarActionsBar* bar,
+                                         const ToolbarItem& item) {
+  scoped_ptr<ToolbarActionViewController> result;
+  switch (item.type) {
+    case EXTENSION_ACTION: {
+      // Get the extension.
+      const extensions::Extension* extension = GetExtensionById(item.id);
+      DCHECK(extension);
+
+      // Create and add an ExtensionActionViewController for the extension.
+      result.reset(new ExtensionActionViewController(
+          extension, browser,
+          extension_action_manager_->GetExtensionAction(*extension), bar));
+      break;
+    }
+    case COMPONENT_ACTION: {
+      DCHECK(use_redesign_);
+      result = ComponentToolbarActionsFactory::GetInstance()
+                   ->GetComponentToolbarActionForId(item.id, browser)
+                   .Pass();
+      break;
+    }
+    case UNKNOWN_ACTION:
+      NOTREACHED();  // Should never have an UNKNOWN_ACTION in toolbar_items.
+      break;
+  }
+  return result.Pass();
 }
 
 void ToolbarActionsModel::OnExtensionActionVisibilityChanged(
     const std::string& extension_id,
     bool is_now_visible) {
-  // Hiding works differently with the new and old toolbars.
-  if (use_redesign_) {
-    // It's possible that we haven't added this action yet, if its
-    // visibility was adjusted in the course of its initialization.
-    if (std::find(toolbar_items_.begin(), toolbar_items_.end(),
-                  ToolbarItem(extension_id, EXTENSION_ACTION)) ==
-        toolbar_items_.end())
-      return;
-
-    int new_size = 0;
-    int new_index = 0;
-    if (is_now_visible) {
-      // If this action used to be hidden, we can't possibly be showing all.
-      DCHECK_LT(visible_icon_count(), toolbar_items_.size());
-      // Grow the bar by one and move the action to the end of the visibles.
-      new_size = visible_icon_count() + 1;
-      new_index = new_size - 1;
-    } else {
-      // If we're hiding one, we must be showing at least one.
-      DCHECK_GE(visible_icon_count(), 0u);
-      // Shrink the bar by one and move the action to the beginning of the
-      // overflow menu.
-      new_size = visible_icon_count() - 1;
-      new_index = new_size;
-    }
-    SetVisibleIconCount(new_size);
-    MoveActionIcon(extension_id, new_index);
-  } else {  // Don't include all extensions.
-    const extensions::Extension* extension = GetExtensionById(extension_id);
-    if (is_now_visible)
-      AddExtension(extension);
-    else
-      RemoveExtension(extension);
-  }
+  if (use_redesign_)
+    return;
+  const extensions::Extension* extension = GetExtensionById(extension_id);
+  if (is_now_visible)
+    AddExtension(extension);
+  else
+    RemoveExtension(extension);
 }
 
 void ToolbarActionsModel::OnExtensionLoaded(
@@ -306,6 +259,7 @@ void ToolbarActionsModel::OnReady() {
 
   if (ExtensionToolbarIconSurfacingBubbleDelegate::ShouldShowForProfile(
           profile_)) {
+    highlighting_for_toolbar_redesign_ = true;
     std::vector<std::string> ids;
     for (const ToolbarItem& action : toolbar_items_)
       ids.push_back(action.id);
@@ -346,15 +300,13 @@ bool ToolbarActionsModel::ShouldAddExtension(
       !extensions::util::IsIncognitoEnabled(extension->id(), profile_))
     return false;
 
-  extensions::ExtensionActionManager* action_manager =
-      extensions::ExtensionActionManager::Get(profile_);
   if (use_redesign_) {
     // In this case, we don't care about the browser action visibility, because
     // we want to show each extension regardless.
-    return action_manager->GetExtensionAction(*extension) != NULL;
+    return extension_action_manager_->GetExtensionAction(*extension) != nullptr;
   }
 
-  return action_manager->GetBrowserAction(*extension) &&
+  return extension_action_manager_->GetBrowserAction(*extension) &&
          extension_action_api_->GetBrowserActionVisibility(extension->id());
 }
 
@@ -437,9 +389,6 @@ void ToolbarActionsModel::AddExtension(const extensions::Extension* extension) {
     if (visible_count_delta)
       SetVisibleIconCount(visible_icon_count() + visible_count_delta);
   }
-
-  MaybeUpdateVisibilityPref(ToolbarItem(extension->id(), EXTENSION_ACTION),
-                            new_index);
 }
 
 void ToolbarActionsModel::RemoveExtension(
@@ -450,12 +399,6 @@ void ToolbarActionsModel::RemoveExtension(
 
   if (pos == toolbar_items_.end())
     return;
-
-  size_t index = pos - toolbar_items_.begin();
-  // If the removed extension was on the toolbar, a new one will take its place
-  // if there are any in overflow.
-  bool new_extension_shown =
-      !all_icons_visible() && index < visible_icon_count();
 
   // If our visible count is set to the current size, we need to decrement it.
   if (visible_icon_count_ == static_cast<int>(toolbar_items_.size()))
@@ -482,11 +425,6 @@ void ToolbarActionsModel::RemoveExtension(
   }
 
   UpdatePrefs();
-  if (new_extension_shown) {
-    size_t newly_visible_index = visible_icon_count() - 1;
-    MaybeUpdateVisibilityPref(toolbar_items_[newly_visible_index],
-                              newly_visible_index);
-  }
 }
 
 // Combine the currently enabled extensions that have browser actions (which
@@ -505,8 +443,6 @@ void ToolbarActionsModel::InitializeActionList() {
     IncognitoPopulate();
   else
     Populate();
-
-  MaybeUpdateVisibilityPrefs();
 }
 
 void ToolbarActionsModel::Populate() {
@@ -538,8 +474,8 @@ void ToolbarActionsModel::Populate() {
   }
 
   // Next, add the component action ids.
-  std::vector<std::string> component_ids =
-      ComponentToolbarActionsFactory::GetComponentIds();
+  std::set<std::string> component_ids =
+      ComponentToolbarActionsFactory::GetInstance()->GetComponentIds(profile_);
   for (const std::string& id : component_ids)
     all_actions.push_back(ToolbarItem(id, COMPONENT_ACTION));
 
@@ -642,6 +578,8 @@ void ToolbarActionsModel::IncognitoPopulate() {
   // overflowed. Order is the same as in regular mode.
   visible_icon_count_ = 0;
 
+  std::set<std::string> component_ids =
+      ComponentToolbarActionsFactory::GetInstance()->GetComponentIds(profile_);
   for (std::vector<ToolbarItem>::const_iterator iter =
            original_model->toolbar_items_.begin();
        iter != original_model->toolbar_items_.end(); ++iter) {
@@ -653,7 +591,9 @@ void ToolbarActionsModel::IncognitoPopulate() {
         should_add = ShouldAddExtension(GetExtensionById(iter->id));
         break;
       case COMPONENT_ACTION:
-        should_add = ComponentToolbarActionsFactory::EnabledIncognito(iter->id);
+        // The component action factory only returns actions that should be
+        // added.
+        should_add = component_ids.count(iter->id) != 0;
         break;
       case UNKNOWN_ACTION:
         // We should never have an uninitialized action in the model.
@@ -679,34 +619,40 @@ void ToolbarActionsModel::UpdatePrefs() {
                              pref_change_callback_);
 }
 
-void ToolbarActionsModel::MaybeUpdateVisibilityPref(const ToolbarItem& action,
-                                                    size_t index) {
-  // Component actions don't have prefs to update.
-  if (action.type == COMPONENT_ACTION)
-    return;
+void ToolbarActionsModel::SetActionVisibility(const std::string& action_id,
+                                              bool is_now_visible) {
+  // Hiding works differently with the new and old toolbars.
+  if (use_redesign_) {
+    DCHECK(std::find(toolbar_items_.begin(), toolbar_items_.end(),
+                     ToolbarItem(action_id, EXTENSION_ACTION)) !=
+           toolbar_items_.end());
 
-  // We only update the visibility pref for hidden/not hidden based on the
-  // overflow menu with the new toolbar design.
-  if (use_redesign_ && !profile_->IsOffTheRecord()) {
-    bool visible = index < visible_icon_count();
-    if (visible !=
-        extension_action_api_->GetBrowserActionVisibility(action.id)) {
-      // Don't observe changes caused by ourselves.
-      bool was_registered = false;
-      if (extension_action_observer_.IsObserving(extension_action_api_)) {
-        was_registered = true;
-        extension_action_observer_.RemoveAll();
-      }
-      extension_action_api_->SetBrowserActionVisibility(action.id, visible);
-      if (was_registered)
-        extension_action_observer_.Add(extension_action_api_);
+    int new_size = 0;
+    int new_index = 0;
+    if (is_now_visible) {
+      // If this action used to be hidden, we can't possibly be showing all.
+      DCHECK_LT(visible_icon_count(), toolbar_items_.size());
+      // Grow the bar by one and move the action to the end of the visibles.
+      new_size = visible_icon_count() + 1;
+      new_index = new_size - 1;
+    } else {
+      // If we're hiding one, we must be showing at least one.
+      DCHECK_GE(visible_icon_count(), 0u);
+      // Shrink the bar by one and move the action to the beginning of the
+      // overflow menu.
+      new_size = visible_icon_count() - 1;
+      new_index = new_size;
+    }
+    SetVisibleIconCount(new_size);
+    MoveActionIcon(action_id, new_index);
+  } else {  // Legacy toolbar; hiding removes it from the toolbar.
+    if (!profile_->IsOffTheRecord()) {
+      extension_action_api_->SetBrowserActionVisibility(action_id,
+                                                        is_now_visible);
+    } else {
+      OnExtensionActionVisibilityChanged(action_id, is_now_visible);
     }
   }
-}
-
-void ToolbarActionsModel::MaybeUpdateVisibilityPrefs() {
-  for (size_t i = 0u; i < toolbar_items_.size(); ++i)
-    MaybeUpdateVisibilityPref(toolbar_items_[i], i);
 }
 
 void ToolbarActionsModel::OnActionToolbarPrefChange() {
@@ -798,6 +744,7 @@ bool ToolbarActionsModel::HighlightActions(const std::vector<std::string>& ids,
 
 void ToolbarActionsModel::StopHighlighting() {
   if (is_highlighting()) {
+    highlighting_for_toolbar_redesign_ = false;
     // It's important that is_highlighting_ is changed immediately before the
     // observers are notified since it changes the result of toolbar_items().
     highlight_type_ = HIGHLIGHT_NONE;

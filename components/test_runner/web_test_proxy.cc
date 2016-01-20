@@ -581,7 +581,7 @@ void WebTestProxyBase::CopyImageAtAndCapturePixels(
 
 void WebTestProxyBase::CapturePixelsForPrinting(
     const base::Callback<void(const SkBitmap&)>& callback) {
-  web_widget_->layout();
+  web_widget_->updateAllLifecyclePhases();
 
   blink::WebSize page_size_in_pixels = web_widget_->size();
   blink::WebFrame* web_frame = GetWebView()->mainFrame();
@@ -600,8 +600,7 @@ void WebTestProxyBase::CapturePixelsForPrinting(
   web_frame->printEnd();
 
   DrawSelectionRect(canvas.get());
-  SkBaseDevice* device = skia::GetTopDevice(*canvas);
-  const SkBitmap& bitmap = device->accessBitmap(false);
+  const SkBitmap bitmap = skia::ReadPixels(canvas.get());
   callback.Run(bitmap);
 }
 
@@ -761,17 +760,12 @@ void WebTestProxyBase::ScheduleAnimation() {
 void WebTestProxyBase::AnimateNow() {
   if (animate_scheduled_) {
     base::TimeDelta animate_time = base::TimeTicks::Now() - base::TimeTicks();
-    base::TimeDelta interval = base::TimeDelta::FromMicroseconds(16666);
-    blink::WebBeginFrameArgs args(animate_time.InSecondsF(),
-                                  (animate_time + interval).InSecondsF(),
-                                  interval.InSecondsF());
-
     animate_scheduled_ = false;
-    web_widget_->beginFrame(args);
-    web_widget_->layout();
+    web_widget_->beginFrame(animate_time.InSecondsF());
+    web_widget_->updateAllLifecyclePhases();
     if (blink::WebPagePopup* popup = web_widget_->pagePopup()) {
-      popup->beginFrame(args);
-      popup->layout();
+      popup->beginFrame(animate_time.InSecondsF());
+      popup->updateAllLifecyclePhases();
     }
   }
 }
@@ -977,11 +971,6 @@ void WebTestProxyBase::SetStatusText(const blink::WebString& text) {
       text.utf8().data() + "\n");
 }
 
-void WebTestProxyBase::DidStopLoading() {
-  if (test_interfaces_->GetTestRunner()->shouldDumpProgressFinishedCallback())
-    delegate_->PrintMessage("postProgressFinishedNotification\n");
-}
-
 void WebTestProxyBase::ShowContextMenu(
     const blink::WebContextMenuData& context_menu_data) {
   test_interfaces_->GetEventSender()->SetContextMenuData(context_menu_data);
@@ -1023,10 +1012,6 @@ void WebTestProxyBase::DidFocus() {
   delegate_->SetFocus(this, true);
 }
 
-void WebTestProxyBase::DidBlur() {
-  delegate_->SetFocus(this, false);
-}
-
 void WebTestProxyBase::SetToolTipText(const blink::WebString& text,
                                       blink::WebTextDirection direction) {
   test_interfaces_->GetTestRunner()->setToolTipText(text);
@@ -1044,11 +1029,10 @@ bool WebTestProxyBase::IsChooserShown() {
   return 0 < chooser_count_;
 }
 
-void WebTestProxyBase::LoadURLExternally(
-    blink::WebLocalFrame* frame,
-    const blink::WebURLRequest& request,
-    blink::WebNavigationPolicy policy,
-    const blink::WebString& suggested_name) {
+void WebTestProxyBase::LoadURLExternally(const blink::WebURLRequest& request,
+                                         blink::WebNavigationPolicy policy,
+                                         const blink::WebString& suggested_name,
+                                         bool replaces_current_history_item) {
   if (test_interfaces_->GetTestRunner()->shouldWaitUntilExternalURLLoad()) {
     if (policy == blink::WebNavigationPolicyDownload) {
       delegate_->PrintMessage(
@@ -1422,6 +1406,20 @@ void WebTestProxyBase::ResetInputMethod() {
   // to cancel the input method's ongoing composition session.
   if (web_widget_)
     web_widget_->confirmComposition();
+}
+
+void WebTestProxyBase::CheckIfAudioSinkExistsAndIsAuthorized(
+    const blink::WebString& sink_id,
+    const blink::WebSecurityOrigin& security_origin,
+    blink::WebSetSinkIdCallbacks* web_callbacks) {
+  scoped_ptr<blink::WebSetSinkIdCallbacks> callback(web_callbacks);
+  std::string device_id = sink_id.utf8();
+  if (device_id == "valid" || device_id.empty())
+    callback->onSuccess();
+  else if (device_id == "unauthorized")
+    callback->onError(blink::WebSetSinkIdError::NotAuthorized);
+  else
+    callback->onError(blink::WebSetSinkIdError::NotFound);
 }
 
 blink::WebString WebTestProxyBase::acceptLanguages() {

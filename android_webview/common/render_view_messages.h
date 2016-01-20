@@ -81,7 +81,7 @@ IPC_MESSAGE_CONTROL1(AwViewMsg_SetJsOnlineProperty,
 IPC_MESSAGE_ROUTED3(AwViewMsg_SmoothScroll,
                     int /* target_x */,
                     int /* target_y */,
-                    long /* duration_ms */);
+                    long /* duration_ms */)
 
 //-----------------------------------------------------------------------------
 // RenderView messages
@@ -96,10 +96,6 @@ IPC_MESSAGE_ROUTED2(AwViewHostMsg_DocumentHasImagesResponse,
 IPC_MESSAGE_ROUTED1(AwViewHostMsg_UpdateHitTestData,
                     android_webview::AwHitTestData)
 
-// Sent whenever the page scale factor (as seen by RenderView) is changed.
-IPC_MESSAGE_ROUTED1(AwViewHostMsg_PageScaleFactorChanged,
-                    float /* page_scale_factor */)
-
 // Sent whenever the contents size (as seen by RenderView) is changed.
 IPC_MESSAGE_ROUTED1(AwViewHostMsg_OnContentsSizeChanged,
                     gfx::Size /* contents_size */)
@@ -110,11 +106,12 @@ IPC_MESSAGE_ROUTED1(AwViewHostMsg_OnContentsSizeChanged,
 // navigations. See AwContentRendererClient::HandleNavigation for all
 // cornercases. This is sent before updating the NavigationController state
 // or creating a URLRequest for the main frame resource.
-IPC_SYNC_MESSAGE_CONTROL4_1(AwViewHostMsg_ShouldOverrideUrlLoading,
+IPC_SYNC_MESSAGE_CONTROL5_1(AwViewHostMsg_ShouldOverrideUrlLoading,
                             int /* render_frame_id id */,
                             base::string16 /* in - url */,
                             bool /* in - has_user_gesture */,
                             bool /* in - is_redirect */,
+                            bool /* in - is_main_frame */,
                             bool /* out - result */)
 
 // Sent when a subframe is created.

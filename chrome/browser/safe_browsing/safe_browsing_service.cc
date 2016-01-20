@@ -64,6 +64,8 @@
 
 using content::BrowserThread;
 
+namespace safe_browsing {
+
 namespace {
 
 // Filename suffix for the cookie database.
@@ -222,24 +224,20 @@ void SafeBrowsingService::Initialize() {
 #if defined(SAFE_BROWSING_CSD)
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableClientSidePhishingDetection)) {
-    csd_service_.reset(safe_browsing::ClientSideDetectionService::Create(
+    csd_service_.reset(ClientSideDetectionService::Create(
         url_request_context_getter_.get()));
   }
 #endif  // defined(SAFE_BROWSING_CSD)
 
-// TODO(nparker): Adding SAFE_BROWSING_SERVICE_DOWNLOAD to control this might
-// allow removing FULL_SAFE_BROWSING above.
-#if !defined(OS_ANDROID)
-  download_service_.reset(new safe_browsing::DownloadProtectionService(
+  download_service_.reset(new DownloadProtectionService(
       this, url_request_context_getter_.get()));
-#endif
 
   incident_service_.reset(CreateIncidentReportingService());
-  resource_request_detector_.reset(new safe_browsing::ResourceRequestDetector(
+  resource_request_detector_.reset(new ResourceRequestDetector(
       incident_service_->GetIncidentReceiver()));
 
   off_domain_inclusion_detector_.reset(
-      new safe_browsing::OffDomainInclusionDetector(database_manager_));
+      new OffDomainInclusionDetector(database_manager_));
 #endif  // !defined(FULL_SAFE_BROWSING)
 
   // Track the safe browsing preference of existing profiles.
@@ -310,9 +308,9 @@ bool SafeBrowsingService::DownloadBinHashNeeded() const {
 
 #if defined(FULL_SAFE_BROWSING)
   return (database_manager_->download_protection_enabled() &&
-          ui_manager_->CanReportStats()) ||
-      (download_protection_service() &&
-       download_protection_service()->enabled());
+          safe_browsing::IsMetricsReportingActive()) ||
+         (download_protection_service() &&
+          download_protection_service()->enabled());
 #else
   return false;
 #endif
@@ -355,7 +353,7 @@ SafeBrowsingService::CreatePreferenceValidationDelegate(
 
 #if defined(FULL_SAFE_BROWSING)
 void SafeBrowsingService::RegisterDelayedAnalysisCallback(
-    const safe_browsing::DelayedAnalysisCallback& callback) {
+    const DelayedAnalysisCallback& callback) {
   incident_service_->RegisterDelayedAnalysisCallback(callback);
 }
 #endif
@@ -391,18 +389,18 @@ SafeBrowsingDatabaseManager* SafeBrowsingService::CreateDatabaseManager() {
 }
 
 #if defined(FULL_SAFE_BROWSING)
-safe_browsing::IncidentReportingService*
+IncidentReportingService*
 SafeBrowsingService::CreateIncidentReportingService() {
-  return new safe_browsing::IncidentReportingService(
+  return new IncidentReportingService(
       this, url_request_context_getter_);
 }
 #endif
 
 void SafeBrowsingService::RegisterAllDelayedAnalysis() {
 #if defined(FULL_SAFE_BROWSING)
-  safe_browsing::RegisterBinaryIntegrityAnalysis();
-  safe_browsing::RegisterBlacklistLoadAnalysis();
-  safe_browsing::RegisterVariationsSeedSignatureAnalysis();
+  RegisterBinaryIntegrityAnalysis();
+  RegisterBlacklistLoadAnalysis();
+  RegisterVariationsSeedSignatureAnalysis();
 #else
   NOTREACHED();
 #endif
@@ -646,3 +644,21 @@ void SafeBrowsingService::RefreshState() {
     download_service_->SetEnabled(enable);
 #endif
 }
+
+void SafeBrowsingService::SendDownloadRecoveryReport(
+    const std::string& report) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&SafeBrowsingService::OnSendDownloadRecoveryReport, this,
+                 report));
+}
+
+void SafeBrowsingService::OnSendDownloadRecoveryReport(
+    const std::string& report) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (ping_manager())
+    ping_manager()->ReportThreatDetails(report);
+}
+
+}  // namespace safe_browsing

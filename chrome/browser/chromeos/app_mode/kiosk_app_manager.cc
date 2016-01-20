@@ -19,6 +19,7 @@
 #include "base/stl_util.h"
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/app_mode/app_session.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_external_loader.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
@@ -38,6 +39,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/ownership/owner_key_util.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/extension_urls.h"
@@ -204,6 +206,14 @@ void KioskAppManager::SetAppWasAutoLaunchedWithZeroDelay(
     const std::string& app_id) {
   DCHECK_EQ(auto_launch_app_id_, app_id);
   currently_auto_launched_with_zero_delay_app_ = app_id;
+}
+
+void KioskAppManager::InitSession(Profile* profile,
+                                   const std::string& app_id) {
+  LOG_IF(FATAL, app_session_) << "Kiosk session is already initialized.";
+
+  app_session_.reset(new AppSession);
+  app_session_->Init(profile, app_id);
 }
 
 void KioskAppManager::EnableConsumerKioskAutoLaunch(
@@ -641,9 +651,9 @@ void KioskAppManager::UpdateAppData() {
   const user_manager::User* active_user =
       user_manager::UserManager::Get()->GetActiveUser();
   if (active_user) {
-    std::string active_user_id = active_user->GetUserID();
+    const AccountId active_account_id = active_user->GetAccountId();
     for (const auto& it : old_apps) {
-      if (it.second->user_id() == active_user_id) {
+      if (it.second->user_id() == active_account_id.GetUserEmail()) {
         VLOG(1) << "Currently running kiosk app removed from policy, exiting";
         cryptohomes_barrier_closure = BarrierClosure(
             old_apps.size(), base::Bind(&chrome::AttemptUserExit));

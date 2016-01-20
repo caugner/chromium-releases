@@ -71,7 +71,7 @@ class UpgradeDetector {
 
   // Retrieves the right icon ID based on the degree of severity (see
   // UpgradeNotificationAnnoyanceLevel, each level has an an accompanying icon
-  // to go with it) to display within the wrench menu.
+  // to go with it) to display within the app menu.
   int GetIconResourceID();
 
   UpgradeNotificationAnnoyanceLevel upgrade_notification_stage() const {
@@ -133,7 +133,7 @@ class UpgradeDetector {
   }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(WrenchMenuModelTest, Basics);
+  FRIEND_TEST_ALL_PREFIXES(AppMenuModelTest, Basics);
 
   // Initiates an Idle check. See IdleCallback below.
   void CheckIdle();

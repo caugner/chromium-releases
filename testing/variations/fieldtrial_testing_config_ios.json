@@ -4,7 +4,23 @@
             "group_name": "Enabled"
         }
     ],
+    "AutofillProfileOrderByFrecency": [
+        {
+            "group_name": "EnabledLimitTo3",
+            "params": {
+                "limit": "3"
+            }
+        }
+    ],
     "ChromotingQUIC": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "DataCompressionProxyDevRollout": [
+        {
+            "group_name": "Control"
+        },
         {
             "group_name": "Enabled"
         }

@@ -12,8 +12,9 @@
 #include "cc/trees/layer_tree_host.h"
 #include "components/mus/public/cpp/context_provider.h"
 #include "components/mus/public/cpp/output_surface.h"
-#include "components/mus/public/cpp/view.h"
+#include "components/mus/public/cpp/window.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
+#include "mojo/public/c/gles2/gles2.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 #include "ui/gfx/buffer_types.h"
 
@@ -23,8 +24,8 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     cc::TaskGraphRunner* task_graph_runner)
-    : widget_(NULL),
-      view_(NULL),
+    : widget_(nullptr),
+      window_(nullptr),
       main_thread_compositor_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       weak_factory_(this) {
   main_thread_bound_weak_ptr_ = weak_factory_.GetWeakPtr();
@@ -57,20 +58,21 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   DCHECK(layer_tree_host_);
 }
 
-void WebLayerTreeViewImpl::Initialize(mojo::GpuPtr gpu_service,
-                                      mus::View* view,
+void WebLayerTreeViewImpl::Initialize(mus::mojom::GpuPtr gpu_service,
+                                      mus::Window* window,
                                       blink::WebWidget* widget) {
-  view_ = view;
+  window_ = window;
   widget_ = widget;
   if (gpu_service) {
-    mojo::CommandBufferPtr cb;
+    mus::mojom::CommandBufferPtr cb;
     gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
     scoped_refptr<cc::ContextProvider> context_provider(
         new mus::ContextProvider(cb.PassInterface().PassHandle()));
-    output_surface_.reset(
-        new mus::OutputSurface(context_provider, view_->RequestSurface()));
+    output_surface_.reset(new mus::OutputSurface(
+        context_provider,
+        window_->RequestSurface(mus::mojom::SURFACE_TYPE_DEFAULT)));
   }
-  layer_tree_host_->SetLayerTreeHostClientReady();
+  layer_tree_host_->SetVisible(window_->visible());
 }
 
 WebLayerTreeViewImpl::~WebLayerTreeViewImpl() {
@@ -91,16 +93,12 @@ void WebLayerTreeViewImpl::BeginMainFrameNotExpectedSoon() {
 void WebLayerTreeViewImpl::BeginMainFrame(const cc::BeginFrameArgs& args) {
   VLOG(2) << "WebLayerTreeViewImpl::BeginMainFrame";
   double frame_time_sec = (args.frame_time - base::TimeTicks()).InSecondsF();
-  double deadline_sec = (args.deadline - base::TimeTicks()).InSecondsF();
-  double interval_sec = args.interval.InSecondsF();
-  blink::WebBeginFrameArgs web_begin_frame_args(
-      frame_time_sec, deadline_sec, interval_sec);
-  widget_->beginFrame(web_begin_frame_args);
+  widget_->beginFrame(frame_time_sec);
   layer_tree_host_->SetNeedsAnimate();
 }
 
-void WebLayerTreeViewImpl::Layout() {
-  widget_->layout();
+void WebLayerTreeViewImpl::UpdateLayerTreeHost() {
+  widget_->updateAllLifecyclePhases();
 }
 
 void WebLayerTreeViewImpl::ApplyViewportDeltas(
@@ -200,8 +198,9 @@ void WebLayerTreeViewImpl::registerViewportLayers(
       // viewports.
       overscrollElasticityLayer
           ? static_cast<const cc_blink::WebLayerImpl*>(
-                overscrollElasticityLayer)->layer()
-          : NULL,
+                overscrollElasticityLayer)
+                ->layer()
+          : nullptr,
       static_cast<const cc_blink::WebLayerImpl*>(pageScaleLayer)->layer(),
       static_cast<const cc_blink::WebLayerImpl*>(innerViewportScrollLayer)
           ->layer(),
@@ -210,7 +209,7 @@ void WebLayerTreeViewImpl::registerViewportLayers(
       outerViewportScrollLayer
           ? static_cast<const cc_blink::WebLayerImpl*>(outerViewportScrollLayer)
                 ->layer()
-          : NULL);
+          : nullptr);
 }
 
 void WebLayerTreeViewImpl::clearViewportLayers() {

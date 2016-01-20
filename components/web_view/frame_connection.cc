@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "components/clipboard/public/interfaces/clipboard.mojom.h"
 #include "components/mus/public/interfaces/gpu.mojom.h"
-#include "components/mus/public/interfaces/view_tree_host.mojom.h"
+#include "components/mus/public/interfaces/window_tree_host.mojom.h"
 #include "components/resource_provider/public/interfaces/resource_provider.mojom.h"
 #include "components/web_view/frame_tree.h"
 #include "components/web_view/frame_utils.h"
@@ -33,15 +33,15 @@ void OnGotContentHandlerForFrame(
     const uint32_t existing_content_handler_id,
     const FrameTreeDelegate::CanNavigateFrameCallback& callback,
     scoped_ptr<FrameConnection> connection) {
-  mojo::ViewTreeClientPtr view_tree_client;
+  mus::mojom::WindowTreeClientPtr window_tree_client;
   if (!AreAppIdsEqual(existing_content_handler_id,
                       connection->GetContentHandlerID())) {
-    view_tree_client = connection->GetViewTreeClient();
+    window_tree_client = connection->GetWindowTreeClient();
   }
   FrameConnection* connection_ptr = connection.get();
   callback.Run(connection_ptr->GetContentHandlerID(),
                connection_ptr->frame_client(), connection.Pass(),
-               view_tree_client.Pass());
+               window_tree_client.Pass());
 }
 
 }  // namespace
@@ -91,12 +91,13 @@ void FrameConnection::Init(mojo::ApplicationImpl* app,
 
   mojo::Array<mojo::String> tracing_interfaces;
   tracing_interfaces.push_back(tracing::StartupPerformanceDataCollector::Name_);
+  tracing_interfaces.push_back(tracing::TraceCollector::Name_);
   filter->filter.insert("mojo:tracing", tracing_interfaces.Pass());
 
-  mojo::Array<mojo::String> view_manager_interfaces;
-  view_manager_interfaces.push_back(mojo::Gpu::Name_);
-  view_manager_interfaces.push_back(mojo::ViewTreeHostFactory::Name_);
-  filter->filter.insert("mojo:mus", view_manager_interfaces.Pass());
+  mojo::Array<mojo::String> window_manager_interfaces;
+  window_manager_interfaces.push_back(mus::mojom::Gpu::Name_);
+  window_manager_interfaces.push_back(mus::mojom::WindowTreeHostFactory::Name_);
+  filter->filter.insert("mojo:mus", window_manager_interfaces.Pass());
 
   mojo::Array<mojo::String> test_runner_interfaces;
   test_runner_interfaces.push_back(LayoutTestRunner::Name_);
@@ -115,11 +116,11 @@ void FrameConnection::Init(mojo::ApplicationImpl* app,
   application_connection_->AddContentHandlerIDCallback(on_got_id_callback);
 }
 
-mojo::ViewTreeClientPtr FrameConnection::GetViewTreeClient() {
+mus::mojom::WindowTreeClientPtr FrameConnection::GetWindowTreeClient() {
   DCHECK(application_connection_);
-  mojo::ViewTreeClientPtr view_tree_client;
-  application_connection_->ConnectToService(&view_tree_client);
-  return view_tree_client.Pass();
+  mus::mojom::WindowTreeClientPtr window_tree_client;
+  application_connection_->ConnectToService(&window_tree_client);
+  return window_tree_client.Pass();
 }
 
 uint32_t FrameConnection::GetContentHandlerID() const {

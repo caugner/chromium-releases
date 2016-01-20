@@ -16,6 +16,7 @@
 #include "cc/surfaces/surface_id.h"
 #include "components/html_viewer/ax_provider_impl.h"
 #include "components/html_viewer/blink_basic_type_converters.h"
+#include "components/html_viewer/blink_find_type_converters.h"
 #include "components/html_viewer/blink_input_events_type_converters.h"
 #include "components/html_viewer/blink_text_input_type_converters.h"
 #include "components/html_viewer/blink_url_request_type_converters.h"
@@ -33,15 +34,16 @@
 #include "components/html_viewer/web_layer_tree_view_impl.h"
 #include "components/html_viewer/web_storage_namespace_impl.h"
 #include "components/html_viewer/web_url_loader_impl.h"
-#include "components/mus/public/cpp/scoped_view_ptr.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_tree_connection.h"
-#include "components/mus/vm/ids.h"
+#include "components/mus/public/cpp/scoped_window_ptr.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
+#include "components/mus/ws/ids.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/application/public/cpp/connect.h"
 #include "mojo/application/public/interfaces/shell.mojom.h"
 #include "mojo/common/common_type_converters.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
@@ -50,6 +52,8 @@
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFindOptions.h"
+#include "third_party/WebKit/public/web/WebFrameOwnerProperties.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -58,7 +62,6 @@
 #include "third_party/WebKit/public/web/WebRemoteFrameClient.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkDevice.h"
@@ -72,7 +75,6 @@ using mojo::AxProvider;
 using mojo::Rect;
 using mojo::ServiceProviderPtr;
 using mojo::URLResponsePtr;
-using mus::View;
 using web_view::mojom::HTMLMessageEvent;
 using web_view::mojom::HTMLMessageEventPtr;
 
@@ -119,17 +121,18 @@ void RequireCallback(cc::SurfaceId surface_id,
 HTMLFrame::HTMLFrame(CreateParams* params)
     : frame_tree_manager_(params->manager),
       parent_(params->parent),
-      view_(nullptr),
+      window_(nullptr),
       id_(params->id),
       web_frame_(nullptr),
       delegate_(params->delegate),
       pending_navigation_(false),
       weak_factory_(this) {
+  TRACE_EVENT0("html_viewer", "HTMLFrame::HTMLFrame");
   if (parent_)
     parent_->children_.push_back(this);
 
-  if (params->view && params->view->id() == id_)
-    SetView(params->view);
+  if (params->window && params->window->id() == id_)
+    SetWindow(params->window);
 
   SetReplicatedFrameStateFromClientProperties(params->properties, &state_);
 
@@ -149,14 +152,13 @@ HTMLFrame::HTMLFrame(CreateParams* params)
 
     // The resize and setDeviceScaleFactor() needs to be after setting the main
     // frame.
-    const gfx::Size size_in_pixels(params->view->bounds().width,
-                                   params->view->bounds().height);
+    const gfx::Size size_in_pixels(params->window->bounds().size());
     const gfx::Size size_in_dips = gfx::ConvertSizeToDIP(
-        params->view->viewport_metrics().device_pixel_ratio, size_in_pixels);
+        params->window->viewport_metrics().device_pixel_ratio, size_in_pixels);
     web_view()->resize(size_in_dips);
     web_frame_ = local_web_frame;
     web_view()->setDeviceScaleFactor(global_state()->device_pixel_ratio());
-    if (id_ != params->view->id()) {
+    if (id_ != params->window->id()) {
       blink::WebRemoteFrame* remote_web_frame =
           blink::WebRemoteFrame::create(state_.tree_scope, this);
       local_web_frame->swap(remote_web_frame);
@@ -180,8 +182,8 @@ HTMLFrame::HTMLFrame(CreateParams* params)
       startup_performance_data_collector_ =
           StatsCollectionController::Install(web_frame_, GetApp());
     }
-  } else if (!params->is_local_create_child && params->view &&
-             id_ == params->view->id()) {
+  } else if (!params->is_local_create_child && params->window &&
+             id_ == params->window->id()) {
     // Frame represents the local frame, and it isn't the root of the tree.
     HTMLFrame* previous_sibling = GetPreviousSibling(this);
     blink::WebFrame* previous_web_frame =
@@ -189,7 +191,9 @@ HTMLFrame::HTMLFrame(CreateParams* params)
     CHECK(!parent_->IsLocal());
     web_frame_ = parent_->web_frame()->toWebRemoteFrame()->createLocalChild(
         state_.tree_scope, state_.name, state_.sandbox_flags, this,
-        previous_web_frame);
+        previous_web_frame,
+        // TODO(lazyboy): Replicate WebFrameOwnerProperties where needed.
+        blink::WebFrameOwnerProperties());
     CreateLocalRootWebWidget(web_frame_->toWebLocalFrame());
   } else if (!parent_->IsLocal()) {
     web_frame_ = parent_->web_frame()->toWebRemoteFrame()->createRemoteChild(
@@ -270,13 +274,18 @@ bool HTMLFrame::HasLocalDescendant() const {
   return false;
 }
 
-void HTMLFrame::LoadRequest(const blink::WebURLRequest& request) {
+void HTMLFrame::LoadRequest(const blink::WebURLRequest& request,
+                            base::TimeTicks navigation_start_time) {
+  TRACE_EVENT1("html_viewer", "HTMLFrame::LoadRequest",
+               "url", request.url().string().utf8());
+
   DCHECK(IsLocal());
 
   DVLOG(2) << "HTMLFrame::LoadRequest this=" << this << " id=" << id_
            << " URL=" << GURL(request.url());
 
   pending_navigation_ = false;
+  navigation_start_time_ = navigation_start_time;
   web_frame_->toWebLocalFrame()->loadRequest(request);
 }
 
@@ -297,9 +306,9 @@ HTMLFrame::~HTMLFrame() {
   if (delegate_)
     delegate_->OnFrameDestroyed();
 
-  if (view_) {
-    view_->RemoveObserver(this);
-    mus::ScopedViewPtr::DeleteViewOrViewManager(view_);
+  if (window_) {
+    window_->RemoveObserver(this);
+    mus::ScopedWindowPtr::DeleteWindowOrWindowManager(window_);
   }
 }
 
@@ -308,7 +317,8 @@ blink::WebMediaPlayer* HTMLFrame::createMediaPlayer(
     const blink::WebURL& url,
     blink::WebMediaPlayerClient* client,
     blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
-    blink::WebContentDecryptionModule* initial_cdm) {
+    blink::WebContentDecryptionModule* initial_cdm,
+    const blink::WebString& sink_id) {
   return global_state()->media_factory()->CreateMediaPlayer(
       frame, url, client, encrypted_client, initial_cdm, GetApp()->shell());
 }
@@ -317,13 +327,14 @@ blink::WebFrame* HTMLFrame::createChildFrame(
     blink::WebLocalFrame* parent,
     blink::WebTreeScopeType scope,
     const blink::WebString& frame_name,
-    blink::WebSandboxFlags sandbox_flags) {
+    blink::WebSandboxFlags sandbox_flags,
+    const blink::WebFrameOwnerProperties& frame_owner_properties) {
   DCHECK(IsLocal());  // Can't create children of remote frames.
   DCHECK_EQ(parent, web_frame_);
-  DCHECK(view_);  // If we're local we have to have a view.
-  // Create the view that will house the frame now. We embed once we know the
+  DCHECK(window_);  // If we're local we have to have a window.
+  // Create the window that will house the frame now. We embed once we know the
   // url (see decidePolicyForNavigation()).
-  mus::View* child_view = view_->connection()->CreateView();
+  mus::Window* child_window = window_->connection()->NewWindow();
   ReplicatedFrameState child_state;
   child_state.name = frame_name;
   child_state.tree_scope = scope;
@@ -332,23 +343,23 @@ blink::WebFrame* HTMLFrame::createChildFrame(
   client_properties.mark_non_null();
   ClientPropertiesFromReplicatedFrameState(child_state, &client_properties);
 
-  child_view->SetVisible(true);
-  view_->AddChild(child_view);
+  child_window->SetVisible(true);
+  window_->AddChild(child_window);
 
-  HTMLFrame::CreateParams params(frame_tree_manager_, this, child_view->id(),
-                                 child_view, client_properties, nullptr);
+  HTMLFrame::CreateParams params(frame_tree_manager_, this, child_window->id(),
+                                 child_window, client_properties, nullptr);
   params.is_local_create_child = true;
   HTMLFrame* child_frame = GetFirstAncestorWithDelegate()
                                ->delegate_->GetHTMLFactory()
                                ->CreateHTMLFrame(&params);
-  child_frame->owned_view_.reset(new mus::ScopedViewPtr(child_view));
+  child_frame->owned_window_.reset(new mus::ScopedWindowPtr(child_window));
 
   web_view::mojom::FrameClientPtr client_ptr;
   child_frame->frame_client_binding_.reset(
       new mojo::Binding<web_view::mojom::FrameClient>(
           child_frame, mojo::GetProxy(&client_ptr)));
   server_->OnCreatedFrame(GetProxy(&(child_frame->server_)), client_ptr.Pass(),
-                          child_view->id(), client_properties.Pass());
+                          child_window->id(), client_properties.Pass());
   return child_frame->web_frame_;
 }
 
@@ -393,6 +404,8 @@ blink::WebNavigationPolicy HTMLFrame::decidePolicyForNavigation(
            << " URL=" << GURL(info.urlRequest.url());
 
   mojo::URLRequestPtr url_request = mojo::URLRequest::From(info.urlRequest);
+  url_request->originating_time_ticks =
+      base::TimeTicks::Now().ToInternalValue();
   server_->RequestNavigate(
       WebNavigationPolicyToNavigationTarget(info.defaultPolicy), id_,
       url_request.Pass());
@@ -413,8 +426,8 @@ void HTMLFrame::didHandleOnloadEvents(blink::WebLocalFrame* frame) {
   DVLOG(2) << "XXX HTMLFrame::didHandleOnloadEvents id=" << id_;
   static bool recorded = false;
   if (!recorded && startup_performance_data_collector_) {
-    startup_performance_data_collector_->SetFirstWebContentsMainFrameLoadTime(
-        base::Time::Now().ToInternalValue());
+    startup_performance_data_collector_->SetFirstWebContentsMainFrameLoadTicks(
+        base::TimeTicks::Now().ToInternalValue());
     recorded = true;
   }
 }
@@ -489,6 +502,13 @@ void HTMLFrame::didCommitProvisionalLoad(
   // NavigationControllerImpl::RendererDidNavigate use everything passed
   // through.
   server_->DidCommitProvisionalLoad();
+
+  if (!navigation_start_time_.is_null()) {
+    frame->dataSource()->setNavigationStartTime(
+        navigation_start_time_.ToInternalValue() /
+        static_cast<double>(base::Time::kMicrosecondsPerSecond));
+    navigation_start_time_ = base::TimeTicks();
+  }
 }
 
 void HTMLFrame::didReceiveTitle(blink::WebLocalFrame* frame,
@@ -501,6 +521,22 @@ void HTMLFrame::didReceiveTitle(blink::WebLocalFrame* frame,
         mojo::String::From(base::string16(title).substr(0, kMaxTitleChars));
   }
   server_->TitleChanged(formatted);
+}
+
+void HTMLFrame::reportFindInFrameMatchCount(int identifier,
+                                            int count,
+                                            bool finalUpdate) {
+  server_->OnFindInFrameCountUpdated(identifier, count, finalUpdate);
+}
+
+void HTMLFrame::reportFindInPageSelection(int identifier,
+                                          int activeMatchOrdinal,
+                                          const blink::WebRect& selection) {
+  server_->OnFindInPageSelectionUpdated(identifier, activeMatchOrdinal);
+}
+
+bool HTMLFrame::shouldSearchSingleFrame() {
+  return true;
 }
 
 void HTMLFrame::Bind(
@@ -552,23 +588,23 @@ web_view::mojom::Frame* HTMLFrame::GetServerFrame() {
   return frame_tree_manager_->local_frame_->server_.get();
 }
 
-void HTMLFrame::SetView(mus::View* view) {
-  if (view_)
-    view_->RemoveObserver(this);
-  view_ = view;
-  if (view_)
-    view_->AddObserver(this);
+void HTMLFrame::SetWindow(mus::Window* window) {
+  if (window_)
+    window_->RemoveObserver(this);
+  window_ = window;
+  if (window_)
+    window_->AddObserver(this);
 }
 
 void HTMLFrame::CreateRootWebWidget() {
   DCHECK(!html_widget_);
-  if (view_) {
+  if (window_) {
     HTMLWidgetRootLocal::CreateParams create_params(GetApp(), global_state(),
-                                                    view_);
+                                                    window_);
     html_widget_.reset(
         delegate_->GetHTMLFactory()->CreateHTMLWidgetRootLocal(&create_params));
   } else {
-    html_widget_.reset(new HTMLWidgetRootRemote);
+    html_widget_.reset(new HTMLWidgetRootRemote(global_state()));
   }
 }
 
@@ -576,20 +612,22 @@ void HTMLFrame::CreateLocalRootWebWidget(blink::WebLocalFrame* local_frame) {
   DCHECK(!html_widget_);
   DCHECK(IsLocal());
   html_widget_.reset(
-      new HTMLWidgetLocalRoot(GetApp(), global_state(), view_, local_frame));
+      new HTMLWidgetLocalRoot(GetApp(), global_state(), window_, local_frame));
 }
 
 void HTMLFrame::UpdateFocus() {
   blink::WebWidget* web_widget = GetWebWidget();
-  if (!web_widget || !view_)
+  if (!web_widget || !window_)
     return;
-  const bool is_focused = view_ && view_->HasFocus();
+  const bool is_focused = window_ && window_->HasFocus();
   web_widget->setFocus(is_focused);
   if (web_widget->isWebView())
     static_cast<blink::WebView*>(web_widget)->setIsActive(is_focused);
 }
 
 void HTMLFrame::SwapToRemote() {
+  TRACE_EVENT0("html_viewer", "HTMLFrame::SwapToRemote");
+
   DVLOG(2) << "HTMLFrame::SwapToRemote this=" << this << " id=" << id_;
 
   DCHECK(IsLocal());
@@ -603,15 +641,14 @@ void HTMLFrame::SwapToRemote() {
   // swap() ends up calling us back and we then close the frame, which deletes
   // it.
   web_frame_->swap(remote_frame);
-  if (owned_view_) {
+  if (owned_window_) {
     surface_layer_ =
           cc::SurfaceLayer::Create(cc_blink::WebLayerImpl::LayerSettings(),
                                    base::Bind(&SatisfyCallback),
                                    base::Bind(&RequireCallback));
-    surface_layer_->SetSurfaceId(
-        cc::SurfaceId(owned_view_->view()->id()),
-        global_state()->device_pixel_ratio(),
-        owned_view_->view()->bounds().To<gfx::Rect>().size());
+    surface_layer_->SetSurfaceId(cc::SurfaceId(owned_window_->window()->id()),
+                                 global_state()->device_pixel_ratio(),
+                                 owned_window_->window()->bounds().size());
 
     web_layer_.reset(new cc_blink::WebLayerImpl(surface_layer_));
   }
@@ -626,7 +663,7 @@ void HTMLFrame::SwapToRemote() {
   pending_navigation_ = false;
 
   web_frame_ = remote_frame;
-  SetView(nullptr);
+  SetWindow(nullptr);
   server_.reset();
   frame_client_binding_.reset();
   if (delegate)
@@ -635,19 +672,22 @@ void HTMLFrame::SwapToRemote() {
 
 void HTMLFrame::SwapToLocal(
     HTMLFrameDelegate* delegate,
-    mus::View* view,
+    mus::Window* window,
     const mojo::Map<mojo::String, mojo::Array<uint8_t>>& properties) {
+  TRACE_EVENT0("html_viewer", "HTMLFrame::SwapToLocal");
   DVLOG(2) << "HTMLFrame::SwapToLocal this=" << this << " id=" << id_;
   CHECK(!IsLocal());
   // It doesn't make sense for the root to swap to local.
   CHECK(parent_);
   delegate_ = delegate;
-  SetView(view);
+  SetWindow(window);
   SetReplicatedFrameStateFromClientProperties(properties, &state_);
   blink::WebLocalFrame* local_web_frame =
       blink::WebLocalFrame::create(state_.tree_scope, this);
   local_web_frame->initializeToReplaceRemoteFrame(
-      web_frame_->toWebRemoteFrame(), state_.name, state_.sandbox_flags);
+      web_frame_->toWebRemoteFrame(), state_.name, state_.sandbox_flags,
+      // TODO(lazyboy): Figure out replicating WebFrameOwnerProperties.
+      blink::WebFrameOwnerProperties());
   // The swap() ends up calling to frameDetached() and deleting the old.
   web_frame_->swap(local_web_frame);
   web_frame_ = local_web_frame;
@@ -660,6 +700,26 @@ void HTMLFrame::SwapDelegate(HTMLFrameDelegate* delegate) {
   HTMLFrameDelegate* old_delegate = delegate_;
   delegate_ = delegate;
   delegate->OnSwap(this, old_delegate);
+}
+
+blink::WebElement HTMLFrame::GetFocusedElement() {
+  if (!web_view())
+    return blink::WebElement();
+
+  HTMLFrame* frame = this;
+  while (frame) {
+    if (frame->web_view()) {
+      if (frame->web_view()->focusedFrame() == web_frame_) {
+        blink::WebDocument doc = web_frame_->document();
+        if (!doc.isNull())
+          return doc.focusedElement();
+      }
+      return blink::WebElement();
+    }
+    frame = frame->parent();
+  }
+
+  return blink::WebElement();
 }
 
 HTMLFrame* HTMLFrame::FindFrameWithWebFrame(blink::WebFrame* web_frame) {
@@ -688,22 +748,23 @@ void HTMLFrame::FrameDetachedImpl(blink::WebFrame* web_frame) {
   delete this;
 }
 
-void HTMLFrame::OnViewBoundsChanged(View* view,
-                                    const Rect& old_bounds,
-                                    const Rect& new_bounds) {
-  DCHECK_EQ(view, view_);
+void HTMLFrame::OnWindowBoundsChanged(mus::Window* window,
+                                      const gfx::Rect& old_bounds,
+                                      const gfx::Rect& new_bounds) {
+  DCHECK_EQ(window, window_);
   if (html_widget_)
-    html_widget_->OnViewBoundsChanged(view);
+    html_widget_->OnWindowBoundsChanged(window);
 }
 
-void HTMLFrame::OnViewDestroyed(View* view) {
-  DCHECK_EQ(view, view_);
-  view_->RemoveObserver(this);
-  view_ = nullptr;
+void HTMLFrame::OnWindowDestroyed(mus::Window* window) {
+  DCHECK_EQ(window, window_);
+  window_->RemoveObserver(this);
+  window_ = nullptr;
   Close();
 }
 
-void HTMLFrame::OnViewInputEvent(View* view, const mojo::EventPtr& event) {
+void HTMLFrame::OnWindowInputEvent(mus::Window* window,
+                                   const mus::mojom::EventPtr& event) {
   if (event->pointer_data && event->pointer_data->location) {
     // Blink expects coordintes to be in DIPs.
     event->pointer_data->location->x /= global_state()->device_pixel_ratio();
@@ -719,12 +780,13 @@ void HTMLFrame::OnViewInputEvent(View* view, const mojo::EventPtr& event) {
   if (!touch_handler_ && web_widget)
     touch_handler_.reset(new TouchHandler(web_widget));
 
-  if (touch_handler_ && (event->action == mojo::EVENT_TYPE_POINTER_DOWN ||
-                         event->action == mojo::EVENT_TYPE_POINTER_UP ||
-                         event->action == mojo::EVENT_TYPE_POINTER_CANCEL ||
-                         event->action == mojo::EVENT_TYPE_POINTER_MOVE) &&
+  if (touch_handler_ &&
+      (event->action == mus::mojom::EVENT_TYPE_POINTER_DOWN ||
+       event->action == mus::mojom::EVENT_TYPE_POINTER_UP ||
+       event->action == mus::mojom::EVENT_TYPE_POINTER_CANCEL ||
+       event->action == mus::mojom::EVENT_TYPE_POINTER_MOVE) &&
       event->pointer_data &&
-      event->pointer_data->kind == mojo::POINTER_KIND_TOUCH) {
+      event->pointer_data->kind == mus::mojom::POINTER_KIND_TOUCH) {
     touch_handler_->OnTouchEvent(*event);
     return;
   }
@@ -738,17 +800,19 @@ void HTMLFrame::OnViewInputEvent(View* view, const mojo::EventPtr& event) {
     web_widget->handleInputEvent(*web_event);
 }
 
-void HTMLFrame::OnViewFocusChanged(mus::View* gained_focus,
-                                   mus::View* lost_focus) {
+void HTMLFrame::OnWindowFocusChanged(mus::Window* gained_focus,
+                                     mus::Window* lost_focus) {
   UpdateFocus();
 }
 
-void HTMLFrame::OnConnect(web_view::mojom::FramePtr frame,
-                          uint32_t change_id,
-                          uint32_t view_id,
-                          web_view::mojom::ViewConnectType view_connect_type,
-                          mojo::Array<web_view::mojom::FrameDataPtr> frame_data,
-                          const OnConnectCallback& callback) {
+void HTMLFrame::OnConnect(
+    web_view::mojom::FramePtr frame,
+    uint32_t change_id,
+    uint32_t window_id,
+    web_view::mojom::WindowConnectType window_connect_type,
+    mojo::Array<web_view::mojom::FrameDataPtr> frame_data,
+    int64_t navigation_start_time_ticks,
+    const OnConnectCallback& callback) {
   // This is called if this frame is created by way of OnCreatedFrame().
   callback.Run();
 }
@@ -857,6 +921,51 @@ void HTMLFrame::OnDispatchFrameLoadEvent(uint32_t frame_id) {
     frame->web_frame_->toWebRemoteFrame()->DispatchLoadEventForFrameOwner();
 }
 
+void HTMLFrame::Find(int32 request_id,
+                     const mojo::String& search_text,
+                     web_view::mojom::FindOptionsPtr options,
+                     bool wrap_within_frame,
+                     const FindCallback& callback) {
+  blink::WebRect selection_rect;
+  bool result = web_frame_->find(request_id, search_text.To<blink::WebString>(),
+                                 options.To<blink::WebFindOptions>(),
+                                 wrap_within_frame, &selection_rect);
+  if (!result) {
+    // don't leave text selected as you move to the next frame.
+    web_frame_->executeCommand(blink::WebString::fromUTF8("Unselect"),
+                               GetFocusedElement());
+  }
+
+  callback.Run(result);
+}
+
+void HTMLFrame::StopFinding(bool clear_selection) {
+  // TODO(erg): |clear_selection| isn't correct; this should be a state enum
+  // that lets us STOP_FIND_ACTION_ACTIVATE_SELECTION, too.
+  if (clear_selection) {
+    blink::WebElement focused_element = GetFocusedElement();
+    if (!focused_element.isNull()) {
+      web_frame_->executeCommand(blink::WebString::fromUTF8("Unselect"),
+                                 focused_element);
+    }
+  }
+
+  web_frame_->stopFinding(clear_selection);
+}
+
+void HTMLFrame::HighlightFindResults(int32_t request_id,
+                                     const mojo::String& search_text,
+                                     web_view::mojom::FindOptionsPtr options,
+                                     bool reset) {
+  web_frame_->scopeStringMatches(request_id, search_text.To<blink::WebString>(),
+                                 options.To<blink::WebFindOptions>(), reset);
+}
+
+void HTMLFrame::StopHighlightingFindResults() {
+  web_frame_->resetMatchCount();
+  web_frame_->cancelPendingScopingEffort();
+}
+
 void HTMLFrame::frameDetached(blink::WebRemoteFrameClient::DetachType type) {
   if (type == blink::WebRemoteFrameClient::DetachType::Swap) {
     web_frame_->close();
@@ -897,8 +1006,7 @@ void HTMLFrame::initializeChildFrame(const blink::WebRect& frame_rect,
                               frame_rect.height);
   const gfx::Rect rect_in_pixels(gfx::ConvertRectToPixel(
       global_state()->device_pixel_ratio(), rect_in_dip));
-  const mojo::RectPtr mojo_rect_in_pixels(mojo::Rect::From(rect_in_pixels));
-  view_->SetBounds(*mojo_rect_in_pixels);
+  window_->SetBounds(rect_in_pixels);
 }
 
 void HTMLFrame::navigate(const blink::WebURLRequest& request,
@@ -916,24 +1024,22 @@ void HTMLFrame::reload(bool ignore_cache, bool is_client_redirect) {
 }
 
 void HTMLFrame::frameRectsChanged(const blink::WebRect& frame_rect) {
-  // Only the owner of view can update its size.
-  if (!owned_view_)
+  // Only the owner of window can update its size.
+  if (!owned_window_)
     return;
 
   const gfx::Rect rect_in_dip(frame_rect.x, frame_rect.y, frame_rect.width,
                               frame_rect.height);
   const gfx::Rect rect_in_pixels(gfx::ConvertRectToPixel(
       global_state()->device_pixel_ratio(), rect_in_dip));
-  const mojo::RectPtr mojo_rect_in_pixels(mojo::Rect::From(rect_in_pixels));
-  owned_view_->view()->SetBounds(*mojo_rect_in_pixels);
+  owned_window_->window()->SetBounds(rect_in_pixels);
 
   if (!surface_layer_)
     return;
 
-  surface_layer_->SetSurfaceId(
-      cc::SurfaceId(owned_view_->view()->id()),
-      global_state()->device_pixel_ratio(),
-      owned_view_->view()->bounds().To<gfx::Rect>().size());
+  surface_layer_->SetSurfaceId(cc::SurfaceId(owned_window_->window()->id()),
+                               global_state()->device_pixel_ratio(),
+                               owned_window_->window()->bounds().size());
 }
 
 }  // namespace mojo

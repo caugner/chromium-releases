@@ -13,6 +13,8 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "mojo/message_pump/handle_watcher.h"
+#include "mojo/public/cpp/bindings/type_converter.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/services/network/http_server_impl.h"
 #include "mojo/services/network/net_adapters.h"
 #include "mojo/services/network/public/cpp/web_socket_read_queue.h"
@@ -24,8 +26,6 @@
 #include "net/server/http_server.h"
 #include "net/server/http_server_request_info.h"
 #include "net/server/http_server_response_info.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/type_converter.h"
-#include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
 
 namespace mojo {
 
@@ -36,7 +36,7 @@ class HttpConnectionImpl::SimpleDataPipeReader {
   using CompletionCallback =
       base::Callback<void(SimpleDataPipeReader*, scoped_ptr<std::string>)>;
 
-  SimpleDataPipeReader() : watcher_(11) {}
+  SimpleDataPipeReader() {}
   ~SimpleDataPipeReader() {}
 
   void Start(ScopedDataPipeConsumerHandle consumer,

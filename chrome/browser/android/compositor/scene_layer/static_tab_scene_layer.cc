@@ -44,7 +44,6 @@ void StaticTabSceneLayer::UpdateTabLayer(JNIEnv* env,
                                          jint id,
                                          jint toolbar_resource_id,
                                          jboolean can_use_live_layer,
-                                         jboolean can_use_ntp_fallback,
                                          jint default_background_color,
                                          jfloat x,
                                          jfloat y,
@@ -73,9 +72,9 @@ void StaticTabSceneLayer::UpdateTabLayer(JNIEnv* env,
 
   // Set up the content layer and move it to the proper position.
   content_layer_->layer()->SetBounds(gfx::Size(width, height));
-  content_layer_->layer()->SetPosition(gfx::Point(x, y));
+  content_layer_->layer()->SetPosition(gfx::PointF(x, y));
   content_layer_->SetProperties(
-      id, can_use_live_layer, can_use_ntp_fallback, static_to_view_blend,
+      id, can_use_live_layer, static_to_view_blend,
       should_override_content_alpha, content_alpha_override, saturation,
       gfx::Rect(content_viewport_size), content_viewport_size);
 
@@ -106,7 +105,7 @@ void StaticTabSceneLayer::UpdateTabLayer(JNIEnv* env,
     y += content_viewport_offset.y();
   }
 
-  content_layer_->layer()->SetPosition(gfx::Point(x, y));
+  content_layer_->layer()->SetPosition(gfx::PointF(x, y));
   content_layer_->layer()->SetIsDrawable(true);
 
   layer_->AddChild(content_layer_->layer());
@@ -126,13 +125,23 @@ void StaticTabSceneLayer::SetContentSceneLayer(JNIEnv* env,
                                                jobject jobj,
                                                jobject jcontent_scene_layer) {
   SceneLayer* content_scene_layer = FromJavaObject(env, jcontent_scene_layer);
-  if (content_scene_layer && content_scene_layer->layer()) {
-    content_scene_layer_ = content_scene_layer->layer();
-    if (content_scene_layer_.get())
-      layer_->AddChild(content_scene_layer_);
-  } else if (content_scene_layer_) {
+  scoped_refptr<cc::Layer> layer = content_scene_layer ?
+      content_scene_layer->layer() : nullptr;
+
+  if (content_scene_layer_ && content_scene_layer_ != layer) {
     content_scene_layer_->RemoveFromParent();
     content_scene_layer_ = nullptr;
+  }
+
+  // TODO(pedrosimonetti): Consider being smarter with regards to when to
+  // add the layer to the hierarchy. For now, we need to keep adding the
+  // content_scene_layer on every frame because the content_layer is also
+  // added on every frame. This means that if we only add it once, the
+  // content_layer will be added again on the next frame and will
+  // occlude the content_scene_layer.
+  if (layer) {
+    content_scene_layer_ = layer;
+    layer_->AddChild(layer);
   }
 }
 

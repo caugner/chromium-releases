@@ -5,7 +5,7 @@
 #include "components/web_view/public/cpp/web_view.h"
 
 #include "base/bind.h"
-#include "components/mus/public/cpp/view.h"
+#include "components/mus/public/cpp/window.h"
 #include "mojo/application/public/cpp/application_impl.h"
 
 namespace web_view {
@@ -20,7 +20,7 @@ void OnEmbed(bool success, uint16 connection_id) {
 WebView::WebView(mojom::WebViewClient* client) : binding_(client) {}
 WebView::~WebView() {}
 
-void WebView::Init(mojo::ApplicationImpl* app, mus::View* view) {
+void WebView::Init(mojo::ApplicationImpl* app, mus::Window* window) {
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = "mojo:web_view";
 
@@ -33,10 +33,11 @@ void WebView::Init(mojo::ApplicationImpl* app, mus::View* view) {
   app->ConnectToService(request.Pass(), &factory);
   factory->CreateWebView(client.Pass(), GetProxy(&web_view_));
 
-  mojo::ViewTreeClientPtr view_tree_client;
-  web_view_->GetViewTreeClient(GetProxy(&view_tree_client));
-  view->Embed(view_tree_client.Pass(), mojo::ViewTree::ACCESS_POLICY_EMBED_ROOT,
-              base::Bind(&OnEmbed));
+  mus::mojom::WindowTreeClientPtr window_tree_client;
+  web_view_->GetWindowTreeClient(GetProxy(&window_tree_client));
+  window->Embed(window_tree_client.Pass(),
+                mus::mojom::WindowTree::ACCESS_POLICY_EMBED_ROOT,
+                base::Bind(&OnEmbed));
 }
 
 }  // namespace web_view

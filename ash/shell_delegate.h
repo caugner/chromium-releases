@@ -38,7 +38,7 @@ class Widget;
 }
 
 namespace keyboard {
-class KeyboardControllerProxy;
+class KeyboardUI;
 }
 
 namespace ash {
@@ -107,9 +107,8 @@ class ASH_EXPORT ShellDelegate {
   // Invoked when the user uses Ctrl-Shift-Q to close chrome.
   virtual void Exit() = 0;
 
-  // Create a shell-specific keyboard::KeyboardControllerProxy
-  virtual keyboard::KeyboardControllerProxy*
-      CreateKeyboardControllerProxy() = 0;
+  // Create a shell-specific keyboard::KeyboardUI
+  virtual keyboard::KeyboardUI* CreateKeyboardUI() = 0;
 
   // Called when virtual keyboard has been activated/deactivated.
   virtual void VirtualKeyboardActivated(bool activated) = 0;
@@ -119,10 +118,6 @@ class ASH_EXPORT ShellDelegate {
       VirtualKeyboardStateObserver* observer) = 0;
   virtual void RemoveVirtualKeyboardStateObserver(
       VirtualKeyboardStateObserver* observer) = 0;
-
-  // Get the active browser context. This will get us the active profile
-  // in chrome.
-  virtual content::BrowserContext* GetActiveBrowserContext() = 0;
 
   // Get the AppListViewDelegate, creating one if it does not yet exist.
   // Ownership stays with Chrome's AppListService, or the ShellDelegate.
@@ -167,6 +162,10 @@ class ASH_EXPORT ShellDelegate {
   virtual void OpenKeyboardShortcutHelpPage() const {}
 
   virtual gfx::Image GetDeprecatedAcceleratorImage() const = 0;
+
+  // Toggles the status of the touchpad / touchscreen on or off.
+  virtual void ToggleTouchpad() {}
+  virtual void ToggleTouchscreen() {}
 };
 
 }  // namespace ash

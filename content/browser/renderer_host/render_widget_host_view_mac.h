@@ -29,7 +29,6 @@
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/accelerated_widget_mac/display_link_mac.h"
-#include "ui/accelerated_widget_mac/io_surface_layer.h"
 #import "ui/base/cocoa/command_dispatcher.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #import "ui/base/cocoa/tool_tip_base_view.h"
@@ -208,8 +207,10 @@ class Layer;
 - (void)updateCursor:(NSCursor*)cursor;
 - (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
                              actualRange:(NSRangePointer)actualRange;
+- (void)quickLookWithEvent:(NSEvent*)event;
 - (void)showLookUpDictionaryOverlayAtPoint:(NSPoint)point;
-- (void)showLookUpDictionaryOverlayFromRange:(NSRange)range;
+- (void)showLookUpDictionaryOverlayFromRange:(NSRange)range
+                                  targetView:(NSView*)targetView;
 @end
 
 namespace content {
@@ -317,7 +318,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
-      const base::Callback<void(bool)>& callback) override;
+      const base::Callback<void(const gfx::Rect&, bool)>& callback) override;
   bool CanCopyToVideoFrame() const override;
   void BeginFrameSubscription(
       scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
@@ -335,6 +336,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void GetScreenInfo(blink::WebScreenInfo* results) override;
   bool GetScreenColorProfile(std::vector<char>* color_profile) override;
   gfx::Rect GetBoundsInRootWindow() override;
+  void LockCompositingSurface() override;
+  void UnlockCompositingSurface() override;
 
   bool LockMouse() override;
   void UnlockMouse() override;
@@ -507,12 +510,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;
-  bool AcceleratedWidgetShouldIgnoreBackpressure() const override;
   void AcceleratedWidgetGetVSyncParameters(
       base::TimeTicks* timebase, base::TimeDelta* interval) const override;
-  void AcceleratedWidgetSwapCompleted(
-      const std::vector<ui::LatencyInfo>& latency_info) override;
-  void AcceleratedWidgetHitError() override;
+  void AcceleratedWidgetSwapCompleted() override;
 
   // Transition from being in the Suspended state to being in the Destroyed
   // state, if appropriate (see BrowserCompositorViewState for details).

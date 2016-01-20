@@ -20,25 +20,25 @@ import java.util.concurrent.Executors;
 /**
  * Test fixture to test upload APIs.  Uses an in-process test server.
  */
+@SuppressWarnings("deprecation")
 public class UploadTest extends CronetTestBase {
     private static final String UPLOAD_DATA = "Nifty upload data!";
     private static final String UPLOAD_CHANNEL_DATA = "Upload channel data";
 
-    private CronetTestActivity mActivity;
+    private CronetTestFramework mTestFramework;
 
     // @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mActivity = launchCronetTestApp();
-        assertNotNull(mActivity);
-        assertTrue(NativeTestServer.startNativeTestServer(
-                getInstrumentation().getTargetContext()));
+        mTestFramework = startCronetTestFramework();
+        assertNotNull(mTestFramework);
+        assertTrue(NativeTestServer.startNativeTestServer(getContext()));
     }
 
     private HttpUrlRequest createRequest(
             String url, HttpUrlRequestListener listener) {
         HashMap<String, String> headers = new HashMap<String, String>();
-        return mActivity.mRequestFactory.createRequest(
+        return mTestFramework.mRequestFactory.createRequest(
                 url, HttpUrlRequest.REQUEST_PRIORITY_MEDIUM, headers, listener);
     }
 

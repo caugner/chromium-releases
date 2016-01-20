@@ -91,6 +91,7 @@ crbug.com/450493 http/tests/inspector/sources/ [ Slow ]
 crbug.com/450493 http/tests/inspector/stacktraces/ [ Slow ]
 crbug.com/450493 inspector/profiler/ [ Slow ]
 crbug.com/420008 inspector/tracing/ [ Slow ]
+crbug.com/420008 virtual/syncpaint/inspector/tracing/ [ Slow ]
 crbug.com/420008 virtual/threaded/inspector/tracing/ [ Slow ]
 crbug.com/246190 [ Release ] http/tests/inspector/indexeddb/ [ Slow ]
 
@@ -161,8 +162,6 @@ crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests1
 crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests19.html [ Slow ]
 crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests2.html [ Slow ]
 
-crbug.com/528421 [ Win ] fast/repaint/fixed-in-page-scale.html [ Slow ]
-
 # FIXME: These tests might still be buggy and time out. They were marked as Slow on 9/20/2013.
 # Double-check the data after they've been running another week or so.
 webkit.org/b/58193 [ Win7 ] http/tests/local/fileapi/send-sliced-dragged-file.html [ Slow ]
@@ -230,3 +229,4 @@ crbug.com/528419 [ Linux ] inspector/elements/shadow/shadow-host-display-modes.h
 crbug.com/528419 [ Linux ] inspector/elements/styles-2/pseudo-elements.html [ Slow ]
 
 crbug.com/529345 [ Win10 ] paint/masks/fieldset-mask.html [ Slow ]
+

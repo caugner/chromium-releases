@@ -19,26 +19,28 @@
 
 namespace nacl_io {
 
-SocketNode::SocketNode(Filesystem* filesystem)
+SocketNode::SocketNode(int type, Filesystem* filesystem)
     : StreamNode(filesystem),
       socket_resource_(0),
       local_addr_(0),
       remote_addr_(0),
       socket_flags_(0),
       last_errno_(0),
-      keep_alive_(false) {
+      keep_alive_(false),
+      so_type_(type) {
   memset(&linger_, 0, sizeof(linger_));
   SetType(S_IFSOCK);
 }
 
-SocketNode::SocketNode(Filesystem* filesystem, PP_Resource socket)
+SocketNode::SocketNode(int type, Filesystem* filesystem, PP_Resource socket)
     : StreamNode(filesystem),
       socket_resource_(socket),
       local_addr_(0),
       remote_addr_(0),
       socket_flags_(0),
       last_errno_(0),
-      keep_alive_(false) {
+      keep_alive_(false),
+      so_type_(type) {
   memset(&linger_, 0, sizeof(linger_));
   SetType(S_IFSOCK);
   filesystem_->ppapi()->AddRefResource(socket_resource_);
@@ -248,6 +250,10 @@ Error SocketNode::GetSockOpt(int lvl,
       value_ptr = &value;
       value_len = sizeof(value);
       break;
+    case SO_TYPE:
+      value_ptr = &so_type_;
+      value_len = sizeof(so_type_);
+      break;
     case SO_LINGER:
       value_ptr = &linger_;
       value_len = sizeof(linger_);
@@ -375,6 +381,8 @@ Error SocketNode::RecvFrom(const HandleAttr& attr,
                            socklen_t* addrlen,
                            int* out_len) {
   PP_Resource addr = 0;
+  if (0 == socket_resource_)
+    return EBADF;
   Error err = RecvHelper(attr, buf, len, flags, &addr, out_len);
   if (0 == err && 0 != addr) {
     if (src_addr)
@@ -392,14 +400,6 @@ Error SocketNode::RecvHelper(const HandleAttr& attr,
                              int flags,
                              PP_Resource* addr,
                              int* out_len) {
-  if (0 == socket_resource_)
-    return EBADF;
-
-  if (TestStreamFlags(SSF_RECV_ENDOFSTREAM)) {
-    *out_len = 0;
-    return 0;
-  }
-
   int ms = read_timeout_;
   if ((flags & MSG_DONTWAIT) || !attr.IsBlocking())
     ms = 0;
@@ -429,6 +429,11 @@ Error SocketNode::Send(const HandleAttr& attr,
                        size_t len,
                        int flags,
                        int* out_len) {
+  if (0 == socket_resource_)
+    return EBADF;
+
+  if (0 == remote_addr_)
+    return ENOTCONN;
   return SendHelper(attr, buf, len, flags, remote_addr_, out_len);
 }
 
@@ -446,6 +451,9 @@ Error SocketNode::SendTo(const HandleAttr& attr,
   if (0 == addr)
     return EINVAL;
 
+  if (0 == socket_resource_)
+    return EBADF;
+
   Error err = SendHelper(attr, buf, len, flags, addr, out_len);
   filesystem_->ppapi()->ReleaseResource(addr);
   return err;
@@ -457,12 +465,6 @@ Error SocketNode::SendHelper(const HandleAttr& attr,
                              int flags,
                              PP_Resource addr,
                              int* out_len) {
-  if (0 == socket_resource_)
-    return EBADF;
-
-  if (0 == addr)
-    return ENOTCONN;
-
   int ms = write_timeout_;
   if ((flags & MSG_DONTWAIT) || !attr.IsBlocking())
     ms = 0;

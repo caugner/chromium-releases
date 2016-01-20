@@ -49,6 +49,36 @@ namespace test_runner {
 
 namespace {
 
+WebMouseEvent::Button GetButtonTypeFromButtonNumber(int button_code) {
+  switch (button_code) {
+    case -1:
+      return WebMouseEvent::ButtonNone;
+    case 0:
+      return WebMouseEvent::ButtonLeft;
+    case 1:
+      return WebMouseEvent::ButtonMiddle;
+    case 2:
+      return WebMouseEvent::ButtonRight;
+  }
+  NOTREACHED();
+  return WebMouseEvent::ButtonNone;
+}
+
+int GetWebMouseEventModifierForButton(WebMouseEvent::Button button) {
+  switch (button) {
+    case WebMouseEvent::ButtonNone:
+      return 0;
+    case WebMouseEvent::ButtonLeft:
+      return WebMouseEvent::LeftButtonDown;
+    case WebMouseEvent::ButtonMiddle:
+      return WebMouseEvent::MiddleButtonDown;
+    case WebMouseEvent::ButtonRight:
+      return WebMouseEvent::RightButtonDown;
+  }
+  NOTREACHED();
+  return 0;
+}
+
 void InitMouseEvent(WebInputEvent::Type t,
                     WebMouseEvent::Button b,
                     const WebPoint& pos,
@@ -58,7 +88,7 @@ void InitMouseEvent(WebInputEvent::Type t,
                     WebMouseEvent* e) {
   e->type = t;
   e->button = b;
-  e->modifiers = modifiers;
+  e->modifiers = modifiers | GetWebMouseEventModifierForButton(b);
   e->x = pos.x;
   e->y = pos.y;
   e->globalX = pos.x;
@@ -96,12 +126,40 @@ int GetKeyModifier(const std::string& modifier_name) {
 #else
     return WebInputEvent::ControlKey;
 #endif
+  } else if (!strcmp(characters, "accessKey")) {
+#ifdef __APPLE__
+    return WebInputEvent::AltKey | WebInputEvent::ControlKey;
+#else
+    return WebInputEvent::AltKey;
+#endif
   } else if (!strcmp(characters, "leftButton")) {
     return WebInputEvent::LeftButtonDown;
   } else if (!strcmp(characters, "middleButton")) {
     return WebInputEvent::MiddleButtonDown;
   } else if (!strcmp(characters, "rightButton")) {
     return WebInputEvent::RightButtonDown;
+  } else if (!strcmp(characters, "capsLockOn")) {
+    return WebInputEvent::CapsLockOn;
+  } else if (!strcmp(characters, "numLockOn")) {
+    return WebInputEvent::NumLockOn;
+  } else if (!strcmp(characters, "locationLeft")) {
+    return WebInputEvent::IsLeft;
+  } else if (!strcmp(characters, "locationRight")) {
+    return WebInputEvent::IsRight;
+  } else if (!strcmp(characters, "locationNumpad")) {
+    return WebInputEvent::IsKeyPad;
+  } else if (!strcmp(characters, "isComposing")) {
+    return WebInputEvent::IsComposing;
+  } else if (!strcmp(characters, "altGraphKey")) {
+    return WebInputEvent::AltGrKey;
+  } else if (!strcmp(characters, "osKey")) {
+    return WebInputEvent::OSKey;
+  } else if (!strcmp(characters, "fnKey")) {
+    return WebInputEvent::FnKey;
+  } else if (!strcmp(characters, "symbolKey")) {
+    return WebInputEvent::SymbolKey;
+  } else if (!strcmp(characters, "scrollLockOn")) {
+    return WebInputEvent::ScrollLockOn;
   }
 
   return 0;
@@ -234,14 +292,6 @@ std::vector<std::string> MakeMenuItemStringsFor(
 // How much we should scroll per event - the value here is chosen to match the
 // WebKit impl and layout test results.
 const float kScrollbarPixelsPerTick = 40.0f;
-
-WebMouseEvent::Button GetButtonTypeFromButtonNumber(int button_code) {
-  if (!button_code)
-    return WebMouseEvent::ButtonLeft;
-  if (button_code == 2)
-    return WebMouseEvent::ButtonRight;
-  return WebMouseEvent::ButtonMiddle;
-}
 
 class MouseDownTask : public WebMethodTask<EventSender> {
  public:
@@ -1180,7 +1230,7 @@ void EventSender::DoDragDrop(const WebDragData& drag_data,
 
 void EventSender::MouseDown(int button_number, int modifiers) {
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   DCHECK_NE(-1, button_number);
 
@@ -1205,7 +1255,7 @@ void EventSender::MouseDown(int button_number, int modifiers) {
 
 void EventSender::MouseUp(int button_number, int modifiers) {
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   DCHECK_NE(-1, button_number);
 
@@ -1378,7 +1428,7 @@ void EventSender::KeyDown(const std::string& code_str,
   event_down.modifiers = modifiers;
   event_down.windowsKeyCode = code;
   event_down.domCode = static_cast<int>(
-      ui::KeycodeConverter::CodeStringToDomCode(domString.c_str()));
+      ui::KeycodeConverter::CodeStringToDomCode(domString));
 
   if (generate_char) {
     event_down.text[0] = text;
@@ -1414,7 +1464,7 @@ void EventSender::KeyDown(const std::string& code_str,
   // EventSender.m forces a layout here, with at least one
   // test (fast/forms/focus-control-to-page.html) relying on this.
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   // In the browser, if a keyboard event corresponds to an editor command,
   // the command will be dispatched to the renderer just before dispatching
@@ -1463,7 +1513,7 @@ void EventSender::ClearKillRing() {}
 
 std::vector<std::string> EventSender::ContextClick() {
   if (force_layout_on_events_) {
-    view_->layout();
+    view_->updateAllLifecyclePhases();
   }
 
   UpdateClickCountForButton(WebMouseEvent::ButtonRight);
@@ -1635,10 +1685,14 @@ void EventSender::DumpFilenameBeingDragged() {
 void EventSender::GestureFlingCancel() {
   WebGestureEvent event;
   event.type = WebInputEvent::GestureFlingCancel;
+  // Generally it won't matter what device we use here, and since it might
+  // be cumbersome to expect all callers to specify a device, we'll just
+  // choose Touchpad here.
+  event.sourceDevice = blink::WebGestureDeviceTouchpad;
   event.timeStampSeconds = GetCurrentEventTimeSec();
 
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   HandleInputEventOnViewOrPopup(event);
 }
@@ -1674,7 +1728,7 @@ void EventSender::GestureFlingStart(float x,
   event.timeStampSeconds = GetCurrentEventTimeSec();
 
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   HandleInputEventOnViewOrPopup(event);
 }
@@ -1850,7 +1904,7 @@ void EventSender::ContinuousMouseScrollBy(gin::Arguments* args) {
 
 void EventSender::MouseMoveTo(gin::Arguments* args) {
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   double x;
   double y;
@@ -1886,7 +1940,7 @@ void EventSender::MouseMoveTo(gin::Arguments* args) {
 
 void EventSender::MouseLeave() {
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   WebMouseEvent event;
   InitMouseEvent(WebInputEvent::MouseLeave,
@@ -1967,7 +2021,7 @@ void EventSender::SendCurrentTouchEvent(WebInputEvent::Type type,
   DCHECK_GT(static_cast<unsigned>(WebTouchEvent::touchesLengthCap),
             touch_points_.size());
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   WebTouchEvent touch_event;
   touch_event.type = type;
@@ -2237,7 +2291,7 @@ void EventSender::GestureEvent(WebInputEvent::Type type,
   event.timeStampSeconds = GetCurrentEventTimeSec();
 
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   bool result = HandleInputEventOnViewOrPopup(event);
 
@@ -2277,7 +2331,7 @@ void EventSender::InitMouseWheelEvent(gin::Arguments* args,
   // determined before we send events (as well as all the other methods
   // that send an event do).
   if (force_layout_on_events_)
-    view_->layout();
+    view_->updateAllLifecyclePhases();
 
   double horizontal;
   if (!args->GetNext(&horizontal)) {
@@ -2383,13 +2437,13 @@ void EventSender::InitPointerProperties(gin::Arguments* args,
       return;
     }
     if (pointer_type_string == kPointerTypeStringUnknown) {
-      e->pointerType = WebMouseEvent::PointerTypeUnknown;
+      e->pointerType = WebMouseEvent::PointerType::Unknown;
     } else if (pointer_type_string == kPointerTypeStringMouse) {
-      e->pointerType = WebMouseEvent::PointerTypeMouse;
+      e->pointerType = WebMouseEvent::PointerType::Mouse;
     } else if (pointer_type_string == kPointerTypeStringPen) {
-      e->pointerType = WebMouseEvent::PointerTypePen;
+      e->pointerType = WebMouseEvent::PointerType::Pen;
     } else if (pointer_type_string == kPointerTypeStringTouch) {
-      e->pointerType = WebMouseEvent::PointerTypeTouch;
+      e->pointerType = WebMouseEvent::PointerType::Touch;
     } else {
       args->ThrowError();
       return;

@@ -33,7 +33,7 @@ class TestFrameTreeDelegate : public FrameTreeDelegate {
   // Waits for DidDestroyFrame() to be called with |frame|.
   void WaitForDestroyFrame(Frame* frame);
 
-  // Waits for OnViewEmbeddedInFrameDisconnected() to be called with |frame|.
+  // Waits for OnWindowEmbeddedInFrameDisconnected() to be called with |frame|.
   void WaitForFrameDisconnected(Frame* frame);
 
   // TestFrameTreeDelegate:
@@ -50,9 +50,10 @@ class TestFrameTreeDelegate : public FrameTreeDelegate {
                         const CanNavigateFrameCallback& callback) override;
   void DidStartNavigation(Frame* frame) override;
   void DidCommitProvisionalLoad(Frame* frame) override;
+  void DidNavigateLocally(Frame* source, const GURL& url) override;
   void DidCreateFrame(Frame* frame) override;
   void DidDestroyFrame(Frame* frame) override;
-  void OnViewEmbeddedInFrameDisconnected(Frame* frame) override;
+  void OnWindowEmbeddedInFrameDisconnected(Frame* frame) override;
 
  private:
   bool is_waiting() const { return run_loop_.get(); }

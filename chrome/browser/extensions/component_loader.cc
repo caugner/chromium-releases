@@ -34,6 +34,7 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -163,7 +164,7 @@ void ComponentLoader::LoadAll() {
 base::DictionaryValue* ComponentLoader::ParseManifest(
     const std::string& manifest_contents) const {
   JSONStringValueDeserializer deserializer(manifest_contents);
-  scoped_ptr<base::Value> manifest(deserializer.Deserialize(NULL, NULL));
+  scoped_ptr<base::Value> manifest = deserializer.Deserialize(NULL, NULL);
 
   if (!manifest.get() || !manifest->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Failed to parse extension manifest.";

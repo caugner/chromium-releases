@@ -27,9 +27,6 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/glue/autofill_data_type_controller.h"
-#include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
@@ -41,15 +38,19 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
+#include "components/autofill/core/browser/webdata/autofill_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
+#include "components/autofill/core/browser/webdata/autofill_profile_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/fake_sync_client.h"
+#include "components/sync_driver/sync_api_component_factory_mock.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata_services/web_data_service_test_util.h"
@@ -390,7 +391,6 @@ ACTION_P(MakeAutocompleteSyncComponents, wds) {
 
 ACTION_P(ReturnNewDataTypeManagerWithDebugListener, debug_listener) {
   return new sync_driver::DataTypeManagerImpl(
-      base::Closure(),
       debug_listener,
       arg1,
       arg2,
@@ -467,6 +467,7 @@ class ProfileSyncServiceAutofillTest
             profile_, ServiceAccessType::EXPLICIT_ACCESS),
         profile_->GetPrefs(),
         AccountTrackerServiceFactory::GetForProfile(profile_),
+        SigninManagerFactory::GetForProfile(profile_),
         profile_->IsOffTheRecord());
 
     web_data_service_->StartSyncableService();
@@ -511,7 +512,7 @@ class ProfileSyncServiceAutofillTest
                                                                     callback);
     sync_client_->SetSyncService(sync_service_);
 
-    ProfileSyncComponentsFactoryMock* components =
+    SyncApiComponentFactoryMock* components =
         sync_service_->GetSyncApiComponentFactoryMock();
 
     EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _)).
@@ -673,10 +674,17 @@ class ProfileSyncServiceAutofillTest
 
   DataTypeController* CreateDataTypeController(syncer::ModelType type) {
     DCHECK(type == AUTOFILL || type == AUTOFILL_PROFILE);
-    if (type == AUTOFILL)
-      return new AutofillDataTypeController(sync_client_.get());
-    else
-      return new AutofillProfileDataTypeController(sync_client_.get());
+    if (type == AUTOFILL) {
+      return new AutofillDataTypeController(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+          base::Bind(&base::DoNothing), sync_client_.get());
+    } else {
+      return new AutofillProfileDataTypeController(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+          base::Bind(&base::DoNothing), sync_client_.get());
+    }
   }
 
   friend class AddAutofillHelper<AutofillEntry>;

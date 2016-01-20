@@ -12,28 +12,27 @@
 #include "chrome/browser/ui/views/location_bar/keyword_hint_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/search_engines/template_url_service.h"
+#include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/theme_provider.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/vector_icons_public.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/painter.h"
 
 SelectedKeywordView::SelectedKeywordView(const gfx::FontList& font_list,
                                          SkColor text_color,
                                          SkColor parent_background_color,
                                          Profile* profile)
-    : IconLabelBubbleView(IDR_KEYWORD_SEARCH_MAGNIFIER,
+    : IconLabelBubbleView(0,
                           font_list,
                           text_color,
                           parent_background_color,
                           false),
       profile_(profile) {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    // The inset for IDR_OMNIBOX_SELECTED_KEYWORD_BUBBLE for which to perfom
-    // nine-slicing.
-    static const int kImageInset = 4;
-    gfx::Insets insets(kImageInset, kImageInset, kImageInset, kImageInset);
-    SetBackgroundImageWithInsets(IDR_OMNIBOX_SELECTED_KEYWORD_BUBBLE, insets);
-  } else {
+  if (!ui::MaterialDesignController::IsModeMaterial()) {
     static const int kBackgroundImages[] =
         IMAGE_GRID(IDR_OMNIBOX_SELECTED_KEYWORD_BUBBLE);
     SetBackgroundImageGrid(kBackgroundImages);
@@ -45,6 +44,24 @@ SelectedKeywordView::SelectedKeywordView(const gfx::FontList& font_list,
 }
 
 SelectedKeywordView::~SelectedKeywordView() {
+}
+
+void SelectedKeywordView::ResetImage() {
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    SetImage(gfx::CreateVectorIcon(gfx::VectorIconId::KEYWORD_SEARCH, 16,
+                                   GetTextColor()));
+  } else {
+    SetImage(*GetThemeProvider()->GetImageSkiaNamed(IDR_OMNIBOX_SEARCH));
+  }
+}
+
+SkColor SelectedKeywordView::GetTextColor() const {
+  return GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_LinkEnabled);
+}
+
+SkColor SelectedKeywordView::GetBorderColor() const {
+  return GetTextColor();
 }
 
 gfx::Size SelectedKeywordView::GetPreferredSize() const {
@@ -92,4 +109,15 @@ void SelectedKeywordView::SetKeyword(const base::string16& keyword) {
 
 const char* SelectedKeywordView::GetClassName() const {
   return "SelectedKeywordView";
+}
+
+int SelectedKeywordView::GetImageAndPaddingWidth() const {
+  int width = IconLabelBubbleView::GetImageAndPaddingWidth();
+  // Squeeze the icon and label closer to account for intrinsic padding in the
+  // icon.
+  if (ui::MaterialDesignController::IsModeMaterial() && width > 0)
+    width -= 3;
+
+  DCHECK_GT(width, 0);
+  return width;
 }

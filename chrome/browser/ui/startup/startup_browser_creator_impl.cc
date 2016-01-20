@@ -26,7 +26,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/apps/install_chrome_app.h"
-#include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -63,7 +62,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/session_crashed_bubble.h"
-#include "chrome/browser/ui/startup/autolaunch_prompt.h"
 #include "chrome/browser/ui/startup/bad_flags_prompt.h"
 #include "chrome/browser/ui/startup/default_browser_prompt.h"
 #include "chrome/browser/ui/startup/google_api_keys_infobar_delegate.h"
@@ -90,6 +88,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
@@ -260,8 +259,9 @@ const Extension* GetPlatformApp(Profile* profile,
 
 namespace internals {
 
-GURL GetResetSettingsURL() {
-  return GURL(chrome::GetSettingsUrl(chrome::kResetProfileSettingsSubPage));
+GURL GetTriggeredResetSettingsURL() {
+  return GURL(
+      chrome::GetSettingsUrl(chrome::kTriggeredResetProfileSettingsSubPage));
 }
 
 GURL GetWelcomePageURL() {
@@ -496,14 +496,9 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
     bool process_startup,
     const std::vector<GURL>& urls_to_open,
     chrome::HostDesktopType desktop_type) {
-  // If we're starting up in "background mode" (no open browser window) then
-  // don't open any browser windows, unless kAutoLaunchAtStartup is also
-  // specified.
-  if (process_startup &&
-      command_line_.HasSwitch(switches::kNoStartupWindow) &&
-      !command_line_.HasSwitch(switches::kAutoLaunchAtStartup)) {
+  // Don't open any browser windows if we're starting up in "background mode".
+  if (process_startup && command_line_.HasSwitch(switches::kNoStartupWindow))
     return;
-  }
 
   // Determine whether or not this launch must include the welcome page.
   InitializeWelcomeRunType(urls_to_open);
@@ -825,10 +820,9 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
       // Generally, the default browser prompt should not be shown on first
       // run. However, when the set-as-default dialog has been suppressed, we
       // need to allow it.
-      if ((!is_first_run_ ||
-           (browser_creator_ &&
-            browser_creator_->is_default_browser_dialog_suppressed())) &&
-          !chrome::ShowAutolaunchPrompt(browser)) {
+      if (!is_first_run_ ||
+          (browser_creator_ &&
+           browser_creator_->is_default_browser_dialog_suppressed())) {
         chrome::ShowDefaultBrowserPrompt(profile_,
                                          browser->host_desktop_type());
       }
@@ -911,8 +905,10 @@ void StartupBrowserCreatorImpl::AddSpecialURLs(
 
   // If this Profile is marked for a reset prompt, ensure the reset
   // settings dialog appears.
-  if (CheckAndClearProfileResetTrigger())
-    url_list->insert(url_list->begin(), internals::GetResetSettingsURL());
+  if (ProfileHasResetTrigger()) {
+    url_list->insert(url_list->begin(),
+                     internals::GetTriggeredResetSettingsURL());
+  }
 }
 
 // For first-run, the type will be FIRST_RUN_LAST for all systems except for
@@ -994,7 +990,7 @@ void StartupBrowserCreatorImpl::RecordRapporOnStartupURLs(
   }
 }
 
-bool StartupBrowserCreatorImpl::CheckAndClearProfileResetTrigger() const {
+bool StartupBrowserCreatorImpl::ProfileHasResetTrigger() const {
   bool has_reset_trigger = false;
 #if defined(OS_WIN)
   TriggeredProfileResetter* triggered_profile_resetter =
@@ -1002,7 +998,6 @@ bool StartupBrowserCreatorImpl::CheckAndClearProfileResetTrigger() const {
   // TriggeredProfileResetter instance will be nullptr for incognito profiles.
   if (triggered_profile_resetter) {
     has_reset_trigger = triggered_profile_resetter->HasResetTrigger();
-    triggered_profile_resetter->ClearResetTrigger();
   }
 #endif  // defined(OS_WIN)
   return has_reset_trigger;

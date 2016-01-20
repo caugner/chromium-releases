@@ -8,8 +8,11 @@
 namespace switches {
 
 extern const char kDisablePageVisibility[];
-extern const char kUseInProcCommandBuffer[];
 extern const char kWebViewSandboxedRenderer[];
+
+// Please note that if you are adding a flag that is intended for a renderer,
+// you also need to add it into
+// AwContentBrowserClient::AppendExtraCommandLineSwitches.
 
 }  // namespace switches
 

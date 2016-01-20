@@ -56,13 +56,15 @@ class TestPasswordStore : public PasswordStore {
   PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
+  bool RemoveStatisticsCreatedBetweenImpl(base::Time delete_begin,
+                                          base::Time delete_end) override;
   bool FillAutofillableLogins(
       ScopedVector<autofill::PasswordForm>* forms) override;
   bool FillBlacklistLogins(
       ScopedVector<autofill::PasswordForm>* forms) override;
   void AddSiteStatsImpl(const InteractionsStats& stats) override;
   void RemoveSiteStatsImpl(const GURL& origin_domain) override;
-  scoped_ptr<InteractionsStats> GetSiteStatsImpl(
+  ScopedVector<InteractionsStats> GetSiteStatsImpl(
       const GURL& origin_domain) override;
 
  private:

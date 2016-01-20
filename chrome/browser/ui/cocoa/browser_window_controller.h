@@ -153,6 +153,11 @@ class Command;
   // primary screen.
   BOOL enteringAppKitFullscreenOnPrimaryScreen_;
 
+  // This flag is set to true when |customWindowsToEnterFullScreenForWindow:|
+  // and |customWindowsToExitFullScreenForWindow:| are called and did not
+  // return nil.
+  BOOL isUsingCustomAnimation_;
+
   // The size of the original (non-fullscreen) window.  This is saved just
   // before entering fullscreen mode and is only valid when |-isFullscreen|
   // returns YES.
@@ -171,6 +176,11 @@ class Command;
   // Bar visibility locks and releases only result (when appropriate) in changes
   // in visible state when the following is |YES|.
   BOOL barVisibilityUpdatesEnabled_;
+
+  // If this ivar is set to YES, layoutSubviews calls will be ignored. This is
+  // used in fullscreen transition to prevent spurious resize messages from
+  // being sent to the renderer, which causes the transition to be janky.
+  BOOL blockLayoutSubviews_;
 
   // When going fullscreen for a tab, we need to store the URL and the
   // fullscreen type, since we can't show the bubble until
@@ -428,12 +438,14 @@ class Command;
 // invoked causes all fullscreen modes to exit.
 //
 // ----------------------------------------------------------------------------
-// There are 2 "styles" of omnibox sliding.
+// There are 3 "styles" of omnibox sliding.
 // + OMNIBOX_TABS_PRESENT: Both the omnibox and the tabstrip are present.
 // Moving the cursor to the top causes the menubar to appear, and everything
 // else to slide down.
 // + OMNIBOX_TABS_HIDDEN: Both tabstrip and omnibox are hidden. Moving cursor
 // to top shows tabstrip, omnibox, and menu bar.
+// + OMNIBOX_TABS_NONE: Both tabstrip and omnibox are hidden. Moving cursor
+// to top causes the menubar to appear, but not the tabstrip and omnibox.
 //
 // The omnibox sliding styles are used in conjunction with the fullscreen APIs.
 // There is exactly 1 sliding style active at a time. The sliding is mangaged

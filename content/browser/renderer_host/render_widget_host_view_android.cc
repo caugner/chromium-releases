@@ -36,11 +36,9 @@
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
 #include "content/browser/android/content_view_core_impl.h"
-#include "content/browser/android/edge_effect.h"
-#include "content/browser/android/edge_effect_l.h"
-#include "content/browser/android/in_process/synchronous_compositor_impl.h"
 #include "content/browser/android/overscroll_controller_android.h"
 #include "content/browser/android/popup_touch_handle_drawable.h"
+#include "content/browser/android/synchronous_compositor_base.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/compositor_util.h"
@@ -73,6 +71,8 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
+#include "ipc/ipc_message_macros.h"
+#include "ipc/ipc_message_start.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -245,14 +245,14 @@ void CopyFromCompositingSurfaceFinished(
   TRACE_EVENT0(
       "cc", "RenderWidgetHostViewAndroid::CopyFromCompositingSurfaceFinished");
   bitmap_pixels_lock.reset();
-  uint32 sync_point = 0;
+  gpu::SyncToken sync_token;
   if (result) {
     GLHelper* gl_helper = GetPostReadbackGLHelper();
     if (gl_helper)
-      sync_point = gl_helper->InsertSyncPoint();
+      sync_token = gpu::SyncToken(gl_helper->InsertSyncPoint());
   }
-  bool lost_resource = sync_point == 0;
-  release_callback->Run(sync_point, lost_resource);
+  const bool lost_resource = !sync_token.HasData();
+  release_callback->Run(sync_token, lost_resource);
   UMA_HISTOGRAM_TIMES(kAsyncReadBackString,
                       base::TimeTicks::Now() - start_time);
   ReadbackResponse response = result ? READBACK_SUCCESS : READBACK_FAILED;
@@ -269,6 +269,9 @@ scoped_ptr<ui::TouchSelectionController> CreateSelectionController(
       gfx::ViewConfiguration::GetLongPressTimeoutInMs());
   config.tap_slop = gfx::ViewConfiguration::GetTouchSlopInDips();
   config.show_on_tap_for_empty_editable = false;
+  config.enable_adaptive_handle_orientation =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAdaptiveSelectionHandleOrientation);
   config.enable_longpress_drag_selection =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableLongpressDragSelection);
@@ -316,6 +319,8 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     : host_(widget_host),
       outstanding_vsync_requests_(0),
       is_showing_(!widget_host->is_hidden()),
+      is_window_visible_(true),
+      is_window_activity_started_(true),
       content_view_core_(nullptr),
       content_view_core_window_android_(nullptr),
       ime_adapter_android_(this),
@@ -353,6 +358,9 @@ void RenderWidgetHostViewAndroid::Blur() {
 
 bool RenderWidgetHostViewAndroid::OnMessageReceived(
     const IPC::Message& message) {
+  if (IPC_MESSAGE_ID_CLASS(message.type()) == SyncCompositorMsgStart) {
+    return SyncCompositorOnMessageReceived(message);
+  }
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderWidgetHostViewAndroid, message)
     IPC_MESSAGE_HANDLER(ViewHostMsg_StartContentIntent, OnStartContentIntent)
@@ -365,6 +373,12 @@ bool RenderWidgetHostViewAndroid::OnMessageReceived(
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+bool RenderWidgetHostViewAndroid::SyncCompositorOnMessageReceived(
+    const IPC::Message& message) {
+  DCHECK(!content_view_core_ || sync_compositor_) << !!content_view_core_;
+  return sync_compositor_ && sync_compositor_->OnMessageReceived(message);
 }
 
 void RenderWidgetHostViewAndroid::InitAsChild(gfx::NativeView parent_view) {
@@ -512,7 +526,7 @@ bool RenderWidgetHostViewAndroid::HasFocus() const {
 }
 
 bool RenderWidgetHostViewAndroid::IsSurfaceAvailableForCopy() const {
-  return HasValidFrame();
+  return !using_browser_compositor_ || HasValidFrame();
 }
 
 void RenderWidgetHostViewAndroid::Show() {
@@ -528,10 +542,7 @@ void RenderWidgetHostViewAndroid::Hide() {
     return;
 
   is_showing_ = false;
-
-  bool hide_frontbuffer = true;
-  bool stop_observing_root_window = true;
-  HideInternal(hide_frontbuffer, stop_observing_root_window);
+  HideInternal();
 }
 
 bool RenderWidgetHostViewAndroid::IsShowing() {
@@ -690,9 +701,9 @@ void RenderWidgetHostViewAndroid::OnSetNeedsBeginFrames(bool enabled) {
 }
 
 void RenderWidgetHostViewAndroid::OnStartContentIntent(
-    const GURL& content_url) {
+    const GURL& content_url, bool is_main_frame) {
   if (content_view_core_)
-    content_view_core_->StartContentIntent(content_url);
+    content_view_core_->StartContentIntent(content_url, is_main_frame);
 }
 
 void RenderWidgetHostViewAndroid::OnSmartClipDataExtracted(
@@ -869,7 +880,7 @@ void RenderWidgetHostViewAndroid::CopyFromCompositingSurface(
     return;
   }
   base::TimeTicks start_time = base::TimeTicks::Now();
-  if (using_browser_compositor_ && !IsSurfaceAvailableForCopy()) {
+  if (!IsSurfaceAvailableForCopy()) {
     callback.Run(SkBitmap(), READBACK_SURFACE_UNAVAILABLE);
     return;
   }
@@ -913,11 +924,11 @@ void RenderWidgetHostViewAndroid::CopyFromCompositingSurface(
 }
 
 void RenderWidgetHostViewAndroid::CopyFromCompositingSurfaceToVideoFrame(
-      const gfx::Rect& src_subrect,
-      const scoped_refptr<media::VideoFrame>& target,
-      const base::Callback<void(bool)>& callback) {
+    const gfx::Rect& src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
+    const base::Callback<void(const gfx::Rect&, bool)>& callback) {
   NOTIMPLEMENTED();
-  callback.Run(false);
+  callback.Run(gfx::Rect(), false);
 }
 
 bool RenderWidgetHostViewAndroid::CanCopyToVideoFrame() const {
@@ -980,6 +991,12 @@ void RenderWidgetHostViewAndroid::ReturnResources(
             std::back_inserter(surface_returned_resources_));
   if (!ack_callbacks_.size())
     SendReturnedDelegatedResources(last_output_surface_id_);
+}
+
+void RenderWidgetHostViewAndroid::SetBeginFrameSource(
+    cc::SurfaceId surface_id,
+    cc::BeginFrameSource* begin_frame_source) {
+  // TODO(tansell): Hook this up.
 }
 
 void RenderWidgetHostViewAndroid::DestroyDelegatedContent() {
@@ -1173,6 +1190,11 @@ void RenderWidgetHostViewAndroid::RetainFrame(
   last_frame_info_.reset(new LastFrameInfo(output_surface_id, frame.Pass()));
 }
 
+SynchronousCompositorBase*
+RenderWidgetHostViewAndroid::GetSynchronousCompositor() {
+  return sync_compositor_.get();
+}
+
 void RenderWidgetHostViewAndroid::SynchronousFrameMetadata(
     const cc::CompositorFrameMetadata& frame_metadata) {
   if (!content_view_core_)
@@ -1238,8 +1260,10 @@ void RenderWidgetHostViewAndroid::OnSelectionEvent(
   // If a selection drag has started, it has taken over the active touch
   // sequence. Immediately cancel gesture detection and any downstream touch
   // listeners (e.g., web content) to communicate this transfer.
-  if (event == ui::SELECTION_HANDLES_SHOWN)
+  if (event == ui::SELECTION_HANDLES_SHOWN &&
+      gesture_provider_.GetCurrentDownEvent()) {
     ResetGestureDetection();
+  }
   content_view_core_->OnSelectionEvent(
       event, selection_controller_->GetStartPosition(),
       GetSelectionRect(*selection_controller_));
@@ -1278,10 +1302,7 @@ void RenderWidgetHostViewAndroid::SynchronousCopyContents(
   int output_width = output_size_in_pixel.width();
   int output_height = output_size_in_pixel.height();
 
-  SynchronousCompositor* compositor =
-      SynchronousCompositorImpl::FromID(host_->GetProcess()->GetID(),
-                                        host_->GetRoutingID());
-  if (!compositor) {
+  if (!sync_compositor_) {
     callback.Run(SkBitmap(), READBACK_FAILED);
     return;
   }
@@ -1295,7 +1316,7 @@ void RenderWidgetHostViewAndroid::SynchronousCopyContents(
   canvas.scale(
       (float)output_width / (float)input_size_in_pixel.width(),
       (float)output_height / (float)input_size_in_pixel.height());
-  compositor->DemandDrawSw(&canvas);
+  sync_compositor_->DemandDrawSw(&canvas);
   callback.Run(bitmap, READBACK_SUCCESS);
 }
 
@@ -1318,6 +1339,15 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
     selection_controller_->OnSelectionBoundsChanged(
         ConvertSelectionBound(frame_metadata.selection.start),
         ConvertSelectionBound(frame_metadata.selection.end));
+
+    // Set parameters for adaptive handle orientation.
+    gfx::SizeF viewport_size(frame_metadata.scrollable_viewport_size);
+    viewport_size.Scale(frame_metadata.page_scale_factor);
+    gfx::RectF viewport_rect(
+        frame_metadata.location_bar_content_translation.x(),
+        frame_metadata.location_bar_content_translation.y(),
+        viewport_size.width(), viewport_size.height());
+    selection_controller_->OnViewportChanged(viewport_rect);
   }
 
   UpdateBackgroundColor(frame_metadata.root_background_color);
@@ -1334,9 +1364,8 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
       frame_metadata.location_bar_content_translation,
       is_mobile_optimized);
 #if defined(VIDEO_HOLE)
-  if (host_ && host_->IsRenderView()) {
-    RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-        RenderViewHost::From(host_));
+  if (host_) {
+    RenderViewHostImpl* rvhi = RenderViewHostImpl::From(host_);
     WebContentsImpl* web_contents_impl =
         static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(rvhi));
     if (web_contents_impl)
@@ -1346,7 +1375,10 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
 }
 
 void RenderWidgetHostViewAndroid::ShowInternal() {
-  DCHECK(is_showing_);
+  bool show = is_showing_ && is_window_activity_started_ && is_window_visible_;
+  if (!show)
+    return;
+
   if (!host_ || !host_->is_hidden())
     return;
 
@@ -1366,9 +1398,20 @@ void RenderWidgetHostViewAndroid::ShowInternal() {
   }
 }
 
-void RenderWidgetHostViewAndroid::HideInternal(
-    bool hide_frontbuffer,
-    bool stop_observing_root_window) {
+void RenderWidgetHostViewAndroid::HideInternal() {
+  DCHECK(!is_showing_ || !is_window_activity_started_ || !is_window_visible_)
+      << "Hide called when the widget should be shown.";
+
+  // Only preserve the frontbuffer if the activity was stopped while the
+  // window is still visible. This avoids visual artificts when transitioning
+  // between activities.
+  bool hide_frontbuffer = is_window_activity_started_ || !is_window_visible_;
+
+  // Only stop observing the root window if the widget has been explicitly
+  // hidden and the frontbuffer is being cleared. This allows window visibility
+  // notifications to eventually clear the frontbuffer.
+  bool stop_observing_root_window = !is_showing_ && hide_frontbuffer;
+
   if (hide_frontbuffer) {
     if (layer_.get() && locks_on_frame_count_ == 0)
       layer_->SetHideLayerAndSubtree(true);
@@ -1376,8 +1419,10 @@ void RenderWidgetHostViewAndroid::HideInternal(
     frame_evictor_->SetVisible(false);
   }
 
-  if (stop_observing_root_window)
+  if (stop_observing_root_window) {
+    DCHECK(!is_showing_);
     StopObservingRootWindow();
+  }
 
   if (!host_ || host_->is_hidden())
     return;
@@ -1452,6 +1497,9 @@ void RenderWidgetHostViewAndroid::StopObservingRootWindow() {
   if (!observing_root_window_)
     return;
 
+  // Reset window state variables to their defaults.
+  is_window_activity_started_ = true;
+  is_window_visible_ = true;
   observing_root_window_ = false;
   content_view_core_window_android_->RemoveObserver(this);
 }
@@ -1470,16 +1518,12 @@ void RenderWidgetHostViewAndroid::SendBeginFrame(base::TimeTicks frame_time,
         host_->GetRoutingID(),
         cc::BeginFrameArgs::Create(BEGINFRAME_FROM_HERE, frame_time, deadline,
                                    vsync_period, cc::BeginFrameArgs::NORMAL)));
-  } else {
-    SynchronousCompositorImpl* compositor = SynchronousCompositorImpl::FromID(
-        host_->GetProcess()->GetID(), host_->GetRoutingID());
-    if (compositor) {
-      // The synchronous compositor synchronously does it's work in this call.
-      // It does not use a deadline.
-      compositor->BeginFrame(cc::BeginFrameArgs::Create(
-          BEGINFRAME_FROM_HERE, frame_time, base::TimeTicks(), vsync_period,
-          cc::BeginFrameArgs::NORMAL));
-    }
+  } else if (sync_compositor_) {
+    // The synchronous compositor synchronously does it's work in this call.
+    // It does not use a deadline.
+    sync_compositor_->BeginFrame(cc::BeginFrameArgs::Create(
+        BEGINFRAME_FROM_HERE, frame_time, base::TimeTicks(), vsync_period,
+        cc::BeginFrameArgs::NORMAL));
   }
 }
 
@@ -1597,11 +1641,8 @@ InputEventAckState RenderWidgetHostViewAndroid::FilterInputEvent(
       shim->Send(new GpuMsg_WakeUpGpu);
   }
 
-  SynchronousCompositorImpl* compositor =
-      SynchronousCompositorImpl::FromID(host_->GetProcess()->GetID(),
-                                          host_->GetRoutingID());
-  if (compositor)
-    return compositor->HandleInputEvent(input_event);
+  if (sync_compositor_)
+    return sync_compositor_->HandleInputEvent(input_event);
   return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
 }
 
@@ -1645,8 +1686,17 @@ void RenderWidgetHostViewAndroid::UnlockMouse() {
 
 void RenderWidgetHostViewAndroid::SendKeyEvent(
     const NativeWebKeyboardEvent& event) {
-  if (host_)
-    host_->ForwardKeyboardEvent(event);
+  if (!host_)
+    return;
+
+  RenderWidgetHostImpl* target_host = host_;
+
+  // If there are multiple widgets on the page (such as when there are
+  // out-of-process iframes), pick the one that should process this event.
+  if (host_->delegate())
+    target_host = host_->delegate()->GetFocusedRenderWidgetHost(host_);
+
+  target_host->ForwardKeyboardEvent(event);
 }
 
 void RenderWidgetHostViewAndroid::SendMouseEvent(
@@ -1733,6 +1783,8 @@ uint32_t RenderWidgetHostViewAndroid::GetSurfaceIdNamespace() {
 
 void RenderWidgetHostViewAndroid::SetContentViewCore(
     ContentViewCoreImpl* content_view_core) {
+  DCHECK(!content_view_core || !content_view_core_ ||
+         (content_view_core_ == content_view_core));
   RemoveLayers();
   StopObservingRootWindow();
 
@@ -1760,9 +1812,10 @@ void RenderWidgetHostViewAndroid::SetContentViewCore(
   }
 
   AttachLayers();
-
-  if (!content_view_core_)
+  if (!content_view_core_) {
+    sync_compositor_.reset();
     return;
+  }
 
   if (is_showing_)
     StartObservingRootWindow();
@@ -1776,6 +1829,11 @@ void RenderWidgetHostViewAndroid::SetContentViewCore(
   if (!overscroll_controller_ &&
       content_view_core_window_android_->GetCompositor()) {
     overscroll_controller_ = CreateOverscrollController(content_view_core_);
+  }
+
+  if (!sync_compositor_) {
+    sync_compositor_ = SynchronousCompositorBase::Create(
+        this, content_view_core_->GetWebContents());
   }
 }
 
@@ -1807,14 +1865,19 @@ void RenderWidgetHostViewAndroid::OnCompositingDidCommit() {
 }
 
 void RenderWidgetHostViewAndroid::OnRootWindowVisibilityChanged(bool visible) {
-  DCHECK(is_showing_);
-  if (visible) {
+  TRACE_EVENT1("browser",
+               "RenderWidgetHostViewAndroid::OnRootWindowVisibilityChanged",
+               "visible", visible);
+  DCHECK(observing_root_window_);
+  if (is_window_visible_ == visible)
+    return;
+
+  is_window_visible_ = visible;
+
+  if (visible)
     ShowInternal();
-  } else {
-    bool hide_frontbuffer = true;
-    bool stop_observing_root_window = false;
-    HideInternal(hide_frontbuffer, stop_observing_root_window);
-  }
+  else
+    HideInternal();
 }
 
 void RenderWidgetHostViewAndroid::OnAttachCompositor() {
@@ -1861,15 +1924,15 @@ void RenderWidgetHostViewAndroid::OnAnimate(base::TimeTicks begin_frame_time) {
 
 void RenderWidgetHostViewAndroid::OnActivityStopped() {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAndroid::OnActivityStopped");
-  DCHECK(is_showing_);
-  bool hide_frontbuffer = false;
-  bool stop_observing_root_window = false;
-  HideInternal(hide_frontbuffer, stop_observing_root_window);
+  DCHECK(observing_root_window_);
+  is_window_activity_started_ = false;
+  HideInternal();
 }
 
 void RenderWidgetHostViewAndroid::OnActivityStarted() {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAndroid::OnActivityStarted");
-  DCHECK(is_showing_);
+  DCHECK(observing_root_window_);
+  is_window_activity_started_ = true;
   ShowInternal();
 }
 
@@ -1945,19 +2008,11 @@ void RenderWidgetHostViewAndroid::PrepareTextureCopyOutputResult(
   ignore_result(scoped_callback_runner.Release());
 
   gl_helper->CropScaleReadbackAndCleanMailbox(
-      texture_mailbox.mailbox(),
-      texture_mailbox.sync_point(),
-      result->size(),
-      gfx::Rect(result->size()),
-      output_size_in_pixel,
-      pixels,
-      color_type,
-      base::Bind(&CopyFromCompositingSurfaceFinished,
-                 callback,
-                 base::Passed(&release_callback),
-                 base::Passed(&bitmap),
-                 start_time,
-                 base::Passed(&bitmap_pixels_lock)),
+      texture_mailbox.mailbox(), texture_mailbox.sync_token(), result->size(),
+      gfx::Rect(result->size()), output_size_in_pixel, pixels, color_type,
+      base::Bind(&CopyFromCompositingSurfaceFinished, callback,
+                 base::Passed(&release_callback), base::Passed(&bitmap),
+                 start_time, base::Passed(&bitmap_pixels_lock)),
       GLHelper::SCALER_QUALITY_GOOD);
 }
 

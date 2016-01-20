@@ -11,12 +11,13 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
-#include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "net/base/net_errors.h"
+
+class AccountId;
 
 namespace policy {
 class ConsumerManagementService;
@@ -42,9 +43,6 @@ struct GaiaContext {
 
   // Whether Gaia should be loaded in offline mode.
   bool use_offline = false;
-
-  // True if user list is non-empty.
-  bool has_users = false;
 
   // Email of the current user.
   std::string email;
@@ -107,7 +105,6 @@ class GaiaScreenHandler : public BaseScreenHandler,
   // BaseScreenHandler implementation:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void GetAdditionalParameters(base::DictionaryValue* dict) override;
   void Initialize() override;
 
   // WebUIMessageHandler implementation:
@@ -119,7 +116,6 @@ class GaiaScreenHandler : public BaseScreenHandler,
       const NetworkPortalDetector::CaptivePortalState& state) override;
 
   // WebUI message handlers.
-  void HandleFrameLoadingCompleted(int status);
   void HandleWebviewLoadAborted(const std::string& error_reason_str);
   void HandleCompleteAuthentication(const std::string& gaia_id,
                                     const std::string& email,
@@ -194,11 +190,9 @@ class GaiaScreenHandler : public BaseScreenHandler,
   void ShowGaiaScreenIfReady();
 
   // Tells webui to load authentication extension. |force| is used to force the
-  // extension reloading, if it has already been loaded. |silent_load| is true
-  // for cases when extension should be loaded in the background and it
-  // shouldn't grab the focus. |offline| is true when offline version of the
-  // extension should be used.
-  void LoadAuthExtension(bool force, bool silent_load, bool offline);
+  // extension reloading, if it has already been loaded. |offline| is true when
+  // offline version of the extension should be used.
+  void LoadAuthExtension(bool force, bool offline);
 
   // TODO (antrim@): GaiaScreenHandler should implement
   // NetworkStateInformer::Observer.
@@ -222,13 +216,18 @@ class GaiaScreenHandler : public BaseScreenHandler,
 
   // Returns user canonical e-mail. Finds already used account alias, if
   // user has already signed in.
-  std::string GetCanonicalEmail(const std::string& authenticated_email,
-                                const std::string& gaia_id) const;
+  AccountId GetAccountId(const std::string& authenticated_email,
+                         const std::string& gaia_id) const;
 
   // Returns current visible screen.
   // TODO(jdufault): This definition exists in multiple locations. Refactor it
   // into BaseScreenHandler.
   OobeUI::Screen GetCurrentScreen() const;
+
+  bool offline_login_is_active() const { return offline_login_is_active_; }
+  void set_offline_login_is_active(bool offline_login_is_active) {
+    offline_login_is_active_ = offline_login_is_active;
+  }
 
   // Current state of Gaia frame.
   FrameState frame_state_ = FRAME_STATE_UNKNOWN;
@@ -294,8 +293,8 @@ class GaiaScreenHandler : public BaseScreenHandler,
   // signin_screen_handler directly.
   SigninScreenHandler* signin_screen_handler_ = nullptr;
 
-  // GAIA extension loader.
-  scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
+  // True if offline GAIA is active.
+  bool offline_login_is_active_ = false;
 
   base::WeakPtrFactory<GaiaScreenHandler> weak_factory_;
 

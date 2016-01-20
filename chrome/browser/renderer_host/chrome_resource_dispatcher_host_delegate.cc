@@ -27,6 +27,7 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/renderer_host/data_reduction_proxy_resource_throttle_android.h"
 #include "chrome/browser/renderer_host/safe_browsing_resource_throttle.h"
+#include "chrome/browser/renderer_host/thread_hop_resource_throttle.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -34,6 +35,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/variations/net/variations_http_header_provider.h"
 #include "content/public/browser/browser_thread.h"
@@ -96,7 +98,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/signin/merge_session_throttle.h"
+#include "chrome/browser/chromeos/login/signin/merge_session_resource_throttle.h"
+#include "chrome/browser/chromeos/login/signin/merge_session_throttling_utils.h"
 #endif
 
 using content::BrowserThread;
@@ -345,15 +348,14 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
 
 #if defined(OS_CHROMEOS)
   // Check if we need to add merge session throttle. This throttle will postpone
-  // loading of main frames and XHR request.
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME ||
-      resource_type == content::RESOURCE_TYPE_XHR) {
+  // loading of XHR requests.
+  if (resource_type == content::RESOURCE_TYPE_XHR) {
     // Add interstitial page while merge session process (cookie
     // reconstruction from OAuth2 refresh token in ChromeOS login) is still in
     // progress while we are attempting to load a google property.
-    if (!MergeSessionThrottle::AreAllSessionMergedAlready() &&
+    if (!merge_session_throttling_utils::AreAllSessionMergedAlready() &&
         request->url().SchemeIsHTTPOrHTTPS()) {
-      throttles->push_back(new MergeSessionThrottle(request, resource_type));
+      throttles->push_back(new MergeSessionResourceThrottle(request));
     }
   }
 #endif
@@ -485,10 +487,10 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
   // Insert either safe browsing or data reduction proxy throttle at the front
   // of the list, so one of them gets to decide if the resource is safe.
   content::ResourceThrottle* first_throttle = NULL;
-#if defined(OS_ANDROID) && defined(SAFE_BROWSING_SERVICE)
+#if defined(OS_ANDROID)
   first_throttle = DataReductionProxyResourceThrottle::MaybeCreate(
       request, resource_context, resource_type, safe_browsing_.get());
-#endif  // defined(OS_ANDROID) && defined(SAFE_BROWSING_SERVICE)
+#endif  // defined(OS_ANDROID)
 
 #if defined(SAFE_BROWSING_DB_LOCAL) || defined(SAFE_BROWSING_DB_REMOTE)
   if (!first_throttle && io_data->safe_browsing_enabled()->GetValue()) {
@@ -538,6 +540,9 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
   if (info->GetVisibilityState() == blink::WebPageVisibilityStatePrerender) {
     throttles->push_back(new prerender::PrerenderResourceThrottle(request));
   }
+
+  if (ThreadHopResourceThrottle::IsEnabled())
+    throttles->push_back(new ThreadHopResourceThrottle);
 }
 
 bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
@@ -719,6 +724,18 @@ void ChromeResourceDispatcherHostDelegate::RequestComplete(
                                        info->GetRouteID(),
                                        url_request->GetTotalReceivedBytes()));
   }
+}
+
+bool ChromeResourceDispatcherHostDelegate::ShouldEnableLoFiMode(
+    const net::URLRequest& url_request,
+    content::ResourceContext* resource_context) {
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  data_reduction_proxy::DataReductionProxyIOData* data_reduction_proxy_io_data =
+      io_data->data_reduction_proxy_io_data();
+
+  if (data_reduction_proxy_io_data)
+    return data_reduction_proxy_io_data->ShouldEnableLoFiMode(url_request);
+  return false;
 }
 
 // static

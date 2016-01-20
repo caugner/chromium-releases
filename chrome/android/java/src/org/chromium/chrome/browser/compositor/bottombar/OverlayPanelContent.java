@@ -23,7 +23,9 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 
 /**
- * Controls the Contextual Search Panel.
+ * Content container for an OverlayPanel. This class is responsible for the management of the
+ * ContentViewCore displayed inside of a panel and exposes a simple API relevant to actions a
+ * panel has.
  */
 public class OverlayPanelContent {
 
@@ -95,6 +97,11 @@ public class OverlayPanelContent {
      */
     private OverlayContentProgressObserver mProgressObserver;
 
+    /**
+     * If a URL is set to delayed load (load on user interaction), it will be stored here.
+     */
+    private String mPendingUrl;
+
     // http://crbug.com/522266 : An instance of InterceptNavigationDelegateImpl should be kept in
     // java layer. Otherwise, the instance could be garbage-collected unexpectedly.
     private InterceptNavigationDelegate mInterceptNavigationDelegate;
@@ -137,8 +144,8 @@ public class OverlayPanelContent {
 
         mWebContentsDelegate = new WebContentsDelegateAndroid() {
             @Override
-            public void onLoadStarted() {
-                super.onLoadStarted();
+            public void onLoadStarted(boolean toDifferentDocument) {
+                super.onLoadStarted(toDifferentDocument);
                 mProgressObserver.onProgressBarStarted();
             }
 
@@ -161,6 +168,15 @@ public class OverlayPanelContent {
     // ============================================================================================
 
     /**
+     * Creates a ContentViewCore. This method will be overridden by tests.
+     * @param activity The ChromeActivity.
+     * @return The newly created ContentViewCore.
+     */
+    protected ContentViewCore createContentViewCore(ChromeActivity activity) {
+        return new ContentViewCore(activity);
+    }
+
+    /**
      * Create a new ContentViewCore that will be managed by this panel.
      */
     private void createNewContentView() {
@@ -172,7 +188,7 @@ public class OverlayPanelContent {
             destroyContentView();
         }
 
-        mContentViewCore = new ContentViewCore(mActivity);
+        mContentViewCore = createContentViewCore(mActivity);
 
         if (mContentViewClient == null) {
             mContentViewClient = new ContentViewClient();
@@ -255,21 +271,19 @@ public class OverlayPanelContent {
     }
 
     /**
-     * @return Whether the ContentViewCore was created.
-     */
-    @VisibleForTesting
-    public boolean didCreateContentView() {
-        return mContentViewCore != null;
-    }
-
-    /**
-     * Load a URL, this will trigger creation of a new ContentViewCore.
+     * Load a URL; this will trigger creation of a new ContentViewCore if being loaded immediately,
+     * otherwise one is created when the panel's content becomes visible.
      * @param url The URL that should be loaded.
+     * @param shouldLoadImmediately If a URL should be loaded immediately or wait until visibility
+     *                        changes.
      */
-    public void loadUrl(String url) {
-        createNewContentView();
+    public void loadUrl(String url, boolean shouldLoadImmediately) {
+        mPendingUrl = null;
 
-        if (mContentViewCore != null && mContentViewCore.getWebContents() != null) {
+        if (!shouldLoadImmediately) {
+            mPendingUrl = url;
+        } else {
+            createNewContentView();
             mLoadedUrl = url;
             mDidStartLoadingUrl = true;
             mIsProcessingPendingNavigation = true;
@@ -323,7 +337,7 @@ public class OverlayPanelContent {
     /**
      * @return The Y scroll position.
      */
-    public float getContentViewVerticalScroll() {
+    public float getContentVerticalScroll() {
         return mContentViewCore != null
                 ? mContentViewCore.computeVerticalScrollOffset() : -1.f;
     }
@@ -338,6 +352,11 @@ public class OverlayPanelContent {
         mIsContentViewShowing = isVisible;
 
         if (isVisible) {
+            // If the last call to loadUrl was sepcified to be delayed, load it now.
+            if (!TextUtils.isEmpty(mPendingUrl)) {
+                loadUrl(mPendingUrl, true);
+            }
+
             // The CVC is created with the search request, but if none was made we'll need
             // one in order to display an empty panel.
             if (mContentViewCore == null) {
@@ -379,7 +398,7 @@ public class OverlayPanelContent {
     /**
      * @return true if the ContentViewCore is visible on the page.
      */
-    public boolean isContentViewShowing() {
+    public boolean isContentShowing() {
         return mIsContentViewShowing;
     }
 

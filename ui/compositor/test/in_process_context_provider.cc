@@ -79,8 +79,7 @@ InProcessContextProvider::InProcessContextProvider(
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       image_factory_(image_factory),
       window_(window),
-      debug_name_(debug_name),
-      destroyed_(false) {
+      debug_name_(debug_name) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   context_thread_checker_.DetachFromThread();
 }
@@ -162,8 +161,8 @@ class GrContext* InProcessContextProvider::GrContext() {
   g_gles2_initializer.Get();
   gles2::SetGLContext(ContextGL());
 
-  skia::RefPtr<GrGLInterface> interface =
-      skia::AdoptRef(skia_bindings::CreateCommandBufferSkiaGLBinding());
+  skia::RefPtr<GrGLInterface> interface = skia::AdoptRef(new GrGLInterface);
+  skia_bindings::InitCommandBufferSkiaGLBinding(interface.get());
   interface->fCallback = BindGrContextCallback;
   interface->fCallbackData = reinterpret_cast<GrGLInterfaceCallbackData>(this);
 
@@ -187,9 +186,6 @@ base::Lock* InProcessContextProvider::GetLock() {
   return &context_lock_;
 }
 
-void InProcessContextProvider::VerifyContexts() {
-}
-
 void InProcessContextProvider::DeleteCachedResources() {
   DCHECK(context_thread_checker_.CalledOnValidThread());
 
@@ -200,31 +196,13 @@ void InProcessContextProvider::DeleteCachedResources() {
   }
 }
 
-bool InProcessContextProvider::DestroyedOnMainThread() {
-  DCHECK(main_thread_checker_.CalledOnValidThread());
-
-  base::AutoLock lock(destroyed_lock_);
-  return destroyed_;
-}
-
 void InProcessContextProvider::SetLostContextCallback(
     const LostContextCallback& lost_context_callback) {
   lost_context_callback_ = lost_context_callback;
 }
 
-void InProcessContextProvider::SetMemoryPolicyChangedCallback(
-    const MemoryPolicyChangedCallback& memory_policy_changed_callback) {
-  // There's no memory manager for the in-process implementation.
-}
-
 void InProcessContextProvider::OnLostContext() {
   DCHECK(context_thread_checker_.CalledOnValidThread());
-  {
-    base::AutoLock lock(destroyed_lock_);
-    if (destroyed_)
-      return;
-    destroyed_ = true;
-  }
   if (!lost_context_callback_.is_null())
     base::ResetAndReturn(&lost_context_callback_).Run();
   if (gr_context_)

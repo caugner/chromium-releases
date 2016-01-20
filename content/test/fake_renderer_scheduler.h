@@ -15,6 +15,7 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   ~FakeRendererScheduler() override;
 
   // RendererScheduler implementation.
+  scoped_ptr<blink::WebThread> CreateMainThread() override;
   scoped_refptr<scheduler::TaskQueue> DefaultTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
@@ -25,6 +26,8 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
       const char* name) override;
   scoped_refptr<scheduler::TaskQueue> NewTimerTaskRunner(
       const char* name) override;
+  scoped_ptr<scheduler::RenderWidgetSchedulingState>
+  NewRenderWidgetSchedulingState() override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
   void DidCommitFrameToCompositor() override;
@@ -34,8 +37,6 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   void DidHandleInputEventOnMainThread(
       const blink::WebInputEvent& web_input_event) override;
   void DidAnimateForInputOnCompositorThread() override;
-  void OnRendererHidden() override;
-  void OnRendererVisible() override;
   void OnRendererBackgrounded() override;
   void OnRendererForegrounded() override;
   void AddPendingNavigation() override;
@@ -51,6 +52,8 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   void SuspendTimerQueue() override;
   void ResumeTimerQueue() override;
   void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
+  double CurrentTimeSeconds() const override;
+  double MonotonicallyIncreasingTimeSeconds() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeRendererScheduler);

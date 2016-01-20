@@ -12,6 +12,7 @@
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
+#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/crtc_controller.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
@@ -30,23 +31,6 @@ namespace {
 #ifndef DRM_CAP_CURSOR_HEIGHT
 #define DRM_CAP_CURSOR_HEIGHT 0x9
 #endif
-
-void EmptyFlipCallback(gfx::SwapResult) {
-}
-
-// TODO(kalyank): We now have this switch statement in GBMBuffer and here.
-// It would be nice to have it in one place.
-uint32_t GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
-  switch (format) {
-    case gfx::BufferFormat::BGRA_8888:
-      return DRM_FORMAT_ARGB8888;
-    case gfx::BufferFormat::BGRX_8888:
-      return DRM_FORMAT_XRGB8888;
-    default:
-      NOTREACHED();
-      return 0;
-  }
-}
 
 void UpdateCursorImage(DrmBuffer* cursor, const SkBitmap& image) {
   SkRect damage;
@@ -95,13 +79,13 @@ HardwareDisplayController* DrmWindow::GetController() {
   return controller_;
 }
 
-void DrmWindow::OnBoundsChanged(const gfx::Rect& bounds) {
-  TRACE_EVENT2("drm", "DrmWindow::OnBoundsChanged", "widget", widget_, "bounds",
+void DrmWindow::SetBounds(const gfx::Rect& bounds) {
+  TRACE_EVENT2("drm", "DrmWindow::SetBounds", "widget", widget_, "bounds",
                bounds.ToString());
-  bounds_ = bounds;
   if (bounds_.size() != bounds.size())
     last_submitted_planes_.clear();
 
+  bounds_ = bounds;
   screen_manager_->UpdateControllerToWindowMapping();
 }
 
@@ -153,9 +137,7 @@ void DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
     return;
   }
 
-  // Controller should call the callback in all cases.
-  controller_->SchedulePageFlip(last_submitted_planes_, false /* test_only */,
-                                callback);
+  controller_->SchedulePageFlip(last_submitted_planes_, callback);
 }
 
 std::vector<OverlayCheck_Params> DrmWindow::TestPageFlip(
@@ -208,11 +190,7 @@ std::vector<OverlayCheck_Params> DrmWindow::TestPageFlip(
 
     compatible_test_list.push_back(plane);
 
-    bool page_flip_succeeded = controller_->SchedulePageFlip(
-        compatible_test_list, true /* test_only */,
-        base::Bind(&EmptyFlipCallback));
-
-    if (page_flip_succeeded) {
+    if (controller_->TestPageFlip(compatible_test_list)) {
       overlay_params.plane_ids =
           controller_->GetCompatibleHardwarePlaneIds(plane);
       params.push_back(overlay_params);

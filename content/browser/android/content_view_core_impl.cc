@@ -25,7 +25,6 @@
 #include "content/browser/geolocation/geolocation_service_context.h"
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
-#include "content/browser/renderer_host/input/motion_event_android.h"
 #include "content/browser/renderer_host/input/web_input_event_builders_android.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -52,6 +51,7 @@
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
+#include "ui/events/android/motion_event_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -310,11 +310,13 @@ void ContentViewCoreImpl::RenderViewHostChanged(RenderViewHost* old_host,
     old_pid = GetRenderProcessIdFromRenderViewHost(old_host);
 
     RenderWidgetHostViewAndroid* view =
-        static_cast<RenderWidgetHostViewAndroid*>(old_host->GetView());
+        static_cast<RenderWidgetHostViewAndroid*>(
+            old_host->GetWidget()->GetView());
     if (view)
       view->SetContentViewCore(NULL);
 
-    view = static_cast<RenderWidgetHostViewAndroid*>(new_host->GetView());
+    view = static_cast<RenderWidgetHostViewAndroid*>(
+        new_host->GetWidget()->GetView());
     if (view)
       view->SetContentViewCore(this);
   }
@@ -342,6 +344,7 @@ RenderWidgetHostViewAndroid*
       rwhv = web_contents_->GetInterstitialPage()
                  ->GetMainFrame()
                  ->GetRenderViewHost()
+                 ->GetWidget()
                  ->GetView();
     }
   }
@@ -561,8 +564,6 @@ bool ContentViewCoreImpl::FilterInputEvent(const blink::WebInputEvent& event) {
                                                     gesture_type,
                                                     gesture.x * dpi_scale(),
                                                     gesture.y * dpi_scale());
-
-  // TODO(jdduke): Also report double-tap UMA, crbug/347568.
 }
 
 bool ContentViewCoreImpl::HasFocus() {
@@ -637,7 +638,8 @@ void ContentViewCoreImpl::GetScaledContentBitmap(
                                result_callback);
 }
 
-void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
+void ContentViewCoreImpl::StartContentIntent(const GURL& content_url,
+                                             bool is_main_frame) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
@@ -646,7 +648,8 @@ void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
       ConvertUTF8ToJavaString(env, content_url.spec());
   Java_ContentViewCore_startContentIntent(env,
                                           j_obj.obj(),
-                                          jcontent_url.obj());
+                                          jcontent_url.obj(),
+                                          is_main_frame);
 }
 
 void ContentViewCoreImpl::ShowDisambiguationPopup(
@@ -876,6 +879,8 @@ jboolean ContentViewCoreImpl::OnTouchEvent(JNIEnv* env,
                                            jfloat touch_minor_1,
                                            jfloat orientation_0,
                                            jfloat orientation_1,
+                                           jfloat tilt_0,
+                                           jfloat tilt_1,
                                            jfloat raw_pos_x,
                                            jfloat raw_pos_y,
                                            jint android_tool_type_0,
@@ -888,21 +893,23 @@ jboolean ContentViewCoreImpl::OnTouchEvent(JNIEnv* env,
   if (!rwhv)
     return false;
 
-  MotionEventAndroid::Pointer pointer0(pointer_id_0,
+  ui::MotionEventAndroid::Pointer pointer0(pointer_id_0,
                                        pos_x_0,
                                        pos_y_0,
                                        touch_major_0,
                                        touch_minor_0,
                                        orientation_0,
+                                       tilt_0,
                                        android_tool_type_0);
-  MotionEventAndroid::Pointer pointer1(pointer_id_1,
+  ui::MotionEventAndroid::Pointer pointer1(pointer_id_1,
                                        pos_x_1,
                                        pos_y_1,
                                        touch_major_1,
                                        touch_minor_1,
                                        orientation_1,
+                                       tilt_1,
                                        android_tool_type_1);
-  MotionEventAndroid event(1.f / dpi_scale(),
+  ui::MotionEventAndroid event(1.f / dpi_scale(),
                            env,
                            motion_event,
                            time_ms,

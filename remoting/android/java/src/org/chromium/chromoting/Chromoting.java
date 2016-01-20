@@ -17,7 +17,6 @@ import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBarDrawerToggle;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
-import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -27,8 +26,11 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Toast;
 
+import org.chromium.base.Log;
 import org.chromium.chromoting.accountswitcher.AccountSwitcher;
 import org.chromium.chromoting.accountswitcher.AccountSwitcherFactory;
+import org.chromium.chromoting.help.HelpContext;
+import org.chromium.chromoting.help.HelpSingleton;
 import org.chromium.chromoting.jni.JniInterface;
 
 import java.util.ArrayList;
@@ -40,16 +42,10 @@ import java.util.Arrays;
  */
 public class Chromoting extends AppCompatActivity implements JniInterface.ConnectionListener,
         AccountSwitcher.Callback, HostListLoader.Callback, View.OnClickListener {
+    private static final String TAG = "Chromoting";
+
     /** Only accounts of this type will be selectable for authentication. */
     private static final String ACCOUNT_TYPE = "com.google";
-
-    /** Web page to be displayed in the Help screen when launched from this activity. */
-    private static final String HELP_URL =
-            "https://support.google.com/chrome/?p=mobile_crd_hostslist";
-
-    /** Web page to be displayed when user triggers the hyperlink for setting up hosts. */
-    private static final String HOST_SETUP_URL =
-            "https://support.google.com/chrome/answer/1649523";
 
     /** Result code used for starting {@link DesktopActivity}. */
     public static final int DESKTOP_ACTIVITY = 0;
@@ -210,7 +206,8 @@ public class Chromoting extends AppCompatActivity implements JniInterface.Connec
                     @Override
                     public void onItemClick(AdapterView<?> parent, View view, int position,
                             long id) {
-                        HelpActivity.launch(Chromoting.this, HELP_URL);
+                        HelpSingleton.getInstance().launchHelp(Chromoting.this,
+                                HelpContext.HOST_LIST);
                     }
                 });
 
@@ -220,6 +217,7 @@ public class Chromoting extends AppCompatActivity implements JniInterface.Connec
         mAccountSwitcher = AccountSwitcherFactory.getInstance().createAccountSwitcher(this, this);
         mAccountSwitcher.setNavigation(navigationMenu);
         LinearLayout navigationDrawer = (LinearLayout) findViewById(R.id.navigation_drawer);
+        mAccountSwitcher.setDrawer(navigationDrawer);
         View switcherView = mAccountSwitcher.getView();
         switcherView.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -364,7 +362,7 @@ public class Chromoting extends AppCompatActivity implements JniInterface.Connec
     /** Called when the user touches hyperlinked text. */
     @Override
     public void onClick(View view) {
-        HelpActivity.launch(this, HOST_SETUP_URL);
+        HelpSingleton.getInstance().launchHelp(this, HelpContext.HOST_SETUP);
     }
 
     /** Called when the user taps on a host entry. */
@@ -496,15 +494,13 @@ public class Chromoting extends AppCompatActivity implements JniInterface.Connec
         if (!mTriedNewAuthToken) {
             // This was our first connection attempt.
             mTriedNewAuthToken = true;
-
-            Log.w("auth", "Requesting renewal of rejected auth token");
             requestAuthToken(true);
 
             // We're not in an error state *yet*.
             return;
         } else {
             // Authentication truly failed.
-            Log.e("auth", "Fresh auth token was also rejected");
+            Log.e(TAG, "Fresh auth token was rejected.");
             explanation = getString(R.string.error_authentication_failed);
             Toast.makeText(this, explanation, Toast.LENGTH_LONG).show();
             setHostListProgressVisible(false);
@@ -519,7 +515,6 @@ public class Chromoting extends AppCompatActivity implements JniInterface.Connec
             mRefreshButton.setEnabled(mAccount != null);
         }
         ArrayAdapter<HostInfo> displayer = new HostListAdapter(this, mHosts);
-        Log.i("hostlist", "About to populate host list display");
         mHostListView.setAdapter(displayer);
     }
 

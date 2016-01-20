@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="ca">
 <translation id="1013923882670373915">El dispositiu Bluetooth "<ph name="DEVICE_NAME" />" sol·licita permís per emparellar-se. Introduïu aquest codi PIN al dispositiu: <ph name="PINCODE" />.</translation>
+<translation id="1021311941847921177">La drecera per canviar al mètode d'introducció següent ha canviat. Utilitzeu <ph name="NEW_SHORTCUT" /> en lloc de la drecera <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="112308213915226829">Amaga el prestatge automàticament</translation>
 <translation id="1195412055398077112">sobreescaneig</translation>
 <translation id="1270290102613614947">Teclat en pantalla desactivat</translation>
@@ -25,10 +26,10 @@
 <translation id="1812696562331527143">El mètode d'entrada ha canviat a <ph name="INPUT_METHOD_ID" />* (<ph name="BEGIN_LINK" />tercers<ph name="END_LINK" />).
 Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="1882897271359938046">S'està replicant <ph name="DISPLAY_NAME" /></translation>
+<translation id="1919743966458266018">La drecera per obrir el gestor de tasques ha canviat. Utilitzeu <ph name="NEW_SHORTCUT" /> en lloc de la drecera <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="1923539912171292317">Clics automàtics</translation>
-<translation id="1950626184269948555">La drecera del gestor de tasques ha canviat. Utilitzeu Cerca+Esc en lloc de Maj+Esc.</translation>
+<translation id="1938872420421548906">Maj + Alt</translation>
 <translation id="1957803754585243749">0°</translation>
-<translation id="1963814843110128691">S'està emetent $1 a $2</translation>
 <translation id="1969011864782743497"><ph name="DEVICE_NAME" /> (USB)</translation>
 <translation id="1987317783729300807">Comptes</translation>
 <translation id="2127372758936585790">Carregador de baix consum</translation>
@@ -94,6 +95,7 @@ Premeu Cerca o Maj per cancel·lar.</translation>
 <translation id="3783640748446814672">alt</translation>
 <translation id="3784455785234192852">Bloqueja</translation>
 <translation id="3799026279081545374">Pot ser que el carregador s'hagi espatllat. Si residiu als EUA, truqueu al 866-628-1371 per rebre ajuda i un carregador de recanvi. Si residiu al Regne Unit, truqueu al 0800-026-0613. Si residiu a Irlanda, truqueu al 1-800-832-664. Si residiu al Canadà, truqueu al 866-628-1372. Si residiu a Austràlia, truqueu al 1-800-067-460.</translation>
+<translation id="3866182280516392520">Adreça IPv6</translation>
 <translation id="3891340733213178823">Premeu Ctrl+Maj+Q dues vegades per tancar la sessió.</translation>
 <translation id="3892641579809465218">Pantalla interna</translation>
 <translation id="3963445509666917109">Altaveu (intern)</translation>
@@ -109,6 +111,7 @@ Premeu Cerca o Maj per cancel·lar.</translation>
 <translation id="4421231901400348175">Es comparteix el control de la pantalla amb <ph name="HELPER_NAME" /> mitjançant l'Assistència remota.</translation>
 <translation id="4430019312045809116">Volum</translation>
 <translation id="4527045527269911712">El dispositiu Bluetooth "<ph name="DEVICE_NAME" />" sol·licita permís per emparellar-se.</translation>
+<translation id="4544944664594876241">La drecera per bloquejar la pantalla ha canviat. Utilitzeu <ph name="NEW_SHORTCUT" /> en lloc de la drecera <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="479989351350248267">cerca</translation>
 <translation id="4804818685124855865">Desconnecta</translation>
 <translation id="4872237917498892622">Alt+Cerca o Maj</translation>
@@ -117,6 +120,7 @@ Premeu Cerca o Maj per cancel·lar.</translation>
 <translation id="4957722034734105353">Més informació...</translation>
 <translation id="4961318399572185831">Emet la pantalla</translation>
 <translation id="5011233892417813670">Chromebook</translation>
+<translation id="5012744545445585468">Ctrl + Maj + Espai</translation>
 <translation id="5045002648206642691">Configuració de Google Drive...</translation>
 <translation id="5102001756192215136">Temps d'autonomia: <ph name="HOUR" />:<ph name="MINUTE" /></translation>
 <translation id="511445211639755999"><ph name="RESOLUTION" />, <ph name="OVERSCAN" /></translation>
@@ -136,6 +140,7 @@ Premeu Cerca o Maj per cancel·lar.</translation>
 Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="5871632337994001636">Gestiona els dispositius...</translation>
 <translation id="5895138241574237353">Reinicia</translation>
+<translation id="5901316534475909376">Maj + Esc</translation>
 <translation id="5927132638760172455">S'està emetent a un receptor desconegut</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="5947494881799873997">Reverteix</translation>
@@ -152,7 +157,6 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="6165508094623778733">Més informació</translation>
 <translation id="6247708409970142803"><ph name="PERCENTAGE" />%</translation>
 <translation id="6248847161401822652">Premeu Control+Maj+Q dues vegades per sortir.</translation>
-<translation id="6287020362823083378">La drecera del bloqueig de pantalla ha canviat. Utilitzeu Cerca+L en lloc de Ctrl+Maj+L.</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME" /> s'ha canviat a <ph name="ROTATION" /></translation>
 <translation id="6359806961507272919">SMS de <ph name="PHONE_NUMBER" /></translation>
 <translation id="639644700271529076">Bloq Maj està desactivat</translation>
@@ -160,6 +164,7 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="6426039856985689743">Desactiva les dades mòbils</translation>
 <translation id="6452181791372256707">Rebutja</translation>
 <translation id="6459472438155181876">S'està ampliant la pantalla a <ph name="DISPLAY_NAME" /></translation>
+<translation id="6501401484702599040">S'està emetent la pantalla a <ph name="RECEIVER_NAME" /></translation>
 <translation id="6550675742724504774">Opcions</translation>
 <translation id="6585808820553845416">La sessió finalitzarà d'aquí a <ph name="SESSION_TIME_REMAINING" />.</translation>
 <translation id="6596816719288285829">Adreça IP</translation>
@@ -167,6 +172,7 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="6713285437468012787">El dispositiu Bluetooth "<ph name="DEVICE_NAME" />" s'ha emparellat i ja està disponible per a tots els usuaris. Podeu eliminar l'emparellament a la Configuració.</translation>
 <translation id="6785414152754474415">La bateria està carregada fins al <ph name="PERCENTAGE" />% i s'està carregant.</translation>
 <translation id="6803622936009808957">No s'han pogut reflectir les pantalles, perquè no s'ha trobat cap resolució compatible. S'està entrant al mode d'escriptori ampliat.</translation>
+<translation id="683971173229319003">Cerca + L</translation>
 <translation id="68610848741840742">ChromeVox (comentaris de veu)</translation>
 <translation id="6895424601869865703">Afegeix un compte per a <ph name="GIVEN_NAME" /></translation>
 <translation id="6911468394164995108">Connecta't a una altra xarxa...</translation>
@@ -175,6 +181,7 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="6981982820502123353">Accessibilitat</translation>
 <translation id="7029814467594812963">Tanca la sessió</translation>
 <translation id="703171847531699602">No hi ha dispositius d'emissió</translation>
+<translation id="7034339000180558234">S'està emetent <ph name="TAB_NAME" /> a <ph name="RECEIVER_NAME" /></translation>
 <translation id="7052914147756339792">Estableix fons de pantalla...</translation>
 <translation id="7097613348211027502">ChromeVox (comentaris de veu) està activat.
 Premeu Ctrl + Alt + Z per desactivar-lo.</translation>
@@ -186,6 +193,7 @@ Premeu Alt+Cerca o Maj per cancel·lar.</translation>
 <translation id="737451040872859086">Micròfon (intern)</translation>
 <translation id="742594950370306541">La càmera s'està utilitzant.</translation>
 <translation id="743058460480092004">La càmera i el micròfon s'estan utilitzant.</translation>
+<translation id="7510334386202674593">Ctrl + Maj + L</translation>
 <translation id="7561014039265304140"><ph name="DISPLAY_NAME" /> no admet <ph name="SPECIFIED_RESOLUTION" />. S'ha canviat la resolució per <ph name="FALLBACK_RESOLUTION" />.</translation>
 <translation id="7573962313813535744">Mode acoblat</translation>
 <translation id="7593891976182323525">Cerca o Maj</translation>
@@ -194,6 +202,7 @@ Premeu Alt+Cerca o Maj per cancel·lar.</translation>
 <translation id="7823564328645135659">L'idioma ha canviat de "<ph name="FROM_LOCALE" />" a "<ph name="TO_LOCALE" />" després de sincronitzar la vostra configuració.</translation>
 <translation id="785750925697875037">Mostra el compte mòbil</translation>
 <translation id="7864539943188674973">Desactiva el Bluetooth</translation>
+<translation id="7893838033650689677">Activa la Wi-Fi</translation>
 <translation id="7904094684485781019">L'administrador d'aquest compte no ha permès l'inici de sessió múltiple.</translation>
 <translation id="7957227661277029961">És possible que el dispositiu <ph name="DEVICE_TYPE" /> no es carregui mentre està encès. Us recomanem que utilitzeu el carregador oficial.</translation>
 <translation id="7982789257301363584">Xarxa</translation>
@@ -204,16 +213,15 @@ Premeu Alt+Cerca o Maj per cancel·lar.</translation>
 <translation id="8308637677604853869">Menú anterior</translation>
 <translation id="8356164830168736643">Tanca <ph name="WINDOW_TITLE" /></translation>
 <translation id="8428213095426709021">Configuració</translation>
-<translation id="8443356412772935865">S'està emetent la pantalla a $1</translation>
 <translation id="8456362689280298700">Temps per a càrrega completa: <ph name="HOUR" />:<ph name="MINUTE" /></translation>
 <translation id="8517041960877371778">És possible que el dispositiu <ph name="DEVICE_TYPE" /> no es carregui mentre està encès.</translation>
 <translation id="8528322925433439945">Xarxes mòbils...</translation>
-<translation id="8654520615680304441">Activa la Wi-Fi...</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="8676770494376880701">S'ha connectat un carregador de baix consum</translation>
 <translation id="8814190375133053267">Wi-Fi</translation>
 <translation id="882279321799040148">Feu clic per visualitzar-la</translation>
 <translation id="8828714802988429505">90°</translation>
+<translation id="8850991929411075241">Cerca + Esc</translation>
 <translation id="8878886163241303700">Ampliació de la pantalla</translation>
 <translation id="8940956008527784070">Bateria baixa (<ph name="PERCENTAGE" />%)</translation>
 <translation id="9074739597929991885">Bluetooth</translation>

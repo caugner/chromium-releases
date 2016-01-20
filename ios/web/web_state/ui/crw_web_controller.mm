@@ -166,15 +166,17 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 }  // namespace
 
 @interface CRWWebController () <CRWNativeContentDelegate,
+                                CRWWebControllerContainerViewDelegate,
                                 CRWWebViewScrollViewProxyObserver> {
   base::WeakNSProtocol<id<CRWWebDelegate>> _delegate;
   base::WeakNSProtocol<id<CRWWebUserInterfaceDelegate>> _UIDelegate;
   base::WeakNSProtocol<id<CRWNativeContentProvider>> _nativeProvider;
   base::WeakNSProtocol<id<CRWSwipeRecognizerProvider>> _swipeRecognizerProvider;
-  base::scoped_nsobject<CRWWebControllerContainerView> _containerView;
   // The CRWWebViewProxy is the wrapper to give components access to the
   // web view in a controlled and limited way.
   base::scoped_nsobject<CRWWebViewProxyImpl> _webViewProxy;
+  // The view used to display content.  Must outlive |_webViewProxy|.
+  base::scoped_nsobject<CRWWebControllerContainerView> _containerView;
   // If |_contentView| contains a native view rather than a web view, this
   // is its controller. If it's a web view, this is nil.
   base::scoped_nsprotocol<id<CRWNativeContent>> _nativeController;
@@ -206,6 +208,8 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
   // Whether or not the page has zoomed since the current navigation has been
   // committed, either by user interaction or via |-restoreStateFromHistory|.
   BOOL _pageHasZoomed;
+  // Whether a PageDisplayState is currently being applied.
+  BOOL _applyingPageState;
   // Actions to execute once the page load is complete.
   base::scoped_nsobject<NSMutableArray> _pendingLoadCompleteActions;
   // UIGestureRecognizers to add to the web view.
@@ -275,6 +279,9 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 
   // The receiver of JavaScripts.
   base::scoped_nsobject<CRWJSInjectionReceiver> _jsInjectionReceiver;
+
+  // The last recorded content offset of |webScrollView|.
+  CGPoint _lastContentOffset;
 }
 
 // The container view.  The container view should be accessed through this
@@ -652,7 +659,9 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 - (void)showTransientContentView:(CRWContentView*)contentView {
   DCHECK(contentView);
   DCHECK(contentView.scrollView);
-  DCHECK([contentView.scrollView isDescendantOfView:contentView]);
+  // TODO(crbug.com/556848) Reenable DCHECK when |CRWWebControllerContainerView|
+  // is restructured so that subviews are not added during |layoutSubviews|.
+  // DCHECK([contentView.scrollView isDescendantOfView:contentView]);
   [self.containerView displayTransientContent:contentView];
 }
 
@@ -686,6 +695,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 - (void)removeWebViewAllowingCachedReconstruction:(BOOL)allowCache {
   if (!self.webView)
     return;
+
+  SEL cancelDialogsSelector =
+      @selector(cancelDialogsForWebController:);
+  if ([self.UIDelegate respondsToSelector:cancelDialogsSelector])
+    [self.UIDelegate cancelDialogsForWebController:self];
 
   if (allowCache)
     _expectedReconstructionURL = [self currentNavigationURL];
@@ -1047,6 +1061,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
                                     stateObject:stateObject
                                      transition:transition];
   [self didUpdateHistoryStateWithPageURL:pageURL];
+  self.userInteractionRegistered = NO;
 }
 
 - (void)replaceStateWithPageURL:(const GURL&)pageUrl
@@ -1550,8 +1565,8 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     // native or web). Note, this needs to be created with a non-zero size
     // to allow for (native) subviews with autosize constraints to be correctly
     // processed.
-    _containerView.reset([[CRWWebControllerContainerView alloc]
-        initWithContentViewProxy:_webViewProxy]);
+    _containerView.reset(
+        [[CRWWebControllerContainerView alloc] initWithDelegate:self]);
     self.containerView.frame = [[UIScreen mainScreen] bounds];
     [self.containerView addGestureRecognizer:[self touchTrackingRecognizer]];
     [self.containerView setAccessibilityIdentifier:web::kContainerViewID];
@@ -1577,9 +1592,9 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     if (!_overlayPreviewMode)
       _usePlaceholderOverlay = NO;
   } else if (_requireReloadOnDisplay && self.webView) {
+    _requireReloadOnDisplay = NO;
     [self addPlaceholderOverlay];
     [self loadCurrentURL];
-    _requireReloadOnDisplay = NO;
   }
 }
 
@@ -1599,7 +1614,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 // displayed.
 - (void)reloadInternal {
   // Clear last user interaction.
-  // TODO(jyquinn): Move to after the load commits, in the subclass
+  // TODO(crbug.com/546337): Move to after the load commits, in the subclass
   // implementation. This will be inaccurate if the reload fails or is
   // cancelled.
   _lastUserInteraction.reset();
@@ -1800,20 +1815,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       ![_webStateImpl->GetNavigationManagerImpl().GetSessionController()
           isPushStateNavigationBetweenEntry:fromEntry
                                    andEntry:self.currentSessionEntry];
-  // Set the serialized state if necessary.  State must be set if:
-  // - the transition between |fromEntry| and the current session entry is a
-  //   history.pushState, or
-  // - the current session entry has a serialized state object (occurs after a
-  //   history.replaceState).
   web::NavigationItemImpl* currentItem =
       self.currentSessionEntry.navigationItemImpl;
-  NSString* stateObject = currentItem->GetSerializedStateObject();
-  if (!shouldLoadURL || stateObject.length) {
-    [self setPushedOrReplacedURL:currentItem->GetURL() stateObject:stateObject];
-  }
+  GURL endURL = [self URLForHistoryNavigationFromItem:fromEntry.navigationItem
+                                               toItem:currentItem];
   if (shouldLoadURL) {
-    GURL endURL = [self URLForHistoryNavigationFromItem:fromEntry.navigationItem
-                                                 toItem:currentItem];
     ui::PageTransition transition = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_RELOAD | ui::PAGE_TRANSITION_FORWARD_BACK);
 
@@ -1823,6 +1829,19 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     }
     params.transition_type = transition;
     [self loadWithParams:params];
+  }
+  // Set the serialized state if necessary.  State must be set if the document
+  // objects are the same. This can happen if:
+  // - The navigation is a pushState (i.e., shouldLoadURL is NO).
+  // - The navigation is a hash change.
+  // TODO(crbug.com/566157): This misses some edge cases (e.g., a mixed series
+  // of hash changes and push/replaceState calls will likely end up dispatching
+  // this in cases where it shouldn't.
+  if (!shouldLoadURL ||
+      (web::GURLByRemovingRefFromGURL(endURL) ==
+       web::GURLByRemovingRefFromGURL(fromEntry.navigationItem->GetURL()))) {
+    NSString* stateObject = currentItem->GetSerializedStateObject();
+    [self setPushedOrReplacedURL:currentItem->GetURL() stateObject:stateObject];
   }
 }
 
@@ -1905,9 +1924,14 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (BOOL)shouldClosePageOnNativeApplicationLoad {
   // The page should be closed if it was initiated by the DOM and there has been
-  // no user interaction with the page since the web view was created.
-  return self.sessionController.openedByDOM &&
-         !_userInteractedWithWebController;
+  // no user interaction with the page since the web view was created, or if
+  // the page has no navigation items, as occurs when an App Store link is
+  // opened from another application.
+  BOOL rendererInitiatedWithoutInteraction =
+      self.sessionController.openedByDOM && !_userInteractedWithWebController;
+  BOOL noNavigationItems =
+      !_webStateImpl->GetNavigationManagerImpl().GetEntryCount();
+  return rendererInitiatedWithoutInteraction || noNavigationItems;
 }
 
 - (BOOL)isBeingDestroyed {
@@ -1922,6 +1946,19 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // TODO(stuartmorgan): Remove this temporary bridge to the helper function
   // once the referrer handling moves into the subclasses.
   return web::ReferrerPolicyFromString(policy);
+}
+
+#pragma mark -
+#pragma mark CRWWebControllerContainerViewDelegate
+
+- (CRWWebViewProxyImpl*)contentViewProxyForContainerView:
+        (CRWWebControllerContainerView*)containerView {
+  return _webViewProxy.get();
+}
+
+- (CGFloat)headerHeightForContainerView:
+        (CRWWebControllerContainerView*)containerView {
+  return [self headerHeight];
 }
 
 #pragma mark -
@@ -2430,6 +2467,14 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (BOOL)handleWindowHistoryDidPushStateMessage:(base::DictionaryValue*)message
                                        context:(NSDictionary*)context {
+  // If there is a pending entry, a new navigation has been registered but
+  // hasn't begun loading.  Since the pushState message is coming from the
+  // previous page, ignore it and allow the previously registered navigation to
+  // continue.  This can ocur if a pushState is issued from an anchor tag
+  // onClick event, as the click would have already been registered.
+  if ([self sessionController].pendingEntry)
+    return NO;
+
   std::string pageURL;
   std::string baseURL;
   if (!message->GetString("pageUrl", &pageURL) ||
@@ -2444,13 +2489,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   pushURL = URLEscapedForHistory(pushURL);
   if (!pushURL.is_valid())
     return YES;
-  const NavigationManagerImpl& navigationManager =
-      _webStateImpl->GetNavigationManagerImpl();
   web::NavigationItem* navItem = [self currentNavItem];
-  // PushState happened before first navigation entry or called right after
-  // window.open when the url is empty.
-  if (!navItem ||
-      (navigationManager.GetEntryCount() <= 1 && navItem->GetURL().is_empty()))
+  // PushState happened before first navigation entry or called when the
+  // navigation entry does not contain a valid URL.
+  if (!navItem || !navItem->GetURL().is_valid())
     return YES;
   if (!web::history_state_util::IsHistoryStateChangeValid(navItem->GetURL(),
                                                           pushURL)) {
@@ -2479,11 +2521,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // If the user interacted with the page, categorize it as a link navigation.
   // If not, categorize it is a client redirect as it occurred without user
   // input and should not be added to the history stack.
-  // TODO(ios): Improve transition detection.
-  ui::PageTransition transition =
-      [context[web::kUserIsInteractingKey] boolValue]
-          ? ui::PAGE_TRANSITION_LINK
-          : ui::PAGE_TRANSITION_CLIENT_REDIRECT;
+  // TODO(crbug.com/549301): Improve transition detection.
+  ui::PageTransition transition = self.userInteractionRegistered
+                                      ? ui::PAGE_TRANSITION_LINK
+                                      : ui::PAGE_TRANSITION_CLIENT_REDIRECT;
   [self pushStateWithPageURL:pushURL
                  stateObject:stateObject
                   transition:transition];
@@ -2618,6 +2659,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
   self.userInteractionRegistered = NO;
   _pageHasZoomed = NO;
+  _lastContentOffset = CGPointZero;
 
   [[self sessionController] commitPendingEntry];
   _webStateImpl->GetRequestTracker()->StartPageLoad(
@@ -2748,7 +2790,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       // that errors reported following the 'NO' reply can be safely ignored.
       if ([self shouldClosePageOnNativeApplicationLoad])
         [_delegate webPageOrderedClose];
-      [self abortLoad];
+      [self stopLoading];
       [_openedApplicationURL addObject:request.URL];
       return NO;
     }
@@ -2773,9 +2815,9 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       return NO;
     }
 
-    // Abort load if navigation is believed to be happening on the main frame.
+    // Stop load if navigation is believed to be happening on the main frame.
     if ([self isPutativeMainFrameRequest:request targetFrame:targetFrame])
-      [self abortLoad];
+      [self stopLoading];
 
     if ([_delegate openExternalURL:requestURL]) {
       // Record the URL so that errors reported following the 'NO' reply can be
@@ -2788,8 +2830,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   }
 
   if ([[request HTTPMethod] isEqualToString:@"POST"]) {
-    [self cachePOSTDataForRequest:request
-                   inSessionEntry:[self currentSessionEntry]];
+    CRWSessionEntry* currentEntry = [self currentSessionEntry];
+    // TODO(crbug.com/570699): Remove this check once it's no longer possible to
+    // have no current entries.
+    if (currentEntry)
+      [self cachePOSTDataForRequest:request inSessionEntry:currentEntry];
   }
 
   return YES;
@@ -2970,9 +3015,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     return NO;
   }
 
+  // Fetching is considered as successful even if |_DOMElementForLastTouch| is
+  // empty. However if |_DOMElementForLastTouch| is empty then custom context
+  // menu should not be shown.
   UMA_HISTOGRAM_BOOLEAN("WebController.FetchContextMenuInfoAsyncSucceeded",
                         _DOMElementForLastTouch);
-
   return _DOMElementForLastTouch && !_DOMElementForLastTouch->empty();
 }
 
@@ -3164,8 +3211,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   [_delegate webController:self retrievePlaceholderOverlayImage:callback];
 
   if (!_placeholderOverlayView.get().image) {
-    // TODO(justincohen): This is just a blank white image. Consider fading in
-    // the snapshot when it comes in instead.
     // TODO(shreyasv): This is just a blank white image. Consider adding an API
     // so that the delegate can return something immediately for the default
     // overlay image.
@@ -3293,11 +3338,42 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 #pragma mark -
 #pragma mark CRWWebViewScrollViewProxyObserver
 
+- (void)webViewScrollViewDidScroll:
+    (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
+  BOOL isRendererInitiated =
+      !webViewScrollViewProxy.updatingThroughProxy && !_applyingPageState;
+  if (isRendererInitiated && !self.userInteractionRegistered) {
+    // Ignore renderer-initiated scrolling that does not correspond with a user
+    // interaction.
+    webViewScrollViewProxy.contentOffset = _lastContentOffset;
+  } else {
+    _lastContentOffset = webViewScrollViewProxy.contentOffset;
+  }
+}
+
 - (void)webViewScrollViewDidZoom:
         (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
   _pageHasZoomed = YES;
 }
 
+- (void)webViewScrollViewDidResetContentSize:
+    (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
+  web::NavigationItem* currentItem = [self currentNavItem];
+  if (webViewScrollViewProxy.isZooming || _applyingPageState || !currentItem)
+    return;
+  CGSize contentSize = webViewScrollViewProxy.contentSize;
+  if (contentSize.width < CGRectGetWidth(webViewScrollViewProxy.frame)) {
+    // The renderer incorrectly resized the content area.  Resetting the scroll
+    // view's zoom scale will force a re-rendering.  rdar://23963992
+    web::PageDisplayState displayState = currentItem->GetPageDisplayState();
+    displayState.set_scroll_state(
+        web::PageScrollState(_lastContentOffset.x, _lastContentOffset.y));
+    const web::PageZoomState& zoomState = displayState.zoom_state();
+    if (!zoomState.IsValid() || zoomState.IsLegacyFormat())
+      displayState.set_zoom_state(web::PageZoomState(1.0, 1.0, 1.0));
+    [self applyPageDisplayState:displayState];
+  }
+}
 #pragma mark -
 #pragma mark Page State
 
@@ -3331,7 +3407,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
         scrollView.maximumZoomScale);
     displayState.zoom_state().set_zoom_scale(scrollView.zoomScale);
   } else {
-    // TODO(kkhorimoto): Handle native views.
+    // TODO(crbug.com/546146): Handle native views.
   }
   return displayState;
 }
@@ -3406,12 +3482,14 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   if (currentItem && currentItem->GetPageDisplayState() != displayState)
     return;
   DCHECK(displayState.IsValid());
+  _applyingPageState = YES;
   if (isUserScalable) {
     [self prepareToApplyWebViewScrollZoomScale];
     [self applyWebViewScrollZoomScaleFromZoomState:displayState.zoom_state()];
     [self finishApplyingWebViewScrollZoomScale];
   }
   [self applyWebViewScrollOffsetFromScrollState:displayState.scroll_state()];
+  _applyingPageState = NO;
 }
 
 - (void)prepareToApplyWebViewScrollZoomScale {
@@ -3651,8 +3729,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   DCHECK_NE(requestStatus, NUM_EXTERNAL_URL_REQUEST_STATUS);
   UMA_HISTOGRAM_ENUMERATION("WebController.ExternalURLRequestBlocking",
                             requestStatus, NUM_EXTERNAL_URL_REQUEST_STATUS);
-  if (requestStatus == SUBFRAME_BLOCKED &&
-      web::GetWebClient()->IsExternalURLBlockingEnabled()) {
+  if (requestStatus == SUBFRAME_BLOCKED) {
     return NO;
   }
 
@@ -3840,6 +3917,20 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (void)resetExternalRequest {
   _externalRequest.reset();
+}
+
+- (web::WebViewDocumentType)documentTypeFromMIMEType:(NSString*)MIMEType {
+  if (!MIMEType.length) {
+    return web::WEB_VIEW_DOCUMENT_TYPE_UNKNOWN;
+  }
+
+  if ([MIMEType isEqualToString:@"text/html"] ||
+      [MIMEType isEqualToString:@"application/xhtml+xml"] ||
+      [MIMEType isEqualToString:@"application/xml"]) {
+    return web::WEB_VIEW_DOCUMENT_TYPE_HTML;
+  }
+
+  return web::WEB_VIEW_DOCUMENT_TYPE_GENERIC;
 }
 
 @end

@@ -12,6 +12,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/android/resources/resource_manager_impl.h"
 #include "ui/android/resources/system_ui_resource_type.h"
+#include "ui/android/window_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 
 
@@ -34,7 +35,9 @@ namespace ui {
 
 class TestResourceManagerImpl : public ResourceManagerImpl {
  public:
-  TestResourceManagerImpl() {}
+  TestResourceManagerImpl(WindowAndroid* window_android)
+      : ResourceManagerImpl(window_android) {}
+
   ~TestResourceManagerImpl() override {}
 
   void SetResourceAsLoaded(AndroidResourceType res_type, int res_id) {
@@ -80,7 +83,10 @@ class MockLayerTreeHost : public cc::LayerTreeHost {
 
 class ResourceManagerTest : public testing::Test {
  public:
-  ResourceManagerTest() : fake_client_(cc::FakeLayerTreeHostClient::DIRECT_3D) {
+  ResourceManagerTest()
+      : window_android_(WindowAndroid::createForTesting()),
+        resource_manager_(window_android_),
+        fake_client_(cc::FakeLayerTreeHostClient::DIRECT_3D) {
     cc::LayerTreeHost::InitParams params;
     cc::LayerTreeSettings settings;
     params.client = &fake_client_;
@@ -89,6 +95,8 @@ class ResourceManagerTest : public testing::Test {
     host_.reset(new MockLayerTreeHost(&params));
     resource_manager_.Init(host_.get());
   }
+
+  ~ResourceManagerTest() override { window_android_->Destroy(NULL, NULL); }
 
   void PreloadResource(ui::SystemUIResourceType type) {
     resource_manager_.PreloadResource(ui::ANDROID_RESOURCE_TYPE_SYSTEM, type);
@@ -103,6 +111,9 @@ class ResourceManagerTest : public testing::Test {
     resource_manager_.SetResourceAsLoaded(ui::ANDROID_RESOURCE_TYPE_SYSTEM,
                                           type);
   }
+
+ private:
+  WindowAndroid* window_android_;
 
  protected:
   scoped_ptr<MockLayerTreeHost> host_;
@@ -127,6 +138,45 @@ TEST_F(ResourceManagerTest, PreloadEnsureResource) {
       .RetiresOnSaturation();
   SetResourceAsLoaded(kTestResourceType);
   EXPECT_EQ(kResourceId, GetUIResourceId(kTestResourceType));
+}
+
+TEST_F(ResourceManagerTest, ProcessCrushedSpriteFrameRects) {
+  const size_t kNumFrames = 3;
+
+  // Create input
+  std::vector<int> frame0 = {35, 30, 38, 165, 18, 12, 0, 70, 0, 146, 72, 2};
+  std::vector<int> frame1 = {};
+  std::vector<int> frame2 = {0, 0, 73, 0, 72, 72};
+  std::vector<std::vector<int>> frame_rects_vector;
+  frame_rects_vector.push_back(frame0);
+  frame_rects_vector.push_back(frame1);
+  frame_rects_vector.push_back(frame2);
+
+  // Create expected output
+  CrushedSpriteResource::SrcDstRects expected_rects(kNumFrames);
+  gfx::Rect frame0_rect0_src(38, 165, 18, 12);
+  gfx::Rect frame0_rect0_dst(35, 30, 18, 12);
+  gfx::Rect frame0_rect1_src(0, 146, 72, 2);
+  gfx::Rect frame0_rect1_dst(0, 70, 72, 2);
+  gfx::Rect frame2_rect0_src(73, 0, 72, 72);
+  gfx::Rect frame2_rect0_dst(0, 0, 72, 72);
+  expected_rects[0].push_back(
+      std::pair<gfx::Rect, gfx::Rect>(frame0_rect0_src, frame0_rect0_dst));
+  expected_rects[0].push_back(
+      std::pair<gfx::Rect, gfx::Rect>(frame0_rect1_src, frame0_rect1_dst));
+  expected_rects[2].push_back(
+      std::pair<gfx::Rect, gfx::Rect>(frame2_rect0_src, frame2_rect0_dst));
+
+  // Check actual against expected
+  CrushedSpriteResource::SrcDstRects actual_rects =
+      resource_manager_.ProcessCrushedSpriteFrameRects(frame_rects_vector);
+  EXPECT_EQ(kNumFrames, actual_rects.size());
+  for (size_t i = 0; i < kNumFrames; i++) {
+    EXPECT_EQ(expected_rects[i].size(), actual_rects[i].size());
+    for (size_t j = 0; j < actual_rects[i].size(); j++) {
+      EXPECT_EQ(expected_rects[i][j], actual_rects[i][j]);
+    }
+  }
 }
 
 }  // namespace ui

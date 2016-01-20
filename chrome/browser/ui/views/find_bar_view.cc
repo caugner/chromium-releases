@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/bar_control_button.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/grit/generated_resources.h"
@@ -65,8 +66,6 @@ const int kInterChildSpacing = 4;
 // Additional spacing around the separator.
 const int kSeparatorLeftSpacing = 12 - kInterChildSpacing;
 const int kSeparatorRightSpacing = 8 - kInterChildSpacing;
-// Extra space around the buttons to increase their event target size.
-const int kButtonExtraTouchSize = 4;
 
 // The margins around the match count label (We add extra space so that the
 // background highlight extends beyond just the text).
@@ -86,12 +85,6 @@ const SkColor kBackgroundColorMatch = SkColorSetARGB(0, 255, 255, 255);
 
 // The background color of the match count label when no results are found.
 const SkColor kBackgroundColorNoMatch = SkColorSetRGB(255, 102, 102);
-
-// The color of the match count label for Material Design.
-const SkColor kMatchTextColorMD = SkColorSetRGB(0x96, 0x96, 0x96);
-
-// Color of the vertical separator between match count and buttons. (MD only.)
-const SkColor kSeparatorColor = SkColorSetARGB(0x26, 0, 0, 0);
 
 // The default number of average characters that the text box will be. This
 // number brings the width on a "regular fonts" system to about 300px.
@@ -119,12 +112,13 @@ class MatchCountLabel : public views::Label {
 
 FindBarView::FindBarView(FindBarHost* host)
     : DropdownBarView(host),
-      find_text_(NULL),
-      match_count_text_(NULL),
-      focus_forwarder_view_(NULL),
-      find_previous_button_(NULL),
-      find_next_button_(NULL),
-      close_button_(NULL) {
+      find_text_(nullptr),
+      match_count_text_(nullptr),
+      focus_forwarder_view_(nullptr),
+      separator_(nullptr),
+      find_previous_button_(nullptr),
+      find_next_button_(nullptr),
+      close_button_(nullptr) {
   find_text_ = new views::Textfield;
   find_text_->set_id(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD);
   find_text_->set_default_width_in_chars(kDefaultCharWidth);
@@ -133,33 +127,60 @@ FindBarView::FindBarView(FindBarHost* host)
   find_text_->SetTextInputFlags(ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF);
   AddChildView(find_text_);
 
-  find_previous_button_ = new views::ImageButton(this);
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    BarControlButton* find_previous = new BarControlButton(this);
+    find_previous->SetIcon(
+        gfx::VectorIconId::FIND_PREV,
+        base::Bind(&FindBarView::GetTextColorForIcon, base::Unretained(this)));
+    BarControlButton* find_next = new BarControlButton(this);
+    find_next->SetIcon(
+        gfx::VectorIconId::FIND_NEXT,
+        base::Bind(&FindBarView::GetTextColorForIcon, base::Unretained(this)));
+    BarControlButton* close = new BarControlButton(this);
+    close->SetIcon(
+        gfx::VectorIconId::BAR_CLOSE,
+        base::Bind(&FindBarView::GetTextColorForIcon, base::Unretained(this)));
+
+    find_previous_button_ = find_previous;
+    find_next_button_ = find_next;
+    close_button_ = close;
+  } else {
+    find_previous_button_ = new views::ImageButton(this);
+    find_next_button_ = new views::ImageButton(this);
+    close_button_ = new views::ImageButton(this);
+  }
+
   find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
   find_previous_button_->SetFocusable(true);
+  find_previous_button_->set_request_focus_on_press(false);
   find_previous_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_PREVIOUS_TOOLTIP));
   find_previous_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_PREVIOUS));
   AddChildView(find_previous_button_);
 
-  find_next_button_ = new views::ImageButton(this);
   find_next_button_->set_tag(FIND_NEXT_TAG);
   find_next_button_->SetFocusable(true);
+  find_next_button_->set_request_focus_on_press(false);
   find_next_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_NEXT_TOOLTIP));
   find_next_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_NEXT));
   AddChildView(find_next_button_);
 
-  close_button_ = new views::ImageButton(this);
   close_button_->set_tag(CLOSE_TAG);
   close_button_->SetFocusable(true);
+  close_button_->set_request_focus_on_press(false);
   close_button_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   close_button_->SetAnimationDuration(0);
   AddChildView(close_button_);
+
+  // Create a focus forwarder view which sends focus to find_text_.
+  focus_forwarder_view_ = new FocusForwarderView(find_text_);
+  AddChildView(focus_forwarder_view_);
 
   EnableCanvasFlippingForRTLUI(true);
 
@@ -299,65 +320,67 @@ void FindBarView::OnPaintBackground(gfx::Canvas* canvas) {
 }
 
 void FindBarView::Layout() {
-  if (ui::MaterialDesignController::IsModeMaterial())
-    return views::View::Layout();
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    views::View::Layout();
+  } else {
+    int panel_width = GetPreferredSize().width();
 
-  int panel_width = GetPreferredSize().width();
+    // Stay within view bounds.
+    int view_width = width();
+    if (view_width && view_width < panel_width)
+      panel_width = view_width;
 
-  // Stay within view bounds.
-  int view_width = width();
-  if (view_width && view_width < panel_width)
-    panel_width = view_width;
+    // First we draw the close button on the far right.
+    gfx::Size sz = close_button_->GetPreferredSize();
+    close_button_->SetBounds(panel_width - sz.width() -
+                                 kMarginRightOfCloseButton,
+                             (height() - sz.height()) / 2,
+                             sz.width(),
+                             sz.height());
+    // Set the color.
+    OnThemeChanged();
 
-  // First we draw the close button on the far right.
-  gfx::Size sz = close_button_->GetPreferredSize();
-  close_button_->SetBounds(panel_width - sz.width() -
-                               kMarginRightOfCloseButton,
-                           (height() - sz.height()) / 2,
-                           sz.width(),
-                           sz.height());
-  // Set the color.
-  OnThemeChanged();
+    // Next, the FindNext button to the left the close button.
+    sz = find_next_button_->GetPreferredSize();
+    find_next_button_->SetBounds(close_button_->x() -
+                                     find_next_button_->width() -
+                                     kMarginLeftOfCloseButton,
+                                 (height() - sz.height()) / 2,
+                                  sz.width(),
+                                  sz.height());
 
-  // Next, the FindNext button to the left the close button.
-  sz = find_next_button_->GetPreferredSize();
-  find_next_button_->SetBounds(close_button_->x() -
-                                   find_next_button_->width() -
-                                   kMarginLeftOfCloseButton,
-                               (height() - sz.height()) / 2,
-                                sz.width(),
-                                sz.height());
+    // Then, the FindPrevious button to the left the FindNext button.
+    sz = find_previous_button_->GetPreferredSize();
+    find_previous_button_->SetBounds(find_next_button_->x() -
+                                         find_previous_button_->width(),
+                                     (height() - sz.height()) / 2,
+                                     sz.width(),
+                                     sz.height());
 
-  // Then, the FindPrevious button to the left the FindNext button.
-  sz = find_previous_button_->GetPreferredSize();
-  find_previous_button_->SetBounds(find_next_button_->x() -
-                                       find_previous_button_->width(),
-                                   (height() - sz.height()) / 2,
-                                   sz.width(),
-                                   sz.height());
+    // Then the label showing the match count number.
+    sz = match_count_text_->GetPreferredSize();
+    // We extend the label bounds a bit to give the background highlighting a
+    // bit of breathing room (margins around the text).
+    sz.Enlarge(kMatchCountExtraWidth, 0);
+    sz.SetToMax(gfx::Size(kMatchCountMinWidth, 0));
+    const int match_count_x =
+        find_previous_button_->x() - kMarginRightOfMatchCountLabel - sz.width();
+    const int find_text_y = kMarginVerticalFindTextfield;
+    const gfx::Insets find_text_insets(find_text_->GetInsets());
+    match_count_text_->SetBounds(match_count_x,
+                                 find_text_y - find_text_insets.top() +
+                                     find_text_->GetBaseline() -
+                                     match_count_text_->GetBaseline(),
+                                 sz.width(), sz.height());
 
-  // Then the label showing the match count number.
-  sz = match_count_text_->GetPreferredSize();
-  // We extend the label bounds a bit to give the background highlighting a bit
-  // of breathing room (margins around the text).
-  sz.Enlarge(kMatchCountExtraWidth, 0);
-  sz.SetToMax(gfx::Size(kMatchCountMinWidth, 0));
-  const int match_count_x =
-      find_previous_button_->x() - kMarginRightOfMatchCountLabel - sz.width();
-  const int find_text_y = kMarginVerticalFindTextfield;
-  const gfx::Insets find_text_insets(find_text_->GetInsets());
-  match_count_text_->SetBounds(match_count_x,
-                               find_text_y - find_text_insets.top() +
-                                   find_text_->GetBaseline() -
-                                   match_count_text_->GetBaseline(),
-                               sz.width(), sz.height());
-
-  // Fill the remaining width and available height with the textfield.
-  const int left_margin = kMarginLeftOfFindTextfield - find_text_insets.left();
-  const int find_text_width = std::max(0, match_count_x - left_margin -
-      kMarginLeftOfMatchCountLabel + find_text_insets.right());
-  find_text_->SetBounds(left_margin, find_text_y, find_text_width,
-                        height() - 2 * kMarginVerticalFindTextfield);
+    // Fill the remaining width and available height with the textfield.
+    const int left_margin =
+        kMarginLeftOfFindTextfield - find_text_insets.left();
+    const int find_text_width = std::max(0, match_count_x - left_margin -
+        kMarginLeftOfMatchCountLabel + find_text_insets.right());
+    find_text_->SetBounds(left_margin, find_text_y, find_text_width,
+                          height() - 2 * kMarginVerticalFindTextfield);
+  }
 
   // The focus forwarder view is a hidden view that should cover the area
   // between the find text box and the find button so that when the user clicks
@@ -474,10 +497,6 @@ void FindBarView::InitViewsForNonMaterial() {
   match_count_text_ = new views::Label();
   AddChildView(match_count_text_);
 
-  // Create a focus forwarder view which sends focus to find_text_.
-  focus_forwarder_view_ = new FocusForwarderView(find_text_);
-  AddChildView(focus_forwarder_view_);
-
   // The find bar textfield has a background image instead of a border.
   find_text_->SetBorder(views::Border::NullBorder());
 
@@ -529,39 +548,12 @@ void FindBarView::InitViewsForMaterial() {
       make_scoped_ptr(new views::ViewTargeter(this)));
   AddChildViewAt(match_count_text_, 1);
 
-  views::Separator* separator =
-      new views::Separator(views::Separator::VERTICAL);
-  separator->SetColor(kSeparatorColor);
-  separator->SetBorder(views::Border::CreateEmptyBorder(
+  separator_ = new views::Separator(views::Separator::VERTICAL);
+  separator_->SetBorder(views::Border::CreateEmptyBorder(
       0, kSeparatorLeftSpacing, 0, kSeparatorRightSpacing));
-  AddChildViewAt(separator, 2);
+  AddChildViewAt(separator_, 2);
 
   find_text_->SetBorder(views::Border::NullBorder());
-
-  struct {
-    views::ImageButton* button;
-    gfx::VectorIconId id;
-  } button_images[] = {
-      {find_previous_button_, gfx::VectorIconId::FIND_PREV},
-      {find_next_button_, gfx::VectorIconId::FIND_NEXT},
-      {close_button_, gfx::VectorIconId::BAR_CLOSE},
-  };
-
-  for (size_t i = 0; i < arraysize(button_images); ++i) {
-    views::ImageButton* button = button_images[i].button;
-    button->SetBorder(views::Border::CreateEmptyBorder(
-        kButtonExtraTouchSize, kButtonExtraTouchSize, kButtonExtraTouchSize,
-        kButtonExtraTouchSize));
-    button->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
-                              views::ImageButton::ALIGN_MIDDLE);
-
-    gfx::ImageSkia image =
-        gfx::CreateVectorIcon(button_images[i].id, 16, gfx::kChromeIconGrey);
-    button->SetImage(views::CustomButton::STATE_NORMAL, &image);
-    image = gfx::CreateVectorIcon(button_images[i].id, 16,
-                                  SkColorSetA(gfx::kChromeIconGrey, 0xff / 2));
-    button->SetImage(views::CustomButton::STATE_DISABLED, &image);
-  }
 
   views::BoxLayout* manager =
       new views::BoxLayout(views::BoxLayout::kHorizontal, kInteriorPadding,
@@ -655,9 +647,18 @@ void FindBarView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   if (!ui::MaterialDesignController::IsModeMaterial())
     return;
 
-  SkColor color =
-      theme->GetSystemColor(ui::NativeTheme::kColorId_DialogBackground);
-  set_background(views::Background::CreateSolidBackground(color));
-  match_count_text_->SetBackgroundColor(color);
-  match_count_text_->SetEnabledColor(kMatchTextColorMD);
+  SkColor bg_color = theme->GetSystemColor(
+      ui::NativeTheme::kColorId_TextfieldDefaultBackground);
+  set_background(views::Background::CreateSolidBackground(bg_color));
+  match_count_text_->SetBackgroundColor(bg_color);
+
+  SkColor text_color =
+      theme->GetSystemColor(ui::NativeTheme::kColorId_TextfieldDefaultColor);
+  match_count_text_->SetEnabledColor(SkColorSetA(text_color, 0x69));
+  separator_->SetColor(SkColorSetA(text_color, 0x26));
+}
+
+SkColor FindBarView::GetTextColorForIcon() {
+  return GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_TextfieldDefaultColor);
 }

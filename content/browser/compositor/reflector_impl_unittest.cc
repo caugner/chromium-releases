@@ -94,8 +94,13 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
     }
   }
 
+  void OnGpuSwapBuffersCompleted(
+      const std::vector<ui::LatencyInfo>& latency_info,
+      gfx::SwapResult result) override {
+    NOTREACHED();
+  }
+
 #if defined(OS_MACOSX)
-  void OnSurfaceDisplayed() override {}
   void SetSurfaceSuspendedForRecycle(bool suspended) override {}
   bool SurfaceShouldNotShowFramesAfterSuspendForRecycle() const override {
     return false;
@@ -124,8 +129,7 @@ class ReflectorImplTest : public testing::Test {
     compositor_task_runner_ = new FakeTaskRunner();
     compositor_.reset(
         new ui::Compositor(context_factory, compositor_task_runner_.get()));
-    compositor_->SetAcceleratedWidgetAndStartCompositor(
-        gfx::kNullAcceleratedWidget);
+    compositor_->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
     context_provider_ = cc::TestContextProvider::Create(
         cc::TestWebGraphicsContext3D::Create().Pass());
     output_surface_ =
@@ -154,7 +158,7 @@ class ReflectorImplTest : public testing::Test {
     cc::TextureMailbox mailbox;
     scoped_ptr<cc::SingleReleaseCallback> release;
     if (mirroring_layer_->PrepareTextureMailbox(&mailbox, &release, false)) {
-      release->Run(0, false);
+      release->Run(gpu::SyncToken(), false);
     }
     compositor_.reset();
     ui::TerminateContextFactoryForTests();

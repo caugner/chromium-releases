@@ -18,19 +18,16 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -124,9 +121,11 @@ scoped_ptr<base::DictionaryValue> SessionWindowToValue(
 
 }  // namespace
 
-ForeignSessionHandler::ForeignSessionHandler() {
+ForeignSessionHandler::ForeignSessionHandler() : scoped_observer_(this) {
   load_attempt_time_ = base::TimeTicks::Now();
 }
+
+ForeignSessionHandler::~ForeignSessionHandler() {}
 
 // static
 void ForeignSessionHandler::RegisterProfilePrefs(
@@ -205,14 +204,13 @@ sync_driver::OpenTabsUIDelegate* ForeignSessionHandler::GetOpenTabsUIDelegate(
 
 void ForeignSessionHandler::RegisterMessages() {
   Profile* profile = Profile::FromWebUI(web_ui());
+
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                 content::Source<ProfileSyncService>(service));
-  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-                 content::Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
-                 content::Source<Profile>(profile));
+
+  // NOTE: The ProfileSyncService can be null in tests.
+  if (service)
+    scoped_observer_.Add(service);
 
   web_ui()->RegisterMessageCallback("deleteForeignSession",
       base::Bind(&ForeignSessionHandler::HandleDeleteForeignSession,
@@ -228,23 +226,12 @@ void ForeignSessionHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void ForeignSessionHandler::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED:
-      // Tab sync is disabled, so clean up data about collapsed sessions.
-      Profile::FromWebUI(web_ui())->GetPrefs()->ClearPref(
-          prefs::kNtpCollapsedForeignSessions);
-      // Fall through.
-    case chrome::NOTIFICATION_SYNC_CONFIGURE_DONE:
-    case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
-      HandleGetForeignSessions(nullptr);
-      break;
-    default:
-      NOTREACHED();
-  }
+void ForeignSessionHandler::OnSyncConfigurationCompleted() {
+  HandleGetForeignSessions(nullptr);
+}
+
+void ForeignSessionHandler::OnForeignSessionUpdated() {
+  HandleGetForeignSessions(nullptr);
 }
 
 bool ForeignSessionHandler::IsTabSyncEnabled() {

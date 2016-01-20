@@ -887,11 +887,22 @@ bool Validator::ValidateGlobalNetworkConfiguration(
   const base::ListValue* disabled_network_types = NULL;
   if (result->GetListWithoutPathExpansion(kDisableNetworkTypes,
                                           &disabled_network_types)) {
-    // The kDisableNetworkTypes field is only allowed in user policy.
+    // The kDisableNetworkTypes field is only allowed in device policy.
     if (!disabled_network_types->empty() &&
-        onc_source_ != ::onc::ONC_SOURCE_USER_POLICY) {
+        onc_source_ != ::onc::ONC_SOURCE_DEVICE_POLICY) {
       error_or_warning_found_ = true;
-      LOG(ERROR) << "Disabled network types only allowed in user policy.";
+      LOG(ERROR) << "Disabled network types only allowed in device policy.";
+      return false;
+    }
+  }
+
+  if (result->HasKey(kAllowOnlyPolicyNetworksToConnect)) {
+    // The kAllowOnlyPolicyNetworksToConnect field is only allowed in device
+    // policy.
+    if (onc_source_ != ::onc::ONC_SOURCE_DEVICE_POLICY) {
+      error_or_warning_found_ = true;
+      LOG(ERROR)
+          << "AllowOnlyPolicyNetworksToConnect only allowed in device policy.";
       return false;
     }
   }
@@ -998,14 +1009,19 @@ bool Validator::ValidateCertificate(base::DictionaryValue* result) {
 
   bool remove = false;
   result->GetBooleanWithoutPathExpansion(::onc::kRemove, &remove);
-  if (!remove) {
-    all_required_exist &= RequireField(*result, kType);
-
-    if (type == kClient)
-      all_required_exist &= RequireField(*result, kPKCS12);
-    else if (type == kServer || type == kAuthority)
-      all_required_exist &= RequireField(*result, kX509);
+  if (remove) {
+    error_or_warning_found_ = true;
+    LOG(ERROR) << MessageHeader()
+               << "Removal of certificates is not supported.";
+    return false;
   }
+
+  all_required_exist &= RequireField(*result, kType);
+
+  if (type == kClient)
+    all_required_exist &= RequireField(*result, kPKCS12);
+  else if (type == kServer || type == kAuthority)
+    all_required_exist &= RequireField(*result, kX509);
 
   return !error_on_missing_field_ || all_required_exist;
 }

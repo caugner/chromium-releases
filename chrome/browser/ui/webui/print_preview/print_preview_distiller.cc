@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/dom_distiller/tab_utils.h"
@@ -13,6 +15,7 @@
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/prerender_messages.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/printing/common/print_messages.h"
@@ -20,6 +23,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
@@ -77,8 +81,9 @@ class PrintPreviewDistiller::WebContentsDelegateImpl
 
   bool ShouldCreateWebContents(
       WebContents* web_contents,
-      int route_id,
-      int main_frame_route_id,
+      int32_t route_id,
+      int32_t main_frame_route_id,
+      int32_t main_frame_widget_route_id,
       WindowContainerType window_container_type,
       const std::string& frame_name,
       const GURL& target_url,
@@ -182,7 +187,7 @@ class PrintPreviewDistiller::WebContentsDelegateImpl
           // size, is also sets itself to be visible, which would then break the
           // visibility API.
           content::Details<RenderViewHost> new_render_view_host(details);
-          new_render_view_host->WasResized();
+          new_render_view_host->GetWidget()->WasResized();
           web_contents()->WasHidden();
         }
         break;
@@ -201,6 +206,14 @@ class PrintPreviewDistiller::WebContentsDelegateImpl
   // The callback called when the preview failed.
   base::Closure on_failed_callback_;
 };
+
+const base::Feature PrintPreviewDistiller::kFeature = {
+    "PrintPreviewDistiller", base::FEATURE_ENABLED_BY_DEFAULT,
+};
+
+bool PrintPreviewDistiller::IsEnabled() {
+  return base::FeatureList::IsEnabled(kFeature);
+}
 
 PrintPreviewDistiller::PrintPreviewDistiller(
     WebContents* source_web_contents,

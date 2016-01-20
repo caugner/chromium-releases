@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/strings/string16.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "third_party/WebKit/public/platform/WebMessagePortChannelClient.h"
 #include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/mojo/src/mojo/public/cpp/system/message_pipe.h"
 
 using blink::WebMessagePortChannel;
 using blink::WebMessagePortChannelArray;
@@ -35,7 +35,7 @@ void WebMessagePortChannelImpl::CreatePair(
 
 WebMessagePortChannelImpl::WebMessagePortChannelImpl(
     mojo::ScopedMessagePipeHandle pipe)
-    : client_(nullptr), pipe_(pipe.Pass()), handle_watcher_(13) {
+    : client_(nullptr), pipe_(pipe.Pass()) {
   WaitForNextMessage();
 }
 

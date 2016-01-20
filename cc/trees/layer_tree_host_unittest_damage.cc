@@ -245,7 +245,7 @@ class LayerTreeHostDamageTestForcedFullDamage : public LayerTreeHostDamageTest {
     child_ = FakePictureLayer::Create(layer_settings(), &client_);
 
     root_->SetBounds(gfx::Size(500, 500));
-    child_->SetPosition(gfx::Point(100, 100));
+    child_->SetPosition(gfx::PointF(100.f, 100.f));
     child_->SetBounds(gfx::Size(30, 30));
 
     root_->AddChild(child_);
@@ -351,9 +351,8 @@ class LayerTreeHostScrollbarDamageTest : public LayerTreeHostDamageTest {
 
     scoped_refptr<Layer> scrollbar_layer = FakePaintedScrollbarLayer::Create(
         layer_settings(), false, true, content_layer->id());
-    scrollbar_layer->SetPosition(gfx::Point(300, 300));
+    scrollbar_layer->SetPosition(gfx::PointF(300.f, 300.f));
     scrollbar_layer->SetBounds(gfx::Size(10, 100));
-    scrollbar_layer->ToScrollbarLayer()->SetClipLayer(scroll_clip_layer->id());
     scrollbar_layer->ToScrollbarLayer()->SetScrollLayer(content_layer->id());
     root_layer->AddChild(scrollbar_layer);
 
@@ -442,7 +441,7 @@ class LayerTreeHostDamageTestScrollbarDoesDamage
     Layer* root = layer_tree_host()->root_layer();
     Layer* scroll_clip_layer = root->child_at(0);
     Layer* scroll_layer = scroll_clip_layer->child_at(0);
-    scroll_layer->SetPosition(gfx::Point(10, 10));
+    scroll_layer->SetPosition(gfx::PointF(10.f, 10.f));
   }
 
   void ResizeScrollLayer() {

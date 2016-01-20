@@ -289,6 +289,12 @@ function FileManagerUI(providersModel, element, launchParam) {
   this.providersMenu = new ProvidersMenu(providersModel,
       util.queryDecoratedElement('#add-new-services-menu', cr.ui.Menu));
 
+  /**
+   * @public {!ActionsSubmenu}
+   * @const
+   */
+  this.actionsSubmenu = new ActionsSubmenu(this.fileContextMenu);
+
   // Initialize attributes.
   this.element.setAttribute('type', this.dialogType_);
 
@@ -399,6 +405,14 @@ FileManagerUI.prototype.initDirectoryTree = function(directoryTree) {
 FileManagerUI.prototype.initBanners = function(banners) {
   this.banners = banners;
   this.banners.addEventListener('relayout', this.relayout.bind(this));
+};
+
+/**
+ * Attaches files tooltip.
+ */
+FileManagerUI.prototype.attachFilesTooltip = function() {
+  assertInstanceof(document.querySelector('files-tooltip'), FilesTooltip)
+      .addTargets(document.querySelectorAll('[has-tooltip]'));
 };
 
 /**

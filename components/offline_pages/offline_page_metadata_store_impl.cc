@@ -4,6 +4,9 @@
 
 #include "components/offline_pages/offline_page_metadata_store_impl.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -13,7 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
-#include "components/leveldb_proto/proto_database.h"
+#include "components/leveldb_proto/proto_database_impl.h"
 #include "components/offline_pages/offline_page_item.h"
 #include "components/offline_pages/proto/offline_pages.pb.h"
 #include "third_party/leveldatabase/env_chromium.h"
@@ -22,10 +25,16 @@
 
 using leveldb_proto::ProtoDatabase;
 
+namespace {
+// Statistics are logged to UMA with this string as part of histogram name. They
+// can all be found under LevelDB.*.OfflinePageMetadataStore. Changing this
+// needs to synchronize with histograms.xml, AND will also become incompatible
+// with older browsers still reporting the previous values.
+const char kDatabaseUMAClientName[] = "OfflinePageMetadataStore";
+}
+
 namespace offline_pages {
 namespace {
-
-typedef std::vector<OfflinePageEntry> OfflinePageEntryVector;
 
 void OfflinePageItemToEntry(const OfflinePageItem& item,
                             offline_pages::OfflinePageEntry* item_proto) {
@@ -44,6 +53,8 @@ void OfflinePageItemToEntry(const OfflinePageItem& item,
   item_proto->set_creation_time(item.creation_time.ToInternalValue());
   item_proto->set_last_access_time(item.last_access_time.ToInternalValue());
   item_proto->set_access_count(item.access_count);
+  item_proto->set_flags(
+      static_cast<::offline_pages::OfflinePageEntry_Flags>(item.flags));
 }
 
 bool OfflinePageItemFromEntry(const offline_pages::OfflinePageEntry& item_proto,
@@ -75,88 +86,93 @@ bool OfflinePageItemFromEntry(const offline_pages::OfflinePageEntry& item_proto,
   if (item_proto.has_access_count()) {
     item->access_count = item_proto.access_count();
   }
+  if (item_proto.has_flags()) {
+    item->flags = static_cast<OfflinePageItem::Flags>(item_proto.flags());
+  }
   return true;
-}
-
-void OnLoadDone(const OfflinePageMetadataStore::LoadCallback& callback,
-                const base::Callback<void()>& failure_callback,
-                bool success,
-                scoped_ptr<OfflinePageEntryVector> entries) {
-  UMA_HISTOGRAM_BOOLEAN("OfflinePages.LoadSuccess", success);
-  if (!success) {
-    DVLOG(1) << "Offline pages database load failed.";
-    failure_callback.Run();
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, false, std::vector<OfflinePageItem>()));
-    return;
-  }
-
-  std::vector<OfflinePageItem> result;
-  for (OfflinePageEntryVector::iterator it = entries->begin();
-       it != entries->end(); ++it) {
-    OfflinePageItem item;
-    if (OfflinePageItemFromEntry(*it, &item))
-      result.push_back(item);
-    else
-      DVLOG(1) << "Failed to create offline page item from proto.";
-  }
-  UMA_HISTOGRAM_COUNTS("OfflinePages.SavedPageCount", result.size());
-
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, true, result));
-}
-
-void OnUpdateDone(const OfflinePageMetadataStore::UpdateCallback& callback,
-                  const base::Callback<void()>& failure_callback,
-                  bool success) {
-  if (!success) {
-    // TODO(fgorski): Add UMA for this case.
-    DVLOG(1) << "Offline pages database update failed.";
-    failure_callback.Run();
-  }
-
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, success));
 }
 
 }  // namespace
 
 OfflinePageMetadataStoreImpl::OfflinePageMetadataStoreImpl(
-    scoped_ptr<ProtoDatabase<OfflinePageEntry>> database,
+    scoped_refptr<base::SequencedTaskRunner> background_task_runner,
     const base::FilePath& database_dir)
-    : database_(database.Pass()), weak_ptr_factory_(this) {
-  database_->Init(database_dir,
-                  base::Bind(&OfflinePageMetadataStoreImpl::OnInitDone,
-                             weak_ptr_factory_.GetWeakPtr()));
+    : background_task_runner_(background_task_runner),
+      database_dir_(database_dir),
+      weak_ptr_factory_(this) {
 }
 
 OfflinePageMetadataStoreImpl::~OfflinePageMetadataStoreImpl() {
 }
 
-void OfflinePageMetadataStoreImpl::OnInitDone(bool success) {
-  if (!success) {
-    // TODO(fgorski): Add UMA for this case.
-    DVLOG(1) << "Offline pages database init failed.";
-    ResetDB();
-    return;
-  }
+void OfflinePageMetadataStoreImpl::Load(const LoadCallback& callback) {
+  // First initialize the database.
+  database_.reset(new leveldb_proto::ProtoDatabaseImpl<OfflinePageEntry>(
+      background_task_runner_));
+  database_->Init(kDatabaseUMAClientName, database_dir_,
+                  base::Bind(&OfflinePageMetadataStoreImpl::LoadContinuation,
+                             weak_ptr_factory_.GetWeakPtr(),
+                             callback));
 }
 
-void OfflinePageMetadataStoreImpl::Load(const LoadCallback& callback) {
-  if (!database_.get()) {
-    // Failing fast here, because DB is not initialized, and there is nothing
-    // that can be done about it.
-    // Callback is invoked through message loop to avoid improper retry and
-    // simplify testing.
-    DVLOG(1) << "Offline pages database not available in Load.";
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, false, std::vector<OfflinePageItem>()));
+void OfflinePageMetadataStoreImpl::LoadContinuation(
+    const LoadCallback& callback,
+    bool success) {
+  if (!success) {
+    NotifyLoadResult(callback,
+                     STORE_INIT_FAILED,
+                     std::vector<OfflinePageItem>());
     return;
   }
 
-  database_->LoadEntries(base::Bind(
-      &OnLoadDone, callback, base::Bind(&OfflinePageMetadataStoreImpl::ResetDB,
-                                        weak_ptr_factory_.GetWeakPtr())));
+  // After initialization, start to load the data.
+  database_->LoadEntries(
+      base::Bind(&OfflinePageMetadataStoreImpl::LoadDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
+}
+
+void OfflinePageMetadataStoreImpl::LoadDone(
+    const LoadCallback& callback,
+    bool success,
+    scoped_ptr<std::vector<OfflinePageEntry>> entries) {
+  DCHECK(entries);
+
+  std::vector<OfflinePageItem> result;
+  LoadStatus status = LOAD_SUCCEEDED;
+
+  if (success) {
+    for (const auto& entry : *entries) {
+      OfflinePageItem item;
+      if (!OfflinePageItemFromEntry(entry, &item)) {
+        status = DATA_PARSING_FAILED;
+        result.clear();
+        break;
+      }
+      result.push_back(item);
+    }
+
+  } else {
+    status = STORE_LOAD_FAILED;
+  }
+
+  NotifyLoadResult(callback, status, result);
+}
+
+void OfflinePageMetadataStoreImpl::NotifyLoadResult(
+    const LoadCallback& callback,
+    LoadStatus status,
+    const std::vector<OfflinePageItem>& result) {
+  UMA_HISTOGRAM_ENUMERATION("OfflinePages.LoadStatus",
+                            status,
+                            OfflinePageMetadataStore::LOAD_STATUS_COUNT);
+  if (status == LOAD_SUCCEEDED) {
+    UMA_HISTOGRAM_COUNTS("OfflinePages.SavedPageCount", result.size());
+  } else {
+    DVLOG(1) << "Offline pages database loading failed: " << status;
+    database_.reset();
+  }
+  callback.Run(status, result);
 }
 
 void OfflinePageMetadataStoreImpl::AddOrUpdateOfflinePage(
@@ -207,14 +223,35 @@ void OfflinePageMetadataStoreImpl::UpdateEntries(
 
   database_->UpdateEntries(
       entries_to_save.Pass(), keys_to_remove.Pass(),
-      base::Bind(&OnUpdateDone, callback,
-                 base::Bind(&OfflinePageMetadataStoreImpl::ResetDB,
-                            weak_ptr_factory_.GetWeakPtr())));
+      base::Bind(&OfflinePageMetadataStoreImpl::UpdateDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
 }
 
-void OfflinePageMetadataStoreImpl::ResetDB() {
+void OfflinePageMetadataStoreImpl::UpdateDone(
+    const OfflinePageMetadataStore::UpdateCallback& callback,
+    bool success) {
+  if (!success) {
+    // TODO(fgorski): Add UMA for this case. Consider rebuilding the store.
+    DVLOG(1) << "Offline pages database update failed.";
+  }
+
+  callback.Run(success);
+}
+
+void OfflinePageMetadataStoreImpl::Reset(const ResetCallback& callback) {
+  database_->Destroy(
+      base::Bind(&OfflinePageMetadataStoreImpl::ResetDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
+}
+
+void OfflinePageMetadataStoreImpl::ResetDone(
+    const ResetCallback& callback,
+    bool success) {
   database_.reset();
   weak_ptr_factory_.InvalidateWeakPtrs();
+  callback.Run(success);
 }
 
 }  // namespace offline_pages

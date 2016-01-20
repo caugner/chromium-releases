@@ -17,16 +17,18 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/third_party/icu/icu_utf.h"
-#include "ui/base/ime/chromeos/composition_text_chromeos.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/composition_text.h"
+#include "ui/base/ime/ime_bridge.h"
+#include "ui/base/ime/ime_engine_handler_interface.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace {
-chromeos::IMEEngineHandlerInterface* GetEngine() {
-  return chromeos::IMEBridge::Get()->GetCurrentEngineHandler();
+ui::IMEEngineHandlerInterface* GetEngine() {
+  return ui::IMEBridge::Get()->GetCurrentEngineHandler();
 }
 }  // namespace
 
@@ -40,7 +42,7 @@ InputMethodChromeOS::InputMethodChromeOS(
       handling_key_event_(false),
       weak_ptr_factory_(this) {
   SetDelegate(delegate);
-  chromeos::IMEBridge::Get()->SetInputContextHandler(this);
+  ui::IMEBridge::Get()->SetInputContextHandler(this);
 
   UpdateContextFocusState();
 }
@@ -50,8 +52,8 @@ InputMethodChromeOS::~InputMethodChromeOS() {
   // We are dead, so we need to ask the client to stop relying on us.
   OnInputMethodChanged();
 
-  if (chromeos::IMEBridge::Get())
-    chromeos::IMEBridge::Get()->SetInputContextHandler(NULL);
+  if (ui::IMEBridge::Get())
+    ui::IMEBridge::Get()->SetInputContextHandler(NULL);
 }
 
 void InputMethodChromeOS::OnFocus() {
@@ -136,12 +138,12 @@ void InputMethodChromeOS::DispatchKeyEvent(ui::KeyEvent* event) {
 
   handling_key_event_ = true;
   if (GetEngine()->IsInterestedInKeyEvent()) {
-    GetEngine()->ProcessKeyEvent(
-        *event,
+    ui::IMEEngineHandlerInterface::KeyEventDoneCallback callback =
         base::Bind(&InputMethodChromeOS::ProcessKeyEventDone,
                    weak_ptr_factory_.GetWeakPtr(),
                    // Pass the ownership of the new copied event.
-                   base::Owned(new ui::KeyEvent(*event))));
+                   base::Owned(new ui::KeyEvent(*event)));
+    GetEngine()->ProcessKeyEvent(*event, callback);
   } else {
     ProcessKeyEventDone(event, false);
   }
@@ -154,13 +156,13 @@ void InputMethodChromeOS::OnTextInputTypeChanged(
 
   UpdateContextFocusState();
 
-  chromeos::IMEEngineHandlerInterface* engine = GetEngine();
+  ui::IMEEngineHandlerInterface* engine = GetEngine();
   if (engine) {
     // When focused input client is not changed, a text input type change should
     // cause blur/focus events to engine.
     // The focus in to or out from password field should also notify engine.
     engine->FocusOut();
-    chromeos::IMEEngineHandlerInterface::InputContext context(
+    ui::IMEEngineHandlerInterface::InputContext context(
         GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
     engine->FocusIn(context);
   }
@@ -204,7 +206,7 @@ void InputMethodChromeOS::OnCaretBoundsChanged(const TextInputClient* client) {
     GetEngine()->SetCompositionBounds(rects);
 
   chromeos::IMECandidateWindowHandlerInterface* candidate_window =
-      chromeos::IMEBridge::Get()->GetCandidateWindowHandler();
+      ui::IMEBridge::Get()->GetCandidateWindowHandler();
   if (!candidate_window)
     return;
   candidate_window->SetCursorBounds(caret_rect, composition_head);
@@ -282,7 +284,7 @@ void InputMethodChromeOS::OnDidChangeFocusedClient(
   UpdateContextFocusState();
 
   if (GetEngine()) {
-    chromeos::IMEEngineHandlerInterface::InputContext context(
+    ui::IMEEngineHandlerInterface::InputContext context(
         GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
     GetEngine()->FocusIn(context);
   }
@@ -324,13 +326,13 @@ void InputMethodChromeOS::UpdateContextFocusState() {
   // Propagate the focus event to the candidate window handler which also
   // manages the input method mode indicator.
   chromeos::IMECandidateWindowHandlerInterface* candidate_window =
-      chromeos::IMEBridge::Get()->GetCandidateWindowHandler();
+      ui::IMEBridge::Get()->GetCandidateWindowHandler();
   if (candidate_window)
     candidate_window->FocusStateChanged(IsNonPasswordInputFieldFocused());
 
-  chromeos::IMEEngineHandlerInterface::InputContext context(
+  ui::IMEEngineHandlerInterface::InputContext context(
       GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
-  chromeos::IMEBridge::Get()->SetCurrentInputContext(context);
+  ui::IMEBridge::Get()->SetCurrentInputContext(context);
 
   if (!IsTextInputTypeNone())
     OnCaretBoundsChanged(GetTextInputClient());
@@ -414,7 +416,7 @@ void InputMethodChromeOS::ProcessUnfilteredKeyPressEvent(
   // to send corresponding character to the focused text input client.
   uint16 ch = event->GetCharacter();
   if (ch)
-    client->InsertChar(ch, event->flags());
+    client->InsertChar(*event);
 }
 
 void InputMethodChromeOS::ProcessInputMethodResult(ui::KeyEvent* event,
@@ -426,7 +428,9 @@ void InputMethodChromeOS::ProcessInputMethodResult(ui::KeyEvent* event,
     if (handled && NeedInsertChar()) {
       for (base::string16::const_iterator i = result_text_.begin();
            i != result_text_.end(); ++i) {
-        client->InsertChar(*i, event->flags());
+        ui::KeyEvent ch_event(*event);
+        ch_event.set_character(*i);
+        client->InsertChar(ch_event);
       }
     } else {
       client->InsertText(result_text_);
@@ -495,18 +499,17 @@ void InputMethodChromeOS::CommitText(const std::string& text) {
   }
 }
 
-void InputMethodChromeOS::UpdateCompositionText(
-    const chromeos::CompositionText& text,
-    uint32 cursor_pos,
-    bool visible) {
+void InputMethodChromeOS::UpdateCompositionText(const CompositionText& text,
+                                                uint32 cursor_pos,
+                                                bool visible) {
   if (IsTextInputTypeNone())
     return;
 
   if (!CanComposeInline()) {
     chromeos::IMECandidateWindowHandlerInterface* candidate_window =
-        chromeos::IMEBridge::Get()->GetCandidateWindowHandler();
+        ui::IMEBridge::Get()->GetCandidateWindowHandler();
     if (candidate_window)
-      candidate_window->UpdatePreeditText(text.text(), cursor_pos, visible);
+      candidate_window->UpdatePreeditText(text.text, cursor_pos, visible);
   }
 
   // |visible| argument is very confusing. For example, what's the correct
@@ -574,10 +577,9 @@ bool InputMethodChromeOS::ExecuteCharacterComposer(const ui::KeyEvent& event) {
     return false;
 
   // CharacterComposer consumed the key event.  Update the composition text.
-  chromeos::CompositionText preedit;
-  preedit.set_text(character_composer_.preedit_string());
-  UpdateCompositionText(preedit, preedit.text().size(),
-                        !preedit.text().empty());
+  CompositionText preedit;
+  preedit.text = character_composer_.preedit_string();
+  UpdateCompositionText(preedit, preedit.text.size(), !preedit.text.empty());
   std::string commit_text =
       base::UTF16ToUTF8(character_composer_.composed_character());
   if (!commit_text.empty()) {
@@ -587,11 +589,11 @@ bool InputMethodChromeOS::ExecuteCharacterComposer(const ui::KeyEvent& event) {
 }
 
 void InputMethodChromeOS::ExtractCompositionText(
-    const chromeos::CompositionText& text,
+    const CompositionText& text,
     uint32 cursor_position,
     CompositionText* out_composition) const {
   out_composition->Clear();
-  out_composition->text = text.text();
+  out_composition->text = text.text;
 
   if (out_composition->text.empty())
     return;
@@ -615,36 +617,24 @@ void InputMethodChromeOS::ExtractCompositionText(
 
   out_composition->selection = gfx::Range(cursor_offset);
 
-  const std::vector<chromeos::CompositionText::UnderlineAttribute>&
-      underline_attributes = text.underline_attributes();
-  if (!underline_attributes.empty()) {
-    for (size_t i = 0; i < underline_attributes.size(); ++i) {
-      const uint32 start = underline_attributes[i].start_index;
-      const uint32 end = underline_attributes[i].end_index;
+  const CompositionUnderlines text_underlines = text.underlines;
+  if (!text_underlines.empty()) {
+    for (size_t i = 0; i < text_underlines.size(); ++i) {
+      const uint32 start = text_underlines[i].start_offset;
+      const uint32 end = text_underlines[i].end_offset;
       if (start >= end)
         continue;
-      CompositionUnderline underline(char16_offsets[start],
-                                     char16_offsets[end],
-                                     SK_ColorBLACK,
-                                     false /* thick */,
-                                     SK_ColorTRANSPARENT);
-      if (underline_attributes[i].type ==
-          chromeos::CompositionText::COMPOSITION_TEXT_UNDERLINE_DOUBLE)
-        underline.thick = true;
-      else if (underline_attributes[i].type ==
-               chromeos::CompositionText::COMPOSITION_TEXT_UNDERLINE_ERROR)
-        underline.color = SK_ColorRED;
-      else if (underline_attributes[i].type ==
-               chromeos::CompositionText::COMPOSITION_TEXT_UNDERLINE_NONE)
-        underline.color = SK_ColorTRANSPARENT;
+      CompositionUnderline underline(
+          char16_offsets[start], char16_offsets[end], text_underlines[i].color,
+          text_underlines[i].thick, text_underlines[i].background_color);
       out_composition->underlines.push_back(underline);
     }
   }
 
-  DCHECK(text.selection_start() <= text.selection_end());
-  if (text.selection_start() < text.selection_end()) {
-    const uint32 start = text.selection_start();
-    const uint32 end = text.selection_end();
+  DCHECK(text.selection.start() <= text.selection.end());
+  if (text.selection.start() < text.selection.end()) {
+    const uint32 start = text.selection.start();
+    const uint32 end = text.selection.end();
     CompositionUnderline underline(char16_offsets[start],
                                    char16_offsets[end],
                                    SK_ColorBLACK,

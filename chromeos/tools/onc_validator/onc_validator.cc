@@ -14,6 +14,9 @@
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_validator.h"
 
+// TODO Check why this file do not fail on default trybots
+// http://crbug.com/543919
+
 // Command line switches.
 const char kSwitchErrorOnUnknownField[] = "error-on-unknown-field";
 const char kSwitchErrorOnWrongRecommended[] = "error-on-wrong-recommended";
@@ -87,23 +90,23 @@ scoped_ptr<base::DictionaryValue> ReadDictionary(const std::string& filename) {
   JSONFileValueDeserializer deserializer(path);
   deserializer.set_allow_trailing_comma(true);
 
-  base::DictionaryValue* dict = NULL;
-
   std::string json_error;
-  base::Value* value = deserializer.Deserialize(NULL, &json_error);
+  scoped_ptr<base::Value> value = deserializer.Deserialize(NULL, &json_error);
   if (!value) {
     LOG(ERROR) << "Couldn't json-deserialize file '" << filename
                << "': " << json_error;
-    return make_scoped_ptr(dict);
+    return nullptr;
   }
 
-  if (!value->GetAsDictionary(&dict)) {
+  scoped_ptr<base::DictionaryValue> dict =
+      base::DictionaryValue::From(value.Pass());
+  if (!dict) {
     LOG(ERROR) << "File '" << filename
                << "' does not contain a dictionary as expected, but type "
                << value->GetType();
   }
 
-  return make_scoped_ptr(dict);
+  return dict;
 }
 
 int main(int argc, const char* argv[]) {

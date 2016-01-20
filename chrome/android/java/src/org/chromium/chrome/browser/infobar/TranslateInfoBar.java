@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.infobar;
 
 import android.content.Context;
+import android.support.v7.widget.SwitchCompat;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
@@ -189,9 +190,8 @@ public class TranslateInfoBar extends InfoBar implements SubPanelListener {
         if (getInfoBarType() == AFTER_TRANSLATE_INFOBAR
                 && !needsAlwaysPanel()
                 && !mOptions.triggeredFromMenu()) {
-            // Long always translate version
-            TranslateCheckBox checkBox = new TranslateCheckBox(context, mOptions, this);
-            layout.setCustomContent(checkBox);
+            // Fully expanded version of the "Always Translate" InfoBar.
+            layout.setCustomContent(TranslateAlwaysPanel.createAlwaysToggle(context, mOptions));
         }
     }
 
@@ -229,6 +229,13 @@ public class TranslateInfoBar extends InfoBar implements SubPanelListener {
     @Override
     public void onOptionsChanged() {
         if (mNativeTranslateInfoBarPtr == 0) return;
+
+        // Handle the "Always Translate" checkbox.
+        if (getInfoBarType() == AFTER_TRANSLATE_INFOBAR) {
+            SwitchCompat alwaysSwitch = (SwitchCompat) getContentWrapper().findViewById(
+                    R.id.translate_infobar_always_toggle);
+            mOptions.toggleAlwaysTranslateLanguageState(alwaysSwitch.isChecked());
+        }
 
         if (mOptions.optionsChanged()) {
             nativeApplyTranslateOptions(mNativeTranslateInfoBarPtr, mOptions.sourceLanguageIndex(),

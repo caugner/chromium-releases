@@ -55,18 +55,18 @@ namespace languageSettingsPrivate {
     DOMString[] languageCodes;
 
     // True if the input method is enabled.
-    boolean enabled;
+    boolean? enabled;
+
+    // True if the input method extension has an options page.
+    boolean? hasOptionsPage;
   };
 
   dictionary InputMethodLists {
-    // The list of built-in input methods.
-    InputMethod[] inputMethods;
-
     // The list of component extension input methods.
-    InputMethod[] componentExtensionIMEs;
+    InputMethod[] componentExtensionImes;
 
     // The list of third-party extension input methods.
-    InputMethod[] thirdPartyExtensionIMEs;
+    InputMethod[] thirdPartyExtensionImes;
   };
 
   callback GetLanguageListCallback = void (Language[] languages);
@@ -88,14 +88,21 @@ namespace languageSettingsPrivate {
     static void getSpellcheckDictionaryStatuses(
         GetSpellcheckDictionaryStatusesCallback callback);
 
-    // Gets the custom spell check words.
+    // Gets the custom spell check words, in sorted order.
     static void getSpellcheckWords(GetSpellcheckWordsCallback callback);
+
+    // Adds a word to the custom dictionary.
+    static void addSpellcheckWord(DOMString word);
+
+    // Removes a word from the custom dictionary.
+    static void removeSpellcheckWord(DOMString word);
 
     // Gets the translate target language (in most cases, the display locale).
     static void getTranslateTargetLanguage(
         GetTranslateTargetLanguageCallback callback);
 
-    // Gets all supported input methods, including IMEs. Chrome OS only.
+    // Gets all supported input methods, including third-party IMEs.
+    // Chrome OS only.
     static void getInputMethodLists(GetInputMethodListsCallback callback);
 
     // Adds the input method to the current user's list of enabled input

@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/extensions/extension_message_bubble_browsertest.h"
 #include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 
 namespace {
 
@@ -76,8 +76,8 @@ void ExtensionMessageBubbleViewBrowserTest::CheckBubble(Browser* browser,
     case ANCHOR_BROWSER_ACTION:
       anchor_view = container->GetToolbarActionViewAt(0);
       break;
-    case ANCHOR_WRENCH_MENU:
-      anchor_view = toolbar_view->app_menu();
+    case ANCHOR_APP_MENU:
+      anchor_view = toolbar_view->app_menu_button();
       break;
   }
   CheckBubbleAndReferenceView(bubble, anchor_view);
@@ -105,13 +105,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
-                       ExtensionBubbleAnchoredToWrenchMenu) {
-  TestBubbleAnchoredToWrenchMenu();
+                       ExtensionBubbleAnchoredToAppMenu) {
+  TestBubbleAnchoredToAppMenu();
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
-                       ExtensionBubbleAnchoredToWrenchMenuWithOtherAction) {
-  TestBubbleAnchoredToWrenchMenuWithOtherAction();
+                       ExtensionBubbleAnchoredToAppMenuWithOtherAction) {
+  TestBubbleAnchoredToAppMenuWithOtherAction();
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,

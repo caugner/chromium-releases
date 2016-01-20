@@ -30,11 +30,15 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/range/range.h"
 #include "ui/gfx/render_text.h"
 #include "ui/gfx/text_utils.h"
+#include "ui/gfx/vector_icons_public.h"
+#include "ui/native_theme/native_theme.h"
 
 using ui::NativeTheme;
 
@@ -92,9 +96,9 @@ struct TextStyle {
      gfx::NORMAL_BASELINE},
     // 2  HEADLINE_TEXT
     {ui::ResourceBundle::LargeFont,
-     {NativeTheme::kColorId_ResultsTableNormalDimmedText,
-      NativeTheme::kColorId_ResultsTableHoveredDimmedText,
-      NativeTheme::kColorId_ResultsTableSelectedDimmedText},
+     {NativeTheme::kColorId_ResultsTableNormalHeadline,
+      NativeTheme::kColorId_ResultsTableHoveredHeadline,
+      NativeTheme::kColorId_ResultsTableSelectedHeadline},
      gfx::NORMAL_BASELINE},
     // 3  TOP_ALIGNED_TEXT
     {ui::ResourceBundle::LargeFont,
@@ -359,8 +363,8 @@ void OmniboxResultView::PaintMatch(const AutocompleteMatch& match,
       &contents_max_width,
       &description_max_width);
 
-  int after_contents_x =
-      DrawRenderText(match, contents, true, canvas, x, y, contents_max_width);
+  int after_contents_x = DrawRenderText(match, contents, CONTENTS, canvas,
+                                        x, y, contents_max_width);
 
   if (description_max_width != 0) {
     if (match.answer) {
@@ -376,11 +380,11 @@ void OmniboxResultView::PaintMatch(const AutocompleteMatch& match,
              GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING);
       }
     } else {
-      x = DrawRenderText(match, separator_rendertext_.get(), false, canvas,
+      x = DrawRenderText(match, separator_rendertext_.get(), SEPARATOR, canvas,
                          after_contents_x, y, separator_width_);
     }
 
-    DrawRenderText(match, description, false, canvas, x, y,
+    DrawRenderText(match, description, DESCRIPTION, canvas, x, y,
                    description_max_width);
   }
 }
@@ -388,7 +392,7 @@ void OmniboxResultView::PaintMatch(const AutocompleteMatch& match,
 int OmniboxResultView::DrawRenderText(
     const AutocompleteMatch& match,
     gfx::RenderText* render_text,
-    bool contents,
+    RenderTextType render_text_type,
     gfx::Canvas* canvas,
     int x,
     int y,
@@ -400,8 +404,8 @@ int OmniboxResultView::DrawRenderText(
 
   // Infinite suggestions should appear with the leading ellipses vertically
   // stacked.
-  if (contents &&
-      (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL)) {
+  if (render_text_type == CONTENTS &&
+      match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
     // When the directionality of suggestion doesn't match the UI, we try to
     // vertically stack the ellipsis by restricting the end edge (right_x).
     const bool is_ui_rtl = base::i18n::IsRTL();
@@ -456,9 +460,11 @@ int OmniboxResultView::DrawRenderText(
   }
 
   // Set the display rect to trigger eliding.
+  const int height = (render_text_type == DESCRIPTION && match.answer) ?
+      GetAnswerLineHeight() : GetContentLineHeight();
   render_text->SetDisplayRect(
       gfx::Rect(mirroring_context_->mirrored_left_coord(x, right_x), y,
-                right_x - x, GetContentLineHeight()));
+                right_x - x, height));
   render_text->Draw(canvas);
   return right_x;
 }
@@ -567,10 +573,16 @@ gfx::ImageSkia OmniboxResultView::GetIcon() const {
   if (!image.IsEmpty())
     return image.AsImageSkia();
 
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    return GetVectorIcon(
+        model_->IsStarredMatch(match_)
+            ? gfx::VectorIconId::OMNIBOX_STAR
+            : AutocompleteMatch::TypeToVectorIcon(match_.type));
+  }
+
   int icon = model_->IsStarredMatch(match_) ?
       IDR_OMNIBOX_STAR : AutocompleteMatch::TypeToIcon(match_.type);
-  if (GetState() == SELECTED &&
-      !ui::MaterialDesignController::IsModeMaterial()) {
+  if (GetState() == SELECTED) {
     switch (icon) {
       case IDR_OMNIBOX_CALCULATOR:
         icon = IDR_OMNIBOX_CALCULATOR_SELECTED;
@@ -592,17 +604,26 @@ gfx::ImageSkia OmniboxResultView::GetIcon() const {
         break;
     }
   }
-  return *(location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon));
+  return *location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon);
 }
 
-const gfx::ImageSkia* OmniboxResultView::GetKeywordIcon() const {
+gfx::ImageSkia OmniboxResultView::GetKeywordIcon() const {
+  if (ui::MaterialDesignController::IsModeMaterial())
+    return GetVectorIcon(gfx::VectorIconId::OMNIBOX_KEYWORD_SEARCH);
+
   // NOTE: If we ever begin returning icons of varying size, then callers need
   // to ensure that |keyword_icon_| is resized each time its image is reset.
   int icon = IDR_OMNIBOX_TTS;
-  if (GetState() == SELECTED && !ui::MaterialDesignController::IsModeMaterial())
+  if (GetState() == SELECTED)
     icon = IDR_OMNIBOX_TTS_SELECTED;
 
-  return location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon);
+  return *location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon);
+}
+
+gfx::ImageSkia OmniboxResultView::GetVectorIcon(
+    gfx::VectorIconId icon_id) const {
+  return gfx::CreateVectorIcon(icon_id, 16, color_utils::DeriveDefaultIconColor(
+                                                GetColor(GetState(), TEXT)));
 }
 
 bool OmniboxResultView::ShowOnlyKeywordMatch() const {

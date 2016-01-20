@@ -5,8 +5,11 @@
 #include "chrome/browser/media/router/media_router_type_converters.h"
 
 using media_router::interfaces::IssuePtr;
-using media_router::interfaces::MediaSinkPtr;
 using media_router::interfaces::MediaRoutePtr;
+using media_router::interfaces::MediaSinkPtr;
+
+using PresentationConnectionState =
+    media_router::interfaces::MediaRouter::PresentationConnectionState;
 
 namespace mojo {
 
@@ -17,6 +20,9 @@ media_router::MediaSink::IconType SinkIconTypeFromMojo(
       return media_router::MediaSink::CAST;
     case media_router::interfaces::MediaSink::IconType::ICON_TYPE_CAST_AUDIO:
       return media_router::MediaSink::CAST_AUDIO;
+    case media_router::interfaces::MediaSink::
+        IconType::ICON_TYPE_CAST_AUDIO_GROUP:
+      return media_router::MediaSink::CAST_AUDIO_GROUP;
     case media_router::interfaces::MediaSink::IconType::ICON_TYPE_HANGOUT:
       return media_router::MediaSink::HANGOUT;
     case media_router::interfaces::MediaSink::IconType::ICON_TYPE_GENERIC:
@@ -35,6 +41,10 @@ media_router::interfaces::MediaSink::IconType SinkIconTypeToMojo(
     case media_router::MediaSink::CAST_AUDIO:
       return
           media_router::interfaces::MediaSink::IconType::ICON_TYPE_CAST_AUDIO;
+    case media_router::MediaSink::CAST_AUDIO_GROUP:
+      return
+          media_router::interfaces::MediaSink::
+              IconType::ICON_TYPE_CAST_AUDIO_GROUP;
     case media_router::MediaSink::HANGOUT:
       return media_router::interfaces::MediaSink::IconType::ICON_TYPE_HANGOUT;
     case media_router::MediaSink::GENERIC:
@@ -50,8 +60,7 @@ media_router::MediaSink
 TypeConverter<media_router::MediaSink, MediaSinkPtr>::Convert(
     const MediaSinkPtr& input) {
   return media_router::MediaSink(input->sink_id, input->name,
-                                 SinkIconTypeFromMojo(input->icon_type),
-                                 input->is_launching);
+                                 SinkIconTypeFromMojo(input->icon_type));
 }
 
 // static
@@ -118,6 +127,21 @@ media_router::Issue TypeConverter<media_router::Issue, IssuePtr>::Convert(
       media_router::IssueAction(IssueActionTypeFromMojo(input->default_action)),
       actions, input->route_id, IssueSeverityFromMojo(input->severity),
       input->is_blocking, input->help_url);
+}
+
+content::PresentationConnectionState PresentationConnectionStateFromMojo(
+    PresentationConnectionState state) {
+  switch (state) {
+    case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_CONNECTED:
+      return content::PRESENTATION_CONNECTION_STATE_CONNECTED;
+    case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_CLOSED:
+      return content::PRESENTATION_CONNECTION_STATE_CLOSED;
+    case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_TERMINATED:
+      return content::PRESENTATION_CONNECTION_STATE_TERMINATED;
+    default:
+      NOTREACHED() << "Unknown PresentationConnectionState " << state;
+      return content::PRESENTATION_CONNECTION_STATE_TERMINATED;
+  }
 }
 
 }  // namespace mojo

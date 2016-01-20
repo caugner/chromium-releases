@@ -84,8 +84,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   @property
   def supports_uploading_logs(self):
-    return (self.browser_options.logs_cloud_bucket and
-            self.browser_options.logs_cloud_remote_path and
+    return (self.browser_options.logs_cloud_bucket and self.log_file_path and
             os.path.isfile(self.log_file_path))
 
   def _SetupProfile(self):
@@ -104,17 +103,16 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         logging.info("Using profile directory:'%s'." % profile_dir)
         shutil.rmtree(self._tmp_profile_dir)
         shutil.copytree(profile_dir, self._tmp_profile_dir)
-    if self.browser_options.use_devtools_active_port:
-      # No matter whether we're using an existing profile directory or
-      # creating a new one, always delete the well-known file containing
-      # the active DevTools port number.
-      port_file = self._GetDevToolsActivePortPath()
-      if os.path.isfile(port_file):
-        try:
-          os.remove(port_file)
-        except Exception as e:
-          logging.critical('Unable to remove DevToolsActivePort file: %s' % e)
-          sys.exit(1)
+    # No matter whether we're using an existing profile directory or
+    # creating a new one, always delete the well-known file containing
+    # the active DevTools port number.
+    port_file = self._GetDevToolsActivePortPath()
+    if os.path.isfile(port_file):
+      try:
+        os.remove(port_file)
+      except Exception as e:
+        logging.critical('Unable to remove DevToolsActivePort file: %s' % e)
+        sys.exit(1)
 
   def _GetDevToolsActivePortPath(self):
     return os.path.join(self.profile_directory, 'DevToolsActivePort')
@@ -178,37 +176,32 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     if not self.IsBrowserRunning():
       raise exceptions.ProcessGoneException(
           "Return code: %d" % self._proc.returncode)
-    if self.browser_options.use_devtools_active_port:
-      # The Telemetry user selected the new code path to start DevTools on
-      # an ephemeral port. Wait for the well-known file containing the port
-      # number to exist.
-      port_file = self._GetDevToolsActivePortPath()
-      if not os.path.isfile(port_file):
-        # File isn't ready yet. Return false. Will retry.
-        return False
-      # Attempt to avoid reading the file until it's populated.
-      got_port = False
-      try:
-        if os.stat(port_file).st_size > 0:
-          with open(port_file) as f:
-            port_string = f.read()
-            self._port = int(port_string)
-            logging.info('Discovered ephemeral port %s' % self._port)
-            got_port = True
-      except Exception:
-        # Both stat and open can throw exceptions.
-        pass
-      if not got_port:
-        # File isn't ready yet. Return false. Will retry.
-        return False
+    # Start DevTools on an ephemeral port and wait for the well-known file
+    # containing the port number to exist.
+    port_file = self._GetDevToolsActivePortPath()
+    if not os.path.isfile(port_file):
+      # File isn't ready yet. Return false. Will retry.
+      return False
+    # Attempt to avoid reading the file until it's populated.
+    got_port = False
+    try:
+      if os.stat(port_file).st_size > 0:
+        with open(port_file) as f:
+          port_string = f.read()
+          self._port = int(port_string)
+          logging.info('Discovered ephemeral port %s' % self._port)
+          got_port = True
+    except Exception:
+      # Both stat and open can throw exceptions.
+      pass
+    if not got_port:
+      # File isn't ready yet. Return false. Will retry.
+      return False
     return super(DesktopBrowserBackend, self).HasBrowserFinishedLaunching()
 
   def GetBrowserStartupArgs(self):
     args = super(DesktopBrowserBackend, self).GetBrowserStartupArgs()
-    if self.browser_options.use_devtools_active_port:
-      self._port = 0
-    else:
-      self._port = util.GetUnreservedAvailableLocalPort()
+    self._port = 0
     logging.info('Requested remote debugging port: %d' % self._port)
     args.append('--remote-debugging-port=%i' % self._port)
     args.append('--enable-crash-reporter-for-testing')
@@ -218,6 +211,9 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         args.append('--ppapi-flash-path=%s' % self._flash_path)
       if not self.browser_options.dont_override_profile:
         args.append('--user-data-dir=%s' % self._tmp_profile_dir)
+    else:
+      args.append('--data-path=%s' % self._tmp_profile_dir)
+
     trace_config_file = (self.platform_backend.tracing_controller_backend
                          .GetChromeTraceConfigFile())
     if trace_config_file:
@@ -371,7 +367,14 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   def _IsExecutableStripped(self):
     if self.browser.platform.GetOSName() == 'mac':
-      symbols = subprocess.check_output(['/usr/bin/nm', self._executable])
+      try:
+        symbols = subprocess.check_output(['/usr/bin/nm', self._executable])
+      except subprocess.CalledProcessError as err:
+        logging.warning('Error when checking whether executable is stripped: %s'
+                        % err.output)
+        # Just assume that binary is stripped to skip breakpad symbol generation
+        # if this check failed.
+        return True
       num_symbols = len(symbols.splitlines())
       # We assume that if there are more than 10 symbols the executable is not
       # stripped.
@@ -438,12 +441,14 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         return
 
       logging.info('Dumping breakpad symbols.')
-      generate_breakpad_symbols_path = os.path.join(
-          util.GetChromiumSrcDir(), "components", "crash", "content",
-          "tools", "generate_breakpad_symbols.py")
+      generate_breakpad_symbols_command = binary_manager.FetchPath(
+          'generate_breakpad_symbols', arch_name, os_name)
+      if generate_breakpad_symbols_command is None:
+        return
+
       cmd = [
           sys.executable,
-          generate_breakpad_symbols_path,
+          generate_breakpad_symbols_command,
           '--binary=%s' % self._executable,
           '--symbols-dir=%s' % symbols_path,
           '--build-dir=%s' % self._browser_directory,
@@ -453,7 +458,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         subprocess.check_output(cmd, stderr=open(os.devnull, 'w'))
       except subprocess.CalledProcessError:
         logging.warning('Failed to execute "%s"' % ' '.join(cmd))
-        return None
+        return
 
     return subprocess.check_output([stackwalk, minidump, symbols_path],
                                    stderr=open(os.devnull, 'w'))

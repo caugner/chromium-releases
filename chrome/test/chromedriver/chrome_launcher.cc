@@ -185,8 +185,17 @@ Status WaitForDevToolsAndCheckVersion(
   if (capabilities && capabilities->device_metrics)
     device_metrics.reset(new DeviceMetrics(*capabilities->device_metrics));
 
-  scoped_ptr<DevToolsHttpClient> client(new DevToolsHttpClient(
-      address, context_getter, socket_factory, device_metrics.Pass()));
+  scoped_ptr<std::set<WebViewInfo::Type>> window_types;
+  if (capabilities && !capabilities->window_types.empty()) {
+    window_types.reset(
+        new std::set<WebViewInfo::Type>(capabilities->window_types));
+  } else {
+    window_types.reset(new std::set<WebViewInfo::Type>());
+  }
+
+  scoped_ptr<DevToolsHttpClient> client(
+      new DevToolsHttpClient(address, context_getter, socket_factory,
+                             device_metrics.Pass(), window_types.Pass()));
   base::TimeTicks deadline =
       base::TimeTicks::Now() + base::TimeDelta::FromSeconds(60);
   Status status = client->Init(deadline - base::TimeTicks::Now());
@@ -775,9 +784,8 @@ Status WritePrefsFile(
     const base::FilePath& path) {
   int code;
   std::string error_msg;
-  scoped_ptr<base::Value> template_value(
-      base::JSONReader::DeprecatedReadAndReturnError(template_string, 0, &code,
-                                                     &error_msg));
+  scoped_ptr<base::Value> template_value = base::JSONReader::ReadAndReturnError(
+      template_string, 0, &code, &error_msg);
   base::DictionaryValue* prefs;
   if (!template_value || !template_value->GetAsDictionary(&prefs)) {
     return Status(kUnknownError,

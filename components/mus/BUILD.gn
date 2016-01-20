@@ -20,9 +20,9 @@ if (is_android) {
       ":lib",
       "public/interfaces",
       "//mojo/application/public/cpp:sources",
+      "//mojo/public/cpp/bindings",
       "//mojo/services/tracing/public/interfaces",
       "//mojo/shell",
-      "//third_party/mojo/src/mojo/public/cpp/bindings",
     ]
   }
 } else {
@@ -34,6 +34,28 @@ if (is_android) {
     deps = [
       ":lib",
       "//mojo/application/public/cpp:sources",
+    ]
+
+    if (is_win) {
+      deps += [ ":copy_gl_libraries" ]
+    }
+  }
+}
+
+if (is_win) {
+  copy("copy_gl_libraries") {
+    deps = [
+      "//third_party/angle:libEGL",
+      "//third_party/angle:libGLESv2",
+    ]
+
+    sources = [
+      "$root_shlib_dir/libEGL.dll",
+      "$root_shlib_dir/libGLESv2.dll",
+    ]
+
+    outputs = [
+      "$root_out_dir/mus/{{source_file_part}}",
     ]
   }
 }
@@ -52,14 +74,20 @@ source_set("lib") {
     "//components/mus/public/cpp:common",
     "//components/mus/public/interfaces",
     "//components/mus/surfaces",
-    "//components/mus/vm:lib",
+    "//components/mus/ws:lib",
     "//mojo/application/public/cpp",
     "//mojo/common:common_base",
-    "//mojo/common:tracing_impl",
+    "//mojo/services/tracing/public/cpp",
     "//ui/events",
     "//ui/gl:gl",
-    "//ui/gl:test_support",
     "//ui/platform_window:platform_impls",
     "//ui/platform_window:platform_window",
   ]
+
+  if (use_x11) {
+    public_configs = [ "//build/config/linux:x11" ]
+    public_deps = [
+      "//ui/events/platform/x11",
+    ]
+  }
 }

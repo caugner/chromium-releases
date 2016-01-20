@@ -23,10 +23,10 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -522,7 +522,7 @@ void ExtensionInstalledBubbleView::Show() {
 
   // Default case.
   if (reference_view == NULL)
-    reference_view = browser_view->GetToolbarView()->app_menu();
+    reference_view = browser_view->GetToolbarView()->app_menu_button();
   SetAnchorView(reference_view);
 
   set_arrow(bubble_->type() == bubble_->OMNIBOX_KEYWORD

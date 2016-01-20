@@ -4,18 +4,17 @@ layer at (0,0) size 800x168
   LayoutBlockFlow {HTML} at (0,0) size 800x167.88
     LayoutBlockFlow {BODY} at (8,21.44) size 784x130.44
       LayoutBlockFlow {H1} at (0,0) size 784x37
-        LayoutText {#text} at (0,0) size 759x37
-          text run at (0,0) width 759: "Testing the values of 'pointer-events' on HTML content"
+        LayoutText {#text} at (0,0) size 755x37
+          text run at (0,0) width 755: "Testing the values of 'pointer-events' on HTML content"
       LayoutBlockFlow {P} at (0,58.44) size 784x72
-        LayoutText {#text} at (0,0) size 780x72
-          text run at (0,0) width 590: "This test is expected to be run from within DumpRenderTree. If running manually, click on "
-          text run at (589,0) width 151: "the elements in the first"
+        LayoutText {#text} at (0,0) size 784x72
+          text run at (0,0) width 589: "This test is expected to be run from within DumpRenderTree. If running manually, click on "
+          text run at (588,0) width 150: "the elements in the first"
           text run at (0,18) width 389: "column, making sure the actual result (3rd column) matches "
-          text run at (388,18) width 392: "the expected result (2nd column). Repeat for click target (4th"
+          text run at (388,18) width 391: "the expected result (2nd column). Repeat for click target (4th"
           text run at (0,36) width 249: "column), expected result (5th column) "
-          text run at (248,36) width 524: "and actual result (6th column). Note: You should click on a yellow inline element"
-          text run at (0,54) width 14: "if "
-          text run at (13,54) width 273: "one exists, otherwise anywhere in the box."
+          text run at (248,36) width 536: "and actual result (6th column). Note: You should click on a yellow inline element if"
+          text run at (0,54) width 272: "one exists, otherwise anywhere in the box."
 layer at (10,140) size 300x100
   LayoutBlockFlow (positioned) {DIV} at (10,140) size 300x100
 layer at (10,140) size 80x80

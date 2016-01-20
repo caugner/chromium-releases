@@ -248,7 +248,7 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   // We don't sync wake-on-wifi related prefs because they are device specific.
-  registry->RegisterBooleanPref(prefs::kWakeOnWifiSsid, true);
+  registry->RegisterBooleanPref(prefs::kWakeOnWifiDarkConnect, true);
 
   // 3G first-time usage promo will be shown at least once.
   registry->RegisterBooleanPref(prefs::kShow3gPromoNotification, true);
@@ -323,7 +323,8 @@ void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
   xkb_auto_repeat_interval_pref_.Init(
       prefs::kLanguageXkbAutoRepeatInterval, prefs, callback);
 
-  wake_on_wifi_ssid_.Init(prefs::kWakeOnWifiSsid, prefs, callback);
+  wake_on_wifi_darkconnect_.Init(prefs::kWakeOnWifiDarkConnect, prefs,
+                                 callback);
 
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(prefs::kResolveTimezoneByGeolocation, callback);
@@ -399,7 +400,8 @@ void Preferences::ApplyPreferences(ApplyReason reason,
                                    const std::string& pref_name) {
   DCHECK(reason != REASON_PREF_CHANGED || !pref_name.empty());
   const bool user_is_owner =
-      user_manager::UserManager::Get()->GetOwnerEmail() == user_->email();
+      user_manager::UserManager::Get()->GetOwnerAccountId() ==
+      user_->GetAccountId();
   const bool user_is_active = user_->is_active();
 
   system::TouchpadSettings touchpad_settings;
@@ -585,13 +587,15 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   }
 
   if (user_is_primary_ && (reason != REASON_PREF_CHANGED ||
-                           pref_name == prefs::kWakeOnWifiSsid)) {
-    int features = wake_on_wifi_ssid_.GetValue() ?
-        WakeOnWifiManager::WAKE_ON_SSID : WakeOnWifiManager::WAKE_ON_NONE;
-    // The flag enables wake on packets but doesn't update a preference.
+                           pref_name == prefs::kWakeOnWifiDarkConnect)) {
+    int features = wake_on_wifi_darkconnect_.GetValue()
+                       ? WakeOnWifiManager::WAKE_ON_WIFI_DARKCONNECT
+                       : WakeOnWifiManager::WAKE_ON_WIFI_NONE;
+    // The flag enables wake on WiFi packet feature but doesn't update a
+    // preference.
     if (base::CommandLine::ForCurrentProcess()->
-            HasSwitch(switches::kWakeOnPackets)) {
-      features |= WakeOnWifiManager::WAKE_ON_PACKET;
+            HasSwitch(switches::kWakeOnWifiPacket)) {
+      features |= WakeOnWifiManager::WAKE_ON_WIFI_PACKET;
     }
     WakeOnWifiManager::Get()->OnPreferenceChanged(
         static_cast<WakeOnWifiManager::WakeOnWifiFeature>(features));
@@ -622,7 +626,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       reason != REASON_ACTIVE_USER_CHANGED) {
     const bool value = prefs_->GetBoolean(prefs::kUse24HourClock);
     user_manager::UserManager::Get()->SetKnownUserBooleanPref(
-        user_->GetUserID(), prefs::kUse24HourClock, value);
+        user_->GetAccountId(), prefs::kUse24HourClock, value);
   }
 }
 

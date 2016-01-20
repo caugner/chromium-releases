@@ -17,6 +17,10 @@
 #include "crypto/signature_verifier.h"
 #include "third_party/protobuf/src/google/protobuf/io/coded_stream.h"
 
+#if defined(OS_ANDROID)
+#include "components/variations/android/variations_seed_bridge.h"
+#endif  // OS_ANDROID
+
 namespace variations {
 
 namespace {
@@ -91,6 +95,9 @@ enum VariationsSeedStoreResult {
   VARIATIONS_SEED_STORE_FAILED_DELTA_READ_SEED,
   VARIATIONS_SEED_STORE_FAILED_DELTA_APPLY,
   VARIATIONS_SEED_STORE_FAILED_DELTA_STORE,
+  VARIATIONS_SEED_STORE_FAILED_UNGZIP,
+  VARIATIONS_SEED_STORE_FAILED_EMPTY_GZIP_CONTENTS,
+  VARIATIONS_SEED_STORE_FAILED_UNSUPPORTED_SEED_FORMAT,
   VARIATIONS_SEED_STORE_RESULT_ENUM_SIZE,
 };
 
@@ -137,6 +144,21 @@ VariationsSeedDateChangeState GetSeedDateChangeState(
   return SEED_DATE_SAME_DAY;
 }
 
+#if defined(OS_ANDROID)
+enum FirstRunResult {
+  FIRST_RUN_SEED_IMPORT_SUCCESS,
+  FIRST_RUN_SEED_IMPORT_FAIL_NO_CALLBACK,
+  FIRST_RUN_SEED_IMPORT_FAIL_NO_FIRST_RUN_SEED,
+  FIRST_RUN_SEED_IMPORT_FAIL_STORE_FAILED,
+  FIRST_RUN_RESULT_ENUM_SIZE,
+};
+
+void RecordFirstRunResult(FirstRunResult result) {
+  UMA_HISTOGRAM_ENUMERATION("Variations.FirstRunResult", result,
+                            FIRST_RUN_RESULT_ENUM_SIZE);
+}
+#endif  // OS_ANDROID
+
 }  // namespace
 
 VariationsSeedStore::VariationsSeedStore(PrefService* local_state)
@@ -148,6 +170,11 @@ VariationsSeedStore::~VariationsSeedStore() {
 
 bool VariationsSeedStore::LoadSeed(variations::VariationsSeed* seed) {
   invalid_base64_signature_.clear();
+
+#if defined(OS_ANDROID)
+  if (!local_state_->HasPrefPath(prefs::kVariationsSeedSignature))
+    ImportFirstRunJavaSeed();
+#endif  // OS_ANDROID
 
   std::string seed_data;
   if (!ReadSeedData(&seed_data))
@@ -194,14 +221,38 @@ bool VariationsSeedStore::StoreSeedData(
     const std::string& country_code,
     const base::Time& date_fetched,
     bool is_delta_compressed,
+    bool is_gzip_compressed,
     variations::VariationsSeed* parsed_seed) {
+  // If the data is gzip compressed, first uncompress it.
+  std::string ungzipped_data;
+  if (is_gzip_compressed) {
+    if (compression::GzipUncompress(data, &ungzipped_data)) {
+      if (ungzipped_data.empty()) {
+        RecordSeedStoreHistogram(
+            VARIATIONS_SEED_STORE_FAILED_EMPTY_GZIP_CONTENTS);
+        return false;
+      }
+
+      int size_reduction = ungzipped_data.length() - data.length();
+      UMA_HISTOGRAM_PERCENTAGE("Variations.StoreSeed.GzipSize.ReductionPercent",
+                               100 * size_reduction / ungzipped_data.length());
+      UMA_HISTOGRAM_COUNTS_1000("Variations.StoreSeed.GzipSize",
+                                data.length() / 1024);
+    } else {
+      RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_UNGZIP);
+      return false;
+    }
+  } else {
+    ungzipped_data = data;
+  }
+
   if (!is_delta_compressed) {
     const bool result =
-        StoreSeedDataNoDelta(data, base64_seed_signature, country_code,
-                             date_fetched, parsed_seed);
+        StoreSeedDataNoDelta(ungzipped_data, base64_seed_signature,
+                             country_code, date_fetched, parsed_seed);
     if (result) {
       UMA_HISTOGRAM_COUNTS_1000("Variations.StoreSeed.Size",
-                                data.length() / 1024);
+                                ungzipped_data.length() / 1024);
     }
     return result;
   }
@@ -216,7 +267,8 @@ bool VariationsSeedStore::StoreSeedData(
     RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_DELTA_READ_SEED);
     return false;
   }
-  if (!ApplyDeltaPatch(existing_seed_data, data, &updated_seed_data)) {
+  if (!ApplyDeltaPatch(existing_seed_data, ungzipped_data,
+                       &updated_seed_data)) {
     RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_DELTA_APPLY);
     return false;
   }
@@ -227,11 +279,11 @@ bool VariationsSeedStore::StoreSeedData(
   if (result) {
     // Note: |updated_seed_data.length()| is guaranteed to be non-zero, else
     // result would be false.
-    int size_reduction = updated_seed_data.length() - data.length();
+    int size_reduction = updated_seed_data.length() - ungzipped_data.length();
     UMA_HISTOGRAM_PERCENTAGE("Variations.StoreSeed.DeltaSize.ReductionPercent",
                              100 * size_reduction / updated_seed_data.length());
     UMA_HISTOGRAM_COUNTS_1000("Variations.StoreSeed.DeltaSize",
-                              data.length() / 1024);
+                              ungzipped_data.length() / 1024);
   } else {
     RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_DELTA_STORE);
   }
@@ -308,6 +360,38 @@ void VariationsSeedStore::ClearPrefs() {
   local_state_->ClearPref(prefs::kVariationsSeedSignature);
 }
 
+#if defined(OS_ANDROID)
+void VariationsSeedStore::ImportFirstRunJavaSeed() {
+  DVLOG(1) << "Importing first run seed from Java preferences.";
+  if (get_variations_first_run_seed_.is_null()) {
+    RecordFirstRunResult(FIRST_RUN_SEED_IMPORT_FAIL_NO_CALLBACK);
+    return;
+  }
+
+  std::string seed_data;
+  std::string seed_signature;
+  std::string seed_country;
+  get_variations_first_run_seed_.Run(&seed_data, &seed_signature,
+                                     &seed_country);
+  if (seed_data.empty()) {
+    RecordFirstRunResult(FIRST_RUN_SEED_IMPORT_FAIL_NO_FIRST_RUN_SEED);
+    return;
+  }
+
+  // TODO(agulenko): Pull actual time from the response.
+  base::Time current_time = base::Time::Now();
+
+  // TODO(agulenko): Support gzip compressed seed.
+  if (!StoreSeedData(seed_data, seed_signature, seed_country, current_time,
+                     false, false, nullptr)) {
+    RecordFirstRunResult(FIRST_RUN_SEED_IMPORT_FAIL_STORE_FAILED);
+    LOG(WARNING) << "First run variations seed is invalid.";
+    return;
+  }
+  RecordFirstRunResult(FIRST_RUN_SEED_IMPORT_SUCCESS);
+}
+#endif  // OS_ANDROID
+
 bool VariationsSeedStore::ReadSeedData(std::string* seed_data) {
   std::string base64_seed_data =
       local_state_->GetString(prefs::kVariationsCompressedSeed);
@@ -347,7 +431,7 @@ bool VariationsSeedStore::StoreSeedDataNoDelta(
     const base::Time& date_fetched,
     variations::VariationsSeed* parsed_seed) {
   if (seed_data.empty()) {
-    RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_EMPTY);
+    RecordSeedStoreHistogram(VARIATIONS_SEED_STORE_FAILED_EMPTY_GZIP_CONTENTS);
     return false;
   }
 
@@ -382,6 +466,16 @@ bool VariationsSeedStore::StoreSeedDataNoDelta(
   // TODO(asvitkine): This pref is no longer being used. Remove it completely
   // in M45+.
   local_state_->ClearPref(prefs::kVariationsSeed);
+
+#if defined(OS_ANDROID)
+  // If currently we do not have any stored pref then we mark seed storing as
+  // successful on the Java side of Chrome for Android to avoid repeated seed
+  // fetches and clear preferences on the Java side.
+  if (local_state_->GetString(prefs::kVariationsCompressedSeed).empty()) {
+    android::MarkVariationsSeedAsStored();
+    android::ClearJavaFirstRunPrefs();
+  }
+#endif
 
   // Update the saved country code only if one was returned from the server.
   // Prefer the country code that was transmitted in the header over the one in
@@ -448,6 +542,11 @@ bool VariationsSeedStore::ApplyDeltaPatch(const std::string& existing_data,
     }
   }
   return true;
+}
+
+void VariationsSeedStore::ReportUnsupportedSeedFormatError() {
+  RecordSeedStoreHistogram(
+      VARIATIONS_SEED_STORE_FAILED_UNSUPPORTED_SEED_FORMAT);
 }
 
 }  // namespace variations

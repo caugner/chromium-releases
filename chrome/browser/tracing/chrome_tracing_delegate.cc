@@ -15,6 +15,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/pref_names.h"
+#include "components/metrics/metrics_pref_names.h"
+#include "components/variations/active_field_trials.h"
 #include "content/public/browser/background_tracing_config.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -76,9 +78,15 @@ bool ProfileAllowsScenario(const content::BackgroundTracingConfig& config,
   if (profile->GetLastSessionExitType() == Profile::EXIT_CRASHED)
     return false;
 
+  PrefService* local_state = g_browser_process->local_state();
+  DCHECK(local_state);
+
+#if !defined(OS_CHROMEOS)
+  if (!local_state->GetBoolean(metrics::prefs::kMetricsReportingEnabled))
+    return false;
+#endif // OS_CHROMEOS
+
   if (config.tracing_mode() == content::BackgroundTracingConfig::PREEMPTIVE) {
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK(local_state);
     const base::Time last_upload_time = base::Time::FromInternalValue(
         local_state->GetInt64(prefs::kBackgroundTracingLastUpload));
     if (!last_upload_time.is_null()) {
@@ -128,4 +136,17 @@ bool ChromeTracingDelegate::IsAllowedToEndBackgroundScenario(
   }
 
   return true;
+}
+
+void ChromeTracingDelegate::GenerateMetadataDict(
+    base::DictionaryValue* metadata_dict) {
+  DCHECK(metadata_dict);
+  std::vector<std::string> variations;
+  variations::GetFieldTrialActiveGroupIdsAsStrings(&variations);
+
+  scoped_ptr<base::ListValue> variations_list(new base::ListValue());
+  for (const auto& it : variations)
+    variations_list->Append(new base::StringValue(it));
+
+  metadata_dict->Set("field-trials", variations_list.Pass());
 }

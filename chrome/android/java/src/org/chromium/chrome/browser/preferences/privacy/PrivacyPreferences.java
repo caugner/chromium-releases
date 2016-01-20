@@ -26,7 +26,6 @@ import org.chromium.chrome.browser.preferences.NetworkPredictionOptions;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.safebrowsing.SafeBrowsingFieldTrial;
 
 /**
  * Fragment to keep track of the all the privacy related preferences.
@@ -65,6 +64,7 @@ public class PrivacyPreferences extends PreferenceFragment
         super.onCreate(savedInstanceState);
         PrivacyPreferencesManager privacyPrefManager =
                 PrivacyPreferencesManager.getInstance(getActivity());
+        privacyPrefManager.migrateNetworkPredictionPreferences();
         addPreferencesFromResource(R.xml.privacy_preferences);
         getActivity().setTitle(R.string.prefs_privacy);
         setHasOptionsMenu(true);
@@ -128,7 +128,7 @@ public class PrivacyPreferences extends PreferenceFragment
         searchSuggestionsPref.setOnPreferenceChangeListener(this);
         searchSuggestionsPref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
-        if (!ContextualSearchFieldTrial.isEnabled()) {
+        if (!ContextualSearchFieldTrial.isEnabled(getActivity())) {
             preferenceScreen.removePreference(findPreference(PREF_CONTEXTUAL_SEARCH));
         }
 
@@ -142,12 +142,6 @@ public class PrivacyPreferences extends PreferenceFragment
                 (ChromeBaseCheckBoxPreference) findPreference(PREF_SAFE_BROWSING);
         safeBrowsingPref.setOnPreferenceChangeListener(this);
         safeBrowsingPref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
-
-        if (!SafeBrowsingFieldTrial.isEnabled()) {
-            preferenceScreen.removePreference(
-                    findPreference(PREF_SAFE_BROWSING_EXTENDED_REPORTING));
-            preferenceScreen.removePreference(findPreference(PREF_SAFE_BROWSING));
-        }
 
         ButtonPreference clearBrowsingData =
                 (ButtonPreference) findPreference(PREF_CLEAR_BROWSING_DATA);
@@ -234,16 +228,12 @@ public class PrivacyPreferences extends PreferenceFragment
 
         CheckBoxPreference extendedReportingPref =
                 (CheckBoxPreference) findPreference(PREF_SAFE_BROWSING_EXTENDED_REPORTING);
-        if (extendedReportingPref != null) {
-            extendedReportingPref.setChecked(
-                    prefServiceBridge.isSafeBrowsingExtendedReportingEnabled());
-        }
+        extendedReportingPref.setChecked(
+                prefServiceBridge.isSafeBrowsingExtendedReportingEnabled());
 
         CheckBoxPreference safeBrowsingPref =
                 (CheckBoxPreference) findPreference(PREF_SAFE_BROWSING);
-        if (safeBrowsingPref != null) {
-            safeBrowsingPref.setChecked(prefServiceBridge.isSafeBrowsingEnabled());
-        }
+        safeBrowsingPref.setChecked(prefServiceBridge.isSafeBrowsingEnabled());
 
         Preference doNotTrackPref = findPreference(PREF_DO_NOT_TRACK);
         if (prefServiceBridge.isDoNotTrackEnabled()) {

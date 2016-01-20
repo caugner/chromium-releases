@@ -261,21 +261,21 @@ TEST(VideoFrame, CheckFrameExtents) {
   ExpectFrameExtents(PIXEL_FORMAT_YV16, "cce408a044b212db42a10dfec304b3ef");
 }
 
-static void TextureCallback(uint32* called_sync_point,
-                            uint32 release_sync_point) {
-  *called_sync_point = release_sync_point;
+static void TextureCallback(gpu::SyncToken* called_sync_token,
+                            const gpu::SyncToken& release_sync_token) {
+  *called_sync_token = release_sync_token;
 }
 
 // Verify the gpu::MailboxHolder::ReleaseCallback is called when VideoFrame is
 // destroyed with the default release sync point.
 TEST(VideoFrame, TextureNoLongerNeededCallbackIsCalled) {
-  uint32 called_sync_point = 1;
+  gpu::SyncToken called_sync_token(gpu::CommandBufferNamespace::GPU_IO, 1, 1);
 
   {
     scoped_refptr<VideoFrame> frame = VideoFrame::WrapNativeTexture(
         PIXEL_FORMAT_ARGB,
-        gpu::MailboxHolder(gpu::Mailbox::Generate(), 5, 0 /* sync_point */),
-        base::Bind(&TextureCallback, &called_sync_point),
+        gpu::MailboxHolder(gpu::Mailbox::Generate(), gpu::SyncToken(), 5),
+        base::Bind(&TextureCallback, &called_sync_token),
         gfx::Size(10, 10),   // coded_size
         gfx::Rect(10, 10),   // visible_rect
         gfx::Size(10, 10),   // natural_size
@@ -284,22 +284,25 @@ TEST(VideoFrame, TextureNoLongerNeededCallbackIsCalled) {
     EXPECT_EQ(VideoFrame::STORAGE_OPAQUE, frame->storage_type());
     EXPECT_TRUE(frame->HasTextures());
   }
-  // Nobody set a sync point to |frame|, so |frame| set |called_sync_point| to 0
-  // as default value.
-  EXPECT_EQ(0u, called_sync_point);
+  // Nobody set a sync point to |frame|, so |frame| set |called_sync_token|
+  // cleared to default value.
+  EXPECT_FALSE(called_sync_token.HasData());
 }
 
 namespace {
 
-class SyncPointClientImpl : public VideoFrame::SyncPointClient {
+class SyncTokenClientImpl : public VideoFrame::SyncTokenClient {
  public:
-  explicit SyncPointClientImpl(uint32 sync_point) : sync_point_(sync_point) {}
-  ~SyncPointClientImpl() override {}
-  uint32 InsertSyncPoint() override { return sync_point_; }
-  void WaitSyncPoint(uint32 sync_point) override {}
+  explicit SyncTokenClientImpl(const gpu::SyncToken& sync_token)
+      : sync_token_(sync_token) {}
+  ~SyncTokenClientImpl() override {}
+  void GenerateSyncToken(gpu::SyncToken* sync_token) override {
+    *sync_token = sync_token_;
+  }
+  void WaitSyncToken(const gpu::SyncToken& sync_token) override {}
 
  private:
-  uint32 sync_point_;
+  gpu::SyncToken sync_token_;
 };
 
 }  // namespace
@@ -310,25 +313,31 @@ class SyncPointClientImpl : public VideoFrame::SyncPointClient {
 TEST(VideoFrame,
      TexturesNoLongerNeededCallbackAfterTakingAndReleasingMailboxes) {
   const int kPlanesNum = 3;
+  const gpu::CommandBufferNamespace kNamespace =
+      gpu::CommandBufferNamespace::GPU_IO;
+  const uint64_t kCommandBufferId = 0x123;
   gpu::Mailbox mailbox[kPlanesNum];
   for (int i = 0; i < kPlanesNum; ++i) {
     mailbox[i].name[0] = 50 + 1;
   }
 
-  uint32 sync_point = 7;
+  gpu::SyncToken sync_token(kNamespace, kCommandBufferId, 7);
+  sync_token.SetVerifyFlush();
   uint32 target = 9;
-  uint32 release_sync_point = 111;
-  uint32 called_sync_point = 0;
+  gpu::SyncToken release_sync_token(kNamespace, kCommandBufferId, 111);
+  release_sync_token.SetVerifyFlush();
+
+  gpu::SyncToken called_sync_token;
   {
     scoped_refptr<VideoFrame> frame = VideoFrame::WrapYUV420NativeTextures(
-        gpu::MailboxHolder(mailbox[VideoFrame::kYPlane], target, sync_point),
-        gpu::MailboxHolder(mailbox[VideoFrame::kUPlane], target, sync_point),
-        gpu::MailboxHolder(mailbox[VideoFrame::kVPlane], target, sync_point),
-        base::Bind(&TextureCallback, &called_sync_point),
-        gfx::Size(10, 10),  // coded_size
-        gfx::Rect(10, 10),  // visible_rect
-        gfx::Size(10, 10),  // natural_size
-        base::TimeDelta()); // timestamp
+        gpu::MailboxHolder(mailbox[VideoFrame::kYPlane], sync_token, target),
+        gpu::MailboxHolder(mailbox[VideoFrame::kUPlane], sync_token, target),
+        gpu::MailboxHolder(mailbox[VideoFrame::kVPlane], sync_token, target),
+        base::Bind(&TextureCallback, &called_sync_token),
+        gfx::Size(10, 10),   // coded_size
+        gfx::Rect(10, 10),   // visible_rect
+        gfx::Size(10, 10),   // natural_size
+        base::TimeDelta());  // timestamp
 
     EXPECT_EQ(VideoFrame::STORAGE_OPAQUE, frame->storage_type());
     EXPECT_EQ(PIXEL_FORMAT_I420, frame->format());
@@ -338,15 +347,15 @@ TEST(VideoFrame,
       const gpu::MailboxHolder& mailbox_holder = frame->mailbox_holder(i);
       EXPECT_EQ(mailbox[i].name[0], mailbox_holder.mailbox.name[0]);
       EXPECT_EQ(target, mailbox_holder.texture_target);
-      EXPECT_EQ(sync_point, mailbox_holder.sync_point);
+      EXPECT_EQ(sync_token, mailbox_holder.sync_token);
     }
 
-    SyncPointClientImpl client(release_sync_point);
-    frame->UpdateReleaseSyncPoint(&client);
-    EXPECT_EQ(sync_point,
-              frame->mailbox_holder(VideoFrame::kYPlane).sync_point);
+    SyncTokenClientImpl client(release_sync_token);
+    frame->UpdateReleaseSyncToken(&client);
+    EXPECT_EQ(sync_token,
+              frame->mailbox_holder(VideoFrame::kYPlane).sync_token);
   }
-  EXPECT_EQ(release_sync_point, called_sync_point);
+  EXPECT_EQ(release_sync_token, called_sync_token);
 }
 
 TEST(VideoFrame, IsValidConfig_OddCodedSize) {

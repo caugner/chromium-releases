@@ -7,9 +7,9 @@
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#import "chrome/browser/ui/cocoa/app_menu/app_menu_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
 
 // static
 scoped_ptr<MediaRouterActionPlatformDelegate>
@@ -28,14 +28,17 @@ MediaRouterActionPlatformDelegateCocoa::
     ~MediaRouterActionPlatformDelegateCocoa() {
 }
 
-void MediaRouterActionPlatformDelegateCocoa::CloseOverflowMenuIfOpen() {
+bool MediaRouterActionPlatformDelegateCocoa::CloseOverflowMenuIfOpen() {
   // TODO(apacible): This should be factored to share code with extension
   // actions.
-  WrenchMenuController* wrenchMenuController =
+  AppMenuController* appMenuController =
       [[[BrowserWindowController
           browserWindowControllerForWindow:
               browser_->window()->GetNativeWindow()]
-          toolbarController] wrenchMenuController];
-  if ([wrenchMenuController isMenuOpen])
-    [wrenchMenuController cancel];
+          toolbarController] appMenuController];
+  if (![appMenuController isMenuOpen])
+    return false;
+
+  [appMenuController cancel];
+  return true;
 }

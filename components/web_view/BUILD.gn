@@ -15,6 +15,8 @@ source_set("lib") {
   sources = [
     "client_initiated_frame_connection.cc",
     "client_initiated_frame_connection.h",
+    "find_controller.cc",
+    "find_controller.h",
     "frame.cc",
     "frame.h",
     "frame_connection.cc",
@@ -29,6 +31,8 @@ source_set("lib") {
     "frame_user_data.h",
     "frame_utils.cc",
     "frame_utils.h",
+    "local_find_options.cc",
+    "local_find_options.h",
     "navigation_controller.cc",
     "navigation_controller.h",
     "navigation_entry.cc",
@@ -57,10 +61,11 @@ source_set("lib") {
     "//mojo/application/public/cpp:sources",
     "//mojo/application/public/interfaces",
     "//mojo/common:common_base",
+    "//mojo/common:url_type_converters",
     "//mojo/converters/geometry",
+    "//mojo/public/cpp/bindings",
     "//mojo/services/network/public/interfaces",
     "//mojo/services/tracing/public/interfaces",
-    "//third_party/mojo/src/mojo/public/cpp/bindings",
     "//url",
   ]
 
@@ -127,6 +132,5 @@ mojo_native_application("apptests") {
 
   data_deps = [
     ":web_view",
-    "//components/mus/vm:lib",
   ]
 }

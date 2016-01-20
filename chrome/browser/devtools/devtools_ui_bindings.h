@@ -33,14 +33,16 @@ class WebContents;
 }
 
 // Base implementation of DevTools bindings around front-end.
-class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
-                           public DevToolsEmbedderMessageDispatcher::Delegate,
+class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
                            public DevToolsAndroidBridge::DeviceCountListener,
                            public content::DevToolsAgentHostClient,
-                           public net::URLFetcherDelegate {
+                           public net::URLFetcherDelegate,
+                           public DevToolsFileHelper::Delegate {
  public:
   static DevToolsUIBindings* ForWebContents(
       content::WebContents* web_contents);
+  static content::DevToolsExternalAgentProxyDelegate*
+      CreateWebSocketAPIChannel();
 
   class Delegate {
    public:
@@ -76,14 +78,11 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
   void Reattach();
   void Detach();
   bool IsAttachedTo(content::DevToolsAgentHost* agent_host);
-  content::DevToolsExternalAgentProxyDelegate* CreateWebSocketAPIChannel();
 
  private:
+  friend class WebSocketAPIChannel;
 
-  // content::DevToolsFrontendHost::Delegate implementation.
-  void HandleMessageFromDevToolsFrontend(const std::string& message) override;
-  void HandleMessageFromDevToolsFrontendToBackend(
-      const std::string& message) override;
+  void HandleMessageFromDevToolsFrontend(const std::string& message);
 
   // content::DevToolsAgentHostClient implementation.
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
@@ -110,7 +109,7 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
   void AppendToFile(const std::string& url,
                     const std::string& content) override;
   void RequestFileSystems() override;
-  void AddFileSystem() override;
+  void AddFileSystem(const std::string& file_system_path) override;
   void RemoveFileSystem(const std::string& file_system_path) override;
   void UpgradeDraggedFileSystemPermissions(
       const std::string& file_system_url) override;
@@ -131,7 +130,10 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
   void SetDevicesUpdatesEnabled(bool enabled) override;
   void PerformActionOnRemotePage(const std::string& page_id,
                                  const std::string& action) override;
-  void SendMessageToBrowser(const std::string& message) override;
+  void OpenRemotePage(const std::string& browser_id,
+                      const std::string& url) override;
+  void DispatchProtocolMessageFromDevToolsFrontend(
+      const std::string& message) override;
   void RecordEnumeratedHistogram(const std::string& name,
                                  int sample,
                                  int boundary_value) override;
@@ -169,13 +171,16 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
                     const std::string& message);
   void DevicesDiscoveryConfigUpdated();
 
+  // DevToolsFileHelper::Delegate overrides.
+  void FileSystemAdded(
+      const DevToolsFileHelper::FileSystem& file_system) override;
+  void FileSystemRemoved(const std::string& file_system_path) override;
+  void FilePathsChanged(const std::vector<std::string>& file_paths) override;
+
   // DevToolsFileHelper callbacks.
   void FileSavedAs(const std::string& url);
   void CanceledFileSaveAs(const std::string& url);
   void AppendedTo(const std::string& url);
-  void FileSystemsLoaded(
-      const std::vector<DevToolsFileHelper::FileSystem>& file_systems);
-  void FileSystemAdded(const DevToolsFileHelper::FileSystem& file_system);
   void IndexingTotalWorkCalculated(int request_id,
                                    const std::string& file_system_path,
                                    int total_work);
@@ -194,7 +199,6 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
   void AddDevToolsExtensionsToClient();
 
   class FrontendWebContentsObserver;
-  class WebSocketAPIChannel;
   scoped_ptr<FrontendWebContentsObserver> frontend_contents_observer_;
 
   Profile* profile_;
@@ -219,7 +223,6 @@ class DevToolsUIBindings :public content::DevToolsFrontendHost::Delegate,
   GURL url_;
   using PendingRequestsMap = std::map<const net::URLFetcher*, DispatchCallback>;
   PendingRequestsMap pending_requests_;
-  WebSocketAPIChannel* open_api_channel_;
   base::WeakPtrFactory<DevToolsUIBindings> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsUIBindings);

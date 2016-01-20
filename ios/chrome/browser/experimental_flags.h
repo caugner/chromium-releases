@@ -5,6 +5,8 @@
 #ifndef IOS_CHROME_BROWSER_EXPERIMENTAL_FLAGS_H_
 #define IOS_CHROME_BROWSER_EXPERIMENTAL_FLAGS_H_
 
+#include <string>
+
 // This file can be empty. Its purpose is to contain the relatively short lived
 // declarations required for experimental flags.
 
@@ -13,14 +15,8 @@ namespace experimental_flags {
 // Whether background crash report upload should generate a local notification.
 bool IsAlertOnBackgroundUploadEnabled();
 
-// Whether external URL request blocking from subframes is enabled.
-bool IsExternalURLBlockingEnabled();
-
 // Whether the new bookmark collection experience is enabled.
 bool IsBookmarkCollectionEnabled();
-
-// Whether to extract salient images from pages at load time if bookmarked.
-bool IsBookmarkImageFetchingOnVisitEnabled();
 
 // Sets whether or not the field trial for WKWebView should be enabled. This
 // must be called at most once, and before IsWKWebViewEnabled. If this is never
@@ -29,9 +25,24 @@ bool IsBookmarkImageFetchingOnVisitEnabled();
 // only whether the trial state will be checked in the default state.
 void SetWKWebViewTrialEligibility(bool eligible);
 
+// Whether the lru snapshot cache experiment is enabled.
+bool IsLRUSnapshotCacheEnabled();
+
 // Whether the app uses WKWebView instead of UIWebView.
 // The returned value will not change within a given session.
 bool IsWKWebViewEnabled();
+
+// Whether the user would be put into a control group for the WKWebView
+// experiment assuming they were eligible. Calling this will *not* activate a
+// trial, so is safe to call without checking eligibility.
+bool IsTargetedToWKWebViewExperimentControlGroup();
+
+// Whether the user is part of a control group for the WKWebView experiment.
+bool IsInWKWebViewExperimentControlGroup();
+
+// Returns a string containing extra params that should be sent along with
+// omnibox search requests.  The returned value contains a leading "&".
+std::string GetWKWebViewSearchParams();
 
 // Whether keyboard commands are supported.
 bool AreKeyboardCommandsEnabled();

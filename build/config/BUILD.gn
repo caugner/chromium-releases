@@ -8,7 +8,6 @@ import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
-import("//build/module_args/v8.gni")
 import("//build/toolchain/goma.gni")
 
 declare_args() {
@@ -168,14 +167,11 @@ config("feature_flags") {
   if (is_msan) {
     defines += [ "MEMORY_SANITIZER" ]
   }
-  if (is_ubsan) {
+  if (is_ubsan || is_ubsan_vptr) {
     defines += [ "UNDEFINED_SANITIZER" ]
   }
   if (enable_webrtc) {
     defines += [ "ENABLE_WEBRTC=1" ]
-  }
-  if (disable_ftp_support) {
-    defines += [ "DISABLE_FTP_SUPPORT=1" ]
   }
   if (!enable_nacl) {
     defines += [ "DISABLE_NACL" ]
@@ -219,9 +215,6 @@ config("feature_flags") {
   if (enable_autofill_dialog) {
     defines += [ "ENABLE_AUTOFILL_DIALOG=1" ]
   }
-  if (enable_wifi_bootstrapping) {
-    defines += [ "ENABLE_WIFI_BOOTSTRAPPING=1" ]
-  }
   if (enable_image_loader_extension) {
     defines += [ "IMAGE_LOADER_EXTENSION=1" ]
   }
@@ -243,9 +236,6 @@ config("feature_flags") {
   if (enable_hangout_services_extension) {
     defines += [ "ENABLE_HANGOUT_SERVICES_EXTENSION=1" ]
   }
-  if (v8_use_external_startup_data) {
-    defines += [ "V8_USE_EXTERNAL_STARTUP_DATA" ]
-  }
   if (enable_background) {
     defines += [ "ENABLE_BACKGROUND=1" ]
   }
@@ -259,14 +249,8 @@ config("feature_flags") {
     defines += [ "FULL_SAFE_BROWSING" ]
     defines += [ "SAFE_BROWSING_CSD" ]
     defines += [ "SAFE_BROWSING_DB_LOCAL" ]
-    defines += [ "SAFE_BROWSING_SERVICE" ]
   } else if (safe_browsing_mode == 2) {
-    defines += [ "MOBILE_SAFE_BROWSING" ]
-    defines += [ "SAFE_BROWSING_SERVICE" ]
-  } else if (safe_browsing_mode == 3) {
-    defines += [ "MOBILE_SAFE_BROWSING" ]
     defines += [ "SAFE_BROWSING_DB_REMOTE" ]
-    defines += [ "SAFE_BROWSING_SERVICE" ]
   }
   if (is_official_build) {
     defines += [ "OFFICIAL_BUILD" ]

@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="ro">
 <translation id="1013923882670373915">Dispozitivul Bluetooth „<ph name="DEVICE_NAME" />” solicită permisiunea de a se conecta. Introduceți acest cod PIN pe dispozitivul respectiv: <ph name="PINCODE" /></translation>
+<translation id="1021311941847921177">Comanda rapidă pentru a comuta la următoarea metodă de introducere a textului a fost modificată. Folosește <ph name="NEW_SHORTCUT" /> în loc de <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="112308213915226829">Ascundeți automat raftul</translation>
 <translation id="1195412055398077112">suprascanare</translation>
 <translation id="1270290102613614947">Tastatură pe ecran dezactivată</translation>
@@ -25,10 +26,10 @@
 <translation id="1812696562331527143">Metoda de introducere s-a schimbat la <ph name="INPUT_METHOD_ID" />*(<ph name="BEGIN_LINK" />terță parte<ph name="END_LINK" />).
         Apăsați pe Shift + Alt pentru a comuta.</translation>
 <translation id="1882897271359938046">Se oglindește pe <ph name="DISPLAY_NAME" /></translation>
+<translation id="1919743966458266018">Comanda rapidă pentru a deschide managerul de activități a fost modificată. Folosește <ph name="NEW_SHORTCUT" /> în loc de <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="1923539912171292317">Clicuri automate</translation>
-<translation id="1950626184269948555">Comanda rapidă pentru managerul de activități s-a schimbat. Folosește Search+Esc în loc de Shift+Esc.</translation>
+<translation id="1938872420421548906">Shift + Alt</translation>
 <translation id="1957803754585243749">0°</translation>
-<translation id="1963814843110128691">Se proiectează $1 pe $2</translation>
 <translation id="1969011864782743497"><ph name="DEVICE_NAME" /> (USB)</translation>
 <translation id="1987317783729300807">Conturi</translation>
 <translation id="2127372758936585790">Încărcător de putere joasă</translation>
@@ -94,6 +95,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="3783640748446814672">alt</translation>
 <translation id="3784455785234192852">Blocați</translation>
 <translation id="3799026279081545374">Este posibil să aveți un încărcător defect. Dacă locuiți în S.U.A., sunați la 866-628-1371 pentru a primi asistență și un încărcător de schimb. Dacă locuiți în Regatul Unit, sunați la 0800-026-0613. Dacă locuiți în Irlanda, sunați la 1-800-832-664. Dacă locuiți în Canada, sunați la 866-628-1372. Dacă locuiți în Australia, sunați la 1-800-067-460.</translation>
+<translation id="3866182280516392520">Adresa IPv6</translation>
 <translation id="3891340733213178823">Apăsați de două ori Ctrl+Shift+Q pentru a vă deconecta.</translation>
 <translation id="3892641579809465218">Afișaj intern</translation>
 <translation id="3963445509666917109">Difuzor (intern)</translation>
@@ -109,6 +111,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="4421231901400348175">În prezent, <ph name="HELPER_NAME" /> îți poate controla ecranul prin Asistență la distanță.</translation>
 <translation id="4430019312045809116">Volum</translation>
 <translation id="4527045527269911712">Dispozitivul Bluetooth „<ph name="DEVICE_NAME" />” solicită permisiunea de a se conecta.</translation>
+<translation id="4544944664594876241">Comanda rapidă pentru a bloca ecranul a fost modificată. Folosește <ph name="NEW_SHORTCUT" /> în loc de <ph name="OLD_SHORTCUT" />.</translation>
 <translation id="479989351350248267">căutați</translation>
 <translation id="4804818685124855865">Deconectează-te</translation>
 <translation id="4872237917498892622">Alt+Căutare sau Shift</translation>
@@ -117,6 +120,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="4957722034734105353">Aflați mai multe...</translation>
 <translation id="4961318399572185831">Proiectează ecranul</translation>
 <translation id="5011233892417813670">Chromebook</translation>
+<translation id="5012744545445585468">Ctrl + Shift + bara de spațiu</translation>
 <translation id="5045002648206642691">Setări Disc Google...</translation>
 <translation id="5102001756192215136">Timp rămas: <ph name="HOUR" />:<ph name="MINUTE" /></translation>
 <translation id="511445211639755999"><ph name="RESOLUTION" />, <ph name="OVERSCAN" /></translation>
@@ -136,6 +140,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
         Apăsați pe Shift + Alt pentru a comuta.</translation>
 <translation id="5871632337994001636">Gestionați dispozitivele...</translation>
 <translation id="5895138241574237353">Reîncepe</translation>
+<translation id="5901316534475909376">Shift + Esc</translation>
 <translation id="5927132638760172455">Se proiectează pe un receiver necunoscut</translation>
 <translation id="5932901536148835538">Chromebit</translation>
 <translation id="5947494881799873997">Reveniți</translation>
@@ -152,7 +157,6 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="6165508094623778733">Află mai multe</translation>
 <translation id="6247708409970142803"><ph name="PERCENTAGE" /> %</translation>
 <translation id="6248847161401822652">Apăsați de două ori Control Shift Q pentru a ieși.</translation>
-<translation id="6287020362823083378">Comanda rapidă pentru blocarea ecranului s-a schimbat. Folosește Search+L în loc de Ctrl+Shift+L.</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME" /> a fost rotit la <ph name="ROTATION" /></translation>
 <translation id="6359806961507272919">SMS de la <ph name="PHONE_NUMBER" /></translation>
 <translation id="639644700271529076">Tasta CAPS LOCK este dezactivată</translation>
@@ -160,6 +164,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="6426039856985689743">Dezactivați datele mobile</translation>
 <translation id="6452181791372256707">Respingeți</translation>
 <translation id="6459472438155181876">Se extinde ecranul pe <ph name="DISPLAY_NAME" /></translation>
+<translation id="6501401484702599040">Se proiectează ecranul pe <ph name="RECEIVER_NAME" /></translation>
 <translation id="6550675742724504774">Opțiuni</translation>
 <translation id="6585808820553845416">Sesiunea se încheie peste <ph name="SESSION_TIME_REMAINING" />.</translation>
 <translation id="6596816719288285829">Adresă IP</translation>
@@ -167,6 +172,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="6713285437468012787">Dispozitivul Bluetooth „<ph name="DEVICE_NAME" />” a fost conectat și este disponibil acum pentru toți utilizatorii. Puteți elimina această conexiune din Setări.</translation>
 <translation id="6785414152754474415">Nivelul bateriei este de <ph name="PERCENTAGE" />% și se încarcă.</translation>
 <translation id="6803622936009808957">Afișajele nu au putut fi oglindite, deoarece nu au fost găsite rezoluții acceptate. Ați intrat, în schimb, în modul monitor extins.</translation>
+<translation id="683971173229319003">Tasta de căutare + L</translation>
 <translation id="68610848741840742">ChromeVox (feedback rostit)</translation>
 <translation id="6895424601869865703">Adăugați un cont pentru <ph name="GIVEN_NAME" /></translation>
 <translation id="6911468394164995108">Conectați-vă la altă rețea...</translation>
@@ -175,6 +181,7 @@ Apăsați Căutare sau Shift pentru a anula.</translation>
 <translation id="6981982820502123353">Accesibilitate</translation>
 <translation id="7029814467594812963">Ieșiți din sesiune</translation>
 <translation id="703171847531699602">Niciun dispozitiv de proiecție</translation>
+<translation id="7034339000180558234">Se proiectează <ph name="TAB_NAME" /> pe <ph name="RECEIVER_NAME" /></translation>
 <translation id="7052914147756339792">Setați o imagine de fundal...</translation>
 <translation id="7097613348211027502">ChromeVox (feedbackul rostit) este activat.
 Apăsați pe Ctrl+Alt+Z pentru dezactivare.</translation>
@@ -186,6 +193,7 @@ Apăsați Alt+Căutare sau Shift pentru a anula.</translation>
 <translation id="737451040872859086">Microfon (intern)</translation>
 <translation id="742594950370306541">Camera foto este în uz.</translation>
 <translation id="743058460480092004">Camera foto și microfonul sunt în uz.</translation>
+<translation id="7510334386202674593">Ctrl + Shift + L</translation>
 <translation id="7561014039265304140"><ph name="DISPLAY_NAME" /> nu acceptă <ph name="SPECIFIED_RESOLUTION" />. Rezoluția a fost modificată la <ph name="FALLBACK_RESOLUTION" /></translation>
 <translation id="7573962313813535744">Modul andocat</translation>
 <translation id="7593891976182323525">Căutare sau Shift</translation>
@@ -194,6 +202,7 @@ Apăsați Alt+Căutare sau Shift pentru a anula.</translation>
 <translation id="7823564328645135659">După sincronizarea setărilor, limba a fost modificată de la „<ph name="FROM_LOCALE" />” la „<ph name="TO_LOCALE" />”.</translation>
 <translation id="785750925697875037">Afișați contul mobil</translation>
 <translation id="7864539943188674973">Dezactivați Bluetooth</translation>
+<translation id="7893838033650689677">Activează Wi-Fi</translation>
 <translation id="7904094684485781019">Administratorul acestui cont a dezactivat conectarea multiplă.</translation>
 <translation id="7957227661277029961">Este posibil ca <ph name="DEVICE_TYPE" /> să nu se încarce cât timp este pornit. Îți recomandăm să folosești încărcătorul oficial.</translation>
 <translation id="7982789257301363584">Rețea</translation>
@@ -204,16 +213,15 @@ Apăsați Alt+Căutare sau Shift pentru a anula.</translation>
 <translation id="8308637677604853869">Meniul anterior</translation>
 <translation id="8356164830168736643">Închide <ph name="WINDOW_TITLE" /></translation>
 <translation id="8428213095426709021">Setări</translation>
-<translation id="8443356412772935865">Se proiectează ecranul pe $1</translation>
 <translation id="8456362689280298700"><ph name="HOUR" />:<ph name="MINUTE" /> până ce bateria va fi plină</translation>
 <translation id="8517041960877371778">Este posibil ca <ph name="DEVICE_TYPE" /> să nu se încarce cât timp este pornit.</translation>
 <translation id="8528322925433439945">Rețele mobile...</translation>
-<translation id="8654520615680304441">Activați Wi-Fi...</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="8676770494376880701">A fost conectat un încărcător de putere joasă</translation>
 <translation id="8814190375133053267">Wi-Fi</translation>
 <translation id="882279321799040148">Dați clic pentru afișare</translation>
 <translation id="8828714802988429505">90°</translation>
+<translation id="8850991929411075241">Tasta de căutare + Esc</translation>
 <translation id="8878886163241303700">Ecran extins</translation>
 <translation id="8940956008527784070">Baterie slabă (<ph name="PERCENTAGE" /> %)</translation>
 <translation id="9074739597929991885">Bluetooth</translation>

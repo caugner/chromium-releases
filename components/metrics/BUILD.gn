@@ -77,6 +77,16 @@ source_set("metrics") {
     deps += [ ":serialization" ]
   }
 
+  if (is_mac) {
+    libs = [
+      # The below are all needed for drive_metrics_provider_mac.mm.
+      "CoreFoundation.framework",
+      "DiskArbitration.framework",
+      "Foundation.framework",
+      "IOKit.framework",
+    ]
+  }
+
   if (is_win) {
     sources -= [ "machine_id_provider_stub.cc" ]
   }
@@ -97,7 +107,6 @@ if (!is_ios) {
       "//base",
       "//content/public/browser",
       "//gpu/config",
-      "//ui/gfx",
     ]
   }
 }
@@ -129,26 +138,73 @@ static_library("net") {
   ]
 }
 
+# GYP version: components/metrics.gypi:metrics_profiler
+source_set("profiler") {
+  sources = [
+    "profiler/profiler_metrics_provider.cc",
+    "profiler/profiler_metrics_provider.h",
+    "profiler/tracking_synchronizer.cc",
+    "profiler/tracking_synchronizer.h",
+    "profiler/tracking_synchronizer_delegate.h",
+    "profiler/tracking_synchronizer_observer.cc",
+    "profiler/tracking_synchronizer_observer.h",
+  ]
+
+  public_deps = [
+    ":metrics",
+  ]
+  deps = [
+    "//base",
+    "//components/variations",
+  ]
+}
+
+# GYP version: components/metrics.gypi:metrics_ui
+source_set("ui") {
+  sources = [
+    "ui/screen_info_metrics_provider.cc",
+    "ui/screen_info_metrics_provider.h",
+  ]
+
+  public_deps = [
+    ":metrics",
+  ]
+  deps = [
+    "//base",
+    "//ui/gfx",
+  ]
+}
+
 if (!is_ios) {
-  # GYP version: components/metrics.gypi:metrics_profiler
-  source_set("profiler") {
+  # GYP version: components/metrics.gypi:metrics_profiler_content
+  source_set("profiler_content") {
     sources = [
-      "profiler/profiler_metrics_provider.cc",
-      "profiler/profiler_metrics_provider.h",
-      "profiler/tracking_synchronizer.cc",
-      "profiler/tracking_synchronizer.h",
-      "profiler/tracking_synchronizer_observer.cc",
-      "profiler/tracking_synchronizer_observer.h",
+      "profiler/content/content_tracking_synchronizer_delegate.cc",
+      "profiler/content/content_tracking_synchronizer_delegate.h",
     ]
 
     public_deps = [
-      ":metrics",
+      ":profiler",
     ]
     deps = [
       "//base",
-      "//components/variations",
       "//content/public/browser",
       "//content/public/common",
+    ]
+  }
+} else {
+  # GYP version: components/metrics.gypi:metrics_profiler_ios
+  source_set("profiler_ios") {
+    sources = [
+      "profiler/ios/ios_tracking_synchronizer_delegate.cc",
+      "profiler/ios/ios_tracking_synchronizer_delegate.h",
+    ]
+
+    public_deps = [
+      ":profiler",
+    ]
+    deps = [
+      "//base",
     ]
   }
 }
@@ -189,6 +245,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "call_stack_profile_metrics_provider_unittest.cc",
+    "cloned_install_detector_unittest.cc",
     "daily_event_unittest.cc",
     "drive_metrics_provider_unittest.cc",
     "histogram_encoder_unittest.cc",
@@ -201,31 +258,24 @@ source_set("unit_tests") {
     "metrics_state_manager_unittest.cc",
     "net/net_metrics_log_uploader_unittest.cc",
     "persisted_logs_unittest.cc",
+    "profiler/profiler_metrics_provider_unittest.cc",
+    "profiler/tracking_synchronizer_unittest.cc",
     "stability_metrics_helper_unittest.cc",
+    "ui/screen_info_metrics_provider_unittest.cc",
   ]
 
   deps = [
     ":metrics",
     ":net",
+    ":profiler",
     ":test_support",
+    ":ui",
     "//base:prefs_test_support",
     "//base/test:test_support",
     "//components/variations",
     "//testing/gtest",
   ]
 
-  if (!is_ios) {
-    deps += [
-      "//content/public/common",
-      ":gpu",
-      ":profiler",
-    ]
-    sources += [
-      "gpu/gpu_metrics_provider_unittest.cc",
-      "profiler/profiler_metrics_provider_unittest.cc",
-      "profiler/tracking_synchronizer_unittest.cc",
-    ]
-  }
   if (is_linux) {
     sources += [ "serialization/serialization_utils_unittest.cc" ]
     deps += [ ":serialization" ]

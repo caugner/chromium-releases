@@ -32,7 +32,7 @@ import java.util.Map;
  */
 @JNINamespace("media")
 class MediaCodecBridge {
-    private static final String TAG = "cr.media";
+    private static final String TAG = "cr_media";
 
     // Error code for MediaCodecBridge. Keep this value in sync with
     // MediaCodecStatus in media_codec_bridge.h.
@@ -538,7 +538,7 @@ class MediaCodecBridge {
             Log.e(TAG, "MediaCodec.CryptoException with error code " + e.getErrorCode());
             return MEDIA_CODEC_ERROR;
         } catch (IllegalStateException e) {
-            Log.e(TAG, "Failed to queue secure input buffer", e);
+            Log.e(TAG, "Failed to queue secure input buffer, IllegalStateException " + e);
             return MEDIA_CODEC_ERROR;
         }
         return MEDIA_CODEC_OK;
@@ -612,7 +612,13 @@ class MediaCodecBridge {
             }
             mMediaCodec.configure(format, surface, crypto, flags);
             return true;
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "Cannot configure the video codec, wrong format or surface", e);
         } catch (IllegalStateException e) {
+            Log.e(TAG, "Cannot configure the video codec", e);
+        } catch (MediaCodec.CryptoException e) {
+            Log.e(TAG, "Cannot configure the video codec: DRM error", e);
+        } catch (Exception e) {
             Log.e(TAG, "Cannot configure the video codec", e);
         }
         return false;
@@ -716,7 +722,13 @@ class MediaCodecBridge {
                 }
             }
             return true;
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "Cannot configure the audio codec", e);
         } catch (IllegalStateException e) {
+            Log.e(TAG, "Cannot configure the audio codec", e);
+        } catch (MediaCodec.CryptoException e) {
+            Log.e(TAG, "Cannot configure the audio codec: DRM error", e);
+        } catch (Exception e) {
             Log.e(TAG, "Cannot configure the audio codec", e);
         }
         return false;
@@ -771,7 +783,11 @@ class MediaCodecBridge {
         // If the stream runs too long, getPlaybackHeadPosition() could
         // overflow. AudioTimestampHelper in MediaSourcePlayer has the same
         // issue. See http://crbug.com/358801.
-        return mAudioTrack.getPlaybackHeadPosition();
+
+        // The method AudioTrack.getPlaybackHeadPosition() returns int that should be
+        // interpreted as unsigned 32 bit value. Convert the return value of
+        // getPlaybackHeadPosition() into unsigned int using the long mask.
+        return 0xFFFFFFFFL & mAudioTrack.getPlaybackHeadPosition();
     }
 
     @SuppressWarnings("deprecation")
@@ -790,7 +806,6 @@ class MediaCodecBridge {
         }
     }
 
-    // TODO(xhwang): fix deprecation warnings crbug.com/527916
     @SuppressWarnings("deprecation")
     private int getAudioFormat(int channelCount) {
         switch (channelCount) {
@@ -803,7 +818,11 @@ class MediaCodecBridge {
             case 6:
                 return AudioFormat.CHANNEL_OUT_5POINT1;
             case 8:
-                return AudioFormat.CHANNEL_OUT_7POINT1;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    return AudioFormat.CHANNEL_OUT_7POINT1_SURROUND;
+                } else {
+                    return AudioFormat.CHANNEL_OUT_7POINT1;
+                }
             default:
                 return AudioFormat.CHANNEL_OUT_DEFAULT;
         }

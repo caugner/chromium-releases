@@ -27,11 +27,6 @@ import java.util.List;
  * preferences.
  */
 public final class PrefServiceBridge {
-    // Does not need sync with native; used for the popup settings check
-    public static final String EXCEPTION_SETTING_ALLOW = "allow";
-    public static final String EXCEPTION_SETTING_BLOCK = "block";
-    public static final String EXCEPTION_SETTING_DEFAULT = "default";
-
     // These values must match the native enum values in
     // SupervisedUserURLFilter::FilteringBehavior
     public static final int SUPERVISED_USER_FILTERING_ALLOW = 0;
@@ -196,10 +191,10 @@ public final class PrefServiceBridge {
             ArrayList<ContentSettingException> list,
             int contentSettingsType,
             String pattern,
-            String setting,
+            int contentSetting,
             String source) {
         ContentSettingException exception = new ContentSettingException(
-                contentSettingsType, pattern, setting, source);
+                contentSettingsType, pattern, ContentSetting.fromInt(contentSetting), source);
         list.add(exception);
     }
 
@@ -513,6 +508,30 @@ public final class PrefServiceBridge {
      */
     public boolean isSafeBrowsingManaged() {
         return nativeGetSafeBrowsingManaged();
+    }
+
+    /**
+     * @return whether there is a user set value for kNetworkPredictionEnabled.  This should only be
+     * used for preference migration.
+     */
+    public boolean networkPredictionEnabledHasUserSetting() {
+        return nativeNetworkPredictionEnabledHasUserSetting();
+    }
+
+    /**
+     * @return whether there is a user set value for kNetworkPredictionOptions.  This should only be
+     * used for preference migration.
+     */
+    public boolean networkPredictionOptionsHasUserSetting() {
+        return nativeNetworkPredictionOptionsHasUserSetting();
+    }
+
+    /**
+     * @return the user set value for kNetworkPredictionEnabled. This should only be used for
+     * preference migration.
+     */
+    public boolean getNetworkPredictionEnabledUserPrefValue() {
+        return nativeGetNetworkPredictionEnabledUserPrefValue();
     }
 
     /**
@@ -968,6 +987,9 @@ public final class PrefServiceBridge {
     private native void nativeSetSafeBrowsingEnabled(boolean enabled);
     private native boolean nativeGetSafeBrowsingManaged();
     private native boolean nativeGetNetworkPredictionManaged();
+    private native boolean nativeNetworkPredictionEnabledHasUserSetting();
+    private native boolean nativeNetworkPredictionOptionsHasUserSetting();
+    private native boolean nativeGetNetworkPredictionEnabledUserPrefValue();
     private native int nativeGetNetworkPredictionOptions();
     private native void nativeSetNetworkPredictionOptions(int option);
     private native void nativeSetResolveNavigationErrorEnabled(boolean enabled);

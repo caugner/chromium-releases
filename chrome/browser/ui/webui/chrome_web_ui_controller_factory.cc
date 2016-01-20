@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/webui/device_log_ui.h"
 #include "chrome/browser/ui/webui/domain_reliability_internals_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
+#include "chrome/browser/ui/webui/downloads_util.h"
 #include "chrome/browser/ui/webui/engagement/site_engagement_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/flash_ui.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/webui/invalidations_ui.h"
 #include "chrome/browser/ui/webui/local_state/local_state_ui.h"
 #include "chrome/browser/ui/webui/log_web_ui_url.h"
+#include "chrome/browser/ui/webui/md_downloads/md_downloads_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
@@ -93,6 +95,7 @@
 #endif
 
 #if defined(ENABLE_MEDIA_ROUTER) && !defined(OS_ANDROID)
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
 #endif
 
@@ -389,8 +392,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIBookmarksHost)
     return &NewWebUI<BookmarksUI>;
   // Downloads list on Android uses the built-in download manager.
-  if (url.host() == chrome::kChromeUIDownloadsHost)
+  if (url.host() == chrome::kChromeUIDownloadsHost) {
+    if (MdDownloadsEnabled())
+      return &NewWebUI<MdDownloadsUI>;
     return &NewWebUI<DownloadsUI>;
+  }
   if (url.host() == chrome::kChromeUIGCMInternalsHost)
     return &NewWebUI<GCMInternalsUI>;
   // Help is implemented with native UI elements on Android.
@@ -542,6 +548,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (url.host() == chrome::kChromeUIPolicyHost)
     return &NewWebUI<PolicyUI>;
+  if (url.host() == chrome::kChromeUIMdPolicyHost &&
+      switches::MdPolicyPageEnabled()) {
+    return &NewWebUI<PolicyMaterialDesignUI>;
+  }
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIProfileSigninConfirmationHost)
     return &NewWebUI<ProfileSigninConfirmationUI>;
@@ -579,7 +589,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #endif
 #if defined(ENABLE_MEDIA_ROUTER) && !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIMediaRouterHost &&
-      switches::MediaRouterEnabled()) {
+      media_router::MediaRouterEnabled(profile)) {
     return &NewWebUI<media_router::MediaRouterUI>;
   }
 #endif

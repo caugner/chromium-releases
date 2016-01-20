@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/toolbar/media_router_action_platform_delegate_views.h"
 
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 
 // static
@@ -24,9 +25,14 @@ MediaRouterActionPlatformDelegateViews::
     ~MediaRouterActionPlatformDelegateViews() {
 }
 
-void MediaRouterActionPlatformDelegateViews::CloseOverflowMenuIfOpen() {
-  ToolbarView* toolbar =
-      BrowserView::GetBrowserViewForBrowser(browser_)->toolbar();
-  if (toolbar->IsWrenchMenuShowing())
-    toolbar->CloseAppMenu();
+bool MediaRouterActionPlatformDelegateViews::CloseOverflowMenuIfOpen() {
+  AppMenuButton* app_menu_button =
+      BrowserView::GetBrowserViewForBrowser(browser_)
+          ->toolbar()
+          ->app_menu_button();
+  if (!app_menu_button->IsMenuShowing())
+    return false;
+
+  app_menu_button->CloseMenu();
+  return true;
 }

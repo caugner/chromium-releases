@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/thread_task_runner_handle.h"
-#include "sync/engine/model_type_processor_impl.h"
+#include "sync/internal_api/public/activation_context.h"
 #include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/shared_model_type_processor.h"
 #include "sync/internal_api/public/sync_context.h"
 #include "sync/internal_api/sync_context_proxy_impl.h"
 #include "sync/sessions/model_type_registry.h"
@@ -41,12 +43,25 @@ class SyncContextProxyImplTest : public ::testing::Test {
   // function simulates such an event.
   void DisableSync() { registry_.reset(); }
 
-  scoped_ptr<SyncContextProxy> GetProxy() { return context_proxy_->Clone(); }
+  void Start(SharedModelTypeProcessor* processor) {
+    processor->Start(base::Bind(&SyncContextProxyImplTest::StartDone,
+                                base::Unretained(this)));
+  }
+
+  void StartDone(syncer::SyncError error,
+                 scoped_ptr<ActivationContext> context) {
+    context_proxy_->ConnectTypeToSync(syncer::THEMES, context.Pass());
+  }
+
+  scoped_ptr<SharedModelTypeProcessor> CreateModelTypeProcessor() {
+    return make_scoped_ptr(new SharedModelTypeProcessor(
+        syncer::THEMES, base::WeakPtr<ModelTypeStore>()));
+  }
 
  private:
   base::MessageLoop loop_;
-  scoped_refptr<base::SequencedTaskRunner> sync_task_runner_;
-  scoped_refptr<base::SequencedTaskRunner> type_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> sync_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> type_task_runner_;
 
   std::vector<scoped_refptr<syncer::ModelSafeWorker>> workers_;
   syncer::TestDirectorySetterUpper dir_maker_;
@@ -58,53 +73,47 @@ class SyncContextProxyImplTest : public ::testing::Test {
 
 // Try to connect a type to a SyncContext that has already shut down.
 TEST_F(SyncContextProxyImplTest, FailToConnect1) {
-  ModelTypeProcessorImpl themes_sync_proxy(syncer::THEMES,
-                                           base::WeakPtr<ModelTypeStore>());
+  scoped_ptr<SharedModelTypeProcessor> processor = CreateModelTypeProcessor();
   DisableSync();
-  themes_sync_proxy.Enable(GetProxy());
+  Start(processor.get());
 
   base::RunLoop run_loop_;
   run_loop_.RunUntilIdle();
-  EXPECT_FALSE(themes_sync_proxy.IsConnected());
+  EXPECT_FALSE(processor->IsConnected());
 }
 
 // Try to connect a type to a SyncContext as it shuts down.
 TEST_F(SyncContextProxyImplTest, FailToConnect2) {
-  ModelTypeProcessorImpl themes_sync_proxy(syncer::THEMES,
-                                           base::WeakPtr<ModelTypeStore>());
-  themes_sync_proxy.Enable(GetProxy());
+  scoped_ptr<SharedModelTypeProcessor> processor = CreateModelTypeProcessor();
+  Start(processor.get());
   DisableSync();
 
   base::RunLoop run_loop_;
   run_loop_.RunUntilIdle();
-  EXPECT_FALSE(themes_sync_proxy.IsConnected());
+  EXPECT_FALSE(processor->IsConnected());
 }
 
 // Tests the case where the type's sync proxy shuts down first.
 TEST_F(SyncContextProxyImplTest, TypeDisconnectsFirst) {
-  scoped_ptr<ModelTypeProcessorImpl> themes_sync_proxy(
-      new ModelTypeProcessorImpl(syncer::THEMES,
-                                 base::WeakPtr<ModelTypeStore>()));
-  themes_sync_proxy->Enable(GetProxy());
+  scoped_ptr<SharedModelTypeProcessor> processor = CreateModelTypeProcessor();
+  Start(processor.get());
 
   base::RunLoop run_loop_;
   run_loop_.RunUntilIdle();
 
-  EXPECT_TRUE(themes_sync_proxy->IsConnected());
-  themes_sync_proxy.reset();
+  EXPECT_TRUE(processor->IsConnected());
+  processor.reset();
 }
 
 // Tests the case where the sync thread shuts down first.
 TEST_F(SyncContextProxyImplTest, SyncDisconnectsFirst) {
-  scoped_ptr<ModelTypeProcessorImpl> themes_sync_proxy(
-      new ModelTypeProcessorImpl(syncer::THEMES,
-                                 base::WeakPtr<ModelTypeStore>()));
-  themes_sync_proxy->Enable(GetProxy());
+  scoped_ptr<SharedModelTypeProcessor> processor = CreateModelTypeProcessor();
+  Start(processor.get());
 
   base::RunLoop run_loop_;
   run_loop_.RunUntilIdle();
 
-  EXPECT_TRUE(themes_sync_proxy->IsConnected());
+  EXPECT_TRUE(processor->IsConnected());
   DisableSync();
 }
 

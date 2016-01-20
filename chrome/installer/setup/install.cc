@@ -26,7 +26,6 @@
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/update_active_setup_version_work_item.h"
-#include "chrome/installer/util/auto_launch_util.h"
 #include "chrome/installer/util/beacons.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
@@ -70,7 +69,10 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
     case ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH:
       message.append("Quick Launch ");
       break;
-    case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR:
+    case ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT:
+      message.append("Start menu ");
+      break;
+    case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED:
       message.append("Start menu/" +
                      base::UTF16ToUTF8(dist->GetStartMenuShortcutSubfolder(
                                      BrowserDistribution::SUBFOLDER_CHROME)) +
@@ -101,11 +103,6 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
   if (properties.pin_to_taskbar &&
       base::win::GetVersion() >= base::win::VERSION_WIN7) {
     message.append(" and pinning to the taskbar");
-  }
-
-  if (properties.pin_to_start &&
-      base::win::GetVersion() >= base::win::VERSION_WIN10) {
-    message.append(" and pinning to Start");
   }
 
   message.push_back('.');
@@ -340,7 +337,6 @@ void CreateOrUpdateShortcuts(
   bool do_not_create_desktop_shortcut = false;
   bool do_not_create_quick_launch_shortcut = false;
   bool do_not_create_taskbar_shortcut = false;
-  bool do_not_create_start_pin = false;
   bool alternate_desktop_shortcut = false;
   prefs.GetBool(master_preferences::kDoNotCreateDesktopShortcut,
                 &do_not_create_desktop_shortcut);
@@ -348,8 +344,6 @@ void CreateOrUpdateShortcuts(
                 &do_not_create_quick_launch_shortcut);
   prefs.GetBool(master_preferences::kDoNotCreateTaskbarShortcut,
                 &do_not_create_taskbar_shortcut);
-  prefs.GetBool(master_preferences::kDoNotCreateStartPin,
-                &do_not_create_start_pin);
   prefs.GetBool(master_preferences::kAltShortcutText,
                 &alternate_desktop_shortcut);
 
@@ -383,20 +377,21 @@ void CreateOrUpdateShortcuts(
 
   if (!do_not_create_desktop_shortcut ||
       shortcut_operation == ShellUtil::SHELL_SHORTCUT_REPLACE_EXISTING) {
+    const base::string16 alternate_shortcut_name =
+        dist->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME_ALTERNATE);
+
     ShellUtil::ShortcutProperties desktop_properties(base_properties);
-    if (alternate_desktop_shortcut) {
-      desktop_properties.set_shortcut_name(
-          dist->GetShortcutName(
-              BrowserDistribution::SHORTCUT_CHROME_ALTERNATE));
-    }
+    if (alternate_desktop_shortcut && !alternate_shortcut_name.empty())
+      desktop_properties.set_shortcut_name(alternate_shortcut_name);
     ExecuteAndLogShortcutOperation(
         ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist, desktop_properties,
         shortcut_operation);
 
     // On update there is no harm in always trying to update the alternate
-    // Desktop shortcut.
+    // Desktop shortcut (if it exists for this distribution).
     if (!alternate_desktop_shortcut &&
-        shortcut_operation == ShellUtil::SHELL_SHORTCUT_REPLACE_EXISTING) {
+        shortcut_operation == ShellUtil::SHELL_SHORTCUT_REPLACE_EXISTING &&
+        !alternate_shortcut_name.empty()) {
       desktop_properties.set_shortcut_name(
           dist->GetShortcutName(
               BrowserDistribution::SHORTCUT_CHROME_ALTERNATE));
@@ -427,12 +422,25 @@ void CreateOrUpdateShortcuts(
       shortcut_operation ==
           ShellUtil::SHELL_SHORTCUT_CREATE_IF_NO_SYSTEM_LEVEL) {
     start_menu_properties.set_pin_to_taskbar(!do_not_create_taskbar_shortcut);
-    // Disabled for now. TODO(gab): Remove this and the associated code if it
-    // remains disabled long term.
-    start_menu_properties.set_pin_to_start(false);
   }
+
+  // The attempt below to update the stortcut will fail if it does not already
+  // exist at the expected location on disk.  First check if it exists in the
+  // previous location (under a subdirectory) and, if so, move it to the new
+  // location.
+  base::FilePath old_shortcut_path;
+  ShellUtil::GetShortcutPath(
+      ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED, dist,
+      shortcut_level, &old_shortcut_path);
+  if (base::PathExists(old_shortcut_path)) {
+    ShellUtil::MoveExistingShortcut(
+        ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,
+        ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT,
+        dist, start_menu_properties);
+  }
+
   ExecuteAndLogShortcutOperation(
-      ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR, dist,
+      ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT, dist,
       start_menu_properties, shortcut_operation);
 }
 
@@ -561,22 +569,6 @@ InstallStatus InstallOrUpdateProduct(
 
       RegisterChromeOnMachine(installer_state, *chrome_product,
           make_chrome_default || force_chrome_default_for_user);
-
-      // Configure auto-launch.
-      if (result == FIRST_INSTALL_SUCCESS) {
-        installer_state.UpdateStage(installer::CONFIGURE_AUTO_LAUNCH);
-
-        // Add auto-launch key if specified in master_preferences.
-        bool auto_launch_chrome = false;
-        prefs.GetBool(
-            installer::master_preferences::kAutoLaunchChrome,
-            &auto_launch_chrome);
-        if (auto_launch_chrome) {
-          auto_launch_util::EnableForegroundStartAtLogin(
-              base::ASCIIToUTF16(chrome::kInitialProfile),
-              installer_state.target_path());
-        }
-      }
 
       if (!installer_state.system_install()) {
         DCHECK_EQ(chrome_product->distribution(),

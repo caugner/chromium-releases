@@ -73,7 +73,7 @@ class ScriptCallback {
 void ScriptCallback::ResultCallback(const base::Value* result) {
   if (result)
     result_.reset(result->DeepCopy());
-  base::MessageLoop::current()->Quit();
+  base::MessageLoop::current()->QuitWhenIdle();
 }
 
 // Monitors if any task is processed by the message loop.
@@ -193,9 +193,7 @@ bool AreAllSitesIsolatedForTesting() {
 }
 
 void IsolateAllSitesForTesting(base::CommandLine* command_line) {
-  EXPECT_TRUE(SiteIsolationPolicy::IsolateAllSitesForTesting())
-      << "IsolateAllSitesForTesting() called after "
-      << "SiteIsolationPolicy was already used";
+  command_line->AppendSwitch(switches::kSitePerProcess);
 }
 
 MessageLoopRunner::MessageLoopRunner()

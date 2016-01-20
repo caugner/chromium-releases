@@ -53,6 +53,12 @@ if [[ -z "$LLVM_DOWNLOAD_GOLD_PLUGIN" ]]; then
   LLVM_DOWNLOAD_GOLD_PLUGIN=
 fi
 
+if [[ "${OS}" == "Linux" ]] && \
+   [[ "$GYP_DEFINES" =~ .*buildtype=Official.* ]] && \
+   [[ "$GYP_DEFINES" =~ .*branding=Chrome.* ]] ; then
+  # LLVM Gold plugin is required to build with this configuration.
+  LLVM_DOWNLOAD_GOLD_PLUGIN=1
+fi
 
 # Die if any command dies, error on undefined variable expansions.
 set -eu
@@ -235,7 +241,10 @@ if [[ -f "${STAMP_FILE}" ]]; then
        [[ "${PREVIOUSLY_BUILT_REVISON}" = \
           "${PACKAGE_VERSION}" ]]; then
     echo "Clang already at ${PACKAGE_VERSION}"
-    exit 0
+    if [[ -z "${LLVM_DOWNLOAD_GOLD_PLUGIN}" ]] || \
+       [[ -f "${LLVM_BUILD_DIR}/lib/LLVMgold.so" ]]; then
+      exit 0
+    fi
   fi
 fi
 # To always force a new build if someone interrupts their build half way.
@@ -580,16 +589,18 @@ strip ${STRIP_FLAGS} bin/clang
 popd
 
 # Build compiler-rt out-of-tree.
+# Do a clobbered build due to cmake changes.
+rm -rf "${COMPILER_RT_BUILD_DIR}"
 mkdir -p "${COMPILER_RT_BUILD_DIR}"
 pushd "${COMPILER_RT_BUILD_DIR}"
 
 rm -fv CMakeCache.txt
-MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
+MACOSX_DEPLOYMENT_TARGET=${deployment_target} CC="" CXX="" cmake -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DLLVM_ENABLE_THREADS=OFF \
-    -DCMAKE_C_COMPILER="${CC}" \
-    -DCMAKE_CXX_COMPILER="${CXX}" \
+    -DCMAKE_C_COMPILER="${ABS_LLVM_BUILD_DIR}/bin/clang" \
+    -DCMAKE_CXX_COMPILER="${ABS_LLVM_BUILD_DIR}/bin/clang++" \
     -DSANITIZER_MIN_OSX_VERSION="10.7" \
     -DLLVM_CONFIG_PATH="${ABS_LLVM_BUILD_DIR}/bin/llvm-config" \
     "${ABS_COMPILER_RT_DIR}"
@@ -620,6 +631,14 @@ if [[ -n "${with_android}" ]]; then
       --stl=stlport \
       --toolchain=arm-linux-androideabi-4.9
 
+  # Do the same for arm64.
+  ${ANDROID_NDK_DIR}/build/tools/make-standalone-toolchain.sh \
+      --platform=android-21 \
+      --install-dir="${LLVM_BUILD_DIR}/android-toolchain-aarch64" \
+      --system=linux-x86_64 \
+      --stl=stlport \
+      --toolchain=aarch64-linux-android-4.9
+
   # Do the same for x86.
   ${ANDROID_NDK_DIR}/build/tools/make-standalone-toolchain.sh \
       --platform=android-19 \
@@ -628,7 +647,7 @@ if [[ -n "${with_android}" ]]; then
       --stl=stlport \
       --toolchain=x86-4.9
 
-  for target_arch in "arm" "i686"; do
+  for target_arch in "aarch64" "arm" "i686"; do
     # Android NDK r9d copies a broken unwind.h into the toolchain, see
     # http://crbug.com/357890
     rm -v "${LLVM_BUILD_DIR}"/android-toolchain-${target_arch}/include/c++/*/unwind.h

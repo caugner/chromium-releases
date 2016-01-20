@@ -41,7 +41,7 @@ TEST(DisplayListRasterSourceTest, AnalyzeIsSolidUnscaled) {
   // Ensure everything is solid.
   for (int y = 0; y <= 300; y += 100) {
     for (int x = 0; x <= 300; x += 100) {
-      RasterSource::SolidColorAnalysis analysis;
+      DisplayListRasterSource::SolidColorAnalysis analysis;
       gfx::Rect rect(x, y, 100, 100);
       raster->PerformSolidColorAnalysis(rect, 1.0, &analysis);
       EXPECT_TRUE(analysis.is_solid_color) << rect.ToString();
@@ -56,7 +56,7 @@ TEST(DisplayListRasterSourceTest, AnalyzeIsSolidUnscaled) {
   raster = DisplayListRasterSource::CreateFromDisplayListRecordingSource(
       recording_source.get(), false);
 
-  RasterSource::SolidColorAnalysis analysis;
+  DisplayListRasterSource::SolidColorAnalysis analysis;
   raster->PerformSolidColorAnalysis(gfx::Rect(0, 0, 100, 100), 1.0, &analysis);
   EXPECT_FALSE(analysis.is_solid_color);
 
@@ -110,7 +110,7 @@ TEST(DisplayListRasterSourceTest, AnalyzeIsSolidScaled) {
   // Ensure everything is solid.
   for (int y = 0; y <= 30; y += 10) {
     for (int x = 0; x <= 30; x += 10) {
-      RasterSource::SolidColorAnalysis analysis;
+      DisplayListRasterSource::SolidColorAnalysis analysis;
       gfx::Rect rect(x, y, 10, 10);
       raster->PerformSolidColorAnalysis(rect, 0.1f, &analysis);
       EXPECT_TRUE(analysis.is_solid_color) << rect.ToString();
@@ -125,7 +125,7 @@ TEST(DisplayListRasterSourceTest, AnalyzeIsSolidScaled) {
   raster = DisplayListRasterSource::CreateFromDisplayListRecordingSource(
       recording_source.get(), false);
 
-  RasterSource::SolidColorAnalysis analysis;
+  DisplayListRasterSource::SolidColorAnalysis analysis;
   raster->PerformSolidColorAnalysis(gfx::Rect(0, 0, 10, 10), 0.1f, &analysis);
   EXPECT_FALSE(analysis.is_solid_color);
 
@@ -160,7 +160,7 @@ TEST(DisplayListRasterSourceTest, AnalyzeIsSolidEmpty) {
   scoped_refptr<DisplayListRasterSource> raster =
       DisplayListRasterSource::CreateFromDisplayListRecordingSource(
           recording_source.get(), false);
-  RasterSource::SolidColorAnalysis analysis;
+  DisplayListRasterSource::SolidColorAnalysis analysis;
   EXPECT_FALSE(analysis.is_solid_color);
 
   raster->PerformSolidColorAnalysis(gfx::Rect(0, 0, 400, 400), 1.f, &analysis);
@@ -201,42 +201,34 @@ TEST(DisplayListRasterSourceTest, PixelRefIteratorDiscardableRefsOneTile) {
 
   // Tile sized iterators. These should find only one pixel ref.
   {
-    std::vector<PositionImage> images;
-    raster->GetDiscardableImagesInRect(gfx::Rect(0, 0, 256, 256), &images);
+    std::vector<DrawImage> images;
+    raster->GetDiscardableImagesInRect(gfx::Rect(0, 0, 256, 256), 1.f, &images);
     EXPECT_EQ(1u, images.size());
-    EXPECT_EQ(discardable_image[0][0].get(), images[0].image);
-    EXPECT_EQ(gfx::RectF(32, 32).ToString(),
-              gfx::SkRectToRectF(images[0].image_rect).ToString());
+    EXPECT_EQ(discardable_image[0][0].get(), images[0].image());
   }
   // Shifted tile sized iterators. These should find only one pixel ref.
   {
-    std::vector<PositionImage> images;
-    raster->GetDiscardableImagesInRect(gfx::Rect(260, 260, 256, 256), &images);
+    std::vector<DrawImage> images;
+    raster->GetDiscardableImagesInRect(gfx::Rect(260, 260, 256, 256), 1.f,
+                                       &images);
     EXPECT_EQ(1u, images.size());
-    EXPECT_EQ(discardable_image[1][1].get(), images[0].image);
-    EXPECT_EQ(gfx::RectF(260, 260, 32, 32).ToString(),
-              gfx::SkRectToRectF(images[0].image_rect).ToString());
+    EXPECT_EQ(discardable_image[1][1].get(), images[0].image());
   }
   // Ensure there's no discardable pixel refs in the empty cell
   {
-    std::vector<PositionImage> images;
-    raster->GetDiscardableImagesInRect(gfx::Rect(0, 256, 256, 256), &images);
+    std::vector<DrawImage> images;
+    raster->GetDiscardableImagesInRect(gfx::Rect(0, 256, 256, 256), 1.f,
+                                       &images);
     EXPECT_EQ(0u, images.size());
   }
   // Layer sized iterators. These should find three pixel ref.
   {
-    std::vector<PositionImage> images;
-    raster->GetDiscardableImagesInRect(gfx::Rect(0, 0, 512, 512), &images);
+    std::vector<DrawImage> images;
+    raster->GetDiscardableImagesInRect(gfx::Rect(0, 0, 512, 512), 1.f, &images);
     EXPECT_EQ(3u, images.size());
-    EXPECT_EQ(discardable_image[0][0].get(), images[0].image);
-    EXPECT_EQ(discardable_image[0][1].get(), images[1].image);
-    EXPECT_EQ(discardable_image[1][1].get(), images[2].image);
-    EXPECT_EQ(gfx::RectF(32, 32).ToString(),
-              gfx::SkRectToRectF(images[0].image_rect).ToString());
-    EXPECT_EQ(gfx::RectF(260, 0, 32, 32).ToString(),
-              gfx::SkRectToRectF(images[1].image_rect).ToString());
-    EXPECT_EQ(gfx::RectF(260, 260, 32, 32).ToString(),
-              gfx::SkRectToRectF(images[2].image_rect).ToString());
+    EXPECT_EQ(discardable_image[0][0].get(), images[0].image());
+    EXPECT_EQ(discardable_image[0][1].get(), images[1].image());
+    EXPECT_EQ(discardable_image[1][1].get(), images[2].image());
   }
 }
 
@@ -362,7 +354,7 @@ TEST(DisplayListRasterSourceTest, RasterPartialContents) {
                                              black_paint);
   recording_source->Rerecord();
 
-  // Make a new RasterSource from the new recording.
+  // Make a new DisplayListRasterSource from the new recording.
   raster = DisplayListRasterSource::CreateFromDisplayListRecordingSource(
       recording_source.get(), false);
 
@@ -464,7 +456,7 @@ TEST(DisplayListRasterSourceTest, RasterPartialClear) {
                                                    white_paint);
   recording_source_light->Rerecord();
 
-  // Make a new RasterSource from the new recording.
+  // Make a new DisplayListRasterSource from the new recording.
   raster = DisplayListRasterSource::CreateFromDisplayListRecordingSource(
       recording_source_light.get(), false);
 

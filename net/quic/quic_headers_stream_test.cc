@@ -10,6 +10,7 @@
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/reliable_quic_stream_peer.h"
+#include "net/spdy/spdy_alt_svc_wire_format.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,6 +19,8 @@ using base::StringPiece;
 using std::ostream;
 using std::string;
 using std::vector;
+using testing::ElementsAre;
+using testing::InSequence;
 using testing::Invoke;
 using testing::StrictMock;
 using testing::WithArgs;
@@ -26,6 +29,9 @@ using testing::_;
 namespace net {
 namespace test {
 namespace {
+
+// TODO(ckrasic):  this workaround is due to absence of std::initializer_list
+const bool kFins[] = {false, true};
 
 class MockVisitor : public SpdyFramerVisitorInterface {
  public:
@@ -38,6 +44,9 @@ class MockVisitor : public SpdyFramerVisitorInterface {
                                        size_t len,
                                        bool fin));
   MOCK_METHOD2(OnStreamPadding, void(SpdyStreamId stream_id, size_t len));
+  MOCK_METHOD1(OnHeaderFrameStart,
+               SpdyHeadersHandlerInterface*(SpdyStreamId stream_id));
+  MOCK_METHOD2(OnHeaderFrameEnd, void(SpdyStreamId stream_id, bool end));
   MOCK_METHOD3(OnControlFrameHeaderData, bool(SpdyStreamId stream_id,
                                               const char* header_data,
                                               size_t len));
@@ -110,8 +119,9 @@ vector<TestParams> GetTestParams() {
 class QuicHeadersStreamTest : public ::testing::TestWithParam<TestParams> {
  public:
   QuicHeadersStreamTest()
-      : connection_(
-            new StrictMock<MockConnection>(perspective(), GetVersion())),
+      : connection_(new StrictMock<MockConnection>(&helper_,
+                                                   perspective(),
+                                                   GetVersion())),
         session_(connection_),
         headers_stream_(QuicSpdySessionPeer::GetHeadersStream(&session_)),
         body_("hello world"),
@@ -124,6 +134,7 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<TestParams> {
     EXPECT_EQ(version(), session_.connection()->version());
     EXPECT_TRUE(headers_stream_ != nullptr);
     VLOG(1) << GetParam();
+    connection_->AdvanceTime(QuicTime::Delta::FromMilliseconds(1));
   }
 
   QuicConsumedData SaveIov(const QuicIOVector& data) {
@@ -169,7 +180,6 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<TestParams> {
       EXPECT_CALL(visitor_, OnHeaders(stream_id, kHasPriority, priority,
                                       /*parent_stream_id=*/0,
                                       /*exclusive=*/false,
-
                                       fin, kFrameComplete));
     } else {
       EXPECT_CALL(visitor_,
@@ -194,11 +204,9 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<TestParams> {
 
   void CheckHeaders() {
     SpdyHeaderBlock headers;
-    EXPECT_EQ(saved_header_data_.length(),
-              framer_.ParseHeaderBlockInBuffer(saved_header_data_.data(),
-                                               saved_header_data_.length(),
-                                               &headers));
-    EXPECT_TRUE(CompareSpdyHeaderBlocks(headers_, headers));
+    EXPECT_TRUE(framer_.ParseHeaderBlockInBuffer(
+        saved_header_data_.data(), saved_header_data_.length(), &headers));
+    EXPECT_EQ(headers_, headers);
     saved_header_data_.clear();
   }
 
@@ -219,6 +227,7 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<TestParams> {
   static const bool kFrameComplete = true;
   static const bool kHasPriority = true;
 
+  MockConnectionHelper helper_;
   StrictMock<MockConnection>* connection_;
   StrictMock<MockQuicSpdySession> session_;
   QuicHeadersStream* headers_stream_;
@@ -246,8 +255,7 @@ TEST_P(QuicHeadersStreamTest, EffectivePriority) {
 TEST_P(QuicHeadersStreamTest, WriteHeaders) {
   for (QuicStreamId stream_id = kClientDataStreamId1;
        stream_id < kClientDataStreamId3; stream_id += 2) {
-    for (int count = 0; count < 2; ++count) {
-      bool fin = (count == 0);
+    for (bool fin : kFins) {
       if (perspective() == Perspective::IS_SERVER) {
         WriteHeadersAndExpectSynReply(stream_id, fin);
       } else {
@@ -263,8 +271,7 @@ TEST_P(QuicHeadersStreamTest, WriteHeaders) {
 TEST_P(QuicHeadersStreamTest, ProcessRawData) {
   for (QuicStreamId stream_id = kClientDataStreamId1;
        stream_id < kClientDataStreamId3; stream_id += 2) {
-    for (int count = 0; count < 2; ++count) {
-      bool fin = (count == 0);
+    for (bool fin : kFins) {
       for (QuicPriority priority = 0; priority < 7; ++priority) {
         // Replace with "WriteHeadersAndSaveData"
         scoped_ptr<SpdySerializedFrame> frame;
@@ -296,6 +303,83 @@ TEST_P(QuicHeadersStreamTest, ProcessRawData) {
   }
 }
 
+TEST_P(QuicHeadersStreamTest, EmptyHeaderHOLBlockedTime) {
+  EXPECT_CALL(session_, OnHeadersHeadOfLineBlocking(_)).Times(0);
+  testing::InSequence seq;
+  bool fin = true;
+  for (int stream_num = 0; stream_num < 10; stream_num++) {
+    QuicStreamId stream_id = QuicClientDataStreamId(stream_num);
+    // Replace with "WriteHeadersAndSaveData"
+    scoped_ptr<SpdySerializedFrame> frame;
+    if (perspective() == Perspective::IS_SERVER) {
+      SpdyHeadersIR headers_frame(stream_id);
+      headers_frame.set_header_block(headers_);
+      headers_frame.set_fin(fin);
+      headers_frame.set_has_priority(true);
+      frame.reset(framer_.SerializeFrame(headers_frame));
+      EXPECT_CALL(session_, OnStreamHeadersPriority(stream_id, 0));
+    } else {
+      SpdyHeadersIR headers_frame(stream_id);
+      headers_frame.set_header_block(headers_);
+      headers_frame.set_fin(fin);
+      frame.reset(framer_.SerializeFrame(headers_frame));
+    }
+    EXPECT_CALL(session_, OnStreamHeaders(stream_id, _));
+    EXPECT_CALL(session_,
+                OnStreamHeadersComplete(stream_id, fin, frame->size()));
+    stream_frame_.data = StringPiece(frame->data(), frame->size());
+    headers_stream_->OnStreamFrame(stream_frame_);
+    connection_->AdvanceTime(QuicTime::Delta::FromMilliseconds(1));
+    stream_frame_.offset += frame->size();
+  }
+}
+
+TEST_P(QuicHeadersStreamTest, NonEmptyHeaderHOLBlockedTime) {
+  QuicStreamId stream_id;
+  bool fin = true;
+  QuicStreamFrame stream_frames[10];
+  scoped_ptr<SpdySerializedFrame> frames[10];
+  // First create all the frames in order
+  {
+    InSequence seq;
+    for (int stream_num = 0; stream_num < 10; ++stream_num) {
+      stream_id = QuicClientDataStreamId(stream_num);
+      if (perspective() == Perspective::IS_SERVER) {
+        SpdyHeadersIR headers_frame(stream_id);
+        headers_frame.set_header_block(headers_);
+        headers_frame.set_fin(fin);
+        headers_frame.set_has_priority(true);
+        frames[stream_num].reset(framer_.SerializeFrame(headers_frame));
+        EXPECT_CALL(session_, OnStreamHeadersPriority(stream_id, 0)).Times(1);
+      } else {
+        SpdyHeadersIR headers_frame(stream_id);
+        headers_frame.set_header_block(headers_);
+        headers_frame.set_fin(fin);
+        frames[stream_num].reset(framer_.SerializeFrame(headers_frame));
+      }
+      stream_frames[stream_num] = stream_frame_;
+      stream_frames[stream_num].data =
+          StringPiece(frames[stream_num]->data(), frames[stream_num]->size());
+      DVLOG(1) << "make frame for stream " << stream_num << " offset "
+               << stream_frames[stream_num].offset;
+      stream_frame_.offset += frames[stream_num]->size();
+      EXPECT_CALL(session_, OnStreamHeaders(stream_id, _)).Times(1);
+      EXPECT_CALL(session_, OnStreamHeadersComplete(stream_id, fin, _))
+          .Times(1);
+    }
+  }
+
+  // Actually writing the frames in reverse order will cause HOL blocking.
+  EXPECT_CALL(session_, OnHeadersHeadOfLineBlocking(_)).Times(9);
+
+  for (int stream_num = 9; stream_num >= 0; --stream_num) {
+    DVLOG(1) << "OnStreamFrame for stream " << stream_num << " offset "
+             << stream_frames[stream_num].offset;
+    headers_stream_->OnStreamFrame(stream_frames[stream_num]);
+    connection_->AdvanceTime(QuicTime::Delta::FromMilliseconds(1));
+  }
+}
+
 TEST_P(QuicHeadersStreamTest, ProcessLargeRawData) {
   // We want to create a frame that is more than the SPDY Framer's max control
   // frame size, which is 16K, but less than the HPACK decoders max decode
@@ -305,8 +389,7 @@ TEST_P(QuicHeadersStreamTest, ProcessLargeRawData) {
   headers_["key2"] = string(1 << 13, '.');
   for (QuicStreamId stream_id = kClientDataStreamId1;
        stream_id < kClientDataStreamId3; stream_id += 2) {
-    for (int count = 0; count < 2; ++count) {
-      bool fin = (count == 0);
+    for (bool fin : kFins) {
       for (QuicPriority priority = 0; priority < 7; ++priority) {
         // Replace with "WriteHeadersAndSaveData"
         scoped_ptr<SpdySerializedFrame> frame;
@@ -359,7 +442,7 @@ TEST_P(QuicHeadersStreamTest, ProcessSpdyDataFrame) {
 }
 
 TEST_P(QuicHeadersStreamTest, ProcessSpdyRstStreamFrame) {
-  SpdyRstStreamIR data(2, RST_STREAM_PROTOCOL_ERROR, "");
+  SpdyRstStreamIR data(2, RST_STREAM_PROTOCOL_ERROR);
   scoped_ptr<SpdySerializedFrame> frame(framer_.SerializeFrame(data));
   EXPECT_CALL(*connection_,
               SendConnectionCloseWithDetails(

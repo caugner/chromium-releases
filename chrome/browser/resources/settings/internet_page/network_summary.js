@@ -59,6 +59,16 @@ Polymer({
 
   properties: {
     /**
+     * Highest priority connected network or null.
+     * @type {?CrOnc.NetworkStateProperties}
+     */
+    defaultNetwork: {
+      type: Object,
+      value: null,
+      notify: true
+    },
+
+    /**
      * The device state for each network device type.
      * @type {DeviceStateObject}
      */
@@ -83,7 +93,7 @@ Polymer({
     networkStateLists: {
       type: Object,
       value: function() { return {}; },
-    }
+    },
   },
 
   /**
@@ -154,7 +164,8 @@ Polymer({
    * @private
    */
   onWiFiExpanded_: function(event) {
-    this.getNetworkStates_();  // Get the latest network states (only).
+    // Get the latest network states (only).
+    this.getNetworkStates_();
     if (event.detail.expanded)
       chrome.networkingPrivate.requestNetworkScan();
   },
@@ -166,7 +177,7 @@ Polymer({
    */
   onSelected_: function(event) {
     var state = event.detail;
-    if (state.ConnectionState == CrOnc.ConnectionState.NOT_CONNECTED) {
+    if (this.canConnect_(state)) {
       this.connectToNetwork_(state);
       return;
     }
@@ -208,27 +219,48 @@ Polymer({
     networkIds.forEach(function(id) {
       if (id in this.networkIds_) {
         chrome.networkingPrivate.getState(
-            id,
-            function(state) {
-              if (chrome.runtime.lastError) {
-                if (chrome.runtime.lastError.message !=
-                    'Error.NetworkUnavailable') {
-                  console.error('Unexpected networkingPrivate.getState error:',
-                                chrome.runtime.lastError, 'For:', id);
-                }
-                return;
-              }
-              // Async call, ensure id still exists.
-              if (!this.networkIds_[id])
-                return;
-              if (!state) {
-                this.networkIds_[id] = undefined;
-                return;
-              }
-              this.updateNetworkState_(state.Type, state);
-            }.bind(this));
+            id, this.getStateCallback_.bind(this, id));
       }
     }, this);
+  },
+
+  /**
+   * Determines whether or not a network state can be connected to.
+   * @param {!CrOnc.NetworkStateProperties} state The network state.
+   * @private
+   */
+  canConnect_: function(state) {
+    if (state.Type == CrOnc.Type.ETHERNET ||
+        state.Type == CrOnc.Type.VPN && !this.defaultNetwork) {
+      return false;
+    }
+    return state.ConnectionState == CrOnc.ConnectionState.NOT_CONNECTED;
+  },
+
+  /**
+   * networkingPrivate.getState event callback.
+   * @param {string} id The id of the requested state.
+   * @param {!chrome.networkingPrivate.NetworkStateProperties} state
+   * @private
+   */
+  getStateCallback_: function(id, state) {
+    if (chrome.runtime.lastError) {
+      var message = chrome.runtime.lastError.message;
+      if (message != 'Error.NetworkUnavailable') {
+        console.error(
+            'Unexpected networkingPrivate.getState error: ' + message +
+            ' For: ' + id);
+      }
+      return;
+    }
+    // Async call, ensure id still exists.
+    if (!this.networkIds_[id])
+      return;
+    if (!state) {
+      this.networkIds_[id] = undefined;
+      return;
+    }
+    this.updateNetworkState_(state.Type, state);
   },
 
   /**
@@ -239,10 +271,13 @@ Polymer({
    */
   connectToNetwork_: function(state) {
     chrome.networkingPrivate.startConnect(state.GUID, function() {
-      if (chrome.runtime.lastError &&
-          chrome.runtime.lastError != 'connecting') {
-        console.error('Unexpected networkingPrivate.startConnect error:',
-                      chrome.runtime.lastError);
+      if (chrome.runtime.lastError) {
+        var message = chrome.runtime.lastError.message;
+        if (message != 'connecting') {
+          console.error(
+              'Unexpected networkingPrivate.startConnect error: ' + message +
+              'For: ' + state.GUID);
+        }
       }
     });
   },
@@ -256,47 +291,50 @@ Polymer({
   getNetworkLists_: function() {
     // First get the device states.
     chrome.networkingPrivate.getDeviceStates(
-      function(states) {
-        this.getDeviceStatesCallback_(states);
+      function(deviceStates) {
         // Second get the network states.
-        this.getNetworkStates_();
+        this.getNetworkStates_(deviceStates);
       }.bind(this));
   },
 
   /**
    * Requests the list of network states from Chrome. Updates networkStates and
    * networkStateLists once the results are returned from Chrome.
+   * @param {!Array<!DeviceStateProperties>=} opt_deviceStates
+   *     Optional list of state properties for all available devices.
    * @private
    */
-  getNetworkStates_: function() {
+  getNetworkStates_: function(opt_deviceStates) {
     var filter = {
       networkType: chrome.networkingPrivate.NetworkType.ALL,
       visible: true,
       configured: false
     };
-    chrome.networkingPrivate.getNetworks(
-        filter, this.getNetworksCallback_.bind(this));
+    chrome.networkingPrivate.getNetworks(filter, function(networkStates) {
+      this.updateNetworkStates_(networkStates, opt_deviceStates);
+    }.bind(this));
   },
 
   /**
-   * networkingPrivate.getDeviceStates callback.
-   * @param {!Array<!DeviceStateProperties>} states The state properties for all
-   *     available devices.
+   * Called after network states are received from getNetworks.
+   * @param {!Array<!CrOnc.NetworkStateProperties>} networkStates The state
+   *     properties for all visible networks.
+   * @param {!Array<!DeviceStateProperties>=} opt_deviceStates
+   *     Optional list of state properties for all available devices. If not
+   *     defined the existing list of device states will be used.
    * @private
    */
-  getDeviceStatesCallback_: function(states) {
-    var newStates = /** @type {!DeviceStateObject} */({});
-    states.forEach(function(state) { newStates[state.Type] = state; });
-    this.deviceStates = newStates;
-  },
+  updateNetworkStates_: function(networkStates, opt_deviceStates) {
+    var newDeviceStates;
+    if (opt_deviceStates) {
+      newDeviceStates = /** @type {!DeviceStateObject} */({});
+      opt_deviceStates.forEach(function(state) {
+        newDeviceStates[state.Type] = state;
+      });
+    } else {
+      newDeviceStates = this.deviceStates;
+    }
 
-  /**
-   * networkingPrivate.getNetworksState callback.
-   * @param {!Array<!CrOnc.NetworkStateProperties>} states The state properties
-   *     for all visible networks.
-   * @private
-   */
-  getNetworksCallback_: function(states) {
     // Clear any current networks.
     this.networkIds_ = {};
 
@@ -312,21 +350,28 @@ Polymer({
       VPN: []
     };
 
-    states.forEach(function(state) {
+    var firstConnectedNetwork = null;
+    networkStates.forEach(function(state) {
       var type = state.Type;
       if (!foundTypes[type]) {
         foundTypes[type] = true;
         this.updateNetworkState_(type, state);
+        if (!firstConnectedNetwork && state.Type != CrOnc.Type.VPN &&
+            state.ConnectionState == CrOnc.ConnectionState.CONNECTED) {
+          firstConnectedNetwork = state;
+        }
       }
       networkStateLists[type].push(state);
     }, this);
+
+    this.defaultNetwork = firstConnectedNetwork;
 
     // Set any types with a deviceState and no network to a default state,
     // and any types not found to undefined.
     NETWORK_TYPES.forEach(function(type) {
       if (!foundTypes[type]) {
         var defaultState = undefined;
-        if (this.deviceStates[type])
+        if (newDeviceStates[type])
           defaultState = {GUID: '', Type: type};
         this.updateNetworkState_(type, defaultState);
       }
@@ -336,9 +381,13 @@ Polymer({
 
     // Create a VPN entry in deviceStates if there are any VPN networks.
     if (networkStateLists.VPN && networkStateLists.VPN.length > 0) {
-      var vpn = {Type: CrOnc.Type.VPN, State: 'Enabled'};
-      this.set('deviceStates.VPN', vpn);
+      newDeviceStates.VPN = /** @type {DeviceStateProperties} */ ({
+        Type: CrOnc.Type.VPN,
+        State: chrome.networkingPrivate.DeviceStateType.ENABLED
+      });
     }
+
+    this.deviceStates = newDeviceStates;
   },
 
   /**

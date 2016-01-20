@@ -35,6 +35,12 @@ class MediaRouterIntegrationBrowserTest : public MediaRouterBaseBrowserTest {
   void ChooseSink(content::WebContents* web_contents,
                   const std::string& sink_name);
 
+  // Checks that the request initiated from |web_contents| to start session
+  // failed with expected |error_name| and |error_message_substring|.
+  void CheckStartFailed(content::WebContents* web_contents,
+                        const std::string& error_name,
+                        const std::string& error_message_substring);
+
   // Execute javascript and check the return value.
   static void ExecuteJavaScriptAPI(content::WebContents* web_contents,
                             const std::string& script);
@@ -46,10 +52,17 @@ class MediaRouterIntegrationBrowserTest : public MediaRouterBaseBrowserTest {
   static std::string ExecuteScriptAndExtractString(
       const content::ToRenderFrameHost& adapter, const std::string& script);
 
+  void ClickDialog();
+
   // Get the chrome modal dialog.
   // |web_contents|: The web contents of the test page which invokes the popup
   //                 dialog.
   content::WebContents* GetMRDialog(content::WebContents* web_contents);
+
+  // Checks that the chrome modal dialog does not exist.
+  bool IsDialogClosed(content::WebContents* web_contents);
+  void WaitUntilDialogClosed(content::WebContents* web_contents);
+  void CheckDialogRemainsOpen(content::WebContents* web_contents);
 
   void OpenTestPage(base::FilePath::StringPieceType file);
   void OpenTestPageInNewTab(base::FilePath::StringPieceType file);
@@ -76,6 +89,16 @@ class MediaRouterIntegrationBrowserTest : public MediaRouterBaseBrowserTest {
   // Wait for the route to show up in the UI with a timeout. Fails if the
   // route did not show up before the timeout.
   void WaitUntilRouteCreated();
+
+  // Wait until there is an issue showing in the UI.
+  void WaitUntilIssue();
+
+  // Returns true if there is an issue showing in the UI.
+  bool IsUIShowingIssue();
+
+  // Returns the title of issue showing in UI. It is an error to call this if
+  // there are no issues showing in UI.
+  std::string GetIssueTitle();
 
  private:
   // Get the full path of the resource file.

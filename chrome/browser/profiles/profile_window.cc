@@ -19,20 +19,21 @@
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
 #include "chrome/browser/ui/user_manager.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/common/signin_pref_names.h"
+#include "components/signin/core/common/signin_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 
@@ -93,7 +94,12 @@ class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
   void OnBrowserAdded(Browser* browser) override {
     if (browser->profile() == profile_) {
       BrowserList::RemoveObserver(this);
-      callback_.Run(profile_, Profile::CREATE_STATUS_INITIALIZED);
+      // By the time the browser is added a tab (or multiple) are about to be
+      // added. Post the callback to the message loop so it gets executed after
+      // the tabs are created.
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(callback_, profile_, Profile::CREATE_STATUS_INITIALIZED));
       base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     }
   }
@@ -296,7 +302,7 @@ void SwitchToProfile(const base::FilePath& path,
                  false,
                  desktop_type),
       base::string16(),
-      base::string16(),
+      std::string(),
       std::string());
 }
 
@@ -314,7 +320,7 @@ void SwitchToGuestProfile(chrome::HostDesktopType desktop_type,
                  false,
                  desktop_type),
       base::string16(),
-      base::string16(),
+      std::string(),
       std::string());
 }
 #endif
@@ -335,8 +341,7 @@ void CreateAndSwitchToNewProfile(chrome::HostDesktopType desktop_type,
   int placeholder_avatar_index = profiles::GetPlaceholderAvatarIndex();
   ProfileManager::CreateMultiProfileAsync(
       cache.ChooseNameForNewProfile(placeholder_avatar_index),
-      base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(
-          placeholder_avatar_index)),
+      profiles::GetDefaultAvatarIconUrl(placeholder_avatar_index),
       base::Bind(&OpenBrowserWindowForProfile,
                  callback,
                  true,
@@ -439,7 +444,7 @@ void CreateSystemProfileForUserManager(
                  profile_open_action,
                  callback),
       base::string16(),
-      base::string16(),
+      std::string(),
       std::string());
 }
 
@@ -462,25 +467,23 @@ void EnableNewProfileManagementPreview(Profile* profile) {
 #else
   // TODO(rogerta): instead of setting experiment flags and command line
   // args, we should set a profile preference.
-  const about_flags::Experiment experiment = {
+  const about_flags::FeatureEntry entry = {
       kNewProfileManagementExperimentInternalName,
       0,  // string id for title of experiment
       0,  // string id for description of experiment
       0,  // supported platforms
-      about_flags::Experiment::ENABLE_DISABLE_VALUE,
+      about_flags::FeatureEntry::ENABLE_DISABLE_VALUE,
       switches::kEnableNewProfileManagement,
       "",  // not used with ENABLE_DISABLE_VALUE type
       switches::kDisableNewProfileManagement,
-      "",  // not used with ENABLE_DISABLE_VALUE type
-      NULL,  // not used with ENABLE_DISABLE_VALUE type
-      3
-  };
+      "",       // not used with ENABLE_DISABLE_VALUE type
+      nullptr,  // not used with ENABLE_DISABLE_VALUE type
+      nullptr,  // not used with ENABLE_DISABLE_VALUE type
+      3};
   flags_ui::PrefServiceFlagsStorage flags_storage(
       g_browser_process->local_state());
-  about_flags::SetExperimentEnabled(
-      &flags_storage,
-      experiment.NameForChoice(1),
-      true);
+  about_flags::SetFeatureEntryEnabled(&flags_storage, entry.NameForChoice(1),
+                                      true);
 
   switches::EnableNewProfileManagementForTesting(
       base::CommandLine::ForCurrentProcess());
@@ -494,7 +497,7 @@ void EnableNewProfileManagementPreview(Profile* profile) {
 void DisableNewProfileManagementPreview(Profile* profile) {
   flags_ui::PrefServiceFlagsStorage flags_storage(
       g_browser_process->local_state());
-  about_flags::SetExperimentEnabled(
+  about_flags::SetFeatureEntryEnabled(
       &flags_storage,
       kNewProfileManagementExperimentInternalName,
       false);

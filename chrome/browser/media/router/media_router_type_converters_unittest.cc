@@ -11,14 +11,12 @@
 namespace media_router {
 
 TEST(MediaRouterTypeConvertersTest, ConvertMediaSink) {
-  MediaSink expected_media_sink("sinkId1", "Sink 1", MediaSink::IconType::CAST,
-                                true);
+  MediaSink expected_media_sink("sinkId1", "Sink 1", MediaSink::IconType::CAST);
   interfaces::MediaSinkPtr mojo_sink(interfaces::MediaSink::New());
   mojo_sink->sink_id = "sinkId1";
   mojo_sink->name = "Sink 1";
   mojo_sink->icon_type =
       media_router::interfaces::MediaSink::IconType::ICON_TYPE_CAST;
-  mojo_sink->is_launching = true;
 
   MediaSink media_sink = mojo::TypeConverter<
       media_router::MediaSink,
@@ -29,7 +27,6 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaSink) {
   EXPECT_EQ(expected_media_sink.id(), media_sink.id());
   EXPECT_EQ(expected_media_sink.icon_type(), media_sink.icon_type());
   EXPECT_EQ(expected_media_sink.icon_type(), media_sink.icon_type());
-  EXPECT_EQ(expected_media_sink.is_launching(), media_sink.is_launching());
   EXPECT_TRUE(expected_media_sink.Equals(media_sink));
 }
 
@@ -41,6 +38,10 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaSinkIconType) {
   EXPECT_EQ(media_router::MediaSink::CAST_AUDIO,
       mojo::SinkIconTypeFromMojo(
           media_router::interfaces::MediaSink::IconType::ICON_TYPE_CAST_AUDIO));
+  EXPECT_EQ(media_router::MediaSink::CAST_AUDIO_GROUP,
+      mojo::SinkIconTypeFromMojo(
+          media_router::interfaces::MediaSink::
+              IconType::ICON_TYPE_CAST_AUDIO_GROUP));
   EXPECT_EQ(media_router::MediaSink::GENERIC,
       mojo::SinkIconTypeFromMojo(
           media_router::interfaces::MediaSink::IconType::ICON_TYPE_GENERIC));
@@ -53,6 +54,9 @@ TEST(MediaRouterTypeConvertersTest, ConvertMediaSinkIconType) {
       mojo::SinkIconTypeToMojo(media_router::MediaSink::CAST));
   EXPECT_EQ(media_router::interfaces::MediaSink::IconType::ICON_TYPE_CAST_AUDIO,
       mojo::SinkIconTypeToMojo(media_router::MediaSink::CAST_AUDIO));
+  EXPECT_EQ(media_router::interfaces::MediaSink::
+      IconType::ICON_TYPE_CAST_AUDIO_GROUP,
+      mojo::SinkIconTypeToMojo(media_router::MediaSink::CAST_AUDIO_GROUP));
   EXPECT_EQ(media_router::interfaces::MediaSink::IconType::ICON_TYPE_GENERIC,
       mojo::SinkIconTypeToMojo(media_router::MediaSink::GENERIC));
   EXPECT_EQ(media_router::interfaces::MediaSink::IconType::ICON_TYPE_HANGOUT,

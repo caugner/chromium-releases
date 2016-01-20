@@ -28,10 +28,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
-#include "chrome/common/pref_names.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/drive_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
@@ -39,6 +39,7 @@
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
 #include "components/metrics/stability_metrics_helper.h"
+#include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
 #include "components/omnibox/browser/omnibox_metrics_provider.h"
 #include "components/variations/variations_associated_data.h"
@@ -65,7 +66,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
-#include "chrome/browser/metrics/signin_status_metrics_provider_chromeos.h"
+#include "chrome/browser/signin/signin_status_metrics_provider_chromeos.h"
 #endif
 
 #if defined(OS_WIN)
@@ -75,7 +76,8 @@
 #endif
 
 #if !defined(OS_CHROMEOS)
-#include "chrome/browser/metrics/signin_status_metrics_provider.h"
+#include "chrome/browser/signin/chrome_signin_status_metrics_provider_delegate.h"
+#include "components/signin/core/browser/signin_status_metrics_provider.h"
 #endif  // !defined(OS_CHROMEOS)
 
 namespace {
@@ -165,9 +167,6 @@ scoped_ptr<ChromeMetricsServiceClient> ChromeMetricsServiceClient::Create(
 
 // static
 void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterInt64Pref(prefs::kUninstallLastLaunchTimeSec, 0);
-  registry->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
-
   metrics::MetricsService::RegisterPrefs(registry);
   metrics::StabilityMetricsHelper::RegisterPrefs(registry);
 
@@ -178,6 +177,10 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
 #if defined(ENABLE_PLUGINS)
   PluginMetricsProvider::RegisterPrefs(registry);
 #endif  // defined(ENABLE_PLUGINS)
+}
+
+metrics::MetricsService* ChromeMetricsServiceClient::GetMetricsService() {
+  return metrics_service_.get();
 }
 
 void ChromeMetricsServiceClient::SetMetricsClientId(
@@ -277,7 +280,7 @@ base::string16 ChromeMetricsServiceClient::GetRegistryBackupKey() {
 #endif
 }
 
-void ChromeMetricsServiceClient::LogPluginLoadingError(
+void ChromeMetricsServiceClient::OnPluginLoadingError(
     const base::FilePath& plugin_path) {
 #if defined(ENABLE_PLUGINS)
   plugin_metrics_provider_->LogPluginLoadingError(plugin_path);
@@ -320,6 +323,9 @@ void ChromeMetricsServiceClient::Initialize() {
           g_browser_process->local_state())));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider));
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(
+          new metrics::ScreenInfoMetricsProvider));
 
   drive_metrics_provider_ = new metrics::DriveMetricsProvider(
       content::BrowserThread::GetMessageLoopProxyForThread(
@@ -348,25 +354,11 @@ void ChromeMetricsServiceClient::Initialize() {
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(google_update_metrics_provider_));
 
-  // Report exit funnels for canary and dev only.
-  bool report_exit_funnels = false;
-  switch (chrome::GetChannel()) {
-    case version_info::Channel::CANARY:
-    case version_info::Channel::DEV:
-      report_exit_funnels = true;
-      break;
-    case version_info::Channel::UNKNOWN:
-    case version_info::Channel::BETA:
-    case version_info::Channel::STABLE:
-      // report_exit_funnels was initialized to the right value above.
-      DCHECK(!report_exit_funnels);
-      break;
-  }
-
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
           new browser_watcher::WatcherMetricsProviderWin(
-              chrome::kBrowserExitCodesRegistryPath, report_exit_funnels)));
+              chrome::kBrowserExitCodesRegistryPath,
+              content::BrowserThread::GetBlockingPool())));
 #endif  // defined(OS_WIN)
 
 #if defined(ENABLE_PLUGINS)
@@ -392,7 +384,8 @@ void ChromeMetricsServiceClient::Initialize() {
 #if !defined(OS_CHROMEOS)
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
-          SigninStatusMetricsProvider::CreateInstance()));
+          SigninStatusMetricsProvider::CreateInstance(
+              make_scoped_ptr(new ChromeSigninStatusMetricsProviderDelegate))));
 #endif  // !defined(OS_CHROMEOS)
 
   // Clear stability metrics if it is the first time cellular upload logic

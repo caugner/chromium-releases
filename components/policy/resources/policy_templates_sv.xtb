@@ -64,11 +64,9 @@
 
           Policyn används bara om policyn DefaultSearchProviderEnabled är aktiverad.</translation>
 <translation id="1265053460044691532">Begränsa tiden som en användare som verifierats via SAML kan logga in offline</translation>
-<translation id="1283072268083088623">Policyn anger vilka scheman för HTTP-autentisering som stöds  <ph name="PRODUCT_NAME" />.
+<translation id="1291880496936992484">Varning: RC4 kommer att helt tas bort från <ph name="PRODUCT_NAME" /> efter version 52 (kring september 2016) och den här principen upphör då att fungera.
 
-          Möjliga värden är basic, digest, ntlm och negotiate. Avgränsa värdena med komma.
-
-          Om policyn inte anges används alla fyra.</translation>
+      Om principen inte har ställts in eller är inställd på falskt kommer RC4-krypteringssviter inte att aktiveras. Principen kan ställas in som sant om kompatibilitet med en föråldrad server önskas bibehållas. Detta är en nödlösning, och servern bör omkonfigureras.</translation>
 <translation id="1297182715641689552">Använd en PAC-proxyskript</translation>
 <translation id="1300635491585192248">Förutsäg nätverksåtgärder i ett nätverk som inte
           är ett mobilnätverk</translation>
@@ -106,6 +104,7 @@
 <translation id="1426410128494586442">Ja</translation>
 <translation id="1427655258943162134">Proxyserverns adress eller webbadress</translation>
 <translation id="1435659902881071157">Nätverkskonfiguration på enhetsnivå</translation>
+<translation id="1445397020763995734">Kontotyp för HTTP Negotiate-autentisering</translation>
 <translation id="1454846751303307294">Policyn gör att du kan ställa in en lista med webbadressmönster som anger webbplatser som inte får köra JavaScript.
 
           Om policyn inte anges används det globala standardvärdet för alla webbplatser. Standardvärdet hämtas från policyn DefaultJavaScriptSetting om den har ställts in. Annars används användarens personliga konfiguration.</translation>
@@ -173,6 +172,15 @@
       Om policyn inte ställs in visas inga användarvillkor.
 
       Den här policyn ska ställas in på en webbadress som <ph name="PRODUCT_OS_NAME" /> kan ladda ned användarvillkoren från. Användarvillkoren måste vara oformaterad text av MIME-typ. Ingen kod får användas.</translation>
+<translation id="1757339646969878244">Konfigurera alternativ för fjärråtkomst i värden för Chrome Remote Desktop.
+
+      Värden för Chrome Remote Desktop är en inbyggd tjänst som körs på målenheten
+      och som en användare kan ansluta till via appen Chrome Remote Desktop.
+      Den inbyggda tjänsten paketeras och körs åtskilt från
+      webbläsaren <ph name="PRODUCT_NAME" />.
+
+      Dessa principer ignoreras om värden
+      för Chrome Remote Desktop inte har installerats.</translation>
 <translation id="1757688868319862958">Tillåter att <ph name="PRODUCT_NAME" /> kör pluginprogram som kräver auktorisering.
 
       Om du aktiverar den här inställningen kan pluginprogram som inte är föråldrade alltid köras.
@@ -230,7 +238,6 @@
 
           Fler alternativ och detaljerade exempel finns på:
           <ph name="PROXY_HELP_URL" /></translation>
-<translation id="1948757837129151165">Policy för HTTP-autentisering</translation>
 <translation id="1956493342242507974">Konfigurera  energihanteringen på inloggningsskärmen i <ph name="PRODUCT_OS_NAME" />.
 
       Med den här principen kan du konfigurera hur <ph name="PRODUCT_OS_NAME" /> ska fungera om inte användaren gör något under en viss tid när inloggningsskärmen visas. Den här principen styr flera inställningar. Deras enskilda semantik och värdeintervaller finns i motsvarande principer som styr energihanteringen under en session. Det här är enda avvikelserna från dessa principer:
@@ -250,6 +257,11 @@
 <translation id="2006530844219044261">Energibesparing (DPMS)</translation>
 <translation id="201557587962247231">Frekvens för antal uppladdningar av statusrapport för enhet</translation>
 <translation id="2030905906517501646">Sökord för standardsökleverantör</translation>
+<translation id="206623763829450685">Anger vilka scheman för HTTP-autentisering som stöds av <ph name="PRODUCT_NAME" />.
+
+          Möjliga värden är basic, digest, ntlm och negotiate. Avgränsa värdena med komma.
+
+          Om principen inte anges används alla fyra.</translation>
 <translation id="2067011586099792101">Blockera åtkomst till webbplatser utanför innehållspaket</translation>
 <translation id="2077129598763517140">Använd maskinvaruacceleration när det är tillgängligt</translation>
 <translation id="2077273864382355561">Skärmavstängningstid när enheten drivs av batteriet</translation>
@@ -465,7 +477,6 @@
 <translation id="2592091433672667839">Inaktivitetstid innan skärmsläckaren visas på inloggningsskärmen i återförsäljarläge</translation>
 <translation id="2623014935069176671">Vänta på inledande användaraktivitet</translation>
 <translation id="262740370354162807">Aktivera sändning av dokument till <ph name="CLOUD_PRINT_NAME" /></translation>
-<translation id="2629448496147630947">Konfigurera alternativ för fjärråtkomst i <ph name="PRODUCT_NAME" />. Dessa funktioner ignoreras om inte webbappen för fjärråtkomst har installerats.</translation>
 <translation id="2633084400146331575">Aktivera talad feedback.</translation>
 <translation id="2646290749315461919">Policyn gör att du kan ställa in om webbplatser får spåra användarnas fysiska plats. Att spåra användarnas fysiska plats kan vara tillåtet som standard, inte tillåtet som standard eller användaren kan bli tillfrågad varje gång en webbplats efterfrågar den fysiska platsen.
 
@@ -522,6 +533,9 @@
       Om du aktiverar eller inaktiverar den här inställningen kan användarna inte ändra eller åsidosätta inställningen ”Aktivera skydd mot lösenordsfiske och skadlig programvara” i <ph name="PRODUCT_NAME" />.
 
       Om den här principen inte anges är den aktiverad, men användarna kan ändra den.</translation>
+<translation id="2801230735743888564">Tillåt användare att spela påskäggsspelet med dinosaurier när enheten är offline.
+
+      Om den här principen är inställd på falskt kommer användare inte att kunna spela påskäggsspelet med dinosaurier när enheten är offline. Om principen är inställd på sant kommer användare att kunna spela dinosauriespelet. Om principen inte tillämpas kommer användare inte att kunna spela påskäggsspelet med dinosaurier på Chrome OS med registrering, men kan spela det under andra omständigheter.</translation>
 <translation id="2805707493867224476">Tillåt alla webbplatser att visa popup-fönster</translation>
 <translation id="2808013382476173118">Policyn gör att STUN-servrar kan användas när fjärrklienter försöker upprätta en anslutning till den här datorn.
 
@@ -592,6 +606,38 @@
       Om du aktiverar inställningen kommer autentiseringssidor för en infångstportal (dvs. alla webbsidor som startar från en inloggningssida för en infångstportal tills <ph name="PRODUCT_NAME" /> kan identifiera en lyckad internetanslutning) att visas i ett separat fönster och ignorera alla policyinställningar och begränsningar för den aktuella användaren.
 
       Om du inaktiverar inställningen eller inte anger den kommer autentiseringssidor för infångstportaler att visas på en (vanlig) ny flik i webbläsaren med den aktuella användarens proxyinställningar.</translation>
+<translation id="3001569025430882724">Åsidosätter skrivarens standardurvalsregler för <ph name="PRODUCT_NAME" />.
+
+      Genom denna princip fastställs reglerna för valet av standardskrivare i <ph name="PRODUCT_NAME" />, vilket sker första gången som utskriftsfunktionen används av en profil.
+
+      När den här principen är inställd försöker <ph name="PRODUCT_NAME" /> hitta en skrivare som uppfyller alla de angivna attributen och välja denna som standardskrivare. Den första skrivare som hittas och överensstämmer med principen är den som väljs. Om matchningen inte är unik väljs en skrivare ut som uppfyller attributen efter den ordning i vilken skrivarna hittades.
+
+      Om denna princip inte ställs in eller om ingen skrivare som uppfyller attributen hittas innan tidsfristen löper ut ställs den inbyggda PDF-skrivaren in som standardskrivare. Om en PDF-skrivare inte finns tillgänglig väljs ingen skrivare.
+
+      Värdet analyseras som ett JSON-objekt enligt följande schema:
+      {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "Huruvida sökningen efter en skrivare som uppfyller attributen ska begränsas till en specifik uppsättning av skrivare.",
+            "type": {
+              "enum": [ "local", "cloud" ]
+            }
+          },
+          "idPattern": {
+            "description": "Reguljärt uttryck som ska överensstämma med skrivar-id.",
+            "type": "string"
+          },
+          "namePattern": {
+            "description": "Reguljärt uttryck som ska överensstämma med skrivarens visningsnamn.",
+            "type": "string"
+          }
+        }
+      }
+
+      Skrivare som är anslutna till Google Cloud Print betraktas som moln medan övriga skrivare klassificeras som lokala.
+      Om ett fält utelämnas innebär det att alla värden överensstämmer. Om till exempel anslutningen inte anges hittar förhandsgranskningen alla typer av skrivare, såväl lokala skrivare som sådana i moln.
+      Reguljära uttryck måste följa JavaScript RegExp-syntaxen. Träffar är skiftlägeskänsliga.</translation>
 <translation id="3021409116652377124">Inaktivera plugin-sökaren</translation>
 <translation id="3030000825273123558">Aktivera statistikrapportering</translation>
 <translation id="3034580675120919256">Policyn gör att du kan ange om webbplatser får köra JavaScript. Du kan tillåta JavaScript på alla webbplatser eller blockera JavaScript på alla webbplatser.
@@ -606,6 +652,11 @@
 <translation id="3067188277482006117">Om den är inställd på sant kan användaren, genom att använda maskinvaran i Chrome-enheten, fjärrattestera sin identitet i sekretessinställningarna CA via API:et Enterprise Platform Keys – chrome.enterprise.platformKeysPrivate.challengeUserKey().
 
           Om den är inställd på falskt, eller om den saknar inställning, fungerar inte anslutningen till API:et och en felkod att visas.</translation>
+<translation id="3069958900488014740">Tillåter att WPAD-optimering (Web Proxy Auto-Discovery) inaktiveras för <ph name="PRODUCT_NAME" />.
+
+      Om principen är inställd på falskt är WPAD-optimeringen inaktiverad, vilket innebär att <ph name="PRODUCT_NAME" /> får vänta längre på DNS-baserade WPAD-servrar. Om principen inte har konfigurerats eller har aktiverats är WPAD-optimeringen aktiverad.
+
+      Oavsett om eller hur principen har konfigurerats kan inte WPAD-optimeringen ändras av användare.</translation>
 <translation id="3072045631333522102">Skärmsläckare att använda på inloggningsskärmen i återförsäljarläge</translation>
 <translation id="3072847235228302527">Ange användarvillkor för ett lokalt enhetskonto</translation>
 <translation id="3096595567015595053">Lista med aktiverade plugin-program</translation>
@@ -916,8 +967,6 @@
           Den här policyn följs endast om policyn DefaultSearchProviderEnabled är aktiverad.</translation>
 <translation id="4320376026953250541">Microsoft Windows XP SP2 eller senare</translation>
 <translation id="4325690621216251241">Lägg till en utloggningsknapp i systemfältet</translation>
-<translation id="4337944790873898250">Om principen är inställd på sant kommer <ph name="PRODUCT_NAME" /> ovillkorligen första gången den körs att maximera det först visade fönstret.
-      Om principen är inställd på falskt eller inte konfigurerad kommer en heuristisk metod att användas för att avgöra om det först visade fönstret ska maximeras utifrån skärmstorleken.</translation>
 <translation id="4349746760316962317">Konfigurerar vilken katalog som ska användas för cachelagrade filer i <ph name="PRODUCT_NAME" />.
 
       Om principen har ställts in används den angivna katalogen i <ph name="PRODUCT_NAME" /> oavsett om användaren har angett flaggan --disk-cache-dir eller inte.
@@ -1076,6 +1125,11 @@
 <translation id="4962195944157514011">Policyn anger webbadressen till sökmotorn som används för standardsökning. Webbadressen ska innehålla strängen <ph name="SEARCH_TERM_MARKER" />, som ersätts av användarens sökord när sökningen utförs.
 
           Alternativet måste anges om policyn DefaultSearchProviderEnabled är aktiverad och används bara om så är fallet.</translation>
+<translation id="4971529314808359013">Med den här principen kan du ange en lista med webbadressmönster som anger för vilka webbplatser <ph name="PRODUCT_NAME" /> ska välja ett klientcertifikat automatiskt, om webbplatsen kräver ett certifikat.
+
+          Värdet måste vara JSON-ordlistor i strängformat i en matris. Varje ordlista måste ha formen { "pattern": "$URL_PATTERN", "filter" : $FILTER }, där $URL_PATTERN är ett innehållsinställningsmönster. $FILTER begränsar vilka klientcertifikat webbläsaren automatiskt väljer mellan. Oavsett vilket filter som används väljs bara certifikat som matchar serverns certifikatbegäran. Om $FILTER har formen { "ISSUER": { "CN": "$ISSUER_CN" } } är det dessutom endast klientcertifikat som har skapats av ett certifikat med CommonName $ISSUER_CN som väljs. Om $FILTER är en tom ordlista {} begränsas inte valet av klientcertifikat ytterligare.
+
+          Om principen inte anges görs inga automatiska val för någon webbplats.</translation>
 <translation id="4980301635509504364">Tillåta eller neka videoinspelning.
 
       Om detta alternativ är aktiverat eller inte konfigurerat (standard), kommer användaren att bli tillfrågad om
@@ -1117,6 +1171,7 @@
       En lista med variabler som kan användas finns på https://www.chromium.org/administrators/policy-list-3/user-data-directory-variables.
 
       Om principen inte har ställts in används profilens standardsökväg och användaren kan åsidosätta den med kommandoradsflaggan --user-data-dir.</translation>
+<translation id="5130288486815037971">Om RC4-krypteringssviter i TLS är aktiverade eller inte</translation>
 <translation id="5141670636904227950">Ange standardtypen för skärmförstoraren på inloggningsskärmen</translation>
 <translation id="5142301680741828703">Rendera alltid följande webbadressmönster i <ph name="PRODUCT_FRAME_NAME" /></translation>
 <translation id="5148753489738115745">Innebär att du kan ange ytterligare parametrar som används när <ph name="PRODUCT_FRAME_NAME" /> startar <ph name="PRODUCT_NAME" />.
@@ -1264,22 +1319,6 @@
       Om du tillämpar den här policyn kan inte användarna ändra eller förbigå den.
 
       Om policyn inte tillämpas kan användarna välja om de vill att hyllan ska döljas automatiskt.</translation>
-<translation id="5573397331902180200">Anger en eller flera rekommenderade språkkoder för en offentlig session så att användare enkelt kan använda någon av dessa språkkoder.
-
-      Användaren kan välja en språkkod och en tangentbordslayout innan en offentlig session startas. Som standard anges alla språkkoder som stöds av <ph name="PRODUCT_OS_NAME" /> i alfabetisk ordning. Du kan använda den här policyn för att flytta flera rekommenderade språkkoder högst upp i listan.
-
-      Om policyn inte är inställd kommer den aktuella språkkoden för gränssnittet att vara förvald.
-
-      Om policyn är inställd kommer de rekommenderade språkkoderna att flyttas högst upp i listan och separeras visuellt från alla andra språkkoder. De rekommenderade språkkoderna anges i den ordning de visas i policyn. Den första rekommenderade språkkoden är förvald.
-
-      Om det finns mer än en rekommenderad språkkod antas användarna kunna välja mellan dessa. Valet av språkkod och tangentbordslayout erbjuds när en offentlig session startas. I annat fall antas att de flesta användare använder den förvalda språkkoden. Valet av språkkod och tangentbordslayout erbjuds inte på ett lika framträdande sätt när en offentlig session startas.
-
-      När den här policyn är inställd och automatisk inloggning aktiverad (mer information finns i policyerna |DeviceLocalAccountAutoLoginId| och |DeviceLocalAccountAutoLoginDelay|) används den första rekommenderade språkkoden och den populäraste tangentbordslayouten som matchar språkkoden i den offentliga sessionen som startade automatiskt.
-
-      Den förvalda tangentbordslayouten är alltid den populäraste layouten som överensstämmer med den förvalda språkkoden.
-
-      Den här policyn kan endast ställas in som rekommenderad. Du kan använda policyn för att flytta flera rekommenderade språkkoder högst upp, men användare kan alltid välja en språkkod som stöds av <ph name="PRODUCT_OS_NAME" /> för sessionen.
-      </translation>
 <translation id="557658534286111200">Aktiverar eller inaktiverar bokmärkesredigering</translation>
 <translation id="5586942249556966598">Gör ingenting</translation>
 <translation id="5630352020869108293">Återställ den senaste sessionen</translation>
@@ -1303,11 +1342,17 @@
 
       Om ingen inställning görs för principen eller om den har värdet falskt använder <ph name="PRODUCT_NAME" /> de befintliga inställningarna för kontroller för återkallning online.</translation>
 <translation id="5732972008943405952">Importera formuläruppgifter för Autofyll från standardwebbläsaren första gången den körs</translation>
+<translation id="5751004203256768694">Anger kontotypen för konton som tillhandahålls av Androids autentiseringsapp som har stöd för autentisering av HTTP Negotiate (t.ex. Kerberos-autentisering). Informationen ska vara tillgänglig från leverantören av autentiseringsappen. Mer information finns på https://goo.gl/hajyfN.
+
+          Om inställningen inte anges är HTTP Negotiate-autentisering inaktiverat på Android.</translation>
 <translation id="5761030451068906335">Konfigurerar proxyinställningarna för <ph name="PRODUCT_NAME" />. Använd inte policyn. Den är inte redo ännu.</translation>
 <translation id="5765780083710877561">Beskrivning:</translation>
 <translation id="5770738360657678870">Kanal för utvecklare (kan vara instabil)</translation>
 <translation id="5774856474228476867">Sökadress för standardsökleverantör</translation>
 <translation id="5776485039795852974">Fråga varje gång en webbplats försöker visa aviseringar på skrivbordet</translation>
+<translation id="5781412041848781654">Anger vilket GSSAPI-bibliotek som ska användas för HTTP-autentisering. Du kan ange bara ett biblioteksnamn eller en fullständig sökväg.
+
+          Om ingen inställning anges använder <ph name="PRODUCT_NAME" /> ett standardbiblioteksnamn.</translation>
 <translation id="5781806558783210276">Anger efter hur lång tid utan åtgärd från användaren som inaktivitietsåtgärden vidtas när enheten drivs av batteriet.
 
           När den här policyn är inställd anger den hur länge användaren måste vara inaktiv innan inaktivitetsåtgärden vidtas av <ph name="PRODUCT_OS_NAME" />. Inaktivitetsåtgärden kan ställas in separat.
@@ -1430,6 +1475,7 @@
           Det rekommenderade sättet att låsa skärmen vid inaktivitet är att aktivera skärmlåsning när appen skickas till bakgrunden och sätta <ph name="PRODUCT_OS_NAME" /> i viloläge efter en viss tids inaktivitet. Den här policyn bör endast användas när du vill att skärmen ska låsas mycket tidigare än viloläget startas eller när du inte vill att appen ska skickas till bakgrunden vid inaktivitet.
 
           Policyvärdet ska anges i millisekunder. Värdena har skurits ned så att de är mindre än fördröjningen innan viloläget.</translation>
+<translation id="6111936128861357925">Tillåt påskäggsspelet med dinosaurier</translation>
 <translation id="6114416803310251055">föråldrad</translation>
 <translation id="6145799962557135888">Policyn gör att du kan ange en lista med webbadressmönster som anger webbplatser som får köra JavaScript.
 
@@ -1866,6 +1912,7 @@
 <translation id="7443616896860707393">Frågor vid korsursprungs-HTTP med basauktorisering</translation>
 <translation id="7468416082528382842">Windows-registerplats:</translation>
 <translation id="7469554574977894907">Aktivera sökförslag</translation>
+<translation id="7485481791539008776">Skrivarens standardurvalsregler</translation>
 <translation id="749556411189861380">Rapportera versionsinformation om operativsystem och fast programvara på registrerade enheter.
 
       Om ingen inställning görs eller om principen anges som True kommer versionsinformation om operativsystemet och den fasta programvaran regelbundet att skickas från registrerade enheter. Om principen anges som False kommer versionsinformationen inte att skickas.</translation>
@@ -1886,7 +1933,6 @@
       Om inget värde har angetts används standardstorleken och användaren kan åsidosätta den med flaggan --disk-cache-size.</translation>
 <translation id="7612157962821894603">Flaggor som gäller hela systemet och som ska tillämpas vid start av <ph name="PRODUCT_NAME" /></translation>
 <translation id="7614663184588396421">Lista över inaktiverade protokollscheman</translation>
-<translation id="7615123397791876280">Kontotyp för Negotiate-autentisering</translation>
 <translation id="7625444193696794922">Policyn anger vilken versionskanal som enheten ska låsas till.</translation>
 <translation id="7632724434767231364">GSSAPI-biblioteksnamn</translation>
 <translation id="7635471475589566552">Policyn konfigurerar appens språkversion i <ph name="PRODUCT_NAME" /> och förhindrar att användarna ändrar språk.
@@ -1924,6 +1970,22 @@
 
           Om inställningen inaktiveras eller inte anges så kommer tvåstegsverifiering inte att aktiveras och standardfunktionen med en användardefinierad PIN-kod kommer att användas.</translation>
 <translation id="7750991880413385988">Öppna sidan Ny flik</translation>
+<translation id="7761526206824804472">Anger en eller flera rekommenderade språkkoder för en offentlig session så att användare enkelt kan använda någon av dessa språkkoder.
+
+      Användaren kan välja en språkkod och en tangentbordslayout innan en offentlig session startas. Som standard anges alla språkkoder som stöds av <ph name="PRODUCT_OS_NAME" /> i alfabetisk ordning. Du kan använda den här principen för att flytta flera rekommenderade språkkoder högst upp i listan.
+
+      Om principen inte är inställd kommer den aktuella språkkoden för gränssnittet att vara förvald.
+
+      Om principen är inställd kommer de rekommenderade språkkoderna att flyttas högst upp i listan och separeras visuellt från alla andra språkkoder. De rekommenderade språkkoderna anges i den ordning de visas i principen. Den första rekommenderade språkkoden är förvald.
+
+      Om det finns mer än en rekommenderad språkkod antas användarna kunna välja mellan dessa. Valet av språkkod och tangentbordslayout erbjuds på ett framträdande sätt när en offentlig session startas. I annat fall antas att de flesta användare använder den förvalda språkkoden. Valet av språkkod och tangentbordslayout erbjuds inte på ett lika framträdande sätt när en offentlig session startas.
+
+      När den här principen är inställd och automatisk inloggning aktiverad (mer information finns i principerna |DeviceLocalAccountAutoLoginId| och |DeviceLocalAccountAutoLoginDelay|) används den första rekommenderade språkkoden och den populäraste tangentbordslayouten som matchar språkkoden i den offentliga sessionen som startade automatiskt.
+
+      Den förvalda tangentbordslayouten är alltid den populäraste layouten som överensstämmer med den förvalda språkkoden.
+
+      Den här principen kan endast ställas in som rekommenderad. Du kan använda principen för att flytta flera rekommenderade språkkoder högst upp, men användare kan alltid välja en språkkod som stöds av <ph name="PRODUCT_OS_NAME" /> för sessionen.
+      </translation>
 <translation id="7763311235717725977">Policyn gör att du kan ställa in om webbplatser får visa bilder. Bildvisning kan tillåtas för alla webbplatser eller nekas för alla webbplatser.
 
           Om du inte ställer in policyn används AllowImages och inställningen kan ändras av användaren.</translation>
@@ -1951,9 +2013,6 @@
 <translation id="7848840259379156480">Innebär att du kan konfigurera standardrenderare för HTML när <ph name="PRODUCT_FRAME_NAME" /> är installerat.
       Standardinställningen är att låta värdwebbläsaren utföra renderingen, men du
       kan välja att åsidosätta detta och låta <ph name="PRODUCT_FRAME_NAME" /> rendera HTML-sidor som standard.</translation>
-<translation id="7880891067740158163">Policyn gör att du kan ange en lista med webbadressmönster som anger webbplatser som <ph name="PRODUCT_NAME" /> ska välja klientcertifikat för automatiskt om webbplatsen efterfrågar certifikat.
-
-          Om policyn inte anges görs inget automatiskt val för någon webbplats.</translation>
 <translation id="7882585827992171421">Den här policyn är bara aktiv i återförsäljarläge.
 
       Avgör ID för det tillägg som ska användas som skärmsläckare på inloggningsskärmen. Tillägget måste finnas i det AppPack som är konfigurerat för domänen i policyn DeviceAppPack.</translation>
@@ -1994,12 +2053,6 @@
 
           Om policyn inte har angetts aktiveras inställningen.</translation>
 <translation id="8073243368829195">Tillåter att Smart Lock används</translation>
-<translation id="8079569287249995869">Aktiverar WPAD-optimering i <ph name="PRODUCT_NAME" /> och förhindrar att användarna ändrar inställningen.
-
-      Om principen är aktiverad väntar <ph name="PRODUCT_NAME" /> kortare tid på DNS-baserade WPAD-servrar.
-
-      Om ingen inställning görs för principen är detta aktiverat och kan inte
-      ändras av användaren.</translation>
 <translation id="8099880303030573137">Inaktivitetstid när enheten drivs av batteriet</translation>
 <translation id="8102913158860568230">Standardinställning för medieuppspelning</translation>
 <translation id="8104962233214241919">Välj klientcertifikat automatiskt för dessa webbplatser</translation>
@@ -2057,21 +2110,21 @@
 
       Om den här policyn inte anges görs inga undantag från policyn URLBlacklist.</translation>
 <translation id="8176035528522326671">Tillåt en företagsanvändare att vara enbart primär flerprofilsanvändare (standardbeteendet för företagshanterade användare)</translation>
+<translation id="8191318459035150777">Konfigurerar webbadressen som är standard för startsidan i <ph name="PRODUCT_NAME" /> och förhindrar att användare ändrar den.
+
+          Startsidan är sidan som du öppnar med knappen Startsida. Sidorna som öppnas styrs av principen RestoreOnStartup.
+
+          Startsidans typ kan ställas in på en webbadress som du anger här eller på sidan Ny flik. Om du väljer sidan Ny flik ignoreras den här principen.
+
+          Om du aktiverar den här inställningen kan användarna inte ändra sin startsideadress i <ph name="PRODUCT_NAME" />, men de kan välja sidan Ny flik som startsida.
+
+          Om den här principen inte anges kan användarna själva välja sin startsida, förutsatt att inte HomepageIsNewTabPage har angetts.
+
+          Principen är inte tillgänglig på Windows-instanser som inte är anslutna
+          till en Active Directory-domän.</translation>
 <translation id="8197918588508433925">Policyn specificerar vilka tillägg som får använda API:et för Enterprise Platform Keys – chrome.enterprise.platformKeysPrivate.challengeUserKey() – för fjärrattestering. Tillägg måste anges på den här listan om de ska kunna använda API:et.
 
           Om ett tillägg inte finns med på listan, eller om listan inte har fastställts, kommer anslutningen till API:et att misslyckas och en felkod att visas.</translation>
-<translation id="8211174979203781791">Konfigurerar adressen för standardstartsidan i <ph name="PRODUCT_NAME" /> och förhindrar att användarna ändrar den.
-
-          Startsidan är sidan som du öppnar med knappen Startsida. Sidorna som öppnas vid programstart styrs av principen RestoreOnStartup.
-
-          Startsidan kan antingen vara en webbadress som du anger här eller sidan Ny flik. Om du väljer sidan Ny flik ignoreras den här principen.
-
-          Om du aktiverar den här inställningen kan användarna inte ändra sin startsidesadress i <ph name="PRODUCT_NAME" />, men de kan välja sidan Ny flik som startsida.
-
-          Om inget värde anges för principen kan användaren själv välja sin startsida, förutsatt att HomepageIsNewTabPage inte heller är inställt.
-
-          Denna princip är inte tillgänglig på Windows-instanser som inte är anslutna
-          till en Active Directory-domän.</translation>
 <translation id="8244525275280476362">Längsta fördröjning av hämtning efter en ogiltigförklarad policy</translation>
 <translation id="8256688113167012935">Kontrollerar hur kontonamnet <ph name="PRODUCT_OS_NAME" /> visas på inloggningssidan för motsvarande lokala konto på enheten.
 
@@ -2091,9 +2144,6 @@
 <translation id="8300455783946254851">När inställningen här är Sant inaktiveras Google Drive-synkronisering i appen Filer i <ph name="PRODUCT_OS_NAME" /> när en mobilanslutning används. Data synkroniseras då med Google Drive endast vid anslutning via Wi-Fi eller Ethernet.
 
           Om ingen inställning görs eller om Falskt anges, kan användaren föra över filer till Google Drive via mobilanslutningar.</translation>
-<translation id="8303314579975657113">Policyn anger vilket GSSAPI-bibliotek som ska användas för HTTP-autentisering. Du kan ange bara ett biblioteksnamn eller en fullständig sökväg.
-
-      Om du inte anger något använder <ph name="PRODUCT_NAME" /> ett standardbiblioteksnamn.</translation>
 <translation id="8329984337216493753">Den här policyn är bara aktiv i återförsäljarläge.
 
       När DeviceIdleLogoutTimeout har angetts definierar den här policyn hur länge en varningsruta med nedräkning ska visas för användaren innan utloggningen genomförs.
@@ -2108,9 +2158,6 @@
 <translation id="8369602308428138533">Skärmavstängningstid när enheten är ansluten till elnätet</translation>
 <translation id="8382184662529825177">Aktivera användning av fjärrattestering för innehållsskydd för enheten</translation>
 <translation id="838870586332499308">Aktivera dataroaming</translation>
-<translation id="8407759228138103300">Anger kontotypen för konton som tillhandahålls av Androids autentiseringsapp som har stöd för autentisering av HTTP Negotiate (t.ex. Kerberos-autentisering). Informationen ska vara tillgänglig från leverantören av autentiseringsappen. Mer information finns på https://goo.gl/hajyfN.
-
-          Om inställningen inte anges är Negotiate-autentisering inaktiverat på Android.</translation>
 <translation id="8412312801707973447">Anger huruvida OCSP/CRL-onlinekontroller ska utföras</translation>
 <translation id="8451988835943702790">Använd sidan Ny flik som startsida</translation>
 <translation id="8465065632133292531">Parametrar för webbadress för Instant som använder POST</translation>
@@ -2197,6 +2244,8 @@
           Om du aktiverar inställningen hoppas CNAME-sökningen över och servernamnet som angavs används.
 
           Om du inaktiverar inställningen eller inte anger den avgörs serverns kanoniska namn av en CNAME-sökning.</translation>
+<translation id="8774131509736383471">Om principen är inställd på sant kommer <ph name="PRODUCT_NAME" /> ovillkorligen första gången den körs att maximera det först visade fönstret.
+      Om principen är inställd på falskt eller inte konfigurerad kommer skärmstorleken att avgöra om det först visade fönstret ska maximeras.</translation>
 <translation id="8777120694819070607">Innebär att föråldrade plugin-program kan köras i <ph name="PRODUCT_NAME" />.
 
       Om du aktiverar den här inställningen kan föråldrade plugin-program användas som vanliga plugin-program.
@@ -2274,6 +2323,7 @@
 <translation id="9042911395677044526">Tillåter att en pushad nätverkskonfiguration används per användare på en <ph name="PRODUCT_OS_NAME" />-enhet. Nätverkskonfigurationen är en JSON-formaterad sträng som definieras av formatet för öppen nätverkskonfiguration som beskrivs på <ph name="ONC_SPEC_URL" /></translation>
 <translation id="9084985621503260744">Ange om videoaktivitet påverkar energihanteringen</translation>
 <translation id="9096086085182305205">Vitlista för autentiseringsserver</translation>
+<translation id="9098553063150791878">Princip för HTTP-autentisering</translation>
 <translation id="9104138886225968319">Skicka övervakningspulser till hanteringsservern så att denna kan identifiera om enheten är offline.
 
       Om principen är inställd på sant kommer övervakningspulser att skickas. Om

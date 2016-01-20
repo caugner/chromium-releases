@@ -1167,6 +1167,14 @@ PasswordStoreChangeList PasswordStoreMac::RemoveLoginsSyncedBetweenImpl(
   return changes;
 }
 
+bool PasswordStoreMac::RemoveStatisticsCreatedBetweenImpl(
+    base::Time delete_begin,
+    base::Time delete_end) {
+  return login_metadata_db_ &&
+         login_metadata_db_->stats_table().RemoveStatsBetween(delete_begin,
+                                                              delete_end);
+}
+
 ScopedVector<autofill::PasswordForm> PasswordStoreMac::FillMatchingLogins(
     const autofill::PasswordForm& form,
     AuthorizationPromptPolicy prompt_policy) {
@@ -1257,12 +1265,12 @@ void PasswordStoreMac::RemoveSiteStatsImpl(const GURL& origin_domain) {
     login_metadata_db_->stats_table().RemoveRow(origin_domain);
 }
 
-scoped_ptr<password_manager::InteractionsStats>
+ScopedVector<password_manager::InteractionsStats>
 PasswordStoreMac::GetSiteStatsImpl(const GURL& origin_domain) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   return login_metadata_db_
-             ? login_metadata_db_->stats_table().GetRow(origin_domain)
-             : scoped_ptr<password_manager::InteractionsStats>();
+             ? login_metadata_db_->stats_table().GetRows(origin_domain)
+             : ScopedVector<password_manager::InteractionsStats>();
 }
 
 bool PasswordStoreMac::AddToKeychainIfNecessary(const PasswordForm& form) {

@@ -17,7 +17,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/media/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc_browsertest_common.h"
 #include "chrome/browser/profiles/profile.h"
@@ -68,14 +67,9 @@ static const struct VideoQualityTestConfig {
   { "360p", 640, 360,
     test::kReferenceFileName360p,
     WebRtcTestBase::kAudioVideoCallConstraints360p },
-    // TODO(phoglund): Temporarily disabled on Windows because 720p has become
-    // very, very slow on Windows (550s).
-    // See https://code.google.com/p/webrtc/issues/detail?id=4986.
-#if !defined(OS_WIN)
     { "720p", 1280, 720,
     test::kReferenceFileName720p,
     WebRtcTestBase::kAudioVideoCallConstraints720p },
-#endif
 };
 
 // Test the video quality of the WebRTC output.

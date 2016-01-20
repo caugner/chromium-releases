@@ -36,6 +36,7 @@
 #include "content/public/common/platform_notification_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/notification_types.h"
 #include "ui/message_center/notifier_settings.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "url/url_constants.h"
@@ -60,6 +61,10 @@ using content::PlatformNotificationContext;
 using message_center::NotifierId;
 
 namespace {
+
+// Invalid id for a renderer process. Used in cases where we need to check for
+// permission without having an associated renderer process yet.
+const int kInvalidRenderProcessId = -1;
 
 // Callback to provide when deleting the data associated with persistent Web
 // Notifications from the notification database.
@@ -99,10 +104,27 @@ void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
     BrowserContext* browser_context,
     int64_t persistent_notification_id,
     const GURL& origin,
-    int action_index) const {
+    int action_index) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  content::RecordAction(
-      base::UserMetricsAction("Notifications.Persistent.Clicked"));
+  blink::WebNotificationPermission permission =
+      CheckPermissionOnUIThread(browser_context, origin,
+                                kInvalidRenderProcessId);
+
+  // TODO(peter): Change this to a CHECK() when Issue 555572 is resolved.
+  // Also change this method to be const again.
+  if (permission != blink::WebNotificationPermissionAllowed) {
+    content::RecordAction(base::UserMetricsAction(
+        "Notifications.Persistent.ClickedWithoutPermission"));
+    return;
+  }
+
+  if (action_index == -1) {
+    content::RecordAction(base::UserMetricsAction(
+        "Notifications.Persistent.Clicked"));
+  } else {
+    content::RecordAction(base::UserMetricsAction(
+        "Notifications.Persistent.ClickedActionButton"));
+  }
 
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
@@ -116,10 +138,16 @@ void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
 void PlatformNotificationServiceImpl::OnPersistentNotificationClose(
     BrowserContext* browser_context,
     int64_t persistent_notification_id,
-    const GURL& origin) const {
+    const GURL& origin,
+    bool by_user) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  content::RecordAction(
-      base::UserMetricsAction("Notifications.Persistent.Closed"));
+  if (by_user) {
+    content::RecordAction(base::UserMetricsAction(
+        "Notifications.Persistent.ClosedByUser"));
+  } else {
+    content::RecordAction(base::UserMetricsAction(
+        "Notifications.Persistent.ClosedProgrammatically"));
+  }
 
   PlatformNotificationContext* context =
       BrowserContext::GetStoragePartitionForSite(browser_context, origin)
@@ -362,9 +390,11 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
   // different pixel density. Be smarter about this when the API gets updated
   // with a way for developers to specify images of different resolutions.
   Notification notification(
-      origin, notification_data.title, notification_data.body,
-      gfx::Image::CreateFrom1xBitmap(icon), base::UTF8ToUTF16(origin.host()),
-      notification_data.tag, delegate);
+      message_center::NOTIFICATION_TYPE_SIMPLE, notification_data.title,
+      notification_data.body, gfx::Image::CreateFrom1xBitmap(icon),
+      message_center::NotifierId(origin), base::UTF8ToUTF16(origin.host()),
+      origin, notification_data.tag, message_center::RichNotificationData(),
+      delegate);
 
   notification.set_context_message(
       DisplayNameForContextMessage(profile, origin));
@@ -377,24 +407,7 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
   for (const auto& action : notification_data.actions)
     buttons.push_back(message_center::ButtonInfo(action.title));
 
-// Android always includes the settings button in all notifications, whereas for
-// desktop only web (not extensions) notifications do.
-#if !defined(OS_ANDROID)
-  // The notification Settings button always comes at the end.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kNotificationSettingsButton)) {
-    message_center::ButtonInfo settings_button = message_center::ButtonInfo(
-        l10n_util::GetStringUTF16(IDS_NOTIFICATION_SETTINGS));
-    settings_button.icon =
-        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-            IDR_NOTIFICATION_SETTINGS);
-    buttons.push_back(settings_button);
-  }
-#endif  // !defined(OS_ANDROID)
-
   notification.set_buttons(buttons);
-
-  notification.set_is_web_notification(true);
 
   // On desktop, notifications with require_interaction==true stay on-screen
   // rather than minimizing to the notification center after a timeout.
@@ -413,21 +426,26 @@ PlatformNotificationServiceImpl::GetNotificationUIManager() const {
   return g_browser_process->notification_ui_manager();
 }
 
-bool PlatformNotificationServiceImpl::OpenNotificationSettings(
+void PlatformNotificationServiceImpl::OpenNotificationSettings(
     BrowserContext* browser_context) {
-#if !defined(OS_ANDROID)
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kNotificationSettingsButton)) {
-    Profile* profile = Profile::FromBrowserContext(browser_context);
-    DCHECK(profile);
+#if defined(OS_ANDROID)
+  NOTIMPLEMENTED();
+#else
+
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  DCHECK(profile);
+
+  if (switches::SettingsWindowEnabled()) {
+    chrome::ShowContentSettingsExceptionsInWindow(
+        profile, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+  } else {
     chrome::ScopedTabbedBrowserDisplayer browser_displayer(
         profile, chrome::GetActiveDesktop());
     chrome::ShowContentSettingsExceptions(browser_displayer.browser(),
                                           CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-    return true;
   }
-#endif  // !defined(OS_ANDROID)
-  return false;
+
+#endif  // defined(OS_ANDROID)
 }
 
 void PlatformNotificationServiceImpl::SetNotificationUIManagerForTesting(

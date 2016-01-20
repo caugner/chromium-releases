@@ -97,7 +97,8 @@ ContentSettingsType kPermissionType[] = {
 #endif
 };
 
-bool CertificateTransparencyStatusMatch(
+// Returns true if any of the given statuses match |status|.
+bool CertificateTransparencyStatusMatchAny(
     const std::vector<net::ct::SCTVerifyStatus>& sct_verify_statuses,
     net::ct::SCTVerifyStatus status) {
   for (const auto& verify_status : sct_verify_statuses) {
@@ -115,34 +116,37 @@ int GetSiteIdentityDetailsMessageByCTInfo(
     return (is_ev ? IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_NO_CT
                   : IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_NO_CT);
 
-  if (CertificateTransparencyStatusMatch(sct_verify_statuses,
-                                         net::ct::SCT_STATUS_OK))
+  // Any valid SCT.
+  if (CertificateTransparencyStatusMatchAny(sct_verify_statuses,
+                                            net::ct::SCT_STATUS_OK))
     return (is_ev ? IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_CT_VERIFIED
                   : IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_CT_VERIFIED);
 
-  if (CertificateTransparencyStatusMatch(sct_verify_statuses,
-                                         net::ct::SCT_STATUS_INVALID))
+  // Any invalid SCT.
+  if (CertificateTransparencyStatusMatchAny(sct_verify_statuses,
+                                            net::ct::SCT_STATUS_INVALID))
     return (is_ev ? IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_CT_INVALID
                   : IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_CT_INVALID);
 
-  // status is SCT_STATUS_LOG_UNKNOWN
+  // All SCTs are from unknown logs.
   return (is_ev ? IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_CT_UNVERIFIED
                 : IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_CT_UNVERIFIED);
 }
 
 // This function will return SITE_IDENTITY_STATUS_CERT or
-// SITE_IDENTITY_STATUS_EV_CERT depending on |is_ev| unless there are SCTs
-// which failed verification, in which case it will return
+// SITE_IDENTITY_STATUS_EV_CERT depending on |is_ev| unless all SCTs
+// failed verification, in which case it will return
 // SITE_IDENTITY_STATUS_ERROR.
 WebsiteSettings::SiteIdentityStatus GetSiteIdentityStatusByCTInfo(
     const std::vector<net::ct::SCTVerifyStatus>& sct_verify_statuses,
     bool is_ev) {
-  if (CertificateTransparencyStatusMatch(sct_verify_statuses,
-                                         net::ct::SCT_STATUS_INVALID))
-    return WebsiteSettings::SITE_IDENTITY_STATUS_ERROR;
+  if (sct_verify_statuses.empty() ||
+      CertificateTransparencyStatusMatchAny(sct_verify_statuses,
+                                            net::ct::SCT_STATUS_OK))
+    return is_ev ? WebsiteSettings::SITE_IDENTITY_STATUS_EV_CERT
+                 : WebsiteSettings::SITE_IDENTITY_STATUS_CERT;
 
-  return is_ev ? WebsiteSettings::SITE_IDENTITY_STATUS_EV_CERT
-               : WebsiteSettings::SITE_IDENTITY_STATUS_CERT;
+  return WebsiteSettings::SITE_IDENTITY_STATUS_CT_ERROR;
 }
 
 base::string16 GetSimpleSiteName(const GURL& url, Profile* profile) {
@@ -214,24 +218,20 @@ void WebsiteSettings::RecordWebsiteSettingsAction(
   }
 }
 
-// Get corresponding Rappor Metric.
+// Get corresponding Rappor Metric. TODO(raymes): This should use the same
+// code that's in permission_context_uma_util.cc. Figure out how to do that.
+// crbug.com/544745.
 const std::string GetRapporMetric(ContentSettingsType permission) {
   std::string permission_str;
-  switch (permission) {
-    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      permission_str = "Geolocation";
-      break;
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      permission_str = "Notifications";
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-      permission_str = "Mic";
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      permission_str = "Camera";
-      break;
-    default:
-      return "";
+
+  if (permission == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+    permission_str = "Geolocation";
+  } else if (permission == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    permission_str = "Notifications";
+  } else if (permission == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) {
+    permission_str = "Mic";
+  } else if (permission == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
+    permission_str = "Camera";
   }
 
   return base::StringPrintf("ContentSettings.PermissionActions_%s.Revoked.Url",
@@ -268,53 +268,8 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
   // compare it against other kinds of actions in WebsiteSettings[PopupView].
   RecordWebsiteSettingsAction(WEBSITE_SETTINGS_CHANGED_PERMISSION);
 
-  ContentSettingsPattern primary_pattern;
-  ContentSettingsPattern secondary_pattern;
-  switch (type) {
-    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-    case CONTENT_SETTINGS_TYPE_FULLSCREEN:
-      // TODO(markusheintz): The rule we create here should also change the
-      // location permission for iframed content.
-      primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
-      secondary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
-      break;
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
-      secondary_pattern = ContentSettingsPattern::Wildcard();
-      break;
-    case CONTENT_SETTINGS_TYPE_IMAGES:
-    case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
-    case CONTENT_SETTINGS_TYPE_PLUGINS:
-    case CONTENT_SETTINGS_TYPE_POPUPS:
-    case CONTENT_SETTINGS_TYPE_MOUSELOCK:
-    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
-    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-      primary_pattern = ContentSettingsPattern::FromURL(site_url_);
-      secondary_pattern = ContentSettingsPattern::Wildcard();
-      break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-      primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
-      secondary_pattern = ContentSettingsPattern::Wildcard();
-      break;
-    default:
-      NOTREACHED() << "ContentSettingsType " << type << "is not supported.";
-      break;
-  }
-
-  // Permission settings are specified via rules. There exists always at least
-  // one rule for the default setting. Get the rule that currently defines
-  // the permission for the given permission |type|. Then test whether the
-  // existing rule is more specific than the rule we are about to create. If
-  // the existing rule is more specific, than change the existing rule instead
-  // of creating a new rule that would be hidden behind the existing rule.
-  content_settings::SettingInfo info;
-  scoped_ptr<base::Value> v =
-      content_settings_->GetWebsiteSetting(
-          site_url_, site_url_, type, std::string(), &info);
-  content_settings_->SetNarrowestWebsiteSetting(
-      primary_pattern, secondary_pattern, type, std::string(), setting, info);
+  content_settings_->SetNarrowestContentSetting(site_url_, site_url_, type,
+                                                setting);
 
   show_info_bar_ = true;
 
@@ -362,8 +317,20 @@ void WebsiteSettings::Init(
   isChromeUINativeScheme = url.SchemeIs(chrome::kChromeUINativeScheme);
 #endif
 
-  if (url.SchemeIs(content::kChromeUIScheme) ||
-      url.SchemeIs(url::kAboutScheme) || isChromeUINativeScheme) {
+  if (url.SchemeIs(url::kAboutScheme)) {
+    // All about: URLs except about:blank are redirected.
+    DCHECK_EQ(url::kAboutBlankURL, url.spec());
+    site_identity_status_ = SITE_IDENTITY_STATUS_NO_CERT;
+    site_identity_details_ =
+        l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY);
+    site_connection_status_ = SITE_CONNECTION_STATUS_UNENCRYPTED;
+    site_connection_details_ = l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
+        UTF8ToUTF16(url.spec()));
+    return;
+  }
+
+  if (url.SchemeIs(content::kChromeUIScheme) || isChromeUINativeScheme) {
     site_identity_status_ = SITE_IDENTITY_STATUS_INTERNAL_PAGE;
     site_identity_details_ =
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_INTERNAL_PAGE);
@@ -536,10 +503,7 @@ void WebsiteSettings::Init(
   } else {
     site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED;
 
-    if (net::SSLConnectionStatusToVersion(security_info.connection_status) >=
-            net::SSL_CONNECTION_VERSION_TLS1_2 &&
-        net::IsSecureTLSCipherSuite(net::SSLConnectionStatusToCipherSuite(
-            security_info.connection_status))) {
+    if (security_info.is_secure_protocol_and_ciphersuite) {
       site_connection_details_.assign(l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
           subject_name));
@@ -639,6 +603,7 @@ void WebsiteSettings::Init(
       site_connection_status_ == SITE_CONNECTION_STATUS_MIXED_CONTENT ||
       site_connection_status_ == SITE_CONNECTION_STATUS_MIXED_SCRIPT ||
       site_identity_status_ == SITE_IDENTITY_STATUS_ERROR ||
+      site_identity_status_ == SITE_IDENTITY_STATUS_CT_ERROR ||
       site_identity_status_ == SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN ||
       site_identity_status_ == SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT ||
       site_identity_status_ ==

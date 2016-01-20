@@ -24,6 +24,7 @@
 <translation id="1546934824884762070">예기치 않은 오류가 발생했습니다. 개발자에게 문제를 신고해 주세요.</translation>
 <translation id="1619813076098775562">Cast 기기에 대한 연결이 종료되었습니다.</translation>
 <translation id="1643640058022401035">이 페이지를 닫으면 Chromoting 세션이 종료됩니다.</translation>
+<translation id="1646994964686260497">연결 대상이 없습니다.</translation>
 <translation id="1654128982815600832">컴퓨터의 원격 연결을 사용하도록 설정 중...</translation>
 <translation id="170207782578677537">컴퓨터를 등록하는 데 실패했습니다.</translation>
 <translation id="1704090719919187045">Chromoting 호스트 환경설정</translation>
@@ -33,7 +34,6 @@
 <translation id="1770394049404108959">애플리케이션이 열리지 않음</translation>
 <translation id="177096447311351977">클라이언트용 채널 IP: <ph name="CLIENT_GAIA_IDENTIFIER" /> ip='<ph name="CLIENT_IP_ADDRESS_AND_PORT" />' host_ip='<ph name="HOST_IP_ADDRESS_AND_PORT" />' channel='<ph name="CHANNEL_TYPE" />' connection='<ph name="CONNECTION_TYPE" />'</translation>
 <translation id="1779766957982586368">창 닫기</translation>
-<translation id="1818475040640568770">등록된 컴퓨터가 없습니다.</translation>
 <translation id="1841799852846221389">컴퓨터의 원격 연결을 사용중지하는 중...</translation>
 <translation id="189172778771606813">탐색 창 닫기</translation>
 <translation id="195619862187186579">키보드 레이아웃</translation>
@@ -87,8 +87,6 @@
 <translation id="2926340305933667314">컴퓨터에 대한 원격 액세스를 사용중지하지 못했습니다. 나중에 다시 시도해 주세요.</translation>
 <translation id="2930135165929238380">필수 구성요소가 일부 누락되었습니다. chrome://plugins로 이동하여 Native Client를 사용하도록 설정되어 있는지 확인해 주시기 바랍니다.</translation>
 <translation id="2939145106548231838">호스트에 대한 인증</translation>
-<translation id="2998137343848432918">• 크레딧 화면 추가
-• 전체화면 보기로 할 때 키보드가 표시되는 문제 해결</translation>
 <translation id="3020807351229499221">PIN을 업데이트하지 못했습니다. 나중에 다시 시도해 주세요.</translation>
 <translation id="3025388528294795783">어떤 문제인지 말씀해 주시면 문제해결에 도움이 됩니다.</translation>
 <translation id="3027681561976217984">터치 모드</translation>
@@ -97,7 +95,6 @@
 <translation id="3150823315463303127">호스트에서 정책을 확인하지 못했습니다.</translation>
 <translation id="3194245623920924351">Chrome 원격 데스크톱</translation>
 <translation id="3197730452537982411">원격 데스크톱</translation>
-<translation id="3244258558056547981">Cardboard 보기 표시</translation>
 <translation id="3258789396564295715">Chrome 원격 데스크톱을 사용하여 컴퓨터에 안전하게 액세스할 수 있습니다.</translation>
 <translation id="327263477022142889">Chrome 원격 데스크톱을 개선하도록 도와주려면 <ph name="LINK_BEGIN" />설문조사에 참여하세요.<ph name="LINK_END" /></translation>
 <translation id="3286521253923406898">Chromoting 호스트 컨트롤러</translation>
@@ -113,6 +110,7 @@
 <translation id="3606997049964069799">Chromium에 로그인하지 않았습니다. 로그인 후 다시 시도하세요.</translation>
 <translation id="3649256019230929621">창 최소화</translation>
 <translation id="369442766917958684">오프라인.</translation>
+<translation id="3695446226812920698">자세히 알아보기</translation>
 <translation id="3776024066357219166">Chrome 원격 데스크톱 세션이 종료되었습니다.</translation>
 <translation id="3785447812627779171">Chromoting
 호스트</translation>
@@ -125,6 +123,11 @@
 <translation id="3950820424414687140">로그인</translation>
 <translation id="3989511127559254552">계속하려면 내 컴퓨터에 확장 액세스 권한을 부여해야 합니다. 이 작업은 한번만 수행하면 됩니다.</translation>
 <translation id="4006787130661126000">Chrome 원격 데스크톱을 사용하여 컴퓨터에 액세스하려면 원격 연결을 사용하도록 설정해야 합니다.</translation>
+<translation id="401121182145179743">먼저 컴퓨터를 원격으로 액세스할 수 있도록 설정해야 합니다.</translation>
+<translation id="4028465833180158312">• 머티리얼 디자인 UI 업데이트
+• 제3자 라이선스 크레딧
+• 오프라인 상태인 원격 컴퓨터 관련 정보 표시</translation>
+<translation id="405887016757208221">원격 컴퓨터가 세션을 초기화하는 데 실패했습니다. 문제가 지속되면 호스트를 다시 구성해 보시기 바랍니다.</translation>
 <translation id="4068946408131579958">모든 연결</translation>
 <translation id="409800995205263688">참고: 정책 설정에 따라 네트워크 내에 있는 컴퓨터 간의 연결만 허용됩니다.</translation>
 <translation id="4155497795971509630">일부 필수 구성요소가 누락되었습니다. 소프트웨어의 최신 버전을 설치했는지 확인한 뒤 다시 시도해주세요.</translation>
@@ -149,6 +152,7 @@
 <translation id="4573676252416618192">Chrome 원격
 데스크톱 호스트</translation>
 <translation id="4619978527973181021">동의 및 설치</translation>
+<translation id="4647791084836149355">Cardboard 보기 표시</translation>
 <translation id="4703799847237267011">Chromoting 세션이 종료되었습니다.</translation>
 <translation id="4736223761657662401">연결 기록</translation>
 <translation id="4741792197137897469">인증에 실패했습니다. Chrome에 다시 로그인하세요.</translation>
@@ -170,7 +174,6 @@
 <translation id="518094545883702183">이 정보는 보고된 문제를 진단하는 데만 사용되고 보고서 조사 담당자만 볼 수 있으며, 30일 이내에 폐기됩니다.</translation>
 <translation id="5222676887888702881">로그아웃</translation>
 <translation id="5254120496627797685">이 페이지를 닫으면 Chrome 원격 데스크톱 세션이 종료됩니다.</translation>
-<translation id="5285241842433869526">컴퓨터에 원격 액세스를 설정하는 방법을 알아보세요.</translation>
 <translation id="5308380583665731573">연결</translation>
 <translation id="5363265567587775042">액세스하려는 컴퓨터의 사용자에게 '<ph name="SHARE" />'를 클릭하여 액세스 코드를 달라고 요청하세요.</translation>
 <translation id="5379087427956679853">Chrome 원격 데스크톱을 사용하면 웹에서 내 컴퓨터를 안전하게 공유할 수 있습니다. 양쪽 사용자 모두 <ph name="URL" /> 페이지에 있는 Chrome 원격 데스크톱 앱을 실행해야 합니다.</translation>
@@ -207,6 +210,7 @@
 <translation id="6284412385303060032">콘솔 로직 화면에서 실행 중인 호스트가 사용자별 세션에서 실행 중인 호스트로 전환하여 커튼 모드를 지원하기 위해 종료되었습니다.</translation>
 <translation id="629730747756840877">계정</translation>
 <translation id="6304318647555713317">클라이언트</translation>
+<translation id="6324708100353784493">Google Cardboard 통합 모드를 사용하도록 설정했습니다. 이 모드를 사용하려면 Google Cardboard 호환 뷰어에 기기를 삽입하세요.</translation>
 <translation id="6381670701864002291">기타 문제</translation>
 <translation id="6398765197997659313">전체화면 닫기</translation>
 <translation id="6441316101718669559">데스크톱 통합이 이 플랫폼에서 지원되지 않습니다. 애플리케이션을 사용할 수는 있지만, 사용자 환경이 저하될 수 있습니다.</translation>
@@ -257,6 +261,7 @@
 <translation id="7869445566579231750">이 애플리케이션을 실행할 수 있는 권한이 없습니다.</translation>
 <translation id="7948001860594368197">화면 옵션</translation>
 <translation id="7970576581263377361">인증에 실패했습니다. Chromium에 다시 로그인하세요.</translation>
+<translation id="7981525049612125370">원격 세션이 만료되었습니다.</translation>
 <translation id="8041721485428375115">Chrome 원격 데스크톱 호스트 설치 프로그램을 다운로드하면 Google <ph name="LINK_BEGIN" />서비스 약관<ph name="LINK_END" />에 동의하게 됩니다.</translation>
 <translation id="8073845705237259513">Chrome 원격 데스크톱을 사용하려면 기기에 Google 계정을 추가해야 합니다.</translation>
 <translation id="80739703311984697">원격 호스트는 타사 웹사이트에 대한 인증이 필요합니다. 계속하려면 이 주소에 액세스할 수 있도록 Chromoting에 추가 권한을 허용해야 합니다.</translation>

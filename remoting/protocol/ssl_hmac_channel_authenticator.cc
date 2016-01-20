@@ -21,6 +21,7 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/ssl/ssl_server_config.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/auth_util.h"
 #include "remoting/protocol/p2p_stream_socket.h"
@@ -132,6 +133,10 @@ class NetStreamSocketAdapter : public net::StreamSocket {
   void AddConnectionAttempts(const net::ConnectionAttempts& attempts) override {
     NOTREACHED();
   }
+  int64_t GetTotalReceivedBytes() const override {
+    NOTIMPLEMENTED();
+    return 0;
+  }
 
  private:
   scoped_ptr<P2PStreamSocket> socket_;
@@ -215,7 +220,7 @@ void SslHmacChannelAuthenticator::SecureAndAuthenticate(
       return;
     }
 
-    net::SSLConfig ssl_config;
+    net::SSLServerConfig ssl_config;
     ssl_config.require_ecdhe = true;
 
     scoped_ptr<net::SSLServerSocket> server_socket = net::CreateSSLServerSocket(

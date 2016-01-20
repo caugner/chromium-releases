@@ -27,8 +27,10 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/password_manager/password_manager_setting_migrator_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/bookmark_model_loaded_observer.h"
@@ -44,7 +46,6 @@
 #include "chrome/browser/signin/cross_device_promo_factory.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
@@ -58,16 +59,24 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/startup_task_runner_service.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/invalidation/impl/profile_invalidation_provider.h"
+#include "components/invalidation/public/invalidation_service.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/sync/browser/password_manager_setting_migrator_service.h"
+#include "components/search_engines/default_search_manager.h"
 #include "components/signin/core/browser/account_fetcher_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "content/public/common/content_switches.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -349,23 +358,19 @@ Profile* ProfileManager::GetActiveUserProfile() {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
 #if defined(OS_CHROMEOS)
   if (!profile_manager)
-    return NULL;
+    return nullptr;
 
-  if (!profile_manager->IsLoggedIn() ||
-      !user_manager::UserManager::IsInitialized()) {
-    return profile_manager->GetActiveUserOrOffTheRecordProfileFromPath(
-        profile_manager->user_data_dir());
+  if (profile_manager->IsLoggedIn() &&
+      user_manager::UserManager::IsInitialized()) {
+    user_manager::UserManager* manager = user_manager::UserManager::Get();
+    const user_manager::User* user = manager->GetActiveUser();
+    // To avoid an endless loop (crbug.com/334098) we have to additionally check
+    // if the profile of the user was already created. If the profile was not
+    // yet created we load the profile using the profile directly.
+    // TODO: This should be cleaned up with the new profile manager.
+    if (user && user->is_profile_created())
+      return chromeos::ProfileHelper::Get()->GetProfileByUserUnsafe(user);
   }
-
-  user_manager::UserManager* manager = user_manager::UserManager::Get();
-  const user_manager::User* user = manager->GetActiveUser();
-  // To avoid an endless loop (crbug.com/334098) we have to additionally check
-  // if the profile of the user was already created. If the profile was not yet
-  // created we load the profile using the profile directly.
-  // TODO: This should be cleaned up with the new profile manager.
-  if (user && user->is_profile_created())
-    return chromeos::ProfileHelper::Get()->GetProfileByUserUnsafe(user);
-
 #endif
   Profile* profile =
       profile_manager->GetActiveUserOrOffTheRecordProfileFromPath(
@@ -398,7 +403,7 @@ void ProfileManager::CreateProfileAsync(
     const base::FilePath& profile_path,
     const CreateCallback& callback,
     const base::string16& name,
-    const base::string16& icon_url,
+    const std::string& icon_url,
     const std::string& supervised_user_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TRACE_EVENT1("browser,startup",
@@ -425,8 +430,8 @@ void ProfileManager::CreateProfileAsync(
     ProfileInfoCache& cache = GetProfileInfoCache();
     // Get the icon index from the user's icon url
     size_t icon_index;
-    std::string icon_url_std = base::UTF16ToASCII(icon_url);
-    if (profiles::IsDefaultAvatarIconUrl(icon_url_std, &icon_index)) {
+    DCHECK(base::IsStringASCII(icon_url));
+    if (profiles::IsDefaultAvatarIconUrl(icon_url, &icon_index)) {
       // add profile to cache with user selected name and avatar
       cache.AddProfileToCache(profile_path, name, std::string(),
                               base::string16(), icon_index, supervised_user_id);
@@ -461,7 +466,7 @@ void ProfileManager::CreateProfileAsync(
   }
 }
 
-bool ProfileManager::IsValidProfile(Profile* profile) {
+bool ProfileManager::IsValidProfile(void* profile) {
   for (ProfilesInfoMap::iterator iter = profiles_info_.begin();
        iter != profiles_info_.end(); ++iter) {
     if (iter->second->created) {
@@ -586,7 +591,7 @@ Profile* ProfileManager::GetProfileByPath(const base::FilePath& path) const {
 // static
 base::FilePath ProfileManager::CreateMultiProfileAsync(
     const base::string16& name,
-    const base::string16& icon_url,
+    const std::string& icon_url,
     const CreateCallback& callback,
     const std::string& supervised_user_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -689,19 +694,17 @@ void ProfileManager::ScheduleProfileForDeletion(
     }
   }
 
-  base::FilePath new_path;
   if (last_non_supervised_profile_path.empty()) {
-    base::string16 new_avatar_url = base::string16();
-    base::string16 new_profile_name = base::string16();
+    std::string new_avatar_url;
+    base::string16 new_profile_name;
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
     int avatar_index = profiles::GetPlaceholderAvatarIndex();
-    new_avatar_url =
-        base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index));
+    new_avatar_url = profiles::GetDefaultAvatarIconUrl(avatar_index);
     new_profile_name = cache.ChooseNameForNewProfile(avatar_index);
 #endif
 
-    new_path = GenerateNextProfileDirectoryPath();
+    base::FilePath new_path(GenerateNextProfileDirectoryPath());
     CreateProfileAsync(new_path,
                        base::Bind(&ProfileManager::OnNewActiveProfileLoaded,
                                   base::Unretained(this),
@@ -732,7 +735,7 @@ void ProfileManager::ScheduleProfileForDeletion(
                                   last_non_supervised_profile_path,
                                   callback),
                        base::string16(),
-                       base::string16(),
+                       std::string(),
                        std::string());
     return;
   }
@@ -1114,8 +1117,24 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
       MaybeActivateDataReductionProxy(true);
 
   GaiaCookieManagerServiceFactory::GetForProfile(profile)->Init();
-  AccountFetcherServiceFactory::GetForProfile(profile)->EnableNetworkFetches();
+  invalidation::ProfileInvalidationProvider* invalidation_provider =
+      invalidation::ProfileInvalidationProviderFactory::GetForProfile(profile);
+  // Chrome OS login and guest profiles do not support invalidation. This is
+  // fine as they do not have GAIA credentials anyway. http://crbug.com/358169
+  invalidation::InvalidationService* invalidation_service =
+      invalidation_provider ? invalidation_provider->GetInvalidationService()
+                            : nullptr;
+  AccountFetcherServiceFactory::GetForProfile(profile)
+      ->SetupInvalidationsOnProfileLoad(invalidation_service);
   AccountReconcilorFactory::GetForProfile(profile);
+
+  // Service is responsible for migration of the legacy password manager
+  // preference which controls behaviour of the Chrome to the new preference
+  // which controls password management behaviour on Chrome and Android. After
+  // migration will be performed for all users it's planned to remove the
+  // migration code, rough time estimates are Q1 2016.
+  PasswordManagerSettingMigratorServiceFactory::GetForProfile(profile)
+      ->InitializeMigration(ProfileSyncServiceFactory::GetForProfile(profile));
 }
 
 void ProfileManager::DoFinalInitLogging(Profile* profile) {

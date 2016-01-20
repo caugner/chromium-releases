@@ -19,6 +19,8 @@ from telemetry.internal.platform import device_finder
 from telemetry.internal.platform.profiler import profiler_finder
 from telemetry.util import wpr_modes
 
+from catapult_base import cloud_storage
+
 import net_configs
 
 
@@ -238,20 +240,21 @@ class BrowserOptions(object):
     # Disable default apps.
     self.disable_default_apps = True
 
-    # Whether to use the new code path for choosing an ephemeral port for
-    # DevTools. The bots set this to true. When Chrome 37 reaches stable,
-    # remove this setting and the old code path. http://crbug.com/379980
-    self.use_devtools_active_port = False
-
     self.enable_logging = False
     # The cloud storage bucket & path for uploading logs data produced by the
     # browser to.
-    self.logs_cloud_bucket = None
+    # If logs_cloud_remote_path is None, a random remote path is generated every
+    # time the logs data is uploaded.
+    self.logs_cloud_bucket = cloud_storage.TELEMETRY_OUTPUT
     self.logs_cloud_remote_path = None
 
     # TODO(danduong): Find a way to store target_os here instead of
     # finder_options.
     self._finder_options = None
+
+    # Whether to take screen shot for failed page & put them in telemetry's
+    # profiling results.
+    self.take_screenshot_for_failed_page = False
 
   def __repr__(self):
     # This works around the infinite loop caused by the introduction of a
@@ -300,11 +303,6 @@ class BrowserOptions(object):
     group.add_option('--show-stdout',
         action='store_true',
         help='When possible, will display the stdout of the process')
-    # This hidden option is to be removed, and the older code path deleted,
-    # once Chrome 37 reaches Stable. http://crbug.com/379980
-    group.add_option('--use-devtools-active-port',
-        action='store_true',
-        help=optparse.SUPPRESS_HELP)
     group.add_option('--enable-browser-logging',
         dest='enable_logging',
         action='store_true',
@@ -328,7 +326,6 @@ class BrowserOptions(object):
         'profile_dir',
         'profile_type',
         'show_stdout',
-        'use_devtools_active_port',
         ]
     for o in browser_options_list:
       a = getattr(finder_options, o, None)

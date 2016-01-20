@@ -220,14 +220,12 @@ class IPCAttachmentBrokerPrivilegedWinTest : public IPCTestBase {
   // Takes ownership of |broker|. Has no effect if called after CommonSetUp().
   void set_broker(IPC::AttachmentBrokerUnprivilegedWin* broker) {
     broker_.reset(broker);
-    IPC::AttachmentBroker::SetGlobal(broker);
   }
 
   void CommonSetUp() {
     if (!broker_.get())
       set_broker(new IPC::AttachmentBrokerUnprivilegedWin);
-    broker_->AddObserver(&observer_);
-    set_attachment_broker(broker_.get());
+    broker_->AddObserver(&observer_, task_runner());
     CreateChannel(&proxy_listener_);
     broker_->DesignateBrokerCommunicationChannel(channel());
     ASSERT_TRUE(ConnectChannel());
@@ -278,8 +276,9 @@ class MockBroker : public IPC::AttachmentBrokerUnprivilegedWin {
  public:
   MockBroker() {}
   ~MockBroker() override {}
-  bool SendAttachmentToProcess(const IPC::BrokerableAttachment* attachment,
-                               base::ProcessId destination_process) override {
+  bool SendAttachmentToProcess(
+      const scoped_refptr<IPC::BrokerableAttachment>& attachment,
+      base::ProcessId destination_process) override {
     return IPC::AttachmentBrokerUnprivilegedWin::SendAttachmentToProcess(
         attachment, base::Process::Current().Pid());
   }
@@ -427,7 +426,6 @@ int CommonPrivilegedProcessMain(OnMessageReceivedCallback callback,
 
   // Set up IPC channel.
   IPC::AttachmentBrokerPrivilegedWin broker;
-  IPC::AttachmentBroker::SetGlobal(&broker);
   scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
       IPCTestBase::GetChannelName(channel_name), &listener));
   broker.RegisterCommunicationChannel(channel.get());

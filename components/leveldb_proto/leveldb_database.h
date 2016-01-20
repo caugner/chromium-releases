@@ -13,6 +13,10 @@
 #include "base/strings/string_split.h"
 #include "base/threading/thread_collision_warner.h"
 
+namespace base {
+class HistogramBase;
+}  // namespace base
+
 namespace leveldb {
 class DB;
 class Env;
@@ -26,7 +30,11 @@ namespace leveldb_proto {
 // same thread (not necessarily the same as the constructor).
 class LevelDB {
  public:
-  LevelDB();
+  // Constructor. Does *not* open a leveldb - only initialize this class.
+  // |client_name| is the name of the "client" that owns this instance. Used
+  // for UMA statics as so: LevelDB.<value>.<client name>. It is best to not
+  // change once shipped.
+  explicit LevelDB(const char* client_name);
   virtual ~LevelDB();
 
   virtual bool InitWithOptions(const base::FilePath& database_dir,
@@ -36,6 +44,8 @@ class LevelDB {
                     const std::vector<std::string>& keys_to_remove);
   virtual bool Load(std::vector<std::string>* entries);
 
+  static bool Destroy(const base::FilePath& database_dir);
+
  private:
   DFAKE_MUTEX(thread_checker_);
 
@@ -43,6 +53,9 @@ class LevelDB {
   // therefore has to be destructed first.
   scoped_ptr<leveldb::Env> env_;
   scoped_ptr<leveldb::DB> db_;
+  base::HistogramBase* open_histogram_;
+
+  DISALLOW_COPY_AND_ASSIGN(LevelDB);
 };
 
 }  // namespace leveldb_proto

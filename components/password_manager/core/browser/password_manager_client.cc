@@ -25,10 +25,6 @@ void PasswordManagerClient::PasswordWasAutofilled(
     const autofill::PasswordFormMap& best_matches,
     const GURL& origin) const {}
 
-void PasswordManagerClient::PasswordAutofillWasBlocked(
-    const autofill::PasswordFormMap& best_matches) const {
-}
-
 PasswordSyncState PasswordManagerClient::GetPasswordSyncState() const {
   return NOT_SYNCING_PASSWORDS;
 }
@@ -73,8 +69,13 @@ bool PasswordManagerClient::IsOffTheRecord() const {
   return false;
 }
 
-PasswordManager* PasswordManagerClient::GetPasswordManager() {
+const PasswordManager* PasswordManagerClient::GetPasswordManager() const {
   return nullptr;
+}
+
+PasswordManager* PasswordManagerClient::GetPasswordManager() {
+  return const_cast<PasswordManager*>(
+      static_cast<const PasswordManagerClient*>(this)->GetPasswordManager());
 }
 
 autofill::AutofillManager*

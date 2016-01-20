@@ -11,20 +11,20 @@
 #include "components/mus/gles2/gpu_state.h"
 #include "components/mus/public/interfaces/command_buffer.mojom.h"
 #include "components/mus/public/interfaces/gpu.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ui/mojo/geometry/geometry.mojom.h"
 
 namespace mus {
 
-class GpuImpl : public mojo::Gpu {
+class GpuImpl : public mojom::Gpu {
  public:
-  GpuImpl(mojo::InterfaceRequest<mojo::Gpu> request,
+  GpuImpl(mojo::InterfaceRequest<mojom::Gpu> request,
           const scoped_refptr<GpuState>& state);
   ~GpuImpl() override;
 
  private:
-  void CreateOffscreenGLES2Context(mojo::InterfaceRequest<mojo::CommandBuffer>
+  void CreateOffscreenGLES2Context(mojo::InterfaceRequest<mojom::CommandBuffer>
                                        command_buffer_request) override;
   void GetGpuInfo(const GetGpuInfoCallback& callback) override;
 

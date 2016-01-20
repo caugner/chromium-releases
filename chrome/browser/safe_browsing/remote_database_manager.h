@@ -17,6 +17,8 @@
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "url/gurl.h"
 
+namespace safe_browsing {
+
 // An implementation that proxies requests to a service outside of Chromium.
 // Does not manage a local database.
 class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
@@ -30,6 +32,7 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   //
 
   bool IsSupported() const override;
+  safe_browsing::ThreatSource GetThreatSource() const override;
   bool ChecksAreAlwaysAsync() const override;
   bool CanCheckResourceType(content::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
@@ -66,10 +69,11 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   bool enabled_;
 
   std::set<content::ResourceType> resource_types_to_check_;
-  bool is_android_field_trial_enabled_;
 
   friend class base::RefCountedThreadSafe<RemoteSafeBrowsingDatabaseManager>;
   DISALLOW_COPY_AND_ASSIGN(RemoteSafeBrowsingDatabaseManager);
 };  // class RemoteSafeBrowsingDatabaseManager
+
+}  // namespace safe_browsing
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_REMOTE_DATABASE_MANAGER_H_

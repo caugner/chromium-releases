@@ -6,13 +6,13 @@
 
 #include <errno.h>
 #include <netinet/in.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "net/base/net_util.h"
 #include "net/quic/quic_protocol.h"
 
 #ifndef SO_RXQ_OVFL

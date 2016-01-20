@@ -91,6 +91,10 @@ class DelayableBackend : public disk_cache::Backend {
                        const CompletionCallback& callback) override {
     return backend_->DoomEntriesSince(initial_time, callback);
   }
+  int CalculateSizeOfAllEntries(
+      const CompletionCallback& callback) override {
+    return backend_->CalculateSizeOfAllEntries(callback);
+  }
   scoped_ptr<Iterator> CreateIterator() override {
     return backend_->CreateIterator();
   }
@@ -500,13 +504,13 @@ class CacheStorageCacheTest : public testing::Test {
   virtual bool MemoryOnly() { return false; }
 
  protected:
+  base::ScopedTempDir temp_dir_;
   TestBrowserContext browser_context_;
   TestBrowserThreadBundle browser_thread_bundle_;
   scoped_ptr<net::URLRequestJobFactoryImpl> url_request_job_factory_;
   scoped_refptr<MockQuotaManagerProxy> quota_manager_proxy_;
   storage::BlobStorageContext* blob_storage_context_;
 
-  base::ScopedTempDir temp_dir_;
   scoped_refptr<TestCacheStorageCache> cache_;
 
   ServiceWorkerFetchRequest body_request_;

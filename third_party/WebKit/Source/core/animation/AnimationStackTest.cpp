@@ -11,6 +11,7 @@
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/LegacyStyleInterpolation.h"
 #include "core/animation/animatable/AnimatableDouble.h"
+#include "core/testing/DummyPageHolder.h"
 #include <gtest/gtest.h>
 
 namespace blink {
@@ -19,7 +20,8 @@ class AnimationAnimationStackTest : public ::testing::Test {
 protected:
     virtual void SetUp()
     {
-        document = Document::create();
+        pageHolder = DummyPageHolder::create();
+        document = &pageHolder->document();
         document->animationClock().resetTimeForTesting();
         timeline = AnimationTimeline::create(document.get());
         element = document->createElement("foo", ASSERT_NO_EXCEPTION);
@@ -35,13 +37,13 @@ protected:
 
     void updateTimeline(double time)
     {
-        document->animationClock().updateTime(time);
+        document->animationClock().updateTime(document->timeline().zeroTime() + time);
         timeline->serviceAnimations(TimingUpdateForAnimationFrame);
     }
 
     const HeapVector<Member<SampledEffect>>& effects()
     {
-        return element->ensureElementAnimations().defaultStack().m_effects;
+        return element->ensureElementAnimations().animationStack().m_effects;
     }
 
     EffectModel* makeEffectModel(CSSPropertyID id, PassRefPtr<AnimatableValue> value)
@@ -77,6 +79,7 @@ protected:
         return toLegacyStyleInterpolation(interpolation).currentValue().get();
     }
 
+    OwnPtr<DummyPageHolder> pageHolder;
     RefPtrWillBePersistent<Document> document;
     Persistent<AnimationTimeline> timeline;
     RefPtrWillBePersistent<Element> element;
@@ -87,7 +90,7 @@ TEST_F(AnimationAnimationStackTest, ElementAnimationsSorted)
     play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(1))), 10);
     play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(2))), 15);
     play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(3))), 5);
-    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->defaultStack(), 0, 0, KeyframeEffect::DefaultPriority, 0);
+    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), 0, 0, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, result.size());
     EXPECT_TRUE(interpolationValue(result, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));
 }
@@ -101,7 +104,7 @@ TEST_F(AnimationAnimationStackTest, NewAnimations)
     InertEffect* inert2 = makeInertEffect(makeEffectModel(CSSPropertyZIndex, AnimatableDouble::create(4)));
     newAnimations.append(inert1);
     newAnimations.append(inert2);
-    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->defaultStack(), &newAnimations, 0, KeyframeEffect::DefaultPriority, 10);
+    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), &newAnimations, 0, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(2u, result.size());
     EXPECT_TRUE(interpolationValue(result, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));
     EXPECT_TRUE(interpolationValue(result, CSSPropertyZIndex)->equals(AnimatableDouble::create(4).get()));
@@ -113,7 +116,7 @@ TEST_F(AnimationAnimationStackTest, CancelledAnimations)
     Animation* animation = play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(1))), 0);
     cancelledAnimations.add(animation);
     play(makeKeyframeEffect(makeEffectModel(CSSPropertyZIndex, AnimatableDouble::create(2))), 0);
-    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->defaultStack(), 0, &cancelledAnimations, KeyframeEffect::DefaultPriority, 0);
+    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), 0, &cancelledAnimations, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, result.size());
     EXPECT_TRUE(interpolationValue(result, CSSPropertyZIndex)->equals(AnimatableDouble::create(2).get()));
 }
@@ -121,12 +124,12 @@ TEST_F(AnimationAnimationStackTest, CancelledAnimations)
 TEST_F(AnimationAnimationStackTest, ClearedEffectsRemoved)
 {
     Animation* animation = play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(1))), 10);
-    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->defaultStack(), 0, 0, KeyframeEffect::DefaultPriority, 0);
+    ActiveInterpolationsMap result = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), 0, 0, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, result.size());
     EXPECT_TRUE(interpolationValue(result, CSSPropertyFontSize)->equals(AnimatableDouble::create(1).get()));
 
     animation->setEffect(0);
-    result = AnimationStack::activeInterpolations(&element->elementAnimations()->defaultStack(), 0, 0, KeyframeEffect::DefaultPriority, 0);
+    result = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), 0, 0, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(0u, result.size());
 }
 

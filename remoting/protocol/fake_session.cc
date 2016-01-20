@@ -9,6 +9,33 @@ namespace protocol {
 
 const char kTestJid[] = "host1@gmail.com/chromoting123";
 
+FakeTransport::FakeTransport() {}
+FakeTransport::~FakeTransport() {}
+
+void FakeTransport::Start(EventHandler* event_handler,
+                                 Authenticator* authenticator) {
+  NOTREACHED();
+}
+
+bool FakeTransport::ProcessTransportInfo(
+    buzz::XmlElement* transport_info) {
+  NOTREACHED();
+  return true;
+}
+
+DatagramChannelFactory* FakeTransport::GetDatagramChannelFactory() {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+
+FakeStreamChannelFactory* FakeTransport::GetStreamChannelFactory() {
+  return &channel_factory_;
+}
+
+FakeStreamChannelFactory* FakeTransport::GetMultiplexedChannelFactory() {
+  return &channel_factory_;
+}
+
 FakeSession::FakeSession()
     : event_handler_(nullptr),
       config_(SessionConfig::ForTest()),
@@ -34,20 +61,17 @@ const SessionConfig& FakeSession::config() {
   return *config_;
 }
 
-StreamChannelFactory* FakeSession::GetTransportChannelFactory() {
-  return &channel_factory_;
+FakeTransport* FakeSession::GetTransport() {
+  return &transport_;
 }
 
-StreamChannelFactory* FakeSession::GetMultiplexedChannelFactory() {
-  return &channel_factory_;
+FakeStreamChannelFactory* FakeSession::GetQuicChannelFactory() {
+  return transport_.GetStreamChannelFactory();
 }
 
-StreamChannelFactory* FakeSession::GetQuicChannelFactory() {
-  return &channel_factory_;
-}
-
-void FakeSession::Close() {
+void FakeSession::Close(ErrorCode error) {
   closed_ = true;
+  error_ = error;
 }
 
 }  // namespace protocol

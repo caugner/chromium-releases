@@ -67,7 +67,6 @@
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
-#include "ui/accelerated_widget_mac/io_surface_layer.h"
 #include "ui/accelerated_widget_mac/surface_handle_types.h"
 #include "ui/base/cocoa/animation_utils.h"
 #import "ui/base/cocoa/fullscreen_window_manager.h"
@@ -183,7 +182,8 @@ static BOOL SupportsBackingPropertiesChangedNotification() {
 - (void)setResponderDelegate:
         (NSObject<RenderWidgetHostViewMacDelegate>*)delegate;
 - (void)showLookUpDictionaryOverlayInternal:(NSAttributedString*) string
-                              baselinePoint:(NSPoint) baselinePoint;
+                              baselinePoint:(NSPoint) baselinePoint
+                                 targetView:(NSView*) view;
 @end
 
 // A window subclass that allows the fullscreen window to become main and gain
@@ -354,7 +354,7 @@ float FlipYFromRectToScreen(float y, float rect_height) {
   if (!g_screen_info_up_to_date) {
     if ([[NSScreen screens] count] > 0) {
       screen_zero_height =
-          [[[NSScreen screens] objectAtIndex:0] frame].size.height;
+          [[[NSScreen screens] firstObject] frame].size.height;
       g_screen_info_up_to_date = true;
     } else {
       return y;
@@ -481,48 +481,6 @@ NSView* RenderWidgetHostViewMac::AcceleratedWidgetGetNSView() const {
   return cocoa_view_;
 }
 
-bool RenderWidgetHostViewMac::AcceleratedWidgetShouldIgnoreBackpressure()
-    const {
-  // If vsync is disabled, then always draw and ack frames immediately.
-  static bool is_vsync_disabled =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuVsync);
-  if (is_vsync_disabled)
-    return true;
-
-  // If the window is occluded, then this frame's display call may be severely
-  // throttled. This is a good thing, unless tab capture may be active, because
-  // the broadcast will be inappropriately throttled.
-  // http://crbug.com/350410
-
-  // If tab capture isn't active then only ack frames when we draw them.
-  if (delegated_frame_host_ && !delegated_frame_host_->HasFrameSubscriber())
-    return false;
-
-  NSWindow* window = [cocoa_view_ window];
-  // If the view isn't even in the heirarchy then frames will never be drawn,
-  // so ack them immediately.
-  if (!window)
-    return true;
-
-  // Check the window occlusion API.
-  if ([window respondsToSelector:@selector(occlusionState)]) {
-    if ([window occlusionState] & NSWindowOcclusionStateVisible) {
-      // If the window is visible then it is safe to wait until frames are
-      // drawn to ack them.
-      return false;
-    } else {
-      // If the window is occluded then frames may never be drawn, so ack them
-      // immediately.
-      return true;
-    }
-  }
-
-  // If the window occlusion API is not present then ack frames when we draw
-  // them.
-  return false;
-}
-
 void RenderWidgetHostViewMac::AcceleratedWidgetGetVSyncParameters(
     base::TimeTicks* timebase, base::TimeDelta* interval) const {
   if (display_link_ &&
@@ -532,28 +490,9 @@ void RenderWidgetHostViewMac::AcceleratedWidgetGetVSyncParameters(
   *interval = base::TimeDelta();
 }
 
-void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted(
-    const std::vector<ui::LatencyInfo>& all_latency_info) {
-  if (!render_widget_host_)
-    return;
-  base::TimeTicks swap_time = base::TimeTicks::Now();
-
-  for (auto latency_info : all_latency_info) {
-    latency_info.AddLatencyNumberWithTimestamp(
-        ui::INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT, 0, 0, swap_time, 1);
-    latency_info.AddLatencyNumberWithTimestamp(
-        ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0,
-        swap_time, 1);
-    render_widget_host_->FrameSwapped(latency_info);
-  }
-
+void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted() {
   if (display_link_)
-    display_link_->NotifyCurrentTime(swap_time);
-}
-
-void RenderWidgetHostViewMac::AcceleratedWidgetHitError() {
-  // Request a new frame be drawn.
-  browser_compositor_->compositor()->ScheduleFullRedraw();
+    display_link_->NotifyCurrentTime(base::TimeTicks::Now());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1311,9 +1250,9 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
 }
 
 void RenderWidgetHostViewMac::CopyFromCompositingSurfaceToVideoFrame(
-      const gfx::Rect& src_subrect,
-      const scoped_refptr<media::VideoFrame>& target,
-      const base::Callback<void(bool)>& callback) {
+    const gfx::Rect& src_subrect,
+    const scoped_refptr<media::VideoFrame>& target,
+    const base::Callback<void(const gfx::Rect&, bool)>& callback) {
   DCHECK(delegated_frame_host_);
   delegated_frame_host_->CopyFromCompositingSurfaceToVideoFrame(
       src_subrect, target, callback);
@@ -1461,9 +1400,6 @@ gfx::Range RenderWidgetHostViewMac::ConvertCharacterRangeToCompositionRange(
 }
 
 WebContents* RenderWidgetHostViewMac::GetWebContents() {
-  if (!render_widget_host_->IsRenderView())
-    return NULL;
-
   return WebContents::FromRenderViewHost(
       RenderViewHost::From(render_widget_host_));
 }
@@ -1594,6 +1530,14 @@ gfx::Rect RenderWidgetHostViewMac::GetBoundsInRootWindow() {
   return FlipNSRectToRectScreen(bounds);
 }
 
+void RenderWidgetHostViewMac::LockCompositingSurface() {
+  NOTIMPLEMENTED();
+}
+
+void RenderWidgetHostViewMac::UnlockCompositingSurface() {
+  NOTIMPLEMENTED();
+}
+
 bool RenderWidgetHostViewMac::LockMouse() {
   if (mouse_locked_)
     return true;
@@ -1649,8 +1593,16 @@ uint32_t RenderWidgetHostViewMac::GetSurfaceIdNamespace() {
 uint32_t RenderWidgetHostViewMac::SurfaceIdNamespaceAtPoint(
     const gfx::Point& point,
     gfx::Point* transformed_point) {
-  cc::SurfaceId id =
-      delegated_frame_host_->SurfaceIdAtPoint(point, transformed_point);
+  // The surface hittest happens in device pixels, so we need to convert the
+  // |point| from DIPs to pixels before hittesting.
+  float scale_factor = gfx::Screen::GetScreenFor(cocoa_view_)
+                           ->GetDisplayNearestWindow(cocoa_view_)
+                           .device_scale_factor();
+  gfx::Point point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
+  cc::SurfaceId id = delegated_frame_host_->SurfaceIdAtPoint(point_in_pixels,
+                                                             transformed_point);
+  *transformed_point = gfx::ConvertPointToDIP(scale_factor, *transformed_point);
+
   // It is possible that the renderer has not yet produced a surface, in which
   // case we return our current namespace.
   if (id.is_null())
@@ -1794,11 +1746,7 @@ void RenderWidgetHostViewMac::PauseForPendingResizeOrRepaintsAndDraw() {
     return;
 
   // Wait for a frame of the right size to come in.
-  if (browser_compositor_)
-    browser_compositor_->accelerated_widget_mac()->BeginPumpingFrames();
   render_widget_host_->PauseForPendingResizeOrRepaints();
-  if (browser_compositor_)
-    browser_compositor_->accelerated_widget_mac()->EndPumpingFrames();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2152,6 +2100,11 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     return;
   }
 
+  // If there are multiple widgets on the page (such as when there are
+  // out-of-process iframes), pick the one that should process this event.
+  if (widgetHost->delegate())
+    widgetHost = widgetHost->delegate()->GetFocusedRenderWidgetHost(widgetHost);
+
   // Suppress the escape key up event if necessary.
   if (event.windowsKeyCode == ui::VKEY_ESCAPE && suppressNextEscapeKeyUp_) {
     if (event.type == NativeWebKeyboardEvent::KeyUp)
@@ -2356,6 +2309,10 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     [NSCursor setHiddenUntilMouseMoves:YES];
 }
 
+- (void)forceTouchEvent:(NSEvent*)theEvent {
+  [self quickLookWithEvent:theEvent];
+}
+
 - (void)shortCircuitScrollWheelEvent:(NSEvent*)event {
   DCHECK(base::mac::IsOSLionOrLater());
 
@@ -2435,7 +2392,8 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
 }
 
 - (void)showLookUpDictionaryOverlayInternal:(NSAttributedString*) string
-                              baselinePoint:(NSPoint) baselinePoint {
+                              baselinePoint:(NSPoint) baselinePoint
+                                 targetView:(NSView*) view {
   if ([string length] == 0) {
     // The PDF plugin does not support getting the attributed string at point.
     // Until it does, use NSPerformService(), which opens Dictionary.app.
@@ -2453,17 +2411,19 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     return;
   }
   dispatch_async(dispatch_get_main_queue(), ^{
-      [self showDefinitionForAttributedString:string
-                                      atPoint:baselinePoint];
+    [view showDefinitionForAttributedString:string
+                                    atPoint:baselinePoint];
   });
 }
 
-- (void)showLookUpDictionaryOverlayFromRange:(NSRange)range {
+- (void)showLookUpDictionaryOverlayFromRange:(NSRange)range
+                                  targetView:(NSView*)targetView {
   TextInputClientMac::GetInstance()->GetStringFromRange(
       renderWidgetHostView_->render_widget_host_, range,
       ^(NSAttributedString* string, NSPoint baselinePoint) {
         [self showLookUpDictionaryOverlayInternal:string
-                                    baselinePoint:baselinePoint];
+                                    baselinePoint:baselinePoint
+                                       targetView:targetView];
       }
   );
 }
@@ -2474,7 +2434,8 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
       gfx::Point(point.x, NSHeight([self frame]) - point.y),
       ^(NSAttributedString* string, NSPoint baselinePoint) {
         [self showLookUpDictionaryOverlayInternal:string
-                                    baselinePoint:baselinePoint];
+                                    baselinePoint:baselinePoint
+                                       targetView:self];
       }
   );
 }
@@ -2745,15 +2706,15 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   }
 
   SEL action = [item action];
+  BOOL is_render_view =
+      RenderViewHost::From(renderWidgetHostView_->render_widget_host_) !=
+      nullptr;
 
-  if (action == @selector(stopSpeaking:)) {
-    return renderWidgetHostView_->render_widget_host_->IsRenderView() &&
-           renderWidgetHostView_->IsSpeaking();
-  }
-  if (action == @selector(startSpeaking:)) {
-    return renderWidgetHostView_->render_widget_host_->IsRenderView() &&
-           renderWidgetHostView_->SupportsSpeech();
-  }
+  if (action == @selector(stopSpeaking:))
+    return is_render_view && renderWidgetHostView_->IsSpeaking();
+
+  if (action == @selector(startSpeaking:))
+    return is_render_view && renderWidgetHostView_->SupportsSpeech();
 
   // For now, these actions are always enabled for render view,
   // this is sub-optimal.
@@ -2765,7 +2726,7 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
       action == @selector(copyToFindPboard:) ||
       action == @selector(paste:) ||
       action == @selector(pasteAndMatchStyle:)) {
-    return renderWidgetHostView_->render_widget_host_->IsRenderView();
+    return is_render_view;
   }
 
   return editCommand_helper_->IsMenuItemEnabled(action, self);

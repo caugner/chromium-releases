@@ -9,9 +9,10 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
-#include "components/mus/public/interfaces/view_tree.mojom.h"
+#include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "components/web_view/public/interfaces/frame.mojom.h"
 #include "mojo/services/network/public/interfaces/url_loader.mojom.h"
+#include "url/gurl.h"
 
 namespace web_view {
 
@@ -30,7 +31,7 @@ class FrameTreeDelegate {
       base::Callback<void(uint32_t,
                           mojom::FrameClient*,
                           scoped_ptr<FrameUserData>,
-                          mojo::ViewTreeClientPtr)>;
+                          mus::mojom::WindowTreeClientPtr)>;
 
   // Called when a Frame creates a new child Frame. |frame_tree_client| is the
   // FrameClient for the new frame.
@@ -58,7 +59,7 @@ class FrameTreeDelegate {
   // Asks the client if navigation is allowed. If the navigation is allowed
   // |callback| should be called to continue the navigation. |callback|
   // may be called synchronously or asynchronously. In the callback
-  // mojo::ViewTreeClientPtr should only be set if an app other than
+  // mus::mojom::WindowTreeClientPtr should only be set if an app other than
   // frame->app_id() is used to render |request|.
   virtual void CanNavigateFrame(Frame* target,
                                 mojo::URLRequestPtr request,
@@ -70,19 +71,31 @@ class FrameTreeDelegate {
   // Invoked when blink has started displaying the frame.
   virtual void DidCommitProvisionalLoad(Frame* frame) = 0;
 
+  // Invoked when the frame has changed its own URL.
+  virtual void DidNavigateLocally(Frame* source, const GURL& url) = 0;
+
   // Notification of various frame state changes. Generally only useful for
   // tests.
   virtual void DidCreateFrame(Frame* frame);
   virtual void DidDestroyFrame(Frame* frame);
 
-  // Invoked when the View embedded in a Frame premuturely stops rendering
-  // to |frame|'s View. This could mean any of the following:
+  // Invoked when the Window embedded in a Frame premuturely stops rendering
+  // to |frame|'s Window. This could mean any of the following:
   // . The app crashed.
   // . There is no app that renders the url.
   // . The app is still alive, but is shutting down.
   // Frame does nothing in response to this, but the delegate may wish to take
   // action.
-  virtual void OnViewEmbeddedInFrameDisconnected(Frame* frame);
+  virtual void OnWindowEmbeddedInFrameDisconnected(Frame* frame);
+
+  // Reports the current find state back to our owner.
+  virtual void OnFindInFrameCountUpdated(int32_t request_id,
+                                         Frame* frame,
+                                         int32_t count,
+                                         bool final_update);
+  virtual void OnFindInPageSelectionUpdated(int32_t request_id,
+                                            Frame* frame,
+                                            int32_t active_match_ordinal);
 
  protected:
   virtual ~FrameTreeDelegate() {}

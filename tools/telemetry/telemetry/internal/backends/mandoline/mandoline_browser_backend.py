@@ -50,6 +50,10 @@ class MandolineBrowserBackend(browser_backend.BrowserBackend):
     args = []
     args.extend(self.browser_options.extra_browser_args)
     args.extend(self.GetReplayBrowserStartupArgs())
+    # Currently the bots that run mojo perf tests use such an old kernel that
+    # it doesn't support the namespace sandboxing primitives. Disable it until
+    # infra fixes it. (crbug.com/546644)
+    args.append('--no-sandbox')
     return args
 
   def _UseHostResolverRules(self):
@@ -190,9 +194,6 @@ class MandolineBrowserBackend(browser_backend.BrowserBackend):
 
     if browser_options.no_proxy_server:
       _RaiseForUnsupportedOption('no_proxy_server')
-
-    if browser_options.use_devtools_active_port:
-      _RaiseForUnsupportedOption('use_devtools_active_port')
 
     if browser_options.browser_user_agent_type:
       _WarnForUnsupportedOption('browser_user_agent_type')

@@ -68,7 +68,6 @@
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/root_window_layout_manager.h"
-#include "ash/wm/screen_dimmer.h"
 #include "ash/wm/system_gesture_event_filter.h"
 #include "ash/wm/system_modal_container_event_filter.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
@@ -96,7 +95,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
-#include "ui/keyboard/keyboard.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
@@ -121,13 +119,13 @@
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
 #include "ash/ash_constants.h"
-#include "ash/content/display/display_color_manager_chromeos.h"
-#include "ash/content/display/screen_orientation_controller_chromeos.h"
 #include "ash/display/display_change_observer_chromeos.h"
+#include "ash/display/display_color_manager_chromeos.h"
 #include "ash/display/display_configurator_animation.h"
 #include "ash/display/display_error_observer_chromeos.h"
 #include "ash/display/projecting_observer_chromeos.h"
 #include "ash/display/resolution_notification_controller.h"
+#include "ash/display/screen_orientation_controller_chromeos.h"
 #include "ash/sticky_keys/sticky_keys_controller.h"
 #include "ash/system/chromeos/bluetooth/bluetooth_notification_controller.h"
 #include "ash/system/chromeos/brightness/brightness_controller_chromeos.h"
@@ -523,13 +521,6 @@ ShelfAlignment Shell::GetShelfAlignment(const aura::Window* root_window) {
   return GetRootWindowController(root_window)
       ->GetShelfLayoutManager()
       ->GetAlignment();
-}
-
-void Shell::SetDimming(bool should_dim) {
-  RootWindowControllerList controllers = GetAllRootWindowControllers();
-  for (RootWindowControllerList::iterator iter = controllers.begin();
-       iter != controllers.end(); ++iter)
-    (*iter)->screen_dimmer()->SetDimming(should_dim);
 }
 
 void Shell::NotifyFullscreenStateChange(bool is_fullscreen,
@@ -959,12 +950,6 @@ void Shell::Init(const ShellInitParams& init_params) {
   keyboard_metrics_filter_.reset(new KeyboardUMAEventFilter);
   AddPreTargetHandler(keyboard_metrics_filter_.get());
 
-  // The keyboard system must be initialized before the RootWindowController is
-  // created.
-#if defined(OS_CHROMEOS)
-    keyboard::InitializeKeyboard();
-#endif
-
 #if defined(OS_CHROMEOS)
   sticky_keys_controller_.reset(new StickyKeysController);
 #endif
@@ -1105,10 +1090,8 @@ void Shell::InitKeyboard() {
             keyboard::KeyboardController::GetInstance());
       }
     }
-    keyboard::KeyboardControllerProxy* proxy =
-        delegate_->CreateKeyboardControllerProxy();
     keyboard::KeyboardController::ResetInstance(
-        new keyboard::KeyboardController(proxy));
+        new keyboard::KeyboardController(delegate_->CreateKeyboardUI()));
   }
 }
 

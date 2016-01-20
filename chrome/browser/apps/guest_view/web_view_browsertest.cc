@@ -38,6 +38,7 @@
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/child_process_host.h"
@@ -112,11 +113,6 @@ const char kUserAgentRedirectResponsePath[] = "/detect-user-agent";
 const char kCacheResponsePath[] = "/cache-control-response";
 const char kRedirectResponseFullPath[] =
     "/extensions/platform_apps/web_view/shim/guest_redirect.html";
-
-class EmptyHttpResponse : public net::test_server::HttpResponse {
- public:
-  std::string ToResponseString() const override { return std::string(); }
-};
 
 class TestInterstitialPageDelegate : public content::InterstitialPageDelegate {
  public:
@@ -453,7 +449,8 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       const net::test_server::HttpRequest& request) {
     if (base::StartsWith(path, request.relative_url,
                          base::CompareCase::SENSITIVE))
-      return scoped_ptr<net::test_server::HttpResponse>(new EmptyHttpResponse);
+      return scoped_ptr<net::test_server::HttpResponse>(
+          new net::test_server::RawHttpResponse("", ""));
 
     return scoped_ptr<net::test_server::HttpResponse>();
   }
@@ -665,9 +662,11 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     mouse_event.button = blink::WebMouseEvent::ButtonRight;
     mouse_event.x = 1;
     mouse_event.y = 1;
-    web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+    web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+        mouse_event);
     mouse_event.type = blink::WebInputEvent::MouseUp;
-    web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+    web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+        mouse_event);
   }
 
   content::WebContents* GetGuestWebContents() {
@@ -1675,6 +1674,19 @@ IN_PROC_BROWSER_TEST_F(WebViewNewWindowTest, OpenURLFromTab_NewWindow_Abort) {
             new_guest_web_contents->GetLastCommittedURL());
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewTest, ContextMenuInspectElement) {
+  LoadAppWithGuest("web_view/context_menus/basic");
+  content::WebContents* guest_web_contents = GetGuestWebContents();
+  ASSERT_TRUE(guest_web_contents);
+
+  content::ContextMenuParams params;
+  TestRenderViewContextMenu menu(guest_web_contents->GetMainFrame(), params);
+  menu.Init();
+
+  // Expect "Inspect" to be shown as we are running webview in a chrome app.
+  EXPECT_TRUE(menu.IsItemPresent(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
+}
+
 // This test executes the context menu command 'LanguageSettings' which will
 // load chrome://settings/languages in a browser window. This is a browser-
 // initiated operation and so we expect this to succeed if the embedder is
@@ -2585,7 +2597,9 @@ INSTANTIATE_TEST_CASE_P(WebViewScrollBubbling,
                         WebViewGuestScrollTest,
                         ::testing::Bool());
 
-IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest, TestGuestWheelScrollsBubble) {
+// Flaky on all platforms, see http://crbug.com/544782.
+IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest,
+                       DISABLED_TestGuestWheelScrollsBubble) {
   LoadAppWithGuest("web_view/scrollable_embedder_and_guest");
 
   if (GetParam())

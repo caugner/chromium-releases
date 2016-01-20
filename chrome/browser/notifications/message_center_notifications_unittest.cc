@@ -22,6 +22,7 @@
 #include "ui/message_center/message_center_impl.h"
 #include "ui/message_center/message_center_tray.h"
 #include "ui/message_center/message_center_types.h"
+#include "ui/message_center/notification_types.h"
 #include "ui/message_center/notifier_settings.h"
 
 #if defined(OS_CHROMEOS)
@@ -29,6 +30,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
+#include "components/signin/core/account_id/account_id.h"
 #endif
 
 namespace message_center {
@@ -77,12 +79,15 @@ class MessageCenterNotificationManagerTest : public BrowserWithTestWindowTest {
 
   const ::Notification GetANotification(const std::string& id) {
     return ::Notification(
-        GURL("chrome-extension://adflkjsdflkdsfdsflkjdsflkdjfs"),
+        message_center::NOTIFICATION_TYPE_SIMPLE,
         base::string16(),
         base::string16(),
         gfx::Image(),
+        NotifierId(NotifierId::APPLICATION, "adflkjsdflkdsfdsflkjdsflkdjfs"),
         base::string16(),
+        GURL("chrome-extension://adflkjsdflkdsfdsflkjdsflkdjfs"),
         id,
+        message_center::RichNotificationData(),
         new MockNotificationDelegate(id));
   }
 
@@ -110,7 +115,8 @@ TEST_F(MessageCenterNotificationManagerTest, UpdateNotification) {
 #if defined(OS_CHROMEOS)
 TEST_F(MessageCenterNotificationManagerTest, MultiUserUpdates) {
   TestingProfile profile;
-  std::string active_user_id = multi_user_util::GetUserIDFromProfile(&profile);
+  const AccountId active_user_id(
+      multi_user_util::GetAccountIdFromProfile(&profile));
   chrome::MultiUserWindowManagerChromeOS* multi_user_window_manager =
       new chrome::MultiUserWindowManagerChromeOS(active_user_id);
   multi_user_window_manager->Init();

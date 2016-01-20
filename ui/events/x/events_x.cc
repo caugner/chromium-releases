@@ -149,6 +149,8 @@ int GetEventFlagsFromXState(unsigned int state) {
     flags |= ui::EF_ALT_DOWN;
   if (state & LockMask)
     flags |= ui::EF_CAPS_LOCK_DOWN;
+  if (state & Mod2Mask)
+    flags |= ui::EF_NUM_LOCK_DOWN;
   if (state & Mod3Mask)
     flags |= ui::EF_MOD3_DOWN;
   if (state & Mod4Mask)
@@ -671,6 +673,11 @@ int GetChangedMouseButtonFlagsFromNative(
       break;
   }
   return 0;
+}
+
+PointerDetails GetMousePointerDetailsFromNative(
+    const base::NativeEvent& native_event) {
+  return PointerDetails(EventPointerType::POINTER_TYPE_MOUSE);
 }
 
 gfx::Vector2d GetMouseWheelOffset(const base::NativeEvent& native_event) {

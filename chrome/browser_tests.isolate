@@ -71,6 +71,7 @@
           '../third_party/safe_browsing/',
           '../third_party/simplejson/',
           '../third_party/tlslite/',
+          '../ui/webui/resources/js/webui_resource_test.js',
           '<(PRODUCT_DIR)/browser_tests.pak',
           '<(PRODUCT_DIR)/pseudo_locales/',
           '<(PRODUCT_DIR)/pyproto/',
@@ -89,6 +90,14 @@
           'common/extensions/docs/examples/apps/calculator/',
           'test/data/',
           'third_party/mock4js/',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="win"', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/chrome_material_100_percent.pak',
+          '<(PRODUCT_DIR)/chrome_100_percent.pak',
         ],
       },
     }],
@@ -241,6 +250,7 @@
           '../ui/file_manager/integration_tests/',
           '../ui/webui/resources/js/',
           '../third_party/analytics/',
+          '../third_party/polymer/v1_0/components-chromium/polymer/',
           '../chrome/browser/resources/chromeos/wallpaper_manager/',
           '<(PRODUCT_DIR)/chromevox_test_data/',
           '<(PRODUCT_DIR)/content_shell.pak',

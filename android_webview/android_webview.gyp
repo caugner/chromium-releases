@@ -28,6 +28,7 @@
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/android_webview',
       },
       'actions': [
+        # GN version: //android_webview:generate_aw_resources
         {
           'action_name': 'generate_aw_resources',
           'variables': {
@@ -35,6 +36,7 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
+        # GN version: //android_webview:repack_pack
         {
           'action_name': 'repack_android_webview_pack',
           'variables': {
@@ -47,10 +49,11 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_resources_100_percent.pak',
               '<(grit_out_dir)/aw_resources.pak',
             ],
-            'pak_output': '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
+            'pak_output': '<(webview_chromium_pak_path)',
           },
          'includes': [ '../build/repack_action.gypi' ],
         },
+        # GN version: //android_webview:generate_aw_strings
         {
           'action_name': 'generate_aw_strings',
           'variables': {
@@ -58,6 +61,19 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
+        # GN version: //android_webview:generate_components_strings
+        {
+          'action_name': 'generate_components_strings',
+          'variables': {
+             # components_strings contains strings from all components. WebView
+             # will never display most of them, so we try to limit the included
+             # strings
+            'grit_whitelist': 'ui/grit_components_whitelist.txt',
+            'grit_grd_file': '../components/components_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        # GN Version: //android_webview:repack_locales
         {
           'action_name': 'android_webview_repack_locales',
           'variables': {
@@ -78,6 +94,7 @@
             '<@(locales)',
           ],
         },
+        # GN version:  //android_webview/rename_snapshot_blob
         {
           'action_name': 'rename_snapshot_blob',
           'inputs': [
@@ -93,6 +110,7 @@
             '<@(_outputs)',
           ],
         },
+        # GN version:  //android_webview/rename_natives_blob
         {
           'action_name': 'rename_natives_blob',
           'inputs': [
@@ -108,20 +126,43 @@
             '<@(_outputs)',
           ],
         },
+        # GN version:  //android_webview/generate_webview_license_notice
+        {
+          'action_name': 'generate_webview_license_notice',
+          'inputs': [
+            '<!@(python <(DEPTH)/android_webview/tools/webview_licenses.py notice_deps)',
+            '<(DEPTH)/android_webview/tools/licenses_notice.tmpl',
+            '<(DEPTH)/android_webview/tools/webview_licenses.py',
+          ],
+          'outputs': [
+             '<(webview_licenses_path)',
+          ],
+          'action': [
+            'python',
+              '<(DEPTH)/android_webview/tools/webview_licenses.py',
+              'notice',
+              '<(webview_licenses_path)',
+          ],
+          'message': 'Generating WebView license notice',
+        },
       ],
     },
+    # GN version:  //android_webview/locale_paks
     {
       'target_name': 'android_webview_locale_paks',
       'type': 'none',
       'variables': {
-        'locale_pak_files': [ '<@(webview_locales_input_paks)' ],
+        'locale_pak_files': [
+          '<@(webview_locales_input_common_paks)',
+          '<@(webview_locales_input_individual_paks)',
+        ],
       },
       'includes': [
-        'apk/system_webview_locales_paks.gypi',
         '../build/android/locale_pak_resources.gypi',
       ],
     },
     {
+      # GN version:  //android_webview:strings_grd
       'target_name': 'android_webview_strings_grd',
       'android_unmangled_name': 1,
       'type': 'none',
@@ -133,6 +174,7 @@
       ],
     },
     {
+      # GN version:  //android_webview/common:version
       'target_name': 'android_webview_version',
       'type': 'none',
       'direct_dependent_settings': {
@@ -173,6 +215,7 @@
         },
       ],
     },
+    # GN version: //android_webview:common
     {
       'target_name': 'android_webview_common',
       'type': 'static_library',
@@ -215,8 +258,6 @@
         '../v8/tools/gyp/v8.gyp:v8',
         'android_webview_pak',
         'android_webview_version',
-        '../components/components.gyp:policy',
-        '../components/components.gyp:policy_component',
         '../components/components.gyp:pref_registry',
         '../components/url_formatter/url_formatter.gyp:url_formatter',
       ],
@@ -373,7 +414,16 @@
         'renderer/print_render_frame_observer.cc',
         'renderer/print_render_frame_observer.h',
       ],
+      'conditions': [
+        ['configuration_policy==1', {
+          'dependencies': [
+            '../components/components.gyp:policy',
+            '../components/components.gyp:policy_component',
+          ],
+        }],
+      ],
     },
+    # GN version:  //android_webview:libwebviewchromium
     {
       'target_name': 'libwebviewchromium',
       'includes': [
@@ -381,13 +431,13 @@
       ],
     },
     {
+      # GN version:  //android_webview:android_webview_java
       'target_name': 'android_webview_java',
       'type': 'none',
       'dependencies': [
         '../android_webview/native/webview_native.gyp:android_webview_aw_permission_request_resource',
         '../components/components.gyp:external_video_surface_java',
         '../components/components.gyp:navigation_interception_java',
-        '../components/components.gyp:policy_java',
         '../components/components.gyp:web_contents_delegate_android_java',
         '../content/content.gyp:content_java',
         '../ui/android/ui_android.gyp:ui_java',
@@ -401,8 +451,16 @@
         'R_package_relpath': 'org/chromium/android_webview',
         'android_manifest_path': '../android_webview/apk/java/AndroidManifest.xml', # for lint
       },
+      'conditions': [
+        ['configuration_policy==1', {
+          'dependencies': [
+            '../components/components.gyp:policy_java',
+          ],
+        }],
+      ],
       'includes': [ '../build/java.gypi' ],
     },
+    # GN version:  //android_webview/glue
     {
       'target_name': 'system_webview_glue_java',
       'variables': {
@@ -411,6 +469,7 @@
       },
       'includes': [ 'apk/system_webview_glue_common.gypi' ],
     },
+    # GN version:  //android_webview:system_webview_apk
     {
       'target_name': 'system_webview_apk',
       'dependencies': [
@@ -428,5 +487,6 @@
   ],
   'includes': [
     'android_webview_tests.gypi',
+    'apk/system_webview_paks.gypi',
   ],
 }

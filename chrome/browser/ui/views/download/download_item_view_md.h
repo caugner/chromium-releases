@@ -35,6 +35,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
 
+class BarControlButton;
 class DownloadShelfView;
 class DownloadShelfContextMenuView;
 
@@ -46,6 +47,10 @@ namespace gfx {
 class Image;
 class ImageSkia;
 class SlideAnimation;
+}
+
+namespace ui {
+class ThemeProvider;
 }
 
 namespace views {
@@ -70,6 +75,9 @@ class DownloadItemViewMd : public views::ButtonListener,
   void UpdateDownloadProgress();
   void StartDownloadProgress();
   void StopDownloadProgress();
+
+  // Returns the base color for text on this download item, based on |theme|.
+  static SkColor GetTextColorForThemeProvider(ui::ThemeProvider* theme);
 
   // IconManager::Client interface.
   void OnExtractIconComplete(gfx::Image* icon);
@@ -174,6 +182,10 @@ class DownloadItemViewMd : public views::ButtonListener,
   // warning.
   void ShowWarningDialog();
 
+  // Returns the current warning icon (should only be called when the view is
+  // actually showing a warning).
+  gfx::ImageSkia GetWarningIcon();
+
   // Sets |size| with the size of the Save and Discard buttons (they have the
   // same size).
   gfx::Size GetButtonSize() const;
@@ -201,8 +213,11 @@ class DownloadItemViewMd : public views::ButtonListener,
                               State to,
                               gfx::SlideAnimation* animation);
 
-  // The warning icon showns for dangerous downloads.
-  const gfx::ImageSkia* warning_icon_;
+  // Returns the base text color.
+  SkColor GetTextColor();
+
+  // Returns a slightly dimmed version of the base text color.
+  SkColor GetDimmedTextColor();
 
   // The download shelf that owns us.
   DownloadShelfView* shelf_;
@@ -263,7 +278,7 @@ class DownloadItemViewMd : public views::ButtonListener,
   views::LabelButton* discard_button_;
 
   // The drop down button.
-  views::ImageButton* dropdown_button_;
+  BarControlButton* dropdown_button_;
 
   // Dangerous mode label.
   views::Label* dangerous_download_label_;

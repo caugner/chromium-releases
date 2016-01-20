@@ -34,6 +34,7 @@
 #include "chromeos/network/onc/onc_utils.h"
 #include "chromeos/network/onc/onc_validator.h"
 #include "chromeos/network/policy_util.h"
+#include "chromeos/network/prohibited_technologies_handler.h"
 #include "chromeos/network/shill_property_util.h"
 #include "components/onc/onc_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -153,7 +154,7 @@ void ManagedNetworkConfigurationHandlerImpl::SendManagedProperties(
   if (ui_data && profile) {
     user_settings = ui_data->user_settings();
   } else if (profile) {
-    NET_LOG_ERROR("Service contains empty or invalid UIData", service_path);
+    NET_LOG_DEBUG("Service contains empty or invalid UIData", service_path);
     // TODO(pneubeck): add a conversion of user configured entries of old
     // ChromeOS versions. We will have to use a heuristic to determine which
     // properties _might_ be user configured.
@@ -425,6 +426,19 @@ void ManagedNetworkConfigurationHandlerImpl::SetPolicy(
   }
 
   policies->global_network_config.MergeDictionary(&global_network_config);
+
+  // Update prohibited technologies.
+  const base::ListValue* prohibited_list = nullptr;
+  if (policies->global_network_config.GetListWithoutPathExpansion(
+          ::onc::global_network_config::kDisableNetworkTypes,
+          &prohibited_list) &&
+      prohibited_technologies_handler_) {
+    // Prohobited technologies are only allowed in user policy.
+    DCHECK_EQ(::onc::ONC_SOURCE_DEVICE_POLICY, onc_source);
+
+    prohibited_technologies_handler_->SetProhibitedTechnologies(
+        prohibited_list);
+  }
 
   GuidToPolicyMap old_per_network_config;
   policies->per_network_config.swap(old_per_network_config);
@@ -709,12 +723,14 @@ void ManagedNetworkConfigurationHandlerImpl::Init(
     NetworkStateHandler* network_state_handler,
     NetworkProfileHandler* network_profile_handler,
     NetworkConfigurationHandler* network_configuration_handler,
-    NetworkDeviceHandler* network_device_handler) {
+    NetworkDeviceHandler* network_device_handler,
+    ProhibitedTechnologiesHandler* prohibited_technologies_handler) {
   network_state_handler_ = network_state_handler;
   network_profile_handler_ = network_profile_handler;
   network_configuration_handler_ = network_configuration_handler;
   network_device_handler_ = network_device_handler;
   network_profile_handler_->AddObserver(this);
+  prohibited_technologies_handler_ = prohibited_technologies_handler;
 }
 
 void ManagedNetworkConfigurationHandlerImpl::OnPolicyAppliedToNetwork(

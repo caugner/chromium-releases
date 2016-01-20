@@ -37,7 +37,6 @@
 #include "chrome/browser/net/chrome_http_user_agent_settings.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
-#include "chrome/browser/net/cookie_store_util.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
@@ -54,9 +53,12 @@
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/cookie_config/cookie_store_util.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/dom_distiller/core/url_constants.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/net_log/chrome_net_log.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -67,6 +69,7 @@
 #include "net/base/network_quality_estimator.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/transport_security_persister.h"
@@ -1067,6 +1070,8 @@ void ProfileIOData::Init(
   network_delegate->set_enable_do_not_track(&enable_do_not_track_);
   network_delegate->set_force_google_safe_search(&force_google_safesearch_);
   network_delegate->set_force_youtube_safety_mode(&force_youtube_safety_mode_);
+  network_delegate->set_data_use_aggregator(
+      io_thread_globals->data_use_aggregator.get(), IsOffTheRecord());
 
   // NOTE: Proxy service uses the default io thread network delegate, not the
   // delegate just created.
@@ -1301,13 +1306,12 @@ void ProfileIOData::DestroyResourceContext() {
   resource_context_.reset();
 }
 
-scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
-    const ProfileParams* profile_params,
-    net::HttpCache::BackendFactory* main_backend) const {
+scoped_ptr<net::HttpNetworkSession> ProfileIOData::CreateHttpNetworkSession(
+    const ProfileParams& profile_params) const {
   net::HttpNetworkSession::Params params;
   net::URLRequestContext* context = main_request_context();
 
-  IOThread* const io_thread = profile_params->io_thread;
+  IOThread* const io_thread = profile_params.io_thread;
 
   io_thread->InitializeNetworkSessionParams(&params);
   net::URLRequestContextBuilder::SetHttpNetworkSessionComponents(context,
@@ -1321,20 +1325,26 @@ scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
   if (data_reduction_proxy_io_data_.get())
     params.proxy_delegate = data_reduction_proxy_io_data_->proxy_delegate();
 
-  net::HttpNetworkSession* session = new net::HttpNetworkSession(params);
-  return scoped_ptr<net::HttpCache>(new net::HttpCache(
-      new DevToolsNetworkTransactionFactory(
-          network_controller_handle_.GetController(), session),
-      context->net_log(), main_backend));
+  return scoped_ptr<net::HttpNetworkSession>(
+      new net::HttpNetworkSession(params));
+}
+
+scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
+    net::HttpNetworkSession* session,
+    scoped_ptr<net::HttpCache::BackendFactory> main_backend) const {
+  return make_scoped_ptr(new net::HttpCache(
+      make_scoped_ptr(new DevToolsNetworkTransactionFactory(
+          network_controller_handle_.GetController(), session)),
+      main_backend.Pass(), true /* set_up_quic_server_info */));
 }
 
 scoped_ptr<net::HttpCache> ProfileIOData::CreateHttpFactory(
     net::HttpNetworkSession* shared_session,
-    net::HttpCache::BackendFactory* backend) const {
-  return scoped_ptr<net::HttpCache>(new net::HttpCache(
-      new DevToolsNetworkTransactionFactory(
-          network_controller_handle_.GetController(), shared_session),
-      shared_session->net_log(), backend));
+    scoped_ptr<net::HttpCache::BackendFactory> backend) const {
+  return make_scoped_ptr(new net::HttpCache(
+      make_scoped_ptr(new DevToolsNetworkTransactionFactory(
+          network_controller_handle_.GetController(), shared_session)),
+      backend.Pass(), true /* set_up_quic_server_info */));
 }
 
 void ProfileIOData::SetCookieSettingsForTesting(

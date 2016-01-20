@@ -85,7 +85,7 @@
               'dependencies': [
                 '../android_webview/android_webview.gyp:android_webview_apk',
                 '../android_webview/android_webview.gyp:system_webview_apk',
-                '../android_webview/android_webview_shell.gyp:android_webview_shell_apk',
+                '../android_webview/android_webview_shell.gyp:system_webview_shell_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_public_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_sync_shell_apk',
                 '../remoting/remoting.gyp:remoting_apk',
@@ -159,7 +159,6 @@
           'dependencies': [
             '../device/bluetooth/bluetooth.gyp:*',
             '../device/device_tests.gyp:*',
-            '../gpu/skia_runner/skia_runner.gyp:*',
           ],
         }],
         ['use_openssl==0 and OS=="ios"', {
@@ -498,7 +497,7 @@
   ],
   'conditions': [
     # TODO(GYP): make gn_migration.gypi work unconditionally.
-    ['OS=="mac" or OS=="win" or (OS=="linux" and target_arch=="x64" and chromecast==0)', {
+    ['OS=="mac" or OS=="win" or (OS=="android" and chromecast==0) or (OS=="linux" and target_arch=="x64" and chromecast==0)', {
       'includes': [
         'gn_migration.gypi',
       ],
@@ -851,7 +850,6 @@
             '../media/media.gyp:media_unittests_apk',
             '../media/midi/midi.gyp:midi_unittests_apk',
             '../net/net.gyp:net_unittests_apk',
-            '../sandbox/sandbox.gyp:sandbox_linux_jni_unittests_apk',
             '../skia/skia_tests.gyp:skia_unittests_apk',
             '../sql/sql.gyp:sql_unittests_apk',
             '../sync/sync.gyp:sync_unit_tests_apk',
@@ -871,10 +869,11 @@
                 # Unit test bundles packaged as an apk.
                 '../android_webview/android_webview.gyp:android_webview_test_apk',
                 '../android_webview/android_webview.gyp:android_webview_unittests_apk',
+                '../android_webview/android_webview_shell.gyp:system_webview_shell_layout_test_apk',
+                '../android_webview/android_webview_shell.gyp:system_webview_shell_page_cycler_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_public_test_apk',
                 '../chrome/android/chrome_apk.gyp:chrome_sync_shell_test_apk',
                 '../chrome/chrome.gyp:chrome_junit_tests',
-                '../chrome/chrome.gyp:chrome_uiautomator_tests',
                 '../chrome/chrome.gyp:chromedriver_webview_shell_apk',
                 '../chrome/chrome.gyp:unit_tests_apk',
                 '../third_party/custom_tabs_client/custom_tabs_client.gyp:custom_tabs_client_example_apk',

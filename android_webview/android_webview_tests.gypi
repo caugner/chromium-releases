@@ -11,6 +11,8 @@
         'android_webview_java',
         'android_webview_pak',
         'libdrawgl',
+        '../base/base.gyp:base_java_test_support',
+        '../components/components.gyp:policy_java_test_support'
       ],
       'variables': {
         'apk_name': 'AndroidWebView',
@@ -34,6 +36,7 @@
           '<(asset_location)/video.mp4',
           '<(asset_location)/visual_state_during_fullscreen_test.html',
           '<(asset_location)/visual_state_waits_for_js_test.html',
+          '<(asset_location)/visual_state_waits_for_js_detached_test.html',
           '<(asset_location)/visual_state_on_page_commit_visible_test.html',
           '<@(snapshot_additional_input_paths)',
         ],
@@ -61,6 +64,7 @@
             '<(java_in_dir)/assets/video.mp4',
             '<(java_in_dir)/assets/visual_state_during_fullscreen_test.html',
             '<(java_in_dir)/assets/visual_state_waits_for_js_test.html',
+            '<(java_in_dir)/assets/visual_state_waits_for_js_detached_test.html',
             '<(java_in_dir)/assets/visual_state_on_page_commit_visible_test.html',
             '<@(snapshot_copy_files)',
           ],
@@ -94,6 +98,7 @@
       'type': 'none',
       'dependencies': [
         '../base/base.gyp:base_java_test_support',
+        '../components/components.gyp:policy_java_test_support',
         '../content/content_shell_and_tests.gyp:content_java_test_support',
         '../net/net.gyp:net_java_test_support',
         '../testing/android/on_device_instrumentation.gyp:broker_java',

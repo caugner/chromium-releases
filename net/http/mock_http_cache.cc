@@ -477,6 +477,11 @@ int MockDiskCache::DoomEntriesSince(const base::Time initial_time,
   return ERR_NOT_IMPLEMENTED;
 }
 
+int MockDiskCache::CalculateSizeOfAllEntries(
+    const CompletionCallback& callback) {
+  return ERR_NOT_IMPLEMENTED;
+}
+
 class MockDiskCache::NotImplementedIterator : public Iterator {
  public:
   int OpenNextEntry(disk_cache::Entry** next_entry,
@@ -520,12 +525,13 @@ int MockBackendFactory::CreateBackend(NetLog* net_log,
 //-----------------------------------------------------------------------------
 
 MockHttpCache::MockHttpCache()
-    : http_cache_(new MockNetworkLayer(), NULL, new MockBackendFactory()) {
-}
+    : MockHttpCache(make_scoped_ptr(new MockBackendFactory())) {}
 
-MockHttpCache::MockHttpCache(HttpCache::BackendFactory* disk_cache_factory)
-    : http_cache_(new MockNetworkLayer(), NULL, disk_cache_factory) {
-}
+MockHttpCache::MockHttpCache(
+    scoped_ptr<HttpCache::BackendFactory> disk_cache_factory)
+    : http_cache_(make_scoped_ptr(new MockNetworkLayer()),
+                  disk_cache_factory.Pass(),
+                  true) {}
 
 disk_cache::Backend* MockHttpCache::backend() {
   TestCompletionCallback cb;

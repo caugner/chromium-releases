@@ -111,7 +111,7 @@ class LayerTreeHostContextTest : public LayerTreeTest {
     if (draw_result == DRAW_ABORTED_MISSING_HIGH_RES_CONTENT) {
       // Only valid for single-threaded compositing, which activates
       // immediately and will try to draw again when content has finished.
-      DCHECK(!host_impl->proxy()->HasImplThread());
+      DCHECK(!host_impl->task_runner_provider()->HasImplThread());
       return draw_result;
     }
     EXPECT_EQ(DRAW_SUCCESS, draw_result);
@@ -354,14 +354,15 @@ class LayerTreeHostContextTestLostContextSucceeds
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostContextTestLostContextSucceeds);
 
-class LayerTreeHostClientNotReadyDoesNotCreateOutputSurface
+class LayerTreeHostClientNotVisibleDoesNotCreateOutputSurface
     : public LayerTreeHostContextTest {
  public:
-  LayerTreeHostClientNotReadyDoesNotCreateOutputSurface()
+  LayerTreeHostClientNotVisibleDoesNotCreateOutputSurface()
       : LayerTreeHostContextTest() {}
 
   void WillBeginTest() override {
-    // Override and do not signal SetLayerTreeHostClientReady.
+    // Override to not become visible.
+    DCHECK(!layer_tree_host()->visible());
   }
 
   void BeginTest() override {
@@ -380,7 +381,7 @@ class LayerTreeHostClientNotReadyDoesNotCreateOutputSurface
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostClientNotReadyDoesNotCreateOutputSurface);
+    LayerTreeHostClientNotVisibleDoesNotCreateOutputSurface);
 
 // This tests the OutputSurface release logic in the following sequence.
 // SetUp LTH and create and init OutputSurface
@@ -411,7 +412,7 @@ class LayerTreeHostClientTakeAwayOutputSurface
   }
 
   void HideAndReleaseOutputSurface() {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     layer_tree_host()->SetVisible(false);
     scoped_ptr<OutputSurface> surface =
         layer_tree_host()->ReleaseOutputSurface();
@@ -435,7 +436,7 @@ class LayerTreeHostClientTakeAwayOutputSurface
   }
 
   void MakeVisible() {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     layer_tree_host()->SetVisible(true);
   }
 
@@ -723,7 +724,7 @@ class LayerTreeHostContextTestLostContextAndEvictTextures
                           EvictTexturesOnImplThread,
                      base::Unretained(this)));
     } else {
-      DebugScopedSetImplThread impl(proxy());
+      DebugScopedSetImplThread impl(task_runner_provider());
       EvictTexturesOnImplThread();
     }
   }
@@ -909,7 +910,8 @@ class LayerTreeHostContextTestDontUseLostResources
         child_output_surface_.get(), shared_bitmap_manager_.get());
   }
 
-  static void EmptyReleaseCallback(unsigned sync_point, bool lost) {}
+  static void EmptyReleaseCallback(const gpu::SyncToken& sync_token,
+                                   bool lost) {}
 
   void SetupTree() override {
     gpu::gles2::GLES2Interface* gl =
@@ -942,14 +944,13 @@ class LayerTreeHostContextTestDontUseLostResources
         delegated_resource_collection_.get(), frame_data.Pass());
 
     ResourceId resource = child_resource_provider_->CreateResource(
-        gfx::Size(4, 4), GL_CLAMP_TO_EDGE,
-        ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+        gfx::Size(4, 4), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
     ResourceProvider::ScopedWriteLockGL lock(child_resource_provider_.get(),
                                              resource);
 
     gpu::Mailbox mailbox;
     gl->GenMailboxCHROMIUM(mailbox.name);
-    GLuint sync_point = gl->InsertSyncPointCHROMIUM();
+    gpu::SyncToken sync_token(gl->InsertSyncPointCHROMIUM());
 
     scoped_refptr<Layer> root = Layer::Create(layer_settings());
     root->SetBounds(gfx::Size(10, 10));
@@ -973,10 +974,10 @@ class LayerTreeHostContextTestDontUseLostResources
     texture->SetBounds(gfx::Size(10, 10));
     texture->SetIsDrawable(true);
     texture->SetTextureMailbox(
-        TextureMailbox(mailbox, GL_TEXTURE_2D, sync_point),
+        TextureMailbox(mailbox, sync_token, GL_TEXTURE_2D),
         SingleReleaseCallback::Create(
             base::Bind(&LayerTreeHostContextTestDontUseLostResources::
-                            EmptyReleaseCallback)));
+                           EmptyReleaseCallback)));
     root->AddChild(texture);
 
     scoped_refptr<PictureLayer> mask =
@@ -1012,12 +1013,12 @@ class LayerTreeHostContextTestDontUseLostResources
         gfx::Size(4, 4), 0x80, 0x80, 0x80, base::TimeDelta());
     hw_video_frame_ = VideoFrame::WrapNativeTexture(
         media::PIXEL_FORMAT_ARGB,
-        gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
+        gpu::MailboxHolder(mailbox, sync_token, GL_TEXTURE_2D),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
         gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta());
     scaled_hw_video_frame_ = VideoFrame::WrapNativeTexture(
         media::PIXEL_FORMAT_ARGB,
-        gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
+        gpu::MailboxHolder(mailbox, sync_token, GL_TEXTURE_2D),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
         gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta());
 
@@ -1223,15 +1224,14 @@ class UIResourceLostTest : public LayerTreeHostContextTest {
   // the call to StepCompleteOnMainThread will not occur until after
   // the commit completes, because the main thread is blocked.
   void PostStepCompleteToMainThread() {
-    proxy()->MainThreadTaskRunner()->PostTask(
+    task_runner_provider()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::Bind(&UIResourceLostTest::StepCompleteOnMainThreadInternal,
-                   base::Unretained(this),
-                   time_step_));
+                   base::Unretained(this), time_step_));
   }
 
   void PostLoseContextToImplThread() {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::Bind(&LayerTreeHostContextTest::LoseContext,
@@ -1244,7 +1244,7 @@ class UIResourceLostTest : public LayerTreeHostContextTest {
 
  private:
   void StepCompleteOnMainThreadInternal(int step) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     StepCompleteOnMainThread(step);
   }
 };
@@ -1265,7 +1265,7 @@ class UIResourceLostTestSimple : public UIResourceLostTest {
 class UIResourceLostAfterCommit : public UIResourceLostTestSimple {
  public:
   void StepCompleteOnMainThread(int step) override {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     switch (step) {
       case 0:
         ui_resource_ = FakeScopedUIResource::Create(layer_tree_host());
@@ -1420,7 +1420,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(UIResourceLostBeforeCommit);
 // commit.  Impl-side-painting only.
 class UIResourceLostBeforeActivateTree : public UIResourceLostTest {
   void StepCompleteOnMainThread(int step) override {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     switch (step) {
       case 0:
         ui_resource_ = FakeScopedUIResource::Create(layer_tree_host());
@@ -1503,7 +1503,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(UIResourceLostBeforeActivateTree);
 class UIResourceLostEviction : public UIResourceLostTestSimple {
  public:
   void StepCompleteOnMainThread(int step) override {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
+    EXPECT_TRUE(layer_tree_host()->task_runner_provider()->IsMainThread());
     switch (step) {
       case 0:
         ui_resource_ = FakeScopedUIResource::Create(layer_tree_host());
@@ -1525,8 +1525,8 @@ class UIResourceLostEviction : public UIResourceLostTestSimple {
   }
 
   void DidSetVisibleOnImplTree(LayerTreeHostImpl* impl, bool visible) override {
-    TestWebGraphicsContext3D* context = TestContext();
     if (!visible) {
+      TestWebGraphicsContext3D* context = TestContext();
       // All resources should have been evicted.
       ASSERT_EQ(0u, context->NumTextures());
       EXPECT_EQ(0u, impl->ResourceIdForUIResource(ui_resource_->id()));

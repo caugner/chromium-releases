@@ -142,32 +142,32 @@ layer at (0,0) size 785x1033 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           LayoutText {#text} at (74,48) size 14x17
             text run at (74,48) width 14: " B"
         LayoutBlockFlow (anonymous) at (1,344) size 350x14
-          LayoutText {#text} at (0,-2) size 139x17
-            text run at (0,-2) width 139: "style=\"overflow:hidden\""
+          LayoutText {#text} at (0,-2) size 138x17
+            text run at (0,-2) width 138: "style=\"overflow:hidden\""
         LayoutBlockFlow {DIV} at (1,358) size 352x37 [border: (1px solid #FF0000)]
           LayoutText {#text} at (1,20) size 14x17
             text run at (1,20) width 14: "A "
           LayoutText {#text} at (175,20) size 14x17
             text run at (175,20) width 14: " B"
         LayoutBlockFlow (anonymous) at (1,395) size 350x14
-          LayoutText {#text} at (0,-2) size 132x17
-            text run at (0,-2) width 132: "style=\"overflow:scroll\""
+          LayoutText {#text} at (0,-2) size 131x17
+            text run at (0,-2) width 131: "style=\"overflow:scroll\""
         LayoutBlockFlow {DIV} at (1,409) size 352x52 [border: (1px solid #FF0000)]
           LayoutText {#text} at (1,35) size 14x17
             text run at (1,35) width 14: "A "
           LayoutText {#text} at (175,35) size 14x17
             text run at (175,35) width 14: " B"
         LayoutBlockFlow (anonymous) at (1,461) size 350x14
-          LayoutText {#text} at (0,-2) size 277x17
-            text run at (0,-2) width 277: "style=\"overflow:hidden;width:60px;height:60px\""
+          LayoutText {#text} at (0,-2) size 276x17
+            text run at (0,-2) width 276: "style=\"overflow:hidden;width:60px;height:60px\""
         LayoutBlockFlow {DIV} at (1,475) size 352x65 [border: (1px solid #FF0000)]
           LayoutText {#text} at (1,48) size 14x17
             text run at (1,48) width 14: "A "
           LayoutText {#text} at (74,48) size 14x17
             text run at (74,48) width 14: " B"
         LayoutBlockFlow (anonymous) at (1,540) size 350x14
-          LayoutText {#text} at (0,-2) size 270x17
-            text run at (0,-2) width 270: "style=\"overflow:scroll;width:60px;height:60px\""
+          LayoutText {#text} at (0,-2) size 269x17
+            text run at (0,-2) width 269: "style=\"overflow:scroll;width:60px;height:60px\""
         LayoutBlockFlow {DIV} at (1,554) size 352x65 [border: (1px solid #FF0000)]
           LayoutText {#text} at (1,48) size 14x17
             text run at (1,48) width 14: "A "

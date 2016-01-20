@@ -95,14 +95,6 @@ using content::WebContents;
 using navigation_interception::InterceptNavigationDelegate;
 using navigation_interception::NavigationParams;
 
-namespace {
-
-const int kImageSearchThumbnailMinSize = 300 * 300;
-const int kImageSearchThumbnailMaxWidth = 600;
-const int kImageSearchThumbnailMaxHeight = 600;
-
-}  // namespace
-
 TabAndroid* TabAndroid::FromWebContents(content::WebContents* web_contents) {
   CoreTabHelper* core_tab_helper = CoreTabHelper::FromWebContents(web_contents);
   if (!core_tab_helper)
@@ -760,20 +752,13 @@ void TabAndroid::LoadOriginalImage(JNIEnv* env, jobject obj) {
       render_frame_host->GetRoutingID()));
 }
 
-void TabAndroid::SearchByImageInNewTabAsync(JNIEnv* env, jobject obj) {
-  content::RenderFrameHost* render_frame_host =
-        web_contents()->GetMainFrame();
-  render_frame_host->Send(
-      new ChromeViewMsg_RequestThumbnailForContextNode(
-          render_frame_host->GetRoutingID(),
-          kImageSearchThumbnailMinSize,
-          gfx::Size(kImageSearchThumbnailMaxWidth,
-                    kImageSearchThumbnailMaxHeight)));
-}
-
 jlong TabAndroid::GetBookmarkId(JNIEnv* env,
                                jobject obj,
                                jboolean only_editable) {
+  return GetBookmarkIdHelper(only_editable);
+}
+
+int64_t TabAndroid::GetBookmarkIdHelper(bool only_editable) const {
   GURL url = dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
       web_contents()->GetURL());
   Profile* profile = GetProfile();
@@ -802,9 +787,51 @@ jlong TabAndroid::GetBookmarkId(JNIEnv* env,
   return -1;
 }
 
+bool TabAndroid::HasOfflinePages() const {
+  if (!offline_pages::IsOfflinePagesEnabled())
+    return false;
+  offline_pages::OfflinePageModel* offline_page_model =
+      offline_pages::OfflinePageModelFactory::GetForBrowserContext(
+          GetProfile());
+  return !offline_page_model->GetAllPages().empty();
+}
+
+void TabAndroid::ShowOfflinePages() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_Tab_showOfflinePages(env, weak_java_tab_.get(env).obj());
+}
+
+void TabAndroid::LoadOfflineCopy(const GURL& url) {
+  if (!offline_pages::IsOfflinePagesEnabled())
+    return;
+
+  // Offline copy is only saved for a bookmarked page.
+  int64_t bookmark_id = GetBookmarkIdHelper(true);
+  if (bookmark_id == -1)
+    return;
+
+  offline_pages::OfflinePageModel* offline_page_model =
+      offline_pages::OfflinePageModelFactory::GetForBrowserContext(
+          GetProfile());
+  if (!offline_page_model)
+    return;
+
+  const offline_pages::OfflinePageItem* offline_page =
+      offline_page_model->GetPageByBookmarkId(bookmark_id);
+  if (!offline_page || offline_page->url != url)
+    return;
+
+  GURL offline_url = offline_page->GetOfflineURL();
+  if (!offline_url.is_valid())
+    return;
+
+  content::NavigationController::LoadURLParams load_params(offline_url);
+  web_contents()->GetController().LoadURLWithParams(load_params);
+}
+
 jboolean TabAndroid::HasOfflineCopy(JNIEnv* env, jobject obj) {
   // Offline copy is only saved for a bookmarked page.
-  jlong bookmark_id = GetBookmarkId(env, obj, true);
+  int64_t bookmark_id = GetBookmarkIdHelper(true);
   if (bookmark_id == -1)
     return false;
 
@@ -934,21 +961,4 @@ static void Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 // static
 bool TabAndroid::RegisterTabAndroid(JNIEnv* env) {
   return RegisterNativesImpl(env);
-}
-
-static void RecordStartupToCommitUma(JNIEnv* env,
-                                     const JavaParamRef<jclass>& jcaller) {
-  // Currently it takes about 2000ms to commit a navigation if the measurement
-  // begins very early in the browser start. How many buckets (b) are needed to
-  // explore the _typical_ values with granularity 100ms and a maximum duration
-  // of 1 minute?
-  //   s^{n+1} / s^{n} = 2100 / 2000
-  //   s = 1.05
-  //   s^b = 60000
-  //   b = ln(60000) / ln(1.05) ~= 225
-  UMA_HISTOGRAM_CUSTOM_TIMES("Startup.FirstCommitNavigationTime",
-      base::Time::Now() - chrome::android::GetMainEntryPointTime(),
-      base::TimeDelta::FromMilliseconds(1),
-      base::TimeDelta::FromMinutes(1),
-      225);
 }

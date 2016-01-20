@@ -22,9 +22,6 @@ public abstract class ChromeSwitches {
     /** Whether fullscreen support is disabled (auto hiding controls, etc...). */
     public static final String DISABLE_FULLSCREEN = "disable-fullscreen";
 
-    /** Show the undo bar for high end UI devices. */
-    public static final String ENABLE_HIGH_END_UI_UNDO = "enable-high-end-ui-undo";
-
     /** Enable toolbar swipe to change tabs in document mode */
     public static final String ENABLE_TOOLBAR_SWIPE_IN_DOCUMENT_MODE =
             "enable-toolbar-swipe-in-document-mode";
@@ -43,6 +40,13 @@ public abstract class ChromeSwitches {
 
     /** Force the crash dump to be uploaded regardless of preferences. */
     public static final String FORCE_CRASH_DUMP_UPLOAD = "force-dump-upload";
+
+    /**
+     * Force the crash dump NOT to be uploaded regardless of preferences.
+     * This is intended for testing use, when command-line switches may be needed.
+     * Overrides any other upload preference.
+     */
+    public static final String DISABLE_CRASH_DUMP_UPLOAD = "disable-dump-upload";
 
     /** Enable debug logs for the video casting feature. */
     public static final String ENABLE_CAST_DEBUG_LOGS = "enable-cast-debug";
@@ -88,9 +92,9 @@ public abstract class ChromeSwitches {
     public static final String DISABLE_LOFI_SNACKBAR = "disable-lo-fi-snackbar";
 
     /**
-     * Enable Physical Web feature.
+     * Enable content snippets on the NTP
      */
-    public static final String ENABLE_PHYSICAL_WEB = "enable-physical-web";
+    public static final String ENABLE_NTP_SNIPPETS = "enable-ntp-snippets";
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Native Switches
@@ -112,9 +116,6 @@ public abstract class ChromeSwitches {
     /** Enable Reader Mode button animation. */
     public static final String ENABLE_READER_MODE_BUTTON_ANIMATION =
             "enable-dom-distiller-button-animation";
-
-    /** Enable the native app banners. */
-    public static final String ENABLE_APP_INSTALL_ALERTS = "enable-app-install-alerts";
 
     /**
      * Use sandbox Wallet environment for requestAutocomplete.
@@ -165,16 +166,37 @@ public abstract class ChromeSwitches {
     public static final String ENABLE_OFFLINE_PAGES = "enable-offline-pages";
 
     /**
-     * Enable theme-color support in ChromeTabbedActivity.
+     * Enable keyboard accessory view that shows autofill suggestions on top of the keyboard.
+     * Native switch - autofill::switches::kEnableAccessorySuggestionView
      */
-    public static final String ENABLE_THEME_COLOR_IN_TABBED_MODE =
-            "enable-theme-color-in-tabbed-mode";
+    public static final String ENABLE_AUTOFILL_KEYBOARD_ACCESSORY =
+            "enable-autofill-keyboard-accessory-view";
 
     /**
      * Enables hung renderer InfoBar activation for unresponsive web content.
      * Native switch - switches::kEnableHungRendererInfoBar
      */
     public static final String ENABLE_HUNG_RENDERER_INFOBAR = "enable-hung-renderer-infobar";
+
+    /**
+     * Enable Physical Web feature.
+     * Native switch - switches::kEnablePhysicalWeb
+     */
+    public static final String ENABLE_PHYSICAL_WEB = "enable-physical-web";
+
+    /**
+     * Enables Web Notification custom layouts.
+     * Native switch - switches::kEnableWebNotificationCustomLayouts
+     */
+    public static final String ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS =
+            "enable-web-notification-custom-layouts";
+
+    /**
+     * Disables Web Notification custom layouts.
+     * Native switch - switches::kDisableWebNotificationCustomLayouts
+     */
+    public static final String DISABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS =
+            "disable-web-notification-custom-layouts";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

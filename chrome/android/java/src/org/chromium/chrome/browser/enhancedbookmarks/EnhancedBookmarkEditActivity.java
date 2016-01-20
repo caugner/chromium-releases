@@ -18,19 +18,19 @@ import android.widget.TextView;
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkModelObserver;
-import org.chromium.chrome.browser.UrlUtilities;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkModelObserver;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.DeletePageCallback;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.OfflinePageModelObserver;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.SavePageCallback;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.widget.EmptyAlertEditText;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.components.bookmarks.BookmarkId;
-import org.chromium.components.offlinepages.DeletePageResult;
-import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.DeviceFormFactor;
 
 /**
  * The activity that enables the user to modify the title, url and parent folder of a bookmark.
@@ -60,6 +60,7 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
     private MenuItem mDeleteButton;
 
     private OfflineButtonType mOfflineButtonType = OfflineButtonType.NONE;
+    private OfflinePageModelObserver mOfflinePageModelObserver;
 
     private BookmarkModelObserver mBookmarkModelObserver = new BookmarkModelObserver() {
         @Override
@@ -128,7 +129,18 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
             }
         });
 
-        if (OfflinePageBridge.isEnabled()) {
+        if (OfflinePageBridge.isEnabled() && OfflinePageBridge.canSavePage(
+                mEnhancedBookmarksModel.getBookmarkById(mBookmarkId).getUrl())) {
+            mOfflinePageModelObserver = new OfflinePageModelObserver() {
+                @Override
+                public void offlinePageDeleted(BookmarkId bookmarkId) {
+                    if (mBookmarkId.equals(bookmarkId)) {
+                        updateOfflineSection();
+                    }
+                }
+            };
+
+            mEnhancedBookmarksModel.getOfflinePageBridge().addObserver(mOfflinePageModelObserver);
             // Make offline page section visible and find controls.
             findViewById(R.id.offline_page_group).setVisibility(View.VISIBLE);
             getIntent().setExtrasClassLoader(WebContents.class.getClassLoader());
@@ -205,9 +217,14 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
 
         super.onStop();
     }
+
     @Override
     protected void onDestroy() {
         recordOfflineButtonAction(false);
+        if (OfflinePageBridge.isEnabled()) {
+            mEnhancedBookmarksModel.getOfflinePageBridge().removeObserver(
+                    mOfflinePageModelObserver);
+        }
         mEnhancedBookmarksModel.removeObserver(mBookmarkModelObserver);
         mEnhancedBookmarksModel.destroy();
         mEnhancedBookmarksModel = null;
@@ -215,6 +232,14 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
     }
 
     private void updateOfflineSection() {
+        assert OfflinePageBridge.isEnabled();
+
+        // It is possible that callback arrives after the activity was dismissed.
+        // See http://crbug.com/566939
+        if (mEnhancedBookmarksModel == null) return;
+
+        mEnhancedBookmarksModel.getOfflinePageBridge().checkOfflinePageMetadata();
+
         Button saveRemoveVisitButton = (Button) findViewById(R.id.offline_page_save_remove_button);
         TextView offlinePageInfoTextView = (TextView) findViewById(R.id.offline_page_info_text);
 
@@ -248,10 +273,9 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
                         mBookmarkId, new DeletePageCallback() {
                             @Override
                             public void onDeletePageDone(int deletePageResult) {
-                                if (deletePageResult == DeletePageResult.SUCCESS) {
-                                    updateOfflineSection();
-                                }
                                 // TODO(fgorski): Add snackbar upon failure.
+                                // Always update UI, as buttons might be disabled.
+                                updateOfflineSection();
                             }
                         });
                 button.setClickable(false);
@@ -266,14 +290,13 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
             @Override
             public void onClick(View v) {
                 recordOfflineButtonAction(true);
-                mEnhancedBookmarksModel.getOfflinePageBridge().savePage(mWebContents, mBookmarkId,
-                        new SavePageCallback() {
+                mEnhancedBookmarksModel.getOfflinePageBridge().savePage(
+                        mWebContents, mBookmarkId, new SavePageCallback() {
                             @Override
                             public void onSavePageDone(int savePageResult, String url) {
-                                if (savePageResult == SavePageResult.SUCCESS) {
-                                    updateOfflineSection();
-                                }
                                 // TODO(fgorski): Add snackbar upon failure.
+                                // Always update UI, as buttons might be disabled.
+                                updateOfflineSection();
                             }
                         });
                 button.setClickable(false);
@@ -294,9 +317,16 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
     }
 
     private void openBookmark() {
-        Intent intent = new Intent();
-        intent.putExtra(EnhancedBookmarkActivity.INTENT_VISIT_BOOKMARK_ID, mBookmarkId.toString());
-        setResult(RESULT_OK, intent);
+        // TODO(kkimlabs): Refactor this out to handle the intent in ChromeActivity.
+        if (DeviceFormFactor.isTablet(this)) {
+            EnhancedBookmarkUtils.openBookmark(
+                    mEnhancedBookmarksModel, this, mBookmarkId, LaunchLocation.BOOKMARK_EDITOR);
+        } else {
+            Intent intent = new Intent();
+            intent.putExtra(
+                    EnhancedBookmarkActivity.INTENT_VISIT_BOOKMARK_ID, mBookmarkId.toString());
+            setResult(RESULT_OK, intent);
+        }
         finish();
     }
 
@@ -307,18 +337,28 @@ public class EnhancedBookmarkEditActivity extends EnhancedBookmarkActivityBase {
             return;
         }
 
-        String actionName = "OfflinePages.Edit.";
-        if (mOfflineButtonType == OfflineButtonType.SAVE) {
-            actionName += clicked ? "SaveButtonClicked" : "SaveButtonNotClicked";
-        } else if (mOfflineButtonType == OfflineButtonType.REMOVE) {
-            actionName += clicked ? "RemoveButtonClicked" : "RemoveButtonNotClicked";
-        } else if (mOfflineButtonType == OfflineButtonType.VISIT) {
-            actionName += clicked ? "VisitButtonClicked" : "VisitButtonNotClicked";
+        assert mOfflineButtonType == OfflineButtonType.SAVE
+                || mOfflineButtonType == OfflineButtonType.REMOVE
+                || mOfflineButtonType == OfflineButtonType.VISIT;
+
+        if (clicked) {
+            if (mOfflineButtonType == OfflineButtonType.SAVE) {
+                RecordUserAction.record("OfflinePages.Edit.SaveButtonClicked");
+            } else if (mOfflineButtonType == OfflineButtonType.REMOVE) {
+                RecordUserAction.record("OfflinePages.Edit.RemoveButtonClicked");
+            } else if (mOfflineButtonType == OfflineButtonType.VISIT) {
+                RecordUserAction.record("OfflinePages.Edit.VisitButtonClicked");
+            }
         } else {
-            assert false;
+            if (mOfflineButtonType == OfflineButtonType.SAVE) {
+                RecordUserAction.record("OfflinePages.Edit.SaveButtonNotClicked");
+            } else if (mOfflineButtonType == OfflineButtonType.REMOVE) {
+                RecordUserAction.record("OfflinePages.Edit.RemoveButtonNotClicked");
+            } else if (mOfflineButtonType == OfflineButtonType.VISIT) {
+                RecordUserAction.record("OfflinePages.Edit.VisitButtonNotClicked");
+            }
         }
 
-        RecordUserAction.record(actionName);
         mOfflineButtonType = OfflineButtonType.NONE;
     }
 }

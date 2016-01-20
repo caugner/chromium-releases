@@ -25,6 +25,7 @@ import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ApplicationStateListener;
 import org.chromium.base.BuildInfo;
+import org.chromium.base.CommandLineInitUtil;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
@@ -41,6 +42,7 @@ import org.chromium.chrome.browser.accessibility.FontSizePrefs;
 import org.chromium.chrome.browser.banners.AppBannerManager;
 import org.chromium.chrome.browser.banners.AppDetailsDelegate;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
+import org.chromium.chrome.browser.datausage.ExternalDataUseObserver;
 import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.IncognitoDocumentActivity;
 import org.chromium.chrome.browser.download.DownloadManagerService;
@@ -115,6 +117,7 @@ import java.util.Locale;
  * chrome layer.
  */
 public class ChromeApplication extends ContentApplication {
+    public static final String COMMAND_LINE_FILE = "chrome-command-line";
 
     private static final String TAG = "ChromiumApplication";
     private static final String PREF_BOOT_TIMESTAMP =
@@ -330,7 +333,7 @@ public class ChromeApplication extends ContentApplication {
             mBackgroundProcessing.onDestroy();
             stopApplicationActivityTracker();
             PartnerBrowserCustomizations.destroy();
-            ShareHelper.clearSharedScreenshots(this);
+            ShareHelper.clearSharedImages(this);
             CombinedPolicyProvider.get().destroy();
         }
     }
@@ -479,14 +482,14 @@ public class ChromeApplication extends ContentApplication {
         removeSessionCookies();
         ApplicationStatus.registerApplicationStateListener(createApplicationStateListener());
         AppBannerManager.setAppDetailsDelegate(createAppDetailsDelegate());
-        mChromeLifetimeController = new ChromeLifetimeController(this);
+        mChromeLifetimeController = new ChromeLifetimeController();
 
         PrefServiceBridge.getInstance().migratePreferences(this);
     }
 
     @Override
     public void initCommandLine() {
-        ChromeCommandLineInitUtil.initChromeCommandLine(this);
+        CommandLineInitUtil.initCommandLine(this, COMMAND_LINE_FILE);
     }
 
     /**
@@ -605,6 +608,14 @@ public class ChromeApplication extends ContentApplication {
      */
     public ExternalEstimateProviderAndroid createExternalEstimateProviderAndroid(long nativePtr) {
         return new ExternalEstimateProviderAndroid();
+    }
+
+    /**
+     * @return An external observer of data use.
+     * @param nativePtr Pointer to the native ExternalDataUseObserver object.
+     */
+    public ExternalDataUseObserver createExternalDataUseObserver(long nativePtr) {
+        return new ExternalDataUseObserver(nativePtr);
     }
 
     /**

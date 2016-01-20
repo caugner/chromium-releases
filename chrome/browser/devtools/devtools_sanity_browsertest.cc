@@ -316,7 +316,7 @@ class DevToolsUnresponsiveBeforeUnloadTest: public DevToolsBeforeUnloadTest {
 
 void TimeoutCallback(const std::string& timeout_message) {
   ADD_FAILURE() << timeout_message;
-  base::MessageLoop::current()->Quit();
+  base::MessageLoop::current()->QuitWhenIdle();
 }
 
 // Base class for DevTools tests that test devtools functionality for
@@ -400,7 +400,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     switch (type) {
       case extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
       case extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_FIRST_LOAD:
-        base::MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->QuitWhenIdle();
         break;
       default:
         NOTREACHED();
@@ -454,7 +454,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       worker_data_->worker_route_id = route_id;
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::MessageLoop::QuitClosure());
+                              base::MessageLoop::QuitWhenIdleClosure());
       delete this;
     }
     std::string path_;
@@ -475,7 +475,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       ASSERT_EQ(worker_data_->worker_route_id, route_id);
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::MessageLoop::QuitClosure());
+                              base::MessageLoop::QuitWhenIdleClosure());
       delete this;
     }
     scoped_refptr<WorkerData> worker_data_;
@@ -521,7 +521,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       worker_data->worker_process_id = worker_info[0].process_id;
       worker_data->worker_route_id = worker_info[0].route_id;
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::MessageLoop::QuitClosure());
+                              base::MessageLoop::QuitWhenIdleClosure());
       return;
     }
 
@@ -610,19 +610,12 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
       &chrome::CloseAllBrowsers));
 }
 
-// Times out on Win and Linux
-// @see http://crbug.com/410327
-#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
-#define MAYBE_TestUndockedDevToolsUnresponsive DISABLED_TestUndockedDevToolsUnresponsive
-#else
-#define MAYBE_TestUndockedDevToolsUnresponsive TestUndockedDevToolsUnresponsive
-#endif
-
 // Tests that inspected tab gets closed if devtools renderer
 // becomes unresponsive during beforeunload event interception.
 // @see http://crbug.com/322380
+// Disabled because of http://crbug.com/410327
 IN_PROC_BROWSER_TEST_F(DevToolsUnresponsiveBeforeUnloadTest,
-                       MAYBE_TestUndockedDevToolsUnresponsive) {
+                       DISABLED_TestUndockedDevToolsUnresponsive) {
   ASSERT_TRUE(test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
   DevToolsWindow* devtools_window = OpenDevToolWindowOnWebContents(

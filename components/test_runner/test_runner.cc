@@ -7,6 +7,8 @@
 #include <limits>
 
 #include "base/logging.h"
+#include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "components/test_runner/mock_credential_manager_client.h"
 #include "components/test_runner/mock_web_speech_recognizer.h"
 #include "components/test_runner/test_interfaces.h"
@@ -35,10 +37,10 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFindOptions.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebGraphicsContext.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
+#include "third_party/WebKit/public/web/WebPageImportanceSignals.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
@@ -246,7 +248,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetAllowRunningOfInsecureContent(bool allowed);
   void DumpPermissionClientCallbacks();
   void DumpWindowStatusChanges();
-  void DumpProgressFinishedCallback();
   void DumpSpellCheckCallbacks();
   void DumpBackForwardList();
   void DumpSelectionRect();
@@ -259,10 +260,12 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void WaitUntilExternalURLLoad();
   void DumpDragImage();
   void DumpNavigationPolicy();
+  void DumpPageImportanceSignals();
   void ShowWebInspector(gin::Arguments* args);
   void CloseWebInspector();
   bool IsChooserShown();
   void EvaluateInWebInspector(int call_id, const std::string& script);
+  std::string EvaluateInWebInspectorOverlay(const std::string& script);
   void ClearAllDatabases();
   void SetDatabaseQuota(int quota);
   void SetAlwaysAcceptCookies(bool accept);
@@ -504,8 +507,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::DumpPermissionClientCallbacks)
       .SetMethod("dumpWindowStatusChanges",
                  &TestRunnerBindings::DumpWindowStatusChanges)
-      .SetMethod("dumpProgressFinishedCallback",
-                 &TestRunnerBindings::DumpProgressFinishedCallback)
       .SetMethod("dumpSpellCheckCallbacks",
                  &TestRunnerBindings::DumpSpellCheckCallbacks)
       .SetMethod("dumpBackForwardList",
@@ -526,11 +527,15 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("dumpDragImage", &TestRunnerBindings::DumpDragImage)
       .SetMethod("dumpNavigationPolicy",
                  &TestRunnerBindings::DumpNavigationPolicy)
+      .SetMethod("dumpPageImportanceSignals",
+                 &TestRunnerBindings::DumpPageImportanceSignals)
       .SetMethod("showWebInspector", &TestRunnerBindings::ShowWebInspector)
       .SetMethod("closeWebInspector", &TestRunnerBindings::CloseWebInspector)
       .SetMethod("isChooserShown", &TestRunnerBindings::IsChooserShown)
       .SetMethod("evaluateInWebInspector",
                  &TestRunnerBindings::EvaluateInWebInspector)
+      .SetMethod("evaluateInWebInspectorOverlay",
+                 &TestRunnerBindings::EvaluateInWebInspectorOverlay)
       .SetMethod("clearAllDatabases", &TestRunnerBindings::ClearAllDatabases)
       .SetMethod("setDatabaseQuota", &TestRunnerBindings::SetDatabaseQuota)
       .SetMethod("setAlwaysAcceptCookies",
@@ -1208,11 +1213,6 @@ void TestRunnerBindings::DumpWindowStatusChanges() {
     runner_->DumpWindowStatusChanges();
 }
 
-void TestRunnerBindings::DumpProgressFinishedCallback() {
-  if (runner_)
-    runner_->DumpProgressFinishedCallback();
-}
-
 void TestRunnerBindings::DumpSpellCheckCallbacks() {
   if (runner_)
     runner_->DumpSpellCheckCallbacks();
@@ -1275,6 +1275,11 @@ void TestRunnerBindings::DumpNavigationPolicy() {
     runner_->DumpNavigationPolicy();
 }
 
+void TestRunnerBindings::DumpPageImportanceSignals() {
+  if (runner_)
+    runner_->DumpPageImportanceSignals();
+}
+
 void TestRunnerBindings::ShowWebInspector(gin::Arguments* args) {
   if (runner_) {
     std::string settings;
@@ -1300,6 +1305,14 @@ void TestRunnerBindings::EvaluateInWebInspector(int call_id,
                                                 const std::string& script) {
   if (runner_)
     runner_->EvaluateInWebInspector(call_id, script);
+}
+
+std::string TestRunnerBindings::EvaluateInWebInspectorOverlay(
+    const std::string& script) {
+  if (runner_)
+    return runner_->EvaluateInWebInspectorOverlay(script);
+
+  return std::string();
 }
 
 void TestRunnerBindings::ClearAllDatabases() {
@@ -1648,7 +1661,7 @@ void TestRunner::Reset() {
     web_view_->setZoomLevel(0);
     web_view_->setTextZoomFactor(1);
     web_view_->setTabKeyCyclesThroughElements(true);
-#if !defined(__APPLE__) && !defined(WIN32) // Actually, TOOLKIT_GTK
+#if !defined(OS_MACOSX) && !defined(OS_WIN)
     // (Constants copied because we can't depend on the header that defined
     // them from this file.)
     web_view_->setSelectionColors(
@@ -1709,7 +1722,6 @@ void TestRunner::Reset() {
   dump_resource_request_callbacks_ = false;
   dump_resource_response_mime_types_ = false;
   dump_window_status_changes_ = false;
-  dump_progress_finished_callback_ = false;
   dump_spell_check_callbacks_ = false;
   dump_back_forward_list_ = false;
   dump_selection_rect_ = false;
@@ -1734,7 +1746,8 @@ void TestRunner::Reset() {
 
   web_content_settings_->Reset();
 
-  use_mock_theme_ = true;
+  SetUseMockTheme(true);
+
   pointer_locked_ = false;
   pointer_lock_planned_result_ = PointerLockWillSucceed;
 
@@ -1881,10 +1894,6 @@ WebContentSettingsClient* TestRunner::GetWebContentSettings() const {
 
 bool TestRunner::shouldDumpStatusCallbacks() const {
   return dump_window_status_changes_;
-}
-
-bool TestRunner::shouldDumpProgressFinishedCallback() const {
-  return dump_progress_finished_callback_;
 }
 
 bool TestRunner::shouldDumpSpellCheckCallbacks() const {
@@ -2734,10 +2743,6 @@ void TestRunner::DumpWindowStatusChanges() {
   dump_window_status_changes_ = true;
 }
 
-void TestRunner::DumpProgressFinishedCallback() {
-  dump_progress_finished_callback_ = true;
-}
-
 void TestRunner::DumpSpellCheckCallbacks() {
   dump_spell_check_callbacks_ = true;
 }
@@ -2773,6 +2778,7 @@ void TestRunner::DumpResourceRequestPriorities() {
 
 void TestRunner::SetUseMockTheme(bool use) {
   use_mock_theme_ = use;
+  blink::setMockThemeEnabledForTest(use);
 }
 
 void TestRunner::ShowWebInspector(const std::string& str,
@@ -2793,6 +2799,22 @@ void TestRunner::DumpNavigationPolicy() {
   dump_navigation_policy_ = true;
 }
 
+void TestRunner::DumpPageImportanceSignals() {
+  blink::WebPageImportanceSignals* signals =
+    web_view_->pageImportanceSignals();
+  if (!signals)
+    return;
+
+  std::string message = base::StringPrintf(
+      "WebPageImportanceSignals:\n"
+      "  hadFormInteraction: %s\n"
+      "  issuedNonGetFetchFromScript: %s\n",
+      signals->hadFormInteraction() ? "true" : "false",
+      signals->issuedNonGetFetchFromScript() ? "true" : "false");
+  if (delegate_)
+    delegate_->PrintMessage(message);
+}
+
 void TestRunner::CloseWebInspector() {
   delegate_->CloseDevTools();
 }
@@ -2804,6 +2826,11 @@ bool TestRunner::IsChooserShown() {
 void TestRunner::EvaluateInWebInspector(int call_id,
                                         const std::string& script) {
   delegate_->EvaluateInWebInspector(call_id, script);
+}
+
+std::string TestRunner::EvaluateInWebInspectorOverlay(
+    const std::string& script) {
+  return delegate_->EvaluateInWebInspectorOverlay(script);
 }
 
 void TestRunner::ClearAllDatabases() {

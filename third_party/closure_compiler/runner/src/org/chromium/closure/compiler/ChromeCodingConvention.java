@@ -67,4 +67,10 @@ public class ChromeCodingConvention extends CodingConventions.Proxy {
       new AssertInstanceofSpec("cr.ui.decorate")
     );
   }
+
+  @Override
+  public boolean isFunctionCallThatAlwaysThrows(Node n) {
+    return CodingConventions.defaultIsFunctionCallThatAlwaysThrows(
+        n, "assertNotReached");
+  }
 }

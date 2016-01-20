@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
@@ -27,9 +28,12 @@ const char kCreateRoute[] = "requestRoute";
 const char kActOnIssue[] = "actOnIssue";
 const char kCloseRoute[] = "closeRoute";
 const char kCloseDialog[] = "closeDialog";
+const char kReportSinkCount[] = "reportSinkCount";
 
 // JS function names.
 const char kSetInitialData[] = "media_router.ui.setInitialData";
+const char kNotifyRouteCreationTimeout[] =
+    "media_router.ui.onNotifyRouteCreationTimeout";
 const char kOnCreateRouteResponseReceived[] =
     "media_router.ui.onCreateRouteResponseReceived";
 const char kSetIssue[] = "media_router.ui.setIssue";
@@ -49,7 +53,6 @@ scoped_ptr<base::ListValue> SinksToValue(
     sink_val->SetString("id", sink.id());
     sink_val->SetString("name", sink.name());
     sink_val->SetInteger("iconType", sink.icon_type());
-    sink_val->SetBoolean("isLaunching", sink.is_launching());
 
     scoped_ptr<base::ListValue> cast_modes_val(new base::ListValue);
     for (MediaCastMode cast_mode : sink_with_cast_modes.cast_modes)
@@ -201,22 +204,26 @@ void MediaRouterWebUIMessageHandler::OnCreateRouteResponseReceived(
         media_router_ui_->GetRouteProviderExtensionId()));
     web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
                                      base::StringValue(sink_id), *route_value);
+    UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StartLocalSessionSuccessful",
+                          true);
   } else {
     web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
                                      base::StringValue(sink_id),
                                      *base::Value::CreateNullValue());
+    UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StartLocalSessionSuccessful",
+                          false);
   }
 }
 
 void MediaRouterWebUIMessageHandler::UpdateIssue(const Issue* issue) {
   DVLOG(2) << "UpdateIssue";
-  if (issue) {
-    scoped_ptr<base::DictionaryValue> issue_val(IssueToValue(*issue));
-    web_ui()->CallJavascriptFunction(kSetIssue, *issue_val);
-  } else {
-    // Clears the issue in the WebUI.
-    web_ui()->CallJavascriptFunction(kSetIssue);
-  }
+  web_ui()->CallJavascriptFunction(kSetIssue,
+      issue ? *IssueToValue(*issue) : *base::Value::CreateNullValue());
+}
+
+void MediaRouterWebUIMessageHandler::NotifyRouteCreationTimeout() {
+  DVLOG(2) << "NotifyRouteCreationTimeout";
+  web_ui()->CallJavascriptFunction(kNotifyRouteCreationTimeout);
 }
 
 void MediaRouterWebUIMessageHandler::RegisterMessages() {
@@ -240,17 +247,16 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
       kCloseDialog,
       base::Bind(&MediaRouterWebUIMessageHandler::OnCloseDialog,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportSinkCount,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportSinkCount,
+                 base::Unretained(this)));
 }
 
 void MediaRouterWebUIMessageHandler::OnRequestInitialData(
     const base::ListValue* args) {
   DVLOG(1) << "OnRequestInitialData";
   base::DictionaryValue initial_data;
-
-  initial_data.SetString("headerText",
-      media_router_ui_->GetInitialHeaderText());
-  initial_data.SetString("headerTextTooltip",
-      media_router_ui_->GetInitialHeaderTextTooltip());
 
   // "No Cast devices found?" Chromecast help center page.
   initial_data.SetString("deviceMissingUrl",
@@ -263,10 +269,15 @@ void MediaRouterWebUIMessageHandler::OnRequestInitialData(
       media_router_ui_->GetRouteProviderExtensionId()));
   initial_data.Set("routes", routes.release());
 
-  scoped_ptr<base::ListValue> cast_modes(CastModesToValue(
-      media_router_ui_->cast_modes(),
-      media_router_ui_->GetFrameURLHost()));
-  initial_data.Set("castModes", cast_modes.release());
+  const std::set<MediaCastMode> cast_modes = media_router_ui_->cast_modes();
+  scoped_ptr<base::ListValue> cast_modes_list(
+      CastModesToValue(cast_modes,
+                       media_router_ui_->GetPresentationRequestSourceName()));
+  initial_data.Set("castModes", cast_modes_list.release());
+  if (!cast_modes.empty()) {
+    initial_data.SetInteger("initialCastModeType",
+                            GetPreferredCastMode(cast_modes));
+  }
 
   web_ui()->CallJavascriptFunction(kSetInitialData, initial_data);
   media_router_ui_->UIInitialized();
@@ -291,9 +302,14 @@ void MediaRouterWebUIMessageHandler::OnCreateRoute(
     return;
   }
 
+  if (!IsValidCastModeNum(cast_mode_num)) {
+    DVLOG(1) << "Invalid cast mode: " << cast_mode_num << ". Aborting.";
+    return;
+  }
+
   MediaRouterUI* media_router_ui =
       static_cast<MediaRouterUI*>(web_ui()->GetController());
-  if (media_router_ui->has_pending_route_request()) {
+  if (media_router_ui->HasPendingRouteRequest()) {
     DVLOG(1) << "UI already has pending route request. Ignoring.";
     Issue issue(
         l10n_util::GetStringUTF8(IDS_MEDIA_ROUTER_ISSUE_PENDING_ROUTE),
@@ -304,22 +320,15 @@ void MediaRouterWebUIMessageHandler::OnCreateRoute(
     return;
   }
 
-  DVLOG(2) << "sink id: " << sink_id << ", cast mode: " << cast_mode_num;
+  DVLOG(2) << __FUNCTION__ << ": sink id: " << sink_id
+           << ", cast mode: " << cast_mode_num;
 
   // TODO(haibinlu): Pass additional parameters into the CreateRoute request,
   // e.g. low-fps-mirror, user-override. (crbug.com/490364)
-  bool success = false;
-  if (IsValidCastModeNum(cast_mode_num)) {
-    // User explicitly selected cast mode.
-    DVLOG(2) << "Cast mode override: " << cast_mode_num;
-    success = media_router_ui->CreateRouteWithCastModeOverride(
-        sink_id, static_cast<MediaCastMode>(cast_mode_num));
-  } else {
-    success = media_router_ui->CreateRoute(sink_id);
-  }
-
-  if (!success) {
-    // The provider will handle sending an issue for a failed route request.
+  if (!media_router_ui->CreateRoute(
+          sink_id, static_cast<MediaCastMode>(cast_mode_num))) {
+    // TODO(imcheng): Need to add an issue if failed to initiate a CreateRoute
+    // request.
     DVLOG(1) << "Error initiating route request.";
   }
 }
@@ -368,6 +377,17 @@ void MediaRouterWebUIMessageHandler::OnCloseDialog(
 
   dialog_closing_ = true;
   media_router_ui_->Close();
+}
+
+void MediaRouterWebUIMessageHandler::OnReportSinkCount(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportSinkCount";
+  int sink_count;
+  if (!args->GetInteger(0, &sink_count)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_COUNTS_100("MediaRouter.Ui.Device.Count", sink_count);
 }
 
 bool MediaRouterWebUIMessageHandler::ActOnIssueType(

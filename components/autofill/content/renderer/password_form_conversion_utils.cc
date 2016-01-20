@@ -43,6 +43,8 @@ struct SyntheticForm {
   ~SyntheticForm();
 
   std::vector<blink::WebElement> fieldsets;
+  // Contains control elements of the represented form, including not fillable
+  // ones.
   std::vector<blink::WebFormControlElement> control_elements;
   blink::WebDocument document;
   blink::WebString action;
@@ -155,14 +157,13 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
   // First, look for elements marked with either autocomplete='current-password'
   // or 'new-password' -- if we find any, take the hint, and treat the first of
   // each kind as the element we are looking for.
-  for (std::vector<WebInputElement>::const_iterator it = passwords.begin();
-       it != passwords.end(); it++) {
-    if (HasAutocompleteAttributeValue(*it, kAutocompleteCurrentPassword) &&
+  for (const WebInputElement& it : passwords) {
+    if (HasAutocompleteAttributeValue(it, kAutocompleteCurrentPassword) &&
         current_password->isNull()) {
-      *current_password = *it;
-    } else if (HasAutocompleteAttributeValue(*it, kAutocompleteNewPassword) &&
-        new_password->isNull()) {
-      *new_password = *it;
+      *current_password = it;
+    } else if (HasAutocompleteAttributeValue(it, kAutocompleteNewPassword) &&
+               new_password->isNull()) {
+      *new_password = it;
     }
   }
 
@@ -251,33 +252,29 @@ void FindPredictedElements(
   // Matching only requires that action and name of the form match to allow
   // the username to be updated even if the form is changed after page load.
   // See https://crbug.com/476092 for more details.
-  auto predictions_iterator = form_predictions.begin();
-  for (; predictions_iterator != form_predictions.end();
-       ++predictions_iterator) {
-    if (predictions_iterator->first.action == form_data.action &&
-        predictions_iterator->first.name == form_data.name) {
+  auto predictions_it = form_predictions.begin();
+  for (; predictions_it != form_predictions.end(); ++predictions_it) {
+    if (predictions_it->first.action == form_data.action &&
+        predictions_it->first.name == form_data.name) {
       break;
     }
   }
 
-  if (predictions_iterator == form_predictions.end())
+  if (predictions_it == form_predictions.end())
     return;
 
   std::vector<blink::WebFormControlElement> autofillable_elements =
       form_util::ExtractAutofillableElementsFromSet(form.control_elements);
-
   const PasswordFormFieldPredictionMap& field_predictions =
-      predictions_iterator->second;
-  for (PasswordFormFieldPredictionMap::const_iterator prediction =
-           field_predictions.begin();
-       prediction != field_predictions.end(); ++prediction) {
-    const FormFieldData& target_field = prediction->first;
-    const PasswordFormFieldPredictionType& type = prediction->second;
-
-    for (size_t i = 0; i < autofillable_elements.size(); ++i) {
-      if (autofillable_elements[i].nameForAutofill() == target_field.name) {
+      predictions_it->second;
+  for (const auto& prediction : field_predictions) {
+    const FormFieldData& target_field = prediction.first;
+    const PasswordFormFieldPredictionType& type = prediction.second;
+    for (const auto& control_element : autofillable_elements)  {
+      if (control_element.nameForAutofill() == target_field.name) {
         const WebInputElement* input_element =
-            toWebInputElement(&autofillable_elements[i]);
+            toWebInputElement(&control_element);
+
         // TODO(sebsg): Investigate why this guard is necessary, see
         // https://crbug.com/517490 for more details.
         if (input_element) {
@@ -341,6 +338,7 @@ bool GetPasswordForm(const SyntheticForm& form,
 
   std::string layout_sequence;
   layout_sequence.reserve(form.control_elements.size());
+  bool visible_passwords_fields_found = false;
   for (size_t i = 0; i < form.control_elements.size(); ++i) {
     WebFormControlElement control_element = form.control_elements[i];
 
@@ -372,6 +370,18 @@ bool GetPasswordForm(const SyntheticForm& form,
           nonscript_modified_values->find(*input_element) !=
               nonscript_modified_values->end()) ||
          password_marked_by_autocomplete_attribute)) {
+      if (form_util::IsWebNodeVisible(*input_element)) {
+        if (!visible_passwords_fields_found) {
+          // Remove all invisible passwords fields, we don't care about them
+          // anymore.
+          passwords.clear();
+          visible_passwords_fields_found = true;
+        }
+      } else {
+        if (visible_passwords_fields_found)
+          continue;
+      }
+
       // We add the field to the list of password fields if it was not flagged
       // as a special NOT_PASSWORD prediction by Autofill. The NOT_PASSWORD
       // mechanism exists because some webpages use the type "password" for
@@ -611,9 +621,8 @@ scoped_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
     const ModifiedValues* nonscript_modified_values,
     const FormsPredictionsMap* form_predictions) {
   SyntheticForm synthetic_form;
-  synthetic_form.control_elements =
-      form_util::GetUnownedAutofillableFormFieldElements(
-          frame.document().all(), &synthetic_form.fieldsets);
+  synthetic_form.control_elements = form_util::GetUnownedFormFieldElements(
+      frame.document().all(), &synthetic_form.fieldsets);
   synthetic_form.document = frame.document();
 
   if (synthetic_form.control_elements.empty())

@@ -14,7 +14,7 @@
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace base {
 class RunLoop;
@@ -29,9 +29,10 @@ class CommandBufferDelegate {
   virtual void ContextLost();
 };
 
-class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
-                                public gpu::CommandBuffer,
-                                public gpu::GpuControl {
+class CommandBufferClientImpl
+    : public mus::mojom::CommandBufferLostContextObserver,
+      public gpu::CommandBuffer,
+      public gpu::GpuControl {
  public:
   explicit CommandBufferClientImpl(
       CommandBufferDelegate* delegate,
@@ -76,12 +77,19 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
   bool IsGpuChannelLost() override;
   gpu::CommandBufferNamespace GetNamespaceID() const override;
   uint64_t GetCommandBufferID() const override;
+  uint64_t GenerateFenceSyncRelease() override;
+  bool IsFenceSyncRelease(uint64_t release) override;
+  bool IsFenceSyncFlushed(uint64_t release) override;
+  bool IsFenceSyncFlushReceived(uint64_t release) override;
+  void SignalSyncToken(const gpu::SyncToken& sync_token,
+                       const base::Closure& callback) override;
+  bool CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) override;
 
  private:
   class SyncClientImpl;
   class SyncPointClientImpl;
 
-  // mojo::CommandBufferLostContextObserver implementation:
+  // mus::mojom::CommandBufferLostContextObserver implementation:
   void DidLoseContext(int32_t lost_reason) override;
 
   void TryUpdateState();
@@ -91,8 +99,8 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
 
   CommandBufferDelegate* delegate_;
   std::vector<int32_t> attribs_;
-  mojo::Binding<mojo::CommandBufferLostContextObserver> observer_binding_;
-  mojo::CommandBufferPtr command_buffer_;
+  mojo::Binding<mus::mojom::CommandBufferLostContextObserver> observer_binding_;
+  mus::mojom::CommandBufferPtr command_buffer_;
   scoped_ptr<SyncClientImpl> sync_client_impl_;
   scoped_ptr<SyncPointClientImpl> sync_point_client_impl_;
 
@@ -105,6 +113,9 @@ class CommandBufferClientImpl : public mojo::CommandBufferLostContextObserver,
 
   // Image IDs are allocated in sequence.
   int next_image_id_;
+
+  uint64_t next_fence_sync_release_;
+  uint64_t flushed_fence_sync_release_;
 
   const MojoAsyncWaiter* async_waiter_;
 };

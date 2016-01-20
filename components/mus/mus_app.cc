@@ -8,20 +8,19 @@
 #include "components/mus/gles2/gpu_impl.h"
 #include "components/mus/public/cpp/args.h"
 #include "components/mus/surfaces/surfaces_scheduler.h"
-#include "components/mus/vm/client_connection.h"
-#include "components/mus/vm/connection_manager.h"
-#include "components/mus/vm/view_tree_host_connection.h"
-#include "components/mus/vm/view_tree_host_impl.h"
-#include "components/mus/vm/view_tree_impl.h"
+#include "components/mus/ws/client_connection.h"
+#include "components/mus/ws/connection_manager.h"
+#include "components/mus/ws/window_tree_host_connection.h"
+#include "components/mus/ws/window_tree_host_impl.h"
+#include "components/mus/ws/window_tree_impl.h"
 #include "mojo/application/public/cpp/application_connection.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/application/public/cpp/application_runner.h"
-#include "mojo/common/tracing_impl.h"
-#include "third_party/mojo/src/mojo/public/c/system/main.h"
+#include "mojo/public/c/system/main.h"
+#include "mojo/services/tracing/public/cpp/tracing_impl.h"
 #include "ui/events/event_switches.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gl/gl_surface.h"
-#include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(USE_X11)
 #include <X11/Xlib.h>
@@ -31,9 +30,9 @@
 
 using mojo::ApplicationConnection;
 using mojo::ApplicationImpl;
-using mojo::Gpu;
 using mojo::InterfaceRequest;
-using mojo::ViewTreeHostFactory;
+using mus::mojom::WindowTreeHostFactory;
+using mus::mojom::Gpu;
 
 namespace mus {
 
@@ -49,7 +48,6 @@ MandolineUIServicesApp::~MandolineUIServicesApp() {
 
 void MandolineUIServicesApp::Initialize(ApplicationImpl* app) {
   app_impl_ = app;
-  tracing_.Initialize(app);
   surfaces_state_ = new SurfacesState;
 
 #if defined(USE_X11)
@@ -60,21 +58,22 @@ void MandolineUIServicesApp::Initialize(ApplicationImpl* app) {
   }
 #endif
 
+  bool hardware_rendering_available = true;
 #if !defined(OS_ANDROID)
-  gfx::GLSurface::InitializeOneOff();
+  hardware_rendering_available = gfx::GLSurface::InitializeOneOff();
   event_source_ = ui::PlatformEventSource::CreateDefault();
 #endif
 
+  // TODO(rjkroege): It is possible that we might want to generalize the
+  // GpuState object.
   if (!gpu_state_.get())
-    gpu_state_ = new GpuState;
-  connection_manager_.reset(new ConnectionManager(this, surfaces_state_));
+    gpu_state_ = new GpuState(hardware_rendering_available);
+  connection_manager_.reset(new ws::ConnectionManager(this, surfaces_state_));
 }
 
 bool MandolineUIServicesApp::ConfigureIncomingConnection(
     ApplicationConnection* connection) {
-  // MandolineUIServices
-  connection->AddService<ViewTreeHostFactory>(this);
-  // GPU
+  connection->AddService<WindowTreeHostFactory>(this);
   connection->AddService<Gpu>(this);
   return true;
 }
@@ -83,62 +82,47 @@ void MandolineUIServicesApp::OnNoMoreRootConnections() {
   app_impl_->Quit();
 }
 
-ClientConnection* MandolineUIServicesApp::CreateClientConnectionForEmbedAtView(
-    ConnectionManager* connection_manager,
-    mojo::InterfaceRequest<mojo::ViewTree> tree_request,
+ws::ClientConnection*
+MandolineUIServicesApp::CreateClientConnectionForEmbedAtWindow(
+    ws::ConnectionManager* connection_manager,
+    mojo::InterfaceRequest<mojom::WindowTree> tree_request,
     ConnectionSpecificId creator_id,
-    mojo::URLRequestPtr request,
-    const ViewId& root_id,
-    uint32_t policy_bitmask) {
-  mojo::ViewTreeClientPtr client;
-  app_impl_->ConnectToService(request.Pass(), &client);
-
-  scoped_ptr<ViewTreeImpl> service(new ViewTreeImpl(
-      connection_manager, creator_id, root_id, policy_bitmask));
-  return new DefaultClientConnection(service.Pass(), connection_manager,
-                                     tree_request.Pass(), client.Pass());
-}
-
-ClientConnection* MandolineUIServicesApp::CreateClientConnectionForEmbedAtView(
-    ConnectionManager* connection_manager,
-    mojo::InterfaceRequest<mojo::ViewTree> tree_request,
-    ConnectionSpecificId creator_id,
-    const ViewId& root_id,
+    const ws::WindowId& root_id,
     uint32_t policy_bitmask,
-    mojo::ViewTreeClientPtr client) {
-  scoped_ptr<ViewTreeImpl> service(new ViewTreeImpl(
+    mojom::WindowTreeClientPtr client) {
+  scoped_ptr<ws::WindowTreeImpl> service(new ws::WindowTreeImpl(
       connection_manager, creator_id, root_id, policy_bitmask));
-  return new DefaultClientConnection(service.Pass(), connection_manager,
-                                     tree_request.Pass(), client.Pass());
+  return new ws::DefaultClientConnection(service.Pass(), connection_manager,
+                                         tree_request.Pass(), client.Pass());
 }
 
 void MandolineUIServicesApp::Create(
     ApplicationConnection* connection,
-    InterfaceRequest<ViewTreeHostFactory> request) {
+    InterfaceRequest<WindowTreeHostFactory> request) {
   factory_bindings_.AddBinding(this, request.Pass());
 }
 
 void MandolineUIServicesApp::Create(mojo::ApplicationConnection* connection,
                                     mojo::InterfaceRequest<Gpu> request) {
-  if (!gpu_state_.get())
-    gpu_state_ = new GpuState;
+  DCHECK(gpu_state_.get());
   new GpuImpl(request.Pass(), gpu_state_);
 }
 
-void MandolineUIServicesApp::CreateViewTreeHost(
-    mojo::InterfaceRequest<mojo::ViewTreeHost> host,
-    mojo::ViewTreeHostClientPtr host_client,
-    mojo::ViewTreeClientPtr tree_client) {
+void MandolineUIServicesApp::CreateWindowTreeHost(
+    mojo::InterfaceRequest<mojom::WindowTreeHost> host,
+    mojom::WindowTreeHostClientPtr host_client,
+    mojom::WindowTreeClientPtr tree_client,
+    mojom::WindowManagerPtr window_manager) {
   DCHECK(connection_manager_.get());
 
   // TODO(fsamuel): We need to make sure that only the window manager can create
   // new roots.
-  ViewTreeHostImpl* host_impl = new ViewTreeHostImpl(
-      host_client.Pass(), connection_manager_.get(), app_impl_,
-      gpu_state_, surfaces_state_);
+  ws::WindowTreeHostImpl* host_impl = new ws::WindowTreeHostImpl(
+      host_client.Pass(), connection_manager_.get(), app_impl_, gpu_state_,
+      surfaces_state_, window_manager.Pass());
 
-  // ViewTreeHostConnection manages its own lifetime.
-  host_impl->Init(new ViewTreeHostConnectionImpl(
+  // WindowTreeHostConnection manages its own lifetime.
+  host_impl->Init(new ws::WindowTreeHostConnectionImpl(
       host.Pass(), make_scoped_ptr(host_impl), tree_client.Pass(),
       connection_manager_.get()));
 }

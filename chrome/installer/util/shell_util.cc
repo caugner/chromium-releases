@@ -35,6 +35,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/values.h"
+#include "base/win/metro.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_comptr.h"
@@ -76,14 +77,6 @@ enum RegistrationConfirmationLevel {
 };
 
 const wchar_t kReinstallCommand[] = L"ReinstallCommand";
-
-// Returns true if Chrome Metro is supported on this version of Windows
-// (supported as of Win8; deprecated as of Win10).
-bool IsChromeMetroSupported() {
-  const base::win::Version win_version = base::win::GetVersion();
-  return win_version >= base::win::VERSION_WIN8 &&
-         win_version < base::win::VERSION_WIN10;
-}
 
 // Returns the current (or installed) browser's ProgId (e.g.
 // "ChromeHTML|suffix|").
@@ -343,7 +336,7 @@ class RegistryEntry {
     if (!app_info.delegate_clsid.empty()) {
       ScopedVector<RegistryEntry> delegate_execute_entries =
           GetChromeDelegateExecuteEntries(chrome_exe, app_info);
-      if (!IsChromeMetroSupported()) {
+      if (!base::win::IsChromeMetroSupported()) {
         // Remove the keys (not only their values) so that Windows will continue
         // to launch Chrome without a pesky association error.
         for (RegistryEntry* entry : delegate_execute_entries)
@@ -383,7 +376,7 @@ class RegistryEntry {
                             app_info.delegate_clsid));
       // If Metro is not supported, remove the DelegateExecute entry instead of
       // adding it.
-      if (!IsChromeMetroSupported())
+      if (!base::win::IsChromeMetroSupported())
         entries->back()->set_removal_flag(RemovalFlag::VALUE);
     }
 
@@ -1226,23 +1219,6 @@ void RemoveRunVerbOnWindows8(BrowserDistribution* dist,
   }
 }
 
-// Gets the short (8.3) form of |path|, putting the result in |short_path| and
-// returning true on success.  |short_path| is not modified on failure.
-bool ShortNameFromPath(const base::FilePath& path, base::string16* short_path) {
-  DCHECK(short_path);
-  base::string16 result(MAX_PATH, L'\0');
-  DWORD short_length = GetShortPathName(path.value().c_str(), &result[0],
-                                        result.size());
-  if (short_length == 0 || short_length > result.size()) {
-    PLOG(ERROR) << "Error getting short (8.3) path for " << path.value();
-    return false;
-  }
-
-  result.resize(short_length);
-  short_path->swap(result);
-  return true;
-}
-
 // Probe using IApplicationAssociationRegistration::QueryCurrentDefault
 // (Windows 8); see ProbeProtocolHandlers.  This mechanism is not suitable for
 // use on previous versions of Windows despite the presence of
@@ -1307,33 +1283,21 @@ ShellUtil::DefaultState ProbeOpenCommandHandlers(
     const base::FilePath& chrome_exe,
     const wchar_t* const* protocols,
     size_t num_protocols) {
-  // Get its short (8.3) form.
-  base::string16 short_app_path;
-  if (!ShortNameFromPath(chrome_exe, &short_app_path))
-    return ShellUtil::UNKNOWN_DEFAULT;
-
   const HKEY root_key = HKEY_CLASSES_ROOT;
   base::string16 key_path;
   base::win::RegKey key;
   base::string16 value;
-  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  base::string16 short_path;
-
+  InstallUtil::ProgramCompare chrome_compare(chrome_exe);
   for (size_t i = 0; i < num_protocols; ++i) {
     // Get the command line from HKCU\<protocol>\shell\open\command.
     key_path.assign(protocols[i]).append(ShellUtil::kRegShellOpen);
-    if ((key.Open(root_key, key_path.c_str(),
-                  KEY_QUERY_VALUE) != ERROR_SUCCESS) ||
-        (key.ReadValue(L"", &value) != ERROR_SUCCESS)) {
+    if (key.Open(root_key, key_path.c_str(),
+                 KEY_QUERY_VALUE) != ERROR_SUCCESS ||
+        key.ReadValue(L"", &value) != ERROR_SUCCESS) {
       return ShellUtil::NOT_DEFAULT;
     }
 
-    // Need to normalize path in case it's been munged.
-    command_line = base::CommandLine::FromString(value);
-    if (!ShortNameFromPath(command_line.GetProgram(), &short_path))
-      return ShellUtil::UNKNOWN_DEFAULT;
-
-    if (!base::FilePath::CompareEqualIgnoreCase(short_path, short_app_path))
+    if (!chrome_compare.Evaluate(value))
       return ShellUtil::NOT_DEFAULT;
   }
 
@@ -1573,7 +1537,8 @@ bool RemoveShortcutFolderIfEmpty(ShellUtil::ShortcutLocation location,
                                  BrowserDistribution* dist,
                                  ShellUtil::ShellChange level) {
   // Explicitly whitelist locations, since accidental calls can be very harmful.
-  if (location != ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR &&
+  if (location !=
+          ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED &&
       location != ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR &&
       location != ShellUtil::SHORTCUT_LOCATION_APP_SHORTCUTS) {
     NOTREACHED();
@@ -1640,7 +1605,6 @@ ShellUtil::ShortcutProperties::ShortcutProperties(ShellChange level_in)
       icon_index(0),
       dual_mode(false),
       pin_to_taskbar(false),
-      pin_to_start(false),
       options(0U) {}
 
 ShellUtil::ShortcutProperties::~ShortcutProperties() {
@@ -1653,13 +1617,12 @@ bool ShellUtil::QuickIsChromeRegisteredInHKLM(BrowserDistribution* dist,
                                  CONFIRM_SHELL_REGISTRATION_IN_HKLM);
 }
 
-bool ShellUtil::ShortcutLocationIsSupported(
-    ShellUtil::ShortcutLocation location) {
+bool ShellUtil::ShortcutLocationIsSupported(ShortcutLocation location) {
   switch (location) {
     case SHORTCUT_LOCATION_DESKTOP:  // Falls through.
     case SHORTCUT_LOCATION_QUICK_LAUNCH:  // Falls through.
     case SHORTCUT_LOCATION_START_MENU_ROOT:  // Falls through.
-    case SHORTCUT_LOCATION_START_MENU_CHROME_DIR:  // Falls through.
+    case SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED:  // Falls through.
     case SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR:
       return true;
     case SHORTCUT_LOCATION_TASKBAR_PINS:
@@ -1672,7 +1635,7 @@ bool ShellUtil::ShortcutLocationIsSupported(
   }
 }
 
-bool ShellUtil::GetShortcutPath(ShellUtil::ShortcutLocation location,
+bool ShellUtil::GetShortcutPath(ShortcutLocation location,
                                 BrowserDistribution* dist,
                                 ShellChange level,
                                 base::FilePath* path) {
@@ -1693,7 +1656,7 @@ bool ShellUtil::GetShortcutPath(ShellUtil::ShortcutLocation location,
       dir_key = (level == CURRENT_USER) ? base::DIR_START_MENU :
                                           base::DIR_COMMON_START_MENU;
       break;
-    case SHORTCUT_LOCATION_START_MENU_CHROME_DIR:
+    case SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED:
       dir_key = (level == CURRENT_USER) ? base::DIR_START_MENU :
                                           base::DIR_COMMON_START_MENU;
       folder_to_append = dist->GetStartMenuShortcutSubfolder(
@@ -1728,16 +1691,42 @@ bool ShellUtil::GetShortcutPath(ShellUtil::ShortcutLocation location,
   return true;
 }
 
+bool ShellUtil::MoveExistingShortcut(ShortcutLocation old_location,
+                                     ShortcutLocation new_location,
+                                     BrowserDistribution* dist,
+                                     const ShortcutProperties& properties) {
+  // Explicitly whitelist locations to which this is applicable.
+  if (old_location != SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED ||
+      new_location != SHORTCUT_LOCATION_START_MENU_ROOT) {
+    NOTREACHED();
+    return false;
+  }
+
+  base::string16 shortcut_name(
+      ExtractShortcutNameFromProperties(dist, properties));
+
+  base::FilePath old_shortcut_path;
+  base::FilePath new_shortcut_path;
+  GetShortcutPath(old_location, dist, properties.level, &old_shortcut_path);
+  GetShortcutPath(new_location, dist, properties.level, &new_shortcut_path);
+  old_shortcut_path = old_shortcut_path.Append(shortcut_name);
+  new_shortcut_path = new_shortcut_path.Append(shortcut_name);
+
+  bool result = base::Move(old_shortcut_path, new_shortcut_path);
+  RemoveShortcutFolderIfEmpty(old_location, dist, properties.level);
+  return result;
+}
+
 bool ShellUtil::CreateOrUpdateShortcut(
-    ShellUtil::ShortcutLocation location,
+    ShortcutLocation location,
     BrowserDistribution* dist,
-    const ShellUtil::ShortcutProperties& properties,
-    ShellUtil::ShortcutOperation operation) {
+    const ShortcutProperties& properties,
+    ShortcutOperation operation) {
   // Explicitly whitelist locations to which this is applicable.
   if (location != SHORTCUT_LOCATION_DESKTOP &&
       location != SHORTCUT_LOCATION_QUICK_LAUNCH &&
       location != SHORTCUT_LOCATION_START_MENU_ROOT &&
-      location != SHORTCUT_LOCATION_START_MENU_CHROME_DIR &&
+      location != SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED &&
       location != SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR) {
     NOTREACHED();
     return false;
@@ -1812,19 +1801,11 @@ bool ShellUtil::CreateOrUpdateShortcut(
         *chosen_path, shortcut_properties, shortcut_operation);
   }
 
-  if (success && shortcut_operation == base::win::SHORTCUT_CREATE_ALWAYS) {
-    if (properties.pin_to_taskbar &&
-        base::win::GetVersion() >= base::win::VERSION_WIN7) {
-      bool pinned = base::win::PinShortcutToTaskbar(*chosen_path);
-      LOG_IF(ERROR, !pinned) << "Failed to pin to taskbar "
-                             << chosen_path->value();
-    }
-    if (properties.pin_to_start &&
-        base::win::GetVersion() >= base::win::VERSION_WIN10) {
-      bool pinned = base::win::PinShortcutToStart(*chosen_path);
-      LOG_IF(ERROR, !pinned) << "Failed to pin to start "
-                             << chosen_path->value();
-    }
+  if (success && shortcut_operation == base::win::SHORTCUT_CREATE_ALWAYS &&
+      properties.pin_to_taskbar && base::win::CanPinShortcutToTaskbar()) {
+    bool pinned = base::win::PinShortcutToTaskbar(*chosen_path);
+    LOG_IF(ERROR, !pinned) << "Failed to pin to taskbar "
+                           << chosen_path->value();
   }
 
   return success;
@@ -1854,7 +1835,7 @@ void ShellUtil::GetRegisteredBrowsers(
   DCHECK(dist);
   DCHECK(browsers);
 
-  const base::string16 base_key(ShellUtil::kRegStartMenuInternet);
+  const base::string16 base_key(kRegStartMenuInternet);
   base::string16 client_path;
   RegKey key;
   base::string16 name;
@@ -1994,7 +1975,7 @@ ShellUtil::DefaultState ShellUtil::GetChromeDefaultState() {
   base::FilePath app_path;
   if (!PathService::Get(base::FILE_EXE, &app_path)) {
     NOTREACHED();
-    return ShellUtil::UNKNOWN_DEFAULT;
+    return UNKNOWN_DEFAULT;
   }
 
   return GetChromeDefaultStateFromPath(app_path);
@@ -2037,7 +2018,7 @@ ShellUtil::DefaultState ShellUtil::GetChromeDefaultProtocolClientState(
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
     NOTREACHED();
-    return ShellUtil::UNKNOWN_DEFAULT;
+    return UNKNOWN_DEFAULT;
   }
 
   const wchar_t* const protocols[] = { protocol.c_str() };
@@ -2055,7 +2036,7 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
                                   int shell_change,
                                   const base::FilePath& chrome_exe,
                                   bool elevate_if_not_admin) {
-  DCHECK(!(shell_change & ShellUtil::SYSTEM_LEVEL) || IsUserAnAdmin());
+  DCHECK(!(shell_change & SYSTEM_LEVEL) || IsUserAnAdmin());
 
   BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
   if (distribution->GetDefaultBrowserControlPolicy() !=
@@ -2070,7 +2051,7 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
     return false;
   }
 
-  if (!ShellUtil::RegisterChromeBrowser(
+  if (!RegisterChromeBrowser(
            dist, chrome_exe, base::string16(), elevate_if_not_admin)) {
     return false;
   }
@@ -2088,24 +2069,24 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
     HRESULT hr = pAAR.CreateInstance(CLSID_ApplicationAssociationRegistration,
         NULL, CLSCTX_INPROC);
     if (SUCCEEDED(hr)) {
-      for (int i = 0; ShellUtil::kBrowserProtocolAssociations[i] != NULL; i++) {
+      for (int i = 0; kBrowserProtocolAssociations[i] != NULL; i++) {
         hr = pAAR->SetAppAsDefault(app_name.c_str(),
-            ShellUtil::kBrowserProtocolAssociations[i], AT_URLPROTOCOL);
+            kBrowserProtocolAssociations[i], AT_URLPROTOCOL);
         if (!SUCCEEDED(hr)) {
           ret = false;
           LOG(ERROR) << "Failed to register as default for protocol "
-                     << ShellUtil::kBrowserProtocolAssociations[i]
+                     << kBrowserProtocolAssociations[i]
                      << " (" << hr << ")";
         }
       }
 
-      for (int i = 0; ShellUtil::kDefaultFileAssociations[i] != NULL; i++) {
+      for (int i = 0; kDefaultFileAssociations[i] != NULL; i++) {
         hr = pAAR->SetAppAsDefault(app_name.c_str(),
-            ShellUtil::kDefaultFileAssociations[i], AT_FILEEXTENSION);
+            kDefaultFileAssociations[i], AT_FILEEXTENSION);
         if (!SUCCEEDED(hr)) {
           ret = false;
           LOG(ERROR) << "Failed to register as default for file extension "
-                     << ShellUtil::kDefaultFileAssociations[i]
+                     << kDefaultFileAssociations[i]
                      << " (" << hr << ")";
         }
       }
@@ -2388,11 +2369,11 @@ bool ShellUtil::RegisterChromeForProtocol(BrowserDistribution* dist,
 }
 
 // static
-bool ShellUtil::RemoveShortcuts(ShellUtil::ShortcutLocation location,
+bool ShellUtil::RemoveShortcuts(ShortcutLocation location,
                                 BrowserDistribution* dist,
                                 ShellChange level,
                                 const base::FilePath& target_exe) {
-  if (!ShellUtil::ShortcutLocationIsSupported(location))
+  if (!ShortcutLocationIsSupported(location))
     return true;  // Vacuous success.
 
   FilterTargetEq shortcut_filter(target_exe, false);
@@ -2406,7 +2387,7 @@ bool ShellUtil::RemoveShortcuts(ShellUtil::ShortcutLocation location,
                                      NULL);
   // Remove chrome-specific shortcut folders if they are now empty.
   if (success &&
-      (location == SHORTCUT_LOCATION_START_MENU_CHROME_DIR ||
+      (location == SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED ||
        location == SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR ||
        location == SHORTCUT_LOCATION_APP_SHORTCUTS)) {
     success = RemoveShortcutFolderIfEmpty(location, dist, level);
@@ -2416,12 +2397,12 @@ bool ShellUtil::RemoveShortcuts(ShellUtil::ShortcutLocation location,
 
 // static
 bool ShellUtil::RetargetShortcutsWithArgs(
-    ShellUtil::ShortcutLocation location,
+    ShortcutLocation location,
     BrowserDistribution* dist,
     ShellChange level,
     const base::FilePath& old_target_exe,
     const base::FilePath& new_target_exe) {
-  if (!ShellUtil::ShortcutLocationIsSupported(location))
+  if (!ShortcutLocationIsSupported(location))
     return true;  // Vacuous success.
 
   FilterTargetEq shortcut_filter(old_target_exe, true);
@@ -2433,14 +2414,14 @@ bool ShellUtil::RetargetShortcutsWithArgs(
 
 // static
 bool ShellUtil::ShortcutListMaybeRemoveUnknownArgs(
-    ShellUtil::ShortcutLocation location,
+    ShortcutLocation location,
     BrowserDistribution* dist,
     ShellChange level,
     const base::FilePath& chrome_exe,
     bool do_removal,
     const scoped_refptr<SharedCancellationFlag>& cancel,
     std::vector<std::pair<base::FilePath, base::string16> >* shortcuts) {
-  if (!ShellUtil::ShortcutLocationIsSupported(location))
+  if (!ShortcutLocationIsSupported(location))
     return false;
   DCHECK(dist);
   FilterTargetEq shortcut_filter(chrome_exe, true);
@@ -2562,7 +2543,7 @@ bool ShellUtil::AddFileAssociations(
 // static
 bool ShellUtil::DeleteFileAssociations(const base::string16& prog_id) {
   // Delete the key HKEY_CURRENT_USER\Software\Classes\PROGID.
-  base::string16 key_path(ShellUtil::kRegClasses);
+  base::string16 key_path(kRegClasses);
   key_path.push_back(base::FilePath::kSeparators[0]);
   key_path.append(prog_id);
   return InstallUtil::DeleteRegistryKey(

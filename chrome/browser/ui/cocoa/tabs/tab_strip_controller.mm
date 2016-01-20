@@ -56,6 +56,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
@@ -959,8 +960,11 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 - (BOOL)isTabFullyVisible:(TabView*)tab {
   NSRect frame = [tab frame];
   return NSMinX(frame) >= [self leftIndentForControls] &&
-      NSMaxX(frame) <= (NSMaxX([tabStripView_ frame]) -
-                        [self rightIndentForControls]);
+      NSMaxX(frame) <= [self tabAreaRightEdge];
+}
+
+- (CGFloat)tabAreaRightEdge {
+  return NSMaxX([tabStripView_ frame]) - [self rightIndentForControls];
 }
 
 - (void)showNewTabButton:(BOOL)show {
@@ -1578,8 +1582,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       ResourceBundle::GetSharedInstance().GetNativeImageNamed(
           IDR_THROBBER).CopyNSImage();
   static NSImage* sadFaviconImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_SAD_FAVICON).CopyNSImage();
+      ResourceBundle::GetSharedInstance()
+          .GetNativeImageNamed(IDR_CRASH_SAD_FAVICON)
+          .CopyNSImage();
 
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];

@@ -88,8 +88,10 @@
 #include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/infobars/core/infobar.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
@@ -105,6 +107,7 @@
 #include "components/search/search.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/ssl_config/ssl_config_prefs.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
 #include "components/variations/service/variations_service.h"
@@ -127,6 +130,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_paths.h"
@@ -295,17 +299,15 @@ class MakeRequestFail {
  public:
   // Sets up the filter on IO thread such that requests to |host| fail.
   explicit MakeRequestFail(const std::string& host) : host_(host) {
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(MakeRequestFailOnIO, host_),
-        base::MessageLoop::QuitClosure());
+    BrowserThread::PostTaskAndReply(BrowserThread::IO, FROM_HERE,
+                                    base::Bind(MakeRequestFailOnIO, host_),
+                                    base::MessageLoop::QuitWhenIdleClosure());
     content::RunMessageLoop();
   }
   ~MakeRequestFail() {
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(UndoMakeRequestFailOnIO, host_),
-        base::MessageLoop::QuitClosure());
+    BrowserThread::PostTaskAndReply(BrowserThread::IO, FROM_HERE,
+                                    base::Bind(UndoMakeRequestFailOnIO, host_),
+                                    base::MessageLoop::QuitWhenIdleClosure());
     content::RunMessageLoop();
   }
 
@@ -377,7 +379,7 @@ void DownloadAndVerifyFile(
   content::DownloadTestObserverTerminal observer(
       download_manager, 1,
       content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(file.MaybeAsASCII()));
   base::FilePath downloaded = dir.Append(file);
   EXPECT_FALSE(base::PathExists(downloaded));
   ui_test_utils::NavigateToURL(browser, url);
@@ -688,10 +690,9 @@ class PolicyTest : public InProcessBrowserTest {
     void OnScreenshotCompleted(
         ScreenshotGrabberObserver::Result screenshot_result,
         const base::FilePath& screenshot_path) override {
-      BrowserThread::PostTaskAndReply(BrowserThread::IO,
-                                      FROM_HERE,
+      BrowserThread::PostTaskAndReply(BrowserThread::IO, FROM_HERE,
                                       base::Bind(base::DoNothing),
-                                      base::MessageLoop::QuitClosure());
+                                      base::MessageLoop::QuitWhenIdleClosure());
     }
 
     ~QuitMessageLoopAfterScreenshot() override {}
@@ -815,9 +816,9 @@ class PolicyTest : public InProcessBrowserTest {
     click_event.clickCount = 1;
     click_event.x = x;
     click_event.y = y;
-    contents->GetRenderViewHost()->ForwardMouseEvent(click_event);
+    contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(click_event);
     click_event.type = blink::WebInputEvent::MouseUp;
-    contents->GetRenderViewHost()->ForwardMouseEvent(click_event);
+    contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(click_event);
   }
 
   void SetPolicy(PolicyMap* policies, const char* key, base::Value* value) {
@@ -1525,8 +1526,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, AlwaysAuthorizePlugins) {
   ASSERT_TRUE(infobar_service);
   EXPECT_EQ(0u, infobar_service->infobar_count());
 
-  base::FilePath path(FILE_PATH_LITERAL("plugin/quicktime.html"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(path));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl("plugin/quicktime.html"));
   ui_test_utils::NavigateToURL(browser(), url);
   // This should have triggered the dangerous plugin infobar.
   ASSERT_EQ(1u, infobar_service->infobar_count());
@@ -1735,7 +1735,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSharedModules) {
   base::FilePath update_xml_path = base::FilePath(kTestExtensionsDir)
                                        .AppendASCII("policy_shared_module")
                                        .AppendASCII("update.xml");
-  GURL update_xml_url(URLRequestMockHTTPJob::GetMockUrl(update_xml_path));
+  GURL update_xml_url(
+      URLRequestMockHTTPJob::GetMockUrl(update_xml_path.MaybeAsASCII()));
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryUpdateURL, update_xml_url.spec());
   ui_test_utils::NavigateToURL(browser(), update_xml_url);
@@ -1829,7 +1830,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   // that includes "good_v1.crx".
   base::FilePath path =
       base::FilePath(kTestExtensionsDir).Append(kGoodV1CrxManifestName);
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(path));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(path.MaybeAsASCII()));
 
   // Setting the forcelist extension should install "good_v1.crx".
   base::ListValue forcelist;
@@ -1839,14 +1840,13 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   policies.Set(key::kExtensionInstallForcelist, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, forcelist.DeepCopy(),
                nullptr);
-  content::WindowedNotificationObserver observer(
-      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::NotificationService::AllSources());
+  extensions::TestExtensionRegistryObserver observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   UpdateProviderPolicy(policies);
-  observer.Wait();
+  observer.WaitForExtensionWillBeInstalled();
   // Note: Cannot check that the notification details match the expected
   // exception, since the details object has already been freed prior to
-  // the completion of observer.Wait().
+  // the completion of observer.WaitForExtensionWillBeInstalled().
 
   EXPECT_TRUE(service->GetExtensionById(kGoodCrxId, true));
 
@@ -1877,11 +1877,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   extensions::ExtensionUpdater* updater = service->updater();
   extensions::ExtensionUpdater::CheckParams params;
   params.install_immediately = true;
-  content::WindowedNotificationObserver update_observer(
-      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::NotificationService::AllSources());
+  extensions::TestExtensionRegistryObserver update_observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   updater->CheckNow(params);
-  update_observer.Wait();
+  update_observer.WaitForExtensionWillBeInstalled();
 
   const base::Version* new_version =
       service->GetExtensionById(kGoodCrxId, true)->version();
@@ -1943,7 +1942,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionRecommendedInstallationMode) {
 
   base::FilePath path =
       base::FilePath(kTestExtensionsDir).Append(kGoodV1CrxManifestName);
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(path));
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(path.MaybeAsASCII()));
 
   // Setting the forcelist extension should install "good_v1.crx".
   base::DictionaryValue dict_value;
@@ -1960,11 +1959,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionRecommendedInstallationMode) {
                POLICY_SOURCE_CLOUD,
                dict_value.DeepCopy(),
                NULL);
-  content::WindowedNotificationObserver observer(
-      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::NotificationService::AllSources());
+  extensions::TestExtensionRegistryObserver observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   UpdateProviderPolicy(policies);
-  observer.Wait();
+  observer.WaitForExtensionWillBeInstalled();
 
   EXPECT_TRUE(service->GetExtensionById(kGoodCrxId, true));
 
@@ -2022,10 +2020,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
   extensions::ScopedTestDialogAutoConfirm auto_confirm(
       extensions::ScopedTestDialogAutoConfirm::ACCEPT);
 
-  const GURL install_source_url(URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("extensions/*"))));
-  const GURL referrer_url(URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("policy/*"))));
+  const GURL install_source_url(
+      URLRequestMockHTTPJob::GetMockUrl("extensions/*"));
+  const GURL referrer_url(URLRequestMockHTTPJob::GetMockUrl("policy/*"));
 
   base::ScopedTempDir download_directory;
   ASSERT_TRUE(download_directory.CreateUniqueTempDir());
@@ -2033,8 +2030,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
       DownloadPrefs::FromBrowserContext(browser()->profile());
   download_prefs->SetDownloadPath(download_directory.path());
 
-  const GURL download_page_url(URLRequestMockHTTPJob::GetMockUrl(base::FilePath(
-      FILE_PATH_LITERAL("policy/extension_install_sources_test.html"))));
+  const GURL download_page_url(URLRequestMockHTTPJob::GetMockUrl(
+      "policy/extension_install_sources_test.html"));
   ui_test_utils::NavigateToURL(browser(), download_page_url);
 
   // As long as the policy is not present, extensions are considered dangerous.
@@ -2054,14 +2051,13 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
                install_sources.DeepCopy(), nullptr);
   UpdateProviderPolicy(policies);
 
-  content::WindowedNotificationObserver observer(
-      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::NotificationService::AllSources());
+  extensions::TestExtensionRegistryObserver observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   PerformClick(1, 0);
-  observer.Wait();
+  observer.WaitForExtensionWillBeInstalled();
   // Note: Cannot check that the notification details match the expected
   // exception, since the details object has already been freed prior to
-  // the completion of observer.Wait().
+  // the completion of observer.WaitForExtensionWillBeInstalled().
 
   // The first extension shouldn't be present, the second should be there.
   EXPECT_FALSE(extension_service()->GetExtensionById(kGoodCrxId, true));
@@ -2126,11 +2122,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionRequired) {
   // via the update URL in the manifest of the older version.
   EXPECT_EQ(1u, interceptor.GetPendingSize());
   {
-    content::WindowedNotificationObserver update_observer(
-        extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-        content::NotificationService::AllSources());
+    extensions::TestExtensionRegistryObserver update_observer(
+        extensions::ExtensionRegistry::Get(browser()->profile()));
     service->updater()->CheckSoon();
-    update_observer.Wait();
+    update_observer.WaitForExtensionWillBeInstalled();
   }
   EXPECT_EQ(0u, interceptor.GetPendingSize());
 
@@ -2179,9 +2174,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionRequiredAlt) {
   // An extension management policy update should trigger an update as well.
   EXPECT_EQ(1u, interceptor.GetPendingSize());
   {
-    content::WindowedNotificationObserver update_observer(
-        extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-        content::NotificationService::AllSources());
+    extensions::TestExtensionRegistryObserver update_observer(
+        extensions::ExtensionRegistry::Get(browser()->profile()));
     {
       // Set a higher minimum version, just intend to trigger a policy update.
       extensions::ExtensionManagementPolicyUpdater management_policy(
@@ -2189,7 +2183,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionRequiredAlt) {
       management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.3");
     }
     base::RunLoop().RunUntilIdle();
-    update_observer.Wait();
+    update_observer.WaitForExtensionWillBeInstalled();
   }
   EXPECT_EQ(0u, interceptor.GetPendingSize());
 
@@ -2223,13 +2217,12 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionForceInstalled) {
   // Prepare the update URL for force installing.
   const base::FilePath path =
       base::FilePath(kTestExtensionsDir).Append(kGoodV1CrxManifestName);
-  const GURL url(URLRequestMockHTTPJob::GetMockUrl(path));
+  const GURL url(URLRequestMockHTTPJob::GetMockUrl(path.MaybeAsASCII()));
 
   // Set policy to force-install the extension, it should be installed and
   // enabled.
-  content::WindowedNotificationObserver install_observer(
-      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::NotificationService::AllSources());
+  extensions::TestExtensionRegistryObserver install_observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   EXPECT_FALSE(registry->enabled_extensions().Contains(kGoodCrxId));
   {
     extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
@@ -2237,7 +2230,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionForceInstalled) {
                                                           url.spec(), true);
   }
   base::RunLoop().RunUntilIdle();
-  install_observer.Wait();
+  install_observer.WaitForExtensionWillBeInstalled();
 
   EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
 
@@ -2443,12 +2436,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SavingBrowserHistoryDisabled) {
   EXPECT_EQ(url, enumerator2.urls()[0]);
 }
 
+// TODO(port): Test corresponding bubble translate UX: http://crbug.com/383235
+#if !defined(USE_AURA)
 // http://crbug.com/241691 PolicyTest.TranslateEnabled is failing regularly.
 IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_TranslateEnabled) {
-  // TODO(port): Test corresponding bubble translate UX: http://crbug.com/383235
-  if (TranslateService::IsTranslateBubbleEnabled())
-    return;
-
   scoped_ptr<test::CldDataHarness> cld_data_scope =
       test::CldDataHarnessFactory::Get()->CreateCldDataHarness();
   ASSERT_NO_FATAL_FAILURE(cld_data_scope->Init());
@@ -2526,6 +2517,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_TranslateEnabled) {
   language_observer2.Wait();
   EXPECT_EQ(0u, infobar_service->infobar_count());
 }
+#endif  // !defined(USE_AURA)
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   // Checks that URLs can be blacklisted, and that exceptions can be made to
@@ -2594,12 +2586,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklistSubresources) {
   // Checks that an image with a blacklisted URL is loaded, but an iframe with a
   // blacklisted URL is not.
 
-  GURL main_url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("policy/blacklist-subresources.html")));
-  GURL image_url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("policy/pixel.png")));
-  GURL subframe_url = URLRequestMockHTTPJob::GetMockUrl(
-      base::FilePath(FILE_PATH_LITERAL("policy/blank.html")));
+  GURL main_url =
+      URLRequestMockHTTPJob::GetMockUrl("policy/blacklist-subresources.html");
+  GURL image_url = URLRequestMockHTTPJob::GetMockUrl("policy/pixel.png");
+  GURL subframe_url = URLRequestMockHTTPJob::GetMockUrl("policy/blank.html");
 
   // Set a blacklist containing the image and the iframe which are used by the
   // main document.
@@ -2736,7 +2726,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
 
   const std::string new_value("tls1.2");
   const std::string default_value(
-      prefs->GetString(prefs::kSSLVersionFallbackMin));
+      prefs->GetString(ssl_config::prefs::kSSLVersionFallbackMin));
 
   EXPECT_NE(default_value, new_value);
   EXPECT_NE(net::SSL_PROTOCOL_VERSION_TLS1_2,
@@ -2880,8 +2870,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DisableAudioOutput) {
   audio_handler->RemoveAudioObserver(test_observer.get());
 }
 
-// Disabled, see http://crbug.com/315308.
-IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_PRE_SessionLengthLimit) {
+IN_PROC_BROWSER_TEST_F(PolicyTest, PRE_SessionLengthLimit) {
   // Indicate that the session started 2 hours ago and no user activity has
   // occurred yet.
   g_browser_process->local_state()->SetInt64(
@@ -2890,8 +2879,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_PRE_SessionLengthLimit) {
           .ToInternalValue());
 }
 
-// Disabled, see http://crbug.com/315308.
-IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_SessionLengthLimit) {
+IN_PROC_BROWSER_TEST_F(PolicyTest, SessionLengthLimit) {
   content::MockNotificationObserver observer;
   content::NotificationRegistrar registrar;
   registrar.Add(&observer,
@@ -2972,9 +2960,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest,
   Mock::VerifyAndClearExpectations(&observer);
 }
 
-// Disabled, see http://crbug.com/315308.
 IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       DISABLED_PRE_WaitForInitialUserActivitySatisfied) {
+                       PRE_WaitForInitialUserActivitySatisfied) {
   // Indicate that initial user activity in this session occurred 2 hours ago.
   g_browser_process->local_state()->SetInt64(
       prefs::kSessionStartTime,
@@ -2985,9 +2972,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest,
       true);
 }
 
-// Disabled, see http://crbug.com/315308.
 IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       DISABLED_WaitForInitialUserActivitySatisfied) {
+                       WaitForInitialUserActivitySatisfied) {
   content::MockNotificationObserver observer;
   content::NotificationRegistrar registrar;
   registrar.Add(&observer,

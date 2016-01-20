@@ -92,6 +92,12 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_LIST;
   (*s_whitelist)["spellcheck.use_spelling_service"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["translate.enabled"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["translate_blocked_languages"] =
+      settings_private::PrefType::PREF_TYPE_LIST;
+
+  // Clear browsing data settings.
   (*s_whitelist)["browser.clear_data.browsing_history"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["browser.clear_data.download_history"] =
@@ -110,10 +116,54 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["browser.clear_data.time_period"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
-  (*s_whitelist)["translate.enabled"] =
-      settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)["translate_blocked_languages"] =
-      settings_private::PrefType::PREF_TYPE_LIST;
+  (*s_whitelist)["profile.default_content_setting_values.cookies"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.fullscreen"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.geolocation"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.javascript"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.media_stream_camera"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.media_stream_mic"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.notifications"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.default_content_setting_values.popups"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["profile.content_settings.exceptions.cookies"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.fullscreen"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.geolocation"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.javascript"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.media_stream_camera"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.media_stream_mic"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.notifications"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+  (*s_whitelist)["profile.content_settings.exceptions.popups"] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
+
+  // Web content settings.
+  (*s_whitelist)["webkit.webprefs.default_font_size"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["webkit.webprefs.minimum_font_size"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["webkit.webprefs.fonts.fixed.Zyyy"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["webkit.webprefs.fonts.sansserif.Zyyy"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["webkit.webprefs.fonts.serif.Zyyy"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["webkit.webprefs.fonts.standard.Zyyy"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["intl.charset_default"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
 
 #if defined(OS_CHROMEOS)
   (*s_whitelist)["cros.accounts.allowBWSI"] =
@@ -154,7 +204,7 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["cros.device.attestation_for_content_protection_enabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)["settings.internet.wake_on_wifi_ssid"] =
+  (*s_whitelist)["settings.internet.wake_on_wifi_darkconnect"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 #else
   (*s_whitelist)["intl.accept_languages"] =
@@ -177,6 +227,8 @@ settings_private::PrefType PrefsUtil::GetType(const std::string& name,
                                  : settings_private::PrefType::PREF_TYPE_STRING;
     case base::Value::Type::TYPE_LIST:
       return settings_private::PrefType::PREF_TYPE_LIST;
+    case base::Value::Type::TYPE_DICTIONARY:
+      return settings_private::PrefType::PREF_TYPE_DICTIONARY;
     default:
       return settings_private::PrefType::PREF_TYPE_NONE;
   }
@@ -263,8 +315,8 @@ scoped_ptr<settings_private::PrefObject> PrefsUtil::GetPref(
         settings_private::PolicySource::POLICY_SOURCE_OWNER;
     pref_object->policy_enforcement =
         settings_private::PolicyEnforcement::POLICY_ENFORCEMENT_ENFORCED;
-    pref_object->policy_source_name.reset(
-        new std::string(user_manager::UserManager::Get()->GetOwnerEmail()));
+    pref_object->policy_source_name.reset(new std::string(
+        user_manager::UserManager::Get()->GetOwnerAccountId().GetUserEmail()));
     return pref_object.Pass();
   }
 #endif
@@ -314,6 +366,7 @@ PrefsUtil::SetPrefResult PrefsUtil::SetPref(const std::string& pref_name,
     case base::Value::TYPE_BOOLEAN:
     case base::Value::TYPE_DOUBLE:
     case base::Value::TYPE_LIST:
+    case base::Value::TYPE_DICTIONARY:
       pref_service->Set(pref_name, *value);
       break;
     case base::Value::TYPE_INTEGER: {
@@ -441,7 +494,7 @@ bool PrefsUtil::IsPrefOwnerControlled(const std::string& pref_name) {
 }
 
 bool PrefsUtil::IsPrefPrimaryUserControlled(const std::string& pref_name) {
-  if (pref_name == prefs::kWakeOnWifiSsid) {
+  if (pref_name == prefs::kWakeOnWifiDarkConnect) {
     user_manager::UserManager* user_manager = user_manager::UserManager::Get();
     const user_manager::User* user =
         chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);

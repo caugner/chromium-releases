@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
@@ -53,6 +54,7 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -68,8 +70,6 @@
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/windows_version.h"
 #include "ui/base/win/atl_module.h"
-#include "win8/test/metro_registration_helper.h"
-#include "win8/test/test_registrar_constants.h"
 #endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
@@ -188,7 +188,6 @@ InProcessBrowserTest::InProcessBrowserTest()
   base::FilePath src_dir;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
   base::FilePath test_data_dir = src_dir.AppendASCII("chrome/test/data");
-  embedded_test_server()->ServeFilesFromDirectory(test_data_dir);
 
   // chrome::DIR_TEST_DATA isn't going to be setup until after we call
   // ContentMain. However that is after tests' constructors or SetUp methods,
@@ -206,6 +205,11 @@ InProcessBrowserTest::~InProcessBrowserTest() {
 void InProcessBrowserTest::SetUp() {
   // Browser tests will create their own g_browser_process later.
   DCHECK(!g_browser_process);
+
+  // Clear the FeatureList instance from base/test/test_suite.cc. Since this is
+  // a browser test, a FeatureList will be registered as part of normal browser
+  // start up in ChromeBrowserMainParts::SetupMetricsAndFieldTrials().
+  base::FeatureList::ClearInstanceForTesting();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
@@ -269,8 +273,6 @@ void InProcessBrowserTest::SetUp() {
           switches::kAshBrowserTests)) {
     com_initializer_.reset(new base::win::ScopedCOMInitializer());
     ui::win::CreateATLModuleIfNeeded();
-    if (version >= base::win::VERSION_WIN8)
-      ASSERT_TRUE(win8::MakeTestDefaultBrowserSynchronously());
   }
 #endif
 
@@ -284,17 +286,6 @@ void InProcessBrowserTest::PrepareTestCommandLine(
 
   // This is a Browser test.
   command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
-
-#if defined(OS_WIN)
-  if (command_line->HasSwitch(switches::kAshBrowserTests)) {
-    command_line->AppendSwitchNative(switches::kViewerLaunchViaAppId,
-                                     win8::test::kDefaultTestAppUserModelId);
-    // Ash already launches with a single browser opened, add kSilentLaunch to
-    // make sure StartupBrowserCreator doesn't attempt to launch a browser on
-    // the native desktop on startup.
-    command_line->AppendSwitch(switches::kSilentLaunch);
-  }
-#endif
 
 #if defined(OS_MACOSX)
   // Explicitly set the path of the binary used for child processes, otherwise

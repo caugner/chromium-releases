@@ -19,7 +19,7 @@
 //   quic_client https://www.google.com --port=443  --host=${IP}
 //
 // Use a specific version:
-//   quic_client http://www.google.com --version=23  --host=${IP}
+//   quic_client http://www.google.com --quic_version=23  --host=${IP}
 //
 // Send a POST instead of a GET:
 //   quic_client http://www.google.com --body="this is a POST body" --host=${IP}
@@ -78,7 +78,7 @@ using std::endl;
 // The IP or hostname the quic client will connect to.
 string FLAGS_host = "";
 // The port to connect to.
-int32 FLAGS_port = 80;
+int32 FLAGS_port = 0;
 // If set, send a POST with this body.
 string FLAGS_body = "";
 // A semicolon separated list of key:value pairs to add to request headers.
@@ -190,6 +190,10 @@ int main(int argc, char *argv[]) {
   if (host.empty()) {
     host = url.host();
   }
+  int port = FLAGS_port;
+  if (port == 0) {
+    port = url.EffectiveIntPort();
+  }
   if (!net::ParseIPLiteralToNumber(host, &ip_addr)) {
     net::AddressList addresses;
     int rv = net::tools::SynchronousHostResolver::Resolve(host, &addresses);
@@ -205,24 +209,23 @@ int main(int argc, char *argv[]) {
   VLOG(1) << "Resolved " << host << " to " << host_port << endl;
 
   // Build the client, and try to connect.
-  net::QuicServerId server_id(host, FLAGS_port, /*is_https=*/true,
+  net::QuicServerId server_id(url.host(), url.EffectiveIntPort(),
                               net::PRIVACY_MODE_DISABLED);
   net::QuicVersionVector versions = net::QuicSupportedVersions();
   if (FLAGS_quic_version != -1) {
     versions.clear();
     versions.push_back(static_cast<net::QuicVersion>(FLAGS_quic_version));
   }
-  net::tools::QuicSimpleClient client(net::IPEndPoint(ip_addr, FLAGS_port),
-                                      server_id, versions);
-  scoped_ptr<CertVerifier> cert_verifier;
-  scoped_ptr<TransportSecurityState> transport_security_state;
+  // For secure QUIC we need to verify the cert chain.
+  scoped_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
+  scoped_ptr<TransportSecurityState> transport_security_state(
+      new TransportSecurityState);
+  ProofVerifierChromium* proof_verifier = new ProofVerifierChromium(
+      cert_verifier.get(), nullptr, transport_security_state.get());
+  net::tools::QuicSimpleClient client(net::IPEndPoint(ip_addr, port), server_id,
+                                      versions, proof_verifier);
   client.set_initial_max_packet_length(
       FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
-  // For secure QUIC we need to verify the cert chain.
-  cert_verifier = CertVerifier::CreateDefault();
-  transport_security_state.reset(new TransportSecurityState);
-  client.SetProofVerifier(new ProofVerifierChromium(
-      cert_verifier.get(), nullptr, transport_security_state.get()));
   if (!client.Initialize()) {
     cerr << "Failed to initialize client." << endl;
     return 1;

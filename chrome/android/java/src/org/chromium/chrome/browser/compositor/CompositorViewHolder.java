@@ -13,6 +13,7 @@ import android.graphics.RectF;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.v4.view.ViewCompat;
+import android.support.v4.view.accessibility.AccessibilityEventCompat;
 import android.support.v4.view.accessibility.AccessibilityNodeInfoCompat;
 import android.support.v4.widget.ExploreByTouchHelper;
 import android.util.AttributeSet;
@@ -39,6 +40,7 @@ import org.chromium.chrome.browser.compositor.layouts.content.ContentOffsetProvi
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -47,6 +49,7 @@ import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.content.browser.ContentReadbackHandler;
@@ -687,6 +690,13 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     @Override
+    public float getTopControlsUrlBarAlpha() {
+        return mTabVisible == null
+                ? 1.f
+                : ColorUtils.getTextBoxAlphaForToolbarBackground(mTabVisible);
+    }
+
+    @Override
     public boolean areTopControlsPermanentlyHidden() {
         return mFullscreenManager != null && mFullscreenManager.areTopControlsPermanentlyHidden();
     }
@@ -768,14 +778,16 @@ public class CompositorViewHolder extends FrameLayout
      * @param androidContentContainer The {@link ViewGroup} the {@link LayoutManager} should bind
      *                                Android content to.
      * @param contextualSearchManager A {@link ContextualSearchManagementDelegate} instance.
+     * @param readerModeManager       A {@link ReaderModeManagerDelegate} instance.
      */
     public void onFinishNativeInitialization(TabModelSelector tabModelSelector,
             TabCreatorManager tabCreatorManager, TabContentManager tabContentManager,
             ViewGroup androidContentContainer,
-            ContextualSearchManagementDelegate contextualSearchManager) {
+            ContextualSearchManagementDelegate contextualSearchManager,
+            ReaderModeManagerDelegate readerModeManager) {
         assert mLayoutManager != null;
         mLayoutManager.init(tabModelSelector, tabCreatorManager, tabContentManager,
-                androidContentContainer, contextualSearchManager,
+                androidContentContainer, contextualSearchManager, readerModeManager,
                 mCompositorView.getResourceManager().getDynamicResourceLoader());
         mTabModelSelector = tabModelSelector;
         tabModelSelector.addObserver(new EmptyTabModelSelectorObserver() {
@@ -1020,6 +1032,8 @@ public class CompositorViewHolder extends FrameLayout
     @Override
     public void invalidateAccessibilityProvider() {
         if (mNodeProvider != null) {
+            mNodeProvider.sendEventForVirtualView(mNodeProvider.getFocusedVirtualView(),
+                    AccessibilityEventCompat.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED);
             mNodeProvider.invalidateRoot();
         }
     }

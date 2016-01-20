@@ -16,10 +16,12 @@ Non-hidden element inside dialog
           "name": "activeModalDialog",
           "value": {
             "type": "idref",
-            "relatedNodeValue": {
-              "backendNodeId": "<string>",
-              "idref": "_2"
-            }
+            "relatedNodes": [
+              {
+                "backendNodeId": "<string>",
+                "idref": "_2"
+              }
+            ]
           }
         }
       ]
@@ -36,7 +38,25 @@ Non-hidden element inside dialog
         "type": "role",
         "value": "dialog"
       },
-      "properties": []
+      "properties": [],
+      "name": {
+        "type": "computedString",
+        "value": "",
+        "sources": [
+          {
+            "type": "relatedElement",
+            "attribute": "aria-labelledby"
+          },
+          {
+            "type": "attribute",
+            "attribute": "aria-label"
+          },
+          {
+            "type": "attribute",
+            "attribute": "title"
+          }
+        ]
+      }
     }
   }
 }
@@ -50,7 +70,25 @@ Non-hidden element inside dialog
         "type": "internalRole",
         "value": "Div"
       },
-      "properties": []
+      "properties": [],
+      "name": {
+        "type": "computedString",
+        "value": "",
+        "sources": [
+          {
+            "type": "relatedElement",
+            "attribute": "aria-labelledby"
+          },
+          {
+            "type": "attribute",
+            "attribute": "aria-label"
+          },
+          {
+            "type": "attribute",
+            "attribute": "title"
+          }
+        ]
+      }
     }
   }
 }

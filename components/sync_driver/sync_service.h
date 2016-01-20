@@ -43,6 +43,7 @@ namespace sync_driver {
 class DataTypeController;
 class LocalDeviceInfoProvider;
 class OpenTabsUIDelegate;
+class SyncClient;
 
 class SyncService : public DataTypeEncryptionHandler {
  public:
@@ -102,12 +103,19 @@ class SyncService : public DataTypeEncryptionHandler {
   // false.
   virtual bool IsSyncActive() const = 0;
 
+  // Triggers a GetUpdates call for the specified |types|, pulling any new data
+  // from the sync server.
+  virtual void TriggerRefresh(const syncer::ModelTypeSet& types) = 0;
+
   // Get the set of current active data types (those chosen or configured by
   // the user which have not also encountered a runtime error).
   // Note that if the Sync engine is in the middle of a configuration, this
   // will the the empty set. Once the configuration completes the set will
   // be updated.
   virtual syncer::ModelTypeSet GetActiveDataTypes() const = 0;
+
+  // Returns the SyncClient instance associated with this service.
+  virtual SyncClient* GetSyncClient() const = 0;
 
   // Adds/removes an observer. SyncService does not take ownership of the
   // observer.

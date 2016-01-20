@@ -29,6 +29,8 @@
 #include "base/trace_event/trace_event.h"
 #include "base/version.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
+#include "chrome/browser/background_sync/background_sync_controller_factory.h"
+#include "chrome/browser/background_sync/background_sync_controller_impl.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -42,7 +44,6 @@
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
@@ -63,7 +64,6 @@
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
@@ -81,6 +81,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
+#include "components/gcm_driver/gcm_profile_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/metrics/metrics_service.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
@@ -88,6 +89,8 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/proxy_config/pref_proxy_config_tracker.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/signin_pref_names.h"
+#include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/ui/zoom/zoom_event_manager.h"
 #include "components/url_formatter/url_fixer.h"
@@ -355,6 +358,8 @@ void ProfileImpl::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kPrintingEnabled, true);
 #endif
   registry->RegisterBooleanPref(prefs::kPrintPreviewDisabled, false);
+  registry->RegisterStringPref(
+      prefs::kPrintPreviewDefaultDestinationSelectionRules, std::string());
   registry->RegisterBooleanPref(prefs::kForceEphemeralProfiles, false);
 
   // Initialize the cache prefs.
@@ -446,7 +451,7 @@ ProfileImpl::ProfileImpl(
       path_, sequenced_task_runner, create_mode == CREATE_MODE_SYNCHRONOUS);
 #endif
 
-  scoped_refptr<SafeBrowsingService> safe_browsing_service(
+  scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service(
       g_browser_process->safe_browsing_service());
   if (safe_browsing_service.get()) {
     pref_validation_delegate_ =
@@ -537,7 +542,9 @@ void ProfileImpl::DoFinalInit() {
 
   PrefService* local_state = g_browser_process->local_state();
   ssl_config_service_manager_.reset(
-      SSLConfigServiceManager::CreateDefaultManager(local_state));
+      ssl_config::SSLConfigServiceManager::CreateDefaultManager(
+          local_state,
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 
 #if defined(ENABLE_BACKGROUND)
   // Initialize the BackgroundModeManager - this has to be done here before
@@ -827,8 +834,6 @@ void ProfileImpl::OnLocaleReady() {
     net_pref_observer_.reset(new NetPrefObserver(prefs_.get()));
   }
 
-  chrome_prefs::SchedulePrefsFilePathVerification(path_);
-
   ChromeVersionService::OnProfileLoaded(prefs_.get(), IsNewProfile());
   DoFinalInit();
 }
@@ -1024,6 +1029,10 @@ content::PermissionManager* ProfileImpl::GetPermissionManager() {
   return PermissionManagerFactory::GetForProfile(this);
 }
 
+content::BackgroundSyncController* ProfileImpl::GetBackgroundSyncController() {
+  return BackgroundSyncControllerFactory::GetForProfile(this);
+}
+
 bool ProfileImpl::IsSameProfile(Profile* profile) {
   if (profile == static_cast<Profile*>(this))
     return true;
@@ -1121,8 +1130,8 @@ void ProfileImpl::ChangeAppLocale(
   if (via != APP_LOCALE_CHANGED_VIA_PUBLIC_SESSION_LOGIN)
     local_state->SetString(prefs::kApplicationLocale, new_locale);
 
-  if (user_manager::UserManager::Get()->GetOwnerEmail() ==
-      chromeos::ProfileHelper::Get()->GetUserByProfile(this)->email())
+  if (user_manager::UserManager::Get()->GetOwnerAccountId() ==
+      chromeos::ProfileHelper::Get()->GetUserByProfile(this)->GetAccountId())
     local_state->SetString(prefs::kOwnerLocale, new_locale);
 }
 

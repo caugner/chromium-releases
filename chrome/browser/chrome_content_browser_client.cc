@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -40,6 +41,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/engagement/site_engagement_eviction_policy.h"
 #include "chrome/browser/font_family_cache.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -85,6 +87,7 @@
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/webui/log_web_ui_url.h"
+#include "chrome/browser/usb/usb_tab_helper.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -98,6 +101,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chromeos/chromeos_constants.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "components/cdm/browser/cdm_message_filter_android.h"
 #include "components/cloud_devices/common/cloud_devices_switches.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
@@ -105,6 +109,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/data_reduction_proxy/content/browser/data_reduction_proxy_message_filter.h"
+#include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/metrics/client_info.h"
@@ -134,12 +139,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_descriptors.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/service_registry.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/common/web_preferences.h"
-#include "device/devices_app/public/cpp/constants.h"
-#include "device/devices_app/public/cpp/devices_app_factory.h"
+#include "device/devices_app/usb/public/interfaces/device_manager.mojom.h"
 #include "gin/v8_initializer.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "net/base/mime_util.h"
@@ -166,6 +171,8 @@
 #include "chrome/browser/chromeos/file_system_provider/fileapi/backend_delegate.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/chromeos/fileapi/mtp_file_system_backend_delegate.h"
+#include "chrome/browser/chromeos/login/signin/merge_session_navigation_throttle.h"
+#include "chrome/browser/chromeos/login/signin/merge_session_throttling_utils.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
@@ -264,11 +271,8 @@
 #endif
 
 #if defined(ENABLE_MEDIA_ROUTER)
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/presentation_service_delegate_impl.h"
-#endif
-
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-#include "chrome/browser/usb/web_usb_permission_provider.h"
 #endif
 
 using base::FileDescriptor;
@@ -558,7 +562,8 @@ void HandleBlockedPopupOnUIThread(const BlockedWindowParams& params) {
 class SafeBrowsingSSLCertReporter : public SSLCertReporter {
  public:
   explicit SafeBrowsingSSLCertReporter(
-      const scoped_refptr<SafeBrowsingUIManager>& safe_browsing_ui_manager)
+      const scoped_refptr<safe_browsing::SafeBrowsingUIManager>&
+          safe_browsing_ui_manager)
       : safe_browsing_ui_manager_(safe_browsing_ui_manager) {}
   ~SafeBrowsingSSLCertReporter() override {}
 
@@ -572,7 +577,8 @@ class SafeBrowsingSSLCertReporter : public SSLCertReporter {
   }
 
  private:
-  const scoped_refptr<SafeBrowsingUIManager> safe_browsing_ui_manager_;
+  const scoped_refptr<safe_browsing::SafeBrowsingUIManager>
+      safe_browsing_ui_manager_;
 };
 
 #if defined(OS_ANDROID)
@@ -628,6 +634,23 @@ void GetGuestViewDefaultContentSettingRules(
                                   incognito));
 }
 #endif  // defined(ENABLE_EXTENSIONS)
+
+void CreateUsbDeviceManager(
+    RenderFrameHost* render_frame_host,
+    mojo::InterfaceRequest<device::usb::DeviceManager> request) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host);
+  if (!web_contents) {
+    NOTREACHED();
+    return;
+  }
+
+  UsbTabHelper* tab_helper =
+      UsbTabHelper::GetOrCreateForWebContents(web_contents);
+  tab_helper->CreateDeviceManager(render_frame_host, request.Pass());
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+}
 
 }  // namespace
 
@@ -944,6 +967,18 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
 #else
   return false;
 #endif
+}
+
+bool ChromeContentBrowserClient::DoesSiteRequireDedicatedProcess(
+    content::BrowserContext* browser_context,
+    const GURL& effective_site_url) {
+#if defined(ENABLE_EXTENSIONS)
+  if (ChromeContentBrowserClientExtensionsPart::DoesSiteRequireDedicatedProcess(
+          browser_context, effective_site_url)) {
+    return true;
+  }
+#endif
+  return false;
 }
 
 // TODO(creis, nick): https://crbug.com/160576 describes a weakness in our
@@ -1370,13 +1405,14 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
                                  arraysize(kIpcFuzzerSwitches));
 #endif
 
-#if defined(OS_CHROMEOS)
-  static const char* const kChromeOSSwitches[] = {
+  static const char* const kDinosaurEasterEggSwitches[] = {
     switches::kDisableDinosaurEasterEgg,
   };
-  command_line->CopySwitchesFrom(browser_command_line, kChromeOSSwitches,
-                                 arraysize(kChromeOSSwitches));
+  command_line->CopySwitchesFrom(browser_command_line,
+                                 kDinosaurEasterEggSwitches,
+                                 arraysize(kDinosaurEasterEggSwitches));
 
+#if defined(OS_CHROMEOS)
   // On Chrome OS need to pass primary user homedir (in multi-profiles session).
   base::FilePath homedir;
   PathService::Get(base::DIR_HOME, &homedir);
@@ -1447,6 +1483,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       if (instant_service &&
           instant_service->IsInstantProcess(process->GetID()))
         command_line->AppendSwitch(switches::kInstantProcess);
+
+      if (prefs->HasPrefPath(prefs::kAllowDinosaurEasterEgg) &&
+          !prefs->GetBoolean(prefs::kAllowDinosaurEasterEgg))
+        command_line->AppendSwitch(switches::kDisableDinosaurEasterEgg);
     }
 
     if (IsAutoReloadEnabled())
@@ -1543,6 +1583,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kProfilingAtStart,
       switches::kProfilingFile,
       switches::kProfilingFlush,
+      switches::kReaderModeHeuristics,
       switches::kUnsafelyTreatInsecureOriginAsSecure,
       translate::switches::kTranslateSecurityOrigin,
     };
@@ -1579,7 +1620,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kEnableNaClNonSfiMode,
       switches::kEnablePNaClSubzero,
       switches::kNaClDangerousNoSandboxNonSfi,
-      switches::kUseNaClHelperNonSfi,
 #endif
       switches::kPpapiFlashPath,
       switches::kPpapiFlashVersion,
@@ -1895,6 +1935,14 @@ ChromeContentBrowserClient::CreateQuotaPermissionContext() {
   return new ChromeQuotaPermissionContext();
 }
 
+scoped_ptr<storage::QuotaEvictionPolicy>
+ChromeContentBrowserClient::GetTemporaryStorageEvictionPolicy(
+    content::BrowserContext* context) {
+  return SiteEngagementEvictionPolicy::IsEnabled()
+             ? make_scoped_ptr(new SiteEngagementEvictionPolicy(context))
+             : nullptr;
+}
+
 void ChromeContentBrowserClient::AllowCertificateError(
     int render_process_id,
     int render_frame_id,
@@ -1943,7 +1991,7 @@ void ChromeContentBrowserClient::AllowCertificateError(
   if (expired_previous_decision)
     options_mask |= SSLBlockingPage::EXPIRED_BUT_PREVIOUSLY_ALLOWED;
 
-  SafeBrowsingService* safe_browsing_service =
+  safe_browsing::SafeBrowsingService* safe_browsing_service =
       g_browser_process->safe_browsing_service();
   scoped_ptr<SafeBrowsingSSLCertReporter> cert_reporter(
       new SafeBrowsingSSLCertReporter(safe_browsing_service
@@ -2514,9 +2562,8 @@ base::string16 ChromeContentBrowserClient::GetAppContainerSidForSandboxType(
   return base::string16();
 }
 
-void ChromeContentBrowserClient::PreSpawnRenderer(
-    sandbox::TargetPolicy* policy,
-    bool* success) {
+bool ChromeContentBrowserClient::PreSpawnRenderer(
+    sandbox::TargetPolicy* policy) {
   // This code is duplicated in nacl_exe_win_64.cc.
   // Allow the server side of a pipe restricted to the "chrome.nacl."
   // namespace so that it cannot impersonate other system or other chrome
@@ -2525,20 +2572,15 @@ void ChromeContentBrowserClient::PreSpawnRenderer(
       sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
       sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
       L"\\\\.\\pipe\\chrome.nacl.*");
-  if (result != sandbox::SBOX_ALL_OK) {
-    *success = false;
-    return;
-  }
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
 
   // Renderers need to send named pipe handles and shared memory
   // segment handles to NaCl loader processes.
   result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
                            sandbox::TargetPolicy::HANDLES_DUP_ANY,
                            L"File");
-  if (result != sandbox::SBOX_ALL_OK) {
-    *success = false;
-    return;
-  }
+  return result == sandbox::SBOX_ALL_OK;
 }
 #endif
 
@@ -2550,18 +2592,19 @@ void ChromeContentBrowserClient::RegisterFrameMojoShellServices(
       base::Bind(&chromeos::attestation::PlatformVerificationImpl::Create,
                  render_frame_host));
 #endif
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  registry->AddService(
-      base::Bind(&WebUSBPermissionProvider::Create, render_frame_host));
-#endif
 }
 
-void ChromeContentBrowserClient::RegisterInProcessMojoApplications(
-    StaticMojoApplicationMap* apps) {
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  apps->insert(std::make_pair(GURL(device::kDevicesMojoAppUrl),
-                              base::Bind(&device::DevicesAppFactory::CreateApp,
-                                         base::ThreadTaskRunnerHandle::Get())));
+void ChromeContentBrowserClient::RegisterRenderFrameMojoServices(
+    content::ServiceRegistry* registry,
+    content::RenderFrameHost* render_frame_host) {
+  registry->AddService(base::Bind(&CreateUsbDeviceManager, render_frame_host));
+}
+
+void ChromeContentBrowserClient::RegisterOutOfProcessMojoApplications(
+      OutOfProcessMojoApplicationMap* apps) {
+#if defined(ENABLE_MOJO_MEDIA_IN_UTILITY_PROCESS)
+  apps->insert(std::make_pair(GURL("mojo:media"),
+                              base::ASCIIToUTF16("Media App")));
 #endif
 }
 
@@ -2593,8 +2636,8 @@ content::PresentationServiceDelegate*
 ChromeContentBrowserClient::GetPresentationServiceDelegate(
       content::WebContents* web_contents) {
 #if defined(ENABLE_MEDIA_ROUTER)
-  if (switches::MediaRouterEnabled() &&
-      !web_contents->GetBrowserContext()->IsOffTheRecord()) {
+  content::BrowserContext* context = web_contents->GetBrowserContext();
+  if (!context->IsOffTheRecord() && media_router::MediaRouterEnabled(context)) {
     return media_router::PresentationServiceDelegateImpl::
         GetOrCreateForWebContents(web_contents);
   }
@@ -2635,6 +2678,21 @@ ChromeContentBrowserClient::CreateThrottlesForNavigation(
       throttles.push_back(url_to_app_throttle.Pass());
   }
 #endif
+
+#if defined(OS_CHROMEOS)
+  // Check if we need to add merge session throttle. This throttle will postpone
+  // loading of main frames.
+  if (handle->IsInMainFrame()) {
+    // Add interstitial page while merge session process (cookie reconstruction
+    // from OAuth2 refresh token in ChromeOS login) is still in progress while
+    // we are attempting to load a google property.
+    if (!merge_session_throttling_utils::AreAllSessionMergedAlready() &&
+        handle->GetURL().SchemeIsHTTPOrHTTPS()) {
+      throttles.push_back(MergeSessionNavigationThrottle::Create(handle));
+    }
+  }
+#endif
+
   return throttles.Pass();
 }
 

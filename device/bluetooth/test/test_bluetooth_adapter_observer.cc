@@ -39,6 +39,7 @@ void TestBluetoothAdapterObserver::Reset() {
   last_device_address_.clear();
   gatt_service_added_count_ = 0;
   gatt_service_removed_count_ = 0;
+  gatt_services_discovered_count_ = 0;
   gatt_service_changed_count_ = 0;
   gatt_discovery_complete_count_ = 0;
   gatt_characteristic_added_count_ = 0;
@@ -175,6 +176,18 @@ void TestBluetoothAdapterObserver::GattServiceRemoved(
   QuitMessageLoop();
 }
 
+void TestBluetoothAdapterObserver::GattServicesDiscovered(
+    BluetoothAdapter* adapter,
+    BluetoothDevice* device) {
+  ASSERT_EQ(adapter_.get(), adapter);
+
+  ++gatt_services_discovered_count_;
+  last_device_ = device;
+  last_device_address_ = device->GetAddress();
+
+  QuitMessageLoop();
+}
+
 void TestBluetoothAdapterObserver::GattDiscoveryCompleteForService(
     BluetoothAdapter* adapter,
     BluetoothGattService* service) {
@@ -302,7 +315,7 @@ void TestBluetoothAdapterObserver::GattDescriptorValueChanged(
 void TestBluetoothAdapterObserver::QuitMessageLoop() {
   if (base::MessageLoop::current() &&
       base::MessageLoop::current()->is_running())
-    base::MessageLoop::current()->Quit();
+    base::MessageLoop::current()->QuitWhenIdle();
 }
 
 }  // namespace device

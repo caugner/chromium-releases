@@ -19,13 +19,14 @@
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/signin_pref_names.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -138,12 +139,19 @@ bool ChildAccountService::SetActive(bool active) {
   active_ = active;
 
   if (active_) {
-    // In contrast to legacy SUs, child account SUs must sign in.
-    scoped_ptr<base::Value> allow_signin(new base::FundamentalValue(true));
     SupervisedUserSettingsService* settings_service =
         SupervisedUserSettingsServiceFactory::GetForProfile(profile_);
-    settings_service->SetLocalSetting(supervised_users::kSigninAllowed,
-                                      allow_signin.Pass());
+
+    // In contrast to legacy SUs, child account SUs must sign in.
+    settings_service->SetLocalSetting(
+        supervised_users::kSigninAllowed,
+        make_scoped_ptr(new base::FundamentalValue(true)));
+
+    // SafeSearch is controlled at the account level, so don't override it
+    // client-side.
+    settings_service->SetLocalSetting(
+        supervised_users::kForceSafeSearch,
+        make_scoped_ptr(new base::FundamentalValue(false)));
 #if !defined(OS_CHROMEOS)
     // This is also used by user policies (UserPolicySigninService), but since
     // child accounts can not also be Dasher accounts, there shouldn't be any
@@ -202,15 +210,15 @@ void ChildAccountService::SetIsChildAccount(bool is_child_account) {
 }
 
 void ChildAccountService::OnAccountUpdated(const AccountInfo& info) {
-  std::string auth_account_id = SigninManagerFactory::GetForProfile(profile_)
-      ->GetAuthenticatedAccountId();
-  if (!info.IsValid() || info.account_id != auth_account_id)
-    return;
-
   if (!IsChildAccountDetectionEnabled()) {
     SetIsChildAccount(false);
     return;
   }
+
+  std::string auth_account_id = SigninManagerFactory::GetForProfile(profile_)
+      ->GetAuthenticatedAccountId();
+  if (info.account_id != auth_account_id)
+    return;
 
   SetIsChildAccount(info.is_child_account);
 }

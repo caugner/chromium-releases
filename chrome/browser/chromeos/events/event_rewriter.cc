@@ -291,7 +291,6 @@ EventRewriter::EventRewriter(ash::StickyKeysController* sticky_keys_controller)
       ime_keyboard_for_testing_(NULL),
       pref_service_for_testing_(NULL),
       sticky_keys_controller_(sticky_keys_controller),
-      current_diamond_key_modifier_flags_(ui::EF_NONE),
       pressed_modifier_latches_(ui::EF_NONE),
       latched_modifier_latches_(ui::EF_NONE),
       used_modifier_latches_(ui::EF_NONE) {}
@@ -430,8 +429,7 @@ int EventRewriter::GetRemappedModifierMasks(const PrefService& pref_service,
                                             const ui::Event& event,
                                             int original_flags) const {
   int unmodified_flags = original_flags;
-  int rewritten_flags = current_diamond_key_modifier_flags_ |
-                        pressed_modifier_latches_ | latched_modifier_latches_;
+  int rewritten_flags = pressed_modifier_latches_ | latched_modifier_latches_;
   for (size_t i = 0; unmodified_flags && (i < arraysize(kModifierRemappings));
        ++i) {
     const ModifierRemapping* remapped_key = NULL;
@@ -673,6 +671,7 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
 
   // First, remap the key code.
   const ModifierRemapping* remapped_key = NULL;
+  // Remapping based on DomKey.
   switch (incoming.key) {
     // On Chrome OS, F15 (XF86XK_Launch6) with NumLock (Mod2Mask) is sent
     // when Diamond key is pressed.
@@ -689,48 +688,6 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
         DCHECK_EQ(ui::VKEY_CONTROL, kModifierRemappingCtrl->result.key_code);
         remapped_key = kModifierRemappingCtrl;
       }
-      // F15 is not a modifier key, so we need to track its state directly.
-      if (key_event.type() == ui::ET_KEY_PRESSED) {
-        int remapped_flag = remapped_key->flag;
-        if (remapped_key->remap_to == input_method::kCapsLockKey)
-          remapped_flag |= ui::EF_CAPS_LOCK_DOWN;
-        current_diamond_key_modifier_flags_ = remapped_flag;
-      } else {
-        current_diamond_key_modifier_flags_ = ui::EF_NONE;
-      }
-      break;
-    // On Chrome OS, XF86XK_Launch7 (F16) with Mod3Mask is sent when Caps Lock
-    // is pressed (with one exception: when
-    // IsISOLevel5ShiftUsedByCurrentInputMethod() is true, the key generates
-    // XK_ISO_Level3_Shift with Mod3Mask, not XF86XK_Launch7).
-    case ui::DomKey::F16:
-      characteristic_flag = ui::EF_CAPS_LOCK_DOWN;
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
-      break;
-    case ui::DomKey::OS:
-      characteristic_flag = ui::EF_COMMAND_DOWN;
-      // Rewrite Command-L/R key presses on an Apple keyboard to Control.
-      if (IsAppleKeyboard()) {
-        DCHECK_EQ(ui::VKEY_CONTROL, kModifierRemappingCtrl->result.key_code);
-        remapped_key = kModifierRemappingCtrl;
-      } else {
-        remapped_key =
-            GetRemappedKey(prefs::kLanguageRemapSearchKeyTo, *pref_service);
-      }
-      // Default behavior is Super key, hence don't remap the event if the pref
-      // is unavailable.
-      break;
-    case ui::DomKey::CONTROL:
-      characteristic_flag = ui::EF_CONTROL_DOWN;
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapControlKeyTo, *pref_service);
-      break;
-    case ui::DomKey::ALT:
-      // ALT key
-      characteristic_flag = ui::EF_ALT_DOWN;
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapAltKeyTo, *pref_service);
       break;
     case ui::DomKey::ALT_GRAPH:
       // The Neo2 codes modifiers such that CapsLock appears as VKEY_ALTGR,
@@ -777,12 +734,57 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
       break;
   }
 
+  // Remapping based on DomCode.
+  switch (incoming.code) {
+    // On Chrome OS, XF86XK_Launch7 (F16) with Mod3Mask is sent when Caps Lock
+    // is pressed (with one exception: when
+    // IsISOLevel5ShiftUsedByCurrentInputMethod() is true, the key generates
+    // XK_ISO_Level3_Shift with Mod3Mask, not XF86XK_Launch7).
+    case ui::DomCode::F16:
+    case ui::DomCode::CAPS_LOCK:
+      characteristic_flag = ui::EF_CAPS_LOCK_DOWN;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
+      break;
+    case ui::DomCode::OS_LEFT:
+    case ui::DomCode::OS_RIGHT:
+      characteristic_flag = ui::EF_COMMAND_DOWN;
+      // Rewrite Command-L/R key presses on an Apple keyboard to Control.
+      if (IsAppleKeyboard()) {
+        DCHECK_EQ(ui::VKEY_CONTROL, kModifierRemappingCtrl->result.key_code);
+        remapped_key = kModifierRemappingCtrl;
+      } else {
+        remapped_key =
+            GetRemappedKey(prefs::kLanguageRemapSearchKeyTo, *pref_service);
+      }
+      // Default behavior is Super key, hence don't remap the event if the pref
+      // is unavailable.
+      break;
+    case ui::DomCode::CONTROL_LEFT:
+    case ui::DomCode::CONTROL_RIGHT:
+      characteristic_flag = ui::EF_CONTROL_DOWN;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapControlKeyTo, *pref_service);
+      break;
+    case ui::DomCode::ALT_LEFT:
+    case ui::DomCode::ALT_RIGHT:
+      // ALT key
+      characteristic_flag = ui::EF_ALT_DOWN;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapAltKeyTo, *pref_service);
+      break;
+    default:
+      break;
+  }
+
   if (remapped_key) {
     state->key_code = remapped_key->result.key_code;
     state->code = remapped_key->result.code;
     state->key = remapped_key->result.key;
     incoming.flags |= characteristic_flag;
     characteristic_flag = remapped_key->flag;
+    if (remapped_key->remap_to == input_method::kCapsLockKey)
+      characteristic_flag |= ui::EF_CAPS_LOCK_DOWN;
     state->code = RelocateModifier(
         state->code, ui::KeycodeConverter::DomCodeToLocation(incoming.code));
   }
@@ -790,10 +792,21 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
   // Next, remap modifier bits.
   state->flags |=
       GetRemappedModifierMasks(*pref_service, key_event, incoming.flags);
-  if (key_event.type() == ui::ET_KEY_PRESSED)
+
+  // If the DomKey is not a modifier before remapping but is after, set the
+  // modifier latches for the later non-modifier key's modifier states.
+  bool non_modifier_to_modifier =
+      !ui::KeycodeConverter::IsDomKeyForModifier(incoming.key) &&
+      ui::KeycodeConverter::IsDomKeyForModifier(state->key);
+  if (key_event.type() == ui::ET_KEY_PRESSED) {
     state->flags |= characteristic_flag;
-  else
+    if (non_modifier_to_modifier)
+      pressed_modifier_latches_ |= characteristic_flag;
+  } else {
     state->flags &= ~characteristic_flag;
+    if (non_modifier_to_modifier)
+      pressed_modifier_latches_ &= ~characteristic_flag;
+  }
 
   if (key_event.type() == ui::ET_KEY_PRESSED) {
     if (!ui::KeycodeConverter::IsDomKeyForModifier(state->key)) {

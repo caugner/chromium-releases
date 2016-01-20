@@ -75,8 +75,7 @@ BlinkPlatformImpl::BlinkPlatformImpl(
     : global_state_(global_state),
       app_(app),
       main_thread_task_runner_(renderer_scheduler->DefaultTaskRunner()),
-      main_thread_(new scheduler::WebThreadImplForRendererScheduler(
-          renderer_scheduler)) {
+      main_thread_(renderer_scheduler->CreateMainThread()) {
   if (app) {
     mojo::URLRequestPtr request(mojo::URLRequest::New());
     request->url = mojo::String::From("mojo:network_service");
@@ -124,11 +123,11 @@ blink::WebBlobRegistry* BlinkPlatformImpl::blobRegistry() {
   return &blob_registry_;
 }
 
-double BlinkPlatformImpl::currentTime() {
+double BlinkPlatformImpl::currentTimeSeconds() {
   return base::Time::Now().ToDoubleT();
 }
 
-double BlinkPlatformImpl::monotonicallyIncreasingTime() {
+double BlinkPlatformImpl::monotonicallyIncreasingTimeSeconds() {
   return base::TimeTicks::Now().ToInternalValue() /
       static_cast<double>(base::Time::kMicrosecondsPerSecond);
 }
@@ -172,14 +171,15 @@ blink::WebGraphicsContext3D*
 BlinkPlatformImpl::createOffscreenGraphicsContext3D(
     const blink::WebGraphicsContext3D::Attributes& attributes,
     blink::WebGraphicsContext3D* share_context) {
-  return createOffscreenGraphicsContext3D(attributes, share_context, nullptr);
+  blink::WebGraphicsContext3D::WebGraphicsInfo gl_info;
+  return createOffscreenGraphicsContext3D(attributes, share_context, &gl_info);
 }
 
 blink::WebGraphicsContext3D*
 BlinkPlatformImpl::createOffscreenGraphicsContext3D(
     const blink::WebGraphicsContext3D::Attributes& attributes,
     blink::WebGraphicsContext3D* share_context,
-    blink::WebGLInfo* gl_info) {
+    blink::WebGraphicsContext3D::WebGraphicsInfo* gl_info) {
   // TODO(penghuang): Use the app from the right HTMLDocument.
   return WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
       global_state_, app_, GURL(attributes.topDocumentURL), attributes,

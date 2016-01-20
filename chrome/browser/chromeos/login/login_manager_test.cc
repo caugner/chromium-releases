@@ -48,7 +48,8 @@ const char kTestUserinfoToken2[] = "fake-userinfo-token-2";
 const char kTestRefreshToken2[] = "fake-refresh-token-2";
 
 UserContext CreateUserContext(const std::string& user_id) {
-  UserContext user_context(user_id);
+  UserContext user_context(AccountId::FromUserEmailGaiaId(
+      user_id, LoginManagerTest::GetGaiaIDForUserID(user_id)));
   user_context.SetGaiaID(LoginManagerTest::GetGaiaIDForUserID(user_id));
   user_context.SetKey(Key("password"));
   if (user_id == LoginManagerTest::kEnterpriseUser1) {
@@ -79,16 +80,14 @@ void LoginManagerTest::SetUp() {
   embedded_test_server()->RegisterRequestHandler(
       base::Bind(&FakeGaia::HandleRequest, base::Unretained(&fake_gaia_)));
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  // Don't spin up the IO thread yet since no threads are allowed while
+  // spawning sandbox host process. See crbug.com/322732.
+  ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
 
   // Start https wrapper here so that the URLs can be pointed at it in
   // SetUpCommandLine().
   ASSERT_TRUE(gaia_https_forwarder_.Initialize(
       kGAIAHost, embedded_test_server()->base_url()));
-
-  // Stop IO thread here because no threads are allowed while
-  // spawning sandbox host process. See crbug.com/322732.
-  embedded_test_server()->StopThread();
 
   MixinBasedBrowserTest::SetUp();
 }
@@ -123,8 +122,10 @@ void LoginManagerTest::SetUpInProcessBrowserTestFixture() {
 
 void LoginManagerTest::SetUpOnMainThread() {
   LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
-  // Restart the thread as the sandbox host process has already been spawned.
-  embedded_test_server()->RestartThreadAndListen();
+
+  // Start the accept thread as the sandbox host process has already been
+  // spawned.
+  embedded_test_server()->StartAcceptingConnections();
 
   FakeGaia::AccessTokenInfo token_info;
   token_info.scopes.insert(GaiaConstants::kDeviceManagementServiceOAuth);
@@ -168,7 +169,7 @@ bool LoginManagerTest::TryToLogin(const UserContext& user_context) {
     return false;
   if (const user_manager::User* active_user =
           user_manager::UserManager::Get()->GetActiveUser())
-    return active_user->email() == user_context.GetUserID();
+    return active_user->GetAccountId() == user_context.GetAccountId();
   return false;
 }
 
@@ -189,7 +190,7 @@ bool LoginManagerTest::AddUserToSession(const UserContext& user_context) {
   for (user_manager::UserList::const_iterator it = logged_users.begin();
        it != logged_users.end();
        ++it) {
-    if ((*it)->email() == user_context.GetUserID())
+    if ((*it)->GetAccountId() == user_context.GetAccountId())
       return true;
   }
   return false;

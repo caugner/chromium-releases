@@ -15,11 +15,12 @@ import android.accounts.OperationCanceledException;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
 
-import org.chromium.base.BuildInfo;
+import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.net.NetworkChangeNotifier;
@@ -38,7 +39,7 @@ import java.util.regex.Pattern;
  * Use the AccountManagerHelper.get(someContext) to instantiate it
  */
 public class AccountManagerHelper {
-    private static final String TAG = "cr.Sync.Signin";
+    private static final String TAG = "Sync_Signin";
 
     private static final Pattern AT_SYMBOL = Pattern.compile("@");
 
@@ -149,6 +150,11 @@ public class AccountManagerHelper {
         return new Account(name, GOOGLE_ACCOUNT_TYPE);
     }
 
+    /**
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
+     */
     public List<String> getGoogleAccountNames() {
         List<String> accountNames = new ArrayList<String>();
         for (Account account : getGoogleAccounts()) {
@@ -158,19 +164,56 @@ public class AccountManagerHelper {
     }
 
     /**
-     * Returns all Google accounts on the device.
-     * @return an array of accounts.
+     * Retrieves a list of the Google account names on the device asynchronously.
+     */
+    public void getGoogleAccountNames(final Callback<List<String>> callback) {
+        getGoogleAccounts(new Callback<Account[]>() {
+            @Override
+            public void onResult(Account[] accounts) {
+                List<String> accountNames = new ArrayList<String>();
+                for (Account account : accounts) {
+                    accountNames.add(account.name);
+                }
+                callback.onResult(accountNames);
+            }
+        });
+    }
+
+    /**
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
      */
     public Account[] getGoogleAccounts() {
         return mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
     }
 
-    public void getGoogleAccounts(AccountManagerDelegate.Callback<Account[]> callback) {
+    /**
+     * Retrieves all Google accounts on the device asynchronously.
+     */
+    public void getGoogleAccounts(Callback<Account[]> callback) {
         mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE, callback);
     }
 
+    /**
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
+     */
     public boolean hasGoogleAccounts() {
         return getGoogleAccounts().length > 0;
+    }
+
+    /**
+     * Asynchronously determine whether any Google accounts have been added.
+     */
+    public void hasGoogleAccounts(final Callback<Boolean> callback) {
+        getGoogleAccounts(new Callback<Account[]>() {
+            @Override
+            public void onResult(Account[] accounts) {
+                callback.onResult(accounts.length > 0);
+            }
+        });
     }
 
     private String canonicalizeName(String name) {
@@ -187,7 +230,9 @@ public class AccountManagerHelper {
     }
 
     /**
-     * Returns the account if it exists, null otherwise.
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
      */
     public Account getAccountFromName(String accountName) {
         String canonicalName = canonicalizeName(accountName);
@@ -201,14 +246,50 @@ public class AccountManagerHelper {
     }
 
     /**
-     * Returns whether the accounts exists.
+     * Asynchronously returns the account if it exists; null otherwise.
+     */
+    public void getAccountFromName(String accountName, final Callback<Account> callback) {
+        final String canonicalName = canonicalizeName(accountName);
+        getGoogleAccounts(new Callback<Account[]>() {
+            @Override
+            public void onResult(Account[] accounts) {
+                Account accountForName = null;
+                for (Account account : accounts) {
+                    if (canonicalizeName(account.name).equals(canonicalName)) {
+                        accountForName = account;
+                        break;
+                    }
+                }
+                callback.onResult(accountForName);
+            }
+        });
+    }
+
+    /**
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
      */
     public boolean hasAccountForName(String accountName) {
         return getAccountFromName(accountName) != null;
     }
 
     /**
-     * @return Whether or not there is an account authenticator for Google accounts.
+     * Asynchronously returns whether an account exists with the given name.
+     */
+    public void hasAccountForName(String accountName, final Callback<Boolean> callback) {
+        getAccountFromName(accountName, new Callback<Account>() {
+            @Override
+            public void onResult(Account account) {
+                callback.onResult(account != null);
+            }
+        });
+    }
+
+    /**
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
      */
     public boolean hasGoogleAccountAuthenticator() {
         AuthenticatorDescription[] descs = mAccountManager.getAuthenticatorTypes();
@@ -264,7 +345,7 @@ public class AccountManagerHelper {
     }
 
     private boolean hasUseCredentialsPermission() {
-        return BuildInfo.isMncOrLater()
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 || mApplicationContext.checkPermission("android.permission.USE_CREDENTIALS",
                 Process.myPid(), Process.myUid()) == PackageManager.PERMISSION_GRANTED;
     }
@@ -373,8 +454,7 @@ public class AccountManagerHelper {
         }
     }
 
-    public void checkChildAccount(
-            Account account, AccountManagerDelegate.Callback<Boolean> callback) {
+    public void checkChildAccount(Account account, Callback<Boolean> callback) {
         String[] features = {FEATURE_IS_CHILD_ACCOUNT_KEY};
         mAccountManager.hasFeatures(account, features, callback);
     }

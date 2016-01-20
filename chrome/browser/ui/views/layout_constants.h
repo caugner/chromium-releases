@@ -8,9 +8,18 @@
 #include "ui/gfx/geometry/insets.h"
 
 enum LayoutConstant {
+  // Vertical offset from top of content to the top of find bar.
+  FIND_BAR_TOOLBAR_OVERLAP,
+
+  // Horizontal padding applied between items of icon-label views.
+  ICON_LABEL_VIEW_INTERNAL_PADDING,
+
   // Additional horizontal padding applied on the trailing edge of icon-label
   // views.
   ICON_LABEL_VIEW_TRAILING_PADDING,
+
+  // The thickness of the location bar's border.
+  LOCATION_BAR_BORDER_THICKNESS,
 
   // The horizontal space between the edge and a bubble.
   LOCATION_BAR_BUBBLE_HORIZONTAL_PADDING,
@@ -30,6 +39,9 @@ enum LayoutConstant {
   // The vertical padding of items in the location bar.
   LOCATION_BAR_VERTICAL_PADDING,
 
+  // The width of the New Tab button.
+  NEW_TAB_BUTTON_WIDTH,
+
   // The number of pixels in the omnibox dropdown border image interior to
   // the actual border.
   OMNIBOX_DROPDOWN_BORDER_INTERIOR,
@@ -37,14 +49,14 @@ enum LayoutConstant {
   // The font size to use in the location bar and omnibox dropdown, in pixels.
   OMNIBOX_FONT_PIXEL_SIZE,
 
+  // The amount of overlap between the last tab and the new tab button.
+  TABSTRIP_NEW_TAB_BUTTON_OVERLAP,
+
   // The amount of overlap between two adjacent tabs.
   TABSTRIP_TAB_OVERLAP,
 
   // The vertical overlap of the tabstrip atop the toolbar.
   TABSTRIP_TOOLBAR_OVERLAP,
-
-  // The height of the shadow region above the top of the tabs.
-  TABSTRIP_TOP_SHADOW_HEIGHT,
 
   // The amount by which the tab close button should overlap the trailing
   // padding region after the tab's contents region.
@@ -59,6 +71,13 @@ enum LayoutConstant {
 
   // Width available for content inside a pinned tab.
   TAB_PINNED_CONTENT_WIDTH,
+
+  // Height of the region atop the tab bounds that is normally excluded when
+  // calculating the tab hit test region or considering where to paint a
+  // custom theme background.  (Based on theme behavior it seems like at some
+  // point this was added to the area above the top of the tab images, and we
+  // now need to subtract it back off to compensate.)
+  TAB_TOP_EXCLUSION_HEIGHT,
 
   // Non-ash uses a rounded content area with no shadow in the assets.
   // Ash doesn't use a rounded content area and its top edge has an extra
@@ -80,6 +99,10 @@ enum LayoutInset {
   // The padding between the avatar icon and the frame border on the left, the
   // tabstrip on the right, and the toolbar on the bottom.
   AVATAR_ICON,
+
+  // The padding above the top row and below the bottom row in the omnibox
+  // dropdown.
+  OMNIBOX_DROPDOWN,
 
   // In an omnibox dropdown row, the minimum distance between the icon and the
   // row edge.

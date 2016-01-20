@@ -58,16 +58,11 @@ WKWebViewConfigurationProvider::GetWebViewConfiguration() {
   DCHECK([NSThread isMainThread]);
   if (!configuration_) {
     configuration_.reset([[WKWebViewConfiguration alloc] init]);
-// TODO(eugenebut): Cleanup this macro, once all bots switched to iOS9 SDK
-// (crbug.com/523365).
-#if defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_9_0
     if (is_off_the_record_ && base::ios::IsRunningOnIOS9OrLater()) {
       // WKWebsiteDataStore is iOS9 only.
       [configuration_
           setWebsiteDataStore:[WKWebsiteDataStore nonPersistentDataStore]];
     }
-#endif  // defined(__IPHONE_9_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >=
-        // __IPHONE_9_0
     // setJavaScriptCanOpenWindowsAutomatically is required to support popups.
     [[configuration_ preferences] setJavaScriptCanOpenWindowsAutomatically:YES];
     [[configuration_ userContentController] addUserScript:GetEarlyPageScript()];
@@ -100,7 +95,7 @@ void WKWebViewConfigurationProvider::Purge() {
   // Make sure that no one retains configuration, router, processPool.
   DCHECK(!weak_configuration);
   DCHECK(!weak_router);
-  // TODO(shreyasv): Enable this DCHECK (crbug.com/522672).
+  // TODO(crbug.com/522672): Enable this DCHECK.
   // DCHECK(!weak_process_pool);
 }
 

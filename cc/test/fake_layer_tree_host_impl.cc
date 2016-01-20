@@ -9,39 +9,42 @@
 
 namespace cc {
 
-FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(Proxy* proxy,
-                                             SharedBitmapManager* manager,
-                                             TaskGraphRunner* task_graph_runner)
+FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
+    TaskRunnerProvider* task_runner_provider,
+    SharedBitmapManager* manager,
+    TaskGraphRunner* task_graph_runner)
     : FakeLayerTreeHostImpl(LayerTreeSettings(),
-                            proxy,
-                            manager,
-                            task_graph_runner,
-                            nullptr) {}
-
-FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
-                                             Proxy* proxy,
-                                             SharedBitmapManager* manager,
-                                             TaskGraphRunner* task_graph_runner)
-    : FakeLayerTreeHostImpl(settings,
-                            proxy,
+                            task_runner_provider,
                             manager,
                             task_graph_runner,
                             nullptr) {}
 
 FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
     const LayerTreeSettings& settings,
-    Proxy* proxy,
+    TaskRunnerProvider* task_runner_provider,
+    SharedBitmapManager* manager,
+    TaskGraphRunner* task_graph_runner)
+    : FakeLayerTreeHostImpl(settings,
+                            task_runner_provider,
+                            manager,
+                            task_graph_runner,
+                            nullptr) {}
+
+FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
+    const LayerTreeSettings& settings,
+    TaskRunnerProvider* task_runner_provider,
     SharedBitmapManager* manager,
     TaskGraphRunner* task_graph_runner,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager)
     : LayerTreeHostImpl(settings,
                         &client_,
-                        proxy,
+                        task_runner_provider,
                         &stats_instrumentation_,
                         manager,
                         gpu_memory_buffer_manager,
                         task_graph_runner,
-                        0) {
+                        0),
+      notify_tile_state_changed_called_(false) {
   // Explicitly clear all debug settings.
   SetDebugState(LayerTreeDebugState());
   SetViewportSize(gfx::Size(100, 100));
@@ -59,6 +62,11 @@ void FakeLayerTreeHostImpl::CreatePendingTree() {
   float arbitrary_large_page_scale = 100000.f;
   pending_tree()->PushPageScaleFromMainThread(
       1.f, 1.f / arbitrary_large_page_scale, arbitrary_large_page_scale);
+}
+
+void FakeLayerTreeHostImpl::NotifyTileStateChanged(const Tile* tile) {
+  LayerTreeHostImpl::NotifyTileStateChanged(tile);
+  notify_tile_state_changed_called_ = true;
 }
 
 BeginFrameArgs FakeLayerTreeHostImpl::CurrentBeginFrameArgs() const {

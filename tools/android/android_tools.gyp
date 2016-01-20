@@ -15,12 +15,14 @@
         'file_poller/file_poller.gyp:file_poller',
         'forwarder2/forwarder.gyp:forwarder2',
         'md5sum/md5sum.gyp:md5sum',
+        'memtrack_helper/memtrack_helper.gyp:memtrack_helper',
         'purge_ashmem/purge_ashmem.gyp:purge_ashmem',
         'run_pie/run_pie.gyp:run_pie',
         '../../tools/telemetry/telemetry.gyp:*#host',
       ],
     },
     {
+      # GN: //tools/android:heap_profiler
       'target_name': 'heap_profiler',
       'type': 'none',
       'dependencies': [
@@ -29,6 +31,7 @@
       ],
     },
     {
+      # GN: //tools/android:memdump
       'target_name': 'memdump',
       'type': 'none',
       'dependencies': [
@@ -43,6 +46,15 @@
       ],
     },
     {
+      # GN: //tools/android:memtrack_helper
+      'target_name': 'memtrack_helper',
+      'type': 'none',
+      'dependencies': [
+        'memtrack_helper/memtrack_helper.gyp:memtrack_helper',
+      ],
+    },
+    {
+      # GN: //tools/android:ps_ext
       'target_name': 'ps_ext',
       'type': 'none',
       'dependencies': [
@@ -50,6 +62,14 @@
       ],
     },
     {
+      'target_name': 'spnego_authenticator',
+      'type': 'none',
+      'dependencies': [
+        'kerberos/kerberos.gyp:spnego_authenticator_apk',
+      ],
+    },
+    {
+      # GN: //tools/android:customtabs_benchmark
       'target_name': 'customtabs_benchmark',
       'type': 'none',
       'dependencies': [

@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string_piece.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_protocol.h"
 
 namespace net {
@@ -21,10 +20,16 @@ class ReliableQuicStreamPeer {
   static void SetWriteSideClosed(bool value, ReliableQuicStream* stream);
   static void SetStreamBytesWritten(QuicStreamOffset stream_bytes_written,
                                     ReliableQuicStream* stream);
+  static bool read_side_closed(ReliableQuicStream* stream);
   static void CloseReadSide(ReliableQuicStream* stream);
 
   static bool FinSent(ReliableQuicStream* stream);
+  static bool FinReceived(ReliableQuicStream* stream);
   static bool RstSent(ReliableQuicStream* stream);
+  static bool RstReceived(ReliableQuicStream* stream);
+
+  static bool ReadSideClosed(ReliableQuicStream* stream);
+  static bool WriteSideClosed(ReliableQuicStream* stream);
 
   static uint32 SizeOfQueuedData(ReliableQuicStream* stream);
 
@@ -37,7 +42,7 @@ class ReliableQuicStreamPeer {
       ReliableQuicStream* stream,
       base::StringPiece data,
       bool fin,
-      QuicAckNotifier::DelegateInterface* ack_notifier_delegate);
+      QuicAckListenerInterface* ack_notifier_delegate);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ReliableQuicStreamPeer);

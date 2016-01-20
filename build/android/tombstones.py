@@ -23,7 +23,6 @@ from devil.android import device_errors
 from devil.android import device_utils
 from devil.utils import run_tests_helper
 
-
 _TZ_UTC = {'TZ': 'UTC'}
 
 def _ListTombstones(device):
@@ -36,11 +35,14 @@ def _ListTombstones(device):
     Tuples of (tombstone filename, date time of file on device).
   """
   try:
+    if not device.PathExists('/data/tombstones', timeout=60, retries=3):
+      return
+    # TODO(perezju): Introduce a DeviceUtils.Ls() method (crbug.com/552376).
     lines = device.RunShellCommand(
         ['ls', '-a', '-l', '/data/tombstones'],
         as_root=True, check_return=True, env=_TZ_UTC, timeout=60)
     for line in lines:
-      if 'tombstone' in line and not 'No such file or directory' in line:
+      if 'tombstone' in line:
         details = line.split()
         t = datetime.datetime.strptime(details[-3] + ' ' + details[-2],
                                        '%Y-%m-%d %H:%M')

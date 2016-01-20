@@ -27,17 +27,6 @@
       'common/chrome_content_client_ios.mm',
       'common/chrome_result_codes.h',
       'common/chrome_utility_messages.h',
-      'common/chrome_utility_printing_messages.h',
-      'common/cloud_print/cloud_print_cdd_conversion.cc',
-      'common/cloud_print/cloud_print_cdd_conversion.h',
-      'common/cloud_print/cloud_print_class_mac.h',
-      'common/cloud_print/cloud_print_class_mac.mm',
-      'common/cloud_print/cloud_print_constants.cc',
-      'common/cloud_print/cloud_print_constants.h',
-      'common/cloud_print/cloud_print_helpers.cc',
-      'common/cloud_print/cloud_print_helpers.h',
-      'common/cloud_print/cloud_print_proxy_info.cc',
-      'common/cloud_print/cloud_print_proxy_info.h',
       'common/common_message_generator.cc',
       'common/common_message_generator.h',
       'common/common_param_traits.cc',
@@ -119,6 +108,8 @@
       'common/variations/variations_util.h',
       'common/web_application_info.cc',
       'common/web_application_info.h',
+      'common/widevine_cdm_constants.cc',
+      'common/widevine_cdm_constants.h',
       'common/worker_thread_ticker.cc',
       'common/worker_thread_ticker.h',
     ],
@@ -197,6 +188,19 @@
       'common/extensions/permissions/chrome_permission_message_rules.h',
       'common/extensions/sync_helper.cc',
       'common/extensions/sync_helper.h',
+    ],
+    'chrome_common_printing_sources': [
+      'common/chrome_utility_printing_messages.h',
+      'common/cloud_print/cloud_print_cdd_conversion.cc',
+      'common/cloud_print/cloud_print_cdd_conversion.h',
+      'common/cloud_print/cloud_print_class_mac.h',
+      'common/cloud_print/cloud_print_class_mac.mm',
+      'common/cloud_print/cloud_print_constants.cc',
+      'common/cloud_print/cloud_print_constants.h',
+      'common/cloud_print/cloud_print_helpers.cc',
+      'common/cloud_print/cloud_print_helpers.h',
+      'common/cloud_print/cloud_print_proxy_info.cc',
+      'common/cloud_print/cloud_print_proxy_info.h',
     ],
     'chrome_common_extensions_chromeos_sources': [
       'common/extensions/api/file_browser_handlers/file_browser_handler.cc',
@@ -323,6 +327,7 @@
         '<(DEPTH)/components/components.gyp:component_updater',
         '<(DEPTH)/components/components.gyp:content_settings_core_common',
         '<(DEPTH)/components/components.gyp:crash_core_common',
+        '<(DEPTH)/components/components.gyp:error_page_common',
         '<(DEPTH)/components/components.gyp:favicon_base',
         '<(DEPTH)/components/components.gyp:gcm_driver_common',
         '<(DEPTH)/components/components.gyp:json_schema',
@@ -431,9 +436,6 @@
             ['include', '^common/translate'],
             ['include', '^common/zip'],
           ],
-          'include_dirs': [
-            '<(DEPTH)/breakpad/src',
-          ],
         }],
         ['disable_nacl==0', {
           'dependencies': [
@@ -461,6 +463,8 @@
           ],
         }],
         ['enable_basic_printing==1 or enable_print_preview==1', {
+          'sources': [ '<@(chrome_common_printing_sources)' ],
+
           'dependencies': [
             '<(DEPTH)/components/components.gyp:printing_common',
             '<(DEPTH)/printing/printing.gyp:printing',
@@ -497,7 +501,6 @@
         }],
         ['OS=="win"', {
           'include_dirs': [
-            '<(DEPTH)/breakpad/src',
             '<(DEPTH)/third_party/wtl/include',
           ],
           'dependencies': [
@@ -513,9 +516,6 @@
           'dependencies': [
             '../third_party/google_toolbox_for_mac/google_toolbox_for_mac.gyp:google_toolbox_for_mac',
             '../third_party/mach_override/mach_override.gyp:mach_override',
-          ],
-          'include_dirs': [
-            '<(DEPTH)/breakpad/src',
           ],
           'sources!': [
             'common/channel_info_posix.cc',
@@ -593,6 +593,15 @@
           ],
         }],
         ['use_nss_certs == 1', {
+          'sources': [
+            # GN version: //chrome/third_party/mozilla_security_manager
+            'third_party/mozilla_security_manager/nsNSSCertHelper.cpp',
+            'third_party/mozilla_security_manager/nsNSSCertHelper.h',
+            'third_party/mozilla_security_manager/nsNSSCertificate.cpp',
+            'third_party/mozilla_security_manager/nsNSSCertificate.h',
+            'third_party/mozilla_security_manager/nsUsageArrayHelper.cpp',
+            'third_party/mozilla_security_manager/nsUsageArrayHelper.h',
+          ],
           'dependencies': [
             '../build/linux/system.gyp:ssl',
           ],

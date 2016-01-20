@@ -55,6 +55,7 @@ PASS oldChildWindow.navigator.maxTouchPoints is newChildWindow.navigator.maxTouc
 PASS oldChildWindow.navigator.onLine is newChildWindow.navigator.onLine
 PASS oldChildWindow.navigator.platform is newChildWindow.navigator.platform
 PASS oldChildWindow.navigator.presentation.defaultRequest is newChildWindow.navigator.presentation.defaultRequest
+PASS oldChildWindow.navigator.presentation.receiver.onconnectionavailable is newChildWindow.navigator.presentation.receiver.onconnectionavailable
 PASS oldChildWindow.navigator.product is newChildWindow.navigator.product
 PASS oldChildWindow.navigator.productSub is newChildWindow.navigator.productSub
 PASS oldChildWindow.navigator.serviceWorker.controller is newChildWindow.navigator.serviceWorker.controller
@@ -87,6 +88,7 @@ PASS oldChildWindow.ondblclick is newChildWindow.ondblclick
 PASS oldChildWindow.ondevicelight is newChildWindow.ondevicelight
 PASS oldChildWindow.ondevicemotion is newChildWindow.ondevicemotion
 PASS oldChildWindow.ondeviceorientation is newChildWindow.ondeviceorientation
+PASS oldChildWindow.ondeviceorientationabsolute is newChildWindow.ondeviceorientationabsolute
 PASS oldChildWindow.ondrag is newChildWindow.ondrag
 PASS oldChildWindow.ondragend is newChildWindow.ondragend
 PASS oldChildWindow.ondragenter is newChildWindow.ondragenter

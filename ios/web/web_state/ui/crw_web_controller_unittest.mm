@@ -25,7 +25,7 @@
 #import "ios/web/public/web_state/ui/crw_content_view.h"
 #import "ios/web/public/web_state/ui/crw_web_view_content_view.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
-#include "ios/web/test/web_test.h"
+#import "ios/web/test/web_test.h"
 #import "ios/web/test/wk_web_view_crash_utils.h"
 #include "ios/web/web_state/blocked_popup_info.h"
 #import "ios/web/web_state/js/crw_js_invoke_parameter_queue.h"
@@ -242,8 +242,10 @@ NSMutableURLRequest* requestForCrWebInvokeCommandAndKey(NSString* command,
                                                         NSString* key) {
   NSString* fullCommand =
       [NSString stringWithFormat:@"[{\"command\":\"%@\"}]", command];
+  NSCharacterSet* noCharacters =
+      [NSCharacterSet characterSetWithCharactersInString:@""];
   NSString* escapedCommand = [fullCommand
-      stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+      stringByAddingPercentEncodingWithAllowedCharacters:noCharacters];
   NSString* urlString =
       [NSString stringWithFormat:@"crwebinvoke://%@/#%@", key, escapedCommand];
   return [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]];
@@ -382,6 +384,7 @@ class CRWWKWebViewWebControllerTest
 
     // Called by resetInjectedWebView
     [[result stub] backForwardList];
+    [[[result stub] andReturn:[NSURL URLWithString:kTestURLString]] URL];
     [[result stub] setNavigationDelegate:OCMOCK_ANY];
     [[result stub] setUIDelegate:OCMOCK_ANY];
     [[result stub] addObserver:webController_
@@ -762,8 +765,7 @@ TEST_F(CRWUIWebViewWebControllerTest, UnicodeEncoding) {
         [NSString stringWithFormat:@"encodeURIComponent('%@');", unicodeString];
     NSString* encodedString =
         [testWebView stringByEvaluatingJavaScriptFromString:encodeJS];
-    NSString* decodedString = [encodedString
-        stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    NSString* decodedString = [encodedString stringByRemovingPercentEncoding];
     EXPECT_NSEQ(unicodeString, decodedString);
   }
 };
@@ -897,9 +899,14 @@ TEST_F(CRWWKWebViewWebControllerTest, SSLCertError) {
                         web::kNSErrorPeerCertificateChainKey : chain,
                       }];
   WKWebView* webView = static_cast<WKWebView*>([webController_ webView]);
-  [static_cast<id<WKNavigationDelegate>>(webController_.get()) webView:webView
-                                          didFailProvisionalNavigation:nil
-                                                             withError:error];
+  base::scoped_nsobject<NSObject> navigation([[NSObject alloc] init]);
+  [static_cast<id<WKNavigationDelegate>>(webController_.get())
+                            webView:webView
+      didStartProvisionalNavigation:static_cast<WKNavigation*>(navigation)];
+  [static_cast<id<WKNavigationDelegate>>(webController_.get())
+                           webView:webView
+      didFailProvisionalNavigation:static_cast<WKNavigation*>(navigation)
+                         withError:error];
 
   // Verify correctness of delegate's method arguments.
   EXPECT_TRUE([mockDelegate_ SSLInfo].is_valid());
@@ -1528,6 +1535,7 @@ TEST_F(CRWWKWebControllerWebProcessTest, Crash) {
   web::SimulateWKWebViewCrash(webView_);
 
   EXPECT_OCMOCK_VERIFY(delegate);
+  EXPECT_FALSE([this->webController_ isViewAlive]);
   [this->webController_ setDelegate:nil];
 };
 

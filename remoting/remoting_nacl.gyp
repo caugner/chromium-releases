@@ -124,15 +124,17 @@
       'sources!': [
         'base/url_request_context_getter.cc',
         'protocol/chromium_socket_factory.cc',
+        'protocol/chromium_port_allocator_factory.cc',
       ],
 
-      # Include normalizing_input_filter_mac.cc excluded by the filename
+      # Include normalizing_input_filter_*.cc excluded by the filename
       # exclusion rules. Must be in target_conditions to make sure it's
       # evaluated after the filename rules.
       'target_conditions': [
         ['1==1', {
           'sources/': [
             [ 'include', 'client/normalizing_input_filter_mac.cc' ],
+            [ 'include', 'client/normalizing_input_filter_win.cc' ],
           ],
         }],
       ],

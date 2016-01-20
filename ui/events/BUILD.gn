@@ -5,6 +5,10 @@
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
+
 static_library("dom_keycode_converter") {
   sources = [
     "keycodes/dom/dom_code.h",
@@ -115,6 +119,8 @@ component("events") {
     "null_event_targeter.cc",
     "null_event_targeter.h",
     "win/events_win.cc",
+    "win/system_event_state_lookup.cc",
+    "win/system_event_state_lookup.h",
   ]
 
   defines = [ "EVENTS_IMPLEMENTATION" ]
@@ -152,8 +158,15 @@ component("events") {
     ]
   }
 
+  if (use_ozone || (is_android && use_aura)) {
+    sources += [ "events_default.cc" ]
+  }
+
   if (use_ozone) {
-    sources += [ "ozone/events_ozone.cc" ]
+    sources += [
+      "ozone/events_ozone.cc",
+      "ozone/events_ozone.h",
+    ]
     deps += [ "//ui/events/ozone:events_ozone_layout" ]
   }
 
@@ -169,8 +182,18 @@ component("events") {
     ]
   }
 
-  if (is_win || is_mac || use_x11 || use_ozone) {
+  if (is_win || is_mac || use_x11 || use_ozone || (is_android && use_aura)) {
     sources -= [ "events_stub.cc" ]
+  }
+
+  if (is_android) {
+    sources += [
+      "android/events_jni_registrar.cc",
+      "android/events_jni_registrar.h",
+      "android/motion_event_android.cc",
+      "android/motion_event_android.h",
+    ]
+    deps += [ ":motionevent_jni_headers" ]
   }
 }
 
@@ -357,7 +380,9 @@ test("events_unittests") {
     ]
   }
 
-  data_deps = [ "//third_party/mesa:osmesa" ]
+  data_deps = [
+    "//third_party/mesa:osmesa",
+  ]
 
   include_dirs = [ "//testing/gmock/include" ]
 
@@ -381,6 +406,8 @@ test("events_unittests") {
       "ozone/evdev/tablet_event_converter_evdev_unittest.cc",
       "ozone/evdev/touch_event_converter_evdev_unittest.cc",
       "ozone/evdev/touch_noise/touch_noise_finder_unittest.cc",
+      "ozone/layout/keyboard_layout_engine_unittest.cc",
+      "ozone/layout/xkb/xkb_keyboard_layout_engine_unittest.cc",
     ]
 
     if (use_xkbcommon) {
@@ -399,5 +426,16 @@ test("events_unittests") {
       "gestures/gesture_provider_aura_unittest.cc",
       "gestures/motion_event_aura_unittest.cc",
     ]
+  }
+
+  if (is_android) {
+    sources += [ "android/motion_event_android_unittest.cc" ]
+  }
+}
+
+if (is_android) {
+  generate_jar_jni("motionevent_jni_headers") {
+    jni_package = "ui"
+    classes = [ "android/view/MotionEvent.class" ]
   }
 }

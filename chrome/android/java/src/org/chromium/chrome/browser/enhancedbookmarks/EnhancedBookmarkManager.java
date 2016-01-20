@@ -9,7 +9,6 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.preference.PreferenceManager;
 import android.support.v4.widget.DrawerLayout;
-import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -18,18 +17,18 @@ import android.widget.ViewSwitcher;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ObserverList;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkModelObserver;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkModelObserver;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
-import org.chromium.chrome.browser.ntp.NewTabPageUma;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksShim;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.components.bookmarks.BookmarkId;
+import org.chromium.ui.base.DeviceFormFactor;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -293,7 +292,26 @@ public class EnhancedBookmarkManager implements EnhancedBookmarkDelegate {
         if (!state.isValid(mEnhancedBookmarksModel)) {
             state = UIState.createAllBookmarksState(mEnhancedBookmarksModel);
         }
-        if (!mStateStack.isEmpty()) {
+        boolean saveUrl = true;
+        if (mStateStack.isEmpty()) {
+            // When offline page feature is enabled, show offline filter view if there is offline
+            // page and there is no network connection.
+            if (mEnhancedBookmarksModel.getOfflinePageBridge() != null
+                    && !mEnhancedBookmarksModel.getOfflinePageBridge().getAllPages().isEmpty()
+                    && !OfflinePageUtils.isConnected(mActivity.getApplicationContext())
+                    && !DeviceFormFactor.isTablet(mActivity.getApplicationContext())) {
+                UIState filterState = UIState.createFilterState(
+                        EnhancedBookmarkFilter.OFFLINE_PAGES, mEnhancedBookmarksModel);
+                if (state.mState != UIState.STATE_LOADING) {
+                    state = filterState;
+                } else {
+                    state.mUrl = filterState.mUrl;
+                }
+                // Showing offline filter view is just a temporary thing and it will not be saved
+                // to the preference.
+                saveUrl = false;
+            }
+        } else {
             if (mStateStack.peek().equals(state)) return;
             if (mStateStack.peek().mState == UIState.STATE_LOADING) {
                 mStateStack.pop();
@@ -302,7 +320,7 @@ public class EnhancedBookmarkManager implements EnhancedBookmarkDelegate {
         mStateStack.push(state);
         if (state.mState != UIState.STATE_LOADING) {
             // Loading state may be pushed to the stack but should never be stored in preferences.
-            saveUrlToPreference(state.mUrl);
+            if (saveUrl) saveUrlToPreference(state.mUrl);
             // If a loading state is replaced by another loading state, do not notify this change.
             if (mUrlChangeListener != null) mUrlChangeListener.onBookmarkUIStateChange(state.mUrl);
         }
@@ -413,15 +431,8 @@ public class EnhancedBookmarkManager implements EnhancedBookmarkDelegate {
     @Override
     public void openBookmark(BookmarkId bookmark, int launchLocation) {
         clearSelection();
-        if (mEnhancedBookmarksModel.getBookmarkById(bookmark) != null) {
-            String url = mEnhancedBookmarksModel.getLaunchUrlAndMarkAccessed(mActivity, bookmark);
-            // TODO(jianli): Notify the user about the failure.
-            if (TextUtils.isEmpty(url)) return;
-
-            NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_BOOKMARK);
-            RecordHistogram.recordEnumeratedHistogram("Stars.LaunchLocation", launchLocation,
-                    LaunchLocation.COUNT);
-            EnhancedBookmarkUtils.openBookmark(mActivity, url);
+        if (EnhancedBookmarkUtils.openBookmark(
+                    mEnhancedBookmarksModel, mActivity, bookmark, launchLocation)) {
             EnhancedBookmarkUtils.finishActivityOnPhone(mActivity);
         }
     }

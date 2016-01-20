@@ -116,7 +116,7 @@ void OmniboxPopupViewMac::UpdatePopupAppearance() {
 
 gfx::Rect OmniboxPopupViewMac::GetTargetBounds() {
   // Flip the coordinate system before returning.
-  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  NSScreen* screen = [[NSScreen screens] firstObject];
   NSRect monitor_frame = [screen frame];
   gfx::Rect bounds(NSRectToCGRect(target_popup_frame_));
   bounds.set_y(monitor_frame.size.height - bounds.y() - bounds.height());
@@ -284,8 +284,9 @@ void OmniboxPopupViewMac::PositionPopup(const CGFloat matrixHeight) {
   // |popup_| gets redrawn once the animation completes. See
   // http://crbug.com/538590 and http://crbug.com/551007 .
   if (base::mac::IsOSElCapitanOrLater()) {
+    NSWindow* popup = popup_.get();
     [[NSAnimationContext currentContext] setCompletionHandler:^{
-      [popup_ display];
+      [popup display];
     }];
   }
   [[popup_ animator] setFrame:popup_frame display:YES];

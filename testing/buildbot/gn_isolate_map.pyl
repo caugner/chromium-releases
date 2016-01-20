@@ -68,6 +68,10 @@
     "label": "//base:base_unittests",
     "type": "console_test_launcher",
   },
+  "blimp_unittests": {
+    "label": "//blimp:blimp_unittests",
+    "type": "console_test_launcher",
+  },
   "blink_heap_unittests": {
     "label": "//third_party/WebKit/public:blink_heap_unittests",
     "type": "unknown",
@@ -276,8 +280,8 @@
     "label": "//third_party/mojo/src/mojo/edk/test:mojo_public_utility_unittests",
     "type": "console_test_launcher",
   },
-  "mojo_runner_unittests": {
-    "label": "//mojo/runner:mojo_runner_unittests",
+  "mojo_runner_host_unittests": {
+    "label": "//mojo/runner/host:unittests",
     "type": "unknown",
   },
   "mojo_shell_unittests": {
@@ -298,6 +302,10 @@
   },
   "message_center_unittests": {
     "label": "//ui/message_center:message_center_unittests",
+    "type": "unknown",
+  },
+  "mustash_unittests": {
+    "label": "//components/mus/example:mustash_unittests",
     "type": "unknown",
   },
   "nacl_loader_unittests": {
@@ -389,6 +397,20 @@
       "-v",
     ],
   },
+  "telemetry_perf_unittests": {
+    "label": "//chrome/test:telemetry_perf_unittests",
+    "type": "script",
+    "script": "//testing/scripts/run_telemetry_as_googletest.py",
+    "args": [
+      "--xvfb",
+      "../../tools/perf/run_tests",
+      "-v",
+    ],
+  },
+  "ui_android_unittests": {
+    "label": "//ui/android:ui_android_unittests",
+    "type": "console_test_launcher",
+  },
   "ui_base_unittests": {
     "label": "//ui/base:ui_base_unittests",
     "type": "windowed_test_launcher",
@@ -409,8 +431,8 @@
     "label": "//url:url_unittests",
     "type": "console_test_launcher",
   },
-  "view_manager_unittests": {
-    "label": "//components/view_manager:view_manager_unittests",
+  "window_manager_unittests": {
+    "label": "//components/mus/ws:window_manager_unittests",
     "type": "unknown",
   },
   "views_unittests": {

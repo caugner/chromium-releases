@@ -32,10 +32,6 @@ namespace gpu {
 class GpuMemoryBufferManager;
 }
 
-namespace mojo {
-class View;
-}
-
 namespace html_viewer {
 
 class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
@@ -47,8 +43,8 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
       cc::TaskGraphRunner* task_graph_runner);
   ~WebLayerTreeViewImpl() override;
 
-  void Initialize(mojo::GpuPtr gpu_service,
-                  mus::View* view,
+  void Initialize(mus::mojom::GpuPtr gpu_service,
+                  mus::Window* window,
                   blink::WebWidget* widget);
 
   // cc::LayerTreeHostClient implementation.
@@ -56,7 +52,7 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   void DidBeginMainFrame() override;
   void BeginMainFrame(const cc::BeginFrameArgs& args) override;
   void BeginMainFrameNotExpectedSoon() override;
-  void Layout() override;
+  void UpdateLayerTreeHost() override;
   void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
                            const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
@@ -112,9 +108,9 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   virtual void setShowScrollBottleneckRects(bool) {}
 
  private:
-  // widget_ and view_ will outlive us.
+  // widget_ and window_ will outlive us.
   blink::WebWidget* widget_;
-  mus::View* view_;
+  mus::Window* window_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
   scoped_ptr<cc::OutputSurface> output_surface_;
   scoped_refptr<base::SingleThreadTaskRunner>

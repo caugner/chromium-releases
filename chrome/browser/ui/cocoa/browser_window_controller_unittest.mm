@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -676,13 +677,13 @@ TEST_F(BrowserWindowControllerTest, TestFindBarOnTop) {
   NSArray* subviews = [controller_.chromeContentView subviews];
   NSUInteger findBar_index =
       [subviews indexOfObject:[controller_ findBarView]];
-  EXPECT_NE(NSNotFound, findBar_index);
+  EXPECT_NE(static_cast<NSUInteger>(NSNotFound), findBar_index);
   NSUInteger toolbar_index =
       [subviews indexOfObject:[controller_ toolbarView]];
-  EXPECT_NE(NSNotFound, toolbar_index);
+  EXPECT_NE(static_cast<NSUInteger>(NSNotFound), toolbar_index);
   NSUInteger bookmark_index =
       [subviews indexOfObject:[controller_ bookmarkView]];
-  EXPECT_NE(NSNotFound, bookmark_index);
+  EXPECT_NE(static_cast<NSUInteger>(NSNotFound), bookmark_index);
 
   EXPECT_GT(findBar_index, toolbar_index);
   EXPECT_GT(findBar_index, bookmark_index);

@@ -5,6 +5,7 @@
 #include "content/test/content_test_suite.h"
 
 #include "base/base_paths.h"
+#include "base/base_switches.h"
 #include "base/logging.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
@@ -109,7 +110,7 @@ void ContentTestSuite::Initialize() {
       InProcessSurfaceTextureManager::GetInstance());
 #endif
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-  IOSurfaceManager::SetInstance(InProcessIOSurfaceManager::GetInstance());
+  gfx::IOSurfaceManager::SetInstance(InProcessIOSurfaceManager::GetInstance());
 #endif
 #if defined(USE_OZONE)
   if (!is_child_process) {

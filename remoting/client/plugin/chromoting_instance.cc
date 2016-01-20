@@ -40,8 +40,10 @@
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/normalizing_input_filter_cros.h"
 #include "remoting/client/normalizing_input_filter_mac.h"
+#include "remoting/client/normalizing_input_filter_win.h"
 #include "remoting/client/plugin/delegating_signal_strategy.h"
 #include "remoting/client/plugin/pepper_audio_player.h"
+#include "remoting/client/plugin/pepper_main_thread_task_runner.h"
 #include "remoting/client/plugin/pepper_mouse_locker.h"
 #include "remoting/client/plugin/pepper_port_allocator.h"
 #include "remoting/client/plugin/pepper_video_renderer_2d.h"
@@ -50,7 +52,7 @@
 #include "remoting/client/token_fetcher_proxy.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
-#include "remoting/protocol/libjingle_transport_factory.h"
+#include "remoting/protocol/ice_transport_factory.h"
 #include "url/gurl.h"
 
 namespace remoting {
@@ -118,6 +120,12 @@ std::string ConnectionErrorToString(protocol::ErrorCode error) {
     case protocol::HOST_OVERLOAD:
       return "HOST_OVERLOAD";
 
+    case protocol::MAX_SESSION_LENGTH:
+      return "MAX_SESSION_LENGTH";
+
+    case protocol::HOST_CONFIGURATION_ERROR:
+      return "HOST_CONFIGURATION_ERROR";
+
     case protocol::CHANNEL_CONNECTION_ERROR:
     case protocol::SIGNALING_ERROR:
     case protocol::SIGNALING_TIMEOUT:
@@ -137,7 +145,7 @@ base::LazyInstance<base::Lock>::Leaky g_logging_lock =
 ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
     : pp::Instance(pp_instance),
       initialized_(false),
-      plugin_task_runner_(new PluginThreadTaskRunner(&plugin_thread_delegate_)),
+      plugin_task_runner_(new PepperMainThreadTaskRunner()),
       context_(plugin_task_runner_.get()),
       input_tracker_(&mouse_input_filter_),
       touch_input_scaler_(&input_tracker_),
@@ -191,11 +199,6 @@ ChromotingInstance::~ChromotingInstance() {
   // Unregister this instance so that debug log messages will no longer be sent
   // to it. This will stop all logging in all Chromoting instances.
   UnregisterLoggingInstance();
-
-  plugin_task_runner_->Quit();
-
-  // Ensure that nothing touches the plugin thread delegate after this point.
-  plugin_task_runner_->DetachAndRunShutdownLoop();
 
   // Stopping the context shuts down all chromoting threads.
   context_.Stop();
@@ -636,6 +639,9 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
   } else if (key_filter == "cros") {
     normalizing_input_filter_.reset(
         new NormalizingInputFilterCros(&key_mapper_));
+  } else if (key_filter == "windows") {
+    normalizing_input_filter_.reset(
+        new NormalizingInputFilterWin(&key_mapper_));
   } else {
     DCHECK(key_filter.empty());
     normalizing_input_filter_.reset(new protocol::InputFilter(&key_mapper_));
@@ -689,7 +695,7 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
 
   // Create TransportFactory.
   scoped_ptr<protocol::TransportFactory> transport_factory(
-      new protocol::LibjingleTransportFactory(
+      new protocol::IceTransportFactory(
           signal_strategy_.get(), PepperPortAllocator::Create(this).Pass(),
           protocol::NetworkSettings(
               protocol::NetworkSettings::NAT_TRAVERSAL_FULL),

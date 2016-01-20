@@ -5,12 +5,13 @@
 #include "components/html_viewer/html_widget.h"
 
 #include "base/command_line.h"
+#include "components/html_viewer/blink_settings.h"
 #include "components/html_viewer/global_state.h"
 #include "components/html_viewer/ime_controller.h"
 #include "components/html_viewer/stats_collection_controller.h"
 #include "components/html_viewer/web_layer_tree_view_impl.h"
 #include "components/html_viewer/web_storage_namespace_impl.h"
-#include "components/mus/public/cpp/view.h"
+#include "components/mus/public/cpp/window.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/services/tracing/public/interfaces/tracing.mojom.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
@@ -20,8 +21,6 @@
 
 namespace html_viewer {
 namespace {
-
-const char kDisableWebGLSwitch[] = "disable-webgl";
 
 scoped_ptr<WebLayerTreeViewImpl> CreateWebLayerTreeView(
     GlobalState* global_state) {
@@ -33,46 +32,34 @@ scoped_ptr<WebLayerTreeViewImpl> CreateWebLayerTreeView(
 
 void InitializeWebLayerTreeView(WebLayerTreeViewImpl* web_layer_tree_view,
                                 mojo::ApplicationImpl* app,
-                                mus::View* view,
+                                mus::Window* window,
                                 blink::WebWidget* widget) {
-  DCHECK(view);
+  DCHECK(window);
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From("mojo:mus");
-  mojo::GpuPtr gpu_service;
+  mus::mojom::GpuPtr gpu_service;
   app->ConnectToService(request.Pass(), &gpu_service);
-  web_layer_tree_view->Initialize(gpu_service.Pass(), view, widget);
+  web_layer_tree_view->Initialize(gpu_service.Pass(), window, widget);
 }
 
-void UpdateWebViewSizeFromViewSize(mus::View* view,
+void UpdateWebViewSizeFromViewSize(mus::Window* window,
                                    blink::WebWidget* web_widget,
                                    WebLayerTreeViewImpl* web_layer_tree_view) {
-  const gfx::Size size_in_pixels(view->bounds().width, view->bounds().height);
+  const gfx::Size size_in_pixels(window->bounds().size());
   const gfx::Size size_in_dips = gfx::ConvertSizeToDIP(
-      view->viewport_metrics().device_pixel_ratio, size_in_pixels);
+      window->viewport_metrics().device_pixel_ratio, size_in_pixels);
   web_widget->resize(
       blink::WebSize(size_in_dips.width(), size_in_dips.height()));
   web_layer_tree_view->setViewportSize(size_in_pixels);
-}
-
-void ConfigureSettings(blink::WebSettings* settings) {
-  settings->setCookieEnabled(true);
-  settings->setDefaultFixedFontSize(13);
-  settings->setDefaultFontSize(16);
-  settings->setLoadsImagesAutomatically(true);
-  settings->setJavaScriptEnabled(true);
-
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  settings->setExperimentalWebGLEnabled(
-      !command_line->HasSwitch(kDisableWebGLSwitch));
 }
 
 }  // namespace
 
 // HTMLWidgetRootRemote -------------------------------------------------------
 
-HTMLWidgetRootRemote::HTMLWidgetRootRemote()
+HTMLWidgetRootRemote::HTMLWidgetRootRemote(GlobalState* global_state)
     : web_view_(blink::WebView::create(this)) {
-  ConfigureSettings(web_view_->settings());
+  global_state->blink_settings()->ApplySettingsToWebView(web_view_);
 }
 
 HTMLWidgetRootRemote::~HTMLWidgetRootRemote() {}
@@ -90,34 +77,34 @@ blink::WebWidget* HTMLWidgetRootRemote::GetWidget() {
   return web_view_;
 }
 
-void HTMLWidgetRootRemote::OnViewBoundsChanged(mus::View* view) {}
+void HTMLWidgetRootRemote::OnWindowBoundsChanged(mus::Window* window) {}
 
 // HTMLWidgetRootLocal --------------------------------------------------------
 
 HTMLWidgetRootLocal::CreateParams::CreateParams(mojo::ApplicationImpl* app,
                                                 GlobalState* global_state,
-                                                mus::View* view)
-    : app(app), global_state(global_state), view(view) {}
+                                                mus::Window* window)
+    : app(app), global_state(global_state), window(window) {}
 
 HTMLWidgetRootLocal::CreateParams::~CreateParams() {}
 
 HTMLWidgetRootLocal::HTMLWidgetRootLocal(CreateParams* create_params)
     : app_(create_params->app),
       global_state_(create_params->global_state),
-      view_(create_params->view),
+      window_(create_params->window),
       web_view_(nullptr) {
   web_view_ = blink::WebView::create(this);
-  ime_controller_.reset(new ImeController(view_, web_view_));
+  ime_controller_.reset(new ImeController(window_, web_view_));
   // Creating the widget calls initializeLayerTreeView() to create the
   // |web_layer_tree_view_impl_|. As we haven't yet assigned the |web_view_|
   // we have to set it here.
   if (web_layer_tree_view_impl_) {
-    InitializeWebLayerTreeView(web_layer_tree_view_impl_.get(), app_, view_,
+    InitializeWebLayerTreeView(web_layer_tree_view_impl_.get(), app_, window_,
                                web_view_);
-    UpdateWebViewSizeFromViewSize(view_, web_view_,
+    UpdateWebViewSizeFromViewSize(window_, web_view_,
                                   web_layer_tree_view_impl_.get());
   }
-  ConfigureSettings(web_view_->settings());
+  global_state_->blink_settings()->ApplySettingsToWebView(web_view_);
 }
 
 HTMLWidgetRootLocal::~HTMLWidgetRootLocal() {}
@@ -135,14 +122,15 @@ blink::WebLayerTreeView* HTMLWidgetRootLocal::layerTreeView() {
   return web_layer_tree_view_impl_.get();
 }
 
-void HTMLWidgetRootLocal::didFirstVisuallyNonEmptyLayout() {
+void HTMLWidgetRootLocal::didMeaningfulLayout(
+    blink::WebMeaningfulLayout layout_type) {
   static bool called = false;
-  if (!called) {
-    const int64 time = base::Time::Now().ToInternalValue();
+  if (!called && layout_type == blink::WebMeaningfulLayout::VisuallyNonEmpty) {
+    const int64 ticks = base::TimeTicks::Now().ToInternalValue();
     tracing::StartupPerformanceDataCollectorPtr collector =
         StatsCollectionController::ConnectToDataCollector(app_);
     if (collector)
-      collector->SetFirstVisuallyNonEmptyLayoutTime(time);
+      collector->SetFirstVisuallyNonEmptyLayoutTicks(ticks);
     called = true;
   }
 }
@@ -169,8 +157,8 @@ blink::WebWidget* HTMLWidgetRootLocal::GetWidget() {
   return web_view_;
 }
 
-void HTMLWidgetRootLocal::OnViewBoundsChanged(mus::View* view) {
-  UpdateWebViewSizeFromViewSize(view, web_view_,
+void HTMLWidgetRootLocal::OnWindowBoundsChanged(mus::Window* window) {
+  UpdateWebViewSizeFromViewSize(window, web_view_,
                                 web_layer_tree_view_impl_.get());
 }
 
@@ -178,19 +166,19 @@ void HTMLWidgetRootLocal::OnViewBoundsChanged(mus::View* view) {
 
 HTMLWidgetLocalRoot::HTMLWidgetLocalRoot(mojo::ApplicationImpl* app,
                                          GlobalState* global_state,
-                                         mus::View* view,
+                                         mus::Window* window,
                                          blink::WebLocalFrame* web_local_frame)
     : app_(app), global_state_(global_state), web_frame_widget_(nullptr) {
   web_frame_widget_ = blink::WebFrameWidget::create(this, web_local_frame);
-  ime_controller_.reset(new ImeController(view, web_frame_widget_));
+  ime_controller_.reset(new ImeController(window, web_frame_widget_));
   // Creating the widget calls initializeLayerTreeView() to create the
   // |web_layer_tree_view_impl_|. As we haven't yet assigned the
   // |web_frame_widget_|
   // we have to set it here.
   if (web_layer_tree_view_impl_) {
-    InitializeWebLayerTreeView(web_layer_tree_view_impl_.get(), app_, view,
+    InitializeWebLayerTreeView(web_layer_tree_view_impl_.get(), app_, window,
                                web_frame_widget_);
-    UpdateWebViewSizeFromViewSize(view, web_frame_widget_,
+    UpdateWebViewSizeFromViewSize(window, web_frame_widget_,
                                   web_layer_tree_view_impl_.get());
   }
 }
@@ -201,8 +189,8 @@ blink::WebWidget* HTMLWidgetLocalRoot::GetWidget() {
   return web_frame_widget_;
 }
 
-void HTMLWidgetLocalRoot::OnViewBoundsChanged(mus::View* view) {
-  UpdateWebViewSizeFromViewSize(view, web_frame_widget_,
+void HTMLWidgetLocalRoot::OnWindowBoundsChanged(mus::Window* window) {
+  UpdateWebViewSizeFromViewSize(window, web_frame_widget_,
                                 web_layer_tree_view_impl_.get());
 }
 

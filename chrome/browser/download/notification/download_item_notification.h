@@ -45,6 +45,9 @@ class DownloadItemNotification : public DownloadNotification,
   void OnNotificationButtonClick(int button_index) override;
   std::string GetNotificationId() const override;
 
+  // Disables popup by setting low priority.
+  void DisablePopup();
+
  private:
   friend class test::DownloadItemNotificationTest;
 
@@ -102,8 +105,10 @@ class DownloadItemNotification : public DownloadNotification,
   // Flag to show the notification on next update. If true, the notification
   // goes visible. The initial value is true so it gets shown on initial update.
   bool show_next_ = true;
-  // Current vilibility status of the notification.
-  bool visible_ = false;
+
+  // Flag if the notification has been closed or not. Setting this flag
+  // prevents updates after close.
+  bool closed_ = false;
 
   int image_resource_id_ = 0;
   std::pair<gfx::VectorIconId, SkColor> vector_icon_params_;
@@ -116,6 +121,12 @@ class DownloadItemNotification : public DownloadNotification,
 
   // Status of the preview image decode.
   ImageDecodeStatus image_decode_status_ = NOT_STARTED;
+
+  // Pointer to the message center instance.
+  message_center::MessageCenter* message_center_;
+
+  void SetMessageCenterForTest(
+      message_center::MessageCenter* message_center);
 
   base::WeakPtrFactory<DownloadItemNotification> weak_factory_;
 

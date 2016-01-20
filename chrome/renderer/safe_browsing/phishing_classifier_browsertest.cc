@@ -24,6 +24,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
 #include "crypto/sha2.h"
 #include "net/dns/mock_host_resolver.h"
@@ -207,7 +208,9 @@ class PhishingClassifierTest : public InProcessBrowserTest {
 
 // This test flakes on Mac with force compositing mode.
 // http://crbug.com/316709
-#if defined(OS_MACOSX)
+// Flaky on Chrome OS, running into a memory allocation error.
+// http://crbug.com/544085
+#if defined(OS_MACOSX) || defined(OS_CHROMEOS)
 #define MAYBE_TestClassification DISABLED_TestClassification
 #else
 #define MAYBE_TestClassification TestClassification

@@ -33,6 +33,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -181,7 +182,9 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
 
   void DontProceed() { interstitial_page_->DontProceed(); }
 
-  bool HasFocus() { return render_view_host()->GetView()->HasFocus(); }
+  bool HasFocus() {
+    return render_view_host()->GetWidget()->GetView()->HasFocus();
+  }
 
  private:
   std::string html_contents_;
@@ -189,11 +192,11 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestInterstitialPage);
 };
 
-// Flaky on Mac (http://crbug.com/67301) and Windows
-// (http://crbug.com/523255).
-#if defined(OS_MACOSX) || defined(OS_WIN)
+// Flaky on Mac (http://crbug.com/67301).
+#if defined(OS_MACOSX)
 #define MAYBE_ClickingMovesFocus DISABLED_ClickingMovesFocus
 #else
+// If this flakes, disable and log details in http://crbug.com/523255.
 #define MAYBE_ClickingMovesFocus ClickingMovesFocus
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
@@ -202,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
   // It seems we have to wait a little bit for the widgets to spin up before
   // we can start clicking on them.
   base::MessageLoop::current()->task_runner()->PostDelayedTask(
-      FROM_HERE, base::MessageLoop::QuitClosure(),
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(kActionDelayMs));
   content::RunMessageLoop();
 #endif  // defined(OS_POSIX)
@@ -465,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, InterstitialFocus) {
   ui_test_utils::NavigateToURL(browser(), url);
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
-  EXPECT_TRUE(tab->GetRenderViewHost()->GetView()->HasFocus());
+  EXPECT_TRUE(tab->GetRenderViewHost()->GetWidget()->GetView()->HasFocus());
 
   // Create and show a test interstitial page; it should gain focus.
   TestInterstitialPage* interstitial_page = new TestInterstitialPage(tab);
@@ -476,14 +479,14 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, InterstitialFocus) {
   interstitial_page->DontProceed();
   content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
-  EXPECT_TRUE(tab->GetRenderViewHost()->GetView()->HasFocus());
+  EXPECT_TRUE(tab->GetRenderViewHost()->GetWidget()->GetView()->HasFocus());
 }
 
 // Test that find-in-page UI can request focus, even when it is already open.
-// flaky on Windows - http://crbug.com/523255
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MACOSX)
 #define MAYBE_FindFocusTest DISABLED_FindFocusTest
 #else
+// If this flakes, disable and log details in http://crbug.com/523255.
 #define MAYBE_FindFocusTest FindFocusTest
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FindFocusTest) {

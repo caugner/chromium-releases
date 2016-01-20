@@ -54,6 +54,7 @@ extern const char kChromeUIInvalidationsURL[];
 extern const char kChromeUILargeIconURL[];
 extern const char kChromeUIMemoryRedirectURL[];
 extern const char kChromeUIMemoryURL[];
+extern const char kChromeUIMdPolicyURL[];
 extern const char kChromeUINaClURL[];
 extern const char kChromeUINetInternalsURL[];
 extern const char kChromeUINewProfileURL[];
@@ -196,6 +197,7 @@ extern const char kChromeUILocalStateHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryInternalsHost[];
 extern const char kChromeUIMemoryRedirectHost[];
+extern const char kChromeUIMdPolicyHost[];
 extern const char kChromeUIMdSettingsHost[];
 extern const char kChromeUINaClHost[];
 extern const char kChromeUINetExportHost[];
@@ -327,6 +329,7 @@ extern const char kSearchEnginesSubPage[];
 extern const char kSearchSubPage[];
 extern const char kSearchUsersSubPage[];
 extern const char kSyncSetupSubPage[];
+extern const char kTriggeredResetProfileSettingsSubPage[];
 #if defined(OS_CHROMEOS)
 extern const char kInternetOptionsSubPage[];
 extern const char kChangeProfilePictureSubPage[];
@@ -527,6 +530,11 @@ extern const char kChromeSearchRemoteNtpHost[];
 extern const char kChromeSearchMostVisitedHost[];
 extern const char kChromeSearchMostVisitedUrl[];
 
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
+extern const char kChromeUIDiscardsHost[];
+extern const char kChromeUIDiscardsURL[];
+#endif
+
 #if defined(OS_CHROMEOS)
 extern const char kCrosScheme[];
 #endif
@@ -536,6 +544,9 @@ extern const char kCloudPrintLearnMoreURL[];
 
 // "Learn more" URL for the Cloud Print Preview No Destinations Promotion.
 extern const char kCloudPrintNoDestinationsLearnMoreURL[];
+
+// The URL for the "Learn more" link the the Easy Unlock settings.
+extern const char kEasyUnlockLearnMoreUrl[];
 
 // Parameters that get appended to force SafeSearch.
 extern const char kSafeSearchSafeParameter[];
@@ -547,17 +558,18 @@ extern const char kMediaAccessLearnMoreUrl[];
 // The URL for the "Learn more" link in the language settings.
 extern const char kLanguageSettingsLearnMoreUrl[];
 
-#if defined(OS_MACOSX)
-// The URL for the 32-bit Mac deprecation help center article
-extern const char kMac32BitDeprecationURL[];
+#if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX) && !defined(OS_CHROMEOS)
+extern const char kLinuxWheezyPreciseDeprecationURL[];
 #endif
 
-// The URL for the "Learn more" link the the Easy Unlock settings.
-extern const char kEasyUnlockLearnMoreUrl[];
+#if defined(OS_MACOSX)
+// The URL for the Mac OS X 10.6/10.7/10.8 deprecation help center article.
+extern const char kMac10_678_DeprecationURL[];
+#endif
 
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
-extern const char kChromeUIDiscardsHost[];
-extern const char kChromeUIDiscardsURL[];
+#if defined(OS_WIN)
+// The URL for the Windows XP/Vista deprecation help center article.
+extern const char kWindowsXPVistaDeprecationURL[];
 #endif
 
 }  // namespace chrome

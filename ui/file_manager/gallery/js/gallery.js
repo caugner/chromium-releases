@@ -123,12 +123,6 @@ function Gallery(volumeManager) {
       this.onModeSwitchButtonClicked_.bind(this));
 
   /**
-   * @private {!PaperRipple}
-   */
-  this.modeSwitchButtonRipple_ = /** @type {!PaperRipple} */
-      (queryRequiredElement('paper-ripple', this.modeSwitchButton_));
-
-  /**
    * @private {!DimmableUIController}
    * @const
    */
@@ -162,23 +156,24 @@ function Gallery(volumeManager) {
    * @private {!HTMLElement}
    * @const
    */
-  this.deleteButton_ = queryRequiredElement(
-      'paper-button.delete', this.topToolbar_);
+  this.deleteButton_ = queryRequiredElement('button.delete', this.topToolbar_);
+  GalleryUtil.decorateMouseFocusHandling(this.deleteButton_);
   this.deleteButton_.addEventListener('click', this.delete_.bind(this));
 
   /**
    * @private {!HTMLElement}
    * @const
    */
-  this.slideshowButton_ = queryRequiredElement('paper-button.slideshow',
-      this.topToolbar_);
+  this.slideshowButton_ = queryRequiredElement(
+      'button.slideshow', this.topToolbar_);
+  GalleryUtil.decorateMouseFocusHandling(this.slideshowButton_);
 
   /**
    * @private {!HTMLElement}
    * @const
    */
-  this.shareButton_ = queryRequiredElement(
-      'paper-button.share', this.topToolbar_);
+  this.shareButton_ = queryRequiredElement('button.share', this.topToolbar_);
+  GalleryUtil.decorateMouseFocusHandling(this.shareButton_);
   this.shareButton_.addEventListener(
       'click', this.onShareButtonClick_.bind(this));
 
@@ -204,6 +199,9 @@ function Gallery(volumeManager) {
 
   window.addEventListener('resize', this.resizeRenameField_.bind(this));
 
+  assertInstanceof(document.querySelector('files-tooltip'), FilesTooltip)
+      .addTargets(document.querySelectorAll('[has-tooltip]'));
+
   // We must call this method after elements of all tools have been attached to
   // the DOM.
   this.dimmableUIController_.setTools(document.querySelectorAll('.tool'));
@@ -213,6 +211,20 @@ function Gallery(volumeManager) {
    * @const
    */
   this.onSubModeChangedBound_ = this.onSubModeChanged_.bind(this);
+
+  chrome.accessibilityFeatures.largeCursor.onChange.addListener(
+      this.onGetOrChangedAccessibilityConfiguration_.bind(
+          this, 'large-cursor'));
+  chrome.accessibilityFeatures.largeCursor.get({},
+      this.onGetOrChangedAccessibilityConfiguration_.bind(
+          this, 'large-cursor'));
+
+  chrome.accessibilityFeatures.highContrast.onChange.addListener(
+      this.onGetOrChangedAccessibilityConfiguration_.bind(
+          this, 'high-contrast'));
+  chrome.accessibilityFeatures.highContrast.get({},
+      this.onGetOrChangedAccessibilityConfiguration_.bind(
+          this, 'high-contrast'));
 }
 
 /**
@@ -266,6 +278,22 @@ Gallery.SubMode = {
 };
 
 /**
+ * Updates attributes of container element when accessibility configuration has
+ * been changed.
+ * @param {string} name
+ * @param {Object} details
+ * @private
+ */
+Gallery.prototype.onGetOrChangedAccessibilityConfiguration_ = function(
+    name, details) {
+  if (details.value) {
+    this.container_.setAttribute(name, true);
+  } else {
+    this.container_.removeAttribute(name);
+  }
+};
+
+/**
  * Closes gallery when a volume containing the selected item is unmounted.
  * @param {!Event} event The unmount event.
  * @private
@@ -315,7 +343,7 @@ Gallery.prototype.loadInternal_ = function(entries, selectedEntries) {
     var locationInfo = this.volumeManager_.getLocationInfo(entries[i]);
     if (!locationInfo)  // Skip the item, since gone.
       return;
-    items.push(new Gallery.Item(
+    items.push(new GalleryItem(
         entries[i],
         locationInfo,
         null,
@@ -503,7 +531,6 @@ Gallery.prototype.onSubModeChanged_ = function() {
  * @private
  */
 Gallery.prototype.onModeSwitchButtonClicked_ = function(event) {
-  this.modeSwitchButtonRipple_.simulatedRipple();
   this.toggleMode_(undefined /* callback */, event);
 };
 
@@ -565,8 +592,6 @@ Gallery.prototype.changeCurrentMode_ = function(mode, opt_event) {
           }.bind(this));
       this.bottomToolbar_.hidden = true;
     } else {
-      // TODO(yawano): Make animation smooth. With this implementation,
-      //     animation starts after the image is fully loaded.
       this.setCurrentMode_(this.slideMode_);
       this.slideMode_.enter(
           thumbnailRect,
@@ -658,7 +683,7 @@ Gallery.prototype.delete_ = function() {
 };
 
 /**
- * @return {!Array<Gallery.Item>} Current selection.
+ * @return {!Array<GalleryItem>} Current selection.
  */
 Gallery.prototype.getSelectedItems = function() {
   return this.selectionModel_.selectedIndexes.map(
@@ -675,7 +700,7 @@ Gallery.prototype.getSelectedEntries = function() {
 };
 
 /**
- * @return {?Gallery.Item} Current single selection.
+ * @return {?GalleryItem} Current single selection.
  */
 Gallery.prototype.getSingleSelectedItem = function() {
   var items = this.getSelectedItems();
@@ -914,7 +939,6 @@ Gallery.prototype.onFilenameEditBlur_ = function(event) {
 
   ImageUtil.setAttribute(this.filenameSpacer_, 'renaming', false);
   this.dimmableUIController_.setRenaming(false);
-
   this.onUserAction_();
 };
 

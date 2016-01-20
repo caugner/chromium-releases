@@ -126,6 +126,10 @@ class TabAndroid : public CoreTabHelperDelegate,
       chrome::NavigateParams* params,
       content::NavigationController::LoadURLParams* load_url_params);
 
+  bool HasOfflinePages() const;
+  void ShowOfflinePages();
+  void LoadOfflineCopy(const GURL& url);
+
   // Overridden from CoreTabHelperDelegate:
   void SwapTabContents(content::WebContents* old_contents,
                        content::WebContents* new_contents,
@@ -201,8 +205,6 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   void LoadOriginalImage(JNIEnv* env, jobject obj);
 
-  void SearchByImageInNewTabAsync(JNIEnv* env, jobject obj);
-
   jlong GetBookmarkId(JNIEnv* env, jobject obj, jboolean only_editable);
 
   jboolean HasOfflineCopy(JNIEnv* env, jobject obj);
@@ -238,6 +240,8 @@ class TabAndroid : public CoreTabHelperDelegate,
 
  private:
   prerender::PrerenderManager* GetPrerenderManager() const;
+
+  int64_t GetBookmarkIdHelper(bool only_editable) const;
 
   const offline_pages::OfflinePageItem* GetOfflinePage(const GURL& url) const;
 

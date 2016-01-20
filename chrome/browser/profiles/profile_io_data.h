@@ -287,7 +287,7 @@ class ProfileIOData {
     scoped_refptr<content_settings::CookieSettings> cookie_settings;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
-    scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
+    scoped_refptr<net::CookieMonsterDelegate> cookie_monster_delegate;
 #if defined(ENABLE_EXTENSIONS)
     scoped_refptr<extensions::InfoMap> extension_info_map;
 #endif
@@ -383,15 +383,18 @@ class ProfileIOData {
   // URLRequests may be accessing.
   void DestroyResourceContext();
 
-  // Creates network session and main network transaction factory.
+  scoped_ptr<net::HttpNetworkSession> CreateHttpNetworkSession(
+      const ProfileParams& profile_params) const;
+
+  // Creates main network transaction factory.
   scoped_ptr<net::HttpCache> CreateMainHttpFactory(
-      const ProfileParams* profile_params,
-      net::HttpCache::BackendFactory* main_backend) const;
+      net::HttpNetworkSession* session,
+      scoped_ptr<net::HttpCache::BackendFactory> main_backend) const;
 
   // Creates network transaction factory.
   scoped_ptr<net::HttpCache> CreateHttpFactory(
       net::HttpNetworkSession* shared_session,
-      net::HttpCache::BackendFactory* backend) const;
+      scoped_ptr<net::HttpCache::BackendFactory> backend) const;
 
   void SetCookieSettingsForTesting(
       content_settings::CookieSettings* cookie_settings);

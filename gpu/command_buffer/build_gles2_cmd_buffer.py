@@ -1346,7 +1346,6 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_TEXTURE_MAG_FILTER',
       'GL_TEXTURE_MIN_FILTER',
-      'GL_TEXTURE_POOL_CHROMIUM',
       'GL_TEXTURE_WRAP_S',
       'GL_TEXTURE_WRAP_T',
     ],
@@ -1363,13 +1362,6 @@ _NAMED_TYPE_INFO = {
     ],
     'invalid': [
       'GL_GENERATE_MIPMAP',
-    ],
-  },
-  'TexturePool': {
-    'type': 'GLenum',
-    'valid': [
-      'GL_TEXTURE_POOL_MANAGED_CHROMIUM',
-      'GL_TEXTURE_POOL_UNMANAGED_CHROMIUM',
     ],
   },
   'TextureWrapMode': {
@@ -1570,6 +1562,25 @@ _NAMED_TYPE_INFO = {
       'GL_COUNT_DOWN_CHROMIUM',
     ],
   },
+  'PathInstancedCoverMode': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_CONVEX_HULL_CHROMIUM',
+      'GL_BOUNDING_BOX_CHROMIUM',
+      'GL_BOUNDING_BOX_OF_BOUNDING_BOXES_CHROMIUM',
+    ],
+  },
+  'PathNameType': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_UNSIGNED_BYTE',
+      'GL_BYTE',
+      'GL_UNSIGNED_SHORT',
+      'GL_SHORT',
+      'GL_UNSIGNED_INT',
+      'GL_INT',
+    ],
+  },
   'PathParameter': {
     'type': 'GLenum',
     'valid': [
@@ -1595,6 +1606,29 @@ _NAMED_TYPE_INFO = {
       'GL_BEVEL_CHROMIUM',
       'GL_ROUND_CHROMIUM',
     ]
+  },
+  'PathTransformType': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_NONE',
+      'GL_TRANSLATE_X_CHROMIUM',
+      'GL_TRANSLATE_Y_CHROMIUM',
+      'GL_TRANSLATE_2D_CHROMIUM',
+      'GL_TRANSLATE_3D_CHROMIUM',
+      'GL_AFFINE_2D_CHROMIUM',
+      'GL_AFFINE_3D_CHROMIUM',
+      'GL_TRANSPOSE_AFFINE_2D_CHROMIUM',
+      'GL_TRANSPOSE_AFFINE_3D_CHROMIUM',
+    ],
+  },
+  'PathFragmentInputGenMode': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_NONE',
+      'GL_EYE_LINEAR_CHROMIUM',
+      'GL_OBJECT_LINEAR_CHROMIUM',
+      'GL_CONSTANT_CHROMIUM',
+    ],
   },
   'ReadPixelType': {
     'type': 'GLenum',
@@ -1869,8 +1903,7 @@ _NAMED_TYPE_INFO = {
   'ImageUsage': {
     'type': 'GLenum',
     'valid': [
-      'GL_MAP_CHROMIUM',
-      'GL_SCANOUT_CHROMIUM'
+      'GL_READ_WRITE_CHROMIUM',
     ],
   },
   'ValueBufferTarget': {
@@ -2190,7 +2223,7 @@ _FUNCTION_INFO = {
     'type': 'Bind',
     'decoder_func': 'DoBindTexture',
     'gen_func': 'GenTextures',
-    # TODO(gman): remove this once client side caching works.
+    # TODO: remove this once client side caching works.
     'client_test': False,
     'trace_level': 2,
   },
@@ -3380,16 +3413,16 @@ _FUNCTION_INFO = {
   'SwapBuffers': {
     'impl_func': False,
     'decoder_func': 'DoSwapBuffers',
-    'unit_test': False,
     'client_test': False,
+    'expectation': False,
     'extension': True,
     'trace_level': 1,
   },
   'SwapInterval': {
     'impl_func': False,
     'decoder_func': 'DoSwapInterval',
-    'unit_test': False,
     'client_test': False,
+    'expectation': False,
     'extension': True,
     'trace_level': 1,
   },
@@ -4085,10 +4118,42 @@ _FUNCTION_INFO = {
   },
   'WaitSyncPointCHROMIUM': {
     'type': 'Custom',
-    'impl_func': True,
+    'impl_func': False,
+    'unit_test': False,
+    'client_test': False,
     'extension': "CHROMIUM_sync_point",
     'chromium': True,
     'trace_level': 1,
+  },
+  'InsertFenceSyncCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'cmd_args': 'GLuint64 release_count',
+    'extension': "CHROMIUM_sync_point",
+    'chromium': True,
+    'trace_level': 1,
+  },
+  'GenSyncTokenCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'extension': "CHROMIUM_sync_point",
+    'chromium': True,
+  },
+  'GenUnverifiedSyncTokenCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'extension': "CHROMIUM_sync_point",
+    'chromium': True,
+  },
+  'WaitSyncTokenCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'cmd_args': 'GLuint namespace_id, '
+                'GLuint64 command_buffer_id, '
+                'GLuint64 release_count',
+    'client_test': False,
+    'extension': "CHROMIUM_sync_point",
+    'chromium': True,
   },
   'DiscardBackbufferCHROMIUM': {
     'type': 'Custom',
@@ -4098,12 +4163,21 @@ _FUNCTION_INFO = {
     'trace_level': 2,
   },
   'ScheduleOverlayPlaneCHROMIUM': {
-      'type': 'Custom',
-      'impl_func': True,
-      'unit_test': False,
-      'client_test': False,
-      'extension': 'CHROMIUM_schedule_overlay_plane',
-      'chromium': True,
+    'type': 'Custom',
+    'impl_func': True,
+    'unit_test': False,
+    'client_test': False,
+    'extension': 'CHROMIUM_schedule_overlay_plane',
+    'chromium': True,
+  },
+  'ScheduleCALayerCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'client_test': False,
+    'cmd_args': 'GLuint contents_texture_id, GLfloat opacity, '
+                'GLuint background_color, GLuint shm_id, GLuint shm_offset',
+    'extension': 'CHROMIUM_schedule_ca_layer',
+    'chromium': True,
   },
   'MatrixLoadfCHROMIUM': {
     'type': 'PUT',
@@ -4209,7 +4283,56 @@ _FUNCTION_INFO = {
     'extension': 'CHROMIUM_path_rendering',
     'extension_flag': 'chromium_path_rendering',
   },
-
+  'StencilFillPathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'StencilStrokePathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'CoverFillPathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'CoverStrokePathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'StencilThenCoverFillPathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'StencilThenCoverStrokePathInstancedCHROMIUM': {
+    'type': 'Custom',
+    'chromium': True,
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'BindFragmentInputLocationCHROMIUM': {
+    'type': 'GLchar',
+    'data_transfer_methods': ['bucket'],
+    'needs_size': True,
+    'gl_test_func': 'DoBindFragmentInputLocationCHROMIUM',
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
+  'ProgramPathFragmentInputGenCHROMIUM': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'extension': 'CHROMIUM_path_rendering',
+    'extension_flag': 'chromium_path_rendering',
+  },
 }
 
 
@@ -4302,7 +4425,7 @@ class CWriter(object):
   """
   def __init__(self, filename):
     self.filename = filename
-    self._file = open(filename, 'w')
+    self._file = open(filename, 'wb')
     self._ENTER_MSG = _LICENSE + _DO_NOT_EDIT_WARNING
     self._EXIT_MSG = ""
 
@@ -4605,9 +4728,7 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
   def WriteHandlerExtensionCheck(self, func, f):
     if func.GetInfo('extension_flag'):
       f.write("  if (!features().%s) {\n" % func.GetInfo('extension_flag'))
-      f.write("    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, \"gl%s\","
-                 " \"function not available\");\n" % func.original_name)
-      f.write("    return error::kNoError;")
+      f.write("    return error::kUnknownCommand;")
       f.write("  }\n\n")
 
   def WriteHandlerDeferReadWrite(self, func, f):
@@ -4755,7 +4876,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteImmediateServiceUnitTest(self, func, f, *extras):
     """Writes the service unit test for an immediate command."""
-    f.write("// TODO(gman): %s\n" % func.name)
+    pass
 
   def WriteImmediateValidationCode(self, func, f):
     """Writes the validation code for an immediate version of a command."""
@@ -4763,7 +4884,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteBucketServiceUnitTest(self, func, f, *extras):
     """Writes the service unit test for a bucket command."""
-    f.write("// TODO(gman): %s\n" % func.name)
+    pass
 
   def WriteGLES2ImplementationDeclaration(self, func, f):
     """Writes the GLES2 Implemention declaration."""
@@ -4962,9 +5083,6 @@ TEST_F(GLES2ImplementationTest, %(name)sInvalidConstantArg%(invalid_index)d) {
             'args': ", ".join(gl_arg_strings),
             'gl_error': invalid[2],
           })
-    else:
-      if client_test != False:
-        f.write("// TODO(zmo): Implement unit test for %s\n" % func.name)
 
   def WriteDestinationInitalizationValidation(self, func, f):
     """Writes the client side destintion initialization validation."""
@@ -5018,7 +5136,7 @@ TEST_F(GLES2ImplementationTest, %(name)sInvalidConstantArg%(invalid_index)d) {
   def WriteImmediateCmdHelper(self, func, f):
     """Writes the cmd helper definition for the immediate version of a cmd."""
     code = """  void %(name)s(%(typed_args)s) {
-    const uint32_t s = 0;  // TODO(gman): compute correct size
+    const uint32_t s = 0;
     gles2::cmds::%(name)s* c =
         GetImmediateCmdSpaceTotalSize<gles2::cmds::%(name)s>(s);
     if (c) {
@@ -5273,16 +5391,16 @@ class CustomHandler(TypeHandler):
 
   def WriteServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateCmdGetTotalSize(self, func, f):
     """Overrriden from TypeHandler."""
     f.write(
-        "    uint32_t total_size = 0;  // TODO(gman): get correct size.\n")
+        "    uint32_t total_size = 0;  // WARNING: compute correct size.\n")
 
   def WriteImmediateCmdInit(self, func, f):
     """Overrriden from TypeHandler."""
@@ -5333,15 +5451,15 @@ class HandWrittenHandler(CustomHandler):
 
   def WriteServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteBucketServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteServiceImplementation(self, func, f):
     """Overrriden from TypeHandler."""
@@ -5365,11 +5483,11 @@ class HandWrittenHandler(CustomHandler):
 
   def WriteFormatTest(self, func, f):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): Write test for %s\n" % func.name)
+    pass
 
   def WriteImmediateFormatTest(self, func, f):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): Write test for %s\n" % func.name)
+    pass
 
 
 class ManualHandler(CustomHandler):
@@ -5394,11 +5512,11 @@ class ManualHandler(CustomHandler):
 
   def WriteServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateServiceImplementation(self, func, f):
     """Overrriden from TypeHandler."""
@@ -5406,7 +5524,7 @@ class ManualHandler(CustomHandler):
 
   def WriteImmediateFormatTest(self, func, f):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): Implement test for %s\n" % func.name)
+    pass
 
   def WriteGLES2Implementation(self, func, f):
     """Overrriden from TypeHandler."""
@@ -5422,7 +5540,7 @@ class ManualHandler(CustomHandler):
 
   def WriteImmediateCmdGetTotalSize(self, func, f):
     """Overrriden from TypeHandler."""
-    # TODO(gman): Move this data to _FUNCTION_INFO?
+    # TODO: Move this data to _FUNCTION_INFO?
     CustomHandler.WriteImmediateCmdGetTotalSize(self, func, f)
 
 
@@ -5439,7 +5557,7 @@ class DataHandler(TypeHandler):
 
   def WriteGetDataSizeCode(self, func, f):
     """Overrriden from TypeHandler."""
-    # TODO(gman): Move this data to _FUNCTION_INFO?
+    # TODO: Move this data to _FUNCTION_INFO?
     name = func.name
     if name.endswith("Immediate"):
       name = name[0:-9]
@@ -5465,7 +5583,7 @@ class DataHandler(TypeHandler):
       f.write(code)
     else:
       f.write(
-          "// uint32_t data_size = 0;  // TODO(gman): get correct size!\n")
+          "// uint32_t data_size = 0;  // WARNING: compute correct size.\n")
 
   def WriteImmediateCmdGetTotalSize(self, func, f):
     """Overrriden from TypeHandler."""
@@ -5496,17 +5614,16 @@ class DataHandler(TypeHandler):
 
   def WriteImmediateFormatTest(self, func, f):
     """Overrriden from TypeHandler."""
-    # TODO(gman): Remove this exception.
-    f.write("// TODO(gman): Implement test for %s\n" % func.name)
+    # TODO: Remove this exception.
     return
 
   def WriteServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteImmediateServiceUnitTest(self, func, f, *extras):
     """Overrriden from TypeHandler."""
-    f.write("// TODO(gman): %s\n\n" % func.name)
+    pass
 
   def WriteBucketServiceImplementation(self, func, f):
     """Overrriden from TypeHandler."""
@@ -7072,7 +7189,7 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
     f.write("  CheckBytesWrittenMatchesExpectedSize(\n")
     f.write("      next_cmd, sizeof(cmd) +\n")
     f.write("      RoundSizeToMultipleOfEntries(sizeof(data)));\n")
-    f.write("  // TODO(gman): Check that data was inserted;\n")
+    # TODO: Check that data was inserted
     f.write("}\n")
     f.write("\n")
 
@@ -7417,7 +7534,7 @@ TEST_F(GLES2ImplementationTest, %(name)sInvalidConstantArg%(invalid_index)d) {
     f.write("  CheckBytesWrittenMatchesExpectedSize(\n")
     f.write("      next_cmd, sizeof(cmd) +\n")
     f.write("      RoundSizeToMultipleOfEntries(sizeof(data)));\n")
-    f.write("  // TODO(gman): Check that data was inserted;\n")
+    # TODO: Check that data was inserted
     f.write("}\n")
     f.write("\n")
 
@@ -8326,7 +8443,7 @@ class Argument(object):
     self.name = name
     self.optional = type.endswith("Optional*")
     if self.optional:
-      type = type[:-9] + "*"
+      type = type[:-len("Optional*")] + "*"
     self.type = type
 
     if type in self.cmd_type_map_:
@@ -8557,9 +8674,6 @@ class SizeArgument(Argument):
 
 class SizeNotNegativeArgument(SizeArgument):
   """class for GLsizeiNotNegative. It's NEVER allowed to be negative"""
-
-  def __init__(self, name, type, gl_type):
-    SizeArgument.__init__(self, name, gl_type)
 
   def GetInvalidArg(self, index):
     """overridden from SizeArgument."""
@@ -9634,44 +9748,50 @@ class BucketFunction(Function):
 
 
 def CreateArg(arg_string):
-  """Creates an Argument."""
-  arg_parts = arg_string.split()
-  if len(arg_parts) == 1 and arg_parts[0] == 'void':
+  """Convert string argument to an Argument class that represents it.
+
+  The parameter 'arg_string' can be a single argument to a GL function,
+  something like 'GLsizei width' or 'const GLenum* bufs'. Returns an instance of
+  the Argument class, or None if 'arg_string' is 'void'.
+  """
+  if arg_string == 'void':
     return None
+
+  arg_parts = arg_string.strip().split()
+  assert len(arg_parts) > 1
+  arg_name = arg_parts[-1]
+  arg_type = " ".join(arg_parts[0:-1])
+  t = arg_parts[0]  # only the first part of arg_type
+
   # Is this a pointer argument?
-  elif arg_string.find('*') >= 0:
-    return PointerArgument(
-        arg_parts[-1],
-        " ".join(arg_parts[0:-1]))
+  if arg_string.find('*') >= 0:
+    return PointerArgument(arg_name, arg_type)
   # Is this a resource argument? Must come after pointer check.
-  elif arg_parts[0].startswith('GLidBind'):
-    return ResourceIdBindArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLidZero'):
-    return ResourceIdZeroArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLid'):
-    return ResourceIdArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLenum') and len(arg_parts[0]) > 6:
-    return EnumArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLbitfield') and len(arg_parts[0]) > 10:
-    return BitFieldArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLboolean') and len(arg_parts[0]) > 9:
-    return ValidatedBoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLboolean'):
-    return BoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLintUniformLocation'):
-    return UniformLocationArgument(arg_parts[-1])
-  elif (arg_parts[0].startswith('GLint') and len(arg_parts[0]) > 5 and
-        not arg_parts[0].startswith('GLintptr')):
-    return IntArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif (arg_parts[0].startswith('GLsizeiNotNegative') or
-        arg_parts[0].startswith('GLintptrNotNegative')):
-    return SizeNotNegativeArgument(arg_parts[-1],
-                                   " ".join(arg_parts[0:-1]),
-                                   arg_parts[0][0:-11])
-  elif arg_parts[0].startswith('GLsize'):
-    return SizeArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+  elif t.startswith('GLidBind'):
+    return ResourceIdBindArgument(arg_name, arg_type)
+  elif t.startswith('GLidZero'):
+    return ResourceIdZeroArgument(arg_name, arg_type)
+  elif t.startswith('GLid'):
+    return ResourceIdArgument(arg_name, arg_type)
+  elif t.startswith('GLenum') and t !='GLenum':
+    return EnumArgument(arg_name, arg_type)
+  elif t.startswith('GLbitfield') and t != 'GLbitfield':
+    return BitFieldArgument(arg_name, arg_type)
+  elif t.startswith('GLboolean') and t != 'GLboolean':
+    return ValidatedBoolArgument(arg_name, arg_type)
+  elif t.startswith('GLboolean'):
+    return BoolArgument(arg_name, arg_type)
+  elif t.startswith('GLintUniformLocation'):
+    return UniformLocationArgument(arg_name)
+  elif (t.startswith('GLint') and t != 'GLint' and
+        not t.startswith('GLintptr')):
+    return IntArgument(arg_name, arg_type)
+  elif t == 'GLsizeiNotNegative' or t == 'GLintptrNotNegative':
+    return SizeNotNegativeArgument(arg_name, t.replace('NotNegative', ''))
+  elif t.startswith('GLsize'):
+    return SizeArgument(arg_name, arg_type)
   else:
-    return Argument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+    return Argument(arg_name, arg_type)
 
 
 class GLGenerator(object):
@@ -10264,9 +10384,7 @@ bool GLES2DecoderImpl::SetCapabilityState(GLenum cap, bool enabled) {
           if True:
           #gen_cmd = func.GetInfo('gen_cmd')
           #if gen_cmd == True or gen_cmd == None:
-            if func.GetInfo('unit_test') == False:
-              f.write("// TODO(gman): %s\n" % func.name)
-            else:
+            if func.GetInfo('unit_test') != False:
               func.WriteServiceUnitTest(f, {
                 'test_name': test_name
               })
@@ -10368,9 +10486,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
     with CHeaderWriter(filename, comment) as f:
       for func in functions:
         if True:
-          if func.GetInfo('unit_test') == False:
-            f.write("// TODO(gman): %s\n" % func.name)
-          else:
+          if func.GetInfo('unit_test') != False:
             extension = ToCamelCase(
               ToGLExtensionString(func.GetInfo('extension_flag')))
             func.WriteServiceUnitTest(f, {
@@ -10424,7 +10540,7 @@ extern const NameToFunc g_gles2_function_table[] = {
                "// GL api functions.\n")
     code = """
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "third_party/mojo/src/mojo/public/c/gles2/gles2.h"
+#include "mojo/public/c/gles2/gles2.h"
 
 namespace mojo {
 
@@ -10455,8 +10571,8 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
 #include "mojo/gpu/mojo_gles2_impl_autogen.h"
 
 #include "base/logging.h"
-#include "third_party/mojo/src/mojo/public/c/gles2/chromium_extension.h"
-#include "third_party/mojo/src/mojo/public/c/gles2/gles2.h"
+#include "mojo/public/c/gles2/chromium_extension.h"
+#include "mojo/public/c/gles2/gles2.h"
 
 namespace mojo {
 
@@ -10652,7 +10768,7 @@ namespace mojo {
     with CHeaderWriter(filename) as f:
       f.write("static const GLES2Util::EnumToString "
                  "enum_to_string_table[] = {\n")
-      for value in dict:
+      for value in sorted(dict):
         f.write('  { %s, "%s", },\n' % (value, dict[value]))
       f.write("""};
 
@@ -10998,8 +11114,7 @@ def main(argv):
   gen.WriteCommonUtilsImpl(
     "gpu/command_buffer/common/gles2_cmd_utils_implementation_autogen.h")
   gen.WriteGLES2Header("gpu/GLES2/gl2chromium_autogen.h")
-  mojo_gles2_prefix = ("third_party/mojo/src/mojo/public/c/gles2/"
-                       "gles2_call_visitor")
+  mojo_gles2_prefix = ("mojo/public/c/gles2/gles2_call_visitor")
   gen.WriteMojoGLCallVisitor(mojo_gles2_prefix + "_autogen.h")
   gen.WriteMojoGLCallVisitorForExtension(
       mojo_gles2_prefix + "_chromium_extension_autogen.h")

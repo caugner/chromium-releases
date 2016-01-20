@@ -37,8 +37,12 @@ void QuicSimpleClient::ClientQuicDataToResend::Resend() {
 
 QuicSimpleClient::QuicSimpleClient(IPEndPoint server_address,
                                    const QuicServerId& server_id,
-                                   const QuicVersionVector& supported_versions)
-    : QuicClientBase(server_id, supported_versions, QuicConfig()),
+                                   const QuicVersionVector& supported_versions,
+                                   ProofVerifier* proof_verifier)
+    : QuicClientBase(server_id,
+                     supported_versions,
+                     QuicConfig(),
+                     proof_verifier),
       server_address_(server_address),
       local_port_(0),
       helper_(CreateQuicConnectionHelper()),
@@ -49,8 +53,9 @@ QuicSimpleClient::QuicSimpleClient(IPEndPoint server_address,
 QuicSimpleClient::QuicSimpleClient(IPEndPoint server_address,
                                    const QuicServerId& server_id,
                                    const QuicVersionVector& supported_versions,
-                                   const QuicConfig& config)
-    : QuicClientBase(server_id, supported_versions, config),
+                                   const QuicConfig& config,
+                                   ProofVerifier* proof_verifier)
+    : QuicClientBase(server_id, supported_versions, config, proof_verifier),
       server_address_(server_address),
       local_port_(0),
       helper_(CreateQuicConnectionHelper()),
@@ -215,8 +220,7 @@ void QuicSimpleClient::StartConnect() {
 
   CreateQuicClientSession(new QuicConnection(
       GetNextConnectionId(), server_address_, helper_.get(), factory,
-      /* owns_writer= */ false, Perspective::IS_CLIENT, server_id().is_https(),
-      supported_versions()));
+      /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 
   session()->Initialize();
   session()->CryptoConnect();
@@ -247,9 +251,7 @@ void QuicSimpleClient::SendRequest(const HttpRequestInfo& headers,
     return;
   }
   SpdyHeaderBlock header_block;
-  SpdyMajorVersion spdy_version =
-      SpdyUtils::GetSpdyVersionForQuicVersion(stream->version());
-  CreateSpdyHeadersFromHttpRequest(headers, headers.extra_headers, spdy_version,
+  CreateSpdyHeadersFromHttpRequest(headers, headers.extra_headers, net::HTTP2,
                                    true, &header_block);
   stream->set_visitor(this);
   stream->SendRequest(header_block, body, fin);
@@ -336,14 +338,12 @@ bool QuicSimpleClient::MigrateSocket(const IPAddressNumber& new_host) {
   return true;
 }
 
-void QuicSimpleClient::OnClose(QuicDataStream* stream) {
+void QuicSimpleClient::OnClose(QuicSpdyStream* stream) {
   DCHECK(stream != nullptr);
   QuicSpdyClientStream* client_stream =
       static_cast<QuicSpdyClientStream*>(stream);
   HttpResponseInfo response;
-  SpdyMajorVersion spdy_version =
-      SpdyUtils::GetSpdyVersionForQuicVersion(client_stream->version());
-  SpdyHeadersToHttpResponse(client_stream->headers(), spdy_version, &response);
+  SpdyHeadersToHttpResponse(client_stream->headers(), net::HTTP2, &response);
   if (response_listener_.get() != nullptr) {
     response_listener_->OnCompleteResponse(
         stream->id(), *response.headers, client_stream->data());

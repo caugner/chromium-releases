@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -517,33 +518,6 @@ TEST_F(PermissionBubbleManagerTest, AllUserGestureRequests) {
   Closing();
   EXPECT_TRUE(iframe_request_other_domain_.finished());
   EXPECT_FALSE(view_()->shown_);
-}
-
-TEST_F(PermissionBubbleManagerTest, RequestsWithoutUserGesture) {
-  manager_->RequireUserGesture(true);
-  manager_->DisplayPendingRequests();
-  WaitForFrameLoad();
-  WaitForCoalescing();
-  manager_->AddRequest(&request1_);
-  manager_->AddRequest(&iframe_request_other_domain_);
-  manager_->AddRequest(&request2_);
-  base::MessageLoop::current()->RunUntilIdle();
-
-  EXPECT_FALSE(view_()->shown_);
-}
-
-TEST_F(PermissionBubbleManagerTest, RequestsWithUserGesture) {
-  manager_->RequireUserGesture(true);
-  manager_->DisplayPendingRequests();
-  WaitForFrameLoad();
-  WaitForCoalescing();
-  request1_.SetHasUserGesture();
-  manager_->AddRequest(&request1_);
-  manager_->AddRequest(&iframe_request_other_domain_);
-  manager_->AddRequest(&request2_);
-  base::MessageLoop::current()->RunUntilIdle();
-
-  EXPECT_TRUE(view_()->shown_);
 }
 
 TEST_F(PermissionBubbleManagerTest, RequestsDontNeedUserGesture) {

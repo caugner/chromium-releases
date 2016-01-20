@@ -73,6 +73,11 @@ public:
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
 
+    void calculateGeometry(WebPluginContainerImpl* pluginContainerImpl, IntRect& windowRect, IntRect& clipRect, IntRect& unobscuredRect, Vector<IntRect>& cutOutRects)
+    {
+        pluginContainerImpl->calculateGeometry(windowRect, clipRect, unobscuredRect, cutOutRects);
+    }
+
 protected:
     std::string m_baseURL;
 };
@@ -137,7 +142,7 @@ TEST_F(WebPluginContainerTest, WindowToLocalPointTest)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     WebPluginContainer* pluginContainerOne = getWebPluginContainer(webView, WebString::fromUTF8("translated-plugin"));
@@ -159,6 +164,22 @@ TEST_F(WebPluginContainerTest, WindowToLocalPointTest)
     ASSERT_EQ(10, point4.y);
 }
 
+TEST_F(WebPluginContainerTest, PluginDocumentPluginIsFocused)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("test.pdf"), WebString::fromUTF8("application/pdf"));
+
+    TestPluginWebFrameClient pluginWebFrameClient; // Must outlive webViewHelper.
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "test.pdf", true, &pluginWebFrameClient);
+    ASSERT(webView);
+    webView->updateAllLifecyclePhases();
+
+    WebDocument document = webView->mainFrame()->document();
+    EXPECT_TRUE(document.isPluginDocument());
+    WebPluginContainer* pluginContainer = getWebPluginContainer(webView, "plugin");
+    EXPECT_EQ(document.focusedElement(), pluginContainer->element());
+}
+
 TEST_F(WebPluginContainerTest, PrintOnePage)
 {
     URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("test.pdf"), WebString::fromUTF8("application/pdf"));
@@ -167,7 +188,7 @@ TEST_F(WebPluginContainerTest, PrintOnePage)
     FrameTestHelpers::WebViewHelper webViewHelper;
     WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "test.pdf", true, &pluginWebFrameClient);
     ASSERT(webView);
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
     WebFrame* frame = webView->mainFrame();
 
@@ -190,7 +211,7 @@ TEST_F(WebPluginContainerTest, PrintAllPages)
     FrameTestHelpers::WebViewHelper webViewHelper;
     WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "test.pdf", true, &pluginWebFrameClient);
     ASSERT(webView);
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
     WebFrame* frame = webView->mainFrame();
 
@@ -214,7 +235,7 @@ TEST_F(WebPluginContainerTest, LocalToWindowPointTest)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     WebPluginContainer* pluginContainerOne = getWebPluginContainer(webView, WebString::fromUTF8("translated-plugin"));
@@ -246,7 +267,7 @@ TEST_F(WebPluginContainerTest, Copy)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
@@ -267,13 +288,13 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
-    PlatformEvent::Modifiers modifierKey = PlatformEvent::CtrlKey;
+    PlatformEvent::Modifiers modifierKey = static_cast<PlatformEvent::Modifiers>(PlatformEvent::CtrlKey | PlatformEvent::NumLockOn | PlatformEvent::IsLeft);
 #if OS(MACOSX)
-    modifierKey = PlatformEvent::MetaKey;
+    modifierKey = static_cast<PlatformEvent::Modifiers>(PlatformEvent::MetaKey | PlatformEvent::NumLockOn | PlatformEvent::IsLeft);
 #endif
     PlatformKeyboardEvent platformKeyboardEventC(PlatformEvent::RawKeyDown, "", "", "67", "", "", 67, 0, false, modifierKey, 0.0);
     RefPtrWillBeRawPtr<KeyboardEvent> keyEventC = KeyboardEvent::create(platformKeyboardEventC, 0);
@@ -330,7 +351,7 @@ TEST_F(WebPluginContainerTest, GestureLongPressReachesPlugin)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
@@ -339,6 +360,7 @@ TEST_F(WebPluginContainerTest, GestureLongPressReachesPlugin)
 
     WebGestureEvent event;
     event.type = WebInputEvent::GestureLongPress;
+    event.sourceDevice = WebGestureDeviceTouchscreen;
 
     // First, send an event that doesn't hit the plugin to verify that the
     // plugin doesn't receive it.
@@ -371,7 +393,7 @@ TEST_F(WebPluginContainerTest, IsRectTopmostTest)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     RefPtrWillBeRawPtr<WebPluginContainerImpl> pluginContainerImpl =
@@ -385,6 +407,46 @@ TEST_F(WebPluginContainerTest, IsRectTopmostTest)
     webViewHelper.reset();
 
     EXPECT_FALSE(pluginContainerImpl->isRectTopmost(rect));
+}
+
+#define EXPECT_RECT_EQ(expected, actual) \
+    do { \
+        const IntRect& actualRect = actual; \
+        EXPECT_EQ(expected.x(), actualRect.x()); \
+        EXPECT_EQ(expected.y(), actualRect.y()); \
+        EXPECT_EQ(expected.width(), actualRect.width()); \
+        EXPECT_EQ(expected.height(), actualRect.height()); \
+    } while (false)
+
+TEST_F(WebPluginContainerTest, ClippedRectsForIframedElement)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("plugin_container.html"));
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("plugin_containing_page.html"));
+
+    TestPluginWebFrameClient pluginWebFrameClient; // Must outlive webViewHelper.
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "plugin_containing_page.html", true, &pluginWebFrameClient);
+    ASSERT(webView);
+    webView->settings()->setPluginsEnabled(true);
+    webView->resize(WebSize(300, 300));
+    webView->updateAllLifecyclePhases();
+    runPendingTasks();
+
+    WebElement pluginElement = webView->mainFrame()->firstChild()->document().getElementById("translated-plugin");
+    RefPtrWillBeRawPtr<WebPluginContainerImpl> pluginContainerImpl = toWebPluginContainerImpl(pluginElement.pluginContainer());
+
+    ASSERT(pluginContainerImpl.get());
+    pluginContainerImpl->setFrameRect(IntRect(0, 0, 300, 300));
+
+    IntRect windowRect, clipRect, unobscuredRect;
+    Vector<IntRect> cutOutRects;
+    calculateGeometry(pluginContainerImpl.get(), windowRect, clipRect, unobscuredRect, cutOutRects);
+    EXPECT_RECT_EQ(IntRect(10, 210, 300, 300), windowRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 240, 90), clipRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 240, 160), unobscuredRect);
+
+    // Cause the plugin's frame to be detached.
+    webViewHelper.reset();
 }
 
 TEST_F(WebPluginContainerTest, TopmostAfterDetachTest)
@@ -424,7 +486,7 @@ TEST_F(WebPluginContainerTest, TopmostAfterDetachTest)
     ASSERT(webView);
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
-    webView->layout();
+    webView->updateAllLifecyclePhases();
     runPendingTasks();
 
     RefPtrWillBeRawPtr<WebPluginContainerImpl> pluginContainerImpl =

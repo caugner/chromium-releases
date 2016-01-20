@@ -542,15 +542,6 @@ bool AutofillTable::GetFormValuesForElementName(
   return succeeded;
 }
 
-bool AutofillTable::HasFormElements() {
-  sql::Statement s(db_->GetUniqueStatement("SELECT COUNT(*) FROM autofill"));
-  if (!s.Step()) {
-    NOTREACHED();
-    return false;
-  }
-  return s.ColumnInt(0) > 0;
-}
-
 bool AutofillTable::RemoveFormElementsAddedBetween(
     const Time& delete_begin,
     const Time& delete_end,
@@ -707,6 +698,29 @@ bool AutofillTable::AddFormFieldValuesTime(
     seen_names.insert(element.name);
   }
   return result;
+}
+
+int AutofillTable::GetCountOfValuesContainedBetween(
+    const Time& begin,
+    const Time& end) {
+  const time_t begin_time_t = begin.ToTimeT();
+  const time_t end_time_t = GetEndTime(end);
+
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT COUNT(DISTINCT(value1)) FROM ( "
+      "  SELECT value AS value1 FROM autofill "
+      "  WHERE NOT EXISTS ( "
+      "    SELECT value AS value2, date_created, date_last_used FROM autofill "
+      "    WHERE value1 = value2 AND "
+      "          (date_created < ? OR date_last_used >= ?)))"));
+  s.BindInt64(0, begin_time_t);
+  s.BindInt64(1, end_time_t);
+
+  if (!s.Step()) {
+    NOTREACHED();
+    return false;
+  }
+  return s.ColumnInt(0);
 }
 
 bool AutofillTable::GetAllAutofillEntries(std::vector<AutofillEntry>* entries) {
@@ -1296,7 +1310,7 @@ bool AutofillTable::UnmaskServerCreditCard(const CreditCard& masked,
   CreditCard unmasked = masked;
   unmasked.set_record_type(CreditCard::FULL_SERVER_CARD);
   unmasked.SetNumber(full_number);
-  unmasked.RecordUse();
+  unmasked.RecordAndLogUse();
   UpdateServerCardUsageStats(unmasked);
 
   return db_->GetLastChangeCount() > 0;

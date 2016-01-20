@@ -30,6 +30,7 @@
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/views/bar_control_button.h"
 #include "chrome/browser/ui/views/download/download_feedback_dialog_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_context_menu_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
@@ -37,7 +38,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/download_danger_type.h"
-#include "grit/theme_resources.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -101,7 +101,8 @@ const int kButtonPadding = 5;
 // The space on the left and right side of the dangerous download label.
 const int kLabelPadding = 8;
 
-const SkColor kFileNameDisabledColor = SkColorSetRGB(171, 192, 212);
+// Height/width of the warning icon, also in dp.
+const int kWarningIconSize = 24;
 
 // How long the 'download complete' animation should last for.
 const int kCompleteAnimationDurationMs = 2500;
@@ -142,8 +143,7 @@ class SeparatorBorder : public views::Border {
 
 DownloadItemViewMd::DownloadItemViewMd(DownloadItem* download_item,
                                        DownloadShelfView* parent)
-    : warning_icon_(nullptr),
-      shelf_(parent),
+    : shelf_(parent),
       status_text_(l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_STARTING)),
       dropdown_state_(NORMAL),
       mode_(NORMAL_MODE),
@@ -179,12 +179,7 @@ DownloadItemViewMd::DownloadItemViewMd(DownloadItem* download_item,
 
   OnDownloadUpdated(download());
 
-  // TODO(estade): share this button init code with the find in page bar;
-  // also fix theming.
-  dropdown_button_ = new views::ImageButton(this);
-  dropdown_button_->SetBorder(views::Border::CreateEmptyBorder(4, 4, 4, 4));
-  dropdown_button_->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
-                                      views::ImageButton::ALIGN_MIDDLE);
+  dropdown_button_ = new BarControlButton(this);
   AddChildView(dropdown_button_);
   SetDropdownState(NORMAL);
   UpdateColorsFromTheme();
@@ -219,6 +214,13 @@ void DownloadItemViewMd::StopDownloadProgress() {
   previous_progress_elapsed_ += base::TimeTicks::Now() - progress_start_time_;
   progress_start_time_ = base::TimeTicks();
   progress_timer_.Stop();
+}
+
+// static
+SkColor DownloadItemViewMd::GetTextColorForThemeProvider(
+    ui::ThemeProvider* theme) {
+  return theme ? theme->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT)
+               : SK_ColorRED;
 }
 
 void DownloadItemViewMd::OnExtractIconComplete(gfx::Image* icon_bitmap) {
@@ -325,7 +327,7 @@ void DownloadItemViewMd::Layout() {
   UpdateColorsFromTheme();
 
   if (IsShowingWarningDialog()) {
-    int x = kStartPadding + warning_icon_->width() + kStartPadding;
+    int x = kStartPadding + kWarningIconSize + kStartPadding;
     int y = (height() - dangerous_download_label_->height()) / 2;
     dangerous_download_label_->SetBounds(x, y,
                                          dangerous_download_label_->width(),
@@ -355,7 +357,7 @@ gfx::Size DownloadItemViewMd::GetPreferredSize() const {
                         kVerticalTextPadding + status_font_list_.GetHeight());
 
   if (IsShowingWarningDialog()) {
-    width = kStartPadding + warning_icon_->width() + kLabelPadding +
+    width = kStartPadding + kWarningIconSize + kLabelPadding +
             dangerous_download_label_->width() + kLabelPadding;
     gfx::Size button_size = GetButtonSize();
     // Make sure the button fits.
@@ -363,7 +365,7 @@ gfx::Size DownloadItemViewMd::GetPreferredSize() const {
                            2 * kMinimumVerticalPadding + button_size.height());
     // Then we make sure the warning icon fits.
     height = std::max<int>(
-        height, 2 * kMinimumVerticalPadding + warning_icon_->height());
+        height, 2 * kMinimumVerticalPadding + kWarningIconSize);
     if (save_button_)
       width += button_size.width() + kButtonPadding;
     width += button_size.width() + kEndPadding;
@@ -587,10 +589,8 @@ void DownloadItemViewMd::DrawStatusText(gfx::Canvas* canvas) {
       kTextWidth);
   int y =
       GetYForFilenameText() + font_list_.GetBaseline() + kVerticalTextPadding;
-  SkColor file_name_color = SkColorSetA(
-      GetThemeProvider()->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT), 0xC7);
   canvas->DrawStringRect(
-      status_text_, status_font_list_, file_name_color,
+      status_text_, status_font_list_, GetDimmedTextColor(),
       gfx::Rect(mirrored_x, y, kTextWidth, status_font_list_.GetHeight()));
 }
 
@@ -623,11 +623,8 @@ void DownloadItemViewMd::DrawFilename(gfx::Canvas* canvas) {
       kStartPadding + DownloadShelf::kProgressIndicatorSize +
           kProgressTextPadding,
       kTextWidth);
-  SkColor file_name_color =
-      GetThemeProvider()->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
-
   canvas->DrawStringRect(filename, font_list_,
-                         enabled() ? file_name_color : kFileNameDisabledColor,
+                         enabled() ? GetTextColor() : GetDimmedTextColor(),
                          gfx::Rect(mirrored_x, GetYForFilenameText(),
                                    kTextWidth, font_list_.GetHeight()));
 }
@@ -635,10 +632,10 @@ void DownloadItemViewMd::DrawFilename(gfx::Canvas* canvas) {
 void DownloadItemViewMd::DrawIcon(gfx::Canvas* canvas) {
   if (IsShowingWarningDialog()) {
     int icon_x = base::i18n::IsRTL()
-                     ? width() - warning_icon_->width() - kStartPadding
+                     ? width() - kWarningIconSize - kStartPadding
                      : kStartPadding;
-    int icon_y = (height() - warning_icon_->height()) / 2;
-    canvas->DrawImageInt(*warning_icon_, icon_x, icon_y);
+    int icon_y = (height() - kWarningIconSize) / 2;
+    canvas->DrawImageInt(GetWarningIcon(), icon_x, icon_y);
     return;
   }
 
@@ -715,7 +712,8 @@ void DownloadItemViewMd::OpenDownload() {
 
 bool DownloadItemViewMd::SubmitDownloadToFeedbackService() {
 #if defined(FULL_SAFE_BROWSING)
-  SafeBrowsingService* sb_service = g_browser_process->safe_browsing_service();
+  safe_browsing::SafeBrowsingService* sb_service =
+      g_browser_process->safe_browsing_service();
   if (!sb_service)
     return false;
   safe_browsing::DownloadProtectionService* download_protection_service =
@@ -759,10 +757,8 @@ void DownloadItemViewMd::UpdateColorsFromTheme() {
   if (!GetThemeProvider())
     return;
 
-  if (dangerous_download_label_) {
-    dangerous_download_label_->SetEnabledColor(
-        GetThemeProvider()->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT));
-  }
+  if (dangerous_download_label_)
+    dangerous_download_label_->SetEnabledColor(GetTextColor());
   SetBorder(make_scoped_ptr(new SeparatorBorder(
       GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR_SEPARATOR))));
 }
@@ -824,12 +820,11 @@ void DownloadItemViewMd::SetDropdownState(State new_state) {
       !dropdown_button_->GetImage(views::CustomButton::STATE_NORMAL).isNull())
     return;
 
-  // TODO(estade): theme this color instead of using a constant.
-  gfx::ImageSkia image =
-      gfx::CreateVectorIcon(new_state == PUSHED ? gfx::VectorIconId::FIND_NEXT
-                                                : gfx::VectorIconId::FIND_PREV,
-                            16, gfx::kChromeIconGrey);
-  dropdown_button_->SetImage(views::CustomButton::STATE_NORMAL, &image);
+  dropdown_button_->SetIcon(
+      new_state == PUSHED ? gfx::VectorIconId::FIND_NEXT
+                          : gfx::VectorIconId::FIND_PREV,
+      base::Bind(&DownloadItemViewMd::GetTextColor, base::Unretained(this)));
+  dropdown_button_->OnThemeChanged();
   dropdown_state_ = new_state;
   SchedulePaint();
 }
@@ -912,26 +907,6 @@ void DownloadItemViewMd::ShowWarningDialog() {
   discard_button_->SetStyle(views::Button::STYLE_BUTTON);
   AddChildView(discard_button_);
 
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  switch (danger_type) {
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
-    case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
-    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
-      warning_icon_ = rb.GetImageSkiaNamed(IDR_SAFEBROWSING_WARNING);
-      break;
-
-    case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
-    case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
-    case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
-    case content::DOWNLOAD_DANGER_TYPE_MAX:
-      NOTREACHED();
-    // fallthrough
-
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
-      warning_icon_ = rb.GetImageSkiaNamed(IDR_WARNING);
-  }
   base::string16 dangerous_label =
       model_.GetWarningText(font_list_, kTextWidth);
   dangerous_download_label_ = new views::Label(dangerous_label);
@@ -941,6 +916,32 @@ void DownloadItemViewMd::ShowWarningDialog() {
   AddChildView(dangerous_download_label_);
   SizeLabelToMinWidth();
   TooltipTextChanged();
+}
+
+gfx::ImageSkia DownloadItemViewMd::GetWarningIcon() {
+  switch (download()->GetDangerType()) {
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
+      return gfx::CreateVectorIcon(gfx::VectorIconId::REMOVE_CIRCLE,
+                                   kWarningIconSize,
+                                   gfx::kGoogleRed700);
+
+    case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
+    case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
+    case content::DOWNLOAD_DANGER_TYPE_MAX:
+      NOTREACHED();
+      break;
+
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
+      return gfx::CreateVectorIcon(gfx::VectorIconId::WARNING,
+                                   kWarningIconSize,
+                                   gfx::kGoogleYellow700);
+  }
+  return gfx::ImageSkia();
 }
 
 gfx::Size DownloadItemViewMd::GetButtonSize() const {
@@ -1069,4 +1070,12 @@ void DownloadItemViewMd::AnimateStateTransition(
   } else if (from != to) {
     animation->Reset((to == HOT) ? 1.0 : 0.0);
   }
+}
+
+SkColor DownloadItemViewMd::GetTextColor() {
+  return GetTextColorForThemeProvider(GetThemeProvider());
+}
+
+SkColor DownloadItemViewMd::GetDimmedTextColor() {
+  return SkColorSetA(GetTextColor(), 0xC7);
 }

@@ -24,6 +24,7 @@
 <translation id="1546934824884762070">אירעה שגיאה לא צפויה. דווח על בעיה זו למפתחים.</translation>
 <translation id="1619813076098775562">נסגר החיבור למכשיר העברה.</translation>
 <translation id="1643640058022401035">‏יציאה מדף זה תגרום לסיום ההפעלה של Chromoting.</translation>
+<translation id="1646994964686260497">אין מחשבים שניתן להתחבר אליהם.</translation>
 <translation id="1654128982815600832">מפעיל חיבורים מרוחקים למחשב זה...</translation>
 <translation id="170207782578677537">הרישום של מחשב זה נכשל.</translation>
 <translation id="1704090719919187045">‏העדפות מארח Chromoting</translation>
@@ -33,7 +34,6 @@
 <translation id="1770394049404108959">איני יכול לפתוח את היישום.</translation>
 <translation id="177096447311351977">‏IP הערוץ של הלקוח: <ph name="CLIENT_GAIA_IDENTIFIER" /> ip='<ph name="CLIENT_IP_ADDRESS_AND_PORT" />' host_ip='<ph name="HOST_IP_ADDRESS_AND_PORT" />' ערוץ='<ph name="CHANNEL_TYPE" />' חיבור='<ph name="CONNECTION_TYPE" />'.</translation>
 <translation id="1779766957982586368">סגור חלון</translation>
-<translation id="1818475040640568770">אין לך מחשבים רשומים.</translation>
 <translation id="1841799852846221389">משבית חיבורים מרוחקים למחשב זה...</translation>
 <translation id="189172778771606813">סגור את חלונית ההזזה לניווט</translation>
 <translation id="195619862187186579">פריסות מקלדת</translation>
@@ -87,8 +87,6 @@
 <translation id="2926340305933667314">הניסיון להשבית גישה מרחוק למחשב זה נכשל. נסה שוב מאוחר יותר.</translation>
 <translation id="2930135165929238380">‏חלק מהרכיבים הדרושים חסרים. עבור אל chrome://plugins וודא ש-Native Client מופעל.</translation>
 <translation id="2939145106548231838">אמת מול המארח</translation>
-<translation id="2998137343848432918">• נוסף מסך המציג את פרטי הכניסה.
-• תוקנה בעיה בעת המעבר למסך מלא כשהמקלדת מוצגת.</translation>
 <translation id="3020807351229499221">‏הניסיון לעדכן את ה-PIN נכשל. נסה שוב מאוחר יותר.</translation>
 <translation id="3025388528294795783">כדי לעזור לנו לפתור את הבעיה שבה נתקלת, ספר לנו מה קרה:</translation>
 <translation id="3027681561976217984">מצב מסך מגע</translation>
@@ -97,7 +95,6 @@
 <translation id="3150823315463303127">המארח לא הצליח לקרוא את המדיניות.</translation>
 <translation id="3194245623920924351">‏שולחן עבודה מרוחק של Chrome</translation>
 <translation id="3197730452537982411">שולחן עבודה מרוחק</translation>
-<translation id="3244258558056547981">‏הצג את תצוגת Cardboard.</translation>
 <translation id="3258789396564295715">‏תוכל לגשת למחשב זה באופן מאובטח באמצעות 'שולחן עבודה מרוחק של Chrome'.</translation>
 <translation id="327263477022142889">‏רוצה לעזור לשפר את שולחן העבודה המרוחק של Chrome‏? <ph name="LINK_BEGIN" />השב על הסקר.<ph name="LINK_END" /></translation>
 <translation id="3286521253923406898">‏בקר מארח Chromoting</translation>
@@ -113,6 +110,7 @@
 <translation id="3606997049964069799">‏אתה לא מחובר ל-Chromium. היכנס ונסה שוב.</translation>
 <translation id="3649256019230929621">מזער את החלון</translation>
 <translation id="369442766917958684">פועל במצב לא מקוון.</translation>
+<translation id="3695446226812920698">איך עושים זאת</translation>
 <translation id="3776024066357219166">‏הפעילות של 'שולחן עבודה מרוחק של Chrome' הסתיימה.</translation>
 <translation id="3785447812627779171">‏מארח
 Chromoting</translation>
@@ -125,6 +123,11 @@ Chromoting</translation>
 <translation id="3950820424414687140">כניסה</translation>
 <translation id="3989511127559254552">כדי להמשיך, ראשית עליך להעניק הרשאות גישה מורחבות למחשב שלך. עליך לעשות זאת פעם אחת בלבד.</translation>
 <translation id="4006787130661126000">‏אם ברצונך להשתמש ב'שולחן עבודה מרוחק של Chrome' כדי לגשת למחשב זה, עליך להפעיל חיבורים מרוחקים.</translation>
+<translation id="401121182145179743">תחילה עליך להגדיר את המחשב שלך לגישה מרחוק.</translation>
+<translation id="4028465833180158312">• עדכוני עיצוב חדשני תלת-ממדי לממשק המשתמש.
+• קרדיטים לרישוי של צד שלישי.
+• מידע המוצג למחשבים מרוחקים שנמצאים במצב לא מקוון.</translation>
+<translation id="405887016757208221">המחשב המרוחק לא הצליח לאתחל את ההפעלה. אם הבעיה נמשכת, נסה להגדיר שוב את המארח.</translation>
 <translation id="4068946408131579958">כל החיבורים</translation>
 <translation id="409800995205263688">הערה: הגדרות המדיניות מתירות חיבורים רק בין מחשבים הנמצאים בתוך הרשת שלך.</translation>
 <translation id="4155497795971509630">חלק מהרכיבים הדרושים חסרים. ודא שהתקנת את הגרסה העדכנית ביותר של התוכנה ונסה שוב.</translation>
@@ -149,6 +152,7 @@ Chromoting</translation>
 <translation id="4573676252416618192">‏מארח שולחן העבודה
 המרוחק של Chrome</translation>
 <translation id="4619978527973181021">קבל והתקן</translation>
+<translation id="4647791084836149355">‏הצג את תצוגת Cardboard</translation>
 <translation id="4703799847237267011">‏הפעילות של Chromoting הסתיימה.</translation>
 <translation id="4736223761657662401">היסטוריית חיבורים</translation>
 <translation id="4741792197137897469">‏האימות נכשל. היכנס שוב ל-Chrome.</translation>
@@ -170,7 +174,6 @@ Chromoting</translation>
 <translation id="518094545883702183">המידע הזה משמש רק לאבחון הבעיה שדיווחת עליה. הוא זמין רק למי שבוחן את הדוח, ונשמר למשך זמן של 30 ימים לכל היותר.</translation>
 <translation id="5222676887888702881">יציאה</translation>
 <translation id="5254120496627797685">‏יציאה מדף זה תגרום לסיום הפעילות של 'שולחן עבודה מרוחק של Chrome'.</translation>
-<translation id="5285241842433869526">למד כיצד להגדיר מחשב לגישה מרחוק.</translation>
 <translation id="5308380583665731573">התחברות</translation>
 <translation id="5363265567587775042">בקש מבעל המחשב שאליו אתה רוצה לגשת שילחץ על “<ph name="SHARE" />” וייתן לך את קוד הגישה.</translation>
 <translation id="5379087427956679853">‏'שולחן עבודה מרוחק של Chrome' מאפשר לך לשתף את המחשב שלך דרך האינטרנט באופן מאובטח. על שני המשתמשים להפעיל את היישום 'שולחן עבודה מרוחק של Chrome', שניתן למצוא בכתובת <ph name="URL" />.</translation>
@@ -207,6 +210,7 @@ Chromoting</translation>
 <translation id="6284412385303060032">המארח הפועל במסך הכניסה למסוף כבה כדי לתמוך במצב הסתרה על ידי מעבר אל מארח הרץ בפעילות באתר שהיא ספציפית למשתמש.</translation>
 <translation id="629730747756840877">חשבון</translation>
 <translation id="6304318647555713317">לקוח</translation>
+<translation id="6324708100353784493">‏הפעלת את מצב האינטגרציה של Google Cardboard. כדי להשתמש במצב זה, הכנס את המכשיר למציג התואם ל-Google Cardboard.</translation>
 <translation id="6381670701864002291">משהו אחר.</translation>
 <translation id="6398765197997659313">צא ממסך מלא</translation>
 <translation id="6441316101718669559">שילוב של שולחן עבודה אינו נתמך בפלטפורמה זו. תוכל עדיין להשתמש ביישום, אבל תהיה לכך השפעה שלילית על חוויית המשתמש.</translation>
@@ -257,6 +261,7 @@ Chromoting</translation>
 <translation id="7869445566579231750">אין לך הרשאה להריץ את היישום הזה.</translation>
 <translation id="7948001860594368197">אפשרויות מסך</translation>
 <translation id="7970576581263377361">‏האימות נכשל. היכנס שוב ל-Chromium.</translation>
+<translation id="7981525049612125370">פג התוקף של ההפעלה המרוחקת.</translation>
 <translation id="8041721485428375115">‏בהורדת מנהל ההתקנה של מארח שולחן העבודה המרוחק של Chrome, אתה מביע הסכמה ל<ph name="LINK_BEGIN" />תנאים ולהגבלות<ph name="LINK_END" /> של Google.</translation>
 <translation id="8073845705237259513">‏כדי להשתמש ב'שולחן עבודה מרוחק של Chrome', עליך להוסיף חשבון Google למכשיר שלך.</translation>
 <translation id="80739703311984697">‏המארח המרוחק דורש שתבצע אימות מול אתר של צד שלישי. כדי להמשיך, עליך להעניק ל-Chromoting הרשאות נוספות כדי לגשת לכתובת זו:</translation>

@@ -15,10 +15,14 @@ namespace cc {
 class LayerTreeHost;
 }
 
-namespace blink { class WebLayer; }
+namespace blink {
+class WebCompositorAnimationTimeline;
+class WebLayer;
+}
 
 namespace content {
 
+// Dummy WeblayerTeeView that does not support any actual compositing.
 class WebLayerTreeViewImplForTesting
     : public blink::WebLayerTreeView,
       public cc::LayerTreeHostClient,
@@ -32,11 +36,14 @@ class WebLayerTreeViewImplForTesting
   // blink::WebLayerTreeView implementation.
   void setRootLayer(const blink::WebLayer& layer) override;
   void clearRootLayer() override;
+  void attachCompositorAnimationTimeline(
+      blink::WebCompositorAnimationTimeline*) override;
+  void detachCompositorAnimationTimeline(
+      blink::WebCompositorAnimationTimeline*) override;
   virtual void setViewportSize(const blink::WebSize& unused_deprecated,
                                const blink::WebSize& device_viewport_size);
   void setViewportSize(const blink::WebSize& device_viewport_size) override;
   void setDeviceScaleFactor(float scale_factor) override;
-  float deviceScaleFactor() const override;
   void setBackgroundColor(blink::WebColor) override;
   void setHasTransparentBackground(bool transparent) override;
   void setVisible(bool visible) override;
@@ -65,7 +72,7 @@ class WebLayerTreeViewImplForTesting
   void DidBeginMainFrame() override {}
   void BeginMainFrame(const cc::BeginFrameArgs& args) override {}
   void BeginMainFrameNotExpectedSoon() override {}
-  void Layout() override;
+  void UpdateLayerTreeHost() override;
   void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
                            const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,

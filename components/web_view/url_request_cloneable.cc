@@ -6,8 +6,15 @@
 
 #include "base/logging.h"
 #include "mojo/common/data_pipe_utils.h"
+#include "mojo/common/url_type_converters.h"
 
 namespace web_view {
+
+// TODO(erg): In the long run, we might not want to have a stack of
+// URLRequestPtrs, but another type that captures most of the data. When I saw
+// NavigationController the first time, I didn't understand why they made their
+// own datastructure which kept track of everything in a request. The reason is
+// that they have to build requests from multiple different datatypes.
 
 URLRequestCloneable::URLRequestCloneable(mojo::URLRequestPtr original_request)
     : url_(original_request->url),
@@ -17,12 +24,24 @@ URLRequestCloneable::URLRequestCloneable(mojo::URLRequestPtr original_request)
       auto_follow_redirects_(original_request->auto_follow_redirects),
       bypass_cache_(original_request->bypass_cache),
       original_body_null_(original_request->body.is_null()),
-      body_(original_request->body.size()) {
+      body_(original_request->body.size()),
+      originating_time_(base::TimeTicks::FromInternalValue(
+          original_request->originating_time_ticks)) {
   // TODO(erg): Maybe we can do some sort of async copy here?
   for (size_t i = 0; i < original_request->body.size(); ++i) {
     mojo::common::BlockingCopyToString(original_request->body[i].Pass(),
                                        &body_[i]);
   }
+}
+
+URLRequestCloneable::URLRequestCloneable(const GURL& raw_url)
+    : url_(mojo::String::From(raw_url)),
+      method_("GET"),
+      headers_(),
+      response_body_buffer_size_(0),
+      auto_follow_redirects_(false),
+      bypass_cache_(false),
+      original_body_null_(true) {
 }
 
 URLRequestCloneable::~URLRequestCloneable() {}
@@ -53,6 +72,8 @@ mojo::URLRequestPtr URLRequestCloneable::Clone() const {
       DCHECK_EQ(num_bytes, body_[i].size());
     }
   }
+
+  request->originating_time_ticks = originating_time_.ToInternalValue();
 
   return request.Pass();
 }

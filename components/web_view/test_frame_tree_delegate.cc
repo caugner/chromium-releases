@@ -81,6 +81,9 @@ void TestFrameTreeDelegate::DidStartNavigation(Frame* frame) {}
 
 void TestFrameTreeDelegate::DidCommitProvisionalLoad(Frame* frame) {}
 
+void TestFrameTreeDelegate::DidNavigateLocally(Frame* source,
+                                               const GURL& url) {}
+
 void TestFrameTreeDelegate::DidCreateFrame(Frame* frame) {
   if (waiting_for_create_frame_) {
     most_recent_frame_ = frame;
@@ -95,7 +98,7 @@ void TestFrameTreeDelegate::DidDestroyFrame(Frame* frame) {
   }
 }
 
-void TestFrameTreeDelegate::OnViewEmbeddedInFrameDisconnected(Frame* frame) {
+void TestFrameTreeDelegate::OnWindowEmbeddedInFrameDisconnected(Frame* frame) {
   if (waiting_for_frame_disconnected_ == frame) {
     waiting_for_frame_disconnected_ = nullptr;
     run_loop_->Quit();

@@ -84,7 +84,20 @@ class DevToolsNetworkControllerHelper {
   }
 
   bool ShouldFail() {
-    return transaction_->interceptor_->ShouldFail(transaction_.get());
+    if (transaction_->interceptor_)
+      return transaction_->interceptor_->ShouldFail();
+    base::WeakPtr<DevToolsNetworkInterceptor> interceptor =
+        controller_.GetInterceptor(kClientId);
+    EXPECT_TRUE(!!interceptor);
+    return interceptor->ShouldFail();
+  }
+
+  bool HasStarted() {
+    return !!transaction_->request_;
+  }
+
+  bool HasFailed() {
+    return transaction_->failed_;
   }
 
   ~DevToolsNetworkControllerHelper() {
@@ -184,10 +197,10 @@ TEST(DevToolsNetworkControllerTest, ReadAfterFail) {
 
   int rv = helper.Start();
   EXPECT_EQ(rv, net::OK);
-  EXPECT_TRUE(helper.transaction()->request());
+  EXPECT_TRUE(helper.HasStarted());
 
   helper.SetNetworkState(kClientId, true);
-  EXPECT_TRUE(helper.transaction()->failed());
+  EXPECT_TRUE(helper.HasFailed());
 
   scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(64));
   rv = helper.Read();
@@ -196,19 +209,6 @@ TEST(DevToolsNetworkControllerTest, ReadAfterFail) {
   // Check that callback is never invoked.
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(helper.callback()->run_count(), 0);
-}
-
-TEST(DevToolsNetworkControllerTest, AllowsDevToolsRequests) {
-  DevToolsNetworkControllerHelper helper;
-  helper.SetNetworkState(kClientId, false);
-  helper.mock_transaction()->request_headers =
-      "X-DevTools-Emulate-Network-Conditions-Client-Id: 42\r\n"
-      "X-DevTools-Request-Initiator: frontend\r\n";
-  helper.Start();
-
-  EXPECT_FALSE(helper.ShouldFail());
-  helper.SetNetworkState(kClientId, true);
-  EXPECT_FALSE(helper.ShouldFail());
 }
 
 }  // namespace test

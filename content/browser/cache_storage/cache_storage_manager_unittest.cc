@@ -294,12 +294,14 @@ class CacheStorageManagerTest : public testing::Test {
   }
 
  protected:
+  // Temporary directory must be allocated first so as to be destroyed last.
+  base::ScopedTempDir temp_dir_;
+
   TestBrowserContext browser_context_;
   TestBrowserThreadBundle browser_thread_bundle_;
   scoped_ptr<net::URLRequestJobFactoryImpl> url_request_job_factory_;
   storage::BlobStorageContext* blob_storage_context_;
 
-  base::ScopedTempDir temp_dir_;
   scoped_refptr<MockQuotaManagerProxy> quota_manager_proxy_;
   scoped_ptr<CacheStorageManager> cache_manager_;
 
@@ -653,6 +655,31 @@ TEST_F(CacheStorageManagerTest, MemoryBackedSizePersistent) {
   EXPECT_TRUE(Open(origin1_, "foo"));
   EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
   EXPECT_EQ(0, cache_storage->MemoryBackedSize());
+}
+
+TEST_F(CacheStorageManagerTest, DeleteUnreferencedCacheDirectories) {
+  // Create a referenced cache.
+  EXPECT_TRUE(Open(origin1_, "foo"));
+  EXPECT_TRUE(CachePut(callback_cache_, GURL("http://example.com/foo")));
+
+  // Create an unreferenced directory next to the referenced one.
+  base::FilePath origin_path = CacheStorageManager::ConstructOriginPath(
+      cache_manager_->root_path(), origin1_);
+  base::FilePath unreferenced_path = origin_path.AppendASCII("bar");
+  EXPECT_TRUE(CreateDirectory(unreferenced_path));
+  EXPECT_TRUE(base::DirectoryExists(unreferenced_path));
+
+  // Create a new StorageManager so that the next time the cache is opened
+  // the unreferenced directory can be deleted.
+  quota_manager_proxy_->SimulateQuotaManagerDestroyed();
+  cache_manager_ = CacheStorageManager::Create(cache_manager_.get());
+
+  // Verify that the referenced cache still works.
+  EXPECT_TRUE(Open(origin1_, "foo"));
+  EXPECT_TRUE(CacheMatch(callback_cache_, GURL("http://example.com/foo")));
+
+  // Verify that the unreferenced cache is gone.
+  EXPECT_FALSE(base::DirectoryExists(unreferenced_path));
 }
 
 class CacheStorageMigrationTest : public CacheStorageManagerTest {

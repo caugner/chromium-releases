@@ -4,10 +4,10 @@
 
 import os
 
+from core import path_util
 from core import perf_benchmark
 
 from telemetry import benchmark
-from telemetry.core import util
 from telemetry import page as page_module
 from telemetry.page import page_test
 from telemetry.page import shared_page_state
@@ -18,7 +18,7 @@ from benchmarks import pywebsocket_server
 from page_sets import webgl_supported_shared_state
 
 
-BLINK_PERF_BASE_DIR = os.path.join(util.GetChromiumSrcDir(),
+BLINK_PERF_BASE_DIR = os.path.join(path_util.GetChromiumSrcDir(),
                                    'third_party', 'WebKit', 'PerformanceTests')
 SKIPPED_FILE = os.path.join(BLINK_PERF_BASE_DIR, 'Skipped')
 
@@ -86,7 +86,8 @@ class _BlinkPerfMeasurement(page_test.PageTest):
     options.AppendExtraBrowserArgs([
         '--js-flags=--expose_gc',
         '--enable-experimental-web-platform-features',
-        '--disable-gesture-requirement-for-media-playback'
+        '--disable-gesture-requirement-for-media-playback',
+        '--enable-experimental-canvas-features'
     ])
     if 'content-shell' in options.browser_type:
       options.AppendExtraBrowserArgs('--expose-internals-for-testing')
@@ -205,7 +206,6 @@ class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
     return story_set
 
 
-@benchmark.Disabled  # http://crbug.com/532093
 class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
   tag = 'dom'
   test = _BlinkPerfMeasurement
@@ -232,7 +232,8 @@ class BlinkPerfEvents(perf_benchmark.PerfBenchmark):
     return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-@benchmark.Disabled('win8')  # http://crbug.com/462350
+@benchmark.Disabled('win8',  # http://crbug.com/462350
+                    'android') #http://crbug.com/551950
 class BlinkPerfLayout(perf_benchmark.PerfBenchmark):
   tag = 'layout'
   test = _BlinkPerfMeasurement
@@ -308,7 +309,7 @@ class BlinkPerfShadowDOM(perf_benchmark.PerfBenchmark):
 
 
 # This benchmark is for local testing, doesn't need to run on bots.
-@benchmark.Disabled()
+@benchmark.Disabled('all')
 class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
   tag = 'xml_http_request'
   test = _BlinkPerfMeasurement
@@ -324,7 +325,8 @@ class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
 
 # Disabled on Windows and ChromeOS due to https://crbug.com/521887
 # Disabled on reference builds due to https://crbug.com/530374
-@benchmark.Disabled('win', 'chromeos', 'reference')
+# Disabled on Android due to http://crbug.com/551950
+@benchmark.Disabled('win', 'chromeos', 'reference', 'android')
 class BlinkPerfPywebsocket(perf_benchmark.PerfBenchmark):
   tag = 'pywebsocket'
   test = _BlinkPerfPywebsocketMeasurement

@@ -11,10 +11,13 @@ be subclassed; however, some, like _FakeBrowser, have public APIs that
 may need to be called in tests.
 """
 
+from telemetry.internal.backends.chrome_inspector import websocket
 from telemetry.internal.browser import browser_options
 from telemetry.internal.platform import system_info
 from telemetry.page import shared_page_state
+from telemetry.util import image_util
 from telemetry.testing.internal import fake_gpu_info
+
 
 # Classes and functions which are intended to be part of the public
 # fakes API.
@@ -58,6 +61,12 @@ class FakePlatform(object):
 
 
 class FakeLinuxPlatform(FakePlatform):
+  def __init__(self):
+    super(FakeLinuxPlatform, self).__init__()
+    self.screenshot_png_data = None
+    self.http_server_directories = []
+    self.http_server = FakeHTTPServer()
+
   @property
   def is_host_platform(self):
     return True
@@ -73,6 +82,24 @@ class FakeLinuxPlatform(FakePlatform):
 
   def GetOSVersionName(self):
     return 'trusty'
+
+  def CanTakeScreenshot(self):
+    return bool(self.screenshot_png_data)
+
+  def TakeScreenshot(self, file_path):
+    if not self.CanTakeScreenshot():
+      raise NotImplementedError
+    img = image_util.FromBase64Png(self.screenshot_png_data)
+    image_util.WritePngFile(img, file_path)
+    return True
+
+  def SetHTTPServerDirectories(self, paths):
+    self.http_server_directories.append(paths)
+
+
+class FakeHTTPServer(object):
+  def UrlOf(self, url):
+    return 'file:///foo'
 
 
 class FakePossibleBrowser(object):
@@ -137,9 +164,15 @@ class FakeSystemInfo(system_info.SystemInfo):
     super(FakeSystemInfo, self).__init__(model_name, gpu_dict)
 
 
+class _FakeBrowserFinderOptions(browser_options.BrowserFinderOptions):
+  def __init__(self, *args, **kwargs):
+    browser_options.BrowserFinderOptions.__init__(self, *args, **kwargs)
+    self.fake_possible_browser = FakePossibleBrowser()
+
+
 def CreateBrowserFinderOptions(browser_type=None):
   """Creates fake browser finder options for discovering a browser."""
-  return browser_options.BrowserFinderOptions(browser_type=browser_type)
+  return _FakeBrowserFinderOptions(browser_type=browser_type)
 
 
 # Internal classes. Note that end users may still need to both call
@@ -227,6 +260,7 @@ class _FakeTab(object):
     self._browser = browser
     self._tab_id = str(tab_id)
     self._collect_garbage_count = 0
+    self.test_png = None
 
   @property
   def collect_garbage_count(self):
@@ -262,6 +296,14 @@ class _FakeTab(object):
   def Close(self):
     pass
 
+  @property
+  def screenshot_supported(self):
+    return self.test_png is not None
+
+  def Screenshot(self):
+    assert self.screenshot_supported, 'Screenshot is not supported'
+    return image_util.FromBase64Png(self.test_png)
+
 
 class _FakeTabList(object):
   _current_tab_id = 0
@@ -291,3 +333,76 @@ class _FakeTabList(object):
       if tab.id == identifier:
         return tab
     return None
+
+
+class FakeInspectorWebsocket(object):
+  _NOTIFICATION_EVENT = 1
+  _NOTIFICATION_CALLBACK = 2
+
+  """A fake InspectorWebsocket.
+
+  A fake that allows tests to send pregenerated data. Normal
+  InspectorWebsockets allow for any number of domain handlers. This fake only
+  allows up to 1 domain handler, and assumes that the domain of the response
+  always matches that of the handler.
+  """
+  def __init__(self, mock_timer):
+    self._mock_timer = mock_timer
+    self._notifications = []
+    self._response_handlers = {}
+    self._pending_callbacks = {}
+    self._handler = None
+
+  def RegisterDomain(self, _, handler):
+    self._handler = handler
+
+  def AddEvent(self, method, params, time):
+    if self._notifications:
+      assert self._notifications[-1][1] < time, (
+          'Current response is scheduled earlier than previous response.')
+    response = {'method': method, 'params': params}
+    self._notifications.append((response, time, self._NOTIFICATION_EVENT))
+
+  def AddAsyncResponse(self, method, result, time):
+    if self._notifications:
+      assert self._notifications[-1][1] < time, (
+          'Current response is scheduled earlier than previous response.')
+    response = {'method': method, 'result': result}
+    self._notifications.append((response, time, self._NOTIFICATION_CALLBACK))
+
+  def AddResponseHandler(self, method, handler):
+    self._response_handlers[method] = handler
+
+  def SyncRequest(self, request, *_args, **_kwargs):
+    handler = self._response_handlers[request['method']]
+    return handler(request) if handler else None
+
+  def AsyncRequest(self, request, callback):
+    self._pending_callbacks.setdefault(request['method'], []).append(callback)
+
+  def SendAndIgnoreResponse(self, request):
+    pass
+
+  def Connect(self, _):
+    pass
+
+  def DispatchNotifications(self, timeout):
+    current_time = self._mock_timer.time()
+    if not self._notifications:
+      self._mock_timer.SetTime(current_time + timeout + 1)
+      raise websocket.WebSocketTimeoutException()
+
+    response, time, kind = self._notifications[0]
+    if time - current_time > timeout:
+      self._mock_timer.SetTime(current_time + timeout + 1)
+      raise websocket.WebSocketTimeoutException()
+
+    self._notifications.pop(0)
+    self._mock_timer.SetTime(time + 1)
+    if kind == self._NOTIFICATION_EVENT:
+      self._handler(response)
+    elif kind == self._NOTIFICATION_CALLBACK:
+      callback = self._pending_callbacks.get(response['method']).pop(0)
+      callback(response)
+    else:
+      raise Exception('Unexpected response type')

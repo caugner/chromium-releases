@@ -38,7 +38,7 @@ namespace {
 const char kLearnMoreURL[] =
 #if defined(OFFICIAL_BUILD)
     "chrome-extension://honijodknafkokifofgiaalefdiedpko/"
-    "main.html?answer=188743";
+    "main.html?answer=1047364";
 #else
     "https://support.google.com/chromebook/answer/183101";
 #endif
@@ -253,8 +253,6 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_TOGGLE_CHROMEVOX_SPOKEN_FEEDBACK },
   { "keyboardOverlayToggleProjectionTouchHud",
     IDS_KEYBOARD_OVERLAY_TOGGLE_PROJECTION_TOUCH_HUD },
-  { "keyboardOverlayToggleSpeechInput",
-    IDS_KEYBOARD_OVERLAY_TOGGLE_SPEECH_INPUT },
   { "keyboardOverlayUndo", IDS_KEYBOARD_OVERLAY_UNDO },
   { "keyboardOverlayViewKeyboardOverlay",
     IDS_KEYBOARD_OVERLAY_VIEW_KEYBOARD_OVERLAY },

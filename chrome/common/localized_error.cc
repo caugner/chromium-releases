@@ -38,6 +38,7 @@
 #endif
 
 using blink::WebURLError;
+using error_page::OfflinePageStatus;
 
 // Some error pages have no details.
 const unsigned int kErrorPagesNoDetails = 0;
@@ -48,9 +49,6 @@ static const char kRedirectLoopLearnMoreUrl[] =
     "https://support.google.com/chrome/answer/95626";
 static const char kWeakDHKeyLearnMoreUrl[] =
     "https://support.google.com/chrome?p=dh_error";
-static const char kCachedCopyButtonFieldTrial[] =
-    "EnableGoogleCachedCopyTextExperiment";
-static const char kCachedCopyButtonExpTypeControl[] = "control";
 static const int kGoogleCachedCopySuggestionType = 0;
 
 enum NAV_SUGGESTIONS {
@@ -517,6 +515,36 @@ const char* GetIconClassForError(const std::string& error_domain,
   return "icon-generic";
 }
 
+// If the first suggestion is for a Google cache copy link. Promote the
+// suggestion to a separate set of strings for displaying as a button.
+void AddGoogleCachedCopyButton(base::ListValue* suggestions,
+                               base::DictionaryValue* error_strings) {
+  if (!suggestions->empty()) {
+    base::DictionaryValue* suggestion;
+    suggestions->GetDictionary(0, &suggestion);
+    int type = -1;
+    suggestion->GetInteger("type", &type);
+
+    if (type == kGoogleCachedCopySuggestionType) {
+      base::string16 cache_url;
+      suggestion->GetString("urlCorrection", &cache_url);
+      int cache_tracking_id = -1;
+      suggestion->GetInteger("trackingId", &cache_tracking_id);
+      scoped_ptr<base::DictionaryValue> cache_button(new base::DictionaryValue);
+      cache_button->SetString(
+            "msg",
+            l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY));
+      cache_button->SetString("cacheUrl", cache_url);
+      cache_button->SetInteger("trackingId", cache_tracking_id);
+      error_strings->Set("cacheButton", cache_button.release());
+
+      // Remove the item from suggestions dictionary so that it does not get
+      // displayed by the template in the details section.
+      suggestions->Remove(0, nullptr);
+    }
+  }
+}
+
 }  // namespace
 
 const char LocalizedError::kHttpErrorDomain[] = "http";
@@ -527,6 +555,7 @@ void LocalizedError::GetStrings(int error_code,
                                 bool is_post,
                                 bool stale_copy_in_cache,
                                 bool can_show_network_diagnostics_dialog,
+                                OfflinePageStatus offline_page_status,
                                 const std::string& locale,
                                 const std::string& accept_languages,
                                 scoped_ptr<error_page::ErrorPageParams> params,
@@ -584,20 +613,21 @@ void LocalizedError::GetStrings(int error_code,
       error_code == error_page::DNS_PROBE_FINISHED_NO_INTERNET) {
     error_strings->SetString("primaryParagraph",
         l10n_util::GetStringUTF16(options.summary_resource_id));
-
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-
-    // Check if easter egg should be disabled.
-    if (command_line->HasSwitch(switches::kDisableDinosaurEasterEgg)) {
-      // The prescence of this string disables the easter egg. Acts as a flag.
-      error_strings->SetString("disabledEasterEgg",
-          l10n_util::GetStringUTF16(IDS_ERRORPAGE_FUN_DISABLED));
-    }
   } else {
     // Set summary message in the details.
     summary->SetString("msg",
         l10n_util::GetStringUTF16(options.summary_resource_id));
   }
+
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+
+  // Check if easter egg should be disabled.
+  if (command_line->HasSwitch(switches::kDisableDinosaurEasterEgg)) {
+    // The presence of this string disables the easter egg. Acts as a flag.
+    error_strings->SetString("disabledEasterEgg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGE_FUN_DISABLED));
+  }
+
   summary->SetString("failedUrl", failed_url_string);
   summary->SetString("hostName", url_formatter::IDNToUnicode(failed_url.host(),
                                                              accept_languages));
@@ -611,10 +641,11 @@ void LocalizedError::GetStrings(int error_code,
           IDS_ERRORPAGE_NET_BUTTON_HIDE_DETAILS));
   error_strings->Set("summary", summary);
 
-  if (options.details_resource_id != kErrorPagesNoDetails) {
-    error_strings->SetString(
-        "errorDetails", l10n_util::GetStringUTF16(options.details_resource_id));
-  }
+  error_strings->SetString(
+      "errorDetails",
+      options.details_resource_id != kErrorPagesNoDetails
+          ? l10n_util::GetStringUTF16(options.details_resource_id)
+          : base::string16());
 
   base::string16 error_string;
   if (error_domain == net::kErrorDomain) {
@@ -671,9 +702,8 @@ void LocalizedError::GetStrings(int error_code,
   } else {
     suggestions = params->override_suggestions.release();
     use_default_suggestions = false;
-    EnableGoogleCachedCopyButtonExperiment(suggestions, error_strings);
+    AddGoogleCachedCopyButton(suggestions, error_strings);
   }
-
   error_strings->Set("suggestions", suggestions);
 
   if (params->search_url.is_valid()) {
@@ -715,7 +745,6 @@ void LocalizedError::GetStrings(int error_code,
   if (!use_default_suggestions)
     return;
 
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   const std::string& show_saved_copy_value =
       command_line->GetSwitchValueASCII(switches::kShowSavedCopy);
   bool show_saved_copy_primary = (show_saved_copy_value ==
@@ -738,6 +767,29 @@ void LocalizedError::GetStrings(int error_code,
       show_saved_copy_button->SetString("primary", "true");
     error_strings->Set("showSavedCopyButton", show_saved_copy_button);
   }
+
+#if defined(OS_ANDROID)
+  // Offline button will not be provided when we want to show something in the
+  // cache.
+  if (!show_saved_copy_visible) {
+    if (offline_page_status == OfflinePageStatus::HAS_OFFLINE_PAGE) {
+      base::DictionaryValue* show_offline_copy_button =
+          new base::DictionaryValue;
+      base::string16 button_text =
+          l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_OFFLINE_COPY);
+      show_offline_copy_button->SetString("msg", button_text);
+      error_strings->Set("showOfflineCopyButton", show_offline_copy_button);
+    } else if (offline_page_status ==
+               OfflinePageStatus::HAS_OTHER_OFFLINE_PAGES) {
+      base::DictionaryValue* show_offline_pages_button =
+          new base::DictionaryValue;
+      base::string16 button_text =
+          l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_OFFLINE_PAGES);
+      show_offline_pages_button->SetString("msg", button_text);
+      error_strings->Set("showOfflinePagesButton", show_offline_pages_button);
+    }
+  }
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
   // ChromeOS has its own diagnostics extension, which doesn't rely on a
@@ -891,40 +943,4 @@ bool LocalizedError::HasStrings(const std::string& error_domain,
   // whether or not the page was be generated by a POST, so just claim it was
   // not.
   return LookupErrorMap(error_domain, error_code, /*is_post=*/false) != NULL;
-}
-
-void LocalizedError::EnableGoogleCachedCopyButtonExperiment(
-    base::ListValue* suggestions,
-    base::DictionaryValue* error_strings) {
-  std::string field_trial_exp_type_ =
-      base::FieldTrialList::FindFullName(kCachedCopyButtonFieldTrial);
-
-  // Google cache copy button experiment.
-  // If the first suggestion is for a Google cache copy. Promote the
-  // suggestion to a separate set of strings for displaying as a button.
-  if (!suggestions->empty() && !field_trial_exp_type_.empty() &&
-      field_trial_exp_type_ != kCachedCopyButtonExpTypeControl) {
-    base::DictionaryValue* suggestion;
-    suggestions->GetDictionary(0, &suggestion);
-    int type = -1;
-    suggestion->GetInteger("type", &type);
-
-    if (type == kGoogleCachedCopySuggestionType) {
-      base::string16 cache_url;
-      suggestion->GetString("urlCorrection", &cache_url);
-      int cache_tracking_id = -1;
-      suggestion->GetInteger("trackingId", &cache_tracking_id);
-      scoped_ptr<base::DictionaryValue> cache_button(new base::DictionaryValue);
-      cache_button->SetString(
-            "msg",
-            l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY));
-      cache_button->SetString("cacheUrl", cache_url);
-      cache_button->SetInteger("trackingId", cache_tracking_id);
-      error_strings->Set("cacheButton", cache_button.release());
-
-      // Remove the item from suggestions dictionary so that it does not get
-      // displayed by the template in the details section.
-      suggestions->Remove(0, nullptr);
-    }
-  }
 }

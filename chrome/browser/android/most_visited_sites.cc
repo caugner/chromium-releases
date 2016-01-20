@@ -10,6 +10,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/prefs/pref_service.h"
@@ -24,15 +25,16 @@
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search/suggestions/suggestions_service_factory.h"
 #include "chrome/browser/search/suggestions/suggestions_source.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/suggestions/suggestions_service.h"
 #include "components/suggestions/suggestions_utils.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/url_data_source.h"
 #include "jni/MostVisitedSites_jni.h"
@@ -152,12 +154,6 @@ std::string GetPopularSitesVersion() {
                                             "version");
 }
 
-// TODO(treib): Get rid of this.
-std::string GetPopularSitesFilename() {
-  return variations::GetVariationParamValue(kPopularSitesFieldTrialName,
-                                            "filename");
-}
-
 // Determine whether we need any popular suggestions to fill up a grid of
 // |num_tiles| tiles.
 bool NeedPopularSites(const PrefService* prefs, size_t num_tiles) {
@@ -259,7 +255,6 @@ void MostVisitedSites::SetMostVisitedURLsObserver(JNIEnv* env,
         profile_,
         GetPopularSitesCountry(),
         GetPopularSitesVersion(),
-        GetPopularSitesFilename(),
         false,
         base::Bind(&MostVisitedSites::OnPopularSitesAvailable,
                    base::Unretained(this))));
@@ -739,15 +734,17 @@ void MostVisitedSites::OnPopularSitesAvailable(bool success) {
 
   std::vector<std::string> urls;
   std::vector<std::string> favicon_urls;
+  std::vector<std::string> large_icon_urls;
   for (const PopularSites::Site& popular_site : popular_sites_->sites()) {
     urls.push_back(popular_site.url.spec());
     favicon_urls.push_back(popular_site.favicon_url.spec());
+    large_icon_urls.push_back(popular_site.large_icon_url.spec());
   }
   JNIEnv* env = AttachCurrentThread();
   Java_MostVisitedURLsObserver_onPopularURLsAvailable(
       env, observer_.obj(), ToJavaArrayOfStrings(env, urls).obj(),
-      ToJavaArrayOfStrings(env, favicon_urls).obj());
-
+      ToJavaArrayOfStrings(env, favicon_urls).obj(),
+      ToJavaArrayOfStrings(env, large_icon_urls).obj());
   QueryMostVisitedURLs();
 }
 

@@ -9,6 +9,7 @@
    (static_cast<uint32>(c) << 16) | (static_cast<uint32>(d) << 24))
 
 #define DRM_FORMAT_ARGB8888 FOURCC('A', 'R', '2', '4')
+#define DRM_FORMAT_ABGR8888 FOURCC('A', 'B', '2', '4')
 #define DRM_FORMAT_XRGB8888 FOURCC('X', 'R', '2', '4')
 
 namespace gfx {
@@ -17,6 +18,7 @@ namespace {
 bool ValidInternalFormat(unsigned internalformat) {
   switch (internalformat) {
     case GL_RGB:
+    case GL_RGBA:
     case GL_BGRA_EXT:
       return true;
     default:
@@ -24,8 +26,9 @@ bool ValidInternalFormat(unsigned internalformat) {
   }
 }
 
-bool ValidFormat(gfx::BufferFormat format) {
+bool ValidFormat(BufferFormat format) {
   switch (format) {
+    case BufferFormat::RGBA_8888:
     case BufferFormat::BGRA_8888:
     case BufferFormat::BGRX_8888:
       return true;
@@ -36,7 +39,7 @@ bool ValidFormat(gfx::BufferFormat format) {
     case BufferFormat::ETC1:
     case BufferFormat::R_8:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::YUV_420:
     case BufferFormat::YUV_420_BIPLANAR:
     case BufferFormat::UYVY_422:
@@ -47,8 +50,10 @@ bool ValidFormat(gfx::BufferFormat format) {
   return false;
 }
 
-EGLint FourCC(gfx::BufferFormat format) {
+EGLint FourCC(BufferFormat format) {
   switch (format) {
+    case BufferFormat::RGBA_8888:
+      return DRM_FORMAT_ABGR8888;
     case BufferFormat::BGRA_8888:
       return DRM_FORMAT_ARGB8888;
     case BufferFormat::BGRX_8888:
@@ -60,7 +65,7 @@ EGLint FourCC(gfx::BufferFormat format) {
     case BufferFormat::ETC1:
     case BufferFormat::R_8:
     case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case BufferFormat::RGBX_8888:
     case BufferFormat::YUV_420:
     case BufferFormat::YUV_420_BIPLANAR:
     case BufferFormat::UYVY_422:
@@ -76,20 +81,20 @@ EGLint FourCC(gfx::BufferFormat format) {
 
 GLImageOzoneNativePixmap::GLImageOzoneNativePixmap(const Size& size,
                                                    unsigned internalformat)
-    : GLImageEGL(size), internalformat_(internalformat) {}
+    : gl::GLImageEGL(size), internalformat_(internalformat) {}
 
 GLImageOzoneNativePixmap::~GLImageOzoneNativePixmap() {
 }
 
-bool GLImageOzoneNativePixmap::Initialize(ui::NativePixmap* pixmap,
-                                          BufferFormat format) {
+bool GLImageOzoneNativePixmap::Initialize(ui::NativePixmap* pixmap) {
   DCHECK(!pixmap_);
-
-  bool result = true;
+  BufferFormat format = pixmap->GetBufferFormat();
   if (pixmap->GetEGLClientBuffer()) {
     EGLint attrs[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
-    result = GLImageEGL::Initialize(EGL_NATIVE_PIXMAP_KHR,
-                                    pixmap->GetEGLClientBuffer(), attrs);
+    if (!gl::GLImageEGL::Initialize(EGL_NATIVE_PIXMAP_KHR,
+                                    pixmap->GetEGLClientBuffer(), attrs)) {
+      return false;
+    }
   } else if (pixmap->GetDmaBufFd() >= 0) {
     if (!ValidInternalFormat(internalformat_)) {
       LOG(ERROR) << "Invalid internalformat: " << internalformat_;
@@ -116,13 +121,15 @@ bool GLImageOzoneNativePixmap::Initialize(ui::NativePixmap* pixmap,
                       EGL_DMA_BUF_PLANE0_PITCH_EXT,
                       pixmap->GetDmaBufPitch(),
                       EGL_NONE};
-    result = GLImageEGL::Initialize(
-        EGL_LINUX_DMA_BUF_EXT, static_cast<EGLClientBuffer>(nullptr), attrs);
+    if (!gl::GLImageEGL::Initialize(EGL_LINUX_DMA_BUF_EXT,
+                                    static_cast<EGLClientBuffer>(nullptr),
+                                    attrs)) {
+      return false;
+    }
   }
 
-  if (result)
-    pixmap_ = pixmap;
-  return result;
+  pixmap_ = pixmap;
+  return true;
 }
 
 unsigned GLImageOzoneNativePixmap::GetInternalFormat() {
@@ -130,7 +137,7 @@ unsigned GLImageOzoneNativePixmap::GetInternalFormat() {
 }
 
 void GLImageOzoneNativePixmap::Destroy(bool have_context) {
-  GLImageEGL::Destroy(have_context);
+  gl::GLImageEGL::Destroy(have_context);
 }
 
 bool GLImageOzoneNativePixmap::ScheduleOverlayPlane(AcceleratedWidget widget,

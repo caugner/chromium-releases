@@ -18,6 +18,7 @@ import android.os.Handler;
 import android.os.StrictMode;
 import android.os.SystemClock;
 
+import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -63,7 +64,7 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
 
             @Override
             protected void onPostExecute(Account[] accounts) {
-                callback.gotResult(accounts);
+                callback.onResult(accounts);
             }
         }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
@@ -93,13 +94,12 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
     }
 
     @Override
-    public void hasFeatures(Account account, String[] features,
-            final AccountManagerDelegate.Callback<Boolean> callback) {
+    public void hasFeatures(Account account, String[] features, final Callback<Boolean> callback) {
         if (!AccountManagerHelper.get(mApplicationContext).hasGetAccountsPermission()) {
             ThreadUtils.postOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    callback.gotResult(false);
+                    callback.onResult(false);
                 }
             });
             return;
@@ -116,7 +116,7 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
                 } catch (OperationCanceledException e) {
                     Log.e(TAG, "Checking features was cancelled. This should not happen.");
                 }
-                callback.gotResult(hasFeatures);
+                callback.onResult(hasFeatures);
             }
         }, null /* handler */);
     }

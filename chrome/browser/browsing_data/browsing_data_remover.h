@@ -66,7 +66,8 @@ class BrowsingDataRemover
     REMOVE_DOWNLOADS = 1 << 3,
     REMOVE_FILE_SYSTEMS = 1 << 4,
     REMOVE_FORM_DATA = 1 << 5,
-    // In addition to visits, REMOVE_HISTORY removes keywords and last session.
+    // In addition to visits, REMOVE_HISTORY removes keywords, last session and
+    // passwords UI statistics.
     REMOVE_HISTORY = 1 << 6,
     REMOVE_INDEXEDDB = 1 << 7,
     REMOVE_LOCAL_STORAGE = 1 << 8,
@@ -84,6 +85,7 @@ class BrowsingDataRemover
     REMOVE_CACHE_STORAGE = 1 << 18,
 #if defined(OS_ANDROID)
     REMOVE_WEBAPP_DATA = 1 << 19,
+    REMOVE_OFFLINE_PAGE_DATA = 1 << 20,
 #endif
     // The following flag is used only in tests. In normal usage, hosted app
     // data is controlled by the REMOVE_COOKIES flag, applied to the
@@ -91,8 +93,8 @@ class BrowsingDataRemover
     REMOVE_HOSTED_APP_DATA_TESTONLY = 1 << 31,
 
     // "Site data" includes cookies, appcache, file systems, indexedDBs, local
-    // storage, webSQL, service workers, cache storage, plugin data, and web app
-    // data (on Android).
+    // storage, webSQL, service workers, cache storage, plugin data, web app
+    // data (on Android) and statistics about passwords.
     REMOVE_SITE_DATA = REMOVE_APPCACHE | REMOVE_COOKIES | REMOVE_FILE_SYSTEMS |
                        REMOVE_INDEXEDDB |
                        REMOVE_LOCAL_STORAGE |
@@ -104,6 +106,7 @@ class BrowsingDataRemover
                        REMOVE_SITE_USAGE_DATA |
 #if defined(OS_ANDROID)
                        REMOVE_WEBAPP_DATA |
+                       REMOVE_OFFLINE_PAGE_DATA |
 #endif
                        REMOVE_WEBRTC_IDENTITY,
 
@@ -356,6 +359,10 @@ class BrowsingDataRemover
   // Callback for when passwords for the requested time range have been cleared.
   void OnClearedPasswords();
 
+  // Callback for when passwords stats for the requested time range have been
+  // cleared.
+  void OnClearedPasswordsStats();
+
   // Callback for when Cookies has been deleted. Invokes NotifyAndDeleteIfDone.
   void OnClearedCookies(int num_deleted);
 
@@ -396,6 +403,9 @@ class BrowsingDataRemover
 
   // Callback on UI thread when the webapp data has been cleared.
   void OnClearedWebappData();
+
+  // Callback on UI thread when the offline page data has been cleared.
+  void OnClearedOfflinePageData();
 #endif
 
   void OnClearedDomainReliabilityMonitor();
@@ -451,12 +461,14 @@ class BrowsingDataRemover
   bool waiting_for_clear_network_predictor_ = false;
   bool waiting_for_clear_networking_history_ = false;
   bool waiting_for_clear_passwords_ = false;
+  bool waiting_for_clear_passwords_stats_ = false;
   bool waiting_for_clear_platform_keys_ = false;
   bool waiting_for_clear_plugin_data_ = false;
   bool waiting_for_clear_pnacl_cache_ = false;
 #if defined(OS_ANDROID)
   bool waiting_for_clear_precache_history_ = false;
   bool waiting_for_clear_webapp_data_ = false;
+  bool waiting_for_clear_offline_page_data_ = false;
 #endif
   bool waiting_for_clear_storage_partition_data_ = false;
 #if defined(ENABLE_WEBRTC)

@@ -8,7 +8,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -31,14 +30,14 @@ import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
+import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.content.browser.BindingManager;
 import org.chromium.content.browser.ChildProcessConnection;
 import org.chromium.content.browser.ChildProcessLauncher;
 import org.chromium.content.browser.test.util.CallbackHelper;
+import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
 import org.chromium.content_public.browser.AccessibilitySnapshotNode;
-import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.io.InputStream;
@@ -55,7 +54,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * AwContents tests.
  */
-@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwContentsTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
@@ -124,7 +122,7 @@ public class AwContentsTest extends AwTestBase {
         // we fail gracefully and do not crash when APIs are invoked after destruction.
         // Due to the large number of APIs we only test a representative selection here.
         awContents.clearHistory();
-        awContents.loadUrl(new LoadUrlParams("http://www.google.com"));
+        awContents.loadUrl("http://www.google.com");
         awContents.findAllAsync("search");
         assertNull(awContents.getUrl());
         assertFalse(awContents.canGoBack());
@@ -591,9 +589,15 @@ public class AwContentsTest extends AwTestBase {
         public void releaseAllModerateBindings() {}
     }
 
+    /**
+     * Verifies that a child process is actually gets created with WEBVIEW_SANDBOXED_RENDERER flag.
+     */
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @CommandLineFlags.Add({
+            AwSwitches.WEBVIEW_SANDBOXED_RENDERER,
+            ContentSwitches.IPC_SYNC_COMPOSITING})
+    @ParameterizedTest.Set
     public void testSandboxedRendererWorks() throws Throwable {
         MockBindingManager bindingManager = new MockBindingManager();
         ChildProcessLauncher.setBindingManagerForTesting(bindingManager);
@@ -631,12 +635,18 @@ public class AwContentsTest extends AwTestBase {
 
     private float mPageScale;
 
-    private AccessibilitySnapshotNode receiveAccessibilitySnapshot(String data) throws Throwable {
+    private AccessibilitySnapshotNode receiveAccessibilitySnapshot(String data, String js)
+            throws Throwable {
         final AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testView.getAwContents();
         final CallbackHelper loadHelper = mContentsClient.getOnPageFinishedHelper();
+        AwSettings awSettings = getAwSettingsOnUiThread(awContents);
+        awSettings.setJavaScriptEnabled(true);
         if (data != null) {
             loadDataSync(awContents, loadHelper, data, "text/html", false);
+        }
+        if (js != null) {
+            executeJavaScriptAndWaitForResult(awContents, mContentsClient, js);
         }
 
         final AccessibilityCallbackHelper callbackHelper = new AccessibilityCallbackHelper();
@@ -667,7 +677,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshot() throws Throwable {
         final String data = "<button>Click</button>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -682,7 +692,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshotColors() throws Throwable {
         final String data = "<p style=\"color:#123456;background:#abcdef\">color</p>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -699,7 +709,7 @@ public class AwContentsTest extends AwTestBase {
                 "<html><head><style> "
                 + "    body { font-size:11px; }"
                 + "    </style></head><body><p>foo</p></body></html>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -715,7 +725,7 @@ public class AwContentsTest extends AwTestBase {
                 "<html><head><style> "
                 + "    body { font: italic bold 12px Courier; }"
                 + "    </style></head><body><p>foo</p></body></html>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -731,7 +741,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshotStrongStyle() throws Throwable {
         final String data = "<html><body><p>foo</p><p><strong>bar</strong></p></body></html>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(2, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child1 = root.children.get(0);
@@ -749,7 +759,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshotItalicStyle() throws Throwable {
         final String data = "<html><body><i>foo</i></body></html>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -763,7 +773,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshotBoldStyle() throws Throwable {
         final String data = "<html><body><b>foo</b></body></html>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode child = root.children.get(0);
@@ -777,7 +787,7 @@ public class AwContentsTest extends AwTestBase {
     @SmallTest
     public void testRequestAccessibilitySnapshotNoStyle() throws Throwable {
         final String data = "<table><thead></thead></table>";
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, null);
         assertEquals(1, root.children.size());
         assertEquals("", root.text);
         AccessibilitySnapshotNode grandChild = root.children.get(0).children.get(0);
@@ -787,7 +797,116 @@ public class AwContentsTest extends AwTestBase {
     @Feature({"AndroidWebView"})
     @SmallTest
     public void testRequestAccessibilitySnapshotAboutBlank() throws Throwable {
-        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(null);
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(null, null);
         assertEquals(null, root);
     }
+
+    private String getSelectionScript(String node1, int start, String node2, int end) {
+        return "var element1 = document.getElementById('" + node1 + "');"
+                + "var node1 = element1.childNodes.item(0);"
+                + "var range=document.createRange();"
+                + "range.setStart(node1," + start + ");"
+                + "var element2 = document.getElementById('" + node2 + "');"
+                + "var node2 = element2.childNodes.item(0);"
+                + "range.setEnd(node2," + end + ");"
+                + "var selection=window.getSelection();"
+                + "selection.removeAllRanges();"
+                + "selection.addRange(range);";
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testRequestAccessibilitySnapshotOneCharacterSelection() throws Throwable {
+        final String data = "<html><body><b id='node'>foo</b></body></html>";
+
+        AccessibilitySnapshotNode root =
+                receiveAccessibilitySnapshot(data, getSelectionScript("node", 0, "node", 1));
+        assertEquals(1, root.children.size());
+        assertEquals("", root.text);
+        AccessibilitySnapshotNode child = root.children.get(0);
+        AccessibilitySnapshotNode grandchild = child.children.get(0);
+        assertEquals("foo", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(1, grandchild.endSelection);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testRequestAccessibilitySnapshotOneNodeSelection() throws Throwable {
+        final String data = "<html><body><b id='node'>foo</b></body></html>";
+
+        AccessibilitySnapshotNode root =
+                receiveAccessibilitySnapshot(data, getSelectionScript("node", 0, "node", 3));
+        assertEquals(1, root.children.size());
+        assertEquals("", root.text);
+        AccessibilitySnapshotNode child = root.children.get(0);
+        AccessibilitySnapshotNode grandchild = child.children.get(0);
+        assertEquals("foo", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(3, grandchild.endSelection);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testRequestAccessibilitySnapshotSubsequentNodeSelection() throws Throwable {
+        final String data = "<html><body><b id='node1'>foo</b><b id='node2'>bar</b></body></html>";
+
+        AccessibilitySnapshotNode root =
+                receiveAccessibilitySnapshot(data, getSelectionScript("node1", 1, "node2", 1));
+        assertEquals(1, root.children.size());
+        assertEquals("", root.text);
+        AccessibilitySnapshotNode child = root.children.get(0);
+        AccessibilitySnapshotNode grandchild = child.children.get(0);
+        assertEquals("foo", grandchild.text);
+        assertEquals(1, grandchild.startSelection);
+        assertEquals(3, grandchild.endSelection);
+        grandchild = child.children.get(1);
+        assertEquals("bar", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(1, grandchild.endSelection);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testRequestAccessibilitySnapshotMultiNodeSelection() throws Throwable {
+        final String data =
+                "<html><body><b id='node1'>foo</b><b>middle</b><b id='node2'>bar</b></body></html>";
+
+        AccessibilitySnapshotNode root =
+                receiveAccessibilitySnapshot(data, getSelectionScript("node1", 1, "node2", 1));
+        assertEquals(1, root.children.size());
+        assertEquals("", root.text);
+        AccessibilitySnapshotNode child = root.children.get(0);
+        AccessibilitySnapshotNode grandchild = child.children.get(0);
+        assertEquals("foo", grandchild.text);
+        assertEquals(1, grandchild.startSelection);
+        assertEquals(3, grandchild.endSelection);
+        grandchild = child.children.get(1);
+        assertEquals("middle", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(6, grandchild.endSelection);
+        grandchild = child.children.get(2);
+        assertEquals("bar", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(1, grandchild.endSelection);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testRequestAccessibilitySnapshotInputSelection() throws Throwable {
+        final String data = "<html><body><input id='input' value='Hello, world'></body></html>";
+        final String js =  "var input = document.getElementById('input');"
+                + "input.select();"
+                + "input.selectionStart = 0;"
+                + "input.selectionEnd = 5;";
+        AccessibilitySnapshotNode root = receiveAccessibilitySnapshot(data, js);
+        assertEquals(1, root.children.size());
+        assertEquals("", root.text);
+        AccessibilitySnapshotNode child = root.children.get(0);
+        AccessibilitySnapshotNode grandchild = child.children.get(0);
+        assertEquals("Hello, world", grandchild.text);
+        assertEquals(0, grandchild.startSelection);
+        assertEquals(5, grandchild.endSelection);
+    }
+
 }

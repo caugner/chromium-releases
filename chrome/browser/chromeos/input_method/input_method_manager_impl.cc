@@ -23,7 +23,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/input_method/candidate_window_controller.h"
 #include "chrome/browser/chromeos/input_method/component_extension_ime_manager_impl.h"
-#include "chrome/browser/chromeos/input_method/input_method_engine.h"
 #include "chrome/browser/chromeos/input_method/input_method_switch_recorder.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -38,6 +37,7 @@
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_delegate.h"
+#include "ui/base/ime/ime_bridge.h"
 #include "ui/chromeos/ime/input_method_menu_item.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
 #include "ui/keyboard/keyboard_controller.h"
@@ -445,7 +445,7 @@ bool InputMethodManagerImpl::StateImpl::MethodAwaitsExtensionLoad(
 void InputMethodManagerImpl::StateImpl::AddInputMethodExtension(
     const std::string& extension_id,
     const InputMethodDescriptors& descriptors,
-    InputMethodEngineInterface* engine) {
+    ui::IMEEngineHandlerInterface* engine) {
   if (manager_->ui_session_ == STATE_TERMINATING)
     return;
 
@@ -472,7 +472,7 @@ void InputMethodManagerImpl::StateImpl::AddInputMethodExtension(
   if (IsActive()) {
     if (extension_id == extension_ime_util::GetExtensionIDFromInputMethodID(
                             current_input_method.id())) {
-      IMEBridge::Get()->SetCurrentEngineHandler(engine);
+      ui::IMEBridge::Get()->SetCurrentEngineHandler(engine);
       engine->Enable(extension_ime_util::GetComponentIDByInputMethodID(
           current_input_method.id()));
     }
@@ -507,9 +507,9 @@ void InputMethodManagerImpl::StateImpl::RemoveInputMethodExtension(
   extra_input_methods.swap(new_extra_input_methods);
 
   if (IsActive()) {
-    if (IMEBridge::Get()->GetCurrentEngineHandler() ==
+    if (ui::IMEBridge::Get()->GetCurrentEngineHandler() ==
         manager_->engine_map_[profile][extension_id]) {
-      IMEBridge::Get()->SetCurrentEngineHandler(NULL);
+      ui::IMEBridge::Get()->SetCurrentEngineHandler(NULL);
     }
     manager_->engine_map_[profile].erase(extension_id);
   }
@@ -974,7 +974,7 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
 
   if (notify_menu) {
     // Clear property list.  Property list would be updated by
-    // extension IMEs via InputMethodEngine::(Set|Update)MenuItems.
+    // extension IMEs via IMEEngineHandlerInterface::(Set|Update)MenuItems.
     // If the current input method is a keyboard layout, empty
     // properties are sufficient.
     const ui::ime::InputMethodMenuItemList empty_menu_item_list;
@@ -985,8 +985,8 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
   }
 
   // Disable the current engine handler.
-  IMEEngineHandlerInterface* engine =
-      IMEBridge::Get()->GetCurrentEngineHandler();
+  ui::IMEEngineHandlerInterface* engine =
+      ui::IMEBridge::Get()->GetCurrentEngineHandler();
   if (engine)
     engine->Disable();
 
@@ -999,7 +999,7 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
       extension_ime_util::GetComponentIDByInputMethodID(descriptor.id());
   engine = engine_map_[profile][extension_id];
 
-  IMEBridge::Get()->SetCurrentEngineHandler(engine);
+  ui::IMEBridge::Get()->SetCurrentEngineHandler(engine);
 
   if (engine) {
     engine->Enable(component_id);
@@ -1057,8 +1057,8 @@ void InputMethodManagerImpl::ActivateInputMethodMenuItem(
 
   if (ui::ime::InputMethodMenuManager::GetInstance()->
       HasInputMethodMenuItemForKey(key)) {
-    IMEEngineHandlerInterface* engine =
-        IMEBridge::Get()->GetCurrentEngineHandler();
+    ui::IMEEngineHandlerInterface* engine =
+        ui::IMEBridge::Get()->GetCurrentEngineHandler();
     if (engine)
       engine->PropertyActivate(key);
     return;
@@ -1135,8 +1135,8 @@ void InputMethodManagerImpl::InitializeComponentExtensionForTesting(
 }
 
 void InputMethodManagerImpl::CandidateClicked(int index) {
-  IMEEngineHandlerInterface* engine =
-      IMEBridge::Get()->GetCurrentEngineHandler();
+  ui::IMEEngineHandlerInterface* engine =
+      ui::IMEBridge::Get()->GetCurrentEngineHandler();
   if (engine)
     engine->CandidateClicked(index);
 }

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_MOJO_IMPL_H_
 #define CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_MOJO_IMPL_H_
 
+#include <deque>
 #include <map>
 #include <set>
 #include <string>
@@ -24,7 +25,8 @@
 #include "chrome/browser/media/router/issue_manager.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+#include "chrome/browser/media/router/media_routes_observer.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace content {
 class BrowserContext;
@@ -64,13 +66,13 @@ class MediaRouterMojoImpl : public MediaRouter,
       const MediaSource::Id& source_id,
       const MediaSink::Id& sink_id,
       const GURL& origin,
-      int tab_id,
+      content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) override;
   void JoinRoute(
       const MediaSource::Id& source_id,
       const std::string& presentation_id,
       const GURL& origin,
-      int tab_id,
+      content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) override;
   void CloseRoute(const MediaRoute::Id& route_id) override;
   void SendRouteMessage(const MediaRoute::Id& route_id,
@@ -83,6 +85,7 @@ class MediaRouterMojoImpl : public MediaRouter,
   void AddIssue(const Issue& issue) override;
   void ClearIssue(const Issue::Id& issue_id) override;
   void OnPresentationSessionDetached(const MediaRoute::Id& route_id) override;
+  bool HasLocalRoute() const override;
 
   const std::string& media_route_provider_extension_id() const {
     return media_route_provider_extension_id_;
@@ -96,14 +99,64 @@ class MediaRouterMojoImpl : public MediaRouter,
   friend class MediaRouterFactory;
   friend class MediaRouterMojoExtensionTest;
   friend class MediaRouterMojoTest;
-
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest,
                            RegisterAndUnregisterMediaSinksObserver);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest,
+                           RegisterMediaSinksObserverWithAvailabilityChange);
+  FRIEND_TEST_ALL_PREFIXES(
+      MediaRouterMojoImplTest,
+      RegisterAndUnregisterMediaSinksObserverWithAvailabilityChange);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest,
                            RegisterAndUnregisterMediaRoutesObserver);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest, HandleIssue);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoExtensionTest,
                            DeferredBindingAndSuspension);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoExtensionTest,
+                           DrainPendingRequestQueue);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoExtensionTest,
+                           DropOldestPendingRequest);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoExtensionTest,
+                           AttemptedWakeupTooManyTimes);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoExtensionTest,
+                           WakeupFailedDrainsQueue);
+
+  // The max number of pending requests allowed. When number of pending requests
+  // exceeds this number, the oldest request will be dropped.
+  static const int kMaxPendingRequests = 30;
+
+  // Max consecutive attempts to wake up the component extension before
+  // giving up and draining the pending request queue.
+  static const int kMaxWakeupAttemptCount = 3;
+
+  class MediaRouterMediaRoutesObserver :
+      public media_router::MediaRoutesObserver {
+   public:
+    explicit MediaRouterMediaRoutesObserver(MediaRouterMojoImpl* router);
+    ~MediaRouterMediaRoutesObserver() override;
+
+    // media_router::MediaRoutesObserver:
+    void OnRoutesUpdated(const std::vector<media_router::MediaRoute>& routes)
+        override;
+
+   private:
+    MediaRouterMojoImpl* const router_;
+
+    DISALLOW_COPY_AND_ASSIGN(MediaRouterMediaRoutesObserver);
+  };
+
+  // Represents a query to the MRPM for media sinks and holds observers for the
+  // query.
+  struct MediaSinksQuery {
+   public:
+    MediaSinksQuery();
+    ~MediaSinksQuery();
+
+    // True if the query has been sent to the MRPM.  False otherwise.
+    bool is_active = false;
+    base::ObserverList<MediaSinksObserver> observers;
+
+    DISALLOW_COPY_AND_ASSIGN(MediaSinksQuery);
+  };
 
   // Standard constructor, used by
   // MediaRouterMojoImplFactory::GetApiForBrowserContext.
@@ -127,6 +180,10 @@ class MediaRouterMojoImpl : public MediaRouter,
   // Dispatches the Mojo requests queued in |pending_requests_|.
   void ExecutePendingRequests();
 
+  // Drops all pending requests. Called when we have a connection error to
+  // component extension and further reattempts are unlikely to help.
+  void DrainPendingRequests();
+
   // MediaRouter implementation.
   bool RegisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void UnregisterMediaSinksObserver(MediaSinksObserver* observer) override;
@@ -138,6 +195,14 @@ class MediaRouterMojoImpl : public MediaRouter,
       PresentationSessionMessagesObserver* observer) override;
   void UnregisterPresentationSessionMessagesObserver(
       PresentationSessionMessagesObserver* observer) override;
+  void RegisterLocalMediaRoutesObserver(
+      LocalMediaRoutesObserver* observer) override;
+  void UnregisterLocalMediaRoutesObserver(
+      LocalMediaRoutesObserver* observer) override;
+  void RegisterPresentationConnectionStateObserver(
+      PresentationConnectionStateObserver* observer) override;
+  void UnregisterPresentationConnectionStateObserver(
+      PresentationConnectionStateObserver* observer) override;
 
   // These calls invoke methods in the component extension via Mojo.
   void DoCreateRoute(const MediaSource::Id& source_id,
@@ -186,14 +251,46 @@ class MediaRouterMojoImpl : public MediaRouter,
   void OnSinksReceived(const mojo::String& media_source,
                        mojo::Array<interfaces::MediaSinkPtr> sinks) override;
   void OnRoutesUpdated(mojo::Array<interfaces::MediaRoutePtr> routes) override;
+  void OnSinkAvailabilityUpdated(
+      interfaces::MediaRouter::SinkAvailability availability) override;
+  void OnPresentationConnectionStateChanged(
+      const mojo::String& route_id,
+      interfaces::MediaRouter::PresentationConnectionState state) override;
+
+  // Converts the callback result of calling Mojo CreateRoute()/JoinRoute()
+  // into a local callback.
+  void RouteResponseReceived(
+    const std::string& presentation_id,
+    const std::vector<MediaRouteResponseCallback>& callbacks,
+    interfaces::MediaRoutePtr media_route,
+    const mojo::String& error_text);
+
+  void UpdateHasLocalRoute(bool has_local_route);
+
+  // Callback invoked by |event_page_tracker_| after an attempt to wake the
+  // component extension. If |success| is false, the pending request queue is
+  // drained.
+  void EventPageWakeComplete(bool success);
+
+  // Removes all requests from the pending requests queue. Called when there is
+  // a permanent error connecting to component extension.
+  void DrainRequestQueue();
+
+  // Calls to |event_page_tracker_| to wake the component extension.
+  // |media_route_provider_extension_id_| must not be empty and the extension
+  // should be currently suspended.
+  // If there have already been too many wakeup attempts, give up and drain
+  // the pending request queue.
+  void AttemptWakeEventPage();
 
   // Pending requests queued to be executed once component extension
   // becomes ready.
-  std::vector<base::Closure> pending_requests_;
+  std::deque<base::Closure> pending_requests_;
 
-  base::ScopedPtrHashMap<MediaSource::Id,
-                         scoped_ptr<base::ObserverList<MediaSinksObserver>>>
-      sinks_observers_;
+  base::ScopedPtrHashMap<MediaSource::Id, scoped_ptr<MediaSinksQuery>>
+      sinks_queries_;
+
+  base::ObserverList<LocalMediaRoutesObserver> local_routes_observers_;
 
   base::ObserverList<MediaRoutesObserver> routes_observers_;
 
@@ -202,11 +299,18 @@ class MediaRouterMojoImpl : public MediaRouter,
   base::ScopedPtrHashMap<MediaRoute::Id,
                          scoped_ptr<PresentationSessionMessagesObserverList>>
       messages_observers_;
+
   // IDs of MediaRoutes being listened for messages. Note that this is
   // different from |message_observers_| because we might be waiting for
   // |OnRouteMessagesReceived()| to be invoked after all observers for that
   // route have been removed.
   std::set<MediaRoute::Id> route_ids_listening_for_messages_;
+
+  using PresentationConnectionStateObserverList =
+      base::ObserverList<PresentationConnectionStateObserver>;
+  base::ScopedPtrHashMap<MediaRoute::Id,
+                         scoped_ptr<PresentationConnectionStateObserverList>>
+      presentation_connection_state_observers_;
 
   IssueManager issue_manager_;
 
@@ -234,7 +338,21 @@ class MediaRouterMojoImpl : public MediaRouter,
   // therefore stale.
   std::string instance_id_;
 
+  // Set to true if there are routes started on this instance.
+  bool has_local_route_;
+
+  // Observes local routes in order to notify LocalMediaRoutesObservers when
+  // there are no more local routes.
+  scoped_ptr<MediaRoutesObserver> routes_observer_;
+
+  // The last reported sink availability from the media route provider manager.
+  interfaces::MediaRouter::SinkAvailability availability_;
+
+  int wakeup_attempt_count_;
+
   base::ThreadChecker thread_checker_;
+
+  base::WeakPtrFactory<MediaRouterMojoImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterMojoImpl);
 };

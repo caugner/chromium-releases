@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/threading/thread_checker.h"
+#include "components/history/core/browser/history_backend_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_data.h"
@@ -33,7 +34,8 @@ class HistoryBackend;
 class TypedUrlSyncableServiceTest;
 class URLRow;
 
-class TypedUrlSyncableService : public syncer::SyncableService {
+class TypedUrlSyncableService : public syncer::SyncableService,
+                                public history::HistoryBackendObserver {
  public:
   explicit TypedUrlSyncableService(HistoryBackend* history_backend);
   ~TypedUrlSyncableService() override;
@@ -52,10 +54,19 @@ class TypedUrlSyncableService : public syncer::SyncableService {
       const tracked_objects::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
-  // Called directly by HistoryBackend when local url data changes.
-  void OnUrlsModified(URLRows* changed_urls);
-  void OnUrlVisited(ui::PageTransition transition, URLRow* row);
-  void OnUrlsDeleted(bool all_history, bool expired, URLRows* rows);
+  // history::HistoryBackendObserver:
+  void OnURLVisited(history::HistoryBackend* history_backend,
+                    ui::PageTransition transition,
+                    const history::URLRow& row,
+                    const history::RedirectList& redirects,
+                    base::Time visit_time) override;
+  void OnURLsModified(history::HistoryBackend* history_backend,
+                      const history::URLRows& changed_urls) override;
+  void OnURLsDeleted(history::HistoryBackend* history_backend,
+                     bool all_history,
+                     bool expired,
+                     const history::URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
 
  private:
   friend class TypedUrlSyncableServiceTest;
@@ -142,7 +153,7 @@ class TypedUrlSyncableService : public syncer::SyncableService {
   // notification. We use this to throttle the number of sync changes we send
   // to the server so we don't hit the server for every
   // single typed URL visit.
-  bool ShouldSyncVisit(ui::PageTransition transition, URLRow* row);
+  bool ShouldSyncVisit(int typed_count, ui::PageTransition transition);
 
   // Utility routine that either updates an existing sync node or creates a
   // new one for the passed |typed_url| if one does not already exist. Returns
@@ -176,6 +187,29 @@ class TypedUrlSyncableService : public syncer::SyncableService {
   // Returns false if we could not fetch the visits for the passed URL, and
   // tracks DB error statistics internally for reporting via UMA.
   virtual bool FixupURLAndGetVisits(URLRow* url, VisitVector* visits);
+
+  // Given a typed URL in the sync DB, looks for an existing entry in the
+  // local history DB and generates a list of visits to add to the
+  // history DB to bring it up to date (avoiding duplicates).
+  // Updates the passed |visits_to_add| and |visits_to_remove| vectors with the
+  // visits to add to/remove from the history DB, and adds a new entry to either
+  // |updated_urls| or |new_urls| depending on whether the URL already existed
+  // in the history DB.
+  void UpdateFromSyncDB(const sync_pb::TypedUrlSpecifics& typed_url,
+                        TypedUrlVisitVector* visits_to_add,
+                        history::VisitVector* visits_to_remove,
+                        history::URLRows* updated_urls,
+                        history::URLRows* new_urls);
+
+  // Diffs the set of visits between the history DB and the sync DB, using the
+  // sync DB as the canonical copy. Result is the set of |new_visits| and
+  // |removed_visits| that can be applied to the history DB to make it match
+  // the sync DB version. |removed_visits| can be null if the caller does not
+  // care about which visits to remove.
+  static void DiffVisits(const history::VisitVector& history_visits,
+                         const sync_pb::TypedUrlSpecifics& sync_specifics,
+                         std::vector<history::VisitInfo>* new_visits,
+                         history::VisitVector* removed_visits);
 
   // TODO(sync): Consider using "delete all" sync logic instead of in-memory
   // cache of typed urls. See http://crbug.com/231689.

@@ -31,6 +31,12 @@ from telemetry.internal.browser import browser_finder
 from telemetry.internal.browser import browser_options
 from telemetry.internal.util import binary_manager
 from telemetry.internal.util import command_line
+from telemetry.internal.util import ps_util
+from telemetry import project_config
+
+
+# TODO(aiolos): Remove this once clients move over to project_config version.
+ProjectConfig = project_config.ProjectConfig
 
 
 def _IsBenchmarkEnabled(benchmark_class, possible_browser):
@@ -63,6 +69,9 @@ def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
 
   print >> output_pipe, 'Available benchmarks %sare:' % (
       'for %s ' % possible_browser.browser_type if possible_browser else '')
+
+  # Sort the benchmarks by benchmark name.
+  benchmarks = sorted(benchmarks, key=lambda b: b.Name())
   for b in benchmarks:
     if not possible_browser or _IsBenchmarkEnabled(b, possible_browser):
       print >> output_pipe, format_string % (b.Name(), b.Description())
@@ -78,40 +87,6 @@ def PrintBenchmarkList(benchmarks, possible_browser, output_pipe=sys.stdout):
   print >> output_pipe, (
       'Pass --browser to list benchmarks for another browser.\n')
 
-
-class ProjectConfig(object):
-  """Contains information about the benchmark runtime environment.
-
-  Attributes:
-    top_level_dir: A dir that contains benchmark, page test, and/or story
-        set dirs and associated artifacts.
-    benchmark_dirs: A list of dirs containing benchmarks.
-    benchmark_aliases: A dict of name:alias string pairs to be matched against
-        exactly during benchmark selection.
-    client_config: A path to a ProjectDependencies json file.
-  """
-  def __init__(self, top_level_dir, benchmark_dirs=None,
-               benchmark_aliases=None, client_config=None):
-    self._top_level_dir = top_level_dir
-    self._benchmark_dirs = benchmark_dirs or []
-    self._benchmark_aliases = benchmark_aliases or dict()
-    self._client_config = client_config or ''
-
-  @property
-  def top_level_dir(self):
-    return self._top_level_dir
-
-  @property
-  def benchmark_dirs(self):
-    return self._benchmark_dirs
-
-  @property
-  def benchmark_aliases(self):
-    return self._benchmark_aliases
-
-  @property
-  def client_config(self):
-    return self._client_config
 
 class Help(command_line.OptparseCommand):
   """Display help information about a command"""
@@ -167,7 +142,7 @@ class List(command_line.OptparseCommand):
   def Run(self, args):
     possible_browser = browser_finder.FindBrowser(args)
     if args.browser_type in (
-        'exact', 'release', 'release_x64', 'debug', 'debug_x64', 'canary'):
+        'release', 'release_x64', 'debug', 'debug_x64', 'canary'):
       args.browser_type = 'reference'
       possible_reference_browser = browser_finder.FindBrowser(args)
     else:
@@ -387,6 +362,8 @@ def _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
 
 
 def main(environment):
+  ps_util.EnableListingStrayProcessesUponExitHook()
+
   # Get the command name from the command line.
   if len(sys.argv) > 1 and sys.argv[1] == '--help':
     sys.argv[1] = 'help'
@@ -421,7 +398,12 @@ def main(environment):
   # Parse and run the command.
   parser = command.CreateParser()
   command.AddCommandLineArgs(parser, environment)
+
+  # Set the default chrome root variable.
+  parser.set_defaults(chrome_root=environment.default_chrome_root)
+
   options, args = parser.parse_args()
+
   if commands:
     args = args[1:]
   options.positional_args = args

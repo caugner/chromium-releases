@@ -53,6 +53,7 @@ WHITELISTED_LICENSES = [
 
     # TODO(phajdan.jr): Make licensecheck not print BSD-like twice.
     'BSD-like MIT/X11 (BSD like)',
+    'BSD MIT/X11 (BSD like)',
 
     'BSL (v1.0)',
     'FreeType (BSD like)',
@@ -137,7 +138,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'native_client/toolchain': [
         'BSD GPL (v2 or later)',
-        'BSD MIT/X11 (BSD like)',
         'BSD (2 clause) GPL (v2 or later)',
         'BSD (3 clause) GPL (v2 or later)',
         'BSD (4 clause) ISC',
@@ -151,6 +151,14 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'GPL (v3 or later)',
         'MPL (v1.1) LGPL (unversioned/unknown version)',
     ],
+
+    # The project is BSD-licensed but the individual files do not have
+    # consistent license headers. Also, this is just used in a utility
+    # and not shipped. https://github.com/waylan/Python-Markdown/issues/435
+    'third_party/Python-Markdown': [
+        'UNKNOWN',
+    ],
+
     'third_party/WebKit': [
         'UNKNOWN',
     ],
@@ -218,6 +226,65 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'third_party/catapult/dashboard/third_party/graphy': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/GoogleCloudPlatform/gsutil/issues/305
+    ('third_party/catapult/third_party/gsutil/gslib/third_party/'
+     'storage_apitools'): [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/google/apitools/issues/63
+    'third_party/catapult/third_party/gsutil/third_party/apitools': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/boto/boto/issues/3373
+    'third_party/catapult/third_party/gsutil/third_party/boto': [
+        'UNKNOWN',
+    ],
+
+    # https://bitbucket.org/cmcqueen1975/crcmod/issues/1/please-add-per-file-licenses
+    # Includes third_party/catapult/third_party/gsutil/third_party/crcmod_osx.
+    'third_party/catapult/third_party/gsutil/third_party/crcmod': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/jcgregorio/httplib2/issues/307
+    'third_party/catapult/third_party/gsutil/third_party/httplib2': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/google/oauth2client/issues/331
+    'third_party/catapult/third_party/gsutil/third_party/oauth2client': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/google/protorpc/issues/14
+    'third_party/catapult/third_party/gsutil/third_party/protorpc': [
+        'UNKNOWN',
+    ],
+
+    # https://sourceforge.net/p/pyasn1/tickets/4/
+    # Includes
+    # third_party/catapult/third_party/gsutil/third_party/pyasn1-modules.
+    'third_party/catapult/third_party/gsutil/third_party/pyasn1': [
+        'UNKNOWN',
+    ],
+
+    # https://github.com/pnpnpn/retry-decorator/issues/4
+    'third_party/catapult/third_party/gsutil/third_party/retry-decorator': [
+        'UNKNOWN',
+    ],
+
+    # https://bitbucket.org/sybren/python-rsa/issues/28/please-add-per-file-licenses
+    'third_party/catapult/third_party/gsutil/third_party/rsa': [
+        'UNKNOWN',
+    ],
+
+    # https://bitbucket.org/gutworth/six/issues/137/please-add-per-file-licenses
+    'third_party/catapult/third_party/gsutil/third_party/six': [
         'UNKNOWN',
     ],
 
@@ -391,6 +458,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/modp_b64': [
         'UNKNOWN',
     ],
+    # Missing license headers in openh264 sources: https://github.com/cisco/openh264/issues/2233
+    'third_party/openh264/src': [
+        'UNKNOWN',
+    ],
     'third_party/openmax_dl/dl' : [
         'Khronos Group',
     ],
@@ -535,7 +606,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     # Not shipped, downloaded on trybots sometimes.
     'tools/telemetry/third_party/gsutil': [
-        'BSD MIT/X11 (BSD like)',
         'UNKNOWN',
     ],
     # Not shipped, MIT license but the header files contain no licensing info.

@@ -93,19 +93,19 @@ class SiteEngagementScoreTest : public testing::Test {
 };
 
 // Accumulate score many times on the same day. Ensure each time the score goes
-// up by kNavigationPoints, but not more than kMaxPointsPerDay.
+// up by g_navigation_points, but not more than g_max_points_per_day.
 TEST_F(SiteEngagementScoreTest, AccumulateOnSameDay) {
   base::Time reference_time = GetReferenceTime();
 
   test_clock_.SetNow(reference_time);
   for (int i = 0; i < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++i) {
-    score_.AddPoints(SiteEngagementScore::kNavigationPoints);
-    EXPECT_EQ(std::min(SiteEngagementScore::kMaxPointsPerDay,
-                       (i + 1) * SiteEngagementScore::kNavigationPoints),
+    score_.AddPoints(SiteEngagementScore::g_navigation_points);
+    EXPECT_EQ(std::min(SiteEngagementScore::g_max_points_per_day,
+                       (i + 1) * SiteEngagementScore::g_navigation_points),
               score_.Score());
   }
 
-  EXPECT_EQ(SiteEngagementScore::kMaxPointsPerDay, score_.Score());
+  EXPECT_EQ(SiteEngagementScore::g_max_points_per_day, score_.Score());
 }
 
 // Accumulate on the first day to max that day's engagement, then accumulate on
@@ -116,21 +116,21 @@ TEST_F(SiteEngagementScoreTest, AccumulateOnTwoDays) {
 
   test_clock_.SetNow(reference_time);
   for (int i = 0; i < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++i)
-    score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+    score_.AddPoints(SiteEngagementScore::g_navigation_points);
 
-  EXPECT_EQ(SiteEngagementScore::kMaxPointsPerDay, score_.Score());
+  EXPECT_EQ(SiteEngagementScore::g_max_points_per_day, score_.Score());
 
   test_clock_.SetNow(later_date);
   for (int i = 0; i < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++i) {
-    score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+    score_.AddPoints(SiteEngagementScore::g_navigation_points);
     double day_score =
-        std::min(SiteEngagementScore::kMaxPointsPerDay,
-                 (i + 1) * SiteEngagementScore::kNavigationPoints);
-    EXPECT_EQ(day_score + SiteEngagementScore::kMaxPointsPerDay,
+        std::min(SiteEngagementScore::g_max_points_per_day,
+                 (i + 1) * SiteEngagementScore::g_navigation_points);
+    EXPECT_EQ(day_score + SiteEngagementScore::g_max_points_per_day,
               score_.Score());
   }
 
-  EXPECT_EQ(2 * SiteEngagementScore::kMaxPointsPerDay, score_.Score());
+  EXPECT_EQ(2 * SiteEngagementScore::g_max_points_per_day, score_.Score());
 }
 
 // Accumulate score on many consecutive days and ensure the score doesn't exceed
@@ -142,10 +142,10 @@ TEST_F(SiteEngagementScoreTest, AccumulateALotOnManyDays) {
     current_day += base::TimeDelta::FromDays(1);
     test_clock_.SetNow(current_day);
     for (int j = 0; j < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++j)
-      score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+      score_.AddPoints(SiteEngagementScore::g_navigation_points);
 
     EXPECT_EQ(std::min(SiteEngagementScore::kMaxPoints,
-                       (i + 1) * SiteEngagementScore::kMaxPointsPerDay),
+                       (i + 1) * SiteEngagementScore::g_max_points_per_day),
               score_.Score());
   }
 
@@ -162,12 +162,12 @@ TEST_F(SiteEngagementScoreTest, AccumulateALittleOnManyDays) {
     test_clock_.SetNow(current_day);
 
     for (int j = 0; j < kLessAccumulationsThanNeededToMaxDailyEngagement; ++j)
-      score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+      score_.AddPoints(SiteEngagementScore::g_navigation_points);
 
     EXPECT_EQ(
         std::min(SiteEngagementScore::kMaxPoints,
                  (i + 1) * kLessAccumulationsThanNeededToMaxDailyEngagement *
-                     SiteEngagementScore::kNavigationPoints),
+                     SiteEngagementScore::g_navigation_points),
         score_.Score());
   }
 
@@ -184,42 +184,43 @@ TEST_F(SiteEngagementScoreTest, ScoresDecayOverTime) {
     test_clock_.SetNow(current_day);
 
     for (int j = 0; j < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++j)
-      score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+      score_.AddPoints(SiteEngagementScore::g_navigation_points);
   }
 
   EXPECT_EQ(SiteEngagementScore::kMaxPoints, score_.Score());
 
   // The score should not have decayed before the first decay period has
   // elapsed.
-  test_clock_.SetNow(
-      current_day +
-      base::TimeDelta::FromDays(SiteEngagementScore::kDecayPeriodInDays - 1));
+  test_clock_.SetNow(current_day +
+                     base::TimeDelta::FromDays(
+                         SiteEngagementScore::g_decay_period_in_days - 1));
   EXPECT_EQ(SiteEngagementScore::kMaxPoints, score_.Score());
 
   // The score should have decayed by one chunk after one decay period has
   // elapsed.
   test_clock_.SetNow(
       current_day +
-      base::TimeDelta::FromDays(SiteEngagementScore::kDecayPeriodInDays));
-  EXPECT_EQ(SiteEngagementScore::kMaxPoints - SiteEngagementScore::kDecayPoints,
-            score_.Score());
+      base::TimeDelta::FromDays(SiteEngagementScore::g_decay_period_in_days));
+  EXPECT_EQ(
+      SiteEngagementScore::kMaxPoints - SiteEngagementScore::g_decay_points,
+      score_.Score());
 
   // The score should have decayed by the right number of chunks after a few
   // decay periods have elapsed.
   test_clock_.SetNow(
       current_day +
       base::TimeDelta::FromDays(kLessPeriodsThanNeededToDecayMaxScore *
-                                SiteEngagementScore::kDecayPeriodInDays));
+                                SiteEngagementScore::g_decay_period_in_days));
   EXPECT_EQ(SiteEngagementScore::kMaxPoints -
                 kLessPeriodsThanNeededToDecayMaxScore *
-                    SiteEngagementScore::kDecayPoints,
+                    SiteEngagementScore::g_decay_points,
             score_.Score());
 
   // The score should not decay below zero.
   test_clock_.SetNow(
       current_day +
       base::TimeDelta::FromDays(kMorePeriodsThanNeededToDecayMaxScore *
-                                SiteEngagementScore::kDecayPeriodInDays));
+                                SiteEngagementScore::g_decay_period_in_days));
   EXPECT_EQ(0, score_.Score());
 }
 
@@ -233,27 +234,27 @@ TEST_F(SiteEngagementScoreTest, DecaysAppliedBeforeAdd) {
     test_clock_.SetNow(current_day);
 
     for (int j = 0; j < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++j)
-      score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+      score_.AddPoints(SiteEngagementScore::g_navigation_points);
   }
 
   double initial_score = kLessDaysThanNeededToMaxTotalEngagement *
-                         SiteEngagementScore::kMaxPointsPerDay;
+                         SiteEngagementScore::g_max_points_per_day;
   EXPECT_EQ(initial_score, score_.Score());
 
   // Go forward a few decay periods.
   test_clock_.SetNow(
       current_day +
       base::TimeDelta::FromDays(kLessPeriodsThanNeededToDecayMaxScore *
-                                SiteEngagementScore::kDecayPeriodInDays));
+                                SiteEngagementScore::g_decay_period_in_days));
 
-  double decayed_score =
-      initial_score -
-      kLessPeriodsThanNeededToDecayMaxScore * SiteEngagementScore::kDecayPoints;
+  double decayed_score = initial_score -
+                         kLessPeriodsThanNeededToDecayMaxScore *
+                             SiteEngagementScore::g_decay_points;
   EXPECT_EQ(decayed_score, score_.Score());
 
   // Now add some points.
-  score_.AddPoints(SiteEngagementScore::kNavigationPoints);
-  EXPECT_EQ(decayed_score + SiteEngagementScore::kNavigationPoints,
+  score_.AddPoints(SiteEngagementScore::g_navigation_points);
+  EXPECT_EQ(decayed_score + SiteEngagementScore::g_navigation_points,
             score_.Score());
 }
 
@@ -263,25 +264,25 @@ TEST_F(SiteEngagementScoreTest, GoBackInTime) {
 
   test_clock_.SetNow(current_day);
   for (int i = 0; i < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++i)
-    score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+    score_.AddPoints(SiteEngagementScore::g_navigation_points);
 
-  EXPECT_EQ(SiteEngagementScore::kMaxPointsPerDay, score_.Score());
+  EXPECT_EQ(SiteEngagementScore::g_max_points_per_day, score_.Score());
 
   // Adding to the score on an earlier date should be treated like another day,
   // and should not cause any decay.
   test_clock_.SetNow(current_day - base::TimeDelta::FromDays(
                                        kMorePeriodsThanNeededToDecayMaxScore *
-                                       SiteEngagementScore::kDecayPoints));
+                                       SiteEngagementScore::g_decay_points));
   for (int i = 0; i < kMoreAccumulationsThanNeededToMaxDailyEngagement; ++i) {
-    score_.AddPoints(SiteEngagementScore::kNavigationPoints);
+    score_.AddPoints(SiteEngagementScore::g_navigation_points);
     double day_score =
-        std::min(SiteEngagementScore::kMaxPointsPerDay,
-                 (i + 1) * SiteEngagementScore::kNavigationPoints);
-    EXPECT_EQ(day_score + SiteEngagementScore::kMaxPointsPerDay,
+        std::min(SiteEngagementScore::g_max_points_per_day,
+                 (i + 1) * SiteEngagementScore::g_navigation_points);
+    EXPECT_EQ(day_score + SiteEngagementScore::g_max_points_per_day,
               score_.Score());
   }
 
-  EXPECT_EQ(2 * SiteEngagementScore::kMaxPointsPerDay, score_.Score());
+  EXPECT_EQ(2 * SiteEngagementScore::g_max_points_per_day, score_.Score());
 }
 
 // Test that scores are read / written correctly from / to empty score
@@ -505,6 +506,13 @@ TEST_F(SiteEngagementServiceTest, GetTotalUserInputPoints) {
   service->HandleUserInput(url1, SiteEngagementMetrics::ENGAGEMENT_MOUSE);
   EXPECT_DOUBLE_EQ(0.15, service->GetScore(url1));
   EXPECT_DOUBLE_EQ(0.3, service->GetTotalEngagementPoints());
+
+  service->HandleUserInput(url2, SiteEngagementMetrics::ENGAGEMENT_WHEEL);
+  service->HandleUserInput(url3,
+                           SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE);
+  EXPECT_DOUBLE_EQ(0.15, service->GetScore(url2));
+  EXPECT_DOUBLE_EQ(0.1, service->GetScore(url3));
+  EXPECT_DOUBLE_EQ(0.4, service->GetTotalEngagementPoints());
 }
 
 TEST_F(SiteEngagementServiceTest, CheckHistograms) {
@@ -545,6 +553,7 @@ TEST_F(SiteEngagementServiceTest, CheckHistograms) {
   service->HandleNavigation(url1, ui::PAGE_TRANSITION_TYPED);
   service->HandleUserInput(url1, SiteEngagementMetrics::ENGAGEMENT_KEYPRESS);
   service->HandleUserInput(url1, SiteEngagementMetrics::ENGAGEMENT_MOUSE);
+  service->HandleMediaPlaying(url2, true);
 
   histograms.ExpectTotalCount(SiteEngagementMetrics::kTotalEngagementHistogram,
                               1);
@@ -564,13 +573,16 @@ TEST_F(SiteEngagementServiceTest, CheckHistograms) {
   histograms.ExpectUniqueSample(
       SiteEngagementMetrics::kPercentOriginsWithMaxEngagementHistogram, 0, 1);
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              3);
+                              4);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_MOUSE, 1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_MEDIA_HIDDEN,
+                               1);
 
   clock->SetNow(GetReferenceTime() + base::TimeDelta::FromMinutes(59));
 
@@ -578,18 +590,23 @@ TEST_F(SiteEngagementServiceTest, CheckHistograms) {
   service->HandleNavigation(url2, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
 
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              5);
+                              6);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 3);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_MOUSE, 1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_MEDIA_HIDDEN,
+                               1);
 
   clock->SetNow(GetReferenceTime() + base::TimeDelta::FromMinutes(60));
 
   service->HandleNavigation(url3, ui::PAGE_TRANSITION_TYPED);
-  service->HandleUserInput(url2, SiteEngagementMetrics::ENGAGEMENT_MOUSE);
+  service->HandleUserInput(url2,
+                           SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE);
+  service->HandleMediaPlaying(url3, false);
 
   histograms.ExpectTotalCount(SiteEngagementMetrics::kTotalEngagementHistogram,
                               2);
@@ -611,28 +628,42 @@ TEST_F(SiteEngagementServiceTest, CheckHistograms) {
   histograms.ExpectUniqueSample(
       SiteEngagementMetrics::kPercentOriginsWithMaxEngagementHistogram, 0, 2);
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              7);
+                              9);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 4);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_MOUSE, 2);
+                               SiteEngagementMetrics::ENGAGEMENT_MOUSE, 1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE,
+                               1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_MEDIA_VISIBLE,
+                               1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_MEDIA_HIDDEN,
+                               1);
 
   service->HandleNavigation(url1, ui::PAGE_TRANSITION_GENERATED);
   service->HandleNavigation(url1, ui::PAGE_TRANSITION_TYPED);
-  service->HandleUserInput(url2, SiteEngagementMetrics::ENGAGEMENT_KEYPRESS);
+  service->HandleUserInput(url2, SiteEngagementMetrics::ENGAGEMENT_WHEEL);
   service->HandleUserInput(url1, SiteEngagementMetrics::ENGAGEMENT_KEYPRESS);
   service->HandleUserInput(url3, SiteEngagementMetrics::ENGAGEMENT_MOUSE);
 
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              12);
+                              14);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 6);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 3);
+                               SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 2);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_MOUSE, 3);
+                               SiteEngagementMetrics::ENGAGEMENT_MOUSE, 2);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE,
+                               1);
+  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
+                               SiteEngagementMetrics::ENGAGEMENT_WHEEL, 1);
 
   // Advance an origin to the max for a day and advance the clock an hour before
   // the last increment before max. Expect the histogram to be updated.
@@ -663,14 +694,10 @@ TEST_F(SiteEngagementServiceTest, CheckHistograms) {
   histograms.ExpectUniqueSample(
       SiteEngagementMetrics::kPercentOriginsWithMaxEngagementHistogram, 0, 3);
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              19);
+                              21);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION,
                                13);
-  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_KEYPRESS, 3);
-  histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_MOUSE, 3);
 }
 
 // Expect that sites that have reached zero engagement are cleaned up.
@@ -707,7 +734,7 @@ TEST_F(SiteEngagementServiceTest, CleanupEngagementScores) {
     // will not have decayed at all.
     clock->SetNow(
         GetReferenceTime() +
-        base::TimeDelta::FromDays(SiteEngagementScore::kDecayPeriodInDays));
+        base::TimeDelta::FromDays(SiteEngagementScore::g_decay_period_in_days));
 
     std::map<GURL, double> score_map = service->GetScoreMap();
     EXPECT_EQ(2u, score_map.size());
@@ -725,9 +752,9 @@ TEST_F(SiteEngagementServiceTest, CleanupEngagementScores) {
   {
     // Decay the other origin to zero by advancing time and expect the
     // engagement score to be cleaned up.
-    clock->SetNow(
-        GetReferenceTime() +
-        base::TimeDelta::FromDays(3 * SiteEngagementScore::kDecayPeriodInDays));
+    clock->SetNow(GetReferenceTime() +
+                  base::TimeDelta::FromDays(
+                      3 * SiteEngagementScore::g_decay_period_in_days));
 
     std::map<GURL, double> score_map = service->GetScoreMap();
     EXPECT_EQ(1u, score_map.size());
@@ -739,6 +766,45 @@ TEST_F(SiteEngagementServiceTest, CleanupEngagementScores) {
     EXPECT_EQ(0u, score_map.size());
     EXPECT_EQ(0, service->GetScore(url1));
   }
+}
+
+// Expect that history can be cleared for given origins.
+TEST_F(SiteEngagementServiceTest, ClearHistoryForURLs) {
+  SiteEngagementService* service =
+      SiteEngagementServiceFactory::GetForProfile(profile());
+
+  GURL url1("https://www.google.com/");
+  GURL url2("http://www.google.com/");
+  GURL url3("http://www.example.com/");
+
+  EXPECT_EQ(0u, service->GetScoreMap().size());
+
+  service->AddPoints(url1, 5.0);
+  EXPECT_EQ(5.0, service->GetScore(url1));
+  service->AddPoints(url2, 5.0);
+  EXPECT_EQ(5.0, service->GetScore(url2));
+  service->AddPoints(url3, 5.0);
+  EXPECT_EQ(5.0, service->GetScore(url3));
+  EXPECT_EQ(3u, service->GetScoreMap().size());
+
+  // Delete 2 of the origins, leaving one left.
+  std::set<GURL> origins_to_clear;
+  origins_to_clear.insert(url1);
+  origins_to_clear.insert(url3);
+
+  SiteEngagementService::ClearHistoryForURLs(profile(), origins_to_clear);
+
+  std::map<GURL, double> score_map = service->GetScoreMap();
+  EXPECT_EQ(1u, score_map.size());
+  EXPECT_DOUBLE_EQ(5.0, score_map[url2]);
+
+  // Ensure nothing bad happens when URLs in the clear list are not in the site
+  // engagement service.
+  SiteEngagementService::ClearHistoryForURLs(profile(), origins_to_clear);
+
+  score_map = service->GetScoreMap();
+  EXPECT_EQ(1u, score_map.size());
+  EXPECT_DOUBLE_EQ(5.0, score_map[url2]);
 }
 
 TEST_F(SiteEngagementServiceTest, NavigationAccumulation) {

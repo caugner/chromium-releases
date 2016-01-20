@@ -4,10 +4,10 @@
 
 #include "net/websockets/websocket_test_util.h"
 
+#include <stddef.h>
 #include <algorithm>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -18,20 +18,21 @@
 namespace net {
 
 namespace {
-const uint64 kA =
-    (static_cast<uint64>(0x5851f42d) << 32) + static_cast<uint64>(0x4c957f2d);
-const uint64 kC = 12345;
-const uint64 kM = static_cast<uint64>(1) << 48;
+
+const uint64_t kA = (static_cast<uint64_t>(0x5851f42d) << 32) +
+                    static_cast<uint64_t>(0x4c957f2d);
+const uint64_t kC = 12345;
+const uint64_t kM = static_cast<uint64_t>(1) << 48;
 
 }  // namespace
 
-LinearCongruentialGenerator::LinearCongruentialGenerator(uint32 seed)
+LinearCongruentialGenerator::LinearCongruentialGenerator(uint32_t seed)
     : current_(seed) {}
 
-uint32 LinearCongruentialGenerator::Generate() {
-  uint64 result = current_;
+uint32_t LinearCongruentialGenerator::Generate() {
+  uint64_t result = current_;
   current_ = (current_ * kA + kC) % kM;
-  return static_cast<uint32>(result >> 16);
+  return static_cast<uint32_t>(result >> 16);
 }
 
 std::string WebSocketStandardRequest(const std::string& path,

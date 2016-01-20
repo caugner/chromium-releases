@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_UI_CONTROLLER_H_
 #define CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_UI_CONTROLLER_H_
 
+#include <vector>
+
 #include "base/memory/scoped_vector.h"
 #include "base/timer/elapsed_timer.h"
 #include "chrome/browser/ui/passwords/manage_passwords_state.h"
@@ -24,7 +26,7 @@ struct CredentialInfo;
 class PasswordFormManager;
 }
 
-class ManagePasswordsIcon;
+class ManagePasswordsIconView;
 
 // Per-tab class to control the Omnibox password icon and bubble.
 class ManagePasswordsUIController
@@ -73,10 +75,6 @@ class ManagePasswordsUIController
   void OnPasswordAutofilled(const autofill::PasswordFormMap& password_form_map,
                             const GURL& origin);
 
-  // TODO(vasilii): remove this method. It's obsolete.
-  void OnBlacklistBlockedAutofill(
-      const autofill::PasswordFormMap& password_form_map);
-
   // PasswordStore::Observer implementation.
   void OnLoginsChanged(
       const password_manager::PasswordStoreChangeList& changes) override;
@@ -102,10 +100,6 @@ class ManagePasswordsUIController
   // state, and will state in this state.
   virtual void NeverSavePassword();
 
-  // Called from the model. The controller should switch to MANAGE_STATE and pop
-  // up a bubble.
-  virtual void ManageAccounts();
-
   // Open a new tab, pointing to the password manager settings page.
   virtual void NavigateToPasswordManagerSettingsPage();
 
@@ -122,7 +116,7 @@ class ManagePasswordsUIController
 #if !defined(OS_ANDROID)
   // Set the state of the Omnibox icon, and possibly show the associated bubble
   // without user interaction.
-  virtual void UpdateIconAndBubbleState(ManagePasswordsIcon* icon);
+  virtual void UpdateIconAndBubbleState(ManagePasswordsIconView* icon);
 #endif
 
   // Called from the model when the bubble is displayed.
@@ -130,6 +124,12 @@ class ManagePasswordsUIController
 
   // Called from the model when the bubble is hidden.
   void OnBubbleHidden();
+
+  // Called when the user chose not to update password.
+  void OnNopeUpdateClicked();
+
+  // Called when the user didn't interact with Update UI.
+  void OnNoInteractionOnUpdate();
 
   virtual password_manager::ui::State state() const;
 

@@ -178,8 +178,9 @@ class NavigationURLLoaderTest : public testing::Test {
   scoped_ptr<NavigationURLLoader> MakeTestLoader(
       const GURL& url,
       NavigationURLLoaderDelegate* delegate) {
-    BeginNavigationParams begin_params(
-        "GET", std::string(), net::LOAD_NORMAL, false);
+    BeginNavigationParams begin_params("GET", std::string(), net::LOAD_NORMAL,
+                                       false, false,
+                                       REQUEST_CONTEXT_TYPE_LOCATION);
     CommonNavigationParams common_params;
     common_params.url = url;
     scoped_ptr<NavigationRequestInfo> request_info(
@@ -187,7 +188,7 @@ class NavigationURLLoaderTest : public testing::Test {
                                   -1, scoped_refptr<ResourceRequestBody>()));
 
     return NavigationURLLoader::Create(browser_context_.get(),
-                                       request_info.Pass(), delegate);
+                                       request_info.Pass(), nullptr, delegate);
   }
 
   // Helper function for fetching the body of a URL to a string.

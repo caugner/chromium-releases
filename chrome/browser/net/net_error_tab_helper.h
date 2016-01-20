@@ -48,7 +48,7 @@ class NetErrorTabHelper
   }
 
   // content::WebContentsObserver implementation.
-  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
+  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
 
   void DidStartNavigationToPendingEntry(
       const GURL& url,
@@ -101,6 +101,15 @@ class NetErrorTabHelper
   // Shows the diagnostics dialog after its been sanitized, virtual for
   // testing.
   virtual void RunNetworkDiagnosticsHelper(const std::string& sanitized_url);
+
+  // Relates to offline pages handling.
+#if defined(OS_ANDROID)
+  void SetOfflinePageInfo(content::RenderFrameHost* render_frame_host,
+                          const GURL& url);
+  void ShowOfflinePages();
+  void LoadOfflineCopy(const GURL& url);
+  bool IsFromErrorPage() const;
+#endif  // defined(OS_ANDROID)
 
   // True if the last provisional load that started was for an error page.
   bool is_error_page_;

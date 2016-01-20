@@ -34,10 +34,12 @@ using content::WebUIMessageHandler;
 using ui::WebDialogDelegate;
 
 namespace {
-const int kMaxHeight = 300;
-#if !defined(OS_MACOSX)
+#if defined(OS_MACOSX)
+const int kFixedHeight = 265;
+#else
+const int kMaxHeight = 400;
 const int kMinHeight = 80;
-#endif  // !defined(OS_MACOSX)
+#endif
 const int kWidth = 340;
 }
 
@@ -49,7 +51,8 @@ namespace {
 // will look like.
 class MediaRouterDialogDelegate : public WebDialogDelegate {
  public:
-  explicit MediaRouterDialogDelegate(base::WeakPtr<MediaRouterAction> action) {}
+  explicit MediaRouterDialogDelegate(base::WeakPtr<MediaRouterAction> action)
+      : action_(action) {}
   ~MediaRouterDialogDelegate() override {}
 
   // WebDialogDelegate implementation.
@@ -93,10 +96,6 @@ class MediaRouterDialogDelegate : public WebDialogDelegate {
     return false;
   }
 
-  void SetAction(const base::WeakPtr<MediaRouterAction>& action) {
-    action_ = action;
-  }
-
  private:
   base::WeakPtr<MediaRouterAction> action_;
 
@@ -107,7 +106,7 @@ void MediaRouterDialogDelegate::GetDialogSize(gfx::Size* size) const {
   DCHECK(size);
   // TODO(apacible): Remove after autoresizing is implemented for OSX.
 #if defined(OS_MACOSX)
-  *size = gfx::Size(kWidth, kMaxHeight);
+  *size = gfx::Size(kWidth, kFixedHeight);
 #else
   // size is not used because the dialog is auto-resizeable.
   *size = gfx::Size();
@@ -191,11 +190,6 @@ void MediaRouterDialogControllerImpl::CloseMediaRouterDialog() {
     if (media_router_ui)
       media_router_ui->Close();
   }
-
-  // If there was no dialog to be closed, the action icon should not have been
-  // pressed and this would be a no-op.
-  if (action_)
-    action_->OnPopupHidden();
 }
 
 void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
@@ -243,9 +237,6 @@ void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
 void MediaRouterDialogControllerImpl::Reset() {
   MediaRouterDialogController::Reset();
   dialog_observer_.reset();
-
-  if (action_)
-    action_->OnPopupHidden();
 }
 
 void MediaRouterDialogControllerImpl::OnDialogNavigated(
@@ -285,18 +276,18 @@ void MediaRouterDialogControllerImpl::PopulateDialog(
     return;
   }
 
-  scoped_ptr<CreatePresentationSessionRequest> presentation_request(
-      TakePresentationRequest());
+  scoped_ptr<CreatePresentationConnectionRequest> create_connection_request(
+      TakeCreateConnectionRequest());
   // TODO(imcheng): Don't create PresentationServiceDelegateImpl if it doesn't
   // exist (crbug.com/508695).
   base::WeakPtr<PresentationServiceDelegateImpl> delegate =
       PresentationServiceDelegateImpl::GetOrCreateForWebContents(initiator())
           ->GetWeakPtr();
-  if (!presentation_request.get()) {
+  if (!create_connection_request.get()) {
     media_router_ui->InitWithDefaultMediaSource(delegate);
   } else {
     media_router_ui->InitWithPresentationSessionRequest(
-        initiator(), delegate, presentation_request.Pass());
+        initiator(), delegate, create_connection_request.Pass());
   }
 }
 

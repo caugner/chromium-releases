@@ -2,11 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import cloud_storage_test_base
-import gpu_rasterization_expectations
-import optparse
+from gpu_tests import cloud_storage_test_base
+from gpu_tests import gpu_rasterization_expectations
 import page_sets
 
+from telemetry.page import page_test
 from telemetry.util import image_util
 
 
@@ -32,10 +32,13 @@ def _DidTestSucceed(tab):
 
 class GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
   def CustomizeBrowserOptions(self, options):
+    # --test-type=gpu is used only to suppress the "Google API Keys are missing"
+    # infobar, which causes flakiness in tests.
     options.AppendExtraBrowserArgs(['--enable-threaded-compositing',
                                     '--enable-impl-side-painting',
                                     '--force-gpu-rasterization',
-                                    '--enable-gpu-benchmarking'])
+                                    '--enable-gpu-benchmarking',
+                                    '--test-type=gpu'])
 
   def ValidateAndMeasurePage(self, page, tab, results):
     if not _DidTestSucceed(tab):
@@ -67,6 +70,9 @@ class GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
 class GpuRasterization(cloud_storage_test_base.TestBase):
   """Tests that GPU rasterization produces valid content"""
   test = GpuRasterizationValidator
+
+  def __init__(self, max_failures=None):
+    super(GpuRasterization, self).__init__(max_failures=max_failures)
 
   @classmethod
   def Name(cls):

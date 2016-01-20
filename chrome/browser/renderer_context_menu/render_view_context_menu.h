@@ -119,6 +119,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendAudioItems();
   void AppendCanvasItems();
   void AppendVideoItems();
+  void AppendMediaItems();
   void AppendPluginItems();
   void AppendPageItems();
   void AppendCopyItem();
@@ -168,6 +169,8 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // a text selection.
   GURL selection_navigation_url_;
 
+  ui::SimpleMenuModel profile_link_submenu_model_;
+  bool multiple_profiles_open_;
   ui::SimpleMenuModel protocol_handler_submenu_model_;
   ProtocolHandlerRegistry* protocol_handler_registry_;
 

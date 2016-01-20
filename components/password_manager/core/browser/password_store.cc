@@ -15,6 +15,8 @@
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_syncable_service.h"
+#include "components/password_manager/core/browser/statistics_table.h"
+#include "url/origin.h"
 
 using autofill::PasswordForm;
 
@@ -61,7 +63,7 @@ void PasswordStore::GetLoginsRequest::NotifyConsumerWithResults(
 }
 
 void PasswordStore::GetLoginsRequest::NotifyWithSiteStatistics(
-    scoped_ptr<InteractionsStats> stats) {
+    ScopedVector<InteractionsStats> stats) {
   origin_task_runner_->PostTask(
       FROM_HERE, base::Bind(&PasswordStoreConsumer::OnGetSiteStatistics,
                             consumer_weak_, base::Passed(&stats)));
@@ -109,6 +111,15 @@ void PasswordStore::RemoveLogin(const PasswordForm& form) {
   ScheduleTask(base::Bind(&PasswordStore::RemoveLoginInternal, this, form));
 }
 
+void PasswordStore::RemoveLoginsByOriginAndTime(
+    const url::Origin& origin,
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
+  ScheduleTask(base::Bind(&PasswordStore::RemoveLoginsByOriginAndTimeInternal,
+                          this, origin, delete_begin, delete_end, completion));
+}
+
 void PasswordStore::RemoveLoginsCreatedBetween(
     base::Time delete_begin,
     base::Time delete_end,
@@ -121,6 +132,15 @@ void PasswordStore::RemoveLoginsSyncedBetween(base::Time delete_begin,
                                               base::Time delete_end) {
   ScheduleTask(base::Bind(&PasswordStore::RemoveLoginsSyncedBetweenInternal,
                           this, delete_begin, delete_end));
+}
+
+void PasswordStore::RemoveStatisticsCreatedBetween(
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
+  ScheduleTask(
+      base::Bind(&PasswordStore::RemoveStatisticsCreatedBetweenInternal, this,
+                 delete_begin, delete_end, completion));
 }
 
 void PasswordStore::TrimAffiliationCache() {
@@ -333,6 +353,18 @@ void PasswordStore::UpdateLoginWithPrimaryKeyInternal(
   NotifyLoginsChanged(all_changes);
 }
 
+void PasswordStore::RemoveLoginsByOriginAndTimeInternal(
+    const url::Origin& origin,
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
+  PasswordStoreChangeList changes =
+      RemoveLoginsByOriginAndTimeImpl(origin, delete_begin, delete_end);
+  NotifyLoginsChanged(changes);
+  if (!completion.is_null())
+    main_thread_runner_->PostTask(FROM_HERE, completion);
+}
+
 void PasswordStore::RemoveLoginsCreatedBetweenInternal(
     base::Time delete_begin,
     base::Time delete_end,
@@ -349,6 +381,15 @@ void PasswordStore::RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
   PasswordStoreChangeList changes =
       RemoveLoginsSyncedBetweenImpl(delete_begin, delete_end);
   NotifyLoginsChanged(changes);
+}
+
+void PasswordStore::RemoveStatisticsCreatedBetweenInternal(
+    base::Time delete_begin,
+    base::Time delete_end,
+    const base::Closure& completion) {
+  RemoveStatisticsCreatedBetweenImpl(delete_begin, delete_end);
+  if (!completion.is_null())
+    main_thread_runner_->PostTask(FROM_HERE, completion);
 }
 
 void PasswordStore::GetAutofillableLoginsImpl(
@@ -543,6 +584,18 @@ void PasswordStore::InitSyncableService(
 void PasswordStore::DestroySyncableService() {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   syncable_service_.reset();
+}
+
+// No-op implementation of RemoveLoginsByOriginAndTimeImpl to please the
+// compiler on derived classes that have not yet provided an implementation on
+// their own.
+// TODO(ttr314@googlemail.com): Once crbug.com/113973 is done, remove default
+// implementation and mark method as pure virtual.
+PasswordStoreChangeList PasswordStore::RemoveLoginsByOriginAndTimeImpl(
+    const url::Origin& origin,
+    base::Time delete_begin,
+    base::Time delete_end) {
+  return PasswordStoreChangeList();
 }
 
 }  // namespace password_manager

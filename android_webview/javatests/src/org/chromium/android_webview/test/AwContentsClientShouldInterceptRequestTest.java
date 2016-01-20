@@ -4,7 +4,6 @@
 
 package org.chromium.android_webview.test;
 
-import android.os.Build;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 
@@ -14,8 +13,8 @@ import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.TestFileUtil;
+import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnReceivedErrorHelper;
 import org.chromium.net.test.util.TestWebServer;
@@ -34,7 +33,6 @@ import java.util.concurrent.CountDownLatch;
 /**
  * Tests for the WebViewClient.shouldInterceptRequest() method.
  */
-@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwContentsClientShouldInterceptRequestTest extends AwTestBase {
 
     private static class ShouldInterceptRequestClient extends TestAwContentsClient {
@@ -226,6 +224,8 @@ public class AwContentsClientShouldInterceptRequestTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    // Run in single-process mode only. Blocked by software draws support crbug.com/545611.
+    @ParameterizedTest.Set
     public void testCalledWithCorrectHasUserGestureParam() throws Throwable {
         final String aboutPageUrl = addAboutPageToTestServer(mWebServer);
         final String pageWithLinkUrl = addPageToTestServer(mWebServer, "/page_with_link.html",

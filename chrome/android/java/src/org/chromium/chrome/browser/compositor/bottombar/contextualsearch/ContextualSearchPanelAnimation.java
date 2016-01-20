@@ -9,8 +9,8 @@ import static org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Ani
 import android.content.Context;
 import android.view.animation.Interpolator;
 
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.PanelState;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animation;
@@ -36,12 +36,12 @@ public abstract class ContextualSearchPanelAnimation extends ContextualSearchPan
      * The base duration of animations in milliseconds. This value is based on
      * the Kennedy specification for slow animations.
      */
-    private static final long BASE_ANIMATION_DURATION_MS = 218;
+    protected static final long BASE_ANIMATION_DURATION_MS = 218;
 
     /**
      * The maximum animation duration in milliseconds.
      */
-    private static final long MAXIMUM_ANIMATION_DURATION_MS = 350;
+    static final long MAXIMUM_ANIMATION_DURATION_MS = 350;
 
     /**
      * The minimum animation duration in milliseconds.
@@ -97,25 +97,14 @@ public abstract class ContextualSearchPanelAnimation extends ContextualSearchPan
     }
 
     // ============================================================================================
-    // Custom Animations
+    // Animation API
     // ============================================================================================
-
-    /**
-     * Updates the UI state for the SearchBar text. The search context view will fade out
-     * while the search term fades in.
-     *
-     * @param percentage The visibility percentage of the search term view.
-     */
-    protected abstract void updateSearchBarTextOpacity(float percentage);
 
     /**
      * Notifies that the acceptance animation has finished.
      */
-    protected abstract void onPromoAcceptanceAnimationFinished();
-
-    // ============================================================================================
-    // Animation API
-    // ============================================================================================
+    protected void onPromoAcceptanceAnimationFinished() {
+    }
 
     /**
      * Animates the Contextual Search Panel to its maximized state.
@@ -157,13 +146,21 @@ public abstract class ContextualSearchPanelAnimation extends ContextualSearchPan
 
     @Override
     protected void closePanel(StateChangeReason reason, boolean animate) {
-        if (!mIsAnimatingPanelClosing) {
-            if (animate) {
-                mIsAnimatingPanelClosing = true;
-                animatePanelToState(PanelState.CLOSED, reason);
+        // If close without animation is called while the panel is already animating closed, cancel
+        // the animation and finish closing immediately.
+        if (mIsAnimatingPanelClosing) {
+            if (!animate) {
+                cancelAnimation(this, Property.PANEL_HEIGHT);
             } else {
-                resizePanelToState(PanelState.CLOSED, reason);
+                return;
             }
+        }
+
+        if (animate) {
+            mIsAnimatingPanelClosing = true;
+            animatePanelToState(PanelState.CLOSED, reason);
+        } else {
+            resizePanelToState(PanelState.CLOSED, reason);
         }
     }
 
@@ -266,7 +263,7 @@ public abstract class ContextualSearchPanelAnimation extends ContextualSearchPan
         // maximized so this project state change is not needed.
         if (projectedState == PanelState.MAXIMIZED
                 && getPanelState() == PanelState.PEEKED
-                && isPromoVisible() && isFullscreenSizePanel()) {
+                && isPromoVisible()) {
             projectedState = PanelState.EXPANDED;
         }
 
@@ -382,8 +379,6 @@ public abstract class ContextualSearchPanelAnimation extends ContextualSearchPan
             setPanelHeight(value);
         } else if (prop == Property.PROMO_VISIBILITY) {
             setPromoVisibilityForOptInAnimation(value);
-        } else if (prop == Property.BOTTOM_BAR_TEXT_VISIBILITY) {
-            updateSearchBarTextOpacity(value);
         }
     }
 

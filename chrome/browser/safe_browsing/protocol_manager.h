@@ -37,6 +37,8 @@ class URLFetcher;
 class URLRequestContextGetter;
 }  // namespace net
 
+namespace safe_browsing {
+
 class SBProtocolManagerFactory;
 class SafeBrowsingProtocolManagerDelegate;
 
@@ -377,12 +379,6 @@ class SafeBrowsingProtocolManager : public net::URLFetcherDelegate,
   // ForceScheduleNextUpdate() is called. This is set for testing purpose.
   bool disable_auto_update_;
 
-#if defined(OS_ANDROID)
-  // When true, protocol_manager will not check network connection
-  // type when scheduling next update. This is set for testing purpose.
-  bool disable_connection_check_;
-#endif
-
   // ID for URLFetchers for testing.
   int url_fetcher_id_;
 
@@ -444,5 +440,7 @@ class SafeBrowsingProtocolManagerDelegate {
   virtual void DeleteChunks(
       scoped_ptr<std::vector<SBChunkDelete> > chunk_deletes) = 0;
 };
+
+}  // namespace safe_browsing
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_PROTOCOL_MANAGER_H_

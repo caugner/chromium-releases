@@ -24,7 +24,7 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/bookmark_change_processor.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/await_match_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
@@ -37,11 +37,13 @@
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/sync_bookmarks/bookmark_change_processor.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -127,7 +129,7 @@ class FaviconChangeObserver : public bookmarks::BookmarkModelObserver {
                                   const BookmarkNode* node) override {
     if (model == model_ && node == node_) {
       if (!wait_for_load_ || (wait_for_load_ && node->is_favicon_loaded()))
-        base::MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->QuitWhenIdle();
     }
   }
 
@@ -260,8 +262,10 @@ void SetFaviconImpl(Profile* profile,
       favicon_service->SetFavicons(
           node->url(), icon_url, favicon_base::FAVICON, image);
     } else {
+      ProfileSyncService* pss =
+          ProfileSyncServiceFactory::GetForProfile(profile);
       browser_sync::BookmarkChangeProcessor::ApplyBookmarkFavicon(
-          node, profile, icon_url, image.As1xPNGBytes());
+          node, pss->GetSyncClient(), icon_url, image.As1xPNGBytes());
     }
 
     // Wait for the favicon for |node| to be invalidated.

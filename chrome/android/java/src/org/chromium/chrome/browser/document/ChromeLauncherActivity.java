@@ -27,10 +27,10 @@ import android.text.TextUtils;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.CommandLineInitUtil;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.ChromeCommandLineInitUtil;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.IntentHandler.TabOpenType;
@@ -85,7 +85,7 @@ public class ChromeLauncherActivity extends Activity
     static final String ACTION_CLOSE_ALL_INCOGNITO =
             "com.google.android.apps.chrome.document.CLOSE_ALL_INCOGNITO";
 
-    private static final String TAG = "cr.document.CLActivity";
+    private static final String TAG = "document_CLActivity";
 
     /** New instance should be launched in the foreground. */
     public static final int LAUNCH_MODE_FOREGROUND = 0;
@@ -114,7 +114,7 @@ public class ChromeLauncherActivity extends Activity
 
     private IntentHandler mIntentHandler;
     private boolean mIsInMultiInstanceMode;
-    private boolean mIsFinishNeeded;
+    private boolean mIsFinishDelayed;
 
     private boolean mIsCustomTabIntent;
 
@@ -145,7 +145,7 @@ public class ChromeLauncherActivity extends Activity
         // time at which the intent was received.
         IntentHandler.addTimestampToIntent(getIntent());
         // Initialize the command line in case we've disabled document mode from there.
-        ChromeCommandLineInitUtil.initChromeCommandLine(this);
+        CommandLineInitUtil.initCommandLine(this, ChromeApplication.COMMAND_LINE_FILE);
 
         // Read partner browser customizations information asynchronously.
         // We want to initialize early because when there is no tabs to restore, we should possibly
@@ -205,7 +205,7 @@ public class ChromeLauncherActivity extends Activity
 
         // Launch a DocumentActivity to handle the Intent.
         handleDocumentActivityIntent();
-        if (!mIsFinishNeeded) ApiCompatibilityUtils.finishAndRemoveTask(this);
+        if (!mIsFinishDelayed) ApiCompatibilityUtils.finishAndRemoveTask(this);
     }
 
     @Override
@@ -225,7 +225,7 @@ public class ChromeLauncherActivity extends Activity
                     finish();
                 } else if (FeatureUtilities.isDocumentMode(this)) {
                     handleDocumentActivityIntent();
-                    if (!mIsFinishNeeded) ApiCompatibilityUtils.finishAndRemoveTask(this);
+                    if (!mIsFinishDelayed) ApiCompatibilityUtils.finishAndRemoveTask(this);
                 } else {
                     launchTabbedMode();
                     finish();
@@ -302,7 +302,7 @@ public class ChromeLauncherActivity extends Activity
     private void handleDocumentActivityIntent() {
         if (getIntent() == null || mIntentHandler.shouldIgnoreIntent(this, getIntent())) {
             Log.e(TAG, "Ignoring intent: " + getIntent());
-            mIsFinishNeeded = true;
+            mIsFinishDelayed = false;
             return;
         }
 
@@ -376,7 +376,7 @@ public class ChromeLauncherActivity extends Activity
 
         // Launch the default page asynchronously because the homepage URL needs to be queried.
         // This is obviously not ideal, but we don't have a choice.
-        mIsFinishNeeded = mIsInMultiInstanceMode;
+        mIsFinishDelayed = mIsInMultiInstanceMode;
         PartnerBrowserCustomizations.setOnInitializeAsyncFinished(new Runnable() {
             @Override
             public void run() {
@@ -390,7 +390,7 @@ public class ChromeLauncherActivity extends Activity
                         mIsInMultiInstanceMode ? LAUNCH_MODE_FOREGROUND : LAUNCH_MODE_RETARGET);
                 launchDocumentInstance(ChromeLauncherActivity.this, false, asyncParams);
 
-                if (mIsFinishNeeded) finish();
+                if (mIsFinishDelayed) finish();
             }
         }, INITIAL_DOCUMENT_ACTIVITY_LAUNCH_TIMEOUT_MS);
     }

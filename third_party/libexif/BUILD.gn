@@ -19,7 +19,12 @@ if (!is_linux || is_chromeos) {
     }
   }
 
-  shared_library("libexif") {
+  loadable_module("libexif") {
+    if (is_mac) {
+      # Matches the output from GYP.
+      output_name = "exif"
+    }
+
     sources = [
       "sources/libexif/canon/exif-mnote-data-canon.c",
       "sources/libexif/canon/mnote-canon-entry.c",

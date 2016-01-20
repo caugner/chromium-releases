@@ -436,8 +436,6 @@ cr.define('options', function() {
         $('set-as-default-browser').onclick = function(event) {
           chrome.send('becomeDefaultBrowser');
         };
-
-        $('auto-launch').onclick = this.handleAutoLaunchChanged_;
       }
 
       // Privacy section.
@@ -520,7 +518,12 @@ cr.define('options', function() {
 
         $('enable-bluetooth').onchange = function(event) {
           var state = $('enable-bluetooth').checked;
-          chrome.send('bluetoothEnableChange', [Boolean(state)]);
+          chrome.bluetoothPrivate.setAdapterState({powered: state}, function() {
+            if (chrome.runtime.lastError) {
+              console.error('Error enabling bluetooth:',
+                            chrome.runtime.lastError.message);
+            }
+          });
         };
 
         $('bluetooth-reconnect-device').onclick = function(event) {
@@ -1321,16 +1324,6 @@ cr.define('options', function() {
       return url.replace(/^http:\/\//, '');
     },
 
-   /**
-    * Shows the autoLaunch preference and initializes its checkbox value.
-    * @param {boolean} enabled Whether autolaunch is enabled or or not.
-    * @private
-    */
-    updateAutoLaunchState_: function(enabled) {
-      $('auto-launch-option').hidden = false;
-      $('auto-launch').checked = enabled;
-    },
-
     /**
      * Called when the value of the download.default_directory preference
      * changes.
@@ -1420,14 +1413,6 @@ cr.define('options', function() {
         var selection = engineSelect.options[selectedIndex];
         chrome.send('setDefaultSearchEngine', [String(selection.value)]);
       }
-    },
-
-   /**
-     * Sets or clear whether Chrome should Auto-launch on computer startup.
-     * @private
-     */
-    handleAutoLaunchChanged_: function() {
-      chrome.send('toggleAutoLaunch', [$('auto-launch').checked]);
     },
 
     /**
@@ -1711,7 +1696,6 @@ cr.define('options', function() {
     handleAddBluetoothDevice_: function() {
       chrome.send('coreOptionsUserMetricsAction',
                   ['Options_BluetoothShowAddDevice']);
-      chrome.send('findBluetoothDevices');
       PageManager.showPageByName('bluetooth', false);
     },
 
@@ -2063,16 +2047,16 @@ cr.define('options', function() {
     },
 
     /**
-     * Adds an element to the list of available Bluetooth devices. If an element
-     * with a matching address is found, the existing element is updated.
-     * @param {{name: string,
-     *          address: string,
-     *          paired: boolean,
-     *          connected: boolean}} device
-     *     Decription of the Bluetooth device.
+     * Process a bluetooth pairing event. event.device will be added to the list
+     * of available Bluetooth devices or updated if a device with a matching
+     * |address| property exists. If event.pairing is defined and not empty, the
+     * pairing dialog will be shown (if not already visible) and the event will
+     * be processed.
+     * @param {!BluetoothPairingEvent} event
      * @private
      */
-    addBluetoothDevice_: function(device) {
+    bluetoothPairingEvent_: function(event) {
+      var device = event.device;
       var list = $('bluetooth-unpaired-devices-list');
       // Display the "connecting" (already paired or not yet paired) and the
       // paired devices in the same list.
@@ -2094,8 +2078,8 @@ cr.define('options', function() {
 
       // One device can be in the process of pairing.  If found, display
       // the Bluetooth pairing overlay.
-      if (device.pairing)
-        BluetoothPairing.showDialog(device);
+      if (event.pairing)
+        BluetoothPairing.showDialog(event);
     },
 
     /**
@@ -2165,9 +2149,9 @@ cr.define('options', function() {
     },
   };
 
-  //Forward public APIs to private implementations.
+  // Forward public APIs to private implementations.
   cr.makePublic(BrowserOptions, [
-    'addBluetoothDevice',
+    'bluetoothPairingEvent',
     'deleteCurrentProfile',
     'enableCertificateButton',
     'enableDisplaySettings',
@@ -2213,7 +2197,6 @@ cr.define('options', function() {
     'showTouchpadControls',
     'toggleExtensionIndicators',
     'updateAccountPicture',
-    'updateAutoLaunchState',
     'updateDefaultBrowserState',
     'updateEasyUnlock',
     'updateManagesSupervisedUsers',

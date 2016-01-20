@@ -76,10 +76,6 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
     return 17;
   }
 
-  bool ShouldLeaveOffsetNearTopBorder() const override {
-    return !IsMaximized();
-  }
-
   gfx::Size GetBrowserViewMinimumSize() const override {
     // Taken from a calculation in BrowserViewLayout.
     return gfx::Size(168, 64);
@@ -113,7 +109,7 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   bool IsTabStripVisible() const override { return window_title_.empty(); }
 
   int GetTabStripHeight() const override {
-    return IsTabStripVisible() ? Tab::GetMinimumUnselectedSize().height() : 0;
+    return IsTabStripVisible() ? Tab::GetMinimumInactiveSize().height() : 0;
   }
 
   gfx::Size GetTabstripPreferredSize() const override {

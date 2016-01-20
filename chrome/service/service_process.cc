@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/base_switches.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/command_line.h"
@@ -263,8 +264,8 @@ void ServiceProcess::Shutdown() {
 }
 
 void ServiceProcess::Terminate() {
-  main_message_loop_->task_runner()->PostTask(FROM_HERE,
-                                              base::MessageLoop::QuitClosure());
+  main_message_loop_->task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 void ServiceProcess::OnShutdown() {

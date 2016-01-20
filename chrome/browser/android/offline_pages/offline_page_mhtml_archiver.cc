@@ -4,11 +4,14 @@
 
 #include "chrome/browser/android/offline_pages/offline_page_mhtml_archiver.h"
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/sha1.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/filename_util.h"
@@ -19,17 +22,9 @@ const base::FilePath::CharType kMHTMLExtension[] = FILE_PATH_LITERAL("mhtml");
 const base::FilePath::CharType kDefaultFileName[] =
     FILE_PATH_LITERAL("offline_page");
 const char kMHTMLFileNameExtension[] = ".mhtml";
-
-base::FilePath GenerateFileName(GURL url, base::string16 title) {
-  return net::GenerateFileName(url,
-                               std::string(),             // content disposition
-                               std::string(),             // charset
-                               base::UTF16ToUTF8(title),  // suggested name
-                               std::string(),             // mime-type
-                               kDefaultFileName)
-      .AddExtension(kMHTMLExtension);
-}
-
+const char kFileNameComponentsSeparator[] = "-";
+const char kReplaceChars[] = " ";
+const char kReplaceWith[] = "_";
 }  // namespace
 
 // static
@@ -37,19 +32,37 @@ std::string OfflinePageMHTMLArchiver::GetFileNameExtension() {
     return kMHTMLFileNameExtension;
 }
 
+// static
+base::FilePath OfflinePageMHTMLArchiver::GenerateFileName(
+    const GURL& url,
+    const std::string& title) {
+  std::string url_hash = base::SHA1HashString(url.spec());
+  base::Base64Encode(url_hash, &url_hash);
+  std::string suggested_name(url.host() + kFileNameComponentsSeparator + title +
+                             kFileNameComponentsSeparator + url_hash);
+
+  // Substitute spaces out from title.
+  base::ReplaceChars(suggested_name, kReplaceChars, kReplaceWith,
+                     &suggested_name);
+
+  return net::GenerateFileName(url,
+                               std::string(),  // content disposition
+                               std::string(),  // charset
+                               suggested_name,
+                               std::string(),  // mime-type
+                               kDefaultFileName)
+      .AddExtension(kMHTMLExtension);
+}
+
 OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver(
-    content::WebContents* web_contents,
-    const base::FilePath& archive_dir)
-    : archive_dir_(archive_dir),
-      web_contents_(web_contents),
+    content::WebContents* web_contents)
+    : web_contents_(web_contents),
       weak_ptr_factory_(this) {
   DCHECK(web_contents_);
 }
 
-OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver(
-    const base::FilePath& archive_dir)
-    : archive_dir_(archive_dir),
-      web_contents_(nullptr),
+OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver()
+    : web_contents_(nullptr),
       weak_ptr_factory_(this) {
 }
 
@@ -57,16 +70,18 @@ OfflinePageMHTMLArchiver::~OfflinePageMHTMLArchiver() {
 }
 
 void OfflinePageMHTMLArchiver::CreateArchive(
+    const base::FilePath& archives_dir,
     const CreateArchiveCallback& callback) {
   DCHECK(callback_.is_null());
   DCHECK(!callback.is_null());
   callback_ = callback;
 
-  GenerateMHTML();
+  GenerateMHTML(archives_dir);
 }
 
-void OfflinePageMHTMLArchiver::GenerateMHTML() {
-  if (archive_dir_.empty()) {
+void OfflinePageMHTMLArchiver::GenerateMHTML(
+    const base::FilePath& archives_dir) {
+  if (archives_dir.empty()) {
     DVLOG(1) << "Archive path was empty. Can't create archive.";
     ReportFailure(ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED);
     return;
@@ -84,16 +99,13 @@ void OfflinePageMHTMLArchiver::GenerateMHTML() {
     return;
   }
 
-  DoGenerateMHTML();
-}
-
-void OfflinePageMHTMLArchiver::DoGenerateMHTML() {
   // TODO(fgorski): Figure out if the actual URL can be different at
   // the end of MHTML generation. Perhaps we should pull it out after the MHTML
   // is generated.
   GURL url(web_contents_->GetLastCommittedURL());
   base::string16 title(web_contents_->GetTitle());
-  base::FilePath file_path(archive_dir_.Append(GenerateFileName(url, title)));
+  base::FilePath file_path(
+      archives_dir.Append(GenerateFileName(url, base::UTF16ToUTF8(title))));
 
   web_contents_->GenerateMHTML(
       file_path, base::Bind(&OfflinePageMHTMLArchiver::OnGenerateMHTMLDone,

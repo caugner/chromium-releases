@@ -5,6 +5,7 @@
 #include "chrome/browser/download/notification/download_item_notification.h"
 
 #include "base/files/file_util.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
@@ -14,10 +15,12 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/notifications/profile_notification.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/mime_util/mime_util.h"
+#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -31,6 +34,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/bytes_formatting.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
@@ -163,7 +167,9 @@ DownloadItemNotification::DownloadItemNotification(
     content::DownloadItem* item,
     DownloadNotificationManagerForProfile* manager)
     : item_(item),
+      message_center_(manager->message_center()),
       weak_factory_(this) {
+
   // Creates the notification instance. |title|, |body| and |icon| will be
   // overridden by UpdateNotificationData() below.
   notification_.reset(new Notification(
@@ -181,6 +187,8 @@ DownloadItemNotification::DownloadItemNotification(
   notification_->set_progress(0);
   notification_->set_never_timeout(false);
   notification_->set_adjust_icon(false);
+
+  Update();
 }
 
 DownloadItemNotification::~DownloadItemNotification() {
@@ -197,11 +205,10 @@ bool DownloadItemNotification::HasNotificationClickedListener() {
 }
 
 void DownloadItemNotification::OnNotificationClose() {
-  visible_ = false;
-
   if (item_ && item_->IsDangerous() && !item_->IsDone()) {
     content::RecordAction(
         UserMetricsAction("DownloadNotification.Close_Dangerous"));
+    closed_ = true;  // Should be set before cancelling the download.
     item_->Cancel(true /* by_user */);
     return;
   }
@@ -312,7 +319,7 @@ void DownloadItemNotification::CloseNotificationByUser() {
   // MessageCenter instance.
   // Note that: this calling has no side-effect even when the message center
   // is not opened.
-  g_browser_process->message_center()->RemoveNotification(
+  message_center_->RemoveNotification(
       notification_id_in_message_center, true /* by_user */);
 }
 
@@ -329,13 +336,11 @@ void DownloadItemNotification::Update() {
        (download_state == content::DownloadItem::INTERRUPTED &&
         previous_download_state_ != content::DownloadItem::INTERRUPTED));
 
-  if (visible_) {
+  if (IsNotificationVisible() && !closed_) {
     UpdateNotificationData(popup ? UPDATE_AND_POPUP : UPDATE);
   } else {
-    if (show_next_ || popup) {
+    if (show_next_ || popup)
       UpdateNotificationData(ADD);
-      visible_ = true;
-    }
   }
 
   show_next_ = false;
@@ -352,12 +357,13 @@ void DownloadItemNotification::UpdateNotificationData(
 
   notification_->set_title(GetTitle());
   notification_->set_message(GetStatusString());
-  notification_->set_priority(message_center::DEFAULT_PRIORITY);
 
   if (item_->IsDangerous()) {
     notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
     if (!model.MightBeMalicious())
       notification_->set_priority(message_center::HIGH_PRIORITY);
+    else
+      notification_->set_priority(message_center::DEFAULT_PRIORITY);
   } else {
     switch (item_->GetState()) {
       case content::DownloadItem::IN_PROGRESS: {
@@ -374,6 +380,7 @@ void DownloadItemNotification::UpdateNotificationData(
       }
       case content::DownloadItem::COMPLETE:
         DCHECK(item_->IsDone());
+        notification_->set_priority(message_center::DEFAULT_PRIORITY);
         notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
         notification_->set_progress(100);
         break;
@@ -391,6 +398,7 @@ void DownloadItemNotification::UpdateNotificationData(
         // be updated. (same as the case of type = COMPLETE)
         notification_->set_type(message_center::NOTIFICATION_TYPE_BASE_FORMAT);
         notification_->set_progress(0);
+        notification_->set_priority(message_center::DEFAULT_PRIORITY);
         break;
       case content::DownloadItem::MAX_DOWNLOAD_STATE:  // sentinel
         NOTREACHED();
@@ -413,6 +421,7 @@ void DownloadItemNotification::UpdateNotificationData(
   notification_->set_buttons(notification_actions);
 
   if (type == ADD) {
+    closed_ = false;
     g_browser_process->notification_ui_manager()->
         Add(*notification_, profile());
   } else if (type == UPDATE ||
@@ -424,7 +433,7 @@ void DownloadItemNotification::UpdateNotificationData(
     // immediately when the message center is visible.
     // See the comment in MessageCenterImpl::UpdateNotification() for detail.
     if (type == UPDATE_AND_POPUP &&
-        g_browser_process->message_center()->IsMessageCenterVisible() &&
+        message_center_->IsMessageCenterVisible() &&
         (item_->GetState() == content::DownloadItem::COMPLETE ||
          item_->GetState() == content::DownloadItem::INTERRUPTED)) {
       DCHECK_EQ(notification_->type(),
@@ -440,6 +449,7 @@ void DownloadItemNotification::UpdateNotificationData(
         Update(*notification_, profile());
   } else if (type == UPDATE_AND_POPUP) {
     CloseNotificationByNonUser();
+    closed_ = false;
     g_browser_process->notification_ui_manager()->
         Add(*notification_, profile());
   } else {
@@ -492,7 +502,7 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 #else
     SetNotificationVectorIcon(
         gfx::VectorIconId::WARNING,
-        model.MightBeMalicious() ? gfx::kErrorRed : gfx::kAmber);
+        model.MightBeMalicious() ? gfx::kGoogleRed700 : gfx::kGoogleYellow700);
 #endif
     return;
   }
@@ -511,7 +521,7 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 #endif
       } else {
         SetNotificationVectorIcon(gfx::VectorIconId::FILE_DOWNLOAD,
-                                  gfx::kGoogleBlue);
+                                  gfx::kGoogleBlue500);
       }
       break;
 
@@ -520,7 +530,7 @@ void DownloadItemNotification::UpdateNotificationIcon() {
       SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_ERROR);
 #else
       SetNotificationVectorIcon(gfx::VectorIconId::ERROR_CIRCLE,
-                                gfx::kErrorRed);
+                                gfx::kGoogleRed700);
 #endif
       break;
 
@@ -561,6 +571,18 @@ void DownloadItemNotification::SetNotificationVectorIcon(gfx::VectorIconId id,
   vector_icon_params_ = std::make_pair(id, color);
   image_resource_id_ = 0;
   notification_->set_icon(gfx::Image(gfx::CreateVectorIcon(id, 40, color)));
+}
+
+void DownloadItemNotification::DisablePopup() {
+  if (notification_->priority() == message_center::LOW_PRIORITY)
+    return;
+  // Hides a notification from popup notifications if it's a pop-up, by
+  // decreasing its priority and reshowing itself. Low-priority notifications
+  // doesn't pop-up itself so this logic works as disabling pop-up.
+  CloseNotificationByNonUser();
+  notification_->set_priority(message_center::LOW_PRIORITY);
+  closed_ = false;
+  g_browser_process->notification_ui_manager()->Add(*notification_, profile());
 }
 
 void DownloadItemNotification::OnImageLoaded(const std::string& image_data) {
@@ -657,8 +679,13 @@ base::string16 DownloadItemNotification::GetTitle() const {
       item_->GetFileNameToReportUser().LossyDisplayName();
   switch (item_->GetState()) {
     case content::DownloadItem::IN_PROGRESS:
-      title_text = l10n_util::GetStringFUTF16(
-          IDS_DOWNLOAD_STATUS_IN_PROGRESS_TITLE, file_name);
+      if (!item_->IsPaused()) {
+        title_text = l10n_util::GetStringFUTF16(
+            IDS_DOWNLOAD_STATUS_IN_PROGRESS_TITLE, file_name);
+      } else {
+        title_text = l10n_util::GetStringFUTF16(
+            IDS_DOWNLOAD_STATUS_PAUSED_TITLE, file_name);
+      }
       break;
     case content::DownloadItem::COMPLETE:
       title_text = l10n_util::GetStringFUTF16(
@@ -765,13 +792,6 @@ base::string16 DownloadItemNotification::GetWarningStatusString() const {
 }
 
 base::string16 DownloadItemNotification::GetInProgressSubStatusString() const {
-  // The download is a CRX (app, extension, theme, ...) and it is being
-  // unpacked and validated.
-  if (item_->AllDataSaved() &&
-      download_crx_util::IsExtensionDownload(*item_)) {
-    return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_CRX_INSTALL_RUNNING);
-  }
-
   // "Paused"
   if (item_->IsPaused())
     return l10n_util::GetStringUTF16(IDS_DOWNLOAD_PROGRESS_PAUSED);
@@ -813,19 +833,41 @@ base::string16 DownloadItemNotification::GetStatusString() const {
   if (item_->IsDangerous())
     return GetWarningStatusString();
 
+  // The hostname. (E.g.:"example.com" or "127.0.0.1")
+  base::string16 host_name =
+      url_formatter::FormatUrlForSecurityDisplayOmitScheme(
+          item_->GetURL(),
+          profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
+
   DownloadItemModel model(item_);
   base::string16 sub_status_text;
+  bool show_size_ratio = true;
   switch (item_->GetState()) {
     case content::DownloadItem::IN_PROGRESS:
-      sub_status_text = GetInProgressSubStatusString();
+      // The download is a CRX (app, extension, theme, ...) and it is being
+      // unpacked and validated.
+      if (item_->AllDataSaved() &&
+          download_crx_util::IsExtensionDownload(*item_)) {
+        show_size_ratio = false;
+        sub_status_text =
+            l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_CRX_INSTALL_RUNNING);
+      } else {
+        sub_status_text = GetInProgressSubStatusString();
+      }
       break;
     case content::DownloadItem::COMPLETE:
       // If the file has been removed: Removed
       if (item_->GetFileExternallyRemoved()) {
+        show_size_ratio = false;
         sub_status_text =
             l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_REMOVED);
+      } else {
+        // Otherwise, the download should be completed.
+        // "3.4 MB from example.com"
+        base::string16 size = ui::FormatBytes(item_->GetReceivedBytes());
+        return l10n_util::GetStringFUTF16(
+            IDS_DOWNLOAD_NOTIFICATION_STATUS_COMPLETED, size, host_name);
       }
-      // Otherwise, no sub status text.
       break;
     case content::DownloadItem::CANCELLED:
       // "Cancelled"
@@ -851,24 +893,15 @@ base::string16 DownloadItemNotification::GetStatusString() const {
       NOTREACHED();
   }
 
-  // The hostname. (E.g.:"example.com" or "127.0.0.1")
-  base::string16 host_name = base::UTF8ToUTF16(item_->GetURL().host());
+  // Indication of progress (E.g.:"100/200 MB" or "100 MB"), or just the
+  // received bytes if the |show_size_ratio| flag is false.
+  base::string16 size =
+      show_size_ratio ? model.GetProgressSizesString() :
+                        ui::FormatBytes(item_->GetReceivedBytes());
 
-  // Indication of progress. (E.g.:"100/200 MB" or "100 MB")
-  base::string16 size_ratio = model.GetProgressSizesString();
-
-  if (sub_status_text.empty()) {
-    // Download completed: "3.4/3.4 MB from example.com"
-    DCHECK_EQ(item_->GetState(), content::DownloadItem::COMPLETE);
-    return l10n_util::GetStringFUTF16(
-        IDS_DOWNLOAD_NOTIFICATION_STATUS_COMPLETED,
-        size_ratio, host_name);
-  }
-
-  // Download is not completed: "3.4/3.4 MB from example.com, <SUB STATUS>"
+  // Download is not completed yet: "3.4/5.6 MB, <SUB STATUS>\nFrom example.com"
   return l10n_util::GetStringFUTF16(
-      IDS_DOWNLOAD_NOTIFICATION_STATUS,
-      size_ratio, host_name, sub_status_text);
+      IDS_DOWNLOAD_NOTIFICATION_STATUS, size, sub_status_text, host_name);
 }
 
 Browser* DownloadItemNotification::GetBrowser() const {
@@ -885,12 +918,17 @@ Profile* DownloadItemNotification::profile() const {
 bool DownloadItemNotification::IsNotificationVisible() const {
   const std::string& notification_id = watcher()->id();
   const ProfileID profile_id = NotificationUIManager::GetProfileID(profile());
-  const std::string notification_id_in_message_center =
-      ProfileNotification::GetProfileNotificationId(notification_id,
-                                                    profile_id);
+  if (!g_browser_process->notification_ui_manager())
+    return false;
+  const Notification* notification = g_browser_process->
+      notification_ui_manager()->FindById(notification_id, profile_id);
+  if (!notification)
+    return false;
+
+  const std::string notification_id_in_message_center = notification->id();
 
   message_center::NotificationList::Notifications visible_notifications =
-      g_browser_process->message_center()->GetVisibleNotifications();
+      message_center_->GetVisibleNotifications();
   for (const auto& notification : visible_notifications) {
     if (notification->id() == notification_id_in_message_center)
       return true;

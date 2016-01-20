@@ -26,6 +26,7 @@
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/crn_http_protocol_handler.h"
 #include "ios/net/empty_nsurlcache.h"
+#include "ios/net/http_cache_helper.h"
 #include "ios/net/request_tracker.h"
 #include "ios/web/public/user_agent.h"
 #include "net/base/net_errors.h"
@@ -33,7 +34,6 @@
 #include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert_net/nss_ocsp.h"
-#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_server_properties_impl.h"
@@ -416,11 +416,11 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   base::FilePath cache_path =
       base::mac::NSStringToFilePath([dirs objectAtIndex:0]);
   cache_path = cache_path.Append(FILE_PATH_LITERAL("crnet"));
-  net::HttpCache::DefaultBackend* main_backend =
+  scoped_ptr<net::HttpCache::DefaultBackend> main_backend(
       new net::HttpCache::DefaultBackend(net::DISK_CACHE,
                                          net::CACHE_BACKEND_DEFAULT, cache_path,
                                          0,  // Default cache size.
-                                         network_cache_thread_->task_runner());
+                                         network_cache_thread_->task_runner()));
 
   net::HttpNetworkSession::Params params;
   params.host_resolver = main_context_->host_resolver();
@@ -451,12 +451,19 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
         base::WorkerPool::GetTaskRunner(true));
   }
 
-  net::HttpCache* main_cache = new net::HttpCache(params, main_backend);
+  // TODO(mmenke):  These really shouldn't be leaked.
+  //                See https://crbug.com/523858.
+  net::HttpNetworkSession* http_network_session =
+      new net::HttpNetworkSession(params);
+  net::HttpCache* main_cache = new net::HttpCache(
+      http_network_session, main_backend.Pass(),
+      true /* set_up_quic_server_info */);
   main_context_->set_http_transaction_factory(main_cache);
 
   // Cookies
   scoped_refptr<net::CookieStore> cookie_store =
-      net::CookieStoreIOS::CreateCookieStoreFromNSHTTPCookieStorage();
+  net::CookieStoreIOS::CreateCookieStore(
+      [NSHTTPCookieStorage sharedHTTPCookieStorage]);
   main_context_->set_cookie_store(cookie_store.get());
 
   net::URLRequestJobFactoryImpl* job_factory =
@@ -482,29 +489,8 @@ std::string CrNetEnvironment::user_agent() {
 }
 
 void CrNetEnvironment::ClearCache(ClearCacheCallback callback) {
-  PostToNetworkThread(FROM_HERE,
-      base::Bind(&CrNetEnvironment::ClearCacheOnNetworkThread,
-                 base::Unretained(this),
-                 callback));
-}
-
-void CrNetEnvironment::ClearCacheOnNetworkThread(ClearCacheCallback callback) {
-  DCHECK(base::MessageLoop::current() == network_io_thread_->message_loop());
-  __block disk_cache::Backend* backend = nullptr;
-  net::HttpCache* cache = main_context_->http_transaction_factory()->GetCache();
-  net::CompletionCallback client_callback = base::BindBlock(^(int error) {
-    if (callback != nil) {
-      callback(error);
-    }
-  });
-  net::CompletionCallback doom_callback = base::BindBlock(^(int error) {
-      if (backend)
-        backend->DoomAllEntries(client_callback);
-  });
-  int rc = cache->GetBackend(&backend, doom_callback);
-  if (rc != net::ERR_IO_PENDING) {
-    // GetBackend doesn't call the callback if it completes synchronously, so
-    // call it directly here.
-    doom_callback.Run(rc);
-  }
+  PostToNetworkThread(
+      FROM_HERE,
+      base::Bind(&net::ClearHttpCache, main_context_getter_,
+                 network_io_thread_->task_runner(), base::BindBlock(callback)));
 }

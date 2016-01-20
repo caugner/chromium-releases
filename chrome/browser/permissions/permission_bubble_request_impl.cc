@@ -5,7 +5,7 @@
 #include "chrome/browser/permissions/permission_bubble_request_impl.h"
 
 #include "chrome/browser/permissions/permission_context_base.h"
-#include "chrome/browser/permissions/permission_context_uma_util.h"
+#include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/url_formatter/elide_url.h"
 #include "grit/theme_resources.h"
@@ -33,11 +33,11 @@ PermissionBubbleRequestImpl::PermissionBubbleRequestImpl(
 PermissionBubbleRequestImpl::~PermissionBubbleRequestImpl() {
   DCHECK(is_finished_);
   if (!action_taken_)
-    PermissionContextUmaUtil::PermissionIgnored(type_, request_origin_);
+    PermissionUmaUtil::PermissionIgnored(type_, request_origin_);
 }
 
 gfx::VectorIconId PermissionBubbleRequestImpl::GetVectorIconId() const {
-#if defined(TOOLKIT_VIEWS)
+#if !defined(OS_MACOSX)
   switch (type_) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       return gfx::VectorIconId::LOCATION_ON;
@@ -46,23 +46,24 @@ gfx::VectorIconId PermissionBubbleRequestImpl::GetVectorIconId() const {
       return gfx::VectorIconId::NOTIFICATIONS;
 #endif
 #if defined(OS_CHROMEOS)
+    // TODO(xhwang): fix this icon, see crrev.com/863263007
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+      return gfx::VectorIconId::CHROME_PRODUCT;
 #endif
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
-      // TODO(estade): add vector icons for these.
-      return gfx::VectorIconId::VECTOR_ICON_NONE;
+      return gfx::VectorIconId::MIDI;
     default:
       NOTREACHED();
       return gfx::VectorIconId::VECTOR_ICON_NONE;
   }
-#else  // !defined(TOOLKIT_VIEWS)
+#else  // !defined(OS_MACOSX)
   return gfx::VectorIconId::VECTOR_ICON_NONE;
 #endif
 }
 
 int PermissionBubbleRequestImpl::GetIconId() const {
-  int icon_id;
+  int icon_id = IDR_INFOBAR_WARNING;
+#if defined(OS_MACOSX)
   switch (type_) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       icon_id = IDR_INFOBAR_GEOLOCATION;
@@ -75,15 +76,10 @@ int PermissionBubbleRequestImpl::GetIconId() const {
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       icon_id = IDR_ALLOWED_MIDI_SYSEX;
       break;
-#if defined(OS_CHROMEOS)
-    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
-      icon_id = IDR_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
-      break;
-#endif
     default:
       NOTREACHED();
-      return IDR_INFOBAR_WARNING;
   }
+#endif
   return icon_id;
 }
 

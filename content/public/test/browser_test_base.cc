@@ -125,7 +125,7 @@ class LocalHostResolverProc : public net::HostResolverProc {
   ~LocalHostResolverProc() override {}
 };
 
-void TraceDisableRecordingComplete(const base::Closure& quit,
+void TraceStopTracingComplete(const base::Closure& quit,
                                    const base::FilePath& file_path) {
   LOG(ERROR) << "Tracing written to: " << file_path.value();
   quit.Run();
@@ -160,14 +160,14 @@ BrowserTestBase::BrowserTestBase()
   // called more than once
   base::i18n::AllowMultipleInitializeCallsForTesting();
 
-  embedded_test_server_.reset(new net::test_server::EmbeddedTestServer);
+  embedded_test_server_.reset(new net::EmbeddedTestServer);
 }
 
 BrowserTestBase::~BrowserTestBase() {
 #if defined(OS_ANDROID)
   // RemoteTestServer can cause wait on the UI thread.
   base::ThreadRestrictions::ScopedAllowWait allow_wait;
-  test_server_.reset(NULL);
+  spawned_test_server_.reset(NULL);
 #endif
 
   CHECK(set_up_called_) << "SetUp was not called. This probably means that the "
@@ -293,9 +293,9 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kEnableTracing),
         base::trace_event::RECORD_CONTINUOUSLY);
-    TracingController::GetInstance()->EnableRecording(
+    TracingController::GetInstance()->StartTracing(
         trace_config,
-        TracingController::EnableRecordingDoneCallback());
+        TracingController::StartTracingDoneCallback());
   }
 
   RunTestOnMainThreadLoop();
@@ -312,10 +312,10 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
 
     // Wait for tracing to collect results from the renderers.
     base::RunLoop run_loop;
-    TracingController::GetInstance()->DisableRecording(
+    TracingController::GetInstance()->StopTracing(
         TracingControllerImpl::CreateFileSink(
             trace_file,
-            base::Bind(&TraceDisableRecordingComplete,
+            base::Bind(&TraceStopTracingComplete,
                        run_loop.QuitClosure(),
                        trace_file)));
     run_loop.Run();
@@ -323,11 +323,11 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
 }
 
 void BrowserTestBase::CreateTestServer(const base::FilePath& test_server_base) {
-  CHECK(!test_server_.get());
-  test_server_.reset(new net::SpawnedTestServer(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
+  CHECK(!spawned_test_server_.get());
+  spawned_test_server_.reset(new net::SpawnedTestServer(
+      net::SpawnedTestServer::TYPE_HTTP, net::SpawnedTestServer::kLocalhost,
       test_server_base));
+  embedded_test_server()->AddDefaultHandlers(test_server_base);
 }
 
 void BrowserTestBase::PostTaskToInProcessRendererAndWait(

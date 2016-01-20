@@ -76,7 +76,7 @@ public class LogcatExtractionCallable implements Callable<Boolean> {
             Pattern.compile("(" + HOST_NAME + "|" + IP_ADDRESS + ")");
 
     private static final Pattern WEB_URL = Pattern.compile(
-            "((?:(http|https|Http|Https|rtsp|Rtsp):"
+            "(?:\\b|^)((?:(http|https|Http|Https|rtsp|Rtsp):"
             + "\\/\\/(?:(?:[a-zA-Z0-9\\$\\-\\_\\.\\+\\!\\*\\'\\(\\)"
             + "\\,\\;\\?\\&\\=]|(?:\\%[a-fA-F0-9]{2})){1,64}(?:\\:(?:[a-zA-Z0-9\\$\\-\\_"
             + "\\.\\+\\!\\*\\'\\(\\)\\,\\;\\?\\&\\=]|(?:\\%[a-fA-F0-9]{2})){1,25})?\\@)?)?"
@@ -159,6 +159,9 @@ public class LogcatExtractionCallable implements Callable<Boolean> {
             int len = mMinidumpFilenames.length;
             CrashFileManager fileManager = new CrashFileManager(mContext.getCacheDir());
             for (int i = 0; i < len; i++) {
+                // Output crash dump file path to logcat so non-browser crashes appear too.
+                Log.i(TAG, "Output crash dump:");
+                Log.i(TAG, fileManager.getCrashFile(mMinidumpFilenames[i]).getAbsolutePath());
                 processMinidump(logcatFile, mMinidumpFilenames[i], fileManager, i == len - 1);
             }
             return true;

@@ -8,7 +8,7 @@ import android.os.ConditionVariable;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
-import org.chromium.net.TestUrlRequestListener.ResponseStep;
+import org.chromium.net.TestUrlRequestCallback.ResponseStep;
 import org.chromium.net.UrlRequest.Status;
 import org.chromium.net.UrlRequest.StatusListener;
 
@@ -16,7 +16,7 @@ import org.chromium.net.UrlRequest.StatusListener;
  * Tests that {@link CronetUrlRequest#getStatus} works as expected.
  */
 public class GetStatusTest extends CronetTestBase {
-    private CronetTestActivity mActivity;
+    private CronetTestFramework mTestFramework;
 
     private static class TestStatusListener extends StatusListener {
         boolean mOnStatusCalled = false;
@@ -38,14 +38,14 @@ public class GetStatusTest extends CronetTestBase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mActivity = launchCronetTestApp();
-        assertTrue(NativeTestServer.startNativeTestServer(getInstrumentation().getTargetContext()));
+        mTestFramework = startCronetTestFramework();
+        assertTrue(NativeTestServer.startNativeTestServer(getContext()));
     }
 
     @Override
     protected void tearDown() throws Exception {
         NativeTestServer.shutdownNativeTestServer();
-        mActivity.mUrlRequestContext.shutdown();
+        mTestFramework.mCronetEngine.shutdown();
         super.tearDown();
     }
 
@@ -53,10 +53,11 @@ public class GetStatusTest extends CronetTestBase {
     @Feature({"Cronet"})
     public void testSimpleGet() throws Exception {
         String url = NativeTestServer.getEchoMethodURL();
-        TestUrlRequestListener listener = new TestUrlRequestListener();
-        listener.setAutoAdvance(false);
-        UrlRequest urlRequest =
-                mActivity.mUrlRequestContext.createRequest(url, listener, listener.getExecutor());
+        TestUrlRequestCallback callback = new TestUrlRequestCallback();
+        callback.setAutoAdvance(false);
+        UrlRequest.Builder builder = new UrlRequest.Builder(
+                url, callback, callback.getExecutor(), mTestFramework.mCronetEngine);
+        UrlRequest urlRequest = builder.build();
         // Calling before request is started should give Status.INVALID,
         // since the native adapter is not created.
         TestStatusListener statusListener0 = new TestStatusListener();
@@ -75,9 +76,9 @@ public class GetStatusTest extends CronetTestBase {
         assertTrue(statusListener1.mStatus >= Status.IDLE);
         assertTrue(statusListener1.mStatus <= Status.READING_RESPONSE);
 
-        listener.waitForNextStep();
-        assertEquals(ResponseStep.ON_RESPONSE_STARTED, listener.mResponseStep);
-        listener.startNextRead(urlRequest);
+        callback.waitForNextStep();
+        assertEquals(ResponseStep.ON_RESPONSE_STARTED, callback.mResponseStep);
+        callback.startNextRead(urlRequest);
 
         // Should receive a valid status.
         TestStatusListener statusListener2 = new TestStatusListener();
@@ -87,11 +88,11 @@ public class GetStatusTest extends CronetTestBase {
         assertTrue(statusListener1.mStatus >= Status.IDLE);
         assertTrue(statusListener1.mStatus <= Status.READING_RESPONSE);
 
-        listener.waitForNextStep();
-        assertEquals(ResponseStep.ON_READ_COMPLETED, listener.mResponseStep);
+        callback.waitForNextStep();
+        assertEquals(ResponseStep.ON_READ_COMPLETED, callback.mResponseStep);
 
-        listener.startNextRead(urlRequest);
-        listener.blockForDone();
+        callback.startNextRead(urlRequest);
+        callback.blockForDone();
 
         // Calling after request done should give Status.INVALID, since
         // the native adapter is destroyed.
@@ -101,8 +102,8 @@ public class GetStatusTest extends CronetTestBase {
         assertTrue(statusListener3.mOnStatusCalled);
         assertEquals(Status.INVALID, statusListener3.mStatus);
 
-        assertEquals(200, listener.mResponseInfo.getHttpStatusCode());
-        assertEquals("GET", listener.mResponseAsString);
+        assertEquals(200, callback.mResponseInfo.getHttpStatusCode());
+        assertEquals("GET", callback.mResponseAsString);
     }
 
     @SmallTest

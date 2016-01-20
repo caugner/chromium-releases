@@ -327,72 +327,35 @@ template("java_cpp_template") {
 #     enum contained in the sources files the script will generate a .java
 #     file with the same name as the name of the enum.
 #
-#   outputs: list of outputs, relative to the output_dir. These paths are
-#     verified at build time by the script. To get the list programatically run:
-#       python build/android/gyp/java_cpp_enum.py \
-#         --print_output_only . path/to/header/file.h
-#
 # Example
 #   java_cpp_enum("foo_generated_enum") {
 #     sources = [
 #       "src/native_foo_header.h",
 #     ]
-#     outputs = [
-#       "org/chromium/FooEnum.java",
-#     ]
 #   }
 template("java_cpp_enum") {
-  set_sources_assignment_filter([])
-  forward_variables_from(invoker, [ "testonly" ])
-
-  assert(defined(invoker.sources))
-  assert(defined(invoker.outputs))
-
-  generate_enum_target_name = "${target_name}__generate_enum"
-  zip_srcjar_target_name = "${target_name}__zip_srcjar"
-  final_target_name = target_name
-
-  action(generate_enum_target_name) {
-    visibility = [ ":$zip_srcjar_target_name" ]
-
+  action(target_name) {
     # The sources aren't compiled so don't check their dependencies.
     check_includes = false
+    set_sources_assignment_filter([])
 
-    sources = invoker.sources
+    assert(defined(invoker.sources))
+    forward_variables_from(invoker,
+                           [
+                             "sources",
+                             "testonly",
+                             "visibility",
+                           ])
+
     script = "//build/android/gyp/java_cpp_enum.py"
-    gen_dir = "${target_gen_dir}/${target_name}/enums"
-    outputs =
-        get_path_info(rebase_path(invoker.outputs, ".", gen_dir), "abspath")
 
-    args = []
-    foreach(output, rebase_path(outputs, root_build_dir)) {
-      args += [
-        "--assert_file",
-        output,
-      ]
-    }
-    args += [ rebase_path(gen_dir, root_build_dir) ]
-    args += rebase_path(invoker.sources, root_build_dir)
-  }
+    _srcjar_path = "${target_gen_dir}/${target_name}.srcjar"
+    _rebased_srcjar_path = rebase_path(_srcjar_path, root_build_dir)
+    _rebased_sources = rebase_path(invoker.sources, root_build_dir)
 
-  generate_enum_outputs = get_target_outputs(":$generate_enum_target_name")
-  base_gen_dir = get_label_info(":$generate_enum_target_name", "target_gen_dir")
-
-  srcjar_path = "${target_gen_dir}/${target_name}.srcjar"
-  zip(zip_srcjar_target_name) {
-    visibility = [ ":$final_target_name" ]
-    inputs = generate_enum_outputs
-    output = srcjar_path
-    base_dir = base_gen_dir
-    deps = [
-      ":$generate_enum_target_name",
-    ]
-  }
-
-  group(final_target_name) {
-    forward_variables_from(invoker, [ "visibility" ])
-    public_deps = [
-      ":$zip_srcjar_target_name",
+    args = [ "--srcjar=$_rebased_srcjar_path" ] + _rebased_sources
+    outputs = [
+      _srcjar_path,
     ]
   }
 }
@@ -667,6 +630,11 @@ template("android_resources") {
                              "v14_skip",
                            ])
     deps += [ ":$build_config_target_name" ]
+
+    # Always generate R.onResourcesLoaded() method, it is required for
+    # compiling ResourceRewriter, there is no side effect because the
+    # generated R.class isn't used in final apk.
+    shared_resources = true
     if (!defined(android_manifest)) {
       android_manifest = "//build/android/AndroidManifest.xml"
     }
@@ -676,6 +644,87 @@ template("android_resources") {
     forward_variables_from(invoker, [ "visibility" ])
     public_deps = [
       ":${target_name}__process_resources",
+    ]
+  }
+}
+
+# Declare an Android assets target.
+#
+# Defines a set of files to include as assets in a dependent apk.
+#
+# To include these assets in an apk, this target should be listed in
+# the apk's deps, or in the deps of a library target used by an apk.
+#
+# Variables
+#   deps: Specifies the dependencies of this target. Any Android assets
+#     listed in deps will be included by libraries/apks that depend on this
+#     target.
+#   sources: List of files to include as assets.
+#   renaming_sources: List of files to include as assets and be renamed.
+#   renaming_destinations: List of asset paths for files in renaming_sources.
+#   disable_compression: Whether to disable compression for files that are
+#     known to be compressable (default: false).
+#
+# Example:
+# android_assets("content_shell_assets") {
+#   deps = [
+#     ":generates_foo",
+#     ":other_assets",
+#     ]
+#   sources = [
+#     "//path/asset1.png",
+#     "//path/asset2.png",
+#     "$target_gen_dir/foo.dat",
+#   ]
+# }
+#
+# android_assets("overriding_content_shell_assets") {
+#   deps = [ ":content_shell_assets" ]
+#   # Override foo.dat from content_shell_assets.
+#   sources = [ "//custom/foo.dat" ]
+#   renaming_sources = [ "//path/asset2.png" ]
+#   renaming_destinations = [ "renamed/asset2.png" ]
+# }
+template("android_assets") {
+  set_sources_assignment_filter([])
+  forward_variables_from(invoker, [ "testonly" ])
+
+  _build_config = "$target_gen_dir/$target_name.build_config"
+  _build_config_target_name = "${target_name}__build_config"
+
+  write_build_config(_build_config_target_name) {
+    forward_variables_from(invoker,
+                           [
+                             "deps",
+                             "disable_compression",
+                           ])
+    type = "android_assets"
+    build_config = _build_config
+    if (defined(invoker.sources)) {
+      asset_sources = invoker.sources
+    }
+    if (defined(invoker.renaming_sources)) {
+      assert(defined(invoker.renaming_destinations))
+      _source_count = 0
+      foreach(_, invoker.renaming_sources) {
+        _source_count += 1
+      }
+      _dest_count = 0
+      foreach(_, invoker.renaming_destinations) {
+        _dest_count += 1
+      }
+      assert(
+          _source_count == _dest_count,
+          "android_assets() renaming_sources.length != renaming_destinations.length")
+      asset_renaming_sources = invoker.renaming_sources
+      asset_renaming_destinations = invoker.renaming_destinations
+    }
+  }
+
+  group(target_name) {
+    forward_variables_from(invoker, [ "visibility" ])
+    public_deps = [
+      ":$_build_config_target_name",
     ]
   }
 }
@@ -1010,6 +1059,12 @@ template("java_prebuilt") {
 #   dex_path: If set, the resulting .dex.jar file will be placed under this
 #     path.
 #
+#   alternative_android_sdk_ijar: if set, the given android_sdk_ijar file
+#     replaces the default android_sdk_ijar.
+#
+#   alternative_android_sdk_ijar_dep: the target that generates
+#      alternative_android_sdk_ijar, must be set if alternative_android_sdk_ijar
+#      is used.
 #
 # Example
 #   android_library("foo_java") {
@@ -1032,6 +1087,11 @@ template("android_library") {
   set_sources_assignment_filter([])
   assert(!defined(invoker.jar_path),
          "android_library does not support a custom jar path")
+
+  if (defined(invoker.alternative_android_sdk_ijar)) {
+    assert(defined(invoker.alternative_android_sdk_ijar_dep))
+  }
+
   java_library_impl(target_name) {
     forward_variables_from(invoker, "*")
 
@@ -1108,6 +1168,7 @@ template("android_java_prebuilt") {
 # Variables
 #   android_manifest: Path to AndroidManifest.xml.
 #   android_manifest_dep: Target that generates AndroidManifest (if applicable)
+#   chromium_code: If true, extra analysis warning/errors will be enabled.
 #   data_deps: List of dependencies needed at runtime. These will be built but
 #     won't change the generated .apk in any way (in fact they may be built
 #     after the .apk is).
@@ -1220,7 +1281,7 @@ template("android_apk") {
   # The dependency that makes the chromium linker, if any is needed.
   _chromium_linker_dep = []
 
-  if (defined(invoker.native_libs)) {
+  if (defined(invoker.native_libs) && invoker.native_libs != []) {
     _use_chromium_linker = false
     if (defined(invoker.use_chromium_linker)) {
       _use_chromium_linker =
@@ -1234,14 +1295,6 @@ template("android_apk") {
       assert(_use_chromium_linker,
              "Loading library from the apk requires use" +
                  " of the Chromium linker.")
-    }
-
-    _enable_relocation_packing = false
-    if (defined(invoker.enable_relocation_packing) &&
-        invoker.enable_relocation_packing) {
-      _enable_relocation_packing = relocation_packing_supported
-      assert(_use_chromium_linker,
-             "Relocation packing requires use of the" + " Chromium linker.")
     }
 
     if (is_component_build) {
@@ -1298,6 +1351,12 @@ template("android_apk") {
   # Help GN understand that _create_abi_split is not unused (bug in GN).
   assert(_create_abi_split || true)
 
+  _proguard_enabled =
+      defined(invoker.proguard_enabled) && invoker.proguard_enabled
+  if (_proguard_enabled) {
+    _proguard_jar_path = "$base_path.proguard.jar"
+  }
+
   build_config_target = "${_template_name}__build_config"
   write_build_config(build_config_target) {
     forward_variables_from(invoker, [ "apk_under_test" ])
@@ -1313,11 +1372,17 @@ template("android_apk") {
       deps += invoker.deps
     }
 
+    proguard_enabled = _proguard_enabled
+    if (_proguard_enabled) {
+      proguard_info = "$_proguard_jar_path.info"
+    }
+
     native_libs = _native_libs
   }
 
   _final_deps = []
 
+  _generated_proguard_config = "$base_path.resources.proguard.txt"
   process_resources_target = "${_template_name}__process_resources"
   process_resources(process_resources_target) {
     forward_variables_from(invoker, [ "include_all_resources" ])
@@ -1328,6 +1393,7 @@ template("android_apk") {
     zip_path = resources_zip_path
     all_resources_zip_path = _all_resources_zip_path
     generate_constant_ids = true
+    proguard_file = _generated_proguard_config
 
     build_config = _build_config
     deps = _android_manifest_deps + [ ":$build_config_target" ]
@@ -1386,6 +1452,10 @@ template("android_apk") {
 
     android_manifest = _android_manifest
     chromium_code = true
+    if (defined(invoker.chromium_code)) {
+      chromium_code = invoker.chromium_code
+    }
+
     if (defined(invoker.java_files)) {
       java_files = invoker.java_files
     } else if (defined(invoker.DEPRECATED_java_in_dir)) {
@@ -1436,20 +1506,47 @@ template("android_apk") {
     }
   }
 
+  if (_proguard_enabled) {
+    _proguard_configs = [ _generated_proguard_config ]
+    if (defined(invoker.proguard_configs)) {
+      _proguard_configs += invoker.proguard_configs
+    }
+    _proguard_target = "${_template_name}__proguard"
+    proguard(_proguard_target) {
+      deps = [
+        ":$build_config_target",
+        ":$process_resources_target",
+        ":$java_target",
+      ]
+      inputs = [
+                 _build_config,
+                 _jar_path,
+               ] + _proguard_configs
+
+      output_jar_path = _proguard_jar_path
+      rebased_proguard_configs = rebase_path(_proguard_configs, root_build_dir)
+      args = [
+        "--proguard-configs=$rebased_proguard_configs",
+        "--tested-apk-info=@FileArg($_rebased_build_config:proguard:tested_apk_info)",
+        "--input-paths=@FileArg($_rebased_build_config:proguard:input_paths)",
+      ]
+    }
+    _dex_sources = [ _proguard_jar_path ]
+    _dex_deps = [ ":$_proguard_target" ]
+  } else {
+    _dex_sources = [ _lib_dex_path ]
+    _dex_deps = [ ":$java_target" ]
+  }
+
   dex("$final_dex_target_name") {
-    deps = [
-      ":$build_config_target",
-      ":$java_target",
-    ]
+    deps = _dex_deps + [ ":$build_config_target" ]
     inputs = [
       _build_config,
     ]
+    sources = _dex_sources
     output = final_dex_path
     _dex_arg_key = "${_rebased_build_config}:final_dex:dependency_dex_files"
-    args = [
-      "--inputs=@FileArg($_dex_arg_key)",
-      _rebased_lib_dex_path,
-    ]
+    args = [ "--inputs=@FileArg($_dex_arg_key)" ]
   }
 
   if (_native_libs != []) {
@@ -1473,9 +1570,10 @@ template("android_apk") {
       inputs += [ _build_config ]
       deps += [ ":$build_config_target" ]
 
+      rebased_gdbserver = rebase_path(android_gdbserver, root_build_dir)
       skip_packing_list = [
-        "gdbserver",
-        "libchromium_android_linker$shlib_extension",
+        rebased_gdbserver,
+        "libchromium_android_linker.so",
       ]
 
       enable_packing_arg = 0
@@ -1504,7 +1602,6 @@ template("android_apk") {
       }
 
       if (is_debug) {
-        rebased_gdbserver = rebase_path([ android_gdbserver ], root_build_dir)
         inputs += [ android_gdbserver ]
         args += [ "--libraries=$rebased_gdbserver" ]
       }
@@ -1523,6 +1620,7 @@ template("android_apk") {
                            ])
     apk_path = _final_apk_path
     android_manifest = _android_manifest
+    assets_build_config = _build_config
     resources_zip = _all_resources_zip_path
     dex_path = final_dex_path
     load_library_from_apk = _load_library_from_apk
@@ -1543,11 +1641,14 @@ template("android_apk") {
     keystore_password = _keystore_password
 
     # Incremental apk does not use native libs nor final dex.
-    incremental_deps =
-        deps + _android_manifest_deps + [ ":$process_resources_target" ]
+    incremental_deps = deps + _android_manifest_deps + [
+                         ":$build_config_target",
+                         ":$process_resources_target",
+                       ]
 
     # This target generates the input file _all_resources_zip_path.
     deps += _android_manifest_deps + [
+              ":$build_config_target",
               ":$process_resources_target",
               ":$final_dex_target_name",
             ]
@@ -1604,7 +1705,7 @@ template("android_apk") {
     ]
 
     _generated_script_path =
-        "${root_out_dir}/bin/install_incremental_${_template_name}"
+        "${root_out_dir}/bin/install_${_template_name}_incremental"
     outputs = [
       depfile,
       _generated_script_path,
@@ -1752,6 +1853,8 @@ template("instrumentation_test_apk") {
 #     support executables.
 #   apk_name: The name of the produced apk. If unspecified, it uses the name
 #             of the unittests_dep target postfixed with "_apk"
+#   use_default_launcher: Whether the default activity (NativeUnitTestActivity)
+#     should be used for launching tests.
 #
 # Example
 #   unittest_apk("foo_unittests_apk") {
@@ -1783,15 +1886,25 @@ template("unittest_apk") {
   }
 
   android_apk(target_name) {
-    forward_variables_from(invoker, [ "asset_location" ])
+    forward_variables_from(invoker,
+                           [
+                             "asset_location",
+                             "android_manifest",
+                           ])
     final_apk_path = "$root_build_dir/${apk_name}_apk/${apk_name}-debug.apk"
-    java_files = [
-      "//testing/android/native_test/java/src/org/chromium/native_test/NativeBrowserTestActivity.java",
-      "//testing/android/native_test/java/src/org/chromium/native_test/NativeTestActivity.java",
-      "//testing/android/native_test/java/src/org/chromium/native_test/NativeUnitTestActivity.java",
-      "//testing/android/native_test/java/src/org/chromium/native_test/NativeTestInstrumentationTestRunner.java",
-    ]
-    android_manifest = "//testing/android/native_test/java/AndroidManifest.xml"
+
+    if (!defined(invoker.use_default_launcher) || invoker.use_default_launcher) {
+      java_files = [
+        "//testing/android/native_test/java/src/org/chromium/native_test/NativeBrowserTestActivity.java",
+        "//testing/android/native_test/java/src/org/chromium/native_test/NativeTestActivity.java",
+        "//testing/android/native_test/java/src/org/chromium/native_test/NativeUnitTestActivity.java",
+        "//testing/android/native_test/java/src/org/chromium/native_test/NativeTestInstrumentationTestRunner.java",
+      ]
+    }
+    if (!defined(invoker.android_manifest)) {
+      android_manifest =
+          "//testing/android/native_test/java/AndroidManifest.xml"
+    }
     native_libs = [ unittests_binary ]
     deps = [
       "//base:base_java",
@@ -1901,6 +2014,7 @@ template("android_aidl") {
 #   dist_dir: Directory for the exe and libraries. Everything in this directory
 #     will be deleted before copying in the exe and libraries.
 #   binary: Path to (stripped) executable.
+#   include_main_binary: Whether |binary| should be copied to |dist_dir|.
 #
 # Example
 #   create_native_executable_dist("foo_dist") {
@@ -1954,17 +2068,22 @@ template("create_native_executable_dist") {
     visibility = [ ":$template_name" ]
 
     clear_dir = true
+
     inputs = [
-      binary,
       libraries_list,
     ]
+    if (defined(invoker.include_main_binary) && invoker.include_main_binary) {
+      inputs += [ binary ]
+    }
+
     dest = dist_dir
-    rebased_binaries_list = rebase_path([ binary ], root_build_dir)
+
     rebased_libraries_list = rebase_path(libraries_list, root_build_dir)
-    args = [
-      "--files=$rebased_binaries_list",
-      "--files=@FileArg($rebased_libraries_list:lib_paths)",
-    ]
+    args = [ "--files=@FileArg($rebased_libraries_list:lib_paths)" ]
+    if (defined(invoker.include_main_binary) && invoker.include_main_binary) {
+      rebased_binaries_list = rebase_path([ binary ], root_build_dir)
+      args += [ "--files=$rebased_binaries_list" ]
+    }
 
     deps = [
       ":$find_deps_target_name",
@@ -2036,15 +2155,5 @@ template("proto_java_library") {
     deps = [
       "//third_party/android_protobuf:protobuf_nano_javalib",
     ]
-  }
-}
-
-# TODO(GYP): implement this.
-template("uiautomator_test") {
-  set_sources_assignment_filter([])
-  forward_variables_from(invoker, [ "testonly" ])
-  assert(target_name != "")
-  assert(invoker.deps != [] || true)
-  group(target_name) {
   }
 }

@@ -16,7 +16,7 @@ ChildIOSurfaceManager* ChildIOSurfaceManager::GetInstance() {
       base::LeakySingletonTraits<ChildIOSurfaceManager>>::get();
 }
 
-bool ChildIOSurfaceManager::RegisterIOSurface(IOSurfaceId io_surface_id,
+bool ChildIOSurfaceManager::RegisterIOSurface(gfx::IOSurfaceId io_surface_id,
                                               int client_id,
                                               IOSurfaceRef io_surface) {
   DCHECK(service_port_.is_valid());
@@ -45,12 +45,12 @@ bool ChildIOSurfaceManager::RegisterIOSurface(IOSurfaceId io_surface_id,
   data.request.header.msgh_bits =
       MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE) |
       MACH_MSGH_BITS_COMPLEX;
-  data.request.header.msgh_remote_port = service_port_;
+  data.request.header.msgh_remote_port = service_port_.get();
   data.request.header.msgh_local_port = reply_port;
   data.request.header.msgh_size = sizeof(data.request);
   data.request.header.msgh_id = IOSurfaceManagerHostMsg_RegisterIOSurface::ID;
   data.request.body.msgh_descriptor_count = 1;
-  data.request.io_surface_port.name = scoped_io_surface_right;
+  data.request.io_surface_port.name = scoped_io_surface_right.get();
   data.request.io_surface_port.disposition = MACH_MSG_TYPE_COPY_SEND;
   data.request.io_surface_port.type = MACH_MSG_PORT_DESCRIPTOR;
   data.request.io_surface_id = io_surface_id.id;
@@ -68,14 +68,14 @@ bool ChildIOSurfaceManager::RegisterIOSurface(IOSurfaceId io_surface_id,
   return data.reply.msg.result;
 }
 
-void ChildIOSurfaceManager::UnregisterIOSurface(IOSurfaceId io_surface_id,
+void ChildIOSurfaceManager::UnregisterIOSurface(gfx::IOSurfaceId io_surface_id,
                                                 int client_id) {
   DCHECK(service_port_.is_valid());
   DCHECK(!token_.IsZero());
 
   IOSurfaceManagerHostMsg_UnregisterIOSurface request = {{0}};
   request.header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0);
-  request.header.msgh_remote_port = service_port_;
+  request.header.msgh_remote_port = service_port_.get();
   request.header.msgh_local_port = MACH_PORT_NULL;
   request.header.msgh_size = sizeof(request);
   request.header.msgh_id = IOSurfaceManagerHostMsg_UnregisterIOSurface::ID;
@@ -92,7 +92,7 @@ void ChildIOSurfaceManager::UnregisterIOSurface(IOSurfaceId io_surface_id,
 }
 
 IOSurfaceRef ChildIOSurfaceManager::AcquireIOSurface(
-    IOSurfaceId io_surface_id) {
+    gfx::IOSurfaceId io_surface_id) {
   DCHECK(service_port_.is_valid());
   DCHECK(!token_.IsZero());
 
@@ -114,7 +114,7 @@ IOSurfaceRef ChildIOSurfaceManager::AcquireIOSurface(
   } data = {{{0}}};
   data.request.header.msgh_bits =
       MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
-  data.request.header.msgh_remote_port = service_port_;
+  data.request.header.msgh_remote_port = service_port_.get();
   data.request.header.msgh_local_port = reply_port;
   data.request.header.msgh_size = sizeof(data.request);
   data.request.header.msgh_id = IOSurfaceManagerHostMsg_AcquireIOSurface::ID;
@@ -137,7 +137,7 @@ IOSurfaceRef ChildIOSurfaceManager::AcquireIOSurface(
   base::mac::ScopedMachSendRight scoped_io_surface_right(
       data.reply.msg.io_surface_port.name);
 
-  return IOSurfaceLookupFromMachPort(scoped_io_surface_right);
+  return IOSurfaceLookupFromMachPort(scoped_io_surface_right.get());
 }
 
 ChildIOSurfaceManager::ChildIOSurfaceManager() {}

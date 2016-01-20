@@ -101,8 +101,6 @@ if (!is_android) {
 
     if (is_win) {
       sources += [
-        "//content/public/common/content_switches.cc",
-        "//content/public/common/content_switches.h",
         "app/chrome_crash_reporter_client.cc",
         "app/chrome_crash_reporter_client.h",
         "app/chrome_exe.rc",
@@ -112,26 +110,20 @@ if (!is_android) {
         "app/chrome_watcher_client_win.h",
         "app/chrome_watcher_command_line_win.cc",
         "app/chrome_watcher_command_line_win.h",
-        "app/client_util.cc",
-        "app/client_util.h",
         "app/kasko_client.cc",
         "app/kasko_client.h",
+        "app/main_dll_loader_win.cc",
+        "app/main_dll_loader_win.h",
         "app/signature_validator_win.cc",
         "app/signature_validator_win.h",
         "common/crash_keys.cc",
         "common/crash_keys.h",
       ]
 
-      if (is_component_build) {
-        # This is necessary to make content_switches compile without DLL
-        # linkage errors in a component build.
-        defines += [ "COMPILE_CONTENT_STATICALLY" ]
-      }
-
       deps += [
+        ":chrome_dll",
         ":chrome_exe_version",
-        ":image_pre_reader",
-        ":main_dll",
+        ":file_pre_reader",
 
         # 'chrome_nacl_win64" TODO(GYP) bug 512869
         # '../win8/delegate_execute/delegate_execute.gyp:*', TODO(GYP) bug 512867
@@ -148,7 +140,8 @@ if (!is_android) {
         "//components/browser_watcher:browser_watcher_client",
         "//components/crash/content/app",
         "//components/crash/core/common",
-        "//content:startup_helper_win",
+        "//content:sandbox_helper_win",
+        "//content/public/common:static_switches",
         "//crypto",
         "//sandbox",
         "//ui/gfx",
@@ -192,7 +185,7 @@ if (!is_android) {
         "//chrome/installer/util",
         "//content/public/app:both",
       ]
-      if (enable_plugins) {
+      if (enable_plugins && enable_pdf) {
         deps += [ "//pdf" ]
       }
 
@@ -216,7 +209,9 @@ if (!is_android) {
     }
 
     if (is_mac) {
-      sources += [ "app/chrome_exe_main_mac.cc" ]
+      sources += [ "app/chrome_exe_main_mac.c" ]
+      deps += [ ":chrome_dll" ]
+
       # TODO(GYP) lots more stuff in the is_mac block.
     } else {  # Non-Mac.
       # These files are used by the installer so we need a public dep.
@@ -225,7 +220,7 @@ if (!is_android) {
         ":packed_resources",
       ]
       deps += [
-        "//components/startup_metric_utils",
+        "//components/startup_metric_utils/browser",
 
         # Precompiled plugins that need to get copied to the output directory.
         # On Mac, internal plugins go inside the framework, so these
@@ -242,17 +237,46 @@ if (!is_android) {
   }
 }  # !is_android
 
-shared_library("main_dll") {
-  configs += [ "//build/config/compiler:wexit_time_destructors" ]
-  defines = []
+if (is_mac) {
+  if (is_component_build) {
+    # On Mac component builds, this target is the bundle, and the main dll is
+    # just another shared library. This speeds up incremental builds by
+    # not requiring re-doing the bundle every time main_dll changes.
+    # See https://codereview.chromium.org/11420019
 
-  deps = [
-    ":browser_dependencies",
-    "//base/allocator",
-    "//build/config/sanitizers:deps",
-  ]
-  if (is_win) {
-    output_name = "chrome"
+    # TODO(GYP) chrome_dll for Mac component build.
+    assert(false)
+  } else {
+    # On Mac non-component builds, this is a no-op forwarding target.
+    group("chrome_dll") {
+      public_deps = [
+        ":main_dll",
+      ]
+    }
+  }
+}
+
+if (is_win) {
+  # This target is a forwarding target to compile the necessary DLLs used
+  # by Chrome.
+  group("chrome_dll") {
+    # TODO(GYP) support incremental_chrome_dll on Windows for faster links in
+    # developer component builds. When that's supported, this target will need
+    # to become more complicated.
+    data_deps = [
+      ":main_dll",
+    ]
+    if (is_multi_dll_chrome) {
+      data_deps += [ ":chrome_child" ]
+    }
+  }
+}
+
+if (is_mac || is_win) {
+  shared_library("main_dll") {
+    configs += [ "//build/config/compiler:wexit_time_destructors" ]
+    defines = []
+    ldflags = []
 
     sources = [
       "//base/win/dllmain.cc",
@@ -262,119 +286,146 @@ shared_library("main_dll") {
       "app/chrome_main.cc",
       "app/chrome_main_delegate.cc",
       "app/chrome_main_delegate.h",
+      "app/chrome_main_mac.h",
+      "app/chrome_main_mac.mm",
       "app/close_handle_hook_win.cc",
       "app/close_handle_hook_win.h",
       "app/delay_load_hook_win.cc",
       "app/delay_load_hook_win.h",
     ]
 
-    deps += [
-      ":chrome_dll_manifest",
-      ":chrome_dll_version",
-      "//base/trace_event/etw_manifest:chrome_events_win",
-      "//chrome/app/theme:chrome_unscaled_resources",
-      "//chrome_elf",
-      "//content/app/resources",
-      "//crypto",
-      "//net:net_resources",
-      "//third_party/wtl",
-      "//ui/views",
+    deps = [
+      ":browser_dependencies",
+      "//base/allocator",
+      "//build/config/sanitizers:deps",
     ]
-    if (enable_configuration_policy) {
-      deps += [ "//components/policy" ]
+    if (is_win) {
+      output_name = "chrome"
+
+      deps += [
+        ":chrome_dll_manifest",
+        ":chrome_dll_version",
+        "//base/trace_event/etw_manifest:chrome_events_win",
+        "//chrome/app/theme:chrome_unscaled_resources",
+        "//chrome_elf",
+        "//content/app/resources",
+        "//crypto",
+        "//net:net_resources",
+        "//third_party/wtl",
+        "//ui/views",
+      ]
+      if (enable_configuration_policy) {
+        deps += [ "//components/policy" ]
+      }
+      if (current_cpu == "x86") {
+        # TODO(GYP) bug 512861: Lots of VCLinkerTool stuff on Windows.
+        #deps += [ 'chrome_user32_delay_imports' ]  TODO(GYP)
+      }
+
+      # This is a large module that can't do incremental linking in some cases.
+      configs -= [ "//build/config/win:default_incremental_linking" ]
+      configs +=
+          [ "//build/config/win:default_large_module_incremental_linking" ]
+
+      # TODO(GYP) bug 512851: PGO.
     }
-    if (current_cpu == "x86") {
-      # TODO(GYP) bug 512861: Lots of VCLinkerTool stuff on Windows.
-      #deps += [ 'chrome_user32_delay_imports' ]  TODO(GYP)
+
+    if (use_aura) {
+      deps += [ "//ui/compositor" ]
     }
 
-    # This is a large module that can't do incremental linking in some cases.
-    configs -= [ "//build/config/win:default_incremental_linking" ]
-    configs += [ "//build/config/win:default_large_module_incremental_linking" ]
+    if (is_multi_dll_chrome) {
+      defines += [ "CHROME_MULTIPLE_DLL_BROWSER" ]
+      deps += [ "//content/public/app:browser" ]
+    } else {
+      deps += [
+        ":child_dependencies",
+        "//content/public/app:both",
+      ]
+    }
 
-    # TODO(GYP) bug 512851: PGO.
-  }
+    if (cld_version == 2) {
+      deps += [ "//third_party/cld_2" ]
+    }
 
-  if (use_aura) {
-    deps += [ "//ui/compositor" ]
+    if (is_mac) {
+      #['OS=="mac" and component!="shared_library"', {  TODO(GYP)
+      #  'includes': [ 'chrome_dll_bundle.gypi' ],
+      #}],
+      # TODO(GYP) Lots of other stuff in the OS=="mac" block.
+      sources += [
+        "app/chrome_crash_reporter_client.cc",
+        "app/chrome_crash_reporter_client.h",
+        "app/chrome_crash_reporter_client_mac.mm",
+      ]
+      deps += [
+        "//components/crash/content/app",
+        "//components/policy",
+      ]
+
+      # Define the order of symbols within the framework.
+      ldflags += [
+        "-Wl,-order_file",
+        "-Wl," + rebase_path("app/framework.order", root_build_dir),
+      ]
+    }
+
+    if (enable_plugins && enable_pdf && !is_multi_dll_chrome) {
+      deps += [ "//pdf" ]
+    }
   }
 
   if (is_multi_dll_chrome) {
-    defines += [ "CHROME_MULTIPLE_DLL_BROWSER" ]
-    deps += [ "//content/public/app:browser" ]
-  } else {
-    deps += [
-      ":child_dependencies",
-      "//content/public/app:both",
-    ]
-  }
-
-  if (cld_version == 2) {
-    deps += [ "//third_party/cld_2" ]
-  }
-
-  if (is_mac) {
-    #['OS=="mac" and component!="shared_library"', {  TODO(GYP)
-    #  'includes': [ 'chrome_dll_bundle.gypi' ],
-    #}],
-    # TODO(GYP) Lots of other stuff in the OS=="mac" block.
-  }
-
-  if (enable_plugins && !is_multi_dll_chrome) {
-    deps += [ "//pdf" ]
-  }
-}
-
-if (is_multi_dll_chrome) {
-  # This manifest matches what GYP produces. It may not even be necessary.
-  windows_manifest("chrome_child_manifest") {
-    sources = [
-      as_invoker_manifest,
-    ]
-    type = "dll"
-  }
-
-  shared_library("chrome_child") {
-    sources = [
-      "app/chrome_main.cc",
-      "app/chrome_main_delegate.cc",
-      "app/chrome_main_delegate.h",
-      "app/close_handle_hook_win.cc",
-      "app/close_handle_hook_win.h",
-    ]
-
-    configs += [ "//build/config/compiler:wexit_time_destructors" ]
-    defines = [ "CHROME_MULTIPLE_DLL_CHILD" ]
-
-    deps = [
-      ":child_dependencies",
-      ":chrome_child_manifest",
-      ":chrome_dll_version",
-      "//base/allocator",
-      "//build/config/sanitizers:deps",
-      "//chrome/browser/policy:path_parser",
-      "//content/public/app:child",
-    ]
-
-    if (is_win) {
-      # TODO(GYP) bug 512851: PGO on Windows.
-      # ['chrome_pgo_phase==1', {
-      #   'msvs_settings': {
-      #     'VCLinkerTool': {
-      #       'LinkTimeCodeGeneration': '2',
-      #     },
-      #   },
-      # }],
-      # ['chrome_pgo_phase==2', {
-      #   'msvs_settings': {
-      #     'VCLinkerTool': {
-      #       'LinkTimeCodeGeneration': '3',
-      #     },
-      #   },
-      # }],
+    # This manifest matches what GYP produces. It may not even be necessary.
+    windows_manifest("chrome_child_manifest") {
+      sources = [
+        as_invoker_manifest,
+      ]
+      type = "dll"
     }
-    if (enable_plugins) {
-      deps += [ "//pdf" ]
+
+    shared_library("chrome_child") {
+      sources = [
+        "app/chrome_main.cc",
+        "app/chrome_main_delegate.cc",
+        "app/chrome_main_delegate.h",
+        "app/close_handle_hook_win.cc",
+        "app/close_handle_hook_win.h",
+      ]
+
+      configs += [ "//build/config/compiler:wexit_time_destructors" ]
+      defines = [ "CHROME_MULTIPLE_DLL_CHILD" ]
+
+      deps = [
+        ":child_dependencies",
+        ":chrome_child_manifest",
+        ":chrome_dll_version",
+        "//base/allocator",
+        "//build/config/sanitizers:deps",
+        "//chrome/browser/policy:path_parser",
+        "//content/public/app:child",
+      ]
+
+      if (is_win) {
+        # TODO(GYP) bug 512851: PGO on Windows.
+        # ['chrome_pgo_phase==1', {
+        #   'msvs_settings': {
+        #     'VCLinkerTool': {
+        #       'LinkTimeCodeGeneration': '2',
+        #     },
+        #   },
+        # }],
+        # ['chrome_pgo_phase==2', {
+        #   'msvs_settings': {
+        #     'VCLinkerTool': {
+        #       'LinkTimeCodeGeneration': '3',
+        #     },
+        #   },
+        # }],
+      }
+      if (enable_plugins && enable_pdf) {
+        deps += [ "//pdf" ]
+      }
     }
   }
 }
@@ -425,22 +476,6 @@ group("child_dependencies") {
 }
 
 if (is_win) {
-  # TODO(brettw) this duplicates "//chrome/common:version" which applies to
-  # Linux.
-  process_version("version_header") {
-    # TODO(brettW) this should have more reduced visibility, but chrome/browser
-    # currently depends on this.
-    #visibility = [ ":*" ]
-
-    # This one just uses the custom template and no separate sources.
-    sources = []
-    template_file = "version.h.in"
-
-    # TODO(brettw) this should move to $target_gen_dir/version.h and
-    # source files including it should reference it via "chrome/version.h"
-    output = "$root_gen_dir/version.h"
-  }
-
   process_version("chrome_exe_version") {
     template_file = chrome_version_rc_template
     sources = [
@@ -482,10 +517,10 @@ if (is_win) {
     output = "$target_gen_dir/other_version.rc"
   }
 
-  source_set("image_pre_reader") {
+  source_set("file_pre_reader") {
     sources = [
-      "app/image_pre_reader_win.cc",
-      "app/image_pre_reader_win.h",
+      "app/file_pre_reader_win.cc",
+      "app/file_pre_reader_win.h",
     ]
     deps = [
       "//base",
@@ -868,10 +903,12 @@ if (enable_topchrome_md) {
 
 # GYP version: chrome/chrome_resources.gyp:chrome_strings
 group("strings") {
-  deps = [
+  public_deps = [
     "//chrome/app:chromium_strings",
     "//chrome/app:generated_resources",
     "//chrome/app:google_chrome_strings",
+    "//chrome/app:settings_chromium_strings",
+    "//chrome/app:settings_google_chrome_strings",
     "//chrome/app:settings_strings",
     "//chrome/app/resources:locale_settings",
   ]
@@ -883,9 +920,6 @@ if (is_android) {
     sources = [
       "../components/content_settings/core/common/content_settings.h",
     ]
-    outputs = [
-      "org/chromium/chrome/browser/ContentSetting.java",
-    ]
   }
 
   # GYP: //chrome/chrome.gyp:content_settings_type_java
@@ -893,18 +927,12 @@ if (is_android) {
     sources = [
       "../components/content_settings/core/common/content_settings_types.h",
     ]
-    outputs = [
-      "org/chromium/chrome/browser/ContentSettingsType.java",
-    ]
   }
 
   # GYP: //chrome/chrome.gyp:page_info_connection_type_java
   java_cpp_enum("page_info_connection_type_javagen") {
     sources = [
       "browser/ui/android/website_settings_popup_android.h",
-    ]
-    outputs = [
-      "org/chromium/chrome/browser/PageInfoConnectionType.java",
     ]
   }
 
@@ -932,6 +960,7 @@ if (is_android) {
       "//chrome/browser",
       "//chrome/browser/ui",
       "//chrome/child",
+      "//chrome/common",
       "//chrome/plugin",
       "//chrome/renderer",
       "//chrome/utility",

@@ -45,8 +45,6 @@ from pylib.perf import test_options as perf_test_options
 from pylib.perf import test_runner as perf_test_runner
 from pylib.results import json_results
 from pylib.results import report_results
-from pylib.uiautomator import setup as uiautomator_setup
-from pylib.uiautomator import test_options as uiautomator_test_options
 
 
 def AddCommonOptions(parser):
@@ -75,7 +73,8 @@ def AddCommonOptions(parser):
                            ' located (must include build type). This will take'
                            ' precedence over --debug, --release and'
                            ' --build-directory'))
-  group.add_argument('--num_retries', dest='num_retries', type=int, default=2,
+  group.add_argument('--num_retries', '--num-retries', dest='num_retries',
+                     type=int, default=2,
                      help=('Number of retries for a test before '
                            'giving up (default: %(default)s).'))
   group.add_argument('-v',
@@ -155,6 +154,8 @@ def AddRemoteDeviceOptions(parser):
   group.add_argument('--network-config', type=int,
                      help='Integer that specifies the network environment '
                           'that the tests will be run in.')
+  group.add_argument('--test-timeout', type=int,
+                     help='Test run timeout in seconds.')
 
   device_os_group = group.add_mutually_exclusive_group()
   device_os_group.add_argument('--remote-device-minimum-os',
@@ -186,6 +187,13 @@ def AddDeviceOptions(parser):
                      help=('Target device for the test suite '
                            'to run on.'))
   group.add_argument('--blacklist-file', help='Device blacklist file.')
+  group.add_argument('--enable-device-cache', action='store_true',
+                     help='Cache device state to disk between runs')
+  group.add_argument('--incremental-install', action='store_true',
+                     help='Use an _incremental apk.')
+  group.add_argument('--enable-concurrent-adb', action='store_true',
+                     help='Run multiple adb commands at the same time, even '
+                          'for the same device.')
 
 
 def AddGTestOptions(parser):
@@ -202,7 +210,8 @@ def AddGTestOptions(parser):
   group.add_argument('-a', '--test-arguments', dest='test_arguments',
                      default='',
                      help='Additional arguments to pass to the test.')
-  group.add_argument('-t', dest='timeout', type=int, default=60,
+  group.add_argument('-t', '--shard-timeout',
+                     dest='shard_timeout', type=int, default=60,
                      help='Timeout to wait for each test '
                           '(default: %(default)s).')
   group.add_argument('--isolate_file_path',
@@ -375,14 +384,19 @@ def ProcessInstrumentationOptions(args):
   if not args.host_driven_root:
     args.run_python_tests = False
 
-  args.test_apk_path = os.path.join(
-      constants.GetOutDirectory(),
-      constants.SDK_BUILD_APKS_DIR,
-      '%s.apk' % args.test_apk)
+  if os.path.exists(args.test_apk):
+    args.test_apk_path = args.test_apk
+    args.test_apk, _ = os.path.splitext(os.path.basename(args.test_apk))
+  else:
+    args.test_apk_path = os.path.join(
+        constants.GetOutDirectory(),
+        constants.SDK_BUILD_APKS_DIR,
+        '%s.apk' % args.test_apk)
+
   args.test_apk_jar_path = os.path.join(
       constants.GetOutDirectory(),
       constants.SDK_BUILD_TEST_JAVALIB_DIR,
-      '%s.jar' %  args.test_apk)
+      '%s.jar' % args.test_apk)
   args.test_support_apk_path = '%sSupport%s' % (
       os.path.splitext(args.test_apk_path))
 
@@ -427,45 +441,6 @@ def AddUIAutomatorTestOptions(parser):
 
   AddCommonOptions(parser)
   AddDeviceOptions(parser)
-
-
-def ProcessUIAutomatorOptions(args):
-  """Processes UIAutomator options/arguments.
-
-  Args:
-    args: argparse.Namespace object.
-
-  Returns:
-    A UIAutomatorOptions named tuple which contains all options relevant to
-    uiautomator tests.
-  """
-
-  ProcessJavaTestOptions(args)
-
-  if os.path.exists(args.test_jar):
-    # The dexed JAR is fully qualified, assume the info JAR lives along side.
-    args.uiautomator_jar = args.test_jar
-  else:
-    args.uiautomator_jar = os.path.join(
-        constants.GetOutDirectory(),
-        constants.SDK_BUILD_JAVALIB_DIR,
-        '%s.dex.jar' % args.test_jar)
-  args.uiautomator_info_jar = (
-      args.uiautomator_jar[:args.uiautomator_jar.find('.dex.jar')] +
-      '_java.jar')
-
-  return uiautomator_test_options.UIAutomatorOptions(
-      args.tool,
-      args.annotations,
-      args.exclude_annotations,
-      args.test_filter,
-      args.test_data,
-      args.save_perf_json,
-      args.screenshot_failures,
-      args.uiautomator_jar,
-      args.uiautomator_info_jar,
-      args.package,
-      args.set_asserts)
 
 
 def AddJUnitTestOptions(parser):
@@ -748,29 +723,6 @@ def _RunInstrumentationTests(args, devices):
   return exit_code
 
 
-def _RunUIAutomatorTests(args, devices):
-  """Subcommand of RunTestsCommands which runs uiautomator tests."""
-  uiautomator_options = ProcessUIAutomatorOptions(args)
-
-  runner_factory, tests = uiautomator_setup.Setup(uiautomator_options, devices)
-
-  results, exit_code = test_dispatcher.RunTests(
-      tests, runner_factory, devices, shard=True, test_timeout=None,
-      num_retries=args.num_retries)
-
-  report_results.LogFull(
-      results=results,
-      test_type='UIAutomator',
-      test_package=os.path.basename(args.test_jar),
-      annotation=args.annotations,
-      flakiness_server=args.flakiness_dashboard_server)
-
-  if args.json_results_file:
-    json_results.GenerateJsonResultsFile([results], args.json_results_file)
-
-  return exit_code
-
-
 def _RunJUnitTests(args):
   """Subcommand of RunTestsCommand which runs junit tests."""
   runner_factory, tests = junit_setup.Setup(args)
@@ -869,11 +821,13 @@ def _RunPythonTests(args):
     sys.path = sys.path[1:]
 
 
-def _GetAttachedDevices(blacklist_file, test_device):
+def _GetAttachedDevices(blacklist_file, test_device, enable_cache):
   """Get all attached devices.
 
   Args:
+    blacklist_file: Path to device blacklist.
     test_device: Name of a specific device to use.
+    enable_cache: Whether to enable checksum caching.
 
   Returns:
     A list of attached devices.
@@ -882,7 +836,8 @@ def _GetAttachedDevices(blacklist_file, test_device):
                if blacklist_file
                else None)
 
-  attached_devices = device_utils.DeviceUtils.HealthyDevices(blacklist)
+  attached_devices = device_utils.DeviceUtils.HealthyDevices(
+      blacklist, enable_device_files_cache=enable_cache)
   if test_device:
     test_device = [d for d in attached_devices if d == test_device]
     if not test_device:
@@ -918,29 +873,26 @@ def RunTestsCommand(args, parser): # pylint: disable=too-many-return-statements
   if args.enable_platform_mode:
     return RunTestsInPlatformMode(args, parser)
 
-  if command in constants.LOCAL_MACHINE_TESTS:
-    devices = []
-  else:
-    devices = _GetAttachedDevices(args.blacklist_file, args.test_device)
-
   forwarder.Forwarder.RemoveHostLog()
   if not ports.ResetTestServerPortAllocation():
     raise Exception('Failed to reset test server port.')
 
+  def get_devices():
+    return _GetAttachedDevices(args.blacklist_file, args.test_device,
+                               args.enable_device_cache)
+
   if command == 'gtest':
     return RunTestsInPlatformMode(args, parser)
   elif command == 'linker':
-    return _RunLinkerTests(args, devices)
+    return _RunLinkerTests(args, get_devices())
   elif command == 'instrumentation':
-    return _RunInstrumentationTests(args, devices)
-  elif command == 'uiautomator':
-    return _RunUIAutomatorTests(args, devices)
+    return _RunInstrumentationTests(args, get_devices())
   elif command == 'junit':
     return _RunJUnitTests(args)
   elif command == 'monkey':
-    return _RunMonkeyTests(args, devices)
+    return _RunMonkeyTests(args, get_devices())
   elif command == 'perf':
-    return _RunPerfTests(args, devices)
+    return _RunPerfTests(args, get_devices())
   elif command == 'python':
     return _RunPythonTests(args)
   else:
@@ -1001,9 +953,6 @@ VALID_COMMANDS = {
     'instrumentation': CommandConfigTuple(
         AddInstrumentationTestOptions,
         'InstrumentationTestCase-based Java tests'),
-    'uiautomator': CommandConfigTuple(
-        AddUIAutomatorTestOptions,
-        "Tests that run via Android's uiautomator command"),
     'junit': CommandConfigTuple(
         AddJUnitTestOptions,
         'JUnit4-based Java tests'),

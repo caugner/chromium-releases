@@ -9,6 +9,7 @@
 #include <keyt.h>
 #include <nspr.h>
 #include <nss.h>
+#include <stdint.h>
 
 #include <string>
 #include <vector>
@@ -84,6 +85,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
   void ClearConnectionAttempts() override {}
   void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
+  int64_t GetTotalReceivedBytes() const override;
 
   // Socket implementation.
   int Read(IOBuffer* buf,
@@ -143,6 +145,12 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // each of the SCTs with the corresponding SCTVerifyStatus as it adds it to
   // the |ssl_info|.signed_certificate_timestamps list.
   void AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const;
+
+  // Move last protocol to first place: SSLConfig::next_protos has protocols in
+  // decreasing order of preference with NPN fallback protocol at the end, but
+  // NSS moves the first one to the last place before sending them in ALPN, and
+  // uses the first one as a fallback for NPN.
+  static void ReorderNextProtos(NextProtoVector* next_protos);
 
   scoped_ptr<ClientSocketHandle> transport_;
   HostPortPair host_and_port_;

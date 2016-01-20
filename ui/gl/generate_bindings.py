@@ -245,8 +245,18 @@ GL_FUNCTIONS = [
       'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
       'GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height', },
 { 'return_type': 'void',
+  'names': ['glCoverFillPathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLenum coverMode, GLenum transformType, '
+  'const GLfloat* transformValues' },
+{ 'return_type': 'void',
   'names': ['glCoverFillPathNV'],
   'arguments': 'GLuint path, GLenum coverMode' },
+{ 'return_type': 'void',
+  'names': ['glCoverStrokePathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLenum coverMode, GLenum transformType, '
+  'const GLfloat* transformValues' },
 { 'return_type': 'void',
   'names': ['glCoverStrokePathNV'],
   'arguments': 'GLuint name, GLenum coverMode' },
@@ -574,11 +584,27 @@ GL_FUNCTIONS = [
   'arguments':
       'GLuint program, GLsizei bufsize, GLsizei* length, char* infolog', },
 { 'return_type': 'void',
+  'versions': [{'name': 'glGetProgramInterfaceiv',
+                'extensions': ['GL_ARB_program_interface_query']}],
+  'arguments': 'GLuint program, GLenum programInterface, GLenum pname, '
+  'GLint* params'},
+{ 'return_type': 'void',
   'names': ['glGetProgramiv'],
   'arguments': 'GLuint program, GLenum pname, GLint* params', },
+{ 'return_type': 'void',
+  'versions': [{'name': 'glGetProgramResourceiv',
+                'extensions': ['GL_ARB_program_interface_query']}],
+  'arguments': 'GLuint program, GLenum programInterface, GLuint index, '
+  'GLsizei propCount, const GLenum* props, GLsizei bufSize, '
+  'GLsizei* length, GLint* params'},
 { 'return_type': 'GLint',
   'names': ['glGetProgramResourceLocation'],
   'arguments': 'GLuint program, GLenum programInterface, const char* name', },
+{ 'return_type': 'void',
+  'versions': [{'name': 'glGetProgramResourceName',
+                'extensions': ['GL_ARB_program_interface_query']}],
+  'arguments': 'GLuint program, GLenum programInterface, GLuint index, '
+  'GLsizei bufSize, GLsizei* length, GLchar* name'},
 { 'return_type': 'void',
   'versions': [{ 'name': 'glGetQueryiv' },
                { 'name': 'glGetQueryivARB' },
@@ -834,6 +860,11 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_ARB_get_program_binary'] }],
   'arguments': 'GLuint program, GLenum pname, GLint value' },
 { 'return_type': 'void',
+  'names': ['glProgramPathFragmentInputGenNV'],
+  'arguments': 'GLuint program, GLint location, GLenum genMode, '
+  'GLint components, const GLfloat* coeffs',
+  'is_optional': True, },
+{ 'return_type': 'void',
   'names': ['glPushGroupMarkerEXT'],
   'arguments': 'GLsizei length, const char* marker', },
 { 'return_type': 'void',
@@ -926,6 +957,11 @@ GL_FUNCTIONS = [
   });
 """, },
 { 'return_type': 'void',
+  'names': ['glStencilFillPathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLenum fillMode, GLuint mask, GLenum transformType, '
+  'const GLfloat* transformValues' },
+{ 'return_type': 'void',
   'names': ['glStencilFillPathNV'],
   'arguments': 'GLuint path, GLenum fillMode, GLuint mask' },
 { 'return_type': 'void',
@@ -947,11 +983,28 @@ GL_FUNCTIONS = [
   'names': ['glStencilOpSeparate'],
   'arguments': 'GLenum face, GLenum fail, GLenum zfail, GLenum zpass', },
 { 'return_type': 'void',
+  'names': ['glStencilStrokePathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLint ref, GLuint mask, GLenum transformType, '
+  'const GLfloat* transformValues' },
+{ 'return_type': 'void',
   'names': ['glStencilStrokePathNV'],
   'arguments': 'GLuint path, GLint reference, GLuint mask' },
 { 'return_type': 'void',
+  'names': ['glStencilThenCoverFillPathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLenum fillMode, GLuint mask, GLenum coverMode, '
+  'GLenum transformType, const GLfloat* transformValues',
+  'is_optional': True, },
+{ 'return_type': 'void',
   'names': ['glStencilThenCoverFillPathNV'],
   'arguments': 'GLuint path, GLenum fillMode, GLuint mask, GLenum coverMode',
+  'is_optional': True, },
+{ 'return_type': 'void',
+  'names': ['glStencilThenCoverStrokePathInstancedNV'],
+  'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
+  'GLuint pathBase, GLint ref, GLuint mask, GLenum coverMode, '
+  'GLenum transformType, const GLfloat* transformValues',
   'is_optional': True, },
 { 'return_type': 'void',
   'names': ['glStencilThenCoverStrokePathNV'],
@@ -1956,8 +2009,9 @@ namespace gfx {
         file.write('  else if (%s) {\n  ' % (cond))
 
       WriteFuncBinding(file, known_as, version['name'])
-      if not 'is_optional' in func or not func['is_optional']:
-        file.write('DCHECK(fn.%sFn);\n' % known_as)
+      if options.validate_bindings:
+        if not 'is_optional' in func or not func['is_optional']:
+          file.write('DCHECK(fn.%sFn);\n' % known_as)
       file.write('}\n')
       i += 1
       first_version = False
@@ -2589,6 +2643,9 @@ def main(argv):
   parser.add_option('--generate-dchecks', action='store_true',
                     help='Generates DCHECKs into the logging functions '
                         'asserting no GL errors (useful for debugging)')
+  parser.add_option('--validate-bindings', action='store_true',
+                    help='Generate DCHECKs to validate function bindings '
+                         ' were correctly supplied (useful for debugging)')
 
   options, args = parser.parse_args(argv)
 

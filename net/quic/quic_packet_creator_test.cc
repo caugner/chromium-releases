@@ -10,6 +10,7 @@
 #include "net/quic/crypto/null_encrypter.h"
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_framer_peer.h"
@@ -36,22 +37,25 @@ namespace {
 struct TestParams {
   TestParams(QuicVersion version,
              bool version_serialization,
-             QuicConnectionIdLength length)
+             QuicConnectionIdLength length,
+             bool copy_use_prefetch)
       : version(version),
         connection_id_length(length),
-        version_serialization(version_serialization) {
-  }
+        version_serialization(version_serialization),
+        copy_use_prefetch(copy_use_prefetch) {}
 
   friend ostream& operator<<(ostream& os, const TestParams& p) {
     os << "{ client_version: " << QuicVersionToString(p.version)
        << " connection id length: " << p.connection_id_length
-       << " include version: " << p.version_serialization << " }";
+       << " include version: " << p.version_serialization
+       << " copy use prefetch: " << p.copy_use_prefetch << " }";
     return os;
   }
 
   QuicVersion version;
   QuicConnectionIdLength connection_id_length;
   bool version_serialization;
+  bool copy_use_prefetch;
 };
 
 // Constructs various test permutations.
@@ -60,15 +64,16 @@ vector<TestParams> GetTestParams() {
   QuicConnectionIdLength max = PACKET_8BYTE_CONNECTION_ID;
   QuicVersionVector all_supported_versions = QuicSupportedVersions();
   for (size_t i = 0; i < all_supported_versions.size(); ++i) {
-    params.push_back(TestParams(all_supported_versions[i], true, max));
-    params.push_back(TestParams(all_supported_versions[i], false, max));
+    params.push_back(TestParams(all_supported_versions[i], true, max, false));
+    params.push_back(TestParams(all_supported_versions[i], false, max, false));
   }
-  params.push_back(TestParams(
-      all_supported_versions[0], true, PACKET_0BYTE_CONNECTION_ID));
-  params.push_back(TestParams(
-      all_supported_versions[0], true, PACKET_1BYTE_CONNECTION_ID));
-  params.push_back(TestParams(
-      all_supported_versions[0], true, PACKET_4BYTE_CONNECTION_ID));
+  params.push_back(TestParams(all_supported_versions[0], true,
+                              PACKET_0BYTE_CONNECTION_ID, false));
+  params.push_back(TestParams(all_supported_versions[0], true,
+                              PACKET_1BYTE_CONNECTION_ID, false));
+  params.push_back(TestParams(all_supported_versions[0], true,
+                              PACKET_4BYTE_CONNECTION_ID, false));
+  params.push_back(TestParams(all_supported_versions[0], true, max, true));
   return params;
 }
 
@@ -88,6 +93,7 @@ class QuicPacketCreatorTest : public ::testing::TestWithParam<TestParams> {
     client_framer_.set_visitor(&framer_visitor_);
     client_framer_.set_received_entropy_calculator(&entropy_calculator_);
     server_framer_.set_visitor(&framer_visitor_);
+    FLAGS_quic_packet_creator_prefetch = GetParam().copy_use_prefetch;
   }
 
   ~QuicPacketCreatorTest() override {}
@@ -491,7 +497,7 @@ TEST_P(QuicPacketCreatorTest, ReserializeFramesWithSequenceNumberLength) {
 TEST_P(QuicPacketCreatorTest, ReserializeFramesWithPadding) {
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("fake handshake message data"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   creator_.CreateStreamFrame(kCryptoStreamId, io_vector, 0u, 0u, false, &frame,
                              &stream_buffer);
   RetransmittableFrames frames(ENCRYPTION_NONE);
@@ -515,7 +521,7 @@ TEST_P(QuicPacketCreatorTest, ReserializeFramesWithFullPacketAndPadding) {
 
     QuicFrame frame;
     QuicIOVector io_vector(MakeIOVector(data));
-    scoped_ptr<char[]> stream_buffer;
+    UniqueStreamBuffer stream_buffer;
     creator_.CreateStreamFrame(kCryptoStreamId, io_vector, 0, kOffset, false,
                                &frame, &stream_buffer);
     RetransmittableFrames frames(ENCRYPTION_NONE);
@@ -623,7 +629,7 @@ TEST_P(QuicPacketCreatorTest, SwitchFecOnWithStreamFrameQueued) {
   // Add a stream frame to the creator.
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, false,
                                                &frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);
@@ -654,7 +660,7 @@ TEST_P(QuicPacketCreatorTest, SwitchFecOnWithStreamFrameQueued) {
 TEST_P(QuicPacketCreatorTest, CreateStreamFrame) {
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, false,
                                                &frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);
@@ -666,7 +672,7 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrame) {
 TEST_P(QuicPacketCreatorTest, CreateStreamFrameFin) {
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 10u, true,
                                                &frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);
@@ -678,7 +684,7 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrameFin) {
 TEST_P(QuicPacketCreatorTest, CreateStreamFrameFinOnly) {
   QuicFrame frame;
   QuicIOVector io_vector(nullptr, 0, 0);
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, true,
                                                &frame, &stream_buffer);
   EXPECT_EQ(0u, consumed);
@@ -698,7 +704,7 @@ TEST_P(QuicPacketCreatorTest, CreateAllFreeBytesForStreamFrames) {
     if (should_have_room) {
       QuicFrame frame;
       QuicIOVector io_vector(MakeIOVector("testdata"));
-      scoped_ptr<char[]> stream_buffer;
+      UniqueStreamBuffer stream_buffer;
       size_t bytes_consumed =
           creator_.CreateStreamFrame(kClientDataStreamId1, io_vector, 0u,
                                      kOffset, false, &frame, &stream_buffer);
@@ -725,7 +731,7 @@ TEST_P(QuicPacketCreatorTest, StreamFrameConsumption) {
     size_t bytes_free = delta > 0 ? 0 : 0 - delta;
     QuicFrame frame;
     QuicIOVector io_vector(MakeIOVector(data));
-    scoped_ptr<char[]> stream_buffer;
+    UniqueStreamBuffer stream_buffer;
     size_t bytes_consumed =
         creator_.CreateStreamFrame(kClientDataStreamId1, io_vector, 0u, kOffset,
                                    false, &frame, &stream_buffer);
@@ -759,7 +765,7 @@ TEST_P(QuicPacketCreatorTest, StreamFrameConsumptionWithFec) {
     size_t bytes_free = delta > 0 ? 0 : 0 - delta;
     QuicFrame frame;
     QuicIOVector io_vector(MakeIOVector(data));
-    scoped_ptr<char[]> stream_buffer;
+    UniqueStreamBuffer stream_buffer;
     size_t bytes_consumed =
         creator_.CreateStreamFrame(kClientDataStreamId1, io_vector, 0u, kOffset,
                                    false, &frame, &stream_buffer);
@@ -794,7 +800,7 @@ TEST_P(QuicPacketCreatorTest, CryptoStreamFramePacketPadding) {
 
     QuicFrame frame;
     QuicIOVector io_vector(MakeIOVector(data));
-    scoped_ptr<char[]> stream_buffer;
+    UniqueStreamBuffer stream_buffer;
     size_t bytes_consumed = creator_.CreateStreamFrame(
         kCryptoStreamId, io_vector, 0u, kOffset, false, &frame, &stream_buffer);
     EXPECT_LT(0u, bytes_consumed);
@@ -830,7 +836,7 @@ TEST_P(QuicPacketCreatorTest, NonCryptoStreamFramePacketNonPadding) {
 
     QuicFrame frame;
     QuicIOVector io_vector(MakeIOVector(data));
-    scoped_ptr<char[]> stream_buffer;
+    UniqueStreamBuffer stream_buffer;
     size_t bytes_consumed =
         creator_.CreateStreamFrame(kClientDataStreamId1, io_vector, 0u, kOffset,
                                    false, &frame, &stream_buffer);
@@ -966,7 +972,7 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrameTooLarge) {
   QuicFrame frame;
   const string too_long_payload(payload_length * 2, 'a');
   QuicIOVector io_vector(MakeIOVector(too_long_payload));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, true,
                                                &frame, &stream_buffer);
   EXPECT_EQ(payload_length, consumed);
@@ -997,7 +1003,7 @@ TEST_P(QuicPacketCreatorTest, AddFrameAndSerialize) {
 
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, false,
                                                &frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);
@@ -1006,7 +1012,7 @@ TEST_P(QuicPacketCreatorTest, AddFrameAndSerialize) {
   EXPECT_TRUE(creator_.HasPendingFrames());
 
   QuicPaddingFrame padding_frame;
-  EXPECT_TRUE(creator_.AddSavedFrame(QuicFrame(&padding_frame)));
+  EXPECT_TRUE(creator_.AddSavedFrame(QuicFrame(padding_frame)));
   EXPECT_TRUE(creator_.HasPendingFrames());
   EXPECT_EQ(0u, creator_.BytesFree());
 
@@ -1058,7 +1064,7 @@ TEST_P(QuicPacketCreatorTest, SerializeTruncatedAckFrameWithLargePacketSize) {
   // Make sure that an additional stream frame can be added to the packet.
   QuicFrame stream_frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(2u, io_vector, 0u, 0u, false,
                                                &stream_frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);
@@ -1204,7 +1210,7 @@ TEST_P(QuicPacketCreatorTest, ResetFecGroupWithQueuedFrames) {
   // Add a stream frame to the creator.
   QuicFrame frame;
   QuicIOVector io_vector(MakeIOVector("test"));
-  scoped_ptr<char[]> stream_buffer;
+  UniqueStreamBuffer stream_buffer;
   size_t consumed = creator_.CreateStreamFrame(1u, io_vector, 0u, 0u, false,
                                                &frame, &stream_buffer);
   EXPECT_EQ(4u, consumed);

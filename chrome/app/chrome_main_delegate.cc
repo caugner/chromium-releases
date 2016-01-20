@@ -40,10 +40,10 @@
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "components/component_updater/component_updater_paths.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/common/constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
@@ -123,6 +123,10 @@
 #if defined(ENABLE_PLUGINS) && (defined(CHROME_MULTIPLE_DLL_CHILD) || \
     !defined(CHROME_MULTIPLE_DLL_BROWSER))
 #include "pdf/pdf.h"
+#endif
+
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
+#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
@@ -402,9 +406,8 @@ void InitLogging(const std::string& process_type) {
 }
 #endif
 
-}  // namespace
-
-ChromeMainDelegate::ChromeMainDelegate() {
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
+void RecordMainStartupMetrics() {
 #if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
   // Record the startup process creation time on supported platforms.
   startup_metric_utils::RecordStartupProcessCreationTime(
@@ -419,6 +422,19 @@ ChromeMainDelegate::ChromeMainDelegate() {
 #if !defined(OS_ANDROID)
   startup_metric_utils::RecordMainEntryPointTime(base::Time::Now());
 #endif
+}
+#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
+
+}  // namespace
+
+ChromeMainDelegate::ChromeMainDelegate() {
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
+  // Record startup metrics in the browser process. For component builds, there
+  // is no way to know the type of process (process command line is not yet
+  // initialized), so the function below will also be called in renderers.
+  // This doesn't matter as it simply sets global variables.
+  RecordMainStartupMetrics();
+#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 }
 
 ChromeMainDelegate::~ChromeMainDelegate() {
@@ -604,9 +620,17 @@ void ChromeMainDelegate::InitMacCrashReporter(
   // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally, Crashpad
   // initialization could occur sooner, preferably even before the framework
   // dylib is even loaded, to catch potential early crashes.
-  crash_reporter::InitializeCrashpad(process_type);
 
   const bool browser_process = process_type.empty();
+  const bool install_from_dmg_relauncher_process =
+      process_type == switches::kRelauncherProcess &&
+      command_line.HasSwitch(switches::kRelauncherProcessDMGDevice);
+
+  const bool initial_client =
+      browser_process || install_from_dmg_relauncher_process;
+
+  crash_reporter::InitializeCrashpad(initial_client, process_type);
+
   if (!browser_process) {
     std::string metrics_client_id =
         command_line.GetSwitchValueASCII(switches::kMetricsClientID);

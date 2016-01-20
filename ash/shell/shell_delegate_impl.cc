@@ -11,13 +11,14 @@
 #include "ash/media_delegate.h"
 #include "ash/new_window_delegate.h"
 #include "ash/session/session_state_delegate.h"
+#include "ash/shell/content/shell_content_state_impl.h"
 #include "ash/shell/context_menu.h"
 #include "ash/shell/example_factory.h"
-#include "ash/shell/keyboard_controller_proxy_stub.h"
 #include "ash/shell/shelf_delegate_impl.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/tray/default_system_tray_delegate.h"
+#include "ash/test/test_keyboard_ui.h"
 #include "ash/wm/window_state.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,6 +26,7 @@
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace ash {
 namespace shell {
@@ -64,8 +66,7 @@ class MediaDelegateImpl : public MediaDelegate {
   void HandleMediaNextTrack() override {}
   void HandleMediaPlayPause() override {}
   void HandleMediaPrevTrack() override {}
-  MediaCaptureState GetMediaCaptureState(
-      content::BrowserContext* context) override {
+  MediaCaptureState GetMediaCaptureState(UserIndex index) override {
     return MEDIA_CAPTURE_VIDEO;
   }
 
@@ -81,18 +82,6 @@ class SessionStateDelegateImpl : public SessionStateDelegate {
   ~SessionStateDelegateImpl() override {}
 
   // SessionStateDelegate:
-  content::BrowserContext* GetBrowserContextByIndex(
-      MultiProfileIndex index) override {
-    return Shell::GetInstance()->delegate()->GetActiveBrowserContext();
-  }
-  content::BrowserContext* GetBrowserContextForWindow(
-      aura::Window* window) override {
-    return Shell::GetInstance()->delegate()->GetActiveBrowserContext();
-  }
-  content::BrowserContext* GetUserPresentingBrowserContextForWindow(
-      aura::Window* window) override {
-    return NULL;
-  }
   int GetMaximumNumberOfLoggedInUsers() const override { return 3; }
   int NumberOfLoggedInUsers() const override {
     // ash_shell has 2 users.
@@ -119,18 +108,16 @@ class SessionStateDelegateImpl : public SessionStateDelegate {
     return IsActiveUserSessionStarted() ? SESSION_STATE_ACTIVE
                                         : SESSION_STATE_LOGIN_PRIMARY;
   }
-  const user_manager::UserInfo* GetUserInfo(
-      MultiProfileIndex index) const override {
-    return user_info_.get();
-  }
-  const user_manager::UserInfo* GetUserInfo(
-      content::BrowserContext* context) const override {
+  const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
     return user_info_.get();
   }
   bool ShouldShowAvatar(aura::Window* window) const override {
     return !user_info_->GetImage().isNull();
   }
-  void SwitchActiveUser(const std::string& user_id) override {}
+  gfx::ImageSkia GetAvatarImageForWindow(aura::Window* window) const override {
+    return gfx::ImageSkia();
+  }
+  void SwitchActiveUser(const AccountId& account_id) override {}
   void CycleActiveUser(CycleUser cycle_user) override {}
   bool IsMultiProfileAllowedByPrimaryUserPolicy() const override {
     return true;
@@ -151,10 +138,7 @@ class SessionStateDelegateImpl : public SessionStateDelegate {
 }  // namespace
 
 ShellDelegateImpl::ShellDelegateImpl()
-    : watcher_(NULL),
-      shelf_delegate_(NULL),
-      browser_context_(NULL) {
-}
+    : watcher_(NULL), shelf_delegate_(NULL) {}
 
 ShellDelegateImpl::~ShellDelegateImpl() {
 }
@@ -200,12 +184,11 @@ void ShellDelegateImpl::PreShutdown() {
 }
 
 void ShellDelegateImpl::Exit() {
-  base::MessageLoopForUI::current()->Quit();
+  base::MessageLoopForUI::current()->QuitWhenIdle();
 }
 
-keyboard::KeyboardControllerProxy*
-    ShellDelegateImpl::CreateKeyboardControllerProxy() {
-  return new KeyboardControllerProxyStub();
+keyboard::KeyboardUI* ShellDelegateImpl::CreateKeyboardUI() {
+  return new TestKeyboardUI;
 }
 
 void ShellDelegateImpl::VirtualKeyboardActivated(bool activated) {
@@ -217,10 +200,6 @@ void ShellDelegateImpl::AddVirtualKeyboardStateObserver(
 
 void ShellDelegateImpl::RemoveVirtualKeyboardStateObserver(
     VirtualKeyboardStateObserver* observer) {
-}
-
-content::BrowserContext* ShellDelegateImpl::GetActiveBrowserContext() {
-  return browser_context_;
 }
 
 app_list::AppListViewDelegate* ShellDelegateImpl::GetAppListViewDelegate() {

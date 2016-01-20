@@ -7,7 +7,9 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "components/scheduler/child/scheduler_task_runner_delegate_impl.h"
+#include "base/test/simple_test_tick_clock.h"
+#include "components/scheduler/base/test_time_source.h"
+#include "components/scheduler/child/scheduler_tqm_delegate_impl.h"
 #include "components/scheduler/renderer/renderer_scheduler_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,9 +36,12 @@ class MockTaskObserver : public blink::WebThread::TaskObserver {
 class WebThreadImplForRendererSchedulerTest : public testing::Test {
  public:
   WebThreadImplForRendererSchedulerTest()
-      : scheduler_(SchedulerTaskRunnerDelegateImpl::Create(&message_loop_)),
+      : clock_(new base::SimpleTestTickClock()),
+        scheduler_(SchedulerTqmDelegateImpl::Create(
+            &message_loop_,
+            make_scoped_ptr(new TestTimeSource(clock_.get())))),
         default_task_runner_(scheduler_.DefaultTaskRunner()),
-        thread_(&scheduler_) {}
+        thread_(scheduler_.CreateMainThread()) {}
 
   ~WebThreadImplForRendererSchedulerTest() override {}
 
@@ -49,16 +54,17 @@ class WebThreadImplForRendererSchedulerTest : public testing::Test {
 
  protected:
   base::MessageLoop message_loop_;
+  scoped_ptr<base::SimpleTestTickClock> clock_;
   RendererSchedulerImpl scheduler_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
-  WebThreadImplForRendererScheduler thread_;
+  scoped_ptr<blink::WebThread> thread_;
 
   DISALLOW_COPY_AND_ASSIGN(WebThreadImplForRendererSchedulerTest);
 };
 
 TEST_F(WebThreadImplForRendererSchedulerTest, TestTaskObserver) {
   MockTaskObserver observer;
-  thread_.addTaskObserver(&observer);
+  thread_->addTaskObserver(&observer);
   scoped_ptr<MockTask> task(new MockTask());
 
   {
@@ -68,14 +74,14 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestTaskObserver) {
     EXPECT_CALL(observer, didProcessTask());
   }
 
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task.release());
   message_loop_.RunUntilIdle();
-  thread_.removeTaskObserver(&observer);
+  thread_->removeTaskObserver(&observer);
 }
 
 TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithOneTask) {
   MockTaskObserver observer;
-  thread_.addTaskObserver(&observer);
+  thread_->addTaskObserver(&observer);
   scoped_ptr<MockTask> task(new MockTask());
 
   SetWorkBatchSizeForTesting(kWorkBatchSize);
@@ -86,14 +92,14 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithOneTask) {
     EXPECT_CALL(observer, didProcessTask());
   }
 
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task.release());
   message_loop_.RunUntilIdle();
-  thread_.removeTaskObserver(&observer);
+  thread_->removeTaskObserver(&observer);
 }
 
 TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithTwoTasks) {
   MockTaskObserver observer;
-  thread_.addTaskObserver(&observer);
+  thread_->addTaskObserver(&observer);
   scoped_ptr<MockTask> task1(new MockTask());
   scoped_ptr<MockTask> task2(new MockTask());
 
@@ -109,15 +115,15 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithTwoTasks) {
     EXPECT_CALL(observer, didProcessTask());
   }
 
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task1.release());
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task2.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task1.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task2.release());
   message_loop_.RunUntilIdle();
-  thread_.removeTaskObserver(&observer);
+  thread_->removeTaskObserver(&observer);
 }
 
 TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithThreeTasks) {
   MockTaskObserver observer;
-  thread_.addTaskObserver(&observer);
+  thread_->addTaskObserver(&observer);
   scoped_ptr<MockTask> task1(new MockTask());
   scoped_ptr<MockTask> task2(new MockTask());
   scoped_ptr<MockTask> task3(new MockTask());
@@ -138,11 +144,11 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithThreeTasks) {
     EXPECT_CALL(observer, didProcessTask());
   }
 
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task1.release());
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task2.release());
-  thread_.taskRunner()->postTask(blink::WebTraceLocation(), task3.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task1.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task2.release());
+  thread_->taskRunner()->postTask(blink::WebTraceLocation(), task3.release());
   message_loop_.RunUntilIdle();
-  thread_.removeTaskObserver(&observer);
+  thread_->removeTaskObserver(&observer);
 }
 
 class ExitRunLoopTask : public blink::WebTaskRunner::Task {
@@ -167,7 +173,7 @@ void EnterRunLoop(base::MessageLoop* message_loop, blink::WebThread* thread) {
 
 TEST_F(WebThreadImplForRendererSchedulerTest, TestNestedRunLoop) {
   MockTaskObserver observer;
-  thread_.addTaskObserver(&observer);
+  thread_->addTaskObserver(&observer);
 
   {
     testing::InSequence sequence;
@@ -185,9 +191,9 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestNestedRunLoop) {
 
   message_loop_.task_runner()->PostTask(
       FROM_HERE, base::Bind(&EnterRunLoop, base::Unretained(&message_loop_),
-                            base::Unretained(&thread_)));
+                            base::Unretained(thread_.get())));
   message_loop_.RunUntilIdle();
-  thread_.removeTaskObserver(&observer);
+  thread_->removeTaskObserver(&observer);
 }
 
 }  // namespace scheduler

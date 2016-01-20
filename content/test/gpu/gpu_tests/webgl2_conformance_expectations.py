@@ -1,9 +1,7 @@
 # Copyright (c) 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import os
-
-from webgl_conformance_expectations import WebGLConformanceExpectations
+from gpu_tests.webgl_conformance_expectations import WebGLConformanceExpectations
 
 # See the GpuTestExpectations class for documentation.
 
@@ -41,6 +39,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('deqp/functional/gles3/framebufferblit.html', bug=483282)
     self.Skip('deqp/functional/gles3/indexedstatequery.html', bug=483282)
     self.Skip('deqp/functional/gles3/instancedrendering.html', bug=483282)
+    self.Skip('deqp/functional/gles3/integerstatequery.html', bug=483282)
     self.Skip('deqp/functional/gles3/internalformatquery.html', bug=483282)
     self.Skip('deqp/functional/gles3/lifetime.html', bug=483282)
     self.Skip('deqp/functional/gles3/multisample.html', bug=483282)
@@ -61,6 +60,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('deqp/functional/gles3/shaderindexing.html', bug=483282)
     self.Skip('deqp/functional/gles3/shaderloop.html', bug=483282)
     self.Skip('deqp/functional/gles3/shadermatrix.html', bug=483282)
+    self.Skip('deqp/functional/gles3/shaderoperator.html', bug=483282)
     self.Skip('deqp/functional/gles3/shaderpackingfunction.html', bug=483282)
     self.Skip('deqp/functional/gles3/shaderprecision.html', bug=483282)
     self.Skip('deqp/functional/gles3/shaderstatequery.html', bug=483282)
@@ -79,7 +79,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     self.Fail('conformance2/buffers/uniform-buffers.html', bug=483282)
     self.Fail('conformance2/glsl3/array-complex-indexing.html', bug=483282)
-    self.Fail('conformance2/glsl3/frag-depth.html', bug=483282)
     self.Fail('conformance2/glsl3/invalid-default-precision.html', bug=483282)
     self.Fail('conformance2/glsl3/sequence-operator-returns-non-constant.html',
         bug=483282)
@@ -97,7 +96,11 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     # Windows only.
     self.Skip('deqp/functional/gles3/readpixel.html', ['win'], bug=483282)
+    self.Skip('deqp/functional/gles3/texturestatequery.html',
+        ['win'], bug=483282)
     self.Fail('conformance2/glsl3/array-in-complex-expression.html',
+        ['win'], bug=483282)
+    self.Fail('conformance2/glsl3/frag-depth.html',
         ['win'], bug=483282)
     self.Fail('conformance2/glsl3/short-circuiting-in-loop-condition.html',
         ['win'], bug=483282)
@@ -107,14 +110,14 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['win'], bug=1082) # angle bug ID
     self.Fail('conformance2/rendering/draw-buffers.html',
         ['win'], bug=483282)
-    self.Fail('conformance2/state/gl-get-calls.html',
-        ['win'], bug=483282)
     self.Fail('conformance2/state/gl-object-get-calls.html',
         ['win'], bug=483282)
     self.Fail('conformance2/textures/canvas/*', ['win'], bug=483282)
     self.Fail('conformance2/textures/misc/gl-get-tex-parameter.html',
         ['win'], bug=483282)
     self.Fail('conformance2/textures/misc/tex-input-validation.html',
+        ['win'], bug=483282)
+    self.Skip('conformance2/transform_feedback/transform_feedback.html',
         ['win'], bug=483282)
     # Windows 8 only.
     self.Fail('conformance2/textures/image_data/tex-image-and-sub-image-2d' +
@@ -141,6 +144,12 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('conformance2/textures/video/tex-image-and-sub-image-2d' +
         '-with-video-rgb5_a1-rgba-unsigned_byte.html',
         ['win8'], bug=483282)
+    # Windows Debug. Causing assertions in the GPU process which raise
+    # a dialog box, so have to skip them rather than mark them as
+    # failing.
+    self.Skip('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgba8-rgba-unsigned_byte.html',
+        ['win', 'debug'], bug=542901)
 
     # Mac only.
     self.Skip('deqp/data/gles3/shaders/qualification_order.html',
@@ -148,6 +157,10 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('deqp/data/gles3/shaders/scoping.html',
         ['mac'], bug=483282)
     self.Skip('deqp/functional/gles3/defaultvertexattribute.html',
+        ['mac'], bug=483282)
+    self.Skip('deqp/functional/gles3/floatstatequery.html',
+        ['mac'], bug=483282)
+    self.Skip('deqp/functional/gles3/texturestatequery.html',
         ['mac'], bug=483282)
     self.Skip('deqp/functional/gles3/vertexarrayobject.html',
         ['mac'], bug=483282)
@@ -176,44 +189,97 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac'], bug=483282)
     self.Fail('conformance2/textures/misc/texture-npot.html',
         ['mac'], bug=483282)
-    # Mac Intel only.
-    self.Fail('deqp/data/gles3/shaders/arrays.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/conditionals.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/declarations.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/fragdata.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/invalid_texture_functions.html',
-        ['mac', 'intel'], bug=536887)
-    self.Fail('deqp/data/gles3/shaders/keywords.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/negative.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/switch.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/data/gles3/shaders/swizzles.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/functional/gles3/bufferobjectquery.html', ['mac', 'intel'],
-        bug=536887)
-    self.Fail('deqp/functional/gles3/fbostencilbuffer.html', ['mac', 'intel'],
-        bug=536887)
 
     # Linux only.
+    self.Skip('deqp/functional/gles3/shaderswitch.html',
+        ['linux'], bug=483282)
     self.Fail('conformance2/glsl3/vector-dynamic-indexing.html',
         ['linux'], bug=483282)
     self.Fail('conformance2/rendering/draw-buffers.html',
         ['linux'], bug=483282)
     self.Fail('conformance2/samplers/samplers.html',
         ['linux'], bug=483282)
-    # Linux NVIDIA only.
-    self.Skip('deqp/functional/gles3/shaderswitch.html',
-        ['linux', 'nvidia'], bug=483282)
-    # Linux AMD only (but fails on all Linux, so not specified as AMD specific)
+
+    # Linux AMD only.
     # It looks like AMD shader compiler rejects many valid ES3 semantics.
-    self.Skip('deqp/data/gles3/shaders/arrays.html', ['linux'], bug=483282)
-    self.Skip('deqp/data/gles3/shaders/constant_expressions.html',
-        ['linux'], bug=483282)
+    self.Skip('deqp/data/gles3/shaders/arrays.html',
+        ['linux', 'amd'], bug=483282)
     self.Skip('deqp/data/gles3/shaders/qualification_order.html',
-        ['linux'], bug=483282)
+        ['linux', 'amd'], bug=483282)
+    self.Skip('deqp/functional/gles3/texturestatequery.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/attribs/gl-vertex-attrib-i-render.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/attribs/gl-vertexattribipointer-offsets.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/buffers/buffer-type-restrictions.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/buffers/buffer-overflow-test.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/textures/misc/tex-storage-compressed-formats.html',
+        ['linux', 'amd'], bug=483282)
+
+    # Conflicting expectations to test that the
+    # "Expectations Have No collisions" unittest works.
+    # page_name = 'conformance/glsl/constructors/glsl-construct-ivec4.html'
+
+    # Conflict when all conditions match
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug', 'opengl'])
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug', 'opengl'])
+
+    # Conflict when all conditions match (and different sets)
+    # self.Fail(page_name,
+    #     ['linux', 'win', ('nvidia', 0x1), 'debug', 'opengl'])
+    # self.Fail(page_name,
+    #     ['linux', 'mac', ('nvidia', 0x1), 'amd', 'debug', 'opengl'])
+
+    # Conflict with one aspect not specified
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug', 'opengl'])
+
+    # Conflict with one aspect not specified (in both conditions)
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+
+    # Conflict even if the GPU is specified in a device ID
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', 'nvidia', 'debug'])
+
+    # Test there are no conflicts between two different devices
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x2), 'debug'])
+
+    # Test there are no conflicts between two devices with different vendors
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', ('amd', 0x1), 'debug'])
+
+    # Conflicts if there is a device and nothing specified for the other's
+    # GPU vendors
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug'])
+    # self.Fail(page_name,
+    #     ['linux', 'debug'])
+
+    # Test no conflicts happen when only one aspect differs
+    # self.Fail(page_name,
+    #     ['linux', ('nvidia', 0x1), 'debug', 'opengl'])
+    # self.Fail(page_name,
+    #     ['win', ('nvidia', 0x1), 'debug', 'opengl'])
+
+    # Conflicts if between a generic os condition and a specific version
+    # self.Fail(page_name,
+    #     ['xp', ('nvidia', 0x1), 'debug', 'opengl'])
+    # self.Fail(page_name,
+    #     ['win', ('nvidia', 0x1), 'debug', 'opengl'])

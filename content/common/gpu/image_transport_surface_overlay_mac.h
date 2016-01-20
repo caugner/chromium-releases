@@ -32,6 +32,7 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   // GLSurface implementation
   bool Initialize() override;
   void Destroy() override;
+  bool Resize(const gfx::Size& size, float scale_factor) override;
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers() override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
@@ -42,15 +43,20 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   bool SetBackbufferAllocation(bool allocated) override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
-                            gfx::GLImage* image,
+                            gl::GLImage* image,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  bool ScheduleCALayer(gl::GLImage* contents_image,
+                       const gfx::RectF& contents_rect,
+                       float opacity,
+                       unsigned background_color,
+                       const gfx::SizeF& bounds_size,
+                       const gfx::Transform& transform) override;
   bool IsSurfaceless() const override;
 
   // ImageTransportSurface implementation
   void OnBufferPresented(
       const AcceleratedSurfaceMsg_BufferPresented_Params& params) override;
-  void OnResize(gfx::Size pixel_size, float scale_factor) override;
   void SetLatencyInfo(const std::vector<ui::LatencyInfo>&) override;
 
   // ui::GpuSwitchingObserver implementation.
@@ -65,8 +71,8 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   gfx::SwapResult SwapBuffersInternal(const gfx::Rect& pixel_damage_rect);
 
   void UpdateRootAndPartialDamagePlanes(
-      const std::vector<linked_ptr<OverlayPlane>>& new_overlay_planes,
-      const gfx::RectF& dip_damage_rect);
+      const linked_ptr<OverlayPlane>& new_root_plane,
+      const gfx::RectF& pixel_damage_rect);
   void UpdateOverlayPlanes(
       const std::vector<linked_ptr<OverlayPlane>>& new_overlay_planes);
   void UpdateCALayerTree();
@@ -97,6 +103,7 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
       const base::TimeTicks& from, double interval_fraction);
 
   scoped_ptr<ImageTransportHelper> helper_;
+  bool use_remote_layer_api_;
   base::scoped_nsobject<CAContext> ca_context_;
   base::scoped_nsobject<CALayer> ca_root_layer_;
 
@@ -108,8 +115,9 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   // targeting.
   GLint gl_renderer_id_;
 
-  // Overlay planes that have been scheduled, but have not had a subsequent
-  // SwapBuffers call made yet.
+  // Planes that have been scheduled, but have not had a subsequent SwapBuffers
+  // call made yet.
+  linked_ptr<OverlayPlane> pending_root_plane_;
   std::vector<linked_ptr<OverlayPlane>> pending_overlay_planes_;
 
   // A queue of all frames that have been created by SwapBuffersInternal but
@@ -130,6 +138,10 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   bool vsync_parameters_valid_;
   base::TimeTicks vsync_timebase_;
   base::TimeDelta vsync_interval_;
+
+  // Calls to ScheduleCALayer come in back-to-front. This is reset to 1 at each
+  // swap and increments with each call to ScheduleCALayer.
+  int next_ca_layer_z_order_;
 
   base::Timer display_pending_swap_timer_;
   base::WeakPtrFactory<ImageTransportSurfaceOverlayMac> weak_factory_;

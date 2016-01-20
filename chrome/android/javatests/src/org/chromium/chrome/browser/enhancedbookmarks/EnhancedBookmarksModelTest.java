@@ -11,8 +11,8 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarksModel.AddBookmarkCallback;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
@@ -234,10 +234,10 @@ public class EnhancedBookmarksModelTest extends NativeLibraryTestBase {
             @Override
             public void run() {
                 mBookmarksModel.addBookmarkAsync(
-                        parent, index, title, url, null, new AddBookmarkCallback() {
+                        parent, index, title, url, null, false, new AddBookmarkCallback() {
                             @Override
                             public void onBookmarkAdded(
-                                    final BookmarkId bookmarkId, boolean savePageSucceeded) {
+                                    final BookmarkId bookmarkId, int saveResult) {
                                 result.set(bookmarkId);
                                 semaphore.release();
                             }

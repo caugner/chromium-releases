@@ -7,9 +7,7 @@
 namespace installer {
 namespace master_preferences {
   const char kAltShortcutText[] = "alternate_shortcut_text";
-  const char kAutoLaunchChrome[] = "auto_launch_chrome";
   const char kChrome[] = "chrome";
-  const char kChromeShortcutIconIndex[] = "chrome_shortcut_icon_index";
   const char kCreateAllShortcuts[] = "create_all_shortcuts";
   const char kDisableLogging[] = "disable_logging";
   const char kDistroDict[] = "distribution";
@@ -30,7 +28,6 @@ namespace master_preferences {
   const char kDoNotCreateQuickLaunchShortcut[] =
       "do_not_create_quick_launch_shortcut";
   const char kDoNotCreateTaskbarShortcut[] = "do_not_create_taskbar_shortcut";
-  const char kDoNotCreateStartPin[] = "do_not_create_start_pin";
   const char kDoNotLaunchChrome[] = "do_not_launch_chrome";
   const char kDoNotRegisterForUpdateLaunch[] =
       "do_not_register_for_update_launch";

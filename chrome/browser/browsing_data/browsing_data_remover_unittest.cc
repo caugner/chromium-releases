@@ -27,6 +27,7 @@
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -44,6 +45,9 @@
 #include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/omnibox_pref_names.h"
+#include "components/password_manager/core/browser/mock_password_store.h"
+#include "components/password_manager/core/browser/password_manager_test_utils.h"
+#include "components/password_manager/core/browser/password_store_consumer.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -72,6 +76,7 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
+#include "components/signin/core/account_id/account_id.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -339,13 +344,12 @@ class RemoveCookieTester {
   DISALLOW_COPY_AND_ASSIGN(RemoveCookieTester);
 };
 
-#if defined(SAFE_BROWSING_SERVICE)
 class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
  public:
   RemoveSafeBrowsingCookieTester()
       : browser_process_(TestingBrowserProcess::GetGlobal()) {
-    scoped_refptr<SafeBrowsingService> sb_service =
-        SafeBrowsingService::CreateSafeBrowsingService();
+    scoped_refptr<safe_browsing::SafeBrowsingService> sb_service =
+        safe_browsing::SafeBrowsingService::CreateSafeBrowsingService();
     browser_process_->SetSafeBrowsingService(sb_service.get());
     sb_service->Initialize();
     base::MessageLoop::current()->RunUntilIdle();
@@ -370,7 +374,6 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
 
   DISALLOW_COPY_AND_ASSIGN(RemoveSafeBrowsingCookieTester);
 };
-#endif
 
 class RemoveChannelIDTester : public net::SSLConfigService::Observer {
  public:
@@ -651,7 +654,7 @@ class RemoveAutofillTester : public autofill::PersonalDataManagerObserver {
 
  private:
   void OnPersonalDataChanged() override {
-    base::MessageLoop::current()->Quit();
+    base::MessageLoop::current()->QuitWhenIdle();
   }
 
   autofill::PersonalDataManager* personal_data_manager_;
@@ -1070,7 +1073,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveCookieLastHour) {
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 }
 
-#if defined(SAFE_BROWSING_SERVICE)
 TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieForever) {
   RemoveSafeBrowsingCookieTester tester;
 
@@ -1100,7 +1102,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieLastHour) {
   // browsing cookies.
   EXPECT_TRUE(tester.ContainsCookie());
 }
-#endif
 
 TEST_F(BrowsingDataRemoverTest, RemoveChannelIDForever) {
   RemoveChannelIDTester tester(GetProfile());
@@ -2022,7 +2023,8 @@ TEST_F(BrowsingDataRemoverTest, ContentProtectionPlatformKeysRemoval) {
   chromeos::ScopedTestCrosSettings test_cros_settings;
   chromeos::MockUserManager* mock_user_manager =
       new testing::NiceMock<chromeos::MockUserManager>();
-  mock_user_manager->SetActiveUser("test@example.com");
+  mock_user_manager->SetActiveUser(
+      AccountId::FromUserEmail("test@example.com"));
   chromeos::ScopedUserManagerEnabler user_manager_enabler(mock_user_manager);
 
   scoped_ptr<chromeos::DBusThreadManagerSetter> dbus_setter =
@@ -2117,4 +2119,21 @@ TEST_F(BrowsingDataRemoverTest, RemoveSameOriginDownloads) {
 
   BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
                               BrowsingDataRemover::REMOVE_DOWNLOADS, kOrigin1);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemovePasswordStatistics) {
+  PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
+      GetProfile(),
+      password_manager::BuildPasswordStoreService<
+          content::BrowserContext, password_manager::MockPasswordStore>);
+  password_manager::MockPasswordStore* store =
+      static_cast<password_manager::MockPasswordStore*>(
+          PasswordStoreFactory::GetInstance()
+              ->GetForProfile(GetProfile(), ServiceAccessType::EXPLICIT_ACCESS)
+              .get());
+  EXPECT_CALL(*store, RemoveStatisticsCreatedBetweenImpl(base::Time(),
+                                                         base::Time::Max()));
+  BlockUntilBrowsingDataRemoved(
+      BrowsingDataRemover::EVERYTHING,
+      BrowsingDataRemover::REMOVE_HISTORY, false);
 }

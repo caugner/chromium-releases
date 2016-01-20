@@ -80,28 +80,17 @@ scoped_ptr<CastService> CastContentBrowserClient::CreateCastService(
   return make_scoped_ptr(new CastServiceSimple(browser_context, pref_service));
 }
 
+#if !defined(OS_ANDROID)
 scoped_ptr<::media::AudioManagerFactory>
 CastContentBrowserClient::CreateAudioManagerFactory() {
-#if defined(OS_ANDROID)
-  // Return nullptr. The factory will not be set, and the default
-  // implementation of AudioManager will be used.
-  return scoped_ptr<::media::AudioManagerFactory>();
-#else
   return make_scoped_ptr(new media::CastAudioManagerFactory());
-#endif
 }
 
-#if !defined(OS_ANDROID)
 scoped_refptr<media::CmaMediaPipelineClient>
 CastContentBrowserClient::CreateCmaMediaPipelineClient() {
   return make_scoped_refptr(new media::CmaMediaPipelineClient());
 }
-
-scoped_ptr<::media::BrowserCdmFactory>
-CastContentBrowserClient::CreateBrowserCdmFactory() {
-  return make_scoped_ptr(new media::CastBrowserCdmFactory());
-}
-#endif
+#endif  // OS_ANDROID
 
 void CastContentBrowserClient::ProcessExiting() {
   // Finalize CastMediaShlib on media thread to ensure it's not accessed
@@ -124,9 +113,8 @@ bool CastContentBrowserClient::EnableRemoteDebuggingImmediately() {
 
 content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
     const content::MainFunctionParams& parameters) {
-  content::BrowserMainParts* parts = new CastBrowserMainParts(
-      parameters, url_request_context_factory_.get(),
-      CreateAudioManagerFactory());
+  content::BrowserMainParts* parts =
+      new CastBrowserMainParts(parameters, url_request_context_factory_.get());
   CastBrowserProcess::GetInstance()->SetCastContentBrowserClient(this);
   return parts;
 }
@@ -366,11 +354,12 @@ void CastContentBrowserClient::RegisterUnsandboxedOutOfProcessMojoApplications(
     std::map<GURL, base::string16>* apps) {
 #if defined(ENABLE_MOJO_MEDIA_IN_UTILITY_PROCESS)
   apps->insert(std::make_pair(GURL("mojo:media"),
-                              base::UTF8ToUTF16("Media Renderer")));
+                              base::ASCIIToUTF16("Media App")));
 #endif
 }
 
 #if defined(OS_ANDROID)
+
 void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
@@ -396,7 +385,18 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     }
   }
 }
+
 #else
+
+scoped_ptr<::media::CdmFactory> CastContentBrowserClient::CreateCdmFactory() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCmaMediaPipeline)) {
+    return make_scoped_ptr(new media::CastBrowserCdmFactory());
+  }
+
+  return nullptr;
+}
+
 void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
@@ -406,6 +406,7 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     mappings->Share(kCrashDumpSignal, crash_signal_fd);
   }
 }
+
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_ANDROID) && defined(VIDEO_HOLE)

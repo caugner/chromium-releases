@@ -31,7 +31,6 @@ define('media_router_bindings', [
       'name': sink.friendlyName,
       'sink_id': sink.id,
       'icon_type': sinkIconTypeToMojo(sink.iconType),
-      'is_launching': sink.isLaunching_,
     });
   }
 
@@ -47,6 +46,8 @@ define('media_router_bindings', [
         return mediaRouterMojom.MediaSink.IconType.CAST;
       case 'cast_audio':
         return mediaRouterMojom.MediaSink.IconType.CAST_AUDIO;
+      case 'cast_audio_group':
+        return mediaRouterMojom.MediaSink.IconType.CAST_AUDIO_GROUP;
       case 'generic':
         return mediaRouterMojom.MediaSink.IconType.GENERIC;
       case 'hangout':
@@ -93,6 +94,28 @@ define('media_router_bindings', [
         'type': mediaRouterMojom.RouteMessage.Type.BINARY,
         'data': message.message,
       });
+    }
+  }
+
+  /**
+   * Converts presentation connection state to Mojo enum value.
+   * @param {!string} state
+   * @return {!mediaRouterMojom.MediaRouter.PresentationConnectionState}
+   */
+  function presentationConnectionStateToMojo_(state) {
+    switch (state) {
+      case 'connected':
+        return
+            mediaRouterMojom.MediaRouter.PresentationConnectionState.CONNECTED;
+      case 'closed':
+        return mediaRouterMojom.MediaRouter.PresentationConnectionState.CLOSED;
+      case 'terminated':
+        return
+            mediaRouterMojom.MediaRouter.PresentationConnectionState.TERMINATED;
+      default:
+        console.error('Unknown presentation connection state: ' + state);
+        return
+            mediaRouterMojom.MediaRouter.PresentationConnectionState.TERMINATED;
     }
   }
 
@@ -263,8 +286,28 @@ define('media_router_bindings', [
   };
 
   /**
+   * Called by the provider manager when sink availability has been updated.
+   * @param {!mediaRouterMojom.MediaRouter.SinkAvailability} availability
+   *     The new sink availability.
+   */
+  MediaRouter.prototype.onSinkAvailabilityUpdated = function(availability) {
+    this.service_.onSinkAvailabilityUpdated(availability);
+  };
+
+  /**
+   * Called by the provider manager when the state of a presentation connected
+   * to a route has changed.
+   * @param {!string} routeId
+   * @param {!string} state
+   */
+  MediaRouter.prototype.onPresentationConnectionStateChanged =
+      function(routeId, state) {
+    this.service_.onPresentationConnectionStateChanged(
+        routeId, presentationConnectionStateToMojo_(state));
+  };
+
+  /**
    * Object containing callbacks set by the provider manager.
-   * TODO(mfoltz): Better named ProviderManagerDelegate?
    *
    * @constructor
    * @struct
@@ -360,7 +403,6 @@ define('media_router_bindings', [
   /*
    * Sets the callback handler used to invoke methods in the provider manager.
    *
-   * TODO(mfoltz): Rename to something more explicit?
    * @param {!MediaRouterHandlers} handlers
    */
   MediaRouteProvider.prototype.setHandlers = function(handlers) {

@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("interfaces") {
   sources = [
@@ -17,6 +17,5 @@ mojom("interfaces") {
     "//components/mus/public/interfaces",
     "//mojo/application/public/interfaces",
     "//mojo/services/network/public/interfaces",
-    "//ui/mojo/events:interfaces",
   ]
 }

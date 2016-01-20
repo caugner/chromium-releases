@@ -23,6 +23,7 @@ BackgroundTest.prototype = {
   /** @override */
   setUp: function() {
     global.backgroundObj.forceChromeVoxNextActive();
+    window.RoleType = chrome.automation.RoleType;
   },
 
   /**
@@ -229,7 +230,7 @@ TEST_F('BackgroundTest', 'LiveRegionAddElement', function() {
       </script>
     */},
     function(rootNode) {
-      var go = rootNode.find({ role: chrome.automation.RoleType.button });
+      var go = rootNode.find({ role: RoleType.button });
       mockFeedback.call(go.doDefault.bind(go))
           .expectSpeech('Hello, world');
       mockFeedback.replay();
@@ -250,7 +251,7 @@ TEST_F('BackgroundTest', 'LiveRegionRemoveElement', function() {
       </script>
     */},
     function(rootNode) {
-      var go = rootNode.find({ role: chrome.automation.RoleType.button });
+      var go = rootNode.find({ role: RoleType.button });
       go.doDefault();
       mockFeedback.expectSpeech('removed:')
           .expectSpeech('Hello, world');
@@ -294,7 +295,7 @@ TEST_F('BackgroundTest', 'ShowContextMenu', function() {
           });
       mockFeedback.replay();
 
-      var go = rootNode.find({ role: chrome.automation.RoleType.link });
+      var go = rootNode.find({ role: RoleType.link });
       this.listenOnce(go, 'focus', function(e) {
         this.doCmd('showContextMenu')();
       }.bind(this), true);
@@ -325,10 +326,10 @@ TEST_F('BackgroundTest', 'BrailleRouting', function() {
         </script>
       */},
       function(rootNode) {
-        var button1 = rootNode.find({role: chrome.automation.RoleType.button,
+        var button1 = rootNode.find({role: RoleType.button,
                                      name: 'Click me'});
         var textField = rootNode.find(
-            {role: chrome.automation.RoleType.textField});
+            {role: RoleType.textField});
         mockFeedback.expectBraille('start')
             .call(button1.focus.bind(button1))
             .expectBraille(/^Click me btn/)
@@ -367,4 +368,145 @@ TEST_F('BackgroundTest', 'FocusInputElement', function() {
           .expectSpeech('Lancelot', 'Edit text');
       mockFeedback.replay();
     }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'UseEditableState', function() {
+  this.runWithLoadedTree(
+    function() {/*!
+      <input type="text"></input>
+      <p tabindex=0>hi</p>
+    */},
+    function(rootNode) {
+      var assertExists = this.newCallback(function (evt) {
+        assertNotNullNorUndefined(
+            global.desktopAutomationHandler.editableTextHandler_);
+        evt.stopPropagation();
+      });
+      var assertDoesntExist = this.newCallback(function (evt) {
+        assertTrue(!global.desktopAutomationHandler.editableTextHandler_);
+        evt.stopPropagation();
+      });
+
+      var editable = rootNode.find({ role: RoleType.textField });
+      var nonEditable = rootNode.find({ role: RoleType.paragraph });
+
+      this.listenOnce(editable, 'focus', assertExists);
+      this.listenOnce(nonEditable, 'focus', assertDoesntExist);
+
+      editable.focus();
+      nonEditable.focus();
+    }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'EarconsForControls', function() {
+  var mockFeedback = this.createMockFeedback();
+  this.runWithLoadedTree(
+    function() {/*!
+      <p>Initial focus will be on something that's not a control.</p>
+      <a href="#">MyLink</a>
+      <button>MyButton</button>
+      <input type=checkbox>
+      <input type=checkbox checked>
+      <input>
+      <select multiple><option>1</option></select>
+      <select><option>2</option></select>
+      <input type=range value=5>
+    */},
+    function(rootNode) {
+      var doCmd = this.doCmd.bind(this);
+
+      mockFeedback.call(doCmd('nextElement'))
+          .expectSpeech('MyLink')
+          .expectEarcon(cvox.Earcon.LINK)
+          .call(doCmd('nextElement'))
+          .expectSpeech('MyButton')
+          .expectEarcon(cvox.Earcon.BUTTON)
+          .call(doCmd('nextElement'))
+          .expectSpeech('Check box')
+          .expectEarcon(cvox.Earcon.CHECK_OFF)
+          .call(doCmd('nextElement'))
+          .expectSpeech('Check box')
+          .expectEarcon(cvox.Earcon.CHECK_ON)
+          .call(doCmd('nextElement'))
+          .expectSpeech('Edit text')
+          .expectEarcon(cvox.Earcon.EDITABLE_TEXT)
+          .call(doCmd('nextElement'))
+          .expectSpeech('List box')
+          .expectEarcon(cvox.Earcon.LISTBOX)
+          .call(doCmd('nextElement'))
+          .expectSpeech('Button', 'has pop up')
+          .expectEarcon(cvox.Earcon.POP_UP_BUTTON)
+          .call(doCmd('nextElement'))
+          .expectSpeech(/slider/)
+          .expectEarcon(cvox.Earcon.SLIDER);
+
+      mockFeedback.replay();
+    }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'ToggleChromeVoxVersion', function() {
+  var mockFeedback = this.createMockFeedback();
+  this.runWithLoadedTree(this.linksAndHeadingsDoc, function() {
+    var gotCmd = global.backgroundObj.onGotCommand;
+
+    // The command came from the background keyboard handler.
+    var togglerFromBackground = gotCmd.bind(gotCmd, 'toggleChromeVoxVersion');
+
+    // The command came from a content script.
+    var togglerFromContent = gotCmd.bind(gotCmd, 'toggleChromeVoxVersion',
+                                         true);
+
+    mockFeedback.call(togglerFromBackground)
+        .expectSpeech('classic')   
+        .call(togglerFromContent)
+        .expectSpeech('next')
+        .call(togglerFromBackground)
+        .expectSpeech('classic');
+    mockFeedback.replay();
+  });
+});
+
+SYNC_TEST_F('BackgroundTest', 'GlobsToRegExp', function() {
+  assertEquals('/^()$/', Background.globsToRegExp_([]).toString());
+  assertEquals(
+      '/^(http:\\/\\/host\\/path\\+here)$/',
+      Background.globsToRegExp_(['http://host/path+here']).toString());
+  assertEquals(
+      '/^(url1.*|u.l2|.*url3)$/',
+      Background.globsToRegExp_(['url1*', 'u?l2', '*url3']).toString());
+});
+
+TEST_F('BackgroundTest', 'ActiveOrInactive', function() {
+  var mockFeedback = this.createMockFeedback();
+  this.runWithLoadedTree(function() {/*!
+      <a href="a">a</a>
+      <button>b</button>
+      <input type="text"></input>
+    */},
+    function(rootNode) {
+      var focusButton = function() { rootNode.find({role: 'button'}).focus(); };
+      var on = function() { cvox.ChromeVox.isActive = true; };
+      var off = function() { cvox.ChromeVox.isActive = false; };
+
+      function focusThen(toFocus, then) {
+        toFocus.addEventListener('focus', function innerFocus(e) {
+          if (e.target != toFocus)
+            return;
+          rootNode.removeEventListener('focus', innerFocus, true);
+          then && then();
+        }, true);
+        toFocus.focus();
+      }
+
+      mockFeedback.call(focusButton)
+          .expectSpeech('b').expectSpeech('Button')
+          .call(off)
+          .call(focusThen.bind(this, rootNode.find({ role: 'link' }), on))
+          .call(focusThen.bind(this, rootNode.find({ role: 'textField' })))
+          .expectNextSpeechUtteranceIsNot('a')
+          .expectSpeech('Edit text');
+
+      mockFeedback.replay();
+    }
+  );
 });

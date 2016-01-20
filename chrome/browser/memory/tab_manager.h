@@ -15,11 +15,19 @@
 #include "base/strings/string16.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/memory/tab_stats.h"
-#include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/browser_tab_strip_tracker.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 
 class BrowserList;
 class GURL;
+
+namespace base {
+class TickClock;
+}
+
+namespace content {
+class WebContents;
+}
 
 namespace memory {
 
@@ -44,9 +52,11 @@ class TabManagerDelegate;
 // Note that the browser tests are only active for platforms that use
 // TabManager (CrOS only for now) and need to be adjusted accordingly if
 // support for new platforms is added.
-class TabManager : public chrome::BrowserListObserver,
-                   public TabStripModelObserver {
+class TabManager : public TabStripModelObserver {
  public:
+  // Needs to be public for DEFINE_WEB_CONTENTS_USER_DATA_KEY.
+  class WebContentsData;
+
   TabManager();
   ~TabManager() override;
 
@@ -65,6 +75,9 @@ class TabManager : public chrome::BrowserListObserver,
   // thread.
   TabStatsList GetTabStats();
 
+  // Returns true if |contents| is currently discarded.
+  bool IsTabDiscarded(content::WebContents* contents) const;
+
   // Discards a tab to free the memory occupied by its renderer. The tab still
   // exists in the tab-strip; clicking on it will reload it. Returns true if it
   // successfully found a tab and discarded it.
@@ -73,7 +86,7 @@ class TabManager : public chrome::BrowserListObserver,
   // Discards a tab with the given unique ID. The tab still exists in the
   // tab-strip; clicking on it will reload it. Returns true if it successfully
   // found a tab and discarded it.
-  bool DiscardTabById(int64 target_web_contents_id);
+  content::WebContents* DiscardTabById(int64 target_web_contents_id);
 
   // Log memory statistics for the running processes, then discards a tab.
   // Tab discard happens sometime later, as collecting the statistics touches
@@ -83,9 +96,18 @@ class TabManager : public chrome::BrowserListObserver,
   // Log memory statistics for the running processes, then call the callback.
   void LogMemory(const std::string& title, const base::Closure& callback);
 
+  // Used to set the test TickClock, which then gets used by NowTicks(). See
+  // |test_tick_clock_| for more details.
+  void set_test_tick_clock(base::TickClock* test_tick_clock);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, Comparator);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, DiscardedTabKeepsLastActiveTime);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, DiscardWebContentsAt);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsInternalPage);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectRecentlyUsedTabs);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ReloadDiscardedTabContextMenu);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerBasics);
 
   static void PurgeMemoryAndDiscardTab();
 
@@ -93,13 +115,13 @@ class TabManager : public chrome::BrowserListObserver,
   // can be easily reloaded and hence makes a good choice to discard.
   static bool IsInternalPage(const GURL& url);
 
-  // Records UMA histogram statistics for a tab discard. We record statistics
-  // for user triggered discards via chrome://discards/ because that allows us
-  // to manually test the system.
+  // Records UMA histogram statistics for a tab discard. Record statistics for
+  // user triggered discards via chrome://discards/ because that allows to
+  // manually test the system.
   void RecordDiscardStatistics();
 
-  // Record whether we ran out of memory during a recent time interval.
-  // This allows us to normalize low memory statistics versus usage.
+  // Record whether an out of memory occured during a recent time interval. This
+  // allows the normalization of low memory statistics versus usage.
   void RecordRecentTabDiscard();
 
   // Purges data structures in the browser that can be easily recomputed.
@@ -109,7 +131,7 @@ class TabManager : public chrome::BrowserListObserver,
   int GetTabCount() const;
 
   // Adds all the stats of the tabs in |browser_list| into |stats_list|. If
-  // |active_desktop| is true, we consider its first window as being active.
+  // |active_desktop| is true, consider its first window as being active.
   void AddTabStats(BrowserList* browser_list,
                    bool active_desktop,
                    TabStatsList* stats_list);
@@ -123,26 +145,40 @@ class TabManager : public chrome::BrowserListObserver,
   // discarding a particular tab from about:discards.
   bool CanDiscardTab(int64 target_web_contents_id) const;
 
+  // Does the actual discard by destroying the WebContents in |model| at |index|
+  // and replacing it by an empty one. Returns the new WebContents or NULL if
+  // the operation fails (return value used only in testing).
+  content::WebContents* DiscardWebContentsAt(int index, TabStripModel* model);
+
   // Called by the memory pressure listener when the memory pressure rises.
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
-
-  // chrome::BrowserListObserver overrides.
-  void OnBrowserAdded(Browser* browser) override;
-  void OnBrowserRemoved(Browser* browser) override;
 
   // TabStripModelObserver overrides.
   void TabChangedAt(content::WebContents* contents,
                     int index,
                     TabChangeType change_type) override;
+  void ActiveTabChanged(content::WebContents* old_contents,
+                        content::WebContents* new_contents,
+                        int index,
+                        int reason) override;
 
   // Returns true if the tab is currently playing audio or has played audio
-  // recently.
-  bool IsAudioTab(content::WebContents* contents) const;
+  // recently, or if the tab is currently accessing the camera, microphone or
+  // mirroring the display.
+  bool IsMediaTab(content::WebContents* contents) const;
+
+  // Returns the WebContentsData associated with |contents|. Also takes care of
+  // creating one if needed.
+  WebContentsData* GetWebContentsData(content::WebContents* contents) const;
 
   // Returns true if |first| is considered less desirable to be killed than
   // |second|.
   static bool CompareTabStats(TabStats first, TabStats second);
+
+  // Returns either the system's clock or the test clock. See |test_tick_clock_|
+  // for more details.
+  base::TimeTicks NowTicks() const;
 
   // Timer to periodically update the stats of the renderers.
   base::RepeatingTimer update_timer_;
@@ -165,19 +201,29 @@ class TabManager : public chrome::BrowserListObserver,
   // times for discontinuities caused by suspend/resume.
   base::TimeTicks last_adjust_time_;
 
-  // Number of times we have discarded a tab, for statistics.
+  // Number of times a tab has been discarded, for statistics.
   int discard_count_;
 
   // Whether a tab discard event has occurred during the last time interval,
   // used for statistics normalized by usage.
   bool recent_tab_discard_;
 
-  // Whether we ever only discard a tab once.
+  // Whether a tab can only ever discarded once.
   bool discard_once_;
+
+  // This allows protecting tabs for a certain amount of time after being
+  // backgrounded.
+  base::TimeDelta minimum_protection_time_;
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<TabManagerDelegate> delegate_;
 #endif
+
+  BrowserTabStripTracker browser_tab_strip_tracker_;
+
+  // Pointer to a test clock. If this is set, NowTicks() returns the value of
+  // this test clock. Otherwise it returns the system clock's value.
+  base::TickClock* test_tick_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(TabManager);
 };

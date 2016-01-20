@@ -79,6 +79,14 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Updates missin API keys message visibility.
+   * @param {boolean} show True if the message should be visible.
+   */
+  Oobe.showAPIKeysNotice = function(show) {
+    $('api-keys-notice-container').hidden = !show;
+  };
+
+  /**
    * Updates version label visibility.
    * @param {boolean} show True if version label should be visible.
    */
@@ -377,13 +385,6 @@ cr.define('cr.ui', function() {
    */
   Oobe.setClientAreaSize = function(width, height) {
     Oobe.getInstance().setClientAreaSize(width, height);
-  };
-
-  /**
-   * Checks whether the New Gaia flow is active.
-   */
-  Oobe.isNewGaiaFlow = function() {
-    return document.querySelector('.new-gaia-flow') != undefined;
   };
 
   // Export

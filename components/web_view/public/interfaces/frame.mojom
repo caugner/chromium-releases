@@ -8,14 +8,14 @@ import "network/public/interfaces/url_loader.mojom";
 
 // This files defines the interfaces and structures used for frames.
 //
-// When a client in the frame tree is connected to by way of the ViewManager a
+// When a client in the frame tree is connected to by way of the WindowManager a
 // FrameClient is obtained (from the ServiceProvider interface request passed
-// in ViewManager::OnEmbed()). The FrameClient is told the frame tree (by way
+// in WindowManager::OnEmbed()). The FrameClient is told the frame tree (by way
 // of OnConnection()), which allows the client to use other frames in the tree
 // (assuming the client has the appropriate permissions).
 //
-// frame_ids are the same as views ids. This means that when a client creates
-// a new view to be part of the frame tree it immediately knows the id to use
+// frame_ids are the same as windows ids. This means that when a client creates
+// a new window to be part of the frame tree it immediately knows the id to use
 // for Frame calls.
 //
 // The server provides an id that may be used to identify the state of the
@@ -66,6 +66,15 @@ struct HTMLMessageEvent {
   // IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
 };
 
+// Options used when performing a find-in-page query.
+struct FindOptions {
+  // Whether to search forward or backward within the page.
+  bool forward = true;
+
+  // Whether this operation is a follow-up to the last find.
+  bool continue_last_find = false;
+};
+
 interface Frame {
   // Requests the server to message the specified frame with |event|. If the
   // operation is allowed OnPostMessageEvent() is called on the appropriate
@@ -86,7 +95,7 @@ interface Frame {
   SetClientProperty(string name, array<uint8>? value);
 
   // Called when the client creates a new frame. |frame_id| corresponds to
-  // the id of the view hosting the frame, and |parent_id| the id of the
+  // the id of the window hosting the frame, and |parent_id| the id of the
   // parent. See FrameData::client_properties for details of
   // |client_properties|.
   //
@@ -110,28 +119,39 @@ interface Frame {
 
   // Dispatches a load event to the parent of the frame.
   DispatchLoadEventToParent();
+
+  // Reports the number of matches for a given find. This is an asynchronous
+  // notification and can fire multiple times per HighlightFindResults() call.
+  OnFindInFrameCountUpdated(int32 request_id, int32 count,
+                            bool final_update);
+
+  // Reports which match is currently highlighted.
+  OnFindInPageSelectionUpdated(int32 request_id, int32 active_match_ordinal);
 };
 
-enum ViewConnectType {
-  // Indicates the app is already a ViewTreeClient and the existing view should
-  // be used. In this case the app is not asked for a new ViewTreeClient.
+enum WindowConnectType {
+  // Indicates the app is already a WindowTreeClient and the existing window should
+  // be used. In this case the app is not asked for a new WindowTreeClient.
   USE_EXISTING,
 
-  // Indicates a new ViewTreeClient is obtained and the View provided to
+  // Indicates a new WindowTreeClient is obtained and the Window provided to
   // OnEmbed() should be used.
   USE_NEW
 };
 
 interface FrameClient {
   // Called once per client. |frame_data| gives the contents of the tree.
-  // |view_id| is the id of the view the FrameClient should render to. If a
-  // ViewTreeClient is asked for then |view_id| is the same id as that of the
-  // View supplied to ViewTreeClient::OnEmbed().
+  // |window_id| is the id of the window the FrameClient should render to. If a
+  // WindowTreeClient is asked for then |window_id| is the same id as that of the
+  // Window supplied to WindowTreeClient::OnEmbed(). |navigation_start_time_ticks|
+  // is the time when the navigation resulting in this OnConnect() call was
+  // started.
   OnConnect(Frame? frame,
             uint32 change_id,
-            uint32 view_id,
-            ViewConnectType view_connect_type,
-            array<FrameData>? frame_data) => ();
+            uint32 window_id,
+            WindowConnectType window_connect_type,
+            array<FrameData>? frame_data,
+            int64 navigation_start_time_ticks) => ();
 
   // Called when a new frame is added to the tree.
   OnFrameAdded(uint32 change_id, FrameData frame_data);
@@ -166,4 +186,37 @@ interface FrameClient {
   // Called to dispatch a load event of |frame_id| in its parent. This is only
   // called on the FrameClient rendering the parent of |frame_id|.
   OnDispatchFrameLoadEvent(uint32 frame_id);
+
+  // TODO(erg): Several of these take a WebFindOptions struct; we probably need
+  // to build a Frame version of that struct.
+
+  // Searches for a given string. If a match is found, it will be
+  // selected. Find() will only return true if it found a match, and will return
+  // the result in the future through OnFindInPageSelectionUpdated(). That
+  // callback will return |request_id|, and the listener should verify the
+  // |request_id| on callback to guard against race conditions.
+  //
+  // |request_id| should be a monotonically increasing number which should only
+  // be reused between Find() and the HighlightFindResults() calls that are
+  // searching for the same string. |search_text| may be empty.
+  Find(int32 request_id, string search_text, FindOptions options,
+       bool wrap_within_frame) => (bool found);
+
+  // Stop finding the single find result on the page. If |clear_selection| is
+  // set, it will also clear the selected find text.
+  StopFinding(bool clear_selection);
+
+  // Match every instance of a string in a document asynchronously, highlighting
+  // them and putting a tick mark in the scroll bar. This differs from Find() as
+  // Find() is about finding the one selected instance of the text.
+  // HighlightFindResults() is about highlighting all the instances of the text.
+  //
+  // HighlightFindResults() will asynchronously call
+  // OnFindInFrameCountUpdated() multiple times to report its progress.
+  HighlightFindResults(int32 request_id, string search_text,
+                       FindOptions options, bool reset);
+
+  // Removes the tick marks and highlighting done by HighlightFindResults() in
+  // this frame.
+  StopHighlightingFindResults();
 };

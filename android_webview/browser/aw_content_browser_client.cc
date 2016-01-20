@@ -18,6 +18,7 @@
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 #include "android_webview/common/aw_descriptors.h"
+#include "android_webview/common/aw_switches.h"
 #include "android_webview/common/render_view_messages.h"
 #include "android_webview/common/url_constants.h"
 #include "base/android/locale_utils.h"
@@ -69,6 +70,7 @@ public:
                                   const base::string16& url,
                                   bool has_user_gesture,
                                   bool is_redirect,
+                                  bool is_main_frame,
                                   bool* ignore_navigation);
   void OnSubFrameCreated(int parent_render_frame_id, int child_render_frame_id);
 
@@ -112,14 +114,15 @@ void AwContentsMessageFilter::OnShouldOverrideUrlLoading(
     const base::string16& url,
     bool has_user_gesture,
     bool is_redirect,
+    bool is_main_frame,
     bool* ignore_navigation) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   *ignore_navigation = false;
   AwContentsClientBridgeBase* client =
       AwContentsClientBridgeBase::FromID(process_id_, render_frame_id);
   if (client) {
-    *ignore_navigation =
-        client->ShouldOverrideUrlLoading(url, has_user_gesture, is_redirect);
+    *ignore_navigation = client->ShouldOverrideUrlLoading(
+        url, has_user_gesture, is_redirect, is_main_frame);
   } else {
     LOG(WARNING) << "Failed to find the associated render view host for url: "
                  << url;
@@ -293,6 +296,14 @@ void AwContentBrowserClient::AppendExtraCommandLineSwitches(
     // The only kind of a child process WebView can have is renderer.
     DCHECK_EQ(switches::kRendererProcess,
               command_line->GetSwitchValueASCII(switches::kProcessType));
+
+    const base::CommandLine& browser_command_line =
+        *base::CommandLine::ForCurrentProcess();
+    static const char* const kCommonSwitchNames[] = {
+      switches::kDisablePageVisibility,
+    };
+    command_line->CopySwitchesFrom(browser_command_line, kCommonSwitchNames,
+                                   arraysize(kCommonSwitchNames));
   }
 }
 

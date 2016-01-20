@@ -27,6 +27,10 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
+namespace tracked_objects {
+class Location;
+}  // namespace tracked_objects
+
 // Small class to bundle device name and connection type into a dictionary.
 MEDIA_EXPORT
 @interface DeviceNameAndTransportType : NSObject {
@@ -70,16 +74,19 @@ class VideoCaptureDeviceMac : public VideoCaptureDevice {
                     int video_frame_length,
                     const VideoCaptureFormat& frame_format,
                     int aspect_numerator,
-                    int aspect_denominator);
+                    int aspect_denominator,
+                    base::TimeDelta timestamp);
 
   // Forwarder to VideoCaptureDevice::Client::OnError().
-  void ReceiveError(const std::string& reason);
+  void ReceiveError(const tracked_objects::Location& from_here,
+                    const std::string& reason);
 
   // Forwarder to VideoCaptureDevice::Client::OnLog().
   void LogMessage(const std::string& message);
 
  private:
-  void SetErrorState(const std::string& reason);
+  void SetErrorState(const tracked_objects::Location& from_here,
+                     const std::string& reason);
   bool UpdateCaptureResolution();
 
   // Flag indicating the internal state.
@@ -101,6 +108,9 @@ class VideoCaptureDeviceMac : public VideoCaptureDevice {
   InternalState state_;
 
   id<PlatformVideoCapturingMac> capture_device_;
+
+  base::TimeDelta first_timestamp_;
+  base::TimeTicks first_aligned_timestamp_;
 
   // Used with Bind and PostTask to ensure that methods aren't called after the
   // VideoCaptureDeviceMac is destroyed.

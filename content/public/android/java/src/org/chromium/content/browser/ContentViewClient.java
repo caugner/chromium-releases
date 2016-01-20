@@ -106,13 +106,41 @@ public class ContentViewClient {
     }
 
     /**
+     * If this returns {@code true} the text processing intents should be forwarded to {@link
+     * startProcessTextIntent(Intent)}, otherwise these intents should be sent by WindowAndroid by
+     * default.
+     * @return {@code true} iff this {@link ContentViewClient} wants to send the processing intents
+     * and override the default intent behavior.
+     */
+    public boolean doesPerformProcessText() {
+        return false;
+    }
+
+    /**
+     * Send the intent to process the current selected text.
+     */
+    public void startProcessTextIntent(Intent intent) {}
+
+    /**
+     * @param actionModeItem the flag for the action mode item in question. See
+     *        {@link WebActionModeCallback.ActionHandler} for a list of valid action
+     *        mode item flags.
+     * @return true if the action is allowed. Otherwise, the menu item
+     *         should be removed from the menu.
+     */
+    public boolean isSelectActionModeAllowed(int actionModeItem) {
+        return true;
+    }
+
+    /**
      * Called when a new content intent is requested to be started.
      */
-    public void onStartContentIntent(Context context, String intentUrl) {
+    public void onStartContentIntent(Context context, String intentUrl, boolean isMainFrame) {
         Intent intent;
         // Perform generic parsing of the URI to turn it into an Intent.
         try {
             intent = Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         } catch (Exception ex) {
             Log.w(TAG, "Bad URI %s", intentUrl, ex);
             return;

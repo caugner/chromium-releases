@@ -15,7 +15,6 @@
       ],
       'dependencies': [
         'ios_web',
-        'ios_web_thread',
         '../../base/base.gyp:base',
         '../../base/base.gyp:base_i18n',
         '../../crypto/crypto.gyp:crypto',
@@ -33,14 +32,10 @@
         'public/app/web_main.h',
         'public/app/web_main_delegate.h',
         'public/app/web_main_parts.h',
-        'public/app/web_main_parts.mm',
       ],
     },
-    # Note: any embedder using ios_web will for now need to include either
-    # ios_web_thread (any new embedder) or ios_web_content_thread_shim (Chrome).
-    # This will become unnecessary once Chrome switches to using ios_web_thread,
-    # at which point that will be folded into this target.
     {
+      # GN version: //ios/web
       'target_name': 'ios_web',
       'type': 'static_library',
       'include_dirs': [
@@ -52,7 +47,6 @@
         'user_agent',
         '../../base/base.gyp:base',
         '../../components/url_formatter/url_formatter.gyp:url_formatter',
-        '../../content/content.gyp:content_browser',
         '../../ios/net/ios_net.gyp:ios_net',
         '../../ios/third_party/blink/blink_html_tokenizer.gyp:blink_html_tokenizer',
         '../../net/net.gyp:net',
@@ -174,8 +168,6 @@
         'public/string_util.h',
         'public/url_scheme_util.h',
         'public/url_util.h',
-        'public/user_agent.h',
-        'public/user_agent.mm',
         'public/user_metrics.h',
         'public/web/url_data_source_ios.h',
         'public/web_client.h',
@@ -224,6 +216,8 @@
         'web_state/blocked_popup_info.h',
         'web_state/blocked_popup_info.mm',
         'web_state/credential.cc',
+        'web_state/crw_pass_kit_downloader.h',
+        'web_state/crw_pass_kit_downloader.mm',
         'web_state/crw_recurring_task_delegate.h',
         'web_state/crw_web_view_proxy_impl.h',
         'web_state/crw_web_view_proxy_impl.mm',
@@ -238,6 +232,8 @@
         'web_state/js/credential_util.mm',
         'web_state/js/crw_js_early_script_manager.h',
         'web_state/js/crw_js_early_script_manager.mm',
+        'web_state/js/crw_js_post_request_loader.h',
+        'web_state/js/crw_js_post_request_loader.mm',
         'web_state/js/crw_js_injection_manager.mm',
         'web_state/js/crw_js_injection_receiver.mm',
         'web_state/js/crw_js_invoke_parameter_queue.h',
@@ -320,8 +316,12 @@
         'webui/web_ui_ios_data_source_impl.h',
         'webui/web_ui_ios_impl.h',
         'webui/web_ui_ios_impl.mm',
+        'web_thread_impl.cc',
+        'web_thread_impl.h',
       ],
       'link_settings': {
+        # TODO(crbug.com/541549): change to regular linking once support for
+        # iOS 7 is dropped.
         'xcode_settings': {
           'OTHER_LDFLAGS': [
             '-weak_framework WebKit',
@@ -329,44 +329,9 @@
         },
       },
     },
-    # Target that builds the actual WebThread implementation. This is a
-    # separate target since it can't yet be used by Chrome (see comment below).
-    {
-      'target_name': 'ios_web_thread',
-      'type': 'static_library',
-      'dependencies': [
-        '../../base/base.gyp:base',
-        '../../net/net.gyp:net',
-      ],
-      'include_dirs': [
-        '../..',
-      ],
-      'sources': [
-        'web_thread_impl.cc',
-        'web_thread_impl.h',
-      ],
-    },
-    # Target that builds the files that shim WebThread functions to their
-    # corresponding content equivalents. This is a separate target since it
-    # is needed by Chrome, which still uses content startup (which creates
-    # content threads), but isn't used by web_shell.
-    {
-      'target_name': 'ios_web_content_thread_shim',
-      'type': 'static_library',
-      'dependencies': [
-        '../../base/base.gyp:base',
-        '../../content/content.gyp:content_browser',
-      ],
-      'include_dirs': [
-        '../..',
-      ],
-      'sources': [
-        'web_thread_adapter.cc',
-        'web_thread_adapter.h',
-      ],
-    },
     # Target shared by ios_web and CrNet.
     {
+      # GN version: //ios/web:core
       'target_name': 'ios_web_core',
       'type': 'static_library',
       'dependencies': [
@@ -383,6 +348,7 @@
       ],
     },
     {
+      # GN version: //ios/web:web_bundle_ui
       'target_name': 'ios_web_js_bundle_ui',
       'type': 'none',
       'variables': {
@@ -413,6 +379,7 @@
       ],
     },
     {
+      # GN version: //ios/web:web_bundle_wk
       'target_name': 'ios_web_js_bundle_wk',
       'type': 'none',
       'variables': {
@@ -443,6 +410,7 @@
       ],
     },
     {
+      # GN version: //ios/web:js_resources
       'target_name': 'js_resources',
       'type': 'none',
       'dependencies': [
@@ -450,12 +418,14 @@
         'ios_web_js_bundle_wk',
       ],
       'sources': [
+        'web_state/js/resources/post_request.js',  
         'web_state/js/resources/plugin_placeholder.js',
         'web_state/js/resources/window_id.js',
         'webui/resources/web_ui.js',
       ],
       'link_settings': {
         'mac_bundle_resources': [
+          '<(SHARED_INTERMEDIATE_DIR)/post_request.js',
           '<(SHARED_INTERMEDIATE_DIR)/plugin_placeholder.js',
           '<(SHARED_INTERMEDIATE_DIR)/window_id.js',
           '<(SHARED_INTERMEDIATE_DIR)/web_ui.js',
@@ -466,51 +436,16 @@
       ],
     },
     {
-      'target_name': 'test_support_ios_web',
+      # GN version: //ios/web:test_support
+      'target_name': 'ios_web_test_support',
       'type': 'static_library',
       'dependencies': [
-        'ios_web_thread',
-        'test_support_ios_web_without_threads',
-      ],
-      'include_dirs': [
-        '../..',
-      ],
-      'sources': [
-        'test/test_web_thread.cc',
-        'test/test_web_thread_bundle.cc',
-      ],
-    },
-    {
-      'target_name': 'test_support_ios_web_with_content_thread_shim',
-      'type': 'static_library',
-      'dependencies': [
-        'ios_web_content_thread_shim',
-        'test_support_ios_web_without_threads',
-      ],
-      'include_dirs': [
-        '../..',
-      ],
-      'sources': [
-        'test/test_web_thread_adapter.cc',
-        'test/test_web_thread_bundle_adapter.cc',
-      ],
-    },
-    # A test support target that does not include TestWebThread. This is
-    # separate because tests that rely on the the shim thread implementation
-    # can't use TestWebThread/TestWebThreadBundle.
-    # TODO(stuartmorgan): Fold this into test_support_ios_web once
-    # the WebThread-to-BrowserThread shim is gone.
-    {
-      'target_name': 'test_support_ios_web_without_threads',
-      'type': 'static_library',
-      'dependencies': [
-        'ios_web',
-        '../../content/content_shell_and_tests.gyp:test_support_content',
         '../../ios/testing/ios_testing.gyp:ocmock_support',
         '../../ios/third_party/gcdwebserver/gcdwebserver.gyp:gcdwebserver',
         '../../testing/gmock.gyp:gmock',
         '../../testing/gtest.gyp:gtest',
         '../../third_party/ocmock/ocmock.gyp:ocmock',
+        'ios_web',
       ],
       'include_dirs': [
         '../..',
@@ -543,6 +478,8 @@
         'public/test/web_test_util.h',
         'test/crw_fake_web_controller_observer.h',
         'test/crw_fake_web_controller_observer.mm',
+        'test/test_web_thread.cc',
+        'test/test_web_thread_bundle.cc',
         'test/web_test.h',
         'test/web_test.mm',
         'test/web_test_suite.cc',
@@ -552,6 +489,7 @@
       ],
     },
     {
+      # GN version: //ios/web:user_agent
       'target_name': 'user_agent',
       'type': 'static_library',
       'include_dirs': [

@@ -31,7 +31,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -490,6 +489,7 @@ void StartupBrowserCreator::RegisterLocalStatePrefs(
   registry->RegisterStringPref(prefs::kLastWelcomedOSVersion, std::string());
   registry->RegisterBooleanPref(prefs::kWelcomePageOnOSUpgradeEnabled, true);
 #endif
+  registry->RegisterBooleanPref(prefs::kWasRestarted, false);
 }
 
 
@@ -879,7 +879,7 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
   if (!profile) {
     profile_manager->CreateProfileAsync(profile_path,
         base::Bind(&StartupBrowserCreator::ProcessCommandLineOnProfileCreated,
-                   command_line, cur_dir), base::string16(), base::string16(),
+                   command_line, cur_dir), base::string16(), std::string(),
                    std::string());
     return;
   }

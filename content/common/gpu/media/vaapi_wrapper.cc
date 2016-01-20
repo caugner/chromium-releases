@@ -114,8 +114,12 @@ static std::vector<VAConfigAttrib> GetRequiredAttribs(
 
 VASurface::VASurface(VASurfaceID va_surface_id,
                      const gfx::Size& size,
+                     unsigned int format,
                      const ReleaseCB& release_cb)
-    : va_surface_id_(va_surface_id), size_(size), release_cb_(release_cb) {
+    : va_surface_id_(va_surface_id),
+      size_(size),
+      format_(format),
+      release_cb_(release_cb) {
   DCHECK(!release_cb_.is_null());
 }
 
@@ -124,7 +128,8 @@ VASurface::~VASurface() {
 }
 
 VaapiWrapper::VaapiWrapper()
-    : va_display_(NULL),
+    : va_surface_format_(0),
+      va_display_(NULL),
       va_config_id_(VA_INVALID_ID),
       va_context_id_(VA_INVALID_ID),
       va_vpp_config_id_(VA_INVALID_ID),
@@ -511,6 +516,7 @@ bool VaapiWrapper::CreateSurfaces(unsigned int va_format,
 
   DCHECK(va_surfaces->empty());
   DCHECK(va_surface_ids_.empty());
+  DCHECK_EQ(va_surface_format_, 0u);
   va_surface_ids_.resize(num_surfaces);
 
   // Allocate surfaces in driver.
@@ -537,6 +543,7 @@ bool VaapiWrapper::CreateSurfaces(unsigned int va_format,
   }
 
   *va_surfaces = va_surface_ids_;
+  va_surface_format_ = va_format;
   return true;
 }
 
@@ -557,6 +564,7 @@ void VaapiWrapper::DestroySurfaces() {
 
   va_surface_ids_.clear();
   va_context_id_ = VA_INVALID_ID;
+  va_surface_format_ = 0;
 }
 
 scoped_refptr<VASurface> VaapiWrapper::CreateUnownedSurface(
@@ -579,7 +587,7 @@ scoped_refptr<VASurface> VaapiWrapper::CreateUnownedSurface(
   // of the destruction order. All the surfaces will be destroyed
   // before VaapiWrapper.
   va_surface = new VASurface(
-      va_surface_id, size,
+      va_surface_id, size, va_format,
       base::Bind(&VaapiWrapper::DestroyUnownedSurface, base::Unretained(this)));
 
   return va_surface;
@@ -939,10 +947,9 @@ bool VaapiWrapper::DownloadAndDestroyCodedBuffer(VABufferID buffer_id,
   return buffer_segment == NULL;
 }
 
-bool VaapiWrapper::BlitSurface(VASurfaceID va_surface_id_src,
-                               const gfx::Size& src_size,
-                               VASurfaceID va_surface_id_dest,
-                               const gfx::Size& dest_size) {
+bool VaapiWrapper::BlitSurface(
+    const scoped_refptr<VASurface>& va_surface_src,
+    const scoped_refptr<VASurface>& va_surface_dest) {
   base::AutoLock auto_lock(*va_lock_);
 
   // Initialize the post processing engine if not already done.
@@ -957,13 +964,15 @@ bool VaapiWrapper::BlitSurface(VASurfaceID va_surface_id_src,
                        "Couldn't map vpp buffer", false);
 
   memset(pipeline_param, 0, sizeof *pipeline_param);
+  const gfx::Size src_size = va_surface_src->size();
+  const gfx::Size dest_size = va_surface_dest->size();
 
   VARectangle input_region;
   input_region.x = input_region.y = 0;
   input_region.width = src_size.width();
   input_region.height = src_size.height();
   pipeline_param->surface_region = &input_region;
-  pipeline_param->surface = va_surface_id_src;
+  pipeline_param->surface = va_surface_src->id();
   pipeline_param->surface_color_standard = VAProcColorStandardNone;
 
   VARectangle output_region;
@@ -973,12 +982,13 @@ bool VaapiWrapper::BlitSurface(VASurfaceID va_surface_id_src,
   pipeline_param->output_region = &output_region;
   pipeline_param->output_background_color = 0xff000000;
   pipeline_param->output_color_standard = VAProcColorStandardNone;
+  pipeline_param->filter_flags = VA_FILTER_SCALING_HQ;
 
   VA_SUCCESS_OR_RETURN(vaUnmapBuffer(va_display_, va_vpp_buffer_id_),
                        "Couldn't unmap vpp buffer", false);
 
   VA_SUCCESS_OR_RETURN(
-      vaBeginPicture(va_display_, va_vpp_context_id_, va_surface_id_dest),
+      vaBeginPicture(va_display_, va_vpp_context_id_, va_surface_dest->id()),
       "Couldn't begin picture", false);
 
   VA_SUCCESS_OR_RETURN(

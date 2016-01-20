@@ -148,23 +148,23 @@ void CookiesEventRouter::CookieChanged(
   // Map the internal cause to an external string.
   std::string cause;
   switch (details->cause) {
-    case net::CookieMonster::Delegate::CHANGE_COOKIE_EXPLICIT:
+    case net::CookieMonsterDelegate::CHANGE_COOKIE_EXPLICIT:
       cause = keys::kExplicitChangeCause;
       break;
 
-    case net::CookieMonster::Delegate::CHANGE_COOKIE_OVERWRITE:
+    case net::CookieMonsterDelegate::CHANGE_COOKIE_OVERWRITE:
       cause = keys::kOverwriteChangeCause;
       break;
 
-    case net::CookieMonster::Delegate::CHANGE_COOKIE_EXPIRED:
+    case net::CookieMonsterDelegate::CHANGE_COOKIE_EXPIRED:
       cause = keys::kExpiredChangeCause;
       break;
 
-    case net::CookieMonster::Delegate::CHANGE_COOKIE_EVICTED:
+    case net::CookieMonsterDelegate::CHANGE_COOKIE_EVICTED:
       cause = keys::kEvictedChangeCause;
       break;
 
-    case net::CookieMonster::Delegate::CHANGE_COOKIE_EXPIRED_OVERWRITE:
+    case net::CookieMonsterDelegate::CHANGE_COOKIE_EXPIRED_OVERWRITE:
       cause = keys::kExpiredOverwriteChangeCause;
       break;
 
@@ -382,9 +382,8 @@ void CookiesSetFunction::SetCookieOnIOThread() {
   }
 
   cookie_monster->SetCookieWithDetailsAsync(
-      url_,
-      parsed_args_->details.name.get() ? *parsed_args_->details.name
-                                       : std::string(),
+      url_, parsed_args_->details.name.get() ? *parsed_args_->details.name
+                                             : std::string(),
       parsed_args_->details.value.get() ? *parsed_args_->details.value
                                         : std::string(),
       parsed_args_->details.domain.get() ? *parsed_args_->details.domain
@@ -399,7 +398,9 @@ void CookiesSetFunction::SetCookieOnIOThread() {
       // TODO(mkwst): If we decide to ship First-party-only cookies, we'll need
       // to extend the extension API to support them. For the moment, we'll set
       // all cookies as non-First-party-only.
-      false,
+      false, store_browser_context_->GetURLRequestContext()
+                 ->network_delegate()
+                 ->AreExperimentalCookieFeaturesEnabled(),
       net::COOKIE_PRIORITY_DEFAULT,
       base::Bind(&CookiesSetFunction::PullCookie, this));
 }

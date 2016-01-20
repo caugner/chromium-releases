@@ -32,14 +32,9 @@ class BlimpContextProvider : public cc::ContextProvider {
   void InvalidateGrContext(uint32_t state) override;
   void SetupLock() override;
   base::Lock* GetLock() override;
-  void VerifyContexts() override;
   void DeleteCachedResources() override;
-  bool DestroyedOnMainThread() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
-  void SetMemoryPolicyChangedCallback(
-      const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      override;
 
  protected:
   explicit BlimpContextProvider(gfx::AcceleratedWidget widget);
@@ -58,9 +53,6 @@ class BlimpContextProvider : public cc::ContextProvider {
   cc::ContextProvider::Capabilities capabilities_;
 
   LostContextCallback lost_context_callback_;
-
-  base::Lock destroyed_lock_;
-  bool destroyed_;
 
   DISALLOW_COPY_AND_ASSIGN(BlimpContextProvider);
 };

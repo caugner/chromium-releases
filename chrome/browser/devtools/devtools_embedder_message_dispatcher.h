@@ -47,7 +47,7 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void AppendToFile(const std::string& url,
                               const std::string& content) = 0;
     virtual void RequestFileSystems() = 0;
-    virtual void AddFileSystem() = 0;
+    virtual void AddFileSystem(const std::string& file_system_path) = 0;
     virtual void RemoveFileSystem(const std::string& file_system_path) = 0;
     virtual void UpgradeDraggedFileSystemPermissions(
         const std::string& file_system_url) = 0;
@@ -72,12 +72,15 @@ class DevToolsEmbedderMessageDispatcher {
         const std::string& port_forwarding_config) = 0;
     virtual void PerformActionOnRemotePage(const std::string& page_id,
                                            const std::string& action) = 0;
+    virtual void OpenRemotePage(const std::string& browser_id,
+                                const std::string& url) = 0;
     virtual void GetPreferences(const DispatchCallback& callback) = 0;
     virtual void SetPreference(const std::string& name,
                                const std::string& value) = 0;
     virtual void RemovePreference(const std::string& name) = 0;
     virtual void ClearPreferences() = 0;
-    virtual void SendMessageToBrowser(const std::string& message) = 0;
+    virtual void DispatchProtocolMessageFromDevToolsFrontend(
+        const std::string& message) = 0;
     virtual void RecordEnumeratedHistogram(const std::string& name,
                                            int sample,
                                            int boundary_value) = 0;

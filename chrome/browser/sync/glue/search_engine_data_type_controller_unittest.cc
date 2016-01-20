@@ -7,20 +7,22 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory_test_util.h"
-#include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
-#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
-#include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/profile_mock.h"
+#include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/sync_driver/data_type_controller_mock.h"
 #include "components/sync_driver/fake_generic_change_processor.h"
 #include "components/sync_driver/fake_sync_client.h"
+#include "components/sync_driver/sync_api_component_factory_mock.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "sync/api/fake_syncable_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
@@ -45,18 +47,18 @@ class SyncSearchEngineDataTypeControllerTest
   }
 
   void SetUp() override {
-    service_.reset(new ProfileSyncServiceMock(&profile_));
     // Feed the DTC the profile so it is reused later.
     // This allows us to control the associated TemplateURLService.
-    search_engine_dtc_ =
-        new SearchEngineDataTypeController(this, &profile_);
+    search_engine_dtc_ = new SearchEngineDataTypeController(
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+        base::Bind(&base::DoNothing), this,
+        TemplateURLServiceFactory::GetForProfile(&profile_));
   }
 
   void TearDown() override {
     // Must be done before we pump the loop.
     syncable_service_.StopSyncing(syncer::SEARCH_ENGINES);
     search_engine_dtc_ = NULL;
-    service_.reset();
   }
 
  protected:
@@ -88,8 +90,7 @@ class SyncSearchEngineDataTypeControllerTest
   TestingProfile profile_;
   TemplateURLServiceFactoryTestUtil test_util_;
   scoped_refptr<SearchEngineDataTypeController> search_engine_dtc_;
-  ProfileSyncComponentsFactoryMock profile_sync_factory_;
-  scoped_ptr<ProfileSyncServiceMock> service_;
+  SyncApiComponentFactoryMock profile_sync_factory_;
   syncer::FakeSyncableService syncable_service_;
   sync_driver::StartCallbackMock start_callback_;
   sync_driver::ModelLoadCallbackMock model_load_callback_;

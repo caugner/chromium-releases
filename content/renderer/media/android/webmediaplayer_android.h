@@ -5,7 +5,6 @@
 #ifndef CONTENT_RENDERER_MEDIA_ANDROID_WEBMEDIAPLAYER_ANDROID_H_
 #define CONTENT_RENDERER_MEDIA_ANDROID_WEBMEDIAPLAYER_ANDROID_H_
 
-#include <jni.h>
 #include <string>
 #include <vector>
 
@@ -29,10 +28,10 @@
 #include "media/base/media_keys.h"
 #include "media/base/time_delta_interpolator.h"
 #include "media/blink/webmediaplayer_params.h"
-#include "media/blink/webmediaplayer_util.h"
 #include "media/cdm/proxy_decryptor.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
+#include "third_party/WebKit/public/platform/WebSetSinkIdCallbacks.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -115,8 +114,9 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   virtual bool supportsSave() const;
   virtual void setRate(double rate);
   virtual void setVolume(double volume);
-  virtual void setSinkId(const blink::WebString& device_id,
-                         media::WebSetSinkIdCB* raw_web_callbacks);
+  virtual void setSinkId(const blink::WebString& sink_id,
+                         const blink::WebSecurityOrigin& security_origin,
+                         blink::WebSetSinkIdCallbacks* web_callback);
   virtual void requestRemotePlayback();
   virtual void requestRemotePlaybackControl();
   virtual blink::WebTimeRanges buffered() const;
@@ -320,15 +320,18 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   void OnCdmContextReady(media::CdmContext* cdm_context);
 
   // Sets the CDM. Should only be called when |is_player_initialized_| is true
-  // and a new non-null |cdm_context_| is available. Fires |cdm_attached_cb_|
-  // with the result after the CDM is attached.
+  // and a new non-null |cdm_context_| is available. Fires |cdm_attached_cb_| on
+  // the main thread with the result after the CDM is attached.
   void SetCdmInternal(const media::CdmAttachedCB& cdm_attached_cb);
 
-  // Requests that this object notifies when a decryptor is ready through the
-  // |decryptor_ready_cb| provided.
-  // If |decryptor_ready_cb| is null, the existing callback will be fired with
+  // Called when the CDM is attached.
+  void OnCdmAttached(const media::CdmAttachedCB& cdm_attached_cb, bool success);
+
+  // Requests that this object notifies when a CDM is ready through the
+  // |cdm_ready_cb| provided.
+  // If |cdm_ready_cb| is null, the existing callback will be fired with
   // NULL immediately and reset.
-  void SetDecryptorReadyCB(const media::DecryptorReadyCB& decryptor_ready_cb);
+  void SetCdmReadyCB(const media::CdmReadyCB& cdm_ready_cb);
 
   // Called when the ContentDecryptionModule has been attached to the
   // pipeline/decoders.
@@ -509,7 +512,7 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   // side CDM will be used. This is similar to WebMediaPlayerImpl. For other key
   // systems, a browser side CDM will be used and we set CDM by calling
   // player_manager_->SetCdm() directly.
-  media::DecryptorReadyCB decryptor_ready_cb_;
+  media::CdmReadyCB cdm_ready_cb_;
 
   SkBitmap bitmap_;
 

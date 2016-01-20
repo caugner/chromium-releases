@@ -372,8 +372,8 @@ class SamlTest : public OobeBaseTest {
 
   void SendConfirmPassword(const std::string& password_to_confirm) {
     std::string js =
-        "$('confirm-password-input').value='$Password';"
-        "$('confirm-password').onConfirmPassword_();";
+        "$('saml-confirm-password').$.passwordInput.value='$Password';"
+        "$('saml-confirm-password').$.inputForm.submit();";
     base::ReplaceSubstringsAfterOffset(
         &js, 0, "$Password", password_to_confirm);
     ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(), js));
@@ -437,8 +437,9 @@ IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_SamlUI) {
 
   // Click on 'cancel'.
   content::DOMMessageQueue message_queue;  // Observe before 'cancel'.
-  ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(),
-                                     "$('close-button-item').click();"));
+  ASSERT_TRUE(
+      content::ExecuteScript(GetLoginUI()->GetWebContents(),
+                             "$('gaia-navigation').$.closeButton.click();"));
 
   // Auth flow should change back to Gaia.
   std::string message;
@@ -629,13 +630,13 @@ IN_PROC_BROWSER_TEST_F(SamlTest, PasswordConfirmFlow) {
 
   // Lands on confirm password screen with no error message.
   OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
-  JsExpect("!$('confirm-password').classList.contains('error')");
+  JsExpect("!$('saml-confirm-password').$.passwordInput.isInvalid");
 
   // Enter an unknown password for the first time should go back to confirm
   // password screen with error message.
   SendConfirmPassword("wrong_password");
   OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
-  JsExpect("$('confirm-password').classList.contains('error')");
+  JsExpect("$('saml-confirm-password').$.passwordInput.isInvalid");
 
   // Enter an unknown password 2nd time should go back fatal error message.
   SendConfirmPassword("wrong_password");
@@ -968,11 +969,13 @@ void SAMLPolicyTest::SetUpOnMainThread() {
 
   // Pretend that the test users' OAuth tokens are valid.
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      kFirstSAMLUserEmail, user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
+      AccountId::FromUserEmail(kFirstSAMLUserEmail),
+      user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      kNonSAMLUserEmail, user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
+      AccountId::FromUserEmail(kNonSAMLUserEmail),
+      user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      kDifferentDomainSAMLUserEmail,
+      AccountId::FromUserEmail(kDifferentDomainSAMLUserEmail),
       user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
 
   // Set up fake networks.

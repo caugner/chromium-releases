@@ -85,6 +85,7 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD1(
       SetResizeCallback, void(const base::Callback<void(gfx::Size, float)>&));
   MOCK_METHOD1(SetIgnoreCachedStateForTest, void(bool ignore));
+  MOCK_METHOD1(SetForceShaderNameHashingForTest, void(bool force));
   MOCK_METHOD1(SetAllowExit, void(bool allow));
   MOCK_METHOD3(DoCommand, error::Error(unsigned int command,
                                        unsigned int arg_count,
@@ -115,6 +116,10 @@ class MockGLES2Decoder : public GLES2Decoder {
                void(const ShaderCacheCallback& callback));
   MOCK_METHOD1(SetWaitSyncPointCallback,
                void(const WaitSyncPointCallback& callback));
+  MOCK_METHOD1(SetFenceSyncReleaseCallback,
+               void(const FenceSyncReleaseCallback& callback));
+  MOCK_METHOD1(SetWaitFenceSyncCallback,
+               void(const WaitFenceSyncCallback& callback));
   MOCK_METHOD1(WaitForReadPixels,
                void(base::Closure callback));
   MOCK_METHOD0(GetTextureUploadCount, uint32());

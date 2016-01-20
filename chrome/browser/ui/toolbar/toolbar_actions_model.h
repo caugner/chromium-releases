@@ -24,6 +24,7 @@ class ToolbarActionsBar;
 class ToolbarActionViewController;
 
 namespace extensions {
+class ExtensionActionManager;
 class ExtensionRegistry;
 class ExtensionSet;
 }
@@ -150,6 +151,10 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   ScopedVector<ToolbarActionViewController> CreateActions(
       Browser* browser,
       ToolbarActionsBar* bar);
+  scoped_ptr<ToolbarActionViewController> CreateActionForItem(
+      Browser* browser,
+      ToolbarActionsBar* bar,
+      const ToolbarItem& item);
 
   const std::vector<ToolbarItem>& toolbar_items() const {
     return is_highlighting() ? highlighted_items_ : toolbar_items_;
@@ -157,6 +162,11 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   bool is_highlighting() const { return highlight_type_ != HIGHLIGHT_NONE; }
   HighlightType highlight_type() const { return highlight_type_; }
+  bool highlighting_for_toolbar_redesign() const {
+    return highlighting_for_toolbar_redesign_;
+  }
+
+  void SetActionVisibility(const std::string& action_id, bool visible);
 
   void OnActionToolbarPrefChange();
 
@@ -211,13 +221,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // Save the model to prefs.
   void UpdatePrefs();
 
-  // Updates action with |action|'s id's browser action visibility pref if the
-  // browser action is in the overflow menu and should be considered hidden.
-  void MaybeUpdateVisibilityPref(const ToolbarItem& action, size_t index);
-
-  // Calls MaybeUpdateVisibilityPref() for each action in |toolbar_items|.
-  void MaybeUpdateVisibilityPrefs();
-
   // Finds the last known visible position of the icon for |action|. The value
   // returned is a zero-based index into the vector of visible items.
   size_t FindNewPositionFromLastKnownGood(const ToolbarItem& action);
@@ -248,6 +251,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // The ExtensionRegistry object, cached for convenience.
   extensions::ExtensionRegistry* extension_registry_;
 
+  // The ExtensionActionManager, cached for convenience.
+  extensions::ExtensionActionManager* extension_action_manager_;
+
   // True if we've handled the initial EXTENSIONS_READY notification.
   bool actions_initialized_;
 
@@ -263,6 +269,10 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // The current type of highlight (with HIGHLIGHT_NONE indicating no current
   // highlight).
   HighlightType highlight_type_;
+
+  // Whether or not the toolbar model is actively highlighting for the toolbar
+  // redesign.
+  bool highlighting_for_toolbar_redesign_;
 
   // A list of action ids ordered to correspond with their last known
   // positions.

@@ -35,6 +35,7 @@ class OZONE_EXPORT DrmBuffer : public ScanoutBuffer {
   uint32_t GetFramebufferPixelFormat() const override;
   uint32_t GetHandle() const override;
   gfx::Size GetSize() const override;
+  bool RequiresGlFinish() const override;
 
  protected:
   ~DrmBuffer() override;
@@ -64,20 +65,6 @@ class OZONE_EXPORT DrmBuffer : public ScanoutBuffer {
   skia::RefPtr<SkSurface> surface_;
 
   DISALLOW_COPY_AND_ASSIGN(DrmBuffer);
-};
-
-class OZONE_EXPORT DrmBufferGenerator : public ScanoutBufferGenerator {
- public:
-  DrmBufferGenerator();
-  ~DrmBufferGenerator() override;
-
-  // ScanoutBufferGenerator:
-  scoped_refptr<ScanoutBuffer> Create(const scoped_refptr<DrmDevice>& drm,
-                                      gfx::BufferFormat format,
-                                      const gfx::Size& size) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DrmBufferGenerator);
 };
 
 }  // namespace ui

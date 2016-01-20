@@ -80,7 +80,7 @@ InspectorTest.timelineModel = function()
 
 InspectorTest.timelineFrameModel = function()
 {
-    return WebInspector.panels.timeline._frameModel();
+    return WebInspector.panels.timeline._frameModel;
 }
 
 InspectorTest.startTimeline = function(callback)
@@ -92,8 +92,8 @@ InspectorTest.startTimeline = function(callback)
         callback();
     }
     panel._model.addEventListener(WebInspector.TimelineModel.Events.RecordingStarted, onRecordingStarted, this)
-    panel._enableJSSamplingSettingSetting.set(false);
-    panel.toggleTimelineButton.element.click();
+    panel._enableJSSamplingSetting.set(false);
+    panel._toggleTimelineButton.element.click();
 };
 
 InspectorTest.stopTimeline = function(callback)
@@ -105,7 +105,7 @@ InspectorTest.stopTimeline = function(callback)
         InspectorTest.runAfterPendingDispatches(callback);
     }
     panel._model.addEventListener(WebInspector.TimelineModel.Events.RecordingStopped, didStop, this)
-    panel.toggleTimelineButton.element.click();
+    panel._toggleTimelineButton.element.click();
 };
 
 InspectorTest.evaluateWithTimeline = function(actions, doneCallback)
@@ -222,13 +222,10 @@ InspectorTest.innerPrintTimelinePresentationRecords = function(records, typeName
 // Dump just the record name, indenting output on separate lines for subrecords
 InspectorTest.dumpTimelineRecord = function(record, detailsCallback, level, filterTypes)
 {
-    if (typeof level !== "number")
-        level = 0;
-    var message = "";
-    for (var i = 0; i < level ; ++i)
-        message = "----" + message;
+    level = level || 0;
+    var message = "----".repeat(level);
     if (level > 0)
-        message = message + "> ";
+        message += "> ";
     if (record.type() === WebInspector.TimelineModel.RecordType.TimeStamp
         || record.type() === WebInspector.TimelineModel.RecordType.ConsoleTime) {
         message += WebInspector.TimelineUIUtils.eventTitle(record.traceEvent());
@@ -250,13 +247,10 @@ InspectorTest.dumpTimelineRecord = function(record, detailsCallback, level, filt
 
 InspectorTest.dumpTimelineModelRecord = function(record, level)
 {
-    if (typeof level !== "number")
-        level = 0;
-    var prefix = "";
-    for (var i = 0; i < level ; ++i)
-        prefix = "----" + prefix;
+    level = level || 0;
+    var prefix = "----".repeat(level);
     if (level > 0)
-        prefix = prefix + "> ";
+        prefix += "> ";
     InspectorTest.addResult(prefix + record.type() + ": " + (WebInspector.TimelineUIUtils.buildDetailsTextForTraceEvent(record.traceEvent(), null) || ""));
 
     var numChildren = record.children() ? record.children().length : 0;
@@ -268,13 +262,10 @@ InspectorTest.dumpTimelineModelRecord = function(record, level)
 InspectorTest.dumpPresentationRecord = function(presentationRecord, detailsCallback, level, filterTypes)
 {
     var record = !presentationRecord.presentationParent() ? null : presentationRecord.record();
-    if (typeof level !== "number")
-        level = 0;
-    var message = "";
-    for (var i = 0; i < level ; ++i)
-        message = "----" + message;
+    level = level || 0;
+    var message = "----".repeat(level);
     if (level > 0)
-        message = message + "> ";
+        message += "> ";
     if (!record) {
         message += "Root";
     } else if (presentationRecord.coalesced()) {

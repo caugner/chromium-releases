@@ -7,6 +7,7 @@ include_rules = [
   "+components/bookmarks",
   "+components/component_updater",
   "+components/content_settings/core",
+  "+components/crash/core/browser",
   "+components/crash/core/common",
   "+components/data_reduction_proxy/core/browser",
   "+components/data_reduction_proxy/core/common",
@@ -26,13 +27,16 @@ include_rules = [
   "+components/keyed_service/ios",
   "+components/leveldb_proto",
   "+components/metrics",
+  "+components/metrics_services_manager",
   "+components/net_log",
   "+components/network_time",
   "+components/omnibox/browser",
   "+components/open_from_clipboard",
   "+components/password_manager/core/browser",
+  "+components/password_manager/sync/browser",
   "+components/policy/core",
   "+components/pref_registry",
+  "+components/profile_metrics",
   "+components/proxy_config",
   "+components/rappor",
   "+components/rlz",
@@ -45,6 +49,7 @@ include_rules = [
   "+components/signin/ios/browser",
   "+components/suggestions",
   "+components/sync_driver",
+  "+components/sync_sessions",
   "+components/syncable_prefs",
   "+components/translate/core",
   "+components/translate/ios",
@@ -53,6 +58,7 @@ include_rules = [
   "+components/upload_list",
   "+components/variations",
   "+components/version_info",
+  "+components/version_ui",
   "+components/web_resource",
   "+components/webdata_services",
   "+components/webp_transcode",
@@ -68,9 +74,8 @@ include_rules = [
   "+third_party/google_toolbox_for_mac",
   "+ui",
 
-  # Those don't works on iOS or depends on //content, exclude them.
+  # Those depend on //content; exclude them.
   "-components/metrics/gpu",
-  "-components/metrics/profiler",
 
   # For tests.
   "+ios/chrome/test",
@@ -81,7 +86,10 @@ include_rules = [
   "+skia/ext/skia_utils_ios.h",
 
   # Strings and resources.
+  "+grit/components_chromium_strings.h",
+  "+grit/components_google_chrome_strings.h",
   "+grit/components_resources.h",
+  "+grit/components_scaled_resources.h",
   "+grit/components_strings.h",
   "+ios/chrome/grit",
 ]

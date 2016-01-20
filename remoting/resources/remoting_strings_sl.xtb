@@ -24,6 +24,7 @@ Za več informacij o zasebnosti si oglejte Googlov pravilnik o zasebnosti (http:
 <translation id="1546934824884762070">Nepričakovana napaka. O tem obvestite razvijalce.</translation>
 <translation id="1619813076098775562">Povezava z napravo za predvajanje je prekinjena.</translation>
 <translation id="1643640058022401035">Če zapustite to stran, se bo seja Oddaljenega povezovanja s Chromom končala.</translation>
+<translation id="1646994964686260497">Ni naprav za povezovanje.</translation>
 <translation id="1654128982815600832">Omogočanje oddaljenih povezav za ta računalnik ...</translation>
 <translation id="170207782578677537">Računalnika ni bilo mogoče registrirati.</translation>
 <translation id="1704090719919187045">Nastavitve gostitelja za Oddaljeno povezovanje s Chromom</translation>
@@ -33,7 +34,6 @@ Za več informacij o zasebnosti si oglejte Googlov pravilnik o zasebnosti (http:
 <translation id="1770394049404108959">Ne morem odpreti aplikacije.</translation>
 <translation id="177096447311351977">IP kanala za odjemalca: <ph name="CLIENT_GAIA_IDENTIFIER" /> ip='<ph name="CLIENT_IP_ADDRESS_AND_PORT" />' host_ip='<ph name="HOST_IP_ADDRESS_AND_PORT" />' channel='<ph name="CHANNEL_TYPE" />' connection='<ph name="CONNECTION_TYPE" />'.</translation>
 <translation id="1779766957982586368">Zapre okno</translation>
-<translation id="1818475040640568770">Nimate registriranih računalnikov.</translation>
 <translation id="1841799852846221389">Onemogočanje oddaljenih povezav za ta računalnik ...</translation>
 <translation id="189172778771606813">Zapri predal za krmarjenje</translation>
 <translation id="195619862187186579">Postavitve tipkovnice</translation>
@@ -87,8 +87,6 @@ Za več informacij o zasebnosti si oglejte Googlov pravilnik o zasebnosti (http:
 <translation id="2926340305933667314">Oddaljenega dostopa za računalnik ni bilo mogoče onemogočiti. Poskusite znova pozneje.</translation>
 <translation id="2930135165929238380">Ni nekaterih zahtevanih delov. Na chrome://plugins preverite, ali je omogočena tehnologija Native Client.</translation>
 <translation id="2939145106548231838">Preverjanje pristnosti pri gostitelju</translation>
-<translation id="2998137343848432918">• Dodan zaslon z ustvarjalci.
-• Odpravljena težava pri preklopu v celozaslonski način z vidno tipkovnico.</translation>
 <translation id="3020807351229499221">Kode PIN ni bilo mogoče posodobiti. Poskusite znova pozneje.</translation>
 <translation id="3025388528294795783">Pomagajte nam odpraviti težave, tako da nam sporočite, kaj je narobe.</translation>
 <translation id="3027681561976217984">Način z dotikanjem</translation>
@@ -97,7 +95,6 @@ Za več informacij o zasebnosti si oglejte Googlov pravilnik o zasebnosti (http:
 <translation id="3150823315463303127">Gostitelj ni mogel prebrati pravilnika.</translation>
 <translation id="3194245623920924351">Oddaljeno namizje za Chrome</translation>
 <translation id="3197730452537982411">Oddaljeno namizje</translation>
-<translation id="3244258558056547981">Prikaz pogleda za Cardboard.</translation>
 <translation id="3258789396564295715">Oddaljeno namizje za Chrome omogoča varen dostop do tega računalnika.</translation>
 <translation id="327263477022142889">Želite pomagati izboljšati oddaljeno namizje za Chrome? <ph name="LINK_BEGIN" />Sodelujte v anketi.<ph name="LINK_END" /></translation>
 <translation id="3286521253923406898">Krmilnik gostitelja za Oddaljeno povezovanje s Chromom</translation>
@@ -113,6 +110,7 @@ Za več informacij o zasebnosti si oglejte Googlov pravilnik o zasebnosti (http:
 <translation id="3606997049964069799">Niste prijavljeni v Chromium. Prijavite se in poskusite znova.</translation>
 <translation id="3649256019230929621">Pomanjšanje olna</translation>
 <translation id="369442766917958684">Brez povezave.</translation>
+<translation id="3695446226812920698">Oglejte si navodila</translation>
 <translation id="3776024066357219166">Seja Oddaljenega namizja za Chrome je končana.</translation>
 <translation id="3785447812627779171">Gostitelj za Oddaljeno
 povezovanje s Chromom</translation>
@@ -125,6 +123,11 @@ povezovanje s Chromom</translation>
 <translation id="3950820424414687140">Prijava</translation>
 <translation id="3989511127559254552">Če želite nadaljevati, morate računalniku najprej odobriti dovoljenja za razširjen dostop. To je treba narediti samo enkrat.</translation>
 <translation id="4006787130661126000">Če želite do računalnika dostopati z Oddaljenim namizjem za Chrome, omogočite oddaljene povezave.</translation>
+<translation id="401121182145179743">Najprej morate nastaviti računalnik za oddaljeni dostop.</translation>
+<translation id="4028465833180158312">• Posodobitve uporabniškega vmesnika z materialnim oblikovanjem.
+• Navedbe licenc tretjih oseb.
+• Podatki, prikazani za oddaljene računalnike, ki so brez povezave.</translation>
+<translation id="405887016757208221">Oddaljeni računalnik ni inicializiral seje. Če se težava ponovi, poskusite znova konfigurirati gostitelja.</translation>
 <translation id="4068946408131579958">Vse povezave</translation>
 <translation id="409800995205263688">OPOMBA: Nastavitve na podlagi pravilnika dovoljujejo povezave samo med računalniki v vašem omrežju.</translation>
 <translation id="4155497795971509630">Ni nekaterih zahtevanih delov. Preverite, ali imate najnovejšo različico programske opreme in poskusite znova.</translation>
@@ -149,6 +152,7 @@ povezovanje s Chromom</translation>
 <translation id="4573676252416618192">Gostitelj za Oddaljeno
 namizje za Chrome</translation>
 <translation id="4619978527973181021">Sprejmite in namestite</translation>
+<translation id="4647791084836149355">Pokaži pogled za Cardboard</translation>
 <translation id="4703799847237267011">Seja Oddaljenega povezovanja s Chromom je končana.</translation>
 <translation id="4736223761657662401">Zgodovina povezav</translation>
 <translation id="4741792197137897469">Preverjanje pristnosti ni uspelo. Še enkrat se prijavite v Chrome.</translation>
@@ -170,7 +174,6 @@ namizje za Chrome</translation>
 <translation id="518094545883702183">Te informacije uporabljamo samo za diagnosticiranje težave, ki ste jo prijavili, na voljo so samo osebi, ki preučuje vašo prijavo, in hranimo jih največ 30 dni.</translation>
 <translation id="5222676887888702881">Odjava</translation>
 <translation id="5254120496627797685">Če zapustite to stran, se bo seja Oddaljenega namizja za Chrome končala.</translation>
-<translation id="5285241842433869526">Naučite se računalnik nastaviti za oddaljen dostop.</translation>
 <translation id="5308380583665731573">Povezovanje</translation>
 <translation id="5363265567587775042">Uporabnika, do čigar računalnika želite dostopati, prosite, da klikne »<ph name="SHARE" />« in vam da kodo za dostop.</translation>
 <translation id="5379087427956679853">Oddaljeno namizje za Chrome omogoča varno skupno rabo računalnika v spletu. Oba uporabnika morata uporabljati aplikacijo Oddaljeno namizje za Chrome, ki je na voljo na <ph name="URL" />.</translation>
@@ -207,6 +210,7 @@ namizje za Chrome</translation>
 <translation id="6284412385303060032">Gostitelj, ki se je izvajal na zaslonu za prijavo v konzolo, se je zaustavil zaradi podpore načinu zavese, tako da je preklopil na gostitelja, ki se izvaja v seji uporabnika.</translation>
 <translation id="629730747756840877">Račun</translation>
 <translation id="6304318647555713317">Odjemalec</translation>
+<translation id="6324708100353784493">Omogočili ste način integracije z Googlom Cardboard. Za uporabo tega načina vstavite napravo v pregledovalnik, združljiv z Googlom Cardboard.</translation>
 <translation id="6381670701864002291">Nekaj drugega.</translation>
 <translation id="6398765197997659313">Izhod iz celozaslonskega načina</translation>
 <translation id="6441316101718669559">Integracija namizja v tem okolju ni podprta. Aplikacijo lahko še vedno uporabljate, vendar bo uporabniška izkušnja okrnjena.</translation>
@@ -257,6 +261,7 @@ namizje za Chrome</translation>
 <translation id="7869445566579231750">Nimate dovoljenja za izvajanje te aplikacije.</translation>
 <translation id="7948001860594368197">Možnosti zaslona</translation>
 <translation id="7970576581263377361">Preverjanje pristnosti ni uspelo. Še enkrat se prijavite v Chromium.</translation>
+<translation id="7981525049612125370">Oddaljena seja je potekla.</translation>
 <translation id="8041721485428375115">Če prenesete namestitveni program za gostitelja za oddaljeno namizje za Chrome, sprejemate Googlove <ph name="LINK_BEGIN" />pogoje storitve<ph name="LINK_END" />.</translation>
 <translation id="8073845705237259513">Če želite uporabljati Oddaljeno namizje za Chrome, morate v napravo dodati Google Račun.</translation>
 <translation id="80739703311984697">Oddaljeni gostitelj zahteva, da previte pristnost na spletnem mestu tretje osebe. Če želite nadaljevati, morate Oddaljenemu povezovanju s Chromom dodeliti dodatna dovoljenja za dostop do tega naslova:</translation>

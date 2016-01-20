@@ -90,12 +90,18 @@ public interface WebContents extends Parcelable {
     void paste();
 
     /**
+     * Replace the selected text with the {@code word}.
+     */
+    void replace(String word);
+
+    /**
      * Select all content.
      */
     void selectAll();
 
     /**
-     * Clear the selection.
+     * Clear the selection. This includes the cursor which is a zero-sized selection, and keyboard
+     * will be hidden as a result.
      */
     void unselect();
 
@@ -138,6 +144,11 @@ public interface WebContents extends Parcelable {
      * @return Whether the page is currently showing an interstitial, such as a bad HTTPS page.
      */
     boolean isShowingInterstitialPage();
+
+    /**
+     * @return Whether the location bar should be focused by default for this page.
+     */
+    boolean focusLocationBarByDefault();
 
     /**
      * If the view is ready to draw contents to the screen. In hardware mode,

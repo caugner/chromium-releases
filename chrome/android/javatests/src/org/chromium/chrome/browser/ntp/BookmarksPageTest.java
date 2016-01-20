@@ -14,10 +14,10 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmark.AddEditBookmarkFragment;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.bookmark.ManageBookmarkActivity;
 import org.chromium.chrome.browser.bookmark.SelectBookmarkFolderFragment;
 import org.chromium.chrome.browser.tab.Tab;
@@ -184,6 +184,7 @@ public class BookmarksPageTest extends ChromeTabbedActivityTestBase {
                 mBookmarksList, TEST_PAGE_TITLE));
     }
 
+    @DisabledTest // Fails on android-one: crbug.com/540728
     @LargeTest
     public void testNavigateFoldersInFolderHierarchy() throws InterruptedException {
         addFolderAndAddBookmark();

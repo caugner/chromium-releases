@@ -6,19 +6,21 @@
 
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/mus/public/cpp/view_tree_connection.h"
-#include "components/mus/public/cpp/view_tree_delegate.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
+#include "components/mus/public/cpp/window_tree_delegate.h"
 #include "components/url_formatter/url_fixer.h"
-#include "mandoline/ui/aura/aura_init.h"
-#include "mandoline/ui/aura/native_widget_view_manager.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/view_embedder.mojom.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/common/common_type_converters.h"
-#include "mojo/converters/geometry/geometry_type_converters.h"
+#include "ui/mojo/init/ui_init.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/layout/layout_manager.h"
+#include "ui/views/mus/aura_init.h"
+#include "ui/views/mus/display_converter.h"
+#include "ui/views/mus/native_widget_mus.h"
 #include "ui/views/widget/widget_delegate.h"
 
 namespace mandoline {
@@ -26,7 +28,7 @@ namespace mandoline {
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxImpl
 
-class OmniboxImpl : public mus::ViewTreeDelegate,
+class OmniboxImpl : public mus::WindowTreeDelegate,
                     public views::LayoutManager,
                     public views::TextfieldController,
                     public Omnibox {
@@ -37,9 +39,9 @@ class OmniboxImpl : public mus::ViewTreeDelegate,
   ~OmniboxImpl() override;
 
  private:
-  // Overridden from mus::ViewTreeDelegate:
-  void OnEmbed(mus::View* root) override;
-  void OnConnectionLost(mus::ViewTreeConnection* connection) override;
+  // Overridden from mus::WindowTreeDelegate:
+  void OnEmbed(mus::Window* root) override;
+  void OnConnectionLost(mus::WindowTreeConnection* connection) override;
 
   // Overridden from views::LayoutManager:
   gfx::Size GetPreferredSize(const views::View* view) const override;
@@ -50,16 +52,17 @@ class OmniboxImpl : public mus::ViewTreeDelegate,
                       const ui::KeyEvent& key_event) override;
 
   // Overridden from Omnibox:
-  void GetViewTreeClient(
-      mojo::InterfaceRequest<mojo::ViewTreeClient> request) override;
+  void GetWindowTreeClient(
+      mojo::InterfaceRequest<mus::mojom::WindowTreeClient> request) override;
   void ShowForURL(const mojo::String& url) override;
 
   void HideWindow();
   void ShowWindow();
 
-  scoped_ptr<AuraInit> aura_init_;
+  scoped_ptr<ui::mojo::UIInit> ui_init_;
+  scoped_ptr<views::AuraInit> aura_init_;
   mojo::ApplicationImpl* app_;
-  mus::View* root_;
+  mus::Window* root_;
   mojo::String url_;
   views::Textfield* edit_;
   mojo::Binding<Omnibox> binding_;
@@ -110,13 +113,14 @@ OmniboxImpl::OmniboxImpl(mojo::ApplicationImpl* app,
 OmniboxImpl::~OmniboxImpl() {}
 
 ////////////////////////////////////////////////////////////////////////////////
-// OmniboxImpl, mus::ViewTreeDelegate implementation:
+// OmniboxImpl, mus::WindowTreeDelegate implementation:
 
-void OmniboxImpl::OnEmbed(mus::View* root) {
+void OmniboxImpl::OnEmbed(mus::Window* root) {
   root_ = root;
 
   if (!aura_init_.get()) {
-    aura_init_.reset(new AuraInit(root, app_->shell()));
+    ui_init_.reset(new ui::mojo::UIInit(views::GetDisplaysFromWindow(root_)));
+    aura_init_.reset(new views::AuraInit(app_, "mandoline_ui.pak"));
     edit_ = new views::Textfield;
     edit_->set_controller(this);
     edit_->SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
@@ -135,10 +139,10 @@ void OmniboxImpl::OnEmbed(mus::View* root) {
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.native_widget =
-      new NativeWidgetViewManager(widget, app_->shell(), root);
+  params.native_widget = new views::NativeWidgetMus(
+      widget, app_->shell(), root, mus::mojom::SURFACE_TYPE_DEFAULT);
   params.delegate = widget_delegate;
-  params.bounds = root->bounds().To<gfx::Rect>();
+  params.bounds = root->bounds();
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   widget->Init(params);
   widget->Show();
@@ -148,7 +152,7 @@ void OmniboxImpl::OnEmbed(mus::View* root) {
   ShowWindow();
 }
 
-void OmniboxImpl::OnConnectionLost(mus::ViewTreeConnection* connection) {
+void OmniboxImpl::OnConnectionLost(mus::WindowTreeConnection* connection) {
   root_ = nullptr;
 }
 
@@ -188,9 +192,11 @@ bool OmniboxImpl::HandleKeyEvent(views::Textfield* sender,
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxImpl, Omnibox implementation:
 
-void OmniboxImpl::GetViewTreeClient(
-    mojo::InterfaceRequest<mojo::ViewTreeClient> request) {
-  mus::ViewTreeConnection::Create(this, request.Pass());
+void OmniboxImpl::GetWindowTreeClient(
+    mojo::InterfaceRequest<mus::mojom::WindowTreeClient> request) {
+  mus::WindowTreeConnection::Create(
+      this, request.Pass(),
+      mus::WindowTreeConnection::CreateType::DONT_WAIT_FOR_EMBED);
 }
 
 void OmniboxImpl::ShowForURL(const mojo::String& url) {

@@ -10,9 +10,11 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/file_downloader.h"
@@ -21,6 +23,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
@@ -34,8 +37,11 @@ namespace {
 const char kPopularSitesURLFormat[] = "https://www.gstatic.com/chrome/ntp/%s";
 const char kPopularSitesServerFilenameFormat[] = "suggested_sites_%s_%s.json";
 const char kPopularSitesDefaultCountryCode[] = "DEFAULT";
-const char kPopularSitesDefaultVersion[] = "2";
+const char kPopularSitesDefaultVersion[] = "3";
 const char kPopularSitesLocalFilename[] = "suggested_sites.json";
+const int kPopularSitesRedownloadIntervalHours = 24;
+
+const char kPopularSitesLastDownloadPref[] = "popular_sites_last_download";
 
 // Extract the country from the default search engine if the default search
 // engine is Google.
@@ -99,11 +105,7 @@ std::string GetCountryCode(Profile* profile) {
 std::string GetPopularSitesServerFilename(
     Profile* profile,
     const std::string& override_country,
-    const std::string& override_version,
-    const std::string& override_filename) {
-  if (!override_filename.empty())
-    return override_filename;
-
+    const std::string& override_version) {
   std::string country =
       !override_country.empty() ? override_country : GetCountryCode(profile);
   std::string version = !override_version.empty() ? override_version
@@ -114,13 +116,16 @@ std::string GetPopularSitesServerFilename(
 
 GURL GetPopularSitesURL(Profile* profile,
                         const std::string& override_country,
-                        const std::string& override_version,
-                        const std::string& override_filename) {
+                        const std::string& override_version) {
   return GURL(base::StringPrintf(
       kPopularSitesURLFormat,
-      GetPopularSitesServerFilename(profile, override_country, override_version,
-                                    override_filename)
+      GetPopularSitesServerFilename(profile, override_country, override_version)
           .c_str()));
+}
+
+GURL GetPopularSitesFallbackURL(Profile* profile) {
+  return GetPopularSitesURL(profile, kPopularSitesDefaultCountryCode,
+                            kPopularSitesDefaultVersion);
 }
 
 base::FilePath GetPopularSitesPath() {
@@ -159,8 +164,11 @@ scoped_ptr<std::vector<PopularSites::Site>> ReadAndParseJsonFile(
     item->GetString("favicon_url", &favicon_url);
     std::string thumbnail_url;
     item->GetString("thumbnail_url", &thumbnail_url);
+    std::string large_icon_url;
+    item->GetString("large_icon_url", &large_icon_url);
 
     sites->push_back(PopularSites::Site(title, GURL(url), GURL(favicon_url),
+                                        GURL(large_icon_url),
                                         GURL(thumbnail_url)));
   }
 
@@ -172,10 +180,12 @@ scoped_ptr<std::vector<PopularSites::Site>> ReadAndParseJsonFile(
 PopularSites::Site::Site(const base::string16& title,
                          const GURL& url,
                          const GURL& favicon_url,
+                         const GURL& large_icon_url,
                          const GURL& thumbnail_url)
     : title(title),
       url(url),
       favicon_url(favicon_url),
+      large_icon_url(large_icon_url),
       thumbnail_url(thumbnail_url) {}
 
 PopularSites::Site::~Site() {}
@@ -183,53 +193,86 @@ PopularSites::Site::~Site() {}
 PopularSites::PopularSites(Profile* profile,
                            const std::string& override_country,
                            const std::string& override_version,
-                           const std::string& override_filename,
                            bool force_download,
                            const FinishedCallback& callback)
-    : callback_(callback), weak_ptr_factory_(this) {
-  // Re-download the file once on every Chrome startup, but use the cached
-  // local file afterwards.
-  static bool first_time = true;
-  FetchPopularSites(GetPopularSitesURL(profile, override_country,
-                                       override_version, override_filename),
-                    profile->GetRequestContext(), first_time || force_download);
-  first_time = false;
-}
+    : PopularSites(profile,
+                   GetPopularSitesURL(profile, override_country,
+                                      override_version),
+                   force_download,
+                   callback) {}
 
 PopularSites::PopularSites(Profile* profile,
                            const GURL& url,
                            const FinishedCallback& callback)
-    : callback_(callback), weak_ptr_factory_(this) {
-  FetchPopularSites(url, profile->GetRequestContext(), true);
-}
+    : PopularSites(profile, url, true, callback) {}
 
 PopularSites::~PopularSites() {}
 
-void PopularSites::FetchPopularSites(
-    const GURL& url,
-    net::URLRequestContextGetter* request_context,
-    bool force_download) {
-  base::FilePath path = GetPopularSitesPath();
-  downloader_.reset(new FileDownloader(
-      url, path, force_download, request_context,
-      base::Bind(&PopularSites::OnDownloadDone, base::Unretained(this), path)));
+// static
+void PopularSites::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* user_prefs) {
+  user_prefs->RegisterInt64Pref(kPopularSitesLastDownloadPref, 0);
 }
 
-void PopularSites::OnDownloadDone(const base::FilePath& path, bool success) {
+PopularSites::PopularSites(Profile* profile,
+                           const GURL& url,
+                           bool force_download,
+                           const FinishedCallback& callback)
+    : callback_(callback),
+      popular_sites_local_path_(GetPopularSitesPath()),
+      profile_(profile),
+      weak_ptr_factory_(this) {
+  const base::Time last_download_time = base::Time::FromInternalValue(
+      profile_->GetPrefs()->GetInt64(kPopularSitesLastDownloadPref));
+  const base::TimeDelta time_since_last_download =
+      base::Time::Now() - last_download_time;
+  const base::TimeDelta redownload_interval =
+      base::TimeDelta::FromHours(kPopularSitesRedownloadIntervalHours);
+  const bool download_time_is_future = base::Time::Now() < last_download_time;
+
+  const bool should_redownload_if_exists =
+      force_download || download_time_is_future ||
+      (time_since_last_download > redownload_interval);
+
+  FetchPopularSites(url, should_redownload_if_exists, false /* is_fallback */);
+}
+
+void PopularSites::FetchPopularSites(const GURL& url,
+                                     bool force_download,
+                                     bool is_fallback) {
+  downloader_.reset(
+      new FileDownloader(url, popular_sites_local_path_, force_download,
+                         profile_->GetRequestContext(),
+                         base::Bind(&PopularSites::OnDownloadDone,
+                                    base::Unretained(this), is_fallback)));
+}
+
+void PopularSites::OnDownloadDone(bool is_fallback, bool success) {
+  downloader_.reset();
   if (success) {
-    base::PostTaskAndReplyWithResult(
-        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-            base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN).get(),
-        FROM_HERE,
-        base::Bind(&ReadAndParseJsonFile, path),
-        base::Bind(&PopularSites::OnJsonParsed,
-                   weak_ptr_factory_.GetWeakPtr()));
+    profile_->GetPrefs()->SetInt64(kPopularSitesLastDownloadPref,
+                                   base::Time::Now().ToInternalValue());
+    ParseSiteList(popular_sites_local_path_);
+  } else if (!is_fallback) {
+    DLOG(WARNING) << "Download country site list failed";
+    // It is fine to force the download as Fallback is only triggered after a
+    // failed download.
+    FetchPopularSites(GetPopularSitesFallbackURL(profile_),
+                      true /* force_download */, true /* is_fallback */);
   } else {
-    DLOG(WARNING) << "Download failed";
+    DLOG(WARNING) << "Download fallback site list failed";
     callback_.Run(false);
   }
+}
 
-  downloader_.reset();
+void PopularSites::ParseSiteList(const base::FilePath& path) {
+  base::PostTaskAndReplyWithResult(
+      BrowserThread::GetBlockingPool()
+          ->GetTaskRunnerWithShutdownBehavior(
+              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+          .get(),
+      FROM_HERE, base::Bind(&ReadAndParseJsonFile, path),
+      base::Bind(&PopularSites::OnJsonParsed, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PopularSites::OnJsonParsed(scoped_ptr<std::vector<Site>> sites) {

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromecast_build.gni")
+
 # This args block should contain arguments used within the //chromecast
 # directory. Arguments which are used in other Chrome components should
 # be instead declared in //build/config/chromecast_build.gni.

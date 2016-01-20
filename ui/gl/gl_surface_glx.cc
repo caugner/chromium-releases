@@ -34,7 +34,6 @@ namespace gfx {
 namespace {
 
 Display* g_display = nullptr;
-const char* g_glx_extensions = nullptr;
 bool g_glx_context_create = false;
 bool g_glx_create_context_robustness_supported = false;
 bool g_glx_texture_from_pixmap_supported = false;
@@ -349,7 +348,6 @@ bool GLSurfaceGLX::InitializeOneOff() {
     return false;
   }
 
-  g_glx_extensions = glXQueryExtensionsString(g_display, 0);
   g_glx_context_create =
       HasGLXExtension("GLX_ARB_create_context");
   g_glx_create_context_robustness_supported =
@@ -371,7 +369,7 @@ bool GLSurfaceGLX::InitializeOneOff() {
 
 // static
 const char* GLSurfaceGLX::GetGLXExtensions() {
-  return g_glx_extensions;
+  return glXQueryExtensionsString(g_display, 0);
 }
 
 // static
@@ -479,9 +477,13 @@ bool NativeViewGLSurfaceGLX::Initialize() {
   // extra blits in the driver), that we can resize exactly in Resize(),
   // correctly ordered with GL, so that we don't have invalid transient states.
   // See https://crbug.com/326995.
+  XSetWindowAttributes swa;
+  memset(&swa, 0, sizeof(swa));
+  swa.background_pixmap = 0;
+  swa.bit_gravity = NorthWestGravity;
   window_ = XCreateWindow(g_display, parent_window_, 0, 0, size_.width(),
                           size_.height(), 0, CopyFromParent, InputOutput,
-                          CopyFromParent, 0, nullptr);
+                          CopyFromParent, CWBackPixmap | CWBitGravity, &swa);
   XMapWindow(g_display, window_);
 
   ui::PlatformEventSource* event_source =
@@ -528,7 +530,7 @@ uint32_t NativeViewGLSurfaceGLX::DispatchEvent(const ui::PlatformEvent& event) {
   return ui::POST_DISPATCH_STOP_PROPAGATION;
 }
 
-bool NativeViewGLSurfaceGLX::Resize(const gfx::Size& size) {
+bool NativeViewGLSurfaceGLX::Resize(const gfx::Size& size, float scale_factor) {
   size_ = size;
   glXWaitGL();
   XResizeWindow(g_display, window_, size.width(), size.height());

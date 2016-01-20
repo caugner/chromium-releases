@@ -574,7 +574,6 @@
       "extensions_unittests",
       "gcm_unit_tests",
       "gfx_unittests",
-      "gl_unittests",
       "gn_unittests",
       "google_apis_unittests",
       "gpu_unittests",
@@ -636,7 +635,6 @@
       "extensions_unittests",
       "gcm_unit_tests",
       "gfx_unittests",
-      "gl_unittests",
       "gn_unittests",
       "google_apis_unittests",
       "gpu_unittests",
@@ -1093,44 +1091,6 @@
     ]
   },
   "WebKit Mac10.6": {
-    "gtest_tests": [
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "blink_heap_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "blink_platform_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "webkit_unit_tests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "wtf_unittests"
-      }
-    ],
-    "scripts": [
-      {
-        "name": "webkit_lint",
-        "script": "webkit_lint.py"
-      },
-      {
-        "name": "webkit_python_tests",
-        "script": "webkit_python_tests.py"
-      }
-    ]
-  },
-  "WebKit Mac10.6 (dbg)": {
     "gtest_tests": [
       {
         "swarming": {

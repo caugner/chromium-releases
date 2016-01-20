@@ -8,14 +8,14 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/web_view/public/interfaces/web_view.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace mojo {
 class ApplicationImpl;
 }
 
 namespace mus {
-class View;
+class Window;
 }
 
 namespace web_view {
@@ -25,7 +25,7 @@ class WebView {
   explicit WebView(mojom::WebViewClient* client);
   ~WebView();
 
-  void Init(mojo::ApplicationImpl* app, mus::View* view);
+  void Init(mojo::ApplicationImpl* app, mus::Window* window);
 
   mojom::WebView* web_view() { return web_view_.get(); }
 

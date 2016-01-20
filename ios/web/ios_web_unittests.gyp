@@ -7,6 +7,7 @@
   },
   'targets': [
     {
+      # GN version: //ios/web:ios_web_unittests
       'target_name': 'ios_web_unittests',
       'type': '<(gtest_target_type)',
       'dependencies': [
@@ -19,7 +20,7 @@
         '../../ui/base/ui_base.gyp:ui_base_test_support',
         '../testing/ios_testing.gyp:ocmock_support',
         'ios_web.gyp:ios_web',
-        'ios_web.gyp:test_support_ios_web',
+        'ios_web.gyp:ios_web_test_support',
       ],
       'sources': [
         'active_state_manager_impl_unittest.mm',
@@ -54,6 +55,7 @@
         'url_scheme_util_unittest.mm',
         'url_util_unittest.cc',
         'weak_nsobject_counter_unittest.mm',
+        'web_state/crw_pass_kit_downloader_unittest.mm',
         'web_state/crw_web_view_scroll_view_proxy_unittest.mm',
         'web_state/js/common_js_unittest.mm',
         'web_state/js/core_js_unittest.mm',
@@ -61,6 +63,7 @@
         'web_state/js/crw_js_early_script_manager_unittest.mm',
         'web_state/js/crw_js_injection_manager_unittest.mm',
         'web_state/js/crw_js_invoke_parameter_queue_unittest.mm',
+        'web_state/js/crw_js_post_request_loader_unittest.mm',
         'web_state/js/crw_js_window_id_manager_unittest.mm',
         'web_state/js/page_script_util_unittest.mm',
         'web_state/ui/crw_static_file_web_view_unittest.mm',

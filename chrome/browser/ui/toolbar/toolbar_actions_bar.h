@@ -9,6 +9,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_bubble_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
@@ -25,6 +26,7 @@ class PrefRegistrySyncable;
 }
 
 class ToolbarActionsBarDelegate;
+class ToolbarActionsBarObserver;
 class ToolbarActionViewController;
 
 // A platform-independent version of the container for toolbar actions,
@@ -39,9 +41,9 @@ class ToolbarActionViewController;
 //
 // This can come in two flavors, main and "overflow". The main bar is visible
 // next to the omnibox, and the overflow bar is visible inside the chrome
-// (fka wrench) menu. The main bar can have only a single row of icons with
-// flexible width, whereas the overflow bar has multiple rows of icons with a
-// fixed width (the width of the menu).
+// app menu. The main bar can have only a single row of icons with flexible
+// width, whereas the overflow bar has multiple rows of icons with a fixed
+// width (the width of the menu).
 class ToolbarActionsBar : public ToolbarActionsModel::Observer {
  public:
   // A struct to contain the platform settings.
@@ -202,6 +204,10 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   ToolbarActionViewController* GetMainControllerForAction(
       ToolbarActionViewController* action);
 
+  // Add or remove an observer.
+  void AddObserver(ToolbarActionsBarObserver* observer);
+  void RemoveObserver(ToolbarActionsBarObserver* observer);
+
   // Returns the underlying toolbar actions, but does not order them. Primarily
   // for use in testing.
   const std::vector<ToolbarActionViewController*>& toolbar_actions_unordered()
@@ -226,6 +232,9 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
     return popped_out_action_;
   }
   bool in_overflow_mode() const { return main_bar_ != nullptr; }
+  bool show_icon_surfacing_bubble() const {
+    return model_->highlighting_for_toolbar_redesign();
+  }
 
   ToolbarActionsBarDelegate* delegate_for_test() { return delegate_; }
 
@@ -322,6 +331,8 @@ class ToolbarActionsBar : public ToolbarActionsModel::Observer {
   // The controller of the bubble to show once animation finishes, if any.
   scoped_ptr<extensions::ExtensionMessageBubbleController>
       pending_extension_bubble_controller_;
+
+  base::ObserverList<ToolbarActionsBarObserver> observers_;
 
   base::WeakPtrFactory<ToolbarActionsBar> weak_ptr_factory_;
 

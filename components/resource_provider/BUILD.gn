@@ -17,10 +17,7 @@ if (is_android) {
     deps = [
       ":java_library",
       ":resource_provider_lib",
-      "//third_party/icu:icudata",
     ]
-
-    resources = [ "$root_out_dir/icudtl.dat" ]
   }
 
   shared_library("resource_provider_lib") {
@@ -36,7 +33,8 @@ if (is_android) {
       "//build/config/sanitizers:deps",
       "//components/resource_provider/public/interfaces",
       "//mojo/environment:chromium",
-      "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
+      "//mojo/platform_handle:for_shared_library",
+      "//mojo/public/c/system:for_shared_library",
       "//url",
     ]
   }
@@ -74,11 +72,8 @@ if (is_android) {
       "//base",
       "//components/resource_provider/public/interfaces",
       "//mojo/environment:chromium",
-      "//third_party/icu:icudata",
       "//url",
     ]
-
-    resources = [ "$root_out_dir/icudtl.dat" ]
   }
 }
 
@@ -97,7 +92,6 @@ source_set("lib") {
     "//components/resource_provider/public/interfaces",
     "//mojo/application/public/cpp",
     "//mojo/common:common_base",
-    "//mojo/platform_handle",
     "//url",
   ]
 }
@@ -113,6 +107,7 @@ test("resource_provider_unittests") {
     "//base/test:test_config",
     "//components/resource_provider/public/interfaces",
     "//mojo/environment:chromium",
+    "//mojo/platform_handle:for_shared_library",
     "//testing/gtest",
     "//third_party/mojo/src/mojo/edk/test:run_all_unittests",
     "//url",
@@ -138,8 +133,9 @@ mojo_native_application("apptests") {
     "//components/resource_provider/public/cpp",
     "//components/resource_provider/public/interfaces",
     "//mojo/application/public/cpp:test_support",
-    "//mojo/platform_handle",
   ]
 
-  data_deps = [ ":resource_provider" ]
+  data_deps = [
+    ":resource_provider",
+  ]
 }

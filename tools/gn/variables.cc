@@ -731,54 +731,6 @@ const char kDeps_Help[] =
     "\n"
     "  See also \"public_deps\" and \"data_deps\".\n";
 
-// TODO(brettw) remove this, deprecated.
-const char kForwardDependentConfigsFrom[] = "forward_dependent_configs_from";
-const char kForwardDependentConfigsFrom_HelpShort[] =
-    "forward_dependent_configs_from: [label list] DEPRECATED.";
-const char kForwardDependentConfigsFrom_Help[] =
-    "forward_dependent_configs_from\n"
-    "\n"
-    "  A list of target labels.\n"
-    "\n"
-    "  DEPRECATED. Use public_deps instead which will have the same effect.\n"
-    "\n"
-    "  Exposes the public_configs from a private dependent target as\n"
-    "  public_configs of the current one. Each label in this list\n"
-    "  must also be in the deps.\n"
-    "\n"
-    "  Generally you should use public_deps instead of this variable to\n"
-    "  express the concept of exposing a dependency as part of a target's\n"
-    "  public API. We're considering removing this variable.\n"
-    "\n"
-    "Discussion\n"
-    "\n"
-    "  Sometimes you depend on a child library that exports some necessary\n"
-    "  configuration via public_configs. If your target in turn exposes the\n"
-    "  child library's headers in its public headers, it might mean that\n"
-    "  targets that depend on you won't work: they'll be seeing the child\n"
-    "  library's code but not the necessary configuration. This list\n"
-    "  specifies which of your deps' direct dependent configs to expose as\n"
-    "  your own.\n"
-    "\n"
-    "Examples\n"
-    "\n"
-    "  If we use a given library \"a\" from our public headers:\n"
-    "\n"
-    "    deps = [ \":a\", \":b\", ... ]\n"
-    "    forward_dependent_configs_from = [ \":a\" ]\n"
-    "\n"
-    "  This example makes a \"transparent\" target that forwards a dependency\n"
-    "  to another:\n"
-    "\n"
-    "    group(\"frob\") {\n"
-    "      if (use_system_frob) {\n"
-    "        deps = \":system_frob\"\n"
-    "      } else {\n"
-    "        deps = \"//third_party/fallback_frob\"\n"
-    "      }\n"
-    "      forward_dependent_configs_from = deps\n"
-    "    }\n";
-
 const char kIncludeDirs[] = "include_dirs";
 const char kIncludeDirs_HelpShort[] =
     "include_dirs: [directory list] Additional include directories.";
@@ -928,9 +880,12 @@ const char kLibs_Help[] =
     "  When constructing the linker command, the \"lib_prefix\" attribute of\n"
     "  the linker tool in the current toolchain will be prepended to each\n"
     "  library. So your BUILD file should not specify the switch prefix\n"
-    "  (like \"-l\"). On Mac, libraries ending in \".framework\" will be\n"
-    "  special-cased: the switch \"-framework\" will be prepended instead of\n"
-    "  the lib_prefix, and the \".framework\" suffix will be trimmed.\n"
+    "  (like \"-l\").\n"
+    "\n"
+    "  Libraries ending in \".framework\" will be special-cased: the switch\n"
+    "  \"-framework\" will be prepended instead of the lib_prefix, and the\n"
+    "  \".framework\" suffix will be trimmed. This is to support the way Mac\n"
+    "  links framework dependencies.\n"
     COMMON_LIB_INHERITANCE_HELP
     COMMON_ORDERING_HELP
     "\n"
@@ -1212,6 +1167,45 @@ const char kPublicDeps_Help[] =
     "    public_deps = [ \":c\" ]\n"
     "  }\n";
 
+const char kResponseFileContents[] = "response_file_contents";
+const char kResponseFileContents_HelpShort[] =
+    "response_file_contents: [string list] Contents of .rsp file for actions.";
+const char kResponseFileContents_Help[] =
+    "response_file_contents: Contents of a response file for actions.\n"
+    "\n"
+    "  Sometimes the arguments passed to a script can be too long for the\n"
+    "  system's command-line capabilities. This is especially the case on\n"
+    "  Windows where the maximum command-line length is less than 8K. A\n"
+    "  response file allows you to pass an unlimited amount of data to a\n"
+    "  script in a temporary file for an action or action_foreach target.\n"
+    "\n"
+    "  If the response_file_contents variable is defined and non-empty, the\n"
+    "  list will be treated as script args (including possibly substitution\n"
+    "  patterns) that will be written to a temporary file at build time.\n"
+    "  The name of the temporary file will be substituted for\n"
+    "  \"{{response_file_name}}\" in the script args.\n"
+    "\n"
+    "  The response file contents will always be quoted and escaped\n"
+    "  according to Unix shell rules. To parse the response file, the Python\n"
+    "  script should use \"shlex.split(file_contents)\".\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  action(\"process_lots_of_files\") {\n"
+    "    script = \"process.py\",\n"
+    "    inputs = [ ... huge list of files ... ]\n"
+    "\n"
+    "    # Write all the inputs to a response file for the script. Also,\n"
+    "    # make the paths relative to the script working directory.\n"
+    "    response_file_contents = rebase_path(inputs, root_build_dir)\n"
+    "\n"
+    "    # The script expects the name of the response file in --file-list.\n"
+    "    args = [\n"
+    "      \"--enable-foo\",\n"
+    "      \"--file-list={{response_file_name}}\",\n"
+    "    ]\n"
+    "  }\n";
+
 const char kScript[] = "script";
 const char kScript_HelpShort[] =
     "script: [file name] Script file for actions.";
@@ -1393,7 +1387,6 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Defines)
     INSERT_VARIABLE(Depfile)
     INSERT_VARIABLE(Deps)
-    INSERT_VARIABLE(ForwardDependentConfigsFrom)
     INSERT_VARIABLE(IncludeDirs)
     INSERT_VARIABLE(Inputs)
     INSERT_VARIABLE(Ldflags)
@@ -1407,6 +1400,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Public)
     INSERT_VARIABLE(PublicConfigs)
     INSERT_VARIABLE(PublicDeps)
+    INSERT_VARIABLE(ResponseFileContents)
     INSERT_VARIABLE(Script)
     INSERT_VARIABLE(Sources)
     INSERT_VARIABLE(Testonly)

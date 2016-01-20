@@ -226,7 +226,7 @@ class ScrollingLayerTreePerfTest : public LayerTreeHostPerfTestJsonReader {
     ASSERT_TRUE(scrollable_.get());
   }
 
-  void Layout() override {
+  void UpdateLayerTreeHost() override {
     if (TestEnded())
       return;
     static const gfx::Vector2d delta = gfx::Vector2d(0, 10);
@@ -260,7 +260,8 @@ TEST_F(ScrollingLayerTreePerfTest, LongScrollablePageThreaded) {
   set_verify_property_trees(old_verify_property_trees);
 }
 
-static void EmptyReleaseCallback(uint32 sync_point, bool lost_resource) {}
+static void EmptyReleaseCallback(const gpu::SyncToken& sync_token,
+                                 bool lost_resource) {}
 
 // Simulates main-thread scrolling on each frame.
 class BrowserCompositorInvalidateLayerTreePerfTest
@@ -292,7 +293,8 @@ class BrowserCompositorInvalidateLayerTreePerfTest
         reinterpret_cast<const int8*>(name_stream.str().c_str()));
     scoped_ptr<SingleReleaseCallback> callback = SingleReleaseCallback::Create(
         base::Bind(&EmptyReleaseCallback));
-    TextureMailbox mailbox(gpu_mailbox, GL_TEXTURE_2D, next_sync_point_);
+    TextureMailbox mailbox(gpu_mailbox, gpu::SyncToken(next_sync_point_),
+                           GL_TEXTURE_2D);
     next_sync_point_++;
 
     tab_contents_->SetTextureMailbox(mailbox, callback.Pass());

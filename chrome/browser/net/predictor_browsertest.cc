@@ -25,6 +25,7 @@
 #include "net/base/net_errors.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/socket/stream_socket.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/embedded_test_server_connection_listener.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -57,8 +58,7 @@ class ConnectionListener
 
   // Get called from the EmbeddedTestServer thread to be notified that
   // a connection was accepted.
-  void AcceptedSocket(
-      const net::test_server::StreamListenSocket& connection) override {
+  void AcceptedSocket(const net::StreamSocket& connection) override {
     base::AutoLock lock(lock_);
     uint16_t socket = GetPort(connection);
     EXPECT_TRUE(sockets_.find(socket) == sockets_.end());
@@ -69,8 +69,7 @@ class ConnectionListener
 
   // Get called from the EmbeddedTestServer thread to be notified that
   // a connection was read from.
-  void ReadFromSocket(
-      const net::test_server::StreamListenSocket& connection) override {
+  void ReadFromSocket(const net::StreamSocket& connection) override {
     base::AutoLock lock(lock_);
     uint16_t socket = GetPort(connection);
     EXPECT_FALSE(sockets_.find(socket) == sockets_.end());
@@ -101,8 +100,7 @@ class ConnectionListener
   void WaitUntilFirstConnectionRead() { read_loop_.Run(); }
 
  private:
-  static uint16_t GetPort(
-      const net::test_server::StreamListenSocket& connection) {
+  static uint16_t GetPort(const net::StreamSocket& connection) {
     // Get the remote port of the peer, since the local port will always be the
     // port the test server is listening on. This isn't strictly correct - it's
     // possible for multiple peers to connect with the same remote port but
@@ -183,7 +181,7 @@ class HostResolutionRequestRecorder : public net::HostResolverProc {
     if (is_waiting_for_hostname_ && waiting_for_hostname_ == hostname) {
       is_waiting_for_hostname_ = false;
       waiting_for_hostname_.clear();
-      base::MessageLoop::current()->Quit();
+      base::MessageLoop::current()->QuitWhenIdle();
     }
   }
 
@@ -232,7 +230,7 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   void SetUpOnMainThread() override {
     connection_listener_.reset(new ConnectionListener());
     embedded_test_server()->SetConnectionListener(connection_listener_.get());
-    ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+    ASSERT_TRUE(embedded_test_server()->Start());
   }
 
   void TearDownOnMainThread() override {
@@ -345,11 +343,10 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, ShutdownStartupCycle) {
 #define MAYBE_DnsPrefetch DnsPrefetch
 #endif
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, MAYBE_DnsPrefetch) {
-  ASSERT_TRUE(test_server()->Start());
   int hostnames_requested_before_load = RequestedHostnameCount();
   ui_test_utils::NavigateToURL(
       browser(),
-      GURL(test_server()->GetURL("files/predictor/dns_prefetch.html")));
+      GURL(embedded_test_server()->GetURL("/predictor/dns_prefetch.html")));
   WaitUntilHostHasBeenRequested(kChromiumHostname);
   ASSERT_FALSE(HasHostBeenRequested(kInvalidLongHostname));
   ASSERT_EQ(hostnames_requested_before_load + 1, RequestedHostnameCount());
@@ -463,4 +460,3 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, PreconnectCORSAndFetchNonCORS) {
 }
 
 }  // namespace chrome_browser_net
-

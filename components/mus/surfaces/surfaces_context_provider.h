@@ -46,14 +46,9 @@ class SurfacesContextProvider : public cc::ContextProvider,
   class GrContext* GrContext() override;
   void InvalidateGrContext(uint32_t state) override;
   Capabilities ContextCapabilities() override;
-  void VerifyContexts() override {}
   void DeleteCachedResources() override {}
-  bool DestroyedOnMainThread() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
-  void SetMemoryPolicyChangedCallback(
-      const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      override {}
   void SetupLock() override;
   base::Lock* GetLock() override;
 

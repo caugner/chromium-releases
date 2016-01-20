@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 
+namespace safe_browsing {
 
 struct SafeBrowsingProtocolConfig {
   SafeBrowsingProtocolConfig();
@@ -24,9 +25,6 @@ struct SafeBrowsingProtocolConfig {
   std::string backup_network_error_url_prefix;
   std::string version;
   bool disable_auto_update;
-#if defined(OS_ANDROID)
-  bool disable_connection_check;
-#endif
 };
 
 class SafeBrowsingProtocolManagerHelper {
@@ -55,5 +53,7 @@ class SafeBrowsingProtocolManagerHelper {
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(SafeBrowsingProtocolManagerHelper);
 };
+
+}  // namespace safe_browsing
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_PROTOCOL_MANAGER_HELPER_H_

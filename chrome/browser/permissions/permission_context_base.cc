@@ -6,14 +6,18 @@
 
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/permissions/permission_context_uma_util.h"
 #include "chrome/browser/permissions/permission_request_id.h"
+#include "chrome/browser/permissions/permission_uma_util.h"
+#include "chrome/browser/permissions/permission_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/origin_util.h"
 
@@ -23,6 +27,13 @@
 #include "chrome/browser/permissions/permission_bubble_request_impl.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #endif
+
+// static
+const char PermissionContextBase::kPermissionsKillSwitchFieldStudy[] =
+    "PermissionsKillSwitch";
+// static
+const char PermissionContextBase::kPermissionsKillSwitchBlockedValue[] =
+    "blocked";
 
 PermissionContextBase::PermissionContextBase(
     Profile* profile,
@@ -48,6 +59,18 @@ void PermissionContextBase::RequestPermission(
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  // First check if this permission has been disabled.
+  if (IsPermissionKillSwitchOn()) {
+    // Log to the developer console.
+    web_contents->GetMainFrame()->AddMessageToConsole(
+        content::CONSOLE_MESSAGE_LEVEL_LOG,
+        base::StringPrintf("%s permission has been blocked.",
+            PermissionUtil::GetPermissionString(permission_type_).c_str()));
+    // The kill switch is enabled for this permission; Block all requests.
+    callback.Run(CONTENT_SETTING_BLOCK);
+    return;
+  }
+
   DecidePermission(web_contents,
                    id,
                    requesting_frame.GetOrigin(),
@@ -59,6 +82,11 @@ void PermissionContextBase::RequestPermission(
 ContentSetting PermissionContextBase::GetPermissionStatus(
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
+
+  // If the permission has been disabled through Finch, block all requests.
+  if (IsPermissionKillSwitchOn())
+    return CONTENT_SETTING_BLOCK;
+
   if (IsRestrictedToSecureOrigins() &&
       !content::IsOriginSecure(requesting_origin)) {
     return CONTENT_SETTING_BLOCK;
@@ -141,7 +169,7 @@ void PermissionContextBase::DecidePermission(
     return;
   }
 
-  PermissionContextUmaUtil::PermissionRequested(
+  PermissionUmaUtil::PermissionRequested(
       permission_type_, requesting_origin, embedding_origin, profile_);
 
 #if !defined(OS_ANDROID)
@@ -192,15 +220,12 @@ void PermissionContextBase::PermissionDecided(
     DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
            content_setting == CONTENT_SETTING_BLOCK);
     if (content_setting == CONTENT_SETTING_ALLOW)
-      PermissionContextUmaUtil::PermissionGranted(permission_type_,
-                                                  requesting_origin);
+      PermissionUmaUtil::PermissionGranted(permission_type_, requesting_origin);
     else
-      PermissionContextUmaUtil::PermissionDenied(permission_type_,
-                                                 requesting_origin);
+      PermissionUmaUtil::PermissionDenied(permission_type_, requesting_origin);
   } else {
     DCHECK_EQ(content_setting, CONTENT_SETTING_DEFAULT);
-    PermissionContextUmaUtil::PermissionDismissed(permission_type_,
-                                                  requesting_origin);
+    PermissionUmaUtil::PermissionDismissed(permission_type_, requesting_origin);
   }
 #endif
 
@@ -261,4 +286,12 @@ void PermissionContextBase::UpdateContentSetting(
       ContentSettingsPattern::FromURLNoWildcard(requesting_origin),
       ContentSettingsPattern::FromURLNoWildcard(embedding_origin),
       permission_type_, std::string(), content_setting);
+}
+
+bool PermissionContextBase::IsPermissionKillSwitchOn() const {
+  const std::string param =
+      variations::GetVariationParamValue(kPermissionsKillSwitchFieldStudy,
+          PermissionUtil::GetPermissionString(permission_type_));
+
+  return param == kPermissionsKillSwitchBlockedValue;
 }

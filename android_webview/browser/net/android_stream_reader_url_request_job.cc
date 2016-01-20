@@ -244,11 +244,9 @@ bool AndroidStreamReaderURLRequestJob::ReadRawData(net::IOBuffer* dest,
   }
 
   PostTaskAndReplyWithResult(
-      GetWorkerThreadRunner(),
-      FROM_HERE,
+      GetWorkerThreadRunner(), FROM_HERE,
       base::Bind(&InputStreamReaderWrapper::ReadRawData,
-                 input_stream_reader_wrapper_,
-                 make_scoped_refptr(dest),
+                 input_stream_reader_wrapper_, make_scoped_refptr(dest),
                  dest_size),
       base::Bind(&AndroidStreamReaderURLRequestJob::OnReaderReadCompleted,
                  weak_factory_.GetWeakPtr()));
@@ -394,9 +392,9 @@ void AndroidStreamReaderURLRequestJob::SetExtraRequestHeaders(
       } else {
         // We don't support multiple range requests in one single URL request,
         // because we need to do multipart encoding here.
-        NotifyDone(net::URLRequestStatus(
-            net::URLRequestStatus::FAILED,
-            net::ERR_REQUEST_RANGE_NOT_SATISFIABLE));
+        NotifyDone(
+            net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                  net::ERR_REQUEST_RANGE_NOT_SATISFIABLE));
       }
     }
   }

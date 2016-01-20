@@ -13,7 +13,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_infobar_delegates.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,6 +25,7 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
+#include "components/metrics_services_manager/metrics_services_manager.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -417,7 +417,7 @@ void PluginObserver::OnCouldNotLoadPlugin(const base::FilePath& plugin_path) {
   SimpleAlertInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents()),
       IDR_INFOBAR_PLUGIN_CRASHED,
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_IOS) && !defined(OS_ANDROID)
       gfx::VectorIconId::EXTENSION_CRASHED,
 #else
       gfx::VectorIconId::VECTOR_ICON_NONE,

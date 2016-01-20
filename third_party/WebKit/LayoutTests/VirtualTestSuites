@@ -12,6 +12,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "fast/canvas/toBlob",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "compositing/visibility",
     "args": ["--enable-threaded-compositing"]
   },
@@ -33,7 +38,8 @@
   {
     "prefix": "threaded",
     "base": "animations",
-    "args": ["--enable-threaded-compositing"]
+    "args": ["--enable-threaded-compositing",
+             "--disable-composited-antialiasing"]
   },
   {
     "prefix": "threaded",
@@ -71,6 +77,11 @@
   {
     "prefix": "stable",
     "base": "media/stable",
+    "args": ["--stable-release-mode"]
+  },
+  {
+    "prefix": "stable",
+    "base": "fast/events/eventlisteneroptions",
     "args": ["--stable-release-mode"]
   },
   {
@@ -116,6 +127,11 @@
   {
     "prefix": "rootlayerscrolls",
     "base": "fast/history/scroll-restoration",
+    "args": ["--root-layer-scrolls"]
+  },
+  {
+    "prefix": "rootlayerscrolls",
+    "base": "scrollbars",
     "args": ["--root-layer-scrolls"]
   },
   {
@@ -178,5 +194,28 @@
     "prefix": "spv2",
     "base": "paint",
     "args": ["--enable-slimming-paint-v2"]
+  },
+  {
+    "prefix": "syncpaint",
+    "base": "compositing/repaint",
+    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
+    "references_use_default_args": true
+  },
+  {
+    "prefix": "syncpaint",
+    "base": "fast/repaint",
+    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
+    "references_use_default_args": true
+  },
+  {
+    "prefix": "syncpaint",
+    "base": "paint",
+    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
+    "references_use_default_args": true
+  },
+  {
+    "prefix": "syncpaint",
+    "base": "inspector/tracing",
+    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"]
   }
 ]

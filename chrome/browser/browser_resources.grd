@@ -18,7 +18,6 @@
         <structure name="IDR_ABOUT_MEMORY_HTML" file="resources\about_memory.html" flattenhtml="true" type="chrome_html" />
       </if>
       <structure name="IDR_ABOUT_MEMORY_CSS" file="resources\about_memory.css" flattenhtml="true" type="chrome_html" />
-      <structure name="IDR_ABOUT_VERSION_HTML" file="resources\about_version.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
       <if expr="enable_app_list">
         <structure name="IDR_APP_LIST_START_PAGE_CSS" file="resources\app_list\start_page.css" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_APP_LIST_START_PAGE_HTML" file="resources\app_list\start_page.html" flattenhtml="true" type="chrome_html" />
@@ -27,6 +26,7 @@
       <if expr="not is_android">
         <structure name="IDR_DOWNLOADS_DOWNLOADS_HTML" file="resources\downloads\downloads.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
         <structure name="IDR_MD_DOWNLOADS_DOWNLOADS_HTML" file="resources\md_downloads\downloads.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
+        <structure name="IDR_MD_DOWNLOADS_VULCANIZED_HTML" file="resources\md_downloads\vulcanized.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
       </if>
       <if expr="enable_extensions">
         <structure name="IDR_EXTENSIONS_HTML" file="resources\extensions\extensions.html" flattenhtml="true" type="chrome_html" />
@@ -88,8 +88,6 @@
       <if expr="not is_android">
         <include name="IDR_ABOUT_SYS_HTML" file="resources\about_sys\about_sys.html" flattenhtml="true" type="BINDATA" />
       </if>
-      <include name="IDR_ABOUT_VERSION_JS" file="resources\about_version.js" type="BINDATA" />
-      <include name="IDR_ABOUT_VERSION_CSS" file="resources\about_version.css" type="BINDATA" />
       <include name="IDR_AD_NETWORK_HASHES" file="resources\ad_networks.dat" type="BINDATA" />
       <include name="IDR_BOOKMARKS_MANIFEST" file="resources\bookmark_manager\manifest.json" type="BINDATA" />
       <if expr="is_posix and not is_macosx and not is_ios">
@@ -108,8 +106,6 @@
       <if expr="enable_printing">
         <include name="IDR_CLOUDPRINT_MANIFEST" file="resources\cloud_print_app\manifest.json" type="BINDATA" />
       </if>
-      <include name="IDR_CRASHES_HTML" file="resources\crashes.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-      <include name="IDR_CRASHES_JS" file="resources\crashes.js" type="BINDATA" />
       <if expr="not is_ios">
         <include name="IDR_DEVTOOLS_DISCOVERY_PAGE_HTML" file="devtools\frontend\devtools_discovery_page.html" type="BINDATA"/>
       </if>
@@ -117,17 +113,24 @@
       <include name="IDR_DOMAIN_RELIABILITY_INTERNALS_CSS" file="resources\domain_reliability_internals.css" type="BINDATA" />
       <include name="IDR_DOMAIN_RELIABILITY_INTERNALS_JS" file="resources\domain_reliability_internals.js" type="BINDATA" />
       <if expr="not is_android">
-        <include name="IDR_DOWNLOADS_CONSTANTS_HTML" file="resources\md_downloads\constants.html" type="BINDATA" />
-        <include name="IDR_DOWNLOADS_CONSTANTS_JS" file="resources\md_downloads\constants.js" type="BINDATA" />
+        <include name="IDR_DOWNLOADS_CONSTANTS_HTML" file="resources\downloads\constants.html" type="BINDATA" />
+        <include name="IDR_DOWNLOADS_CONSTANTS_JS" file="resources\downloads\constants.js" type="BINDATA" />
         <include name="IDR_DOWNLOADS_FOCUS_ROW_JS" file="resources\downloads\focus_row.js" type="BINDATA" />
         <include name="IDR_DOWNLOADS_ITEM_VIEW_JS" file="resources\downloads\item_view.js" type="BINDATA" />
         <include name="IDR_DOWNLOADS_MANAGER_JS" file="resources\downloads\manager.js" type="BINDATA" />
-        <include name="IDR_DOWNLOADS_THROTTLED_ICON_LOADER_HTML" file="resources\md_downloads\throttled_icon_loader.html" type="BINDATA" />
-        <include name="IDR_DOWNLOADS_THROTTLED_ICON_LOADER_JS" file="resources\md_downloads\throttled_icon_loader.js" type="BINDATA" />
+        <include name="IDR_DOWNLOADS_THROTTLED_ICON_LOADER_HTML" file="resources\downloads\throttled_icon_loader.html" type="BINDATA" />
+        <include name="IDR_DOWNLOADS_THROTTLED_ICON_LOADER_JS" file="resources\downloads\throttled_icon_loader.js" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_1X_INCOGNITO_MARKER_PNG" file="resources\md_downloads\1x\incognito_marker.png" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_2X_INCOGNITO_MARKER_PNG" file="resources\md_downloads\2x\incognito_marker.png" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_1X_NO_DOWNLOADS_PNG" file="resources\md_downloads\1x\no_downloads.png" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_2X_NO_DOWNLOADS_PNG" file="resources\md_downloads\2x\no_downloads.png" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_ACTION_SERVICE_HTML" file="resources\md_downloads\action_service.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_ACTION_SERVICE_JS" file="resources\md_downloads\action_service.js" type="BINDATA" />
-        <include name="IDR_MD_DOWNLOADS_FOCUS_ROW_HTML" file="resources\md_downloads\focus_row.html" type="BINDATA" />
-        <include name="IDR_MD_DOWNLOADS_FOCUS_ROW_JS" file="resources\md_downloads\focus_row.js" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_CONSTANTS_HTML" file="resources\md_downloads\constants.html" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_CONSTANTS_JS" file="resources\md_downloads\constants.js" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_CRISPER_JS" file="resources\md_downloads\crisper.js" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_DOWNLOADS_JS" file="resources\md_downloads\downloads.js" type="BINDATA" />
+        <include name="IDR_MD_DOWNLOADS_I18N_SETUP_HTML" file="resources\md_downloads\i18n_setup.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_ITEM_CSS" file="resources\md_downloads\item.css" type="BINDATA" flattenhtml="true" />
         <include name="IDR_MD_DOWNLOADS_ITEM_HTML" file="resources\md_downloads\item.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_ITEM_JS" file="resources\md_downloads\item.js" type="BINDATA" />
@@ -135,7 +138,6 @@
         <include name="IDR_MD_DOWNLOADS_MANAGER_HTML" file="resources\md_downloads\manager.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_MANAGER_JS" file="resources\md_downloads\manager.js" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_SHARED_STYLE_CSS" file="resources\md_downloads\shared_style.css" type="BINDATA" />
-        <include name="IDR_MD_DOWNLOADS_STRINGS_HTML" file="resources\md_downloads\strings.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_TOOLBAR_CSS" file="resources\md_downloads\toolbar.css" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_TOOLBAR_HTML" file="resources\md_downloads\toolbar.html" type="BINDATA" />
         <include name="IDR_MD_DOWNLOADS_TOOLBAR_JS" file="resources\md_downloads\toolbar.js" type="BINDATA" />
@@ -147,6 +149,12 @@
         <include name="IDR_MD_EXTENSIONS_MANAGER_CSS" file="resources\md_extensions\manager.css" type="BINDATA" />
         <include name="IDR_MD_EXTENSIONS_MANAGER_HTML" file="resources\md_extensions\manager.html" type="BINDATA" />
         <include name="IDR_MD_EXTENSIONS_MANAGER_JS" file="resources\md_extensions\manager.js" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_ICONS_HTML" file="resources\md_extensions\icons.html" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_ITEM_CSS" file="resources\md_extensions\item.css" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_ITEM_HTML" file="resources\md_extensions\item.html" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_ITEM_JS" file="resources\md_extensions\item.js" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_SERVICE_HTML" file="resources\md_extensions\service.html" type="BINDATA" />
+        <include name="IDR_MD_EXTENSIONS_SERVICE_JS" file="resources\md_extensions\service.js" type="BINDATA" />
         <include name="IDR_MD_EXTENSIONS_SIDEBAR_CSS" file="resources\md_extensions\sidebar.css" type="BINDATA" />
         <include name="IDR_MD_EXTENSIONS_SIDEBAR_HTML" file="resources\md_extensions\sidebar.html" type="BINDATA" />
         <include name="IDR_MD_EXTENSIONS_SIDEBAR_JS" file="resources\md_extensions\sidebar.js" type="BINDATA" />
@@ -261,6 +269,7 @@
         <include name="IDR_POLICY_CSS" file="resources\policy.css" type="BINDATA"/>
       </if>
       <include name="IDR_POLICY_HTML" file="resources\policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
+      <include name="IDR_MD_POLICY_HTML" file="resources\md_policy\md_policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
       <include name="IDR_POLICY_JS" file="resources\policy.js" type="BINDATA"/>
       <if expr="enable_print_preview">
         <include name="IDR_PRINT_PREVIEW_HTML" file="resources\print_preview\print_preview.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />

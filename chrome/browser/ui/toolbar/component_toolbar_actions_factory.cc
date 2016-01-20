@@ -6,12 +6,15 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/toolbar/media_router_action.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
-#include "chrome/common/chrome_switches.h"
 #include "extensions/common/feature_switch.h"
+
+#if defined(ENABLE_MEDIA_ROUTER)
+#include "chrome/browser/ui/toolbar/media_router_action.h"
+#endif
 
 namespace {
 
@@ -25,8 +28,6 @@ base::LazyInstance<ComponentToolbarActionsFactory> lazy_factory =
 // static
 const char ComponentToolbarActionsFactory::kMediaRouterActionId[] =
     "media_router_action";
-const char ComponentToolbarActionsFactory::kActionIdForTesting[] =
-    "mock_action";
 
 ComponentToolbarActionsFactory::ComponentToolbarActionsFactory() {}
 ComponentToolbarActionsFactory::~ComponentToolbarActionsFactory() {}
@@ -36,40 +37,29 @@ ComponentToolbarActionsFactory* ComponentToolbarActionsFactory::GetInstance() {
   return testing_factory_ ? testing_factory_ : &lazy_factory.Get();
 }
 
-// static
-std::vector<std::string> ComponentToolbarActionsFactory::GetComponentIds() {
-  std::vector<std::string> component_ids;
+std::set<std::string> ComponentToolbarActionsFactory::GetComponentIds(
+    Profile* profile) {
+  std::set<std::string> component_ids;
 
   // This is currently behind the extension-action-redesign flag, as it is
   // designed for the new toolbar.
   if (!extensions::FeatureSwitch::extension_action_redesign()->IsEnabled())
     return component_ids;
 
-  if (testing_factory_) {
-    component_ids.push_back(
-        ComponentToolbarActionsFactory::kActionIdForTesting);
-  } else if (switches::MediaRouterEnabled()) {
-    component_ids.push_back(
-        ComponentToolbarActionsFactory::kMediaRouterActionId);
-  }
+  if (!profile->IsOffTheRecord() && media_router::MediaRouterEnabled(profile))
+    component_ids.insert(kMediaRouterActionId);
 
   return component_ids;
 }
 
-// static
-bool ComponentToolbarActionsFactory::EnabledIncognito(
-    const std::string& action_id) {
-  return action_id != kMediaRouterActionId;
-}
-
-ScopedVector<ToolbarActionViewController>
-ComponentToolbarActionsFactory::GetComponentToolbarActions(Browser* browser) {
-  ScopedVector<ToolbarActionViewController> component_actions;
-
+scoped_ptr<ToolbarActionViewController>
+ComponentToolbarActionsFactory::GetComponentToolbarActionForId(
+    const std::string& id,
+    Browser* browser) {
   // This is currently behind the extension-action-redesign flag, as it is
   // designed for the new toolbar.
-  if (!extensions::FeatureSwitch::extension_action_redesign()->IsEnabled())
-    return component_actions.Pass();
+  DCHECK(extensions::FeatureSwitch::extension_action_redesign()->IsEnabled());
+  DCHECK(GetComponentIds(browser->profile()).count(id));
 
   // Add component toolbar actions here.
   // This current design means that the ComponentToolbarActionsFactory is aware
@@ -77,11 +67,14 @@ ComponentToolbarActionsFactory::GetComponentToolbarActions(Browser* browser) {
   // (since each will have an action in the toolbar or overflow menu), this
   // should be okay. If this changes, we should rethink this design to have,
   // e.g., RegisterChromeAction().
+#if defined(ENABLE_MEDIA_ROUTER)
+  if (id == kMediaRouterActionId)
+    return scoped_ptr<ToolbarActionViewController>(
+        new MediaRouterAction(browser));
+#endif  // defined(ENABLE_MEDIA_ROUTER)
 
-  if (switches::MediaRouterEnabled() && !browser->profile()->IsOffTheRecord())
-    component_actions.push_back(new MediaRouterAction(browser));
-
-  return component_actions.Pass();
+  NOTREACHED();
+  return scoped_ptr<ToolbarActionViewController>();
 }
 
 // static

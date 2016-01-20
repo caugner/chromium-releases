@@ -19,10 +19,10 @@ import zipfile
 # Some clients do not add //build/android/gyp to PYTHONPATH.
 import md5_check  # pylint: disable=relative-import
 
-CHROMIUM_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__),
-                 os.pardir, os.pardir, os.pardir, os.pardir))
-COLORAMA_ROOT = os.path.join(CHROMIUM_SRC,
+sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+from pylib import constants
+
+COLORAMA_ROOT = os.path.join(constants.DIR_SOURCE_ROOT,
                              'third_party', 'colorama', 'src')
 # aapt should ignore OWNERS files in addition the default ignore pattern.
 AAPT_IGNORE_PATTERN = ('!OWNERS:!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:' +
@@ -224,6 +224,14 @@ def ExtractAll(zip_path, path=None, no_clobber=True, pattern=None,
       z.extract(name, path)
 
 
+def CreateHermeticZipInfo(zip_path):
+  """Creates a ZipInfo with a zero'ed out timestamp."""
+  CheckZipPath(zip_path)
+  zipinfo = zipfile.ZipInfo(filename=zip_path, date_time=HERMETIC_TIMESTAMP)
+  zipinfo.external_attr = HERMETIC_FILE_ATTR
+  return zipinfo
+
+
 def DoZip(inputs, output, base_dir=None):
   """Creates a zip file from a list of files.
 
@@ -242,12 +250,9 @@ def DoZip(inputs, output, base_dir=None):
   input_tuples.sort(key=lambda tup: tup[0])
   with zipfile.ZipFile(output, 'w') as outfile:
     for zip_path, fs_path in input_tuples:
-      CheckZipPath(zip_path)
-      zipinfo = zipfile.ZipInfo(filename=zip_path, date_time=HERMETIC_TIMESTAMP)
-      zipinfo.external_attr = HERMETIC_FILE_ATTR
       with file(fs_path) as f:
         contents = f.read()
-      outfile.writestr(zipinfo, contents)
+      outfile.writestr(CreateHermeticZipInfo(zip_path), contents)
 
 
 def ZipDir(output, base_dir):
@@ -272,13 +277,13 @@ def MergeZips(output, inputs, exclude_patterns=None, path_transform=None):
     for in_file in inputs:
       with zipfile.ZipFile(in_file, 'r') as in_zip:
         for name in in_zip.namelist():
+          # Ignore directories.
+          if name[-1] == '/':
+            continue
           dst_name = path_transform(name, in_file)
           already_added = dst_name in added_names
           if not already_added and not MatchesGlob(dst_name, exclude_patterns):
-            zipinfo = zipfile.ZipInfo(filename=dst_name,
-                                      date_time=HERMETIC_TIMESTAMP)
-            zipinfo.external_attr = HERMETIC_FILE_ATTR
-            out_zip.writestr(zipinfo, in_zip.read(name))
+            out_zip.writestr(CreateHermeticZipInfo(dst_name), in_zip.read(name))
             added_names.add(dst_name)
 
 
@@ -339,8 +344,9 @@ def GetPythonDependencies():
 
   abs_module_paths = map(os.path.abspath, module_paths)
 
+  assert os.path.isabs(constants.DIR_SOURCE_ROOT)
   non_system_module_paths = [
-      p for p in abs_module_paths if p.startswith(CHROMIUM_SRC)]
+      p for p in abs_module_paths if p.startswith(constants.DIR_SOURCE_ROOT)]
   def ConvertPycToPy(s):
     if s.endswith('.pyc'):
       return s[:-1]

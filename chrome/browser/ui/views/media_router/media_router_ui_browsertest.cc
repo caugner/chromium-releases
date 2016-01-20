@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/toolbar/media_router_action.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -54,26 +55,28 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
     content::TestNavigationObserver nav_observer(NULL);
     nav_observer.StartWatchingNewWebContents();
 
-    ToolbarView* toolbar =
-        BrowserView::GetBrowserViewForBrowser(browser())->toolbar();
+    AppMenuButton* app_menu_button =
+        BrowserView::GetBrowserViewForBrowser(browser())
+            ->toolbar()
+            ->app_menu_button();
 
     // When the Media Router Action executes, it opens a dialog with web
     // contents to chrome://media-router.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-        base::Bind(&MediaRouterUIBrowserTest::ExecuteMediaRouterAction,
-                   this,
-                   toolbar));
-    toolbar->ShowAppMenu(false);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&MediaRouterUIBrowserTest::ExecuteMediaRouterAction, this,
+                   app_menu_button));
+    app_menu_button->ShowMenu(false);
 
-    EXPECT_FALSE(toolbar->IsWrenchMenuShowing());
+    EXPECT_FALSE(app_menu_button->IsMenuShowing());
     nav_observer.Wait();
     ASSERT_EQ(chrome::kChromeUIMediaRouterURL,
         nav_observer.last_navigation_url().spec());
     nav_observer.StopWatchingNewWebContents();
   }
 
-  void ExecuteMediaRouterAction(ToolbarView* toolbar) {
-    EXPECT_TRUE(toolbar->IsWrenchMenuShowing());
+  void ExecuteMediaRouterAction(AppMenuButton* app_menu_button) {
+    EXPECT_TRUE(app_menu_button->IsMenuShowing());
     media_router_action_->ExecuteAction(true);
   }
 

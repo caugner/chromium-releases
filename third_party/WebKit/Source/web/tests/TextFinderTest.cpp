@@ -47,7 +47,7 @@ void TextFinderTest::SetUp()
     m_webViewHelper.initialize();
     WebLocalFrameImpl& frameImpl = *m_webViewHelper.webViewImpl()->mainFrameImpl();
     frameImpl.viewImpl()->resize(WebSize(640, 480));
-    frameImpl.viewImpl()->layout();
+    frameImpl.viewImpl()->updateAllLifecyclePhases();
     m_document = PassRefPtrWillBeRawPtr<Document>(frameImpl.document());
     m_textFinder = &frameImpl.ensureTextFinder();
 }
@@ -188,7 +188,7 @@ TEST_F(TextFinderTest, FindTextNotFound)
 TEST_F(TextFinderTest, FindTextInShadowDOM)
 {
     document().body()->setInnerHTML("<b>FOO</b><i>foo</i>", ASSERT_NO_EXCEPTION);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::OpenByDefault, ASSERT_NO_EXCEPTION);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML("<content select=\"i\"></content><u>Foo</u><content></content>", ASSERT_NO_EXCEPTION);
     Node* textInBElement = document().body()->firstChild()->firstChild();
     Node* textInIElement = document().body()->lastChild()->firstChild();
@@ -302,7 +302,7 @@ TEST_F(TextFinderTest, ScopeTextMatchesSimple)
 TEST_F(TextFinderTest, ScopeTextMatchesWithShadowDOM)
 {
     document().body()->setInnerHTML("<b>FOO</b><i>foo</i>", ASSERT_NO_EXCEPTION);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::Open, ASSERT_NO_EXCEPTION);
+    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML("<content select=\"i\"></content><u>Foo</u><content></content>", ASSERT_NO_EXCEPTION);
     Node* textInBElement = document().body()->firstChild()->firstChild();
     Node* textInIElement = document().body()->lastChild()->firstChild();
@@ -414,7 +414,7 @@ protected:
             // Check that the proxy wasn't installed yet.
             ASSERT_NE(Platform::current(), this);
             m_fallbackPlatform = Platform::current();
-            m_timeCounter = m_fallbackPlatform->currentTime();
+            m_timeCounter = m_fallbackPlatform->currentTimeSeconds();
             Platform::initialize(this);
             ASSERT_EQ(Platform::current(), this);
         }
@@ -436,7 +436,7 @@ protected:
         }
 
         // From blink::Platform:
-        double currentTime() override
+        double currentTimeSeconds() override
         {
             return ++m_timeCounter;
         }
@@ -453,9 +453,9 @@ protected:
         }
 
         // These two methods allow timers to work correctly.
-        double monotonicallyIncreasingTime() override
+        double monotonicallyIncreasingTimeSeconds() override
         {
-            return ensureFallback().monotonicallyIncreasingTime();
+            return ensureFallback().monotonicallyIncreasingTimeSeconds();
         }
 
         WebThread* currentThread() override { return ensureFallback().currentThread(); }

@@ -226,7 +226,8 @@ TEST(EventTest, KeyEvent) {
     { VKEY_NUMPAD9, EF_CONTROL_DOWN, '\0' },
     { VKEY_NUMPAD9, EF_SHIFT_DOWN, '9' },
 
-    { VKEY_TAB, EF_CONTROL_DOWN, '\0' },
+    { VKEY_TAB, EF_NONE, '\t' },
+    { VKEY_TAB, EF_CONTROL_DOWN, '\t' },
     { VKEY_TAB, EF_SHIFT_DOWN, '\t' },
 
     { VKEY_MULTIPLY, EF_CONTROL_DOWN, '\0' },
@@ -641,8 +642,8 @@ TEST(EventTest, PointerEventDetailsTouch) {
 }
 
 TEST(EventTest, PointerEventDetailsMouse) {
-  ui::MouseEvent mouse_event(ET_MOUSE_PRESSED, gfx::PointF(0, 0),
-                             gfx::PointF(0, 0), ui::EventTimeForNow(), 0, 0);
+  ui::MouseEvent mouse_event(ET_MOUSE_PRESSED, gfx::Point(0, 0),
+                             gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
 
   EXPECT_EQ(EventPointerType::POINTER_TYPE_MOUSE,
             mouse_event.pointer_details().pointer_type());
@@ -663,8 +664,8 @@ TEST(EventTest, PointerEventDetailsMouse) {
 }
 
 TEST(EventTest, PointerEventDetailsStylus) {
-  ui::MouseEvent stylus_event(ET_MOUSE_PRESSED, gfx::PointF(0, 0),
-                              gfx::PointF(0, 0), ui::EventTimeForNow(), 0, 0);
+  ui::MouseEvent stylus_event(ET_MOUSE_PRESSED, gfx::Point(0, 0),
+                              gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   ui::PointerDetails pointer_details(EventPointerType::POINTER_TYPE_PEN,
       /* radius_x */ 0.0f,
       /* radius_y */ 0.0f,

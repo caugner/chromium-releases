@@ -22,7 +22,10 @@
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "content/public/browser/notification_details.h"
@@ -116,9 +119,14 @@ PrefMappingEntry kPrefMapping[] = {
     {"translationServiceEnabled", prefs::kEnableTranslate,
      APIPermission::kPrivacy, APIPermission::kPrivacy},
 #if defined(ENABLE_WEBRTC)
+    // webRTCMultipleRoutesEnabled and webRTCNonProxiedUdpEnabled have been
+    // replaced by webRTCIPHandlingPolicy. Leaving it for backward
+    // compatibility. TODO(guoweis): Remove this in M50.
     {"webRTCMultipleRoutesEnabled", prefs::kWebRTCMultipleRoutesEnabled,
      APIPermission::kPrivacy, APIPermission::kPrivacy},
     {"webRTCNonProxiedUdpEnabled", prefs::kWebRTCNonProxiedUdpEnabled,
+     APIPermission::kPrivacy, APIPermission::kPrivacy},
+    {"webRTCIPHandlingPolicy", prefs::kWebRTCIPHandlingPolicy,
      APIPermission::kPrivacy, APIPermission::kPrivacy},
 #endif
     // accessibilityFeatures.animationPolicy is available for
