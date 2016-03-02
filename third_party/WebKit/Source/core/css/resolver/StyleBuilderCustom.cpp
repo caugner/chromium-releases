@@ -36,8 +36,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/StyleBuilderFunctions.h"
@@ -113,6 +111,8 @@ void StyleBuilder::applyProperty(CSSPropertyID id, StyleResolverState& state, CS
 {
     if (RuntimeEnabledFeatures::cssVariablesEnabled() && id != CSSPropertyVariable && value->isVariableReferenceValue()) {
         CSSVariableResolver::resolveAndApplyVariableReferences(state, id, *toCSSVariableReferenceValue(value));
+        if (!state.style()->hasVariableReferenceFromNonInheritedProperty() && !CSSPropertyMetadata::isInheritedProperty(id))
+            state.style()->setHasVariableReferenceFromNonInheritedProperty();
         return;
     }
 
@@ -648,20 +648,24 @@ void StyleBuilderFunctions::applyInheritCSSPropertyWillChange(StyleResolverState
 
 void StyleBuilderFunctions::applyValueCSSPropertyWillChange(StyleResolverState& state, CSSValue* value)
 {
-    ASSERT(value->isValueList());
     bool willChangeContents = false;
     bool willChangeScrollPosition = false;
     Vector<CSSPropertyID> willChangeProperties;
 
-    for (auto& willChangeValue : toCSSValueList(*value)) {
-        if (willChangeValue->isCustomIdentValue())
-            willChangeProperties.append(toCSSCustomIdentValue(*willChangeValue).valueAsPropertyID());
-        else if (toCSSPrimitiveValue(*willChangeValue).getValueID() == CSSValueContents)
-            willChangeContents = true;
-        else if (toCSSPrimitiveValue(*willChangeValue).getValueID() == CSSValueScrollPosition)
-            willChangeScrollPosition = true;
-        else
-            ASSERT_NOT_REACHED();
+    if (value->isPrimitiveValue()) {
+        ASSERT(toCSSPrimitiveValue(value)->getValueID() == CSSValueAuto);
+    } else {
+        ASSERT(value->isValueList());
+        for (auto& willChangeValue : toCSSValueList(*value)) {
+            if (willChangeValue->isCustomIdentValue())
+                willChangeProperties.append(toCSSCustomIdentValue(*willChangeValue).valueAsPropertyID());
+            else if (toCSSPrimitiveValue(*willChangeValue).getValueID() == CSSValueContents)
+                willChangeContents = true;
+            else if (toCSSPrimitiveValue(*willChangeValue).getValueID() == CSSValueScrollPosition)
+                willChangeScrollPosition = true;
+            else
+                ASSERT_NOT_REACHED();
+        }
     }
     state.style()->setWillChangeContents(willChangeContents);
     state.style()->setWillChangeScrollPosition(willChangeScrollPosition);
@@ -695,7 +699,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyContent(StyleResolverState& sta
         }
 
         if (item->isImageValue()) {
-            state.style()->setContent(state.elementStyleResources().cachedOrPendingFromValue(state.document(), CSSPropertyContent, toCSSImageValue(*item)), didSet);
+            state.style()->setContent(state.elementStyleResources().cachedOrPendingFromValue(CSSPropertyContent, toCSSImageValue(*item)), didSet);
             didSet = true;
             continue;
         }
@@ -763,11 +767,10 @@ void StyleBuilderFunctions::applyValueCSSPropertyWebkitLocale(StyleResolverState
 {
     if (value->isPrimitiveValue()) {
         ASSERT(toCSSPrimitiveValue(value)->getValueID() == CSSValueAuto);
-        state.style()->setLocale(nullAtom);
+        state.fontBuilder().setLocale(nullAtom);
     } else {
-        state.style()->setLocale(AtomicString(toCSSStringValue(value)->value()));
+        state.fontBuilder().setLocale(AtomicString(toCSSStringValue(value)->value()));
     }
-    state.fontBuilder().setScript(state.style()->locale());
 }
 
 void StyleBuilderFunctions::applyInitialCSSPropertyWebkitAppRegion(StyleResolverState&)

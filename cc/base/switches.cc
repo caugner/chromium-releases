@@ -56,21 +56,15 @@ const char kEnableBeginFrameScheduling[] = "enable-begin-frame-scheduling";
 // Enables the GPU benchmarking extension
 const char kEnableGpuBenchmarking[] = "enable-gpu-benchmarking";
 
-// Enables the use of property trees rather than CalcDrawProps for computing
+// Disables the use of property trees rather than CalcDrawProps for computing
 // draw properties.
-const char kEnableCompositorPropertyTrees[] =
-    "enable-compositor-property-trees";
+const char kDisableCompositorPropertyTrees[] =
+    "disable-compositor-property-trees";
 
 // Renders a border around compositor layers to help debug and study
 // layer compositing.
 const char kShowCompositedLayerBorders[] = "show-composited-layer-borders";
 const char kUIShowCompositedLayerBorders[] = "ui-show-layer-borders";
-
-// Draws a heads-up-display showing Frames Per Second as well as GPU memory
-// usage. If you also use --vmodule="head*=1" then FPS will also be output to
-// the console log.
-const char kShowFPSCounter[] = "show-fps-counter";
-const char kUIShowFPSCounter[] = "ui-show-fps-counter";
 
 // Renders a border that represents the bounding box for the layer's animation.
 const char kShowLayerAnimationBounds[] = "show-layer-animation-bounds";

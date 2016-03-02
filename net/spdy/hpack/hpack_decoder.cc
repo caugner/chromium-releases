@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
 #include "net/spdy/hpack/hpack_constants.h"
 #include "net/spdy/hpack/hpack_output_stream.h"
@@ -22,9 +21,8 @@ const char kCookieKey[] = "cookie";
 
 }  // namespace
 
-HpackDecoder::HpackDecoder(const HpackHuffmanTable& table)
+HpackDecoder::HpackDecoder()
     : max_string_literal_size_(kDefaultMaxStringLiteralSize),
-      huffman_table_(table),
       handler_(nullptr),
       regular_header_seen_(false),
       header_block_started_(false) {}
@@ -131,7 +129,7 @@ bool HpackDecoder::DecodeNextOpcode(HpackInputStream* input_stream) {
 
 bool HpackDecoder::DecodeNextHeaderTableSizeUpdate(
     HpackInputStream* input_stream) {
-  uint32 size = 0;
+  uint32_t size = 0;
   if (!input_stream->DecodeNextUint32(&size)) {
     return false;
   }
@@ -143,7 +141,7 @@ bool HpackDecoder::DecodeNextHeaderTableSizeUpdate(
 }
 
 bool HpackDecoder::DecodeNextIndexedHeader(HpackInputStream* input_stream) {
-  uint32 index = 0;
+  uint32_t index = 0;
   if (!input_stream->DecodeNextUint32(&index)) {
     return false;
   }
@@ -182,7 +180,7 @@ bool HpackDecoder::DecodeNextLiteralHeader(HpackInputStream* input_stream,
 
 bool HpackDecoder::DecodeNextName(HpackInputStream* input_stream,
                                   StringPiece* next_name) {
-  uint32 index_or_zero = 0;
+  uint32_t index_or_zero = 0;
   if (!input_stream->DecodeNextUint32(&index_or_zero)) {
     return false;
   }
@@ -210,7 +208,7 @@ bool HpackDecoder::DecodeNextStringLiteral(HpackInputStream* input_stream,
                                            StringPiece* output) {
   if (input_stream->MatchPrefixAndConsume(kStringLiteralHuffmanEncoded)) {
     string* buffer = is_key ? &key_buffer_ : &value_buffer_;
-    bool result = input_stream->DecodeNextHuffmanString(huffman_table_, buffer);
+    bool result = input_stream->DecodeNextHuffmanString(buffer);
     *output = StringPiece(*buffer);
     return result;
   }

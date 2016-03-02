@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_TOOLBAR_TOOLBAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_TOOLBAR_TOOLBAR_VIEW_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_member.h"
@@ -120,7 +121,8 @@ class ToolbarView : public views::AccessiblePaneView,
   void ShowWebsiteSettings(
       content::WebContents* web_contents,
       const GURL& url,
-      const SecurityStateModel::SecurityInfo& security_info) override;
+      const security_state::SecurityStateModel::SecurityInfo& security_info)
+      override;
 
   // CommandObserver:
   void EnabledStateChangedForCommand(int id, bool enabled) override;
@@ -144,24 +146,9 @@ class ToolbarView : public views::AccessiblePaneView,
   gfx::Size GetPreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
   void Layout() override;
-  void OnPaint(gfx::Canvas* canvas) override;
   void OnThemeChanged() override;
   const char* GetClassName() const override;
   bool AcceleratorPressed(const ui::Accelerator& acc) override;
-
-  // Whether the toolbar view needs its background painted by the
-  // BrowserNonClientFrameView.
-  bool ShouldPaintBackground() const;
-
-  enum {
-    // The apparent horizontal space between most items, and the vertical
-    // padding above and below them.
-    kStandardSpacing = 3,
-
-    // The top of the toolbar has an edge we have to skip over in addition to
-    // the standard spacing.
-    kVertSpacing = 5,
-  };
 
  protected:
   // AccessiblePaneView:
@@ -187,6 +174,12 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // Returns the number of pixels above the location bar in non-normal display.
   int PopupTopSpacing() const;
+
+  // Used to avoid duplicating the near-identical logic of
+  // ToolbarView::GetPreferredSize() and ToolbarView::GetMinimumSize(). These
+  // two functions call through to GetSizeInternal(), passing themselves as the
+  // function pointer |View::*get_size|.
+  gfx::Size GetSizeInternal(gfx::Size (View::*get_size)() const) const;
 
   // Given toolbar contents of size |size|, returns the total toolbar size.
   gfx::Size SizeForContentSize(gfx::Size size) const;

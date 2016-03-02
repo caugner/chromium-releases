@@ -7,6 +7,7 @@
   },
   'targets': [
     {
+      # GN version: //ios/chrome:ios_chrome_unittests
       'target_name': 'ios_chrome_unittests',
       'type': '<(gtest_target_type)',
       'dependencies': [
@@ -84,9 +85,17 @@
           'includes': [ '../../build/copy_test_data_ios.gypi' ]
         },
       ],
+      'conditions': [
+        ['safe_browsing!=0', {
+          'sources': [
+            'browser/safe_browsing/util_unittest.cc',
+          ],
+        }],
+      ],
       'includes': ['ios_chrome_resources_bundle.gypi'],
     },
     {
+      # GN version: //ios/chrome/browser:test_support + //ios/public/test
       'target_name': 'ios_chrome_test_support',
       'type': 'static_library',
       'dependencies': [
@@ -110,10 +119,14 @@
         'browser/signin/fake_oauth2_token_service_builder.h',
         'browser/signin/fake_signin_manager_builder.cc',
         'browser/signin/fake_signin_manager_builder.h',
+        'browser/sync/ios_chrome_profile_sync_test_util.cc',
+        'browser/sync/ios_chrome_profile_sync_test_util.h',
         'browser/sync/sync_setup_service_mock.cc',
         'browser/sync/sync_setup_service_mock.h',
         'test/block_cleanup_test.h',
         'test/block_cleanup_test.mm',
+        'test/ios_chrome_scoped_testing_chrome_browser_provider.cc',
+        'test/ios_chrome_scoped_testing_chrome_browser_provider.h',
         'test/ios_chrome_scoped_testing_local_state.cc',
         'test/ios_chrome_scoped_testing_local_state.h',
         'test/ios_chrome_unit_test_suite.cc',

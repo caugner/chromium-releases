@@ -26,7 +26,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/css/resolver/StyleAdjuster.h"
 
 #include "core/HTMLNames.h"
@@ -49,6 +48,7 @@
 #include "core/svg/SVGSVGElement.h"
 #include "platform/Length.h"
 #include "platform/transforms/TransformOperations.h"
+#include "public/platform/WebCompositorMutableProperties.h"
 #include "wtf/Assertions.h"
 
 namespace blink {
@@ -177,9 +177,17 @@ void StyleAdjuster::adjustComputedStyle(ComputedStyle& style, const ComputedStyl
         adjustStyleForFirstLetter(style);
 
         adjustStyleForDisplay(style, parentStyle, element ? &element->document() : 0);
+
+        // Paint containment forces a block formatting context, so we must coerce from inline.
+        // https://drafts.csswg.org/css-containment/#containment-paint
+        if (style.containsPaint() && style.display() == INLINE)
+            style.setDisplay(BLOCK);
     } else {
         adjustStyleForFirstLetter(style);
     }
+
+    if (element && element->hasCompositorProxy())
+        style.setHasCompositorProxy(true);
 
     // Make sure our z-index value is only applied if the object is positioned.
     if (style.position() == StaticPosition && !parentStyleForcesZIndexToCreateStackingContext(parentStyle))
@@ -199,7 +207,8 @@ void StyleAdjuster::adjustComputedStyle(ComputedStyle& style, const ComputedStyl
         || style.hasIsolation()
         || style.position() == FixedPosition
         || isInTopLayer(element, style)
-        || hasWillChangeThatCreatesStackingContext(style)))
+        || hasWillChangeThatCreatesStackingContext(style)
+        || style.containsPaint()))
         style.setZIndex(0);
 
     if (doesNotInheritTextDecoration(style, element))
@@ -290,16 +299,6 @@ void StyleAdjuster::adjustStyleForAlignment(ComputedStyle& style, const Computed
     if (style.alignItemsPosition() == ItemPositionAuto) {
         if (isFlexOrGrid)
             style.setAlignItemsPosition(ItemPositionStretch);
-    }
-
-    // The 'auto' keyword computes to 'stretch' on absolutely-positioned elements,
-    // and to the computed value of align-items on the parent (minus
-    // any 'legacy' keywords) on all other boxes.
-    if (style.alignSelfPosition() == ItemPositionAuto) {
-        if (absolutePositioned)
-            style.setAlignSelfPosition(ItemPositionStretch);
-        else
-            style.setAlignSelf(parentStyle.alignItems());
     }
 
     // Block Containers: For table cells, the behavior of the 'auto' depends on the computed

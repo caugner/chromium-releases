@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "core/css/invalidation/StyleInvalidator.h"
 
 #include "core/css/invalidation/InvalidationSet.h"
@@ -43,40 +41,48 @@ void StyleInvalidator::invalidate(Document& document)
 void StyleInvalidator::scheduleInvalidationSetsForElement(const InvalidationLists& invalidationLists, Element& element)
 {
     ASSERT(element.inActiveDocument());
-    if (element.styleChangeType() >= SubtreeStyleChange)
-        return;
-
     bool requiresDescendantInvalidation = false;
 
-    for (auto& invalidationSet : invalidationLists.descendants) {
-        if (invalidationSet->wholeSubtreeInvalid()) {
-            element.setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));
-            clearInvalidation(element);
-            return;
+    if (element.styleChangeType() < SubtreeStyleChange) {
+        for (auto& invalidationSet : invalidationLists.descendants) {
+            if (invalidationSet->wholeSubtreeInvalid()) {
+                element.setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));
+                requiresDescendantInvalidation = false;
+                break;
+            }
+
+            if (invalidationSet->invalidatesSelf())
+                element.setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));
+
+            if (!invalidationSet->isEmpty())
+                requiresDescendantInvalidation = true;
         }
-
-        if (invalidationSet->invalidatesSelf())
-            element.setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));
-
-        if (!invalidationSet->isEmpty())
-            requiresDescendantInvalidation = true;
     }
 
-    if (invalidationLists.siblings.isEmpty() && !requiresDescendantInvalidation)
+    if (!requiresDescendantInvalidation && (invalidationLists.siblings.isEmpty() || !element.nextSibling()))
         return;
 
     element.setNeedsStyleInvalidation();
+
     PendingInvalidations& pendingInvalidations = ensurePendingInvalidations(element);
-    for (auto& invalidationSet : invalidationLists.siblings)
-        pendingInvalidations.siblings().append(invalidationSet);
+    if (element.nextSibling()) {
+        for (auto& invalidationSet : invalidationLists.siblings) {
+            if (pendingInvalidations.siblings().contains(invalidationSet))
+                continue;
+            pendingInvalidations.siblings().append(invalidationSet);
+        }
+    }
 
     if (!requiresDescendantInvalidation)
         return;
 
     for (auto& invalidationSet : invalidationLists.descendants) {
         ASSERT(!invalidationSet->wholeSubtreeInvalid());
-        if (!invalidationSet->isEmpty())
-            pendingInvalidations.descendants().append(invalidationSet);
+        if (invalidationSet->isEmpty())
+            continue;
+        if (pendingInvalidations.descendants().contains(invalidationSet))
+            continue;
+        pendingInvalidations.descendants().append(invalidationSet);
     }
 }
 

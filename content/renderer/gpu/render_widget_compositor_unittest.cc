@@ -4,7 +4,10 @@
 
 #include "content/renderer/gpu/render_widget_compositor.h"
 
+#include <utility>
+
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "cc/output/begin_frame_args.h"
@@ -40,15 +43,19 @@ class TestRenderWidget : public RenderWidget {
                      false,
                      false) {
     webwidget_ = &mock_webwidget_;
+    SetRoutingID(++next_routing_id_);
   }
 
   MockWebWidget mock_webwidget_;
 
  protected:
   ~TestRenderWidget() override { webwidget_ = NULL; }
+  static int next_routing_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderWidget);
 };
+
+int TestRenderWidget::next_routing_id_ = 0;
 
 class RenderWidgetCompositorTest : public testing::Test {
  public:
@@ -141,7 +148,7 @@ class RenderWidgetCompositorOutputSurface : public RenderWidgetCompositor {
       // Image support required for synchronous compositing.
       context->set_support_image(true);
       // Create delegating surface so that max_pending_frames = 1.
-      return cc::FakeOutputSurface::CreateDelegating3d(context.Pass());
+      return cc::FakeOutputSurface::CreateDelegating3d(std::move(context));
     }
     return use_null_output_surface_
                ? nullptr

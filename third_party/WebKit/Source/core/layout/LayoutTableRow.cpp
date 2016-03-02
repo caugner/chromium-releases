@@ -22,7 +22,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/layout/LayoutTableRow.h"
 
 #include "core/HTMLNames.h"
@@ -254,6 +253,15 @@ void LayoutTableRow::addOverflowFromCell(const LayoutTableCell* cell)
     cellVisualOverflowRect.move(0, cellOffsetLogicalTopDifference);
 
     addVisualOverflow(cellVisualOverflowRect);
+}
+
+bool LayoutTableRow::backgroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect) const
+{
+    // If this object has layer, the area of collapsed borders should be transparent
+    // to expose the collapsed borders painted on the underlying layer.
+    if (hasLayer() && table()->collapseBorders())
+        return false;
+    return LayoutBox::backgroundIsKnownToBeOpaqueInRect(localRect);
 }
 
 } // namespace blink

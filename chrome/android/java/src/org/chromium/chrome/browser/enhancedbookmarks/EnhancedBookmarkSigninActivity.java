@@ -13,9 +13,10 @@ import org.chromium.chrome.browser.ntp.RecentTabsPromoView;
 import org.chromium.chrome.browser.ntp.RecentTabsPromoView.SyncPromoModel;
 import org.chromium.chrome.browser.ntp.RecentTabsPromoView.UserActionListener;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
-import org.chromium.chrome.browser.sync.SyncController;
+import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.AndroidSyncSettings.AndroidSyncSettingsObserver;
 import org.chromium.sync.signin.ChromeSigninController;
@@ -99,7 +100,10 @@ public class EnhancedBookmarkSigninActivity extends EnhancedBookmarkActivityBase
 
     @Override
     public void enableSync() {
-        SyncController.get(this).start();
+        ProfileSyncService syncService = ProfileSyncService.get();
+        if (syncService != null) {
+            syncService.requestStart();
+        }
     }
 
     @Override
@@ -117,11 +121,13 @@ public class EnhancedBookmarkSigninActivity extends EnhancedBookmarkActivityBase
     @Override
     public void onAccountSelectionConfirmed() {
         RecordUserAction.record("Stars_SignInPromoActivity_SignedIn");
+        RecordUserAction.record("Signin_Signin_FromBookmarkManager");
     }
 
     @Override
     public void onNewAccount() {
         RecordUserAction.record("Stars_SignInPromoActivity_NewAccount");
+        RecordUserAction.record("Signin_AddAccountToDevice");
     }
 
     @Override
@@ -130,5 +136,10 @@ public class EnhancedBookmarkSigninActivity extends EnhancedBookmarkActivityBase
             mProfileDataCache = new ProfileDataCache(this, Profile.getLastUsedProfile());
         }
         return mProfileDataCache;
+    }
+
+    @Override
+    public int getAccessPoint() {
+        return SigninAccessPoint.BOOKMARK_MANAGER;
     }
 }

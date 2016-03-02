@@ -8,17 +8,19 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "wtf/Allocator.h"
+#include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
 
 // When slimming paint ships we can remove this SkPicture abstraction and
 // rely on PaintController here.
-class SkPictureBuilder {
+class SkPictureBuilder final {
     WTF_MAKE_NONCOPYABLE(SkPictureBuilder);
     STACK_ALLOCATED();
 public:
-    SkPictureBuilder(const FloatRect& bounds, SkMetaData* metaData = 0, GraphicsContext* containingContext = 0)
+    SkPictureBuilder(const FloatRect& bounds, SkMetaData* metaData = nullptr, GraphicsContext* containingContext = nullptr)
         : m_bounds(bounds)
     {
         GraphicsContext::DisabledMode disabledMode = GraphicsContext::NothingDisabled;

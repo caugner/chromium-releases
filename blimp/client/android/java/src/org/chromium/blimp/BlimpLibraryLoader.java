@@ -7,6 +7,7 @@ package org.chromium.blimp;
 import android.content.Context;
 import android.os.Handler;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
@@ -18,7 +19,7 @@ import org.chromium.base.library_loader.ProcessInitException;
 /**
  * Asynchronously loads and registers the native libraries associated with Blimp.
  */
-@JNINamespace("blimp")
+@JNINamespace("blimp::client")
 public final class BlimpLibraryLoader {
     /**
      * A callback interface that is notified with the native library load results.
@@ -90,12 +91,12 @@ public final class BlimpLibraryLoader {
         extractor.addCompletionCallback(new Runnable() {
             @Override
             public void run() {
-                final boolean initResult = nativeInitializeBlimp(context.getApplicationContext());
+                ContextUtils.initApplicationContext(context.getApplicationContext());
                 new Handler().post(new Runnable() {
                     @Override
                     public void run() {
                         // Only run nativeStartBlimp if we properly initialized native.
-                        boolean startResult = initResult && nativeStartBlimp();
+                        boolean startResult = nativeStartBlimp();
                         sLibraryLoadResult = new Boolean(startResult);
 
                         // Notify any oustanding callers to #startAsync().
@@ -126,6 +127,5 @@ public final class BlimpLibraryLoader {
     }
 
     // Native methods.
-    private static native boolean nativeInitializeBlimp(Context context);
     private static native boolean nativeStartBlimp();
 }

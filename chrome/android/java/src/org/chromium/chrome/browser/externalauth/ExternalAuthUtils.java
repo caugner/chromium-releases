@@ -12,6 +12,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Binder;
+import android.os.StrictMode;
 import android.text.TextUtils;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -34,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ExternalAuthUtils {
     public static final int FLAG_SHOULD_BE_GOOGLE_SIGNED = 1 << 0;
     public static final int FLAG_SHOULD_BE_SYSTEM = 1 << 1;
-    private static final String TAG = "cr.ExternalAuthUtils";
+    private static final String TAG = "ExternalAuthUtils";
     private static final String CONNECTION_RESULT_HISTOGRAM_NAME =
             "GooglePlayServices.ConnectionResult";
 
@@ -238,7 +239,14 @@ public class ExternalAuthUtils {
      * @return The code produced by calling the external code
      */
     protected int checkGooglePlayServicesAvailable(final Context context) {
-        return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context);
+        // Temporarily allowing disk access. TODO: Fix. See http://crbug.com/577190
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        StrictMode.allowThreadDiskWrites();
+        try {
+            return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
     }
 
     /**

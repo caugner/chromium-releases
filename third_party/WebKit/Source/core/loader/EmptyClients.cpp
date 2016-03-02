@@ -25,7 +25,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/loader/EmptyClients.h"
 
 #include "core/frame/LocalFrame.h"
@@ -75,7 +74,7 @@ public:
     void setFrameVisible(bool) override { }
     WebTaskRunner* loadingTaskRunner() override;
     WebTaskRunner* timerTaskRunner() override;
-    void setFrameOrigin(const WebSecurityOrigin*) override { }
+    void setFrameOrigin(const WebSecurityOrigin&) override { }
 };
 
 WebTaskRunner* EmptyFrameScheduler::loadingTaskRunner()

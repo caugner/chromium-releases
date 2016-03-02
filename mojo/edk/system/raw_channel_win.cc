@@ -5,6 +5,8 @@
 #include "mojo/edk/system/raw_channel.h"
 
 #include <windows.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
@@ -19,6 +21,7 @@
 #include "base/win/windows_version.h"
 #include "mojo/edk/embedder/embedder_internal.h"
 #include "mojo/edk/embedder/platform_handle.h"
+#include "mojo/edk/system/broker.h"
 #include "mojo/edk/system/transport_data.h"
 #include "mojo/public/cpp/system/macros.h"
 
@@ -29,11 +32,6 @@ namespace mojo {
 namespace edk {
 
 namespace {
-
-struct MOJO_ALIGNAS(8) SerializedHandle {
-  DWORD handle_pid;
-  HANDLE handle;
-};
 
 class VistaOrHigherFunctions {
  public:
@@ -128,6 +126,7 @@ class RawChannelWin final : public RawChannel {
     RawChannelIOHandler(RawChannelWin* owner,
                         ScopedPlatformHandle handle)
         : handle_(handle.Pass()),
+          io_task_runner_(internal::g_io_thread_task_runner),
           owner_(owner),
           suppress_self_destruct_(false),
           pending_read_(false),
@@ -158,7 +157,8 @@ class RawChannelWin final : public RawChannel {
 
       if (write_wait_object_)
         UnregisterWaitEx(write_wait_object_, INVALID_HANDLE_VALUE);
-      DCHECK(ShouldSelfDestruct());
+      DCHECK(ShouldSelfDestruct() ||
+             !base::MessageLoop::current()->is_running());
     }
 
     HANDLE handle() const { return handle_.get().handle; }
@@ -227,7 +227,9 @@ class RawChannelWin final : public RawChannel {
         preserved_write_buffer_after_detach_ = write_buffer.Pass();
 
       owner_ = nullptr;
-      if (ShouldSelfDestruct())
+      // On shutdown, the message loop won't be running. Since we'll never get
+      // notifications after this point, delete the object to avoid leaks.
+      if (ShouldSelfDestruct() || !base::MessageLoop::current()->is_running())
         delete this;
     }
 
@@ -469,7 +471,7 @@ class RawChannelWin final : public RawChannel {
       // that that is always a pointer to a valid RawChannelIOHandler.
       RawChannelIOHandler* that = static_cast<RawChannelIOHandler*>(param);
       that->read_event_signalled_ = true;
-      internal::g_io_thread_task_runner->PostTask(
+      that->io_task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&RawChannelIOHandler::OnObjectSignaled,
                      that->this_weakptr_, that->read_event_.Get()));
@@ -481,13 +483,17 @@ class RawChannelWin final : public RawChannel {
       // that that is always a pointer to a valid RawChannelIOHandler.
       RawChannelIOHandler* that = static_cast<RawChannelIOHandler*>(param);
       that->write_event_signalled_ = true;
-      internal::g_io_thread_task_runner->PostTask(
+      that->io_task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&RawChannelIOHandler::OnObjectSignaled,
                      that->this_weakptr_, that->write_event_.Get()));
     }
 
     ScopedPlatformHandle handle_;
+
+    // We cache this because ReadCompleted and WriteCompleted might get fired
+    // after ShutdownIPCSupport is called.
+    scoped_refptr<base::TaskRunner> io_task_runner_;
 
     // |owner_| is reset on the I/O thread under |owner_->write_lock()|.
     // Therefore, it may be used on any thread under lock; or on the I/O thread
@@ -602,35 +608,13 @@ class RawChannelWin final : public RawChannel {
   ScopedPlatformHandleVectorPtr GetReadPlatformHandles(
       size_t num_platform_handles,
       const void* platform_handle_table) override {
-    // TODO(jam): this code will have to be updated once it's used in a sandbox
-    // and the receiving process doesn't have duplicate permission for the
-    // receiver. Once there's a broker and we have a connection to it (possibly
-    // through ConnectionManager), then we can make a sync IPC to it here to get
-    // a token for this handle, and it will duplicate the handle to is process.
-    // Then we pass the token to the receiver, which will then make a sync call
-    // to the broker to get a duplicated handle. This will also allow us to
-    // avoid leaks of the handle if the receiver dies, since the broker can
-    // notice that.
     DCHECK_GT(num_platform_handles, 0u);
     ScopedPlatformHandleVectorPtr rv(new PlatformHandleVector());
+    rv->resize(num_platform_handles);
 
-    const SerializedHandle* serialization_data =
-        static_cast<const SerializedHandle*>(platform_handle_table);
-    for (size_t i = 0; i < num_platform_handles; i++) {
-      DWORD pid = serialization_data->handle_pid;
-      HANDLE source_handle = serialization_data->handle;
-      serialization_data ++;
-      base::Process sender =
-          base::Process::OpenWithAccess(pid, PROCESS_DUP_HANDLE);
-      DCHECK(sender.IsValid());
-      HANDLE target_handle = NULL;
-      BOOL dup_result = DuplicateHandle(
-          sender.Handle(), source_handle,
-          base::GetCurrentProcessHandle(), &target_handle, 0,
-          FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE);
-      DCHECK(dup_result);
-      rv->push_back(PlatformHandle(target_handle));
-    }
+    const uint64_t* tokens =
+        static_cast<const uint64_t*>(platform_handle_table);
+    internal::g_broker->TokenToHandle(tokens, num_platform_handles, &rv->at(0));
     return rv.Pass();
   }
 
@@ -638,26 +622,19 @@ class RawChannelWin final : public RawChannel {
     if (!write_buffer_no_lock()->HavePlatformHandlesToSend())
       return 0u;
 
-    // Since we're not sure which process might ultimately deserialize this
-    // message, we can't duplicate the handle now. Instead, write the process
-    // ID and handle now and let the receiver duplicate it.
     PlatformHandle* platform_handles;
     void* serialization_data_temp;
     size_t num_platform_handles;
     write_buffer_no_lock()->GetPlatformHandlesToSend(
         &num_platform_handles, &platform_handles, &serialization_data_temp);
-    SerializedHandle* serialization_data =
-        static_cast<SerializedHandle*>(serialization_data_temp);
+    uint64_t* tokens = static_cast<uint64_t*>(serialization_data_temp);
     DCHECK_GT(num_platform_handles, 0u);
     DCHECK(platform_handles);
 
-    DWORD current_process_id = base::GetCurrentProcId();
-    for (size_t i = 0; i < num_platform_handles; i++) {
-      serialization_data->handle_pid = current_process_id;
-      serialization_data->handle = platform_handles[i].handle;
-      serialization_data++;
+    internal::g_broker->HandleToToken(
+        &platform_handles[0], num_platform_handles, tokens);
+    for (size_t i = 0; i < num_platform_handles; i++)
       platform_handles[i] = PlatformHandle();
-    }
     return num_platform_handles;
   }
 
@@ -683,7 +660,7 @@ class RawChannelWin final : public RawChannel {
                   &io_handler_->write_context_no_lock()->overlapped);
     if (!result) {
       DWORD error = GetLastError();
-      if (error == ERROR_BROKEN_PIPE)
+      if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA)
         return IO_FAILED_SHUTDOWN;
       if (error != ERROR_IO_PENDING) {
         LOG(WARNING) << "WriteFile: "
@@ -778,7 +755,7 @@ RawChannel* RawChannel::Create(ScopedPlatformHandle handle) {
 }
 
 size_t RawChannel::GetSerializedPlatformHandleSize() {
-  return sizeof(SerializedHandle);
+  return sizeof(uint64_t);
 }
 
 bool RawChannel::IsOtherEndOf(RawChannel* other) {

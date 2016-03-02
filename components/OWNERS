@@ -5,6 +5,10 @@ sdefresne@chromium.org
 
 per-file app_modal*=avi@chromium.org
 
+per-file arc.gypi=elijahtaylor@chromium.org
+per-file arc.gypi=hidehiko@chromium.org
+per-file arc.gypi=lhchavez@chromium.org
+
 per-file audio_modem.gypi=ckehoe@chromium.org
 per-file audio_modem.gypi=rkc@chromium.org
 per-file audio_modem.gypi=xiyuan@chromium.org
@@ -12,8 +16,10 @@ per-file audio_modem.gypi=xiyuan@chromium.org
 # Can not match autofill* due to crbug.com/397984
 per-file autofill.gypi=estade@chromium.org
 per-file autofill.gypi=isherman@chromium.org
+per-file autofill.gypi=vabr@chromium.org
 per-file autofill_strings.grdp=estade@chromium.org
 per-file autofill_strings.grdp=isherman@chromium.org
+per-file autofill_strings.gypi=vabr@chromium.org
 
 per-file bookmark_bar_strings.grdp=sky@chromium.org
 per-file bookmarks.gypi=sky@chromium.org
@@ -77,6 +83,7 @@ per-file data_reduction_proxy*=tbansal@chromium.org
 
 per-file data_usage*=bengr@chromium.org
 per-file data_usage*=sclittle@chromium.org
+per-file data_usage*=tbansal@chromium.org
 
 per-file data_use_measurement*=sclittle@chromium.org
 per-file data_use_measurement*=bengr@chromium.org
@@ -113,6 +120,8 @@ per-file enhanced_bookmarks*=sky@chromium.org
 
 per-file error_page*=mmenke@chromium.org
 per-file error_page*=ttuttle@chromium.org
+
+per-file exo.gypi=reveman@chromium.org
 
 per-file external_video_surface.gypi=boliu@chromium.org
 per-file external_video_surface.gypi=qinmin@chromium.org
@@ -183,6 +192,9 @@ per-file navigation_interception.gypi=mnaganov@chromium.org
 
 per-file network_time.gypi=zea@chromium.org
 
+per-file ntp_snippets.gypi=noyau@chromium.org
+per-file ntp_snippets.gypi=bauerb@chromium.org
+
 per-file offline_pages*=dimich@chromium.org
 per-file offline_pages*=fgorski@chromium.org
 
@@ -222,6 +234,8 @@ per-file pdf.gypi=gene@chromium.org
 per-file pdf.gypi=jam@chromium.org
 per-file pdf.gypi=raymes@chromium.org
 per-file pdf.gypi=thestig@chromium.org
+per-file pdf_strings.grdp=raymes@chromium.org
+per-file pdf_strings.grdp=tsergeant@chromium.org
 
 per-file plugins.gypi=bauerb@chromium.org
 per-file plugins.gypi=tommycli@chromium.org
@@ -289,6 +303,9 @@ per-file signin*=rogerta@chromium.org
 
 per-file ssl_errors*=estark@chromium.org
 per-file ssl_errors*=felt@chromium.org
+
+per-file startup_metric_utils.gypi=gab@chromium.org
+per-file startup_metric_utils.gypi=erikchen@chromium.org
 
 per-file storage_monitor.gypi=gbillock@chromium.org
 per-file storage_monitor.gypi=thestig@chromium.org

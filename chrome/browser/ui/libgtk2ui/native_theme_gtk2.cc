@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/libgtk2ui/gtk2_util.h"
 #include "chrome/browser/ui/libgtk2ui/skia_utils_gtk2.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -319,6 +320,10 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       // return GetTextColor(GetButton(), NORMAL);
     case kColorId_CallToActionColor:
       return GetSystemColor(kColorId_LinkEnabled);
+    // TODO(estade): set proper values for these.
+    case kColorId_MdTextButtonEnabledColor:
+    case kColorId_MdTextButtonDisabledColor:
+      return gfx::kPlaceholderColor;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -412,18 +417,6 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       return SelectedURLColor(
           GetSystemColor(kColorId_TextfieldSelectionColor),
           GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused));
-    case kColorId_ResultsTableNormalDivider:
-      return color_utils::AlphaBlend(GetTextColor(GetWindow(), NORMAL),
-                                     GetBGColor(GetWindow(), NORMAL),
-                                     0x34);
-    case kColorId_ResultsTableHoveredDivider:
-      return color_utils::AlphaBlend(GetTextColor(GetWindow(), PRELIGHT),
-                                     GetBGColor(GetWindow(), PRELIGHT),
-                                     0x34);
-    case kColorId_ResultsTableSelectedDivider:
-      return color_utils::AlphaBlend(GetTextColor(GetWindow(), SELECTED),
-                                     GetBGColor(GetWindow(), SELECTED),
-                                     0x34);
 
     case kColorId_ResultsTablePositiveText: {
       return color_utils::GetReadableColor(kPositiveTextColor,

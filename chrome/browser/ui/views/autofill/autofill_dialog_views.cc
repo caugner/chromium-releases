@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/views/autofill/autofill_dialog_views.h"
 
+#include <stddef.h>
+
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
@@ -311,7 +314,8 @@ class NotificationView : public views::View,
   }
 
   // views::StyledLabelListener implementation.
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override {
     delegate_->LinkClicked(data_.link_url());
   }

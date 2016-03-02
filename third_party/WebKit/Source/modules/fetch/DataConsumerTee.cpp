@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/fetch/DataConsumerTee.h"
 
 #include "core/dom/ActiveDOMObject.h"
@@ -278,21 +277,6 @@ public:
     {
         MutexLocker locker(context()->mutex());
         context()->detachReader();
-    }
-
-    Result read(void* buffer, size_t size, Flags, size_t* readSize) override
-    {
-        MutexLocker locker(context()->mutex());
-        *readSize = 0;
-        if (context()->isEmpty())
-            return context()->result();
-
-        const OwnPtr<Vector<char>>& chunk = context()->top();
-        size_t sizeToCopy = std::min(size, chunk->size() - context()->offset());
-        std::copy(chunk->data() + context()->offset(), chunk->data() + context()->offset() + sizeToCopy, static_cast<char*>(buffer));
-        context()->consume(sizeToCopy);
-        *readSize = sizeToCopy;
-        return WebDataConsumerHandle::Ok;
     }
 
     Result beginRead(const void** buffer, Flags, size_t* available) override

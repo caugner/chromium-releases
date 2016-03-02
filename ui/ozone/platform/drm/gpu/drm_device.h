@@ -5,6 +5,7 @@
 #ifndef UI_OZONE_PLATFORM_DRM_GPU_DRM_DEVICE_H_
 #define UI_OZONE_PLATFORM_DRM_GPU_DRM_DEVICE_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <vector>
@@ -187,7 +188,7 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
   class IOWatcher;
   class PageFlipManager;
 
-  // Path to DRM device.
+  // Path to the DRM device (in sysfs).
   const base::FilePath device_path_;
 
   // DRM device.

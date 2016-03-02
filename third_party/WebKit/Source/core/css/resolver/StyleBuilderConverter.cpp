@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/css/resolver/StyleBuilderConverter.h"
 
 #include "core/css/BasicShapeFunctions.h"
@@ -33,6 +32,7 @@
 #include "core/css/CSSFontFeatureValue.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSGridLineNamesValue.h"
+#include "core/css/CSSPathValue.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/css/CSSQuadValue.h"
 #include "core/css/CSSReflectValue.h"
@@ -45,6 +45,7 @@
 #include "platform/transforms/RotateTransformOperation.h"
 #include "platform/transforms/ScaleTransformOperation.h"
 #include "platform/transforms/TranslateTransformOperation.h"
+#include <algorithm>
 
 namespace blink {
 
@@ -521,12 +522,12 @@ void StyleBuilderConverter::createImplicitNamedGridLinesFromGridArea(const Named
         GridSpan areaSpan = direction == ForRows ? namedGridAreaEntry.value.rows : namedGridAreaEntry.value.columns;
         {
             NamedGridLinesMap::AddResult startResult = namedGridLines.add(namedGridAreaEntry.key + "-start", Vector<size_t>());
-            startResult.storedValue->value.append(areaSpan.resolvedInitialPosition.toInt());
+            startResult.storedValue->value.append(areaSpan.resolvedInitialPosition());
             std::sort(startResult.storedValue->value.begin(), startResult.storedValue->value.end());
         }
         {
             NamedGridLinesMap::AddResult endResult = namedGridLines.add(namedGridAreaEntry.key + "-end", Vector<size_t>());
-            endResult.storedValue->value.append(areaSpan.resolvedFinalPosition.toInt() + 1);
+            endResult.storedValue->value.append(areaSpan.resolvedFinalPosition());
             std::sort(endResult.storedValue->value.begin(), endResult.storedValue->value.end());
         }
     }
@@ -611,7 +612,7 @@ Length StyleBuilderConverter::convertLineHeight(StyleResolverState& state, const
         return Length(primitiveValue.getDoubleValue() * 100.0, Percent);
     if (primitiveValue.isCalculated()) {
         Length zoomedLength = Length(primitiveValue.cssCalcValue()->toCalcValue(lineHeightToLengthConversionData(state)));
-        return Length(valueForLength(zoomedLength, state.style()->fontSize()), Fixed);
+        return Length(valueForLength(zoomedLength, state.style()->computedFontSize()), Fixed);
     }
 
     ASSERT(primitiveValue.getValueID() == CSSValueNormal);
@@ -639,7 +640,21 @@ static Length convertPositionLength(StyleResolverState& state, const CSSValue& v
         return length.subtractFromOneHundredPercent();
     }
 
-    return StyleBuilderConverter::convertLength(state, value);
+    const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
+    if (primitiveValue.isValueID()) {
+        switch (primitiveValue.getValueID()) {
+        case cssValueFor0:
+            return Length(0, Percent);
+        case cssValueFor100:
+            return Length(100, Percent);
+        case CSSValueCenter:
+            return Length(50, Percent);
+        default:
+            ASSERT_NOT_REACHED();
+        }
+    }
+
+    return StyleBuilderConverter::convertLength(state, primitiveValue);
 }
 
 LengthPoint StyleBuilderConverter::convertPosition(StyleResolverState& state, const CSSValue& value)
@@ -682,20 +697,6 @@ static Length convertOriginLength(StyleResolverState& state, const CSSPrimitiveV
     }
 
     return StyleBuilderConverter::convertLength(state, primitiveValue);
-}
-
-LengthPoint StyleBuilderConverter::convertPerspectiveOrigin(StyleResolverState& state, const CSSValue& value)
-{
-    const CSSValueList& list = toCSSValueList(value);
-    ASSERT(list.length() == 2);
-
-    const CSSPrimitiveValue& primitiveValueX = toCSSPrimitiveValue(*list.item(0));
-    const CSSPrimitiveValue& primitiveValueY = toCSSPrimitiveValue(*list.item(1));
-
-    return LengthPoint(
-        convertOriginLength<CSSValueLeft, CSSValueRight>(state, primitiveValueX),
-        convertOriginLength<CSSValueTop, CSSValueBottom>(state, primitiveValueY)
-    );
 }
 
 EPaintOrder StyleBuilderConverter::convertPaintOrder(StyleResolverState&, const CSSValue& cssPaintOrder)
@@ -951,6 +952,11 @@ RespectImageOrientationEnum StyleBuilderConverter::convertImageOrientation(Style
 {
     const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
     return primitiveValue.getValueID() == CSSValueFromImage ? RespectImageOrientation : DoNotRespectImageOrientation;
+}
+
+PassRefPtr<StylePath> StyleBuilderConverter::convertPath(StyleResolverState&, CSSValue& value)
+{
+    return toCSSPathValue(value).cachedPath();
 }
 
 } // namespace blink

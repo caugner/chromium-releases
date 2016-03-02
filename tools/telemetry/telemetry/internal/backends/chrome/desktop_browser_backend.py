@@ -34,6 +34,23 @@ def ParseCrashpadDateTime(date_time_str):
   return datetime.datetime.strptime(date_time_str, '%Y-%m-%d %H:%M:%S')
 
 
+def GetSymbolBinary(executable, os_name):
+  # Returns binary file where symbols are located.
+  if os_name == 'mac':
+    version_dir = os.path.join(os.path.dirname(executable),
+                               '..',
+                               'Versions')
+    for version_num in os.listdir(version_dir):
+      framework_file = os.path.join(version_dir,
+                                    version_num,
+                                    'Chromium Framework.framework',
+                                    'Chromium Framework')
+      if os.path.isfile(framework_file):
+        return framework_file
+
+  return executable
+
+
 class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   """The backend for controlling a locally-executed browser instance, on Linux,
   Mac or Windows.
@@ -143,11 +160,15 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
           '--no-window',
           '--dumps-dir=%s' % self._tmp_minidump_dir,
           '--pipe-name=%s' % self._GetCrashServicePipeName()])
-    except:
+    except Exception:
       logging.error(
           'Failed to run %s --no-window --dump-dir=%s --pip-name=%s' % (
             command, self._tmp_minidump_dir, self._GetCrashServicePipeName()))
       logging.error('Running on platform: %s and arch: %s.', os_name, arch_name)
+      wmic_stdout, _ = subprocess.Popen(
+        ['wmic', 'process', 'get', 'CommandLine,Name,ProcessId,ParentProcessId',
+        '/format:csv'], stdout=subprocess.PIPE).communicate()
+      logging.error('Current running processes:\n%s' % wmic_stdout)
       raise
     return crash_service
 
@@ -449,7 +470,8 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       cmd = [
           sys.executable,
           generate_breakpad_symbols_command,
-          '--binary=%s' % self._executable,
+          '--binary=%s' % GetSymbolBinary(self._executable,
+                                          self.browser.platform.GetOSName()),
           '--symbols-dir=%s' % symbols_path,
           '--build-dir=%s' % self._browser_directory,
           ]
@@ -480,16 +502,13 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   def GetStackTrace(self):
     most_recent_dump = self._GetMostRecentMinidump()
     if not most_recent_dump:
-      return 'No crash dump found. Returning browser stdout:\n' + (
-          self.GetStandardOutput())
-
-    logging.info('minidump found: %s' % most_recent_dump)
+      return 'No crash dump found.'
+    logging.info('Minidump found: %s' % most_recent_dump)
     stack = self._GetStackFromMinidump(most_recent_dump)
     if not stack:
       cloud_storage_link = self._UploadMinidumpToCloudStorage(most_recent_dump)
       return ('Failed to symbolize minidump. Raw stack is uploaded to cloud '
-              'storage: %s. Returning browser stdout:\n%s' % (
-                  cloud_storage_link, self.GetStandardOutput()))
+              'storage: %s.' % cloud_storage_link)
     return stack
 
   def __del__(self):

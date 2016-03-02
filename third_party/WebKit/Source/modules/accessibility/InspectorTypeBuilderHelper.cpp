@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/accessibility/InspectorTypeBuilderHelper.h"
 
 #include "core/InspectorTypeBuilder.h"
@@ -216,6 +215,8 @@ AXValueNativeSourceType::Enum nativeSourceType(AXTextFromNativeHTML nativeSource
         return AXValueNativeSourceType::Tablecaption;
     case AXTextFromNativeHTMLLegend:
         return AXValueNativeSourceType::Legend;
+    case AXTextFromNativeHTMLTitleElement:
+        return AXValueNativeSourceType::Title;
     default:
         return AXValueNativeSourceType::Other;
     }

@@ -4,6 +4,9 @@
 
 #include "components/test_runner/web_test_proxy.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <cctype>
 
 #include "base/callback_helpers.h"
@@ -162,7 +165,7 @@ void PrintResponseDescription(WebTestDelegate* delegate,
   }
   delegate->PrintMessage(base::StringPrintf(
       "<NSURLResponse %s, http status code %d>",
-      DescriptionSuitableForTestResult(response.url().spec()).c_str(),
+      DescriptionSuitableForTestResult(response.url().string().utf8()).c_str(),
       response.httpStatusCode()));
 }
 
@@ -670,7 +673,8 @@ void WebTestProxyBase::CapturePixelsAsync(
   web_widget_->compositeAndReadbackAsync(capture_callback);
   if (blink::WebPagePopup* popup = web_widget_->pagePopup()) {
     capture_callback->set_wait_for_popup(true);
-    capture_callback->set_popup_position(popup->positionRelativeToOwner());
+    capture_callback->set_popup_position(
+        delegate_->ConvertDIPToNative(popup->positionRelativeToOwner()));
     popup->compositeAndReadbackAsync(capture_callback);
   }
 }
@@ -1234,7 +1238,8 @@ void WebTestProxyBase::WillSendRequest(
   }
 
   // Set the new substituted URL.
-  request.setURL(delegate_->RewriteLayoutTestsURL(request.url().spec()));
+  request.setURL(
+      delegate_->RewriteLayoutTestsURL(request.url().string().utf8()));
 }
 
 void WebTestProxyBase::DidReceiveResponse(

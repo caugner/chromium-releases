@@ -8,6 +8,7 @@ import time
 
 from devil.android import device_errors
 from pylib import flag_changer
+from pylib import valgrind_tools
 from pylib.base import base_test_result
 from pylib.local.device import local_device_test_run
 
@@ -63,6 +64,8 @@ class LocalDeviceInstrumentationTestRun(
       else:
         return d
 
+    @local_device_test_run.handle_shard_failures_with(
+        self._env.BlacklistDevice)
     def individual_device_set_up(dev, host_device_tuples):
       dev.Install(self._test_instance.apk_under_test,
                   permissions=self._test_instance.apk_under_test_permissions)
@@ -90,6 +93,9 @@ class LocalDeviceInstrumentationTestRun(
                         self._test_instance.flags)
           self._flag_changers[str(dev)].AddFlags(self._test_instance.flags)
 
+      valgrind_tools.SetChromeTimeoutScale(
+          dev, self._test_instance.timeout_scale)
+
     self._env.parallel_devices.pMap(
         individual_device_set_up,
         self._test_instance.GetDataDependencies())
@@ -98,6 +104,8 @@ class LocalDeviceInstrumentationTestRun(
     def individual_device_tear_down(dev):
       if str(dev) in self._flag_changers:
         self._flag_changers[str(dev)].Restore()
+
+      valgrind_tools.SetChromeTimeoutScale(dev, None)
 
     self._env.parallel_devices.pMap(individual_device_tear_down)
 
@@ -129,9 +137,10 @@ class LocalDeviceInstrumentationTestRun(
 
   #override
   def _RunTest(self, device, test):
-    extras = self._test_instance.GetHttpServerEnvironmentVars()
+    extras = {}
 
     flags = None
+    test_timeout_scale = None
     if isinstance(test, list):
       if not self._test_instance.driver_apk:
         raise Exception('driver_apk does not exist. '
@@ -165,6 +174,12 @@ class LocalDeviceInstrumentationTestRun(
       timeout = self._GetTimeoutFromAnnotations(
         test['annotations'], test_display_name)
 
+      test_timeout_scale = self._GetTimeoutScaleFromAnnotations(
+          test['annotations'])
+      if test_timeout_scale and test_timeout_scale != 1:
+        valgrind_tools.SetChromeTimeoutScale(
+            device, test_timeout_scale * self._test_instance.timeout_scale)
+
     logging.info('preparing to run %s: %s', test_display_name, test)
 
     if flags:
@@ -181,6 +196,9 @@ class LocalDeviceInstrumentationTestRun(
     finally:
       if flags:
         self._flag_changers[str(device)].Restore()
+      if test_timeout_scale:
+        valgrind_tools.SetChromeTimeoutScale(
+            device, self._test_instance.timeout_scale)
 
     # TODO(jbudorick): Make instrumentation tests output a JSON so this
     # doesn't have to parse the output.
@@ -208,8 +226,16 @@ class LocalDeviceInstrumentationTestRun(
   def _ShouldShard(self):
     return True
 
-  @staticmethod
-  def _GetTimeoutFromAnnotations(annotations, test_name):
+  @classmethod
+  def _GetTimeoutScaleFromAnnotations(cls, annotations):
+    try:
+      return int(annotations.get('TimeoutScale', 1))
+    except ValueError as e:
+      logging.warning("Non-integer value of TimeoutScale ignored. (%s)", str(e))
+      return 1
+
+  @classmethod
+  def _GetTimeoutFromAnnotations(cls, annotations, test_name):
     for k, v in TIMEOUT_ANNOTATIONS:
       if k in annotations:
         timeout = v
@@ -218,12 +244,7 @@ class LocalDeviceInstrumentationTestRun(
       logging.warning('Using default 1 minute timeout for %s', test_name)
       timeout = 60
 
-    try:
-      scale = int(annotations.get('TimeoutScale', 1))
-    except ValueError as e:
-      logging.warning("Non-integer value of TimeoutScale ignored. (%s)", str(e))
-      scale = 1
-    timeout *= scale
+    timeout *= cls._GetTimeoutScaleFromAnnotations(annotations)
 
     return timeout
 

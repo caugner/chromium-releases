@@ -6,6 +6,7 @@
 
 #include "chrome/browser/extensions/api/cookies/cookies_api.h"
 
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -178,7 +179,7 @@ void CookiesEventRouter::CookieChanged(
   GURL cookie_domain =
       cookies_helpers::GetURLFromCanonicalCookie(*details->cookie);
   DispatchEvent(profile, events::COOKIES_ON_CHANGED,
-                cookies::OnChanged::kEventName, args.Pass(), cookie_domain);
+                cookies::OnChanged::kEventName, std::move(args), cookie_domain);
 }
 
 void CookiesEventRouter::DispatchEvent(content::BrowserContext* context,
@@ -190,10 +191,10 @@ void CookiesEventRouter::DispatchEvent(content::BrowserContext* context,
   if (!router)
     return;
   scoped_ptr<Event> event(
-      new Event(histogram_value, event_name, event_args.Pass()));
+      new Event(histogram_value, event_name, std::move(event_args)));
   event->restrict_to_browser_context = context;
   event->event_url = cookie_domain;
-  router->BroadcastEvent(event.Pass());
+  router->BroadcastEvent(std::move(event));
 }
 
 CookiesGetFunction::CookiesGetFunction() {
@@ -381,6 +382,11 @@ void CookiesSetFunction::SetCookieOnIOThread() {
         base::Time::FromDoubleT(*parsed_args_->details.expiration_date);
   }
 
+  bool are_experimental_cookie_features_enabled =
+      store_browser_context_->GetURLRequestContext()
+          ->network_delegate()
+          ->AreExperimentalCookieFeaturesEnabled();
+
   cookie_monster->SetCookieWithDetailsAsync(
       url_, parsed_args_->details.name.get() ? *parsed_args_->details.name
                                              : std::string(),
@@ -398,10 +404,8 @@ void CookiesSetFunction::SetCookieOnIOThread() {
       // TODO(mkwst): If we decide to ship First-party-only cookies, we'll need
       // to extend the extension API to support them. For the moment, we'll set
       // all cookies as non-First-party-only.
-      false, store_browser_context_->GetURLRequestContext()
-                 ->network_delegate()
-                 ->AreExperimentalCookieFeaturesEnabled(),
-      net::COOKIE_PRIORITY_DEFAULT,
+      false, are_experimental_cookie_features_enabled,
+      are_experimental_cookie_features_enabled, net::COOKIE_PRIORITY_DEFAULT,
       base::Bind(&CookiesSetFunction::PullCookie, this));
 }
 

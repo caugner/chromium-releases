@@ -4,7 +4,8 @@
 
 {
   'variables': {
-    'chromium_code': 1
+    'chromium_code': 1,
+    'use_alsa%': 0,
   },
   'targets': [
     {
@@ -18,6 +19,7 @@
         '../testing/gtest.gyp:gtest',
       ],
       'sources': [
+        'base/bind_to_task_runner_unittest.cc',
         'base/device_capabilities_impl_unittest.cc',
         'base/error_codes_unittest.cc',
         'base/path_utils_unittest.cc',
@@ -94,7 +96,6 @@
       'type': 'none',
       'dependencies': [
         'cast_base_unittests',
-        'cast_crash_unittests',
         '../base/base.gyp:base_unittests',
         '../content/content_shell_and_tests.gyp:content_unittests',
         '../crypto/crypto.gyp:crypto_unittests',
@@ -112,7 +113,7 @@
         '../url/url.gyp:url_unittests',
       ],
       'conditions': [
-        ['target_arch=="arm" and OS!="android"', {
+        ['OS=="linux" and is_cast_desktop_build==0', {
           'variables': {
             'filters': [
               # Run net_unittests first to avoid random failures due to slow python startup
@@ -154,13 +155,18 @@
               'url_unittests --gtest_filter=-URLCanonTest.DoAppendUTF8Invalid',
             ],
           },
-        }, { # else "x86" or "android"
+        }, { # else desktop or android
           'variables': {
             'filters': [
               # Disable PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM (not supported)
               'media_unittests --gtest_filter=-PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM',
             ],
           }
+        }],
+        ['OS=="linux"', {
+          'dependencies': [
+            'cast_crash_unittests',
+          ],
         }],
         ['disable_display==0', {
           'dependencies': [
@@ -176,9 +182,20 @@
           ],
           'variables': {
             'filters': [
-              'cast_shell_browser_test --no-sandbox --disable-gpu',
+              # --enable-local-file-accesses => to load sample media files
+              # --test-launcher-jobs=1 => so internal code can bind to port
+              'cast_shell_browser_test --no-sandbox --enable-local-file-accesses --enable-cma-media-pipeline --ozone-platform=cast --test-launcher-jobs=1',
             ],
           },
+          'conditions': [
+            # TODO(slan): Reenable this test for Desktop x86 when CQ supports it.
+            # (b/26429268)
+            ['use_alsa==1 and is_cast_desktop_build==0', {
+              'dependencies': [
+                'media/media.gyp:alsa_cma_backend_unittests',
+              ],
+            }],
+          ],
         }],
         ['disable_display==1', {
           'variables': {
@@ -218,17 +235,6 @@
           'includes': ['../build/apk_test.gypi'],
         },  # end of target 'cast_base_unittests_apk'
         {
-          'target_name': 'cast_crash_unittests_apk',
-          'type': 'none',
-          'dependencies': [
-            'cast_crash_unittests',
-          ],
-          'variables': {
-            'test_suite_name': 'cast_crash_unittests',
-          },
-          'includes': ['../build/apk_test.gypi'],
-        },  # end of target 'cast_crash_unittests_apk'
-        {
           'target_name': 'cast_android_tests',
           'type': 'none',
           'dependencies': ['cast_android_tests_generator'],
@@ -254,7 +260,6 @@
           },
           'dependencies': [
             'cast_base_unittests_apk',
-            'cast_crash_unittests_apk',
             '../base/base.gyp:base_unittests_apk',
             '../cc/cc_tests.gyp:cc_unittests_apk',
             '../ipc/ipc.gyp:ipc_tests_apk',
@@ -263,7 +268,7 @@
             '../net/net.gyp:net_unittests_apk',
             '../sql/sql.gyp:sql_unittests_apk',
             '../sync/sync.gyp:sync_unit_tests_apk',
-            '../ui/events/events.gyp:events_unittests_apk',
+            '../ui/events/events_unittests.gyp:events_unittests_apk',
             '../ui/gfx/gfx_tests.gyp:gfx_unittests_apk',
           ],
           'includes': ['build/tests/test_list.gypi'],

@@ -9,14 +9,15 @@
         {
           "position": [8, 13],
           "bounds": [100, 100],
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "children": [
             {
               "bounds": [85, 100],
+              "shouldFlattenTransform": false,
               "children": [
                 {
                   "bounds": [85, 200],
-                  "shouldFlattenTransform": false,
                   "children": [
                     {
                       "bounds": [10, 200]
@@ -26,6 +27,7 @@
               ]
             },
             {
+              "bounds": [100, 100],
               "children": [
                 {
                   "position": [85, 0],
@@ -38,14 +40,15 @@
         {
           "position": [8, 13],
           "bounds": [100, 100],
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "children": [
             {
               "bounds": [100, 85],
+              "shouldFlattenTransform": false,
               "children": [
                 {
                   "bounds": [200, 85],
-                  "shouldFlattenTransform": false,
                   "children": [
                     {
                       "bounds": [200, 10]
@@ -55,6 +58,7 @@
               ]
             },
             {
+              "bounds": [100, 100],
               "children": [
                 {
                   "position": [0, 85],
@@ -67,14 +71,15 @@
         {
           "position": [8, 13],
           "bounds": [100, 100],
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "children": [
             {
               "bounds": [85, 85],
+              "shouldFlattenTransform": false,
               "children": [
                 {
                   "bounds": [200, 200],
-                  "shouldFlattenTransform": false,
                   "children": [
                     {
                       "bounds": [200, 200]
@@ -84,6 +89,7 @@
               ]
             },
             {
+              "bounds": [100, 100],
               "children": [
                 {
                   "position": [0, 85],
@@ -116,6 +122,7 @@
               ]
             },
             {
+              "bounds": [100, 100],
               "children": [
                 {
                   "position": [85, 85],

@@ -4,19 +4,18 @@
 
 #include "chrome/browser/ui/browser.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#include <shellapi.h>
-#endif  // defined(OS_WIN)
+#include <stddef.h>
 
 #include <algorithm>
 #include <string>
+#include <utility>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/process_info.h"
@@ -30,6 +29,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
@@ -76,7 +76,7 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/ssl/security_state_model.h"
+#include "chrome/browser/ssl/chrome_security_state_model_client.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
@@ -87,6 +87,8 @@
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
+#include "chrome/browser/ui/bluetooth/bluetooth_chooser_bubble_delegate.h"
+#include "chrome/browser/ui/bluetooth/bluetooth_chooser_desktop.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -105,6 +107,7 @@
 #include "chrome/browser/ui/browser_toolbar_model_delegate.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_bubble_manager.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -158,10 +161,12 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/bubble/bubble_controller.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/search/search.h"
+#include "components/security_state/security_state_model.h"
 #include "components/sessions/core/session_types.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
@@ -207,7 +212,8 @@
 #include "ui/shell_dialogs/selected_file_info.h"
 
 #if defined(OS_WIN)
-#include "base/win/metro.h"
+#include <windows.h>
+#include <shellapi.h>
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "components/autofill/core/browser/autofill_ie_toolbar_import_win.h"
@@ -236,6 +242,7 @@ using content::RenderWidgetHostView;
 using content::SiteInstance;
 using content::WebContents;
 using extensions::Extension;
+using security_state::SecurityStateModel;
 using ui::WebDialogDelegate;
 using web_modal::WebContentsModalDialogManager;
 using blink::WebWindowFeatures;
@@ -375,8 +382,7 @@ Browser::Browser(const CreateParams& params)
       override_bounds_(params.initial_bounds),
       initial_show_state_(params.initial_show_state),
       is_session_restore_(params.is_session_restore),
-      host_desktop_type_(
-          BrowserWindow::AdjustHostDesktopType(params.host_desktop_type)),
+      host_desktop_type_(params.host_desktop_type),
       content_setting_bubble_model_delegate_(
           new BrowserContentSettingBubbleModelDelegate(this)),
       toolbar_model_delegate_(new BrowserToolbarModelDelegate(this)),
@@ -1096,14 +1102,11 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   if (session_service && !tab_strip_model_->closing_all()) {
     session_service->SetSelectedTabInWindow(session_id(),
                                             tab_strip_model_->active_index());
-    if (SessionRestore::GetSmartRestoreMode() ==
-        SessionRestore::SMART_RESTORE_MODE_MRU) {
-      SessionTabHelper* session_tab_helper =
-          SessionTabHelper::FromWebContents(new_contents);
-      session_service->SetLastActiveTime(session_id(),
-                                         session_tab_helper->session_id(),
-                                         base::TimeTicks::Now());
-    }
+    SessionTabHelper* session_tab_helper =
+        SessionTabHelper::FromWebContents(new_contents);
+    session_service->SetLastActiveTime(session_id(),
+                                       session_tab_helper->session_id(),
+                                       base::TimeTicks::Now());
   }
 
   // This needs to be called after notifying SearchDelegate.
@@ -1238,12 +1241,12 @@ void Browser::SetFocusToLocationBar(bool select_all) {
 bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
                                      const NativeWebKeyboardEvent& event,
                                      bool* is_keyboard_shortcut) {
-  // Escape exits tabbed fullscreen mode and mouse lock, and possibly others.
+  // Forward keyboard events to the manager for fullscreen / mouse lock. This
+  // may consume the event (e.g., Esc exits fullscreen mode).
   // TODO(koz): Write a test for this http://crbug.com/100441.
-  if (event.windowsKeyCode == 27 &&
-      exclusive_access_manager_->HandleUserPressedEscape()) {
+  if (exclusive_access_manager_->HandleUserKeyPress(event))
     return true;
-  }
+
   return window()->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
 }
 
@@ -1315,18 +1318,21 @@ bool Browser::CanDragEnter(content::WebContents* source,
 content::SecurityStyle Browser::GetSecurityStyle(
     WebContents* web_contents,
     content::SecurityStyleExplanations* security_style_explanations) {
-  SecurityStateModel* model = SecurityStateModel::FromWebContents(web_contents);
-  DCHECK(model);
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(web_contents);
+  DCHECK(model_client);
   const SecurityStateModel::SecurityInfo& security_info =
-      model->GetSecurityInfo();
+      model_client->GetSecurityInfo();
 
   const content::SecurityStyle security_style =
       SecurityLevelToSecurityStyle(security_info.security_level);
 
   security_style_explanations->ran_insecure_content_style =
-      SecurityStateModel::kRanInsecureContentStyle;
+      SecurityLevelToSecurityStyle(
+          SecurityStateModel::kRanInsecureContentLevel);
   security_style_explanations->displayed_insecure_content_style =
-      SecurityStateModel::kDisplayedInsecureContentStyle;
+      SecurityLevelToSecurityStyle(
+          SecurityStateModel::kDisplayedInsecureContentLevel);
 
   // Check if the page is HTTP; if so, no explanations are needed. Note
   // that SECURITY_STYLE_UNAUTHENTICATED does not necessarily mean that
@@ -1350,7 +1356,7 @@ content::SecurityStyle Browser::GetSecurityStyle(
             security_info.cert_id));
   } else if (security_info.sha1_deprecation_status ==
              SecurityStateModel::DEPRECATED_SHA1_MINOR) {
-    security_style_explanations->warning_explanations.push_back(
+    security_style_explanations->unauthenticated_explanations.push_back(
         content::SecurityStyleExplanation(
             l10n_util::GetStringUTF8(IDS_MINOR_SHA1),
             l10n_util::GetStringUTF8(IDS_MINOR_SHA1_DESCRIPTION),
@@ -1379,7 +1385,8 @@ content::SecurityStyle Browser::GetSecurityStyle(
         security_info.cert_id);
 
     if (net::IsCertStatusMinorError(security_info.cert_status))
-      security_style_explanations->warning_explanations.push_back(explanation);
+      security_style_explanations->unauthenticated_explanations.push_back(
+          explanation);
     else
       security_style_explanations->broken_explanations.push_back(explanation);
   } else {
@@ -1414,6 +1421,29 @@ void Browser::ShowCertificateViewerInDevTools(
       DevToolsWindow::GetInstanceForInspectedWebContents(web_contents);
   if (devtools_window)
     devtools_window->ShowCertificateViewer(cert_id);
+}
+
+scoped_ptr<content::BluetoothChooser> Browser::RunBluetoothChooser(
+    content::WebContents* web_contents,
+    const content::BluetoothChooser::EventHandler& event_handler,
+    const GURL& origin) {
+  scoped_ptr<BluetoothChooserDesktop> bluetooth_chooser_desktop(
+      new BluetoothChooserDesktop(event_handler));
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  scoped_ptr<BluetoothChooserBubbleDelegate> bubble_delegate(
+      new BluetoothChooserBubbleDelegate(browser));
+  BluetoothChooserBubbleDelegate* bubble_delegate_ptr = bubble_delegate.get();
+
+  // Wire the ChooserBubbleDelegate to the BluetoothChooser.
+  bluetooth_chooser_desktop->set_bluetooth_chooser_bubble_delegate(
+      bubble_delegate_ptr);
+  bubble_delegate->set_bluetooth_chooser(bluetooth_chooser_desktop.get());
+
+  BubbleReference bubble_controller =
+      browser->GetBubbleManager()->ShowBubble(std::move(bubble_delegate));
+  bubble_delegate_ptr->set_bubble_controller(bubble_controller);
+
+  return std::move(bluetooth_chooser_desktop);
 }
 
 bool Browser::IsMouseLocked() const {
@@ -1587,14 +1617,17 @@ void Browser::UpdateTargetURL(WebContents* source, const GURL& url) {
   }
 }
 
-void Browser::ContentsMouseEvent(
-    WebContents* source, const gfx::Point& location, bool motion) {
-  if (!GetStatusBubble())
+void Browser::ContentsMouseEvent(WebContents* source,
+                                 const gfx::Point& location,
+                                 bool motion,
+                                 bool exited) {
+  // Mouse motion events update the status bubble, if it exists.
+  if (!GetStatusBubble() || (!motion && !exited))
     return;
 
   if (source == tab_strip_model_->GetActiveWebContents()) {
-    GetStatusBubble()->MouseMoved(location, !motion);
-    if (!motion)
+    GetStatusBubble()->MouseMoved(location, exited);
+    if (exited)
       GetStatusBubble()->SetURL(GURL(), std::string());
   }
 }

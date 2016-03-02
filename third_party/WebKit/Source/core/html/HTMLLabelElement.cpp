@@ -22,7 +22,6 @@
  *
  */
 
-#include "config.h"
 #include "core/html/HTMLLabelElement.h"
 
 #include "core/HTMLNames.h"
@@ -235,16 +234,6 @@ void HTMLLabelElement::updateLabel(TreeScope& scope, const AtomicString& oldForA
         scope.addLabel(newForAttributeValue, this);
 }
 
-void HTMLLabelElement::attributeWillChange(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& newValue)
-{
-    if (name == HTMLNames::forAttr) {
-        TreeScope& scope = treeScope();
-        if (scope.shouldCacheLabelsByForAttribute())
-            updateLabel(scope, oldValue, newValue);
-    }
-    HTMLElement::attributeWillChange(name, oldValue, newValue);
-}
-
 Node::InsertionNotificationRequest HTMLLabelElement::insertedInto(ContainerNode* insertionPoint)
 {
     InsertionNotificationRequest result = HTMLElement::insertedInto(insertionPoint);
@@ -280,13 +269,18 @@ DEFINE_TRACE(HTMLLabelElement)
     FormAssociatedElement::trace(visitor);
 }
 
-void HTMLLabelElement::parseAttribute(const QualifiedName& attributeName, const AtomicString& attributeValue)
+void HTMLLabelElement::parseAttribute(const QualifiedName& attributeName, const AtomicString& oldValue, const AtomicString& attributeValue)
 {
     if (attributeName == formAttr) {
         formAttributeChanged();
         UseCounter::count(document(), UseCounter::HTMLLabelElementFormContentAttribute);
     } else {
-        HTMLElement::parseAttribute(attributeName, attributeValue);
+        if (attributeName == forAttr) {
+            TreeScope& scope = treeScope();
+            if (scope.shouldCacheLabelsByForAttribute())
+                updateLabel(scope, oldValue, attributeValue);
+        }
+        HTMLElement::parseAttribute(attributeName, oldValue, attributeValue);
     }
 }
 

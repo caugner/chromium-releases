@@ -5,6 +5,7 @@
 #ifndef CC_OUTPUT_OVERLAY_STRATEGY_SANDWICH_H_
 #define CC_OUTPUT_OVERLAY_STRATEGY_SANDWICH_H_
 
+#include "base/macros.h"
 #include "cc/output/overlay_processor.h"
 
 namespace cc {
@@ -23,8 +24,7 @@ class CC_EXPORT OverlayStrategySandwich : public OverlayProcessor::Strategy {
 
   bool Attempt(ResourceProvider* resource_provider,
                RenderPassList* render_passes,
-               OverlayCandidateList* candidate_list,
-               gfx::Rect* damage_rect) override;
+               OverlayCandidateList* candidate_list) override;
 
  private:
   QuadList::Iterator TryOverlay(RenderPass* render_pass,

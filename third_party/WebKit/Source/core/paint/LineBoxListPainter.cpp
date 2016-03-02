@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/paint/LineBoxListPainter.h"
 
 #include "core/layout/LayoutBoxModelObject.h"
@@ -30,7 +29,7 @@ static void addPDFURLRectsForInlineChildrenRecursively(const LayoutObject& layou
 
 void LineBoxListPainter::paint(const LayoutBoxModelObject& layoutObject, const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
 {
-    ASSERT(paintInfo.phase != PaintPhaseOutline && paintInfo.phase != PaintPhaseSelfOutline && paintInfo.phase != PaintPhaseChildOutlines);
+    ASSERT(!shouldPaintSelfOutline(paintInfo.phase) && !shouldPaintDescendantOutlines(paintInfo.phase));
 
     // Only paint during the foreground/selection phases.
     if (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection && paintInfo.phase != PaintPhaseTextClip && paintInfo.phase != PaintPhaseMask)
@@ -78,7 +77,7 @@ static void invalidateLineBoxPaintOffsetsInternal(PaintController& paintControll
 
 void LineBoxListPainter::invalidateLineBoxPaintOffsets(const PaintInfo& paintInfo) const
 {
-    PaintController& paintController = paintInfo.context->paintController();
+    PaintController& paintController = paintInfo.context.paintController();
     for (InlineFlowBox* curr = m_lineBoxList.firstLineBox(); curr; curr = curr->nextLineBox())
         invalidateLineBoxPaintOffsetsInternal(paintController, curr);
 }

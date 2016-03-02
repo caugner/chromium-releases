@@ -5,9 +5,11 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_FIELD_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_FIELD_H_
 
+#include <stddef.h>
+
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -87,8 +89,8 @@ class AutofillField : public FormFieldData {
                             FormFieldData* field_data);
 
   // Returns the phone number value for the given |field|. The returned value
-  // might be |number|, or could possibly be a prefix or suffix of |number|
-  // if that's appropriate for the field.
+  // might be |number|, or could possibly be a meaningful subset |number|, if
+  // that's appropriate for the field.
   static base::string16 GetPhoneNumberValue(const AutofillField& field,
                                             const base::string16& number,
                                             const FormFieldData& field_data);

@@ -13,6 +13,7 @@ goog.provide('cursors.Range');
 goog.provide('cursors.Unit');
 
 goog.require('AutomationUtil');
+goog.require('constants');
 
 /**
  * The special index that represents a cursor pointing to a node without
@@ -55,9 +56,9 @@ cursors.Movement = {
 
 goog.scope(function() {
 var AutomationNode = chrome.automation.AutomationNode;
-var Dir = AutomationUtil.Dir;
+var Dir = constants.Dir;
 var Movement = cursors.Movement;
-var Role = chrome.automation.RoleType;
+var RoleType = chrome.automation.RoleType;
 var Unit = cursors.Unit;
 
 /**
@@ -112,16 +113,13 @@ cursors.Cursor.prototype = {
   /**
    * Gets the accessible text of the node associated with this cursor.
    *
-   * Note that only one of |name| or |value| attribute is ever nonempty on an
-   * automation node. If either contains whitespace, we still treat it as we do
-   * for a nonempty string.
    * @param {!AutomationNode=} opt_node Use this node rather than this cursor's
    * node.
    * @return {string}
    */
   getText: function(opt_node) {
     var node = opt_node || this.node_;
-    return node.name || node.value || '';
+    return node.name || '';
   },
 
   /**
@@ -159,7 +157,7 @@ cursors.Cursor.prototype = {
       case Unit.WORD:
         switch (movement) {
           case Movement.BOUND:
-            if (newNode.role == Role.inlineTextBox) {
+            if (newNode.role == RoleType.inlineTextBox) {
               var start, end;
               for (var i = 0; i < newNode.wordStarts.length; i++) {
                 if (newIndex >= newNode.wordStarts[i] &&
@@ -176,7 +174,7 @@ cursors.Cursor.prototype = {
             }
             break;
           case Movement.DIRECTIONAL:
-            if (newNode.role == Role.inlineTextBox) {
+            if (newNode.role == RoleType.inlineTextBox) {
               var start, end;
               for (var i = 0; i < newNode.wordStarts.length; i++) {
                 if (newIndex >= newNode.wordStarts[i] &&
@@ -199,7 +197,7 @@ cursors.Cursor.prototype = {
                   if (newNode) {
                     newIndex = 0;
                     if (dir == Dir.BACKWARD &&
-                        newNode.role == Role.inlineTextBox) {
+                        newNode.role == RoleType.inlineTextBox) {
                       var starts = newNode.wordStarts;
                       newIndex = starts[starts.length - 1] || 0;
                     } else {
@@ -221,7 +219,7 @@ cursors.Cursor.prototype = {
             break;
           case Movement.DIRECTIONAL:
             var pred = unit == Unit.NODE ?
-                AutomationPredicate.leaf : AutomationPredicate.leafDomNode;
+                AutomationPredicate.leaf : AutomationPredicate.element;
             newNode = AutomationUtil.findNextNode(
                 newNode, dir, pred) || this.node_;
             newIndex = cursors.NODE_INDEX;
@@ -435,6 +433,15 @@ cursors.Range.prototype = {
         break;
     }
     return new cursors.Range(newStart, newEnd);
+  },
+
+  /**
+   * Returns true if this range has either cursor end on web content.
+   * @return {boolean}
+  */
+  isWebRange: function() {
+    return this.start.node.root.role != RoleType.desktop ||
+        this.end.node.root.role != RoleType.desktop;
   }
 };
 

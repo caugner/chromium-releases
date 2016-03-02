@@ -8,7 +8,7 @@
 #ifndef CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
 #define CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
 
-#include "base/basictypes.h"
+#include <stddef.h>
 
 namespace installer {
 
@@ -128,8 +128,8 @@ enum InstallerStage {
 
 // When we start reporting the numerical values from the enum, the order
 // above MUST be preserved.
-COMPILE_ASSERT(UNINSTALLING_CHROME_FRAME == 20,
-               never_ever_ever_change_InstallerStage_values_bang);
+static_assert(UNINSTALLING_CHROME_FRAME == 20,
+              "Never ever ever change InstallerStage values!");
 
 namespace switches {
 
@@ -204,7 +204,6 @@ extern const wchar_t kChromeNewExe[];
 extern const wchar_t kChromeOldExe[];
 extern const wchar_t kCmdOnOsUpgrade[];
 extern const wchar_t kCmdQuickEnableCf[];
-extern const wchar_t kDelegateExecuteExe[];
 extern const wchar_t kEULASentinelFile[];
 extern const wchar_t kGoogleChromeInstallSubDir1[];
 extern const wchar_t kGoogleChromeInstallSubDir2[];

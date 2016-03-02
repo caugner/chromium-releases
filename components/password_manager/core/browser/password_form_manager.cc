@@ -4,13 +4,17 @@
 
 #include "components/password_manager/core/browser/password_form_manager.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <map>
 #include <set>
+#include <utility>
 
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/validation.h"
@@ -18,10 +22,12 @@
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
+#include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/statistics_table.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -52,7 +58,7 @@ bool DoesUsenameAndPasswordMatchCredentials(
     const base::string16& typed_username,
     const base::string16& typed_password,
     const autofill::PasswordFormMap& credentials) {
-  for (auto match : credentials) {
+  for (const auto& match : credentials) {
     if (match.second->username_value == typed_username &&
         match.second->password_value == typed_password)
       return true;
@@ -103,6 +109,7 @@ PasswordFormManager::PasswordFormManager(
       is_new_login_(true),
       has_generated_password_(false),
       password_overridden_(false),
+      retry_password_form_password_update_(false),
       generation_available_(false),
       password_manager_(password_manager),
       preferred_match_(nullptr),
@@ -257,7 +264,7 @@ void PasswordFormManager::ProvisionallySave(
     mutable_provisionally_saved_form->username_element.clear();
     is_possible_change_password_form_without_username_ = true;
   }
-  provisionally_saved_form_ = mutable_provisionally_saved_form.Pass();
+  provisionally_saved_form_ = std::move(mutable_provisionally_saved_form);
   other_possible_username_action_ = action;
 
   if (HasCompletedMatching())
@@ -312,8 +319,9 @@ void PasswordFormManager::FetchDataFromPasswordStore(
   }
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_FETCH_LOGINS_METHOD);
     logger->LogNumber(Logger::STRING_FORM_MANAGER_STATE, state_);
   }
@@ -383,8 +391,9 @@ void PasswordFormManager::OnRequestDone(
   const size_t logins_result_size = logins_result.size();
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_ON_REQUEST_DONE_METHOD);
   }
 
@@ -396,7 +405,7 @@ void PasswordFormManager::OnRequestDone(
         logins_result.end());
   }
   logins_result =
-      client_->GetStoreResultFilter()->FilterResults(logins_result.Pass());
+      client_->GetStoreResultFilter()->FilterResults(std::move(logins_result));
 
   // Deal with blacklisted forms.
   auto begin_blacklisted = std::partition(
@@ -467,9 +476,9 @@ void PasswordFormManager::OnRequestDone(
       is_credential_protected |= IsValidAndroidFacetURI(login->signon_realm);
 
       if (is_credential_protected)
-        protected_credentials.push_back(login.Pass());
+        protected_credentials.push_back(std::move(login));
       else
-        not_best_matches_.push_back(login.Pass());
+        not_best_matches_.push_back(std::move(login));
       continue;
     }
 
@@ -480,9 +489,9 @@ void PasswordFormManager::OnRequestDone(
     if (best_match_username == best_matches_.end()) {
       if (login->preferred)
         preferred_match_ = login.get();
-      best_matches_.insert(username, login.Pass());
+      best_matches_.insert(std::make_pair(username, std::move(login)));
     } else {
-      not_best_matches_.push_back(login.Pass());
+      not_best_matches_.push_back(std::move(login));
     }
   }
 
@@ -495,9 +504,9 @@ void PasswordFormManager::OnRequestDone(
     *it = nullptr;
     const base::string16& username = protege->username_value;
     if (best_matches_.find(username) == best_matches_.end())
-      best_matches_.insert(username, protege.Pass());
+      best_matches_.insert(std::make_pair(username, std::move(protege)));
     else
-      not_best_matches_.push_back(protege.Pass());
+      not_best_matches_.push_back(std::move(protege));
   }
 
   UMA_HISTOGRAM_COUNTS("PasswordManager.NumPasswordsNotShown",
@@ -509,7 +518,7 @@ void PasswordFormManager::OnRequestDone(
     // just pick the first one and whichever the user selects for submit will
     // be saved as preferred.
     if (!preferred_match_)
-      preferred_match_ = best_matches_.begin()->second;
+      preferred_match_ = best_matches_.begin()->second.get();
   }
 }
 
@@ -586,14 +595,15 @@ void PasswordFormManager::OnGetPasswordStoreResults(
   }
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_ON_GET_STORE_RESULTS_METHOD);
     logger->LogNumber(Logger::STRING_NUMBER_RESULTS, results.size());
   }
 
   if (!results.empty())
-    OnRequestDone(results.Pass());
+    OnRequestDone(std::move(results));
   state_ = POST_MATCHING_PHASE;
 
   // If password store was slow and provisionally saved form is already here
@@ -610,11 +620,11 @@ void PasswordFormManager::OnGetPasswordStoreResults(
 }
 
 void PasswordFormManager::OnGetSiteStatistics(
-    ScopedVector<InteractionsStats> stats) {
+    scoped_ptr<std::vector<scoped_ptr<InteractionsStats>>> stats) {
   // On Windows the password request may be resolved after the statistics due to
   // importing from IE.
   DCHECK(state_ == MATCHING_PHASE || state_ == POST_MATCHING_PHASE) << state_;
-  interactions_stats_.swap(stats);
+  interactions_stats_.swap(*stats);
 }
 
 void PasswordFormManager::SaveAsNewLogin() {
@@ -886,7 +896,7 @@ bool PasswordFormManager::UploadPasswordForm(
 
   bool success = autofill_manager->download_manager()->StartUploadRequest(
       form_structure, false /* was_autofilled */, available_field_types,
-      login_form_signature);
+      login_form_signature, true /* observed_submission */);
 
   UMA_HISTOGRAM_BOOLEAN("PasswordGeneration.UploadStarted", success);
   return success;
@@ -964,7 +974,7 @@ bool PasswordFormManager::UploadChangePasswordForm(
 
   return autofill_manager->download_manager()->StartUploadRequest(
       form_structure, false /* was_autofilled */, available_field_types,
-      login_form_signature);
+      login_form_signature, true /* observed_submission */);
 }
 
 void PasswordFormManager::CreatePendingCredentials() {
@@ -975,11 +985,11 @@ void PasswordFormManager::CreatePendingCredentials() {
   // autofilled ones, as they may have changed if the user experienced a login
   // failure.
   // Look for these credentials in the list containing auto-fill entries.
-  PasswordFormMap::const_iterator it =
-      best_matches_.find(provisionally_saved_form_->username_value);
-  if (it != best_matches_.end()) {
+  PasswordForm* saved_form =
+      FindBestSavedMatch(provisionally_saved_form_.get());
+  if (saved_form != nullptr) {
     // The user signed in with a login we autofilled.
-    pending_credentials_ = *it->second;
+    pending_credentials_ = *saved_form;
     password_overridden_ =
         pending_credentials_.password_value != password_to_save;
     if (IsPendingCredentialsPublicSuffixMatch()) {
@@ -1052,41 +1062,31 @@ void PasswordFormManager::CreatePendingCredentials() {
     selected_username_ = provisionally_saved_form_->username_value;
     is_new_login_ = false;
   } else if (client_->IsUpdatePasswordUIEnabled() && !best_matches_.empty() &&
-             provisionally_saved_form_
-                 ->IsPossibleChangePasswordFormWithoutUsername()) {
+             (provisionally_saved_form_
+                  ->IsPossibleChangePasswordFormWithoutUsername() ||
+              provisionally_saved_form_->username_element.empty())) {
     PasswordForm* best_update_match = FindBestMatchForUpdatePassword(
         provisionally_saved_form_->password_value);
 
+    retry_password_form_password_update_ =
+        provisionally_saved_form_->username_element.empty() &&
+        provisionally_saved_form_->new_password_element.empty();
+
+    is_new_login_ = false;
     if (best_update_match)
       pending_credentials_ = *best_update_match;
-    else
+    else if (has_generated_password_) {
+      // If a password was generated and we didn't find match we have to save it
+      // in separate entry since we have to store it but we don't know where.
+      CreatePendingCredentialsForNewCredentials();
+      is_new_login_ = true;
+    } else {
+      // We don't care about |pending_credentials_| if we didn't find the best
+      // match, since the user will select the correct one.
       pending_credentials_.origin = provisionally_saved_form_->origin;
-    is_new_login_ = false;
-    // We don't care about |pending_credentials_| if we didn't find the best
-    // match, since the user will select the correct one.
-  } else {
-    // User typed in a new, unknown username.
-    user_action_ = kUserActionOverrideUsernameAndPassword;
-    pending_credentials_ = observed_form_;
-    if (provisionally_saved_form_->was_parsed_using_autofill_predictions)
-      pending_credentials_.username_element =
-          provisionally_saved_form_->username_element;
-    pending_credentials_.username_value =
-        provisionally_saved_form_->username_value;
-    pending_credentials_.other_possible_usernames =
-        provisionally_saved_form_->other_possible_usernames;
-
-    // The password value will be filled in later, remove any garbage for now.
-    pending_credentials_.password_value.clear();
-    pending_credentials_.new_password_value.clear();
-
-    // If this was a sign-up or change password form, the names of the elements
-    // are likely different than those on a login form, so do not bother saving
-    // them. We will fill them with meaningful values in UpdateLogin() when the
-    // user goes onto a real login form for the first time.
-    if (!provisionally_saved_form_->new_password_element.empty()) {
-      pending_credentials_.password_element.clear();
     }
+  } else {
+    CreatePendingCredentialsForNewCredentials();
   }
 
   if (!IsValidAndroidFacetURI(pending_credentials_.signon_realm)) {
@@ -1215,7 +1215,7 @@ void PasswordFormManager::DeleteEmptyUsernameCredentials() {
     return;
   }
   for (auto iter = best_matches_.begin(); iter != best_matches_.end(); ++iter) {
-    PasswordForm* form = iter->second;
+    PasswordForm* form = iter->second.get();
     if (!form->is_public_suffix_match && form->username_value.empty() &&
         form->password_value == pending_credentials_.password_value)
       password_store->RemoveLogin(*form);
@@ -1224,27 +1224,59 @@ void PasswordFormManager::DeleteEmptyUsernameCredentials() {
 
 PasswordForm* PasswordFormManager::FindBestMatchForUpdatePassword(
     const base::string16& password) const {
-  if (best_matches_.size() == 1) {
-    // In case when the user has only one credential, consider it the same as
-    // is being saved.
-    return best_matches_.begin()->second;
+  if (best_matches_.size() == 1 && !has_generated_password_) {
+    // In case when the user has only one credential and the current password is
+    // not generated, consider it the same as is being saved.
+    return best_matches_.begin()->second.get();
   }
   if (password.empty())
     return nullptr;
 
-  PasswordFormMap::const_iterator best_password_match_it = best_matches_.end();
   for (auto it = best_matches_.begin(); it != best_matches_.end(); ++it) {
-    if (it->second->password_value == password) {
-      if (best_password_match_it != best_matches_.end()) {
-        // Found a second credential with the same password, do nothing.
-        return nullptr;
-      }
-      best_password_match_it = it;
-    }
+    if (it->second->password_value == password)
+      return it->second.get();
   }
-  return best_password_match_it == best_matches_.end()
-             ? nullptr
-             : best_password_match_it->second;
+  return nullptr;
+}
+
+PasswordForm* PasswordFormManager::FindBestSavedMatch(
+    const PasswordForm* form) const {
+  PasswordFormMap::const_iterator it =
+      best_matches_.find(provisionally_saved_form_->username_value);
+  if (it != best_matches_.end())
+    return it->second.get();
+  if (!form->username_element.empty() || !form->new_password_element.empty())
+    return nullptr;
+  for (const auto& stored_match : best_matches_) {
+    if (stored_match.second->password_value == form->password_value)
+      return stored_match.second.get();
+  }
+  return nullptr;
+}
+
+void PasswordFormManager::CreatePendingCredentialsForNewCredentials() {
+  // User typed in a new, unknown username.
+  user_action_ = kUserActionOverrideUsernameAndPassword;
+  pending_credentials_ = observed_form_;
+  if (provisionally_saved_form_->was_parsed_using_autofill_predictions)
+    pending_credentials_.username_element =
+        provisionally_saved_form_->username_element;
+  pending_credentials_.username_value =
+      provisionally_saved_form_->username_value;
+  pending_credentials_.other_possible_usernames =
+      provisionally_saved_form_->other_possible_usernames;
+
+  // The password value will be filled in later, remove any garbage for now.
+  pending_credentials_.password_value.clear();
+  pending_credentials_.new_password_value.clear();
+
+  // If this was a sign-up or change password form, the names of the elements
+  // are likely different than those on a login form, so do not bother saving
+  // them. We will fill them with meaningful values in UpdateLogin() when the
+  // user goes onto a real login form for the first time.
+  if (!provisionally_saved_form_->new_password_element.empty()) {
+    pending_credentials_.password_element.clear();
+  }
 }
 
 void PasswordFormManager::OnNopeUpdateClicked() {
@@ -1307,7 +1339,7 @@ void PasswordFormManager::WipeStoreCopyIfOutdated() {
       continue;
     }
     password_store->RemoveLogin(*credential_to_delete->second);
-    if (credential_to_delete->second == preferred_match_)
+    if (credential_to_delete->second.get() == preferred_match_)
       preferred_match_ = nullptr;
     best_matches_.erase(credential_to_delete);
   }

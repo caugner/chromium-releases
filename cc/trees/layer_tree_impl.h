@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "base/containers/hash_tables.h"
+#include "base/macros.h"
 #include "base/values.h"
-#include "cc/base/scoped_ptr_vector.h"
 #include "cc/base/synced_property.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/layers/layer_impl.h"
@@ -58,6 +58,9 @@ typedef SyncedProperty<AdditionGroup<gfx::Vector2dF>> SyncedElasticOverscroll;
 
 class CC_EXPORT LayerTreeImpl {
  public:
+  // This is the number of times a fixed point has to be hit contiuously by a
+  // layer to consider it as jittering.
+  const int kFixedPointHitsThreshold = 3;
   static scoped_ptr<LayerTreeImpl> create(
       LayerTreeHostImpl* layer_tree_host_impl,
       scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor,
@@ -95,7 +98,6 @@ class CC_EXPORT LayerTreeImpl {
   bool PinchGestureActive() const;
   BeginFrameArgs CurrentBeginFrameArgs() const;
   base::TimeDelta CurrentBeginFrameInterval() const;
-  void SetNeedsCommit();
   gfx::Rect DeviceViewport() const;
   gfx::Size DrawViewportSize() const;
   const gfx::Rect ViewportRectForTilePriority() const;
@@ -136,9 +138,30 @@ class CC_EXPORT LayerTreeImpl {
 
   void PushPropertiesTo(LayerTreeImpl* tree_impl);
 
+  // TODO(thakis): Consider marking this CC_EXPORT once we understand
+  // http://crbug.com/575700 better.
+  struct ElementLayers {
+    // Transform and opacity mutations apply to this layer.
+    LayerImpl* main = nullptr;
+    // Scroll mutations apply to this layer.
+    LayerImpl* scroll = nullptr;
+  };
+
+  void AddToElementMap(LayerImpl* layer);
+  void RemoveFromElementMap(LayerImpl* layer);
+  ElementLayers GetMutableLayers(uint64_t element_id);
   int source_frame_number() const { return source_frame_number_; }
   void set_source_frame_number(int frame_number) {
     source_frame_number_ = frame_number;
+  }
+
+  bool is_first_frame_after_commit() const {
+    return source_frame_number_ != is_first_frame_after_commit_tracker_;
+  }
+
+  void set_is_first_frame_after_commit(bool is_first_frame_after_commit) {
+    is_first_frame_after_commit_tracker_ =
+        is_first_frame_after_commit ? -1 : source_frame_number_;
   }
 
   HeadsUpDisplayLayerImpl* hud_layer() { return hud_layer_; }
@@ -155,6 +178,7 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* InnerViewportContainerLayer() const;
   LayerImpl* OuterViewportContainerLayer() const;
   LayerImpl* CurrentlyScrollingLayer() const;
+  int LastScrolledLayerId() const;
   void SetCurrentlyScrollingLayer(LayerImpl* layer);
   void ClearCurrentlyScrollingLayer();
 
@@ -224,6 +248,7 @@ class CC_EXPORT LayerTreeImpl {
   // text may cause invalidations, so should only be done after a commit.
   bool UpdateDrawProperties(bool update_lcd_text);
   void BuildPropertyTreesForTesting();
+  void IncrementRenderSurfaceListIdForTesting();
 
   void set_needs_update_draw_properties() {
     needs_update_draw_properties_ = true;
@@ -306,7 +331,7 @@ class CC_EXPORT LayerTreeImpl {
   void QueuePinnedSwapPromise(scoped_ptr<SwapPromise> swap_promise);
 
   // Take the |new_swap_promise| and append it to |swap_promise_list_|.
-  void PassSwapPromises(ScopedPtrVector<SwapPromise>* new_swap_promise);
+  void PassSwapPromises(std::vector<scoped_ptr<SwapPromise>>* new_swap_promise);
   void FinishSwapPromises(CompositorFrameMetadata* metadata);
   void BreakSwapPromises(SwapPromise::DidNotSwapReason reason);
 
@@ -333,6 +358,12 @@ class CC_EXPORT LayerTreeImpl {
   void AddLayerWithCopyOutputRequest(LayerImpl* layer);
   void RemoveLayerWithCopyOutputRequest(LayerImpl* layer);
   const std::vector<LayerImpl*>& LayersWithCopyOutputRequest() const;
+
+  void AddSurfaceLayer(LayerImpl* layer);
+  void RemoveSurfaceLayer(LayerImpl* layer);
+  const std::vector<LayerImpl*>& SurfaceLayers() const {
+    return surface_layers_;
+  }
 
   int current_render_surface_list_id() const {
     return render_surface_layer_list_id_;
@@ -391,6 +422,7 @@ class CC_EXPORT LayerTreeImpl {
   bool OpacityIsAnimatingOnImplOnly(const LayerImpl* layer) const;
   bool TransformIsAnimatingOnImplOnly(const LayerImpl* layer) const;
 
+  bool AnimationsPreserveAxisAlignment(const LayerImpl* layer) const;
   bool HasOnlyTranslationTransforms(const LayerImpl* layer) const;
 
   bool MaximumTargetScale(const LayerImpl* layer, float* max_scale) const;
@@ -425,6 +457,7 @@ class CC_EXPORT LayerTreeImpl {
   void PushTopControls(const float* top_controls_shown_ratio);
   LayerTreeHostImpl* layer_tree_host_impl_;
   int source_frame_number_;
+  int is_first_frame_after_commit_tracker_;
   scoped_ptr<LayerImpl> root_layer_;
   HeadsUpDisplayLayerImpl* hud_layer_;
   PropertyTrees property_trees_;
@@ -432,6 +465,7 @@ class CC_EXPORT LayerTreeImpl {
   bool has_transparent_background_;
 
   int currently_scrolling_layer_id_;
+  int last_scrolled_layer_id_;
   int overscroll_elasticity_layer_id_;
   int page_scale_layer_id_;
   int inner_viewport_scroll_layer_id_;
@@ -451,6 +485,8 @@ class CC_EXPORT LayerTreeImpl {
   typedef base::hash_map<int, LayerImpl*> LayerIdMap;
   LayerIdMap layer_id_map_;
 
+  base::hash_map<uint64_t, ElementLayers> element_layers_map_;
+
   // Maps from clip layer ids to scroll layer ids.  Note that this only includes
   // the subset of clip layers that act as scrolling containers.  (This is
   // derived from LayerImpl::scroll_clip_layer_ and exists to avoid O(n) walks.)
@@ -464,6 +500,7 @@ class CC_EXPORT LayerTreeImpl {
 
   std::vector<PictureLayerImpl*> picture_layers_;
   std::vector<LayerImpl*> layers_with_copy_output_request_;
+  std::vector<LayerImpl*> surface_layers_;
 
   // List of visible layers for the most recently prepared frame.
   LayerImplList render_surface_layer_list_;
@@ -482,8 +519,8 @@ class CC_EXPORT LayerTreeImpl {
 
   bool has_ever_been_drawn_;
 
-  ScopedPtrVector<SwapPromise> swap_promise_list_;
-  ScopedPtrVector<SwapPromise> pinned_swap_promise_list_;
+  std::vector<scoped_ptr<SwapPromise>> swap_promise_list_;
+  std::vector<scoped_ptr<SwapPromise>> pinned_swap_promise_list_;
 
   UIResourceRequestQueue ui_resource_request_queue_;
 

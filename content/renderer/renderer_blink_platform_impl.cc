@@ -4,6 +4,8 @@
 
 #include "content/renderer/renderer_blink_platform_impl.h"
 
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
@@ -58,6 +60,7 @@
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/gamepad_shared_memory_reader.h"
 #include "content/renderer/media/audio_decoder.h"
+#include "content/renderer/media/canvas_capture_handler.h"
 #include "content/renderer/media/media_recorder_handler.h"
 #include "content/renderer/media/renderer_webaudiodevice_impl.h"
 #include "content/renderer/media/renderer_webmidiaccessor_impl.h"
@@ -95,7 +98,6 @@
 
 #if defined(OS_ANDROID)
 #include "content/renderer/android/synchronous_compositor_factory.h"
-#include "content/renderer/media/android/audio_decoder_android.h"
 #include "gpu/blink/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #endif
 
@@ -138,6 +140,7 @@
 using blink::Platform;
 using blink::WebAudioDevice;
 using blink::WebBlobRegistry;
+using blink::WebCanvasCaptureHandler;
 using blink::WebDatabaseObserver;
 using blink::WebFileInfo;
 using blink::WebFileSystem;
@@ -148,10 +151,12 @@ using blink::WebMIDIAccessor;
 using blink::WebMediaRecorderHandler;
 using blink::WebMediaStreamCenter;
 using blink::WebMediaStreamCenterClient;
+using blink::WebMediaStreamTrack;
 using blink::WebMimeRegistry;
 using blink::WebRTCPeerConnectionHandler;
 using blink::WebRTCPeerConnectionHandlerClient;
 using blink::WebStorageNamespace;
+using blink::WebSize;
 using blink::WebString;
 using blink::WebURL;
 using blink::WebVector;
@@ -185,7 +190,6 @@ class RendererBlinkPlatformImpl::MimeRegistry
                                    const blink::WebString& codecs) override;
   blink::WebString mimeTypeForExtension(
       const blink::WebString& file_extension) override;
-  blink::WebString mimeTypeFromFile(const blink::WebString& file_path) override;
 };
 
 class RendererBlinkPlatformImpl::FileUtilities : public WebFileUtilitiesImpl {
@@ -208,7 +212,7 @@ class RendererBlinkPlatformImpl::SandboxSupport
 #if defined(OS_MACOSX)
   bool loadFont(NSFont* src_font,
                 CGFontRef* container,
-                uint32* font_id) override;
+                uint32_t* font_id) override;
 #elif defined(OS_POSIX)
   void getFallbackFontForCharacter(
       blink::WebUChar32 character,
@@ -298,7 +302,7 @@ blink::WebURLLoader* RendererBlinkPlatformImpl::createURLLoader() {
             ? loading_task_runner_ : base::ThreadTaskRunnerHandle::Get()));
   return new content::WebURLLoaderImpl(
       child_thread ? child_thread->resource_dispatcher() : NULL,
-      task_runner.Pass());
+      std::move(task_runner));
 }
 
 blink::WebThread* RendererBlinkPlatformImpl::currentThread() {
@@ -384,7 +388,7 @@ RendererBlinkPlatformImpl::prescientNetworking() {
 }
 
 void RendererBlinkPlatformImpl::cacheMetadata(const blink::WebURL& url,
-                                              int64 response_time,
+                                              int64_t response_time,
                                               const char* data,
                                               size_t size) {
   // Let the browser know we generated cacheable metadata for this resource. The
@@ -455,9 +459,6 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
     const WebString& codecs,
     const WebString& key_system) {
   const std::string mime_type_ascii = ToASCIIOrEmpty(mime_type);
-  // Not supporting the container is a flat-out no.
-  if (!media::IsSupportedMediaMimeType(mime_type_ascii))
-    return IsNotSupported;
 
   if (!key_system.isEmpty()) {
     // Check whether the key system is supported with the mime_type and codecs.
@@ -469,34 +470,21 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
     std::string key_system_ascii =
         media::GetUnprefixedKeySystemName(base::UTF16ToASCII(
             base::StringPiece16(key_system)));
-    std::vector<std::string> strict_codecs;
-    media::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, true);
+    std::vector<std::string> codec_vector;
+    media::ParseCodecString(ToASCIIOrEmpty(codecs), &codec_vector, true);
 
     if (!media::PrefixedIsSupportedKeySystemWithMediaMimeType(
-            mime_type_ascii, strict_codecs, key_system_ascii)) {
+            mime_type_ascii, codec_vector, key_system_ascii)) {
       return IsNotSupported;
     }
 
     // Continue processing the mime_type and codecs.
   }
 
-  // Check list of strict codecs to see if it is supported.
-  if (media::IsStrictMediaMimeType(mime_type_ascii)) {
-    // Check if the codecs are a perfect match.
-    std::vector<std::string> strict_codecs;
-    media::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, false);
-    return static_cast<WebMimeRegistry::SupportsType> (
-        media::IsSupportedStrictMediaMimeType(mime_type_ascii, strict_codecs));
-  }
-
-  // If we don't recognize the codec, it's possible we support it.
-  std::vector<std::string> parsed_codecs;
-  media::ParseCodecString(ToASCIIOrEmpty(codecs), &parsed_codecs, true);
-  if (!media::AreSupportedMediaCodecs(parsed_codecs))
-    return MayBeSupported;
-
-  // Otherwise we have a perfect match.
-  return IsSupported;
+  std::vector<std::string> codec_vector;
+  media::ParseCodecString(ToASCIIOrEmpty(codecs), &codec_vector, false);
+  return static_cast<WebMimeRegistry::SupportsType>(
+      media::IsSupportedMediaFormat(mime_type_ascii, codec_vector));
 }
 
 bool RendererBlinkPlatformImpl::MimeRegistry::supportsMediaSourceMIMEType(
@@ -522,20 +510,6 @@ WebString RendererBlinkPlatformImpl::MimeRegistry::mimeTypeForExtension(
   RenderThread::Get()->Send(
       new MimeRegistryMsg_GetMimeTypeFromExtension(
           base::FilePath::FromUTF16Unsafe(file_extension).value(), &mime_type));
-  return base::ASCIIToUTF16(mime_type);
-}
-
-WebString RendererBlinkPlatformImpl::MimeRegistry::mimeTypeFromFile(
-    const WebString& file_path) {
-  if (IsPluginProcess())
-    return SimpleWebMimeRegistryImpl::mimeTypeFromFile(file_path);
-
-  // The sandbox restricts our access to the registry, so we need to proxy
-  // these calls over to the browser process.
-  std::string mime_type;
-  RenderThread::Get()->Send(new MimeRegistryMsg_GetMimeTypeFromFile(
-      base::FilePath::FromUTF16Unsafe(file_path),
-      &mime_type));
   return base::ASCIIToUTF16(mime_type);
 }
 
@@ -571,8 +545,8 @@ bool RendererBlinkPlatformImpl::FileUtilities::SendSyncMessageFromAnyThread(
 
 bool RendererBlinkPlatformImpl::SandboxSupport::loadFont(NSFont* src_font,
                                                          CGFontRef* out,
-                                                         uint32* font_id) {
-  uint32 font_data_size;
+                                                         uint32_t* font_id) {
+  uint32_t font_data_size;
   FontDescriptor src_font_descriptor(src_font);
   base::SharedMemoryHandle font_data;
   if (!RenderThread::Get()->Send(new RenderProcessHostMsg_LoadFont(
@@ -778,17 +752,6 @@ WebAudioDevice* RendererBlinkPlatformImpl::createAudioDevice(
   return new RendererWebAudioDeviceImpl(params, callback, session_id);
 }
 
-#if defined(OS_ANDROID)
-bool RendererBlinkPlatformImpl::loadAudioResource(
-    blink::WebAudioBus* destination_bus,
-    const char* audio_file_data,
-    size_t data_size) {
-  return DecodeAudioFileData(destination_bus,
-                             audio_file_data,
-                             data_size,
-                             thread_safe_sender_);
-}
-#else
 bool RendererBlinkPlatformImpl::loadAudioResource(
     blink::WebAudioBus* destination_bus,
     const char* audio_file_data,
@@ -796,7 +759,6 @@ bool RendererBlinkPlatformImpl::loadAudioResource(
   return DecodeAudioFileData(
       destination_bus, audio_file_data, data_size);
 }
-#endif  // defined(OS_ANDROID)
 
 //------------------------------------------------------------------------------
 
@@ -847,13 +809,12 @@ blink::WebPublicSuffixList* RendererBlinkPlatformImpl::publicSuffixList() {
 blink::WebString RendererBlinkPlatformImpl::signedPublicKeyAndChallengeString(
     unsigned key_size_index,
     const blink::WebString& challenge,
-    const blink::WebURL& url) {
+    const blink::WebURL& url,
+    const blink::WebURL& top_origin) {
   std::string signed_public_key;
   RenderThread::Get()->Send(new RenderProcessHostMsg_Keygen(
-      static_cast<uint32>(key_size_index),
-      challenge.utf8(),
-      GURL(url),
-      &signed_public_key));
+      static_cast<uint32_t>(key_size_index), challenge.utf8(), GURL(url),
+      GURL(top_origin), &signed_public_key));
   return WebString::fromUTF8(signed_public_key);
 }
 
@@ -905,7 +866,7 @@ void RendererBlinkPlatformImpl::sampleGamepads(WebGamepads& gamepads) {
 
 WebMediaRecorderHandler*
 RendererBlinkPlatformImpl::createMediaRecorderHandler() {
-#if !defined(OS_ANDROID) && defined(ENABLE_WEBRTC)
+#if defined(ENABLE_WEBRTC)
   return new content::MediaRecorderHandler();
 #else
   return nullptr;
@@ -968,20 +929,23 @@ bool RendererBlinkPlatformImpl::SetSandboxEnabledForTesting(bool enable) {
 
 //------------------------------------------------------------------------------
 
-blink::WebSpeechSynthesizer* RendererBlinkPlatformImpl::createSpeechSynthesizer(
-    blink::WebSpeechSynthesizerClient* client) {
-  return GetContentClient()->renderer()->OverrideSpeechSynthesizer(client);
+WebCanvasCaptureHandler* RendererBlinkPlatformImpl::createCanvasCaptureHandler(
+    const WebSize& size,
+    double frame_rate,
+    WebMediaStreamTrack* track) {
+#if defined(ENABLE_WEBRTC)
+  return CanvasCaptureHandler::CreateCanvasCaptureHandler(
+      size, frame_rate, RenderThread::Get()->GetIOMessageLoopProxy(), track);
+#else
+  return nullptr;
+#endif  // defined(ENABLE_WEBRTC)
 }
 
 //------------------------------------------------------------------------------
 
-bool RendererBlinkPlatformImpl::processMemorySizesInBytes(
-    size_t* private_bytes,
-    size_t* shared_bytes) {
-  content::RenderThread::Get()->Send(
-      new RenderProcessHostMsg_GetProcessMemorySizes(
-          private_bytes, shared_bytes));
-  return true;
+blink::WebSpeechSynthesizer* RendererBlinkPlatformImpl::createSpeechSynthesizer(
+    blink::WebSpeechSynthesizerClient* client) {
+  return GetContentClient()->renderer()->OverrideSpeechSynthesizer(client);
 }
 
 //------------------------------------------------------------------------------
@@ -1143,7 +1107,7 @@ void RendererBlinkPlatformImpl::SetMockDeviceOrientationDataForTesting(
 
 void RendererBlinkPlatformImpl::vibrate(unsigned int milliseconds) {
   GetConnectedVibrationManagerService()->Vibrate(
-      base::checked_cast<int64>(milliseconds));
+      base::checked_cast<int64_t>(milliseconds));
   vibration_manager_.reset();
 }
 
@@ -1228,7 +1192,7 @@ void RendererBlinkPlatformImpl::startListening(
     observer = CreatePlatformEventObserverFromType(type);
     if (!observer)
       return;
-    platform_event_observers_.AddWithID(observer, static_cast<int32>(type));
+    platform_event_observers_.AddWithID(observer, static_cast<int32_t>(type));
   }
   observer->Start(listener);
 

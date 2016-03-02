@@ -26,12 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
-#if ENABLE(WEB_AUDIO)
-
 #include "platform/audio/HRTFDatabaseLoader.h"
-
 #include "platform/Task.h"
 #include "platform/TaskSynchronizer.h"
 #include "platform/ThreadSafeFunctional.h"
@@ -131,4 +126,3 @@ void HRTFDatabaseLoader::waitForLoaderThreadCompletion()
 
 } // namespace blink
 
-#endif // ENABLE(WEB_AUDIO)

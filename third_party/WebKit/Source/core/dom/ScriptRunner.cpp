@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/dom/ScriptRunner.h"
 
 #include "core/dom/Document.h"
@@ -43,7 +42,6 @@ ScriptRunner::ScriptRunner(Document* document)
     , m_numberOfInOrderScriptsWithPendingNotification(0)
     , m_isSuspended(false)
 #if !ENABLE(OILPAN)
-    , m_isDisposed(false)
     , m_weakPointerFactoryForTasks(this)
 #endif
 {
@@ -99,7 +97,6 @@ void ScriptRunner::dispose()
     m_pendingAsyncScripts.clear();
     m_inOrderScriptsToExecuteSoon.clear();
     m_asyncScriptsToExecuteSoon.clear();
-    m_isDisposed = true;
     m_numberOfInOrderScriptsWithPendingNotification = 0;
 }
 #endif
@@ -207,24 +204,14 @@ void ScriptRunner::notifyScriptLoadError(ScriptLoader* scriptLoader, ExecutionTy
         // where the ScriptLoader is associated with the wrong ScriptRunner
         // (otherwise we'd cause a use-after-free in ~ScriptRunner when it tries
         // to detach).
-        bool foundLoader = m_pendingAsyncScripts.contains(scriptLoader);
-#if !ENABLE(OILPAN)
-        // If the ScriptRunner has been disposed of, no pending scripts remain.
-        foundLoader = foundLoader || m_isDisposed;
-#endif
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(foundLoader);
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(m_pendingAsyncScripts.contains(scriptLoader));
         m_pendingAsyncScripts.remove(scriptLoader);
         break;
     }
     case IN_ORDER_EXECUTION:
-        bool foundLoader = removePendingInOrderScript(scriptLoader);
-#if !ENABLE(OILPAN)
-        foundLoader = foundLoader || m_isDisposed;
-#endif
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(foundLoader);
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(removePendingInOrderScript(scriptLoader));
         break;
     }
-    scriptLoader->detach();
     m_document->decrementLoadEventDelayCount();
 }
 

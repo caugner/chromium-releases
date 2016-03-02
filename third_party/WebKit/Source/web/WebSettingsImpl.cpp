@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/WebSettingsImpl.h"
 
 #include "core/frame/Settings.h"
@@ -185,9 +184,9 @@ void WebSettingsImpl::setInlineTextBoxAccessibilityEnabled(bool enabled)
     m_settings->setInlineTextBoxAccessibilityEnabled(enabled);
 }
 
-void WebSettingsImpl::setInvertViewportScrollOrder(bool enabled)
+void WebSettingsImpl::setInertVisualViewport(bool enabled)
 {
-    m_settings->setInvertViewportScrollOrder(enabled);
+    m_settings->setInertVisualViewport(enabled);
 }
 
 void WebSettingsImpl::setDeviceScaleAdjustment(float deviceScaleAdjustment)
@@ -434,6 +433,11 @@ void WebSettingsImpl::setDNSPrefetchingEnabled(bool enabled)
     m_settings->setDNSPrefetchingEnabled(enabled);
 }
 
+void WebSettingsImpl::setDataSaverEnabled(bool enabled)
+{
+    m_settings->setDataSaverEnabled(enabled);
+}
+
 void WebSettingsImpl::setLocalStorageEnabled(bool enabled)
 {
     m_settings->setLocalStorageEnabled(enabled);
@@ -567,11 +571,6 @@ void WebSettingsImpl::setMinimumAccelerated2dCanvasSize(int numPixels)
 void WebSettingsImpl::setHyperlinkAuditingEnabled(bool enabled)
 {
     m_settings->setHyperlinkAuditingEnabled(enabled);
-}
-
-void WebSettingsImpl::setAsynchronousSpellCheckingEnabled(bool enabled)
-{
-    m_settings->setAsynchronousSpellCheckingEnabled(enabled);
 }
 
 void WebSettingsImpl::setAutoplayExperimentMode(const WebString& mode)

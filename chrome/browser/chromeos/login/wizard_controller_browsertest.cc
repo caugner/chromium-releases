@@ -4,9 +4,9 @@
 
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 
-#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_service_factory.h"
@@ -917,7 +917,7 @@ class WizardControllerBrokenLocalStateTest : public WizardControllerTest {
   void SetUpOnMainThread() override {
     base::PrefServiceFactory factory;
     factory.set_user_prefs(make_scoped_refptr(new PrefStoreStub()));
-    local_state_ = factory.Create(new PrefRegistrySimple()).Pass();
+    local_state_ = factory.Create(new PrefRegistrySimple());
     WizardController::set_local_state_for_testing(local_state_.get());
 
     WizardControllerTest::SetUpOnMainThread();
@@ -1231,7 +1231,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerOobeResumeTest,
 // TODO(dzhioev): Add tests for controller/host pairing flow.
 // http://crbug.com/375191
 
-static_assert(BaseScreenDelegate::EXIT_CODES_COUNT == 24,
+static_assert(BaseScreenDelegate::EXIT_CODES_COUNT == 23,
               "tests for new control flow are missing");
 
 }  // namespace chromeos

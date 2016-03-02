@@ -9,11 +9,11 @@ function test()
 
     for (var i = 0; i < uiSourceCodes.length; ++i) {
         var uiSourceCode = uiSourceCodes[i];
-        if (!/.php$/.test(uiSourceCode.originURL()))
+        if (!/.php$/.test(uiSourceCode.url()))
             continue;
         if (uiSourceCode.project().type() !== WebInspector.projectTypes.Network)
             continue;
-        InspectorTest.addResult("Highlight mimeType: " + WebInspector.SourcesView.uiSourceCodeHighlighterType(uiSourceCode));
+        InspectorTest.addResult("Highlight mimeType: " + WebInspector.NetworkProject.uiSourceCodeMimeType(uiSourceCode));
         InspectorTest.completeTest();
         return;
     }

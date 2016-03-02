@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/device_orientation/DeviceOrientationAbsoluteController.h"
 
 #include "core/dom/Document.h"
@@ -18,6 +17,9 @@ DeviceOrientationAbsoluteController::DeviceOrientationAbsoluteController(Documen
 
 DeviceOrientationAbsoluteController::~DeviceOrientationAbsoluteController()
 {
+#if !ENABLE(OILPAN)
+    stopUpdating();
+#endif
 }
 
 const char* DeviceOrientationAbsoluteController::supplementName()

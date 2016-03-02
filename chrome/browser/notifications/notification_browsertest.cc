@@ -9,12 +9,14 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/clock.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -392,7 +394,7 @@ void NotificationsTest::DropOriginPreference(const GURL& origin) {
 
 // Flaky on Windows, Mac, Linux: http://crbug.com/437414.
 IN_PROC_BROWSER_TEST_F(NotificationsTest, DISABLED_TestUserGestureInfobar) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURL(
       browser(),
@@ -413,7 +415,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, DISABLED_TestUserGestureInfobar) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateSimpleNotification) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Creates a simple notification.
   AllowAllOrigins();
@@ -435,7 +437,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateSimpleNotification) {
 IN_PROC_BROWSER_TEST_F(NotificationsTest, NotificationBlockerTest) {
   ToggledNotificationBlocker blocker;
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Creates a simple notification.
   AllowAllOrigins();
@@ -451,7 +453,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, NotificationBlockerTest) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseNotification) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Creates a notification and closes it.
   AllowAllOrigins();
@@ -471,7 +473,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseNotification) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCancelNotification) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Creates a notification and cancels it in the origin page.
   AllowAllOrigins();
@@ -487,7 +489,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCancelNotification) {
 
 // Requests notification privileges and verifies the prompt appears.
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestPermissionRequestUIAppears) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
   EXPECT_TRUE(RequestPermissionAndWait(browser()));
@@ -495,7 +497,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestPermissionRequestUIAppears) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowOnPermissionRequestUI) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Tries to create a notification & clicks 'allow' on the prompt.
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -510,7 +512,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowOnPermissionRequestUI) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyOnPermissionRequestUI) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test that no notification is created when Deny is chosen from prompt.
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -523,7 +525,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyOnPermissionRequestUI) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestClosePermissionRequestUI) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test that no notification is created when prompt is dismissed.
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -536,7 +538,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestClosePermissionRequestUI) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowNotificationsFromAllSites) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that all domains can be allowed to show notifications.
   SetDefaultContentSetting(CONTENT_SETTING_ALLOW);
@@ -549,7 +551,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowNotificationsFromAllSites) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyNotificationsFromAllSites) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that no domain can show notifications.
   SetDefaultContentSetting(CONTENT_SETTING_BLOCK);
@@ -562,7 +564,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyNotificationsFromAllSites) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyDomainAndAllowAll) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that denying a domain and allowing all shouldn't show
   // notifications from the denied domain.
@@ -578,7 +580,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyDomainAndAllowAll) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowDomainAndDenyAll) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that allowing a domain and denying all others should show
   // notifications from the allowed domain.
@@ -594,7 +596,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowDomainAndDenyAll) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyAndThenAllowDomain) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that denying and again allowing should show notifications.
   DenyOrigin(GetTestPageURL().GetOrigin());
@@ -614,7 +616,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyAndThenAllowDomain) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateDenyCloseNotifications) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify able to create, deny, and close the notification.
   AllowAllOrigins();
@@ -640,7 +642,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCreateDenyCloseNotifications) {
 IN_PROC_BROWSER_TEST_F(
     NotificationsTest,
     DISABLED_TestOriginPrefsNotSavedInIncognito) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Verify that allow/deny origin preferences are not saved in incognito.
   Browser* incognito = CreateIncognitoBrowser();
@@ -666,20 +668,8 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(0U, settings.size());
 }
 
-IN_PROC_BROWSER_TEST_F(NotificationsTest, TestIncognitoNotification) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
-
-  // Test notifications in incognito window.
-  Browser* browser = CreateIncognitoBrowser();
-  ui_test_utils::NavigateToURL(browser, GetTestPageURL());
-  browser->tab_strip_model()->ActivateTabAt(0, true);
-  ASSERT_TRUE(RequestAndAcceptPermission(browser));
-  CreateSimpleNotification(browser, true);
-  ASSERT_EQ(1, GetNotificationCount());
-}
-
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseTabWithPermissionRequestUI) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test that user can close tab when bubble present.
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -702,7 +692,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseTabWithPermissionRequestUI) {
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest,
                        MAYBE_TestCrashRendererNotificationRemain) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test crashing renderer does not close or crash notification.
   AllowAllOrigins();
@@ -720,7 +710,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationReplacement) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test that we can replace a notification using the replaceId.
   AllowAllOrigins();
@@ -746,7 +736,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationReplacement) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestLastUsage) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(browser()->profile());
@@ -781,7 +771,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestLastUsage) {
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest,
                        TestNotificationReplacementReappearance) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Test that we can replace a notification using the tag, and that it will
   // cause the notification to reappear as a popup again.
@@ -816,7 +806,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationValidIcon) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   AllowAllOrigins();
 
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -837,7 +827,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationValidIcon) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationInvalidIcon) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   AllowAllOrigins();
 
   ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
@@ -868,7 +858,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationInvalidIcon) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationDoubleClose) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   AllowAllOrigins();
 
   ui_test_utils::NavigateToURL(

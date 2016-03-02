@@ -3,21 +3,25 @@
  * found in the LICENSE file.
  *
  * Exported function:
- *  - assertAttributeInterpolation({property, [from], [to], [fromComposite], [toComposite], [underlying]}, [{at: fraction, is: value}])
+ *  - assertAttributeInterpolation({property, from, to, [fromComposite], [toComposite], [underlying]}, [{at: fraction, is: value}])
  *        Constructs a test case for each fraction that asserts the expected value
  *        equals the value produced by interpolation between from and to composited
  *        onto underlying by fromComposite and toComposite respectively using
  *        SMIL and Web Animations.
- *        If from or to are missing then a neutral keyframe will be used and the
- *        composite mode will be forced to be 'add'.
+ *        Set from/to to the exported neutralKeyframe object to specify neutral keyframes.
  *        SMIL will only be tested with equal fromComposite and toComposite values.
 */
 'use strict';
 (() => {
   var interpolationTests = [];
+  var neutralKeyframe = {};
 
   // Set to true to output rebaselined test expectations.
   var rebaselineTests = false;
+
+  function isNeutralKeyframe(keyframe) {
+    return keyframe === neutralKeyframe;
+  }
 
   function createElement(tagName, container) {
     var element = document.createElement(tagName);
@@ -114,10 +118,7 @@
   }
 
   function serializeSVGNumberList(numberList) {
-    var elements = [];
-    for (var index = 0; index < numberList.numberOfItems; ++index)
-      elements.push(numberList.getItem(index).value);
-    return String(elements);
+    return Array.from(numberList).map(number => number.value).join(', ');
   }
 
   function serializeSVGPointList(pointList) {
@@ -135,7 +136,7 @@
   }
 
   function serializeSVGRect(rect) {
-    return String([rect.x, rect.y, rect.width, rect.height]);
+    return [rect.x, rect.y, rect.width, rect.height].join(', ');
   }
 
   function serializeSVGTransformList(transformList) {
@@ -256,6 +257,9 @@
   {
     var animateElement;
     if (attributeName.toLowerCase().includes('transform')) {
+      if (isNeutralKeyframe(from) || isNeutralKeyframe(to)) {
+        return null;
+      }
       from = from.split(')');
       to = to.split(')');
       // Discard empty string at end.
@@ -311,32 +315,27 @@
           target.container.pauseAnimations();
           target.container.setCurrentTime(expectation.at);
         } else {
-          console.warn(`Unable to test SMIL from ${params.from} to ${params.to}`);
           target.container.remove();
           target.measure = function() {};
         }
         break;
       case 'Web Animations':
-        // Replace 'transform' with 'svgTransform', etc. This avoids collisions with CSS properties or the Web Animations API (offset).
-        var prefixedProperty = 'svg' + params.property[0].toUpperCase() + params.property.slice(1);
+        // Replace 'transform' with 'svg-transform', etc. This avoids collisions with CSS properties or the Web Animations API (offset).
+        var prefixedProperty = 'svg-' + params.property;
         var keyframes = [];
-        if ('from' in params) {
+        if (!isNeutralKeyframe(params.from)) {
           keyframes.push({
             offset: 0,
             [prefixedProperty]: params.from,
             composite: params.fromComposite,
           });
-        } else {
-          console.assert(params.fromComposite === 'add');
         }
-        if ('to' in params) {
+        if (!isNeutralKeyframe(params.to)) {
           keyframes.push({
             offset: 1,
             [prefixedProperty]: params.to,
             composite: params.toComposite,
           });
-        } else {
-          console.assert(params.toComposite === 'add');
         }
         target.animate(keyframes, {
           fill: 'forwards',
@@ -368,34 +367,50 @@
     return target;
   }
 
-  function reprKeyframe(x) {
-    return (typeof x === 'string') ? "'" + x + "'" : null;
-  }
-
   function createTestTargets(interpolationTests, container, rebaselineContainer) {
     var targets = [];
     for (var interpolationTest of interpolationTests) {
       var params = interpolationTest.params;
-      params.fromComposite = 'from' in params ? (params.fromComposite || 'replace') : 'add';
-      params.toComposite = 'to' in params ? (params.toComposite || 'replace') : 'add';
+      assert_true('property' in params);
+      assert_true('from' in params);
+      assert_true('to' in params);
+      params.fromComposite = isNeutralKeyframe(params.from) ? 'add' : (params.fromComposite || 'replace');
+      params.toComposite = isNeutralKeyframe(params.to) ? 'add' : (params.toComposite || 'replace');
       var underlyingText = params.underlying ? `with underlying [${params.underlying}] ` : '';
-      var fromText = 'from' in params ? `${params.fromComposite} [${params.from}]` : 'neutral';
-      var toText = 'to' in params ? `${params.toComposite} [${params.to}]` : 'neutral';
+      var fromText = isNeutralKeyframe(params.from) ? 'neutral' : `${params.fromComposite} [${params.from}]`;
+      var toText = isNeutralKeyframe(params.to) ? 'neutral' : `${params.toComposite} [${params.to}]`;
       var description = `Interpolate attribute <${params.property}> ${underlyingText}from ${fromText} to ${toText}`;
 
     if (rebaselineTests) {
         var rebaseline = createElement('pre', rebaselineContainer);
-        rebaseline.appendChild(document.createTextNode(`\
-assertAttributeInterpolation({
-  property: '${params.property}',
-  underlying: '${params.underlying}',
-  from: ${reprKeyframe(params.from)},
-  fromComposite: '${params.fromComposite}',
-  to: ${reprKeyframe(params.to)},
-  toComposite: '${params.toComposite}',
-}, [\n`));
-        var rebaselineExpectation;
-        rebaseline.appendChild(rebaselineExpectation = document.createTextNode(''));
+
+        var assertionCode =
+          `assertAttributeInterpolation({\n` +
+          `  property: '${params.property}',\n` +
+          `  underlying: '${params.underlying}',\n`;
+
+
+        if (isNeutralKeyframe(params.from)) {
+          assertionCode += `  from: neutralKeyframe,\n`;
+        } else {
+          assertionCode +=
+            `  from: '${params.from}',\n` +
+            `  fromComposite: '${params.fromComposite}',\n`;
+        }
+
+        if (isNeutralKeyframe(params.to)) {
+          assertionCode += `  to: neutralKeyframe,\n`;
+        } else {
+          assertionCode +=
+            `  to: '${params.to}',\n` +
+            `  toComposite: '${params.toComposite}',\n`;
+        }
+
+        assertionCode += `}, [\n`;
+
+        rebaseline.appendChild(document.createTextNode(assertionCode));
+        var rebaselineExpectation = document.createTextNode('');
+        rebaseline.appendChild(rebaselineExpectation);
         rebaseline.appendChild(document.createTextNode(']);\n\n'));
       }
 
@@ -460,4 +475,5 @@ assertAttributeInterpolation({
   });
 
   window.assertAttributeInterpolation = assertAttributeInterpolation;
+  window.neutralKeyframe = neutralKeyframe;
 })();

@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
+#include <utility>
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
@@ -13,6 +15,7 @@
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/cert/mock_cert_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -77,7 +80,8 @@ class QuicEndToEndTest : public PlatformTest {
  protected:
   QuicEndToEndTest()
       : host_resolver_impl_(CreateResolverImpl()),
-        host_resolver_(host_resolver_impl_.Pass()),
+        host_resolver_(std::move(host_resolver_impl_)),
+        cert_transparency_verifier_(new MultiLogCTVerifier()),
         ssl_config_service_(new SSLConfigServiceDefaults),
         proxy_service_(ProxyService::CreateDirect()),
         auth_handler_factory_(
@@ -93,6 +97,7 @@ class QuicEndToEndTest : public PlatformTest {
     params_.host_resolver = &host_resolver_;
     params_.cert_verifier = &cert_verifier_;
     params_.transport_security_state = &transport_security_state_;
+    params_.cert_transparency_verifier = cert_transparency_verifier_.get();
     params_.proxy_service = proxy_service_.get();
     params_.ssl_config_service = ssl_config_service_.get();
     params_.http_auth_handler_factory = auth_handler_factory_.get();
@@ -157,8 +162,8 @@ class QuicEndToEndTest : public PlatformTest {
     server_thread_.reset(new ServerThread(server, server_address_,
                                           strike_register_no_startup_period_));
     server_thread_->Initialize();
-    server_address_ = IPEndPoint(server_address_.address(),
-                                 server_thread_->GetPort());
+    server_address_ =
+        IPEndPoint(server_address_.address(), server_thread_->GetPort());
     server_thread_->Start();
     server_started_ = true;
   }
@@ -196,12 +201,11 @@ class QuicEndToEndTest : public PlatformTest {
   // Initializes |request_| for a post of |length| bytes.
   void InitializePostRequest(size_t length) {
     GenerateBody(length);
-    ScopedVector<UploadElementReader> element_readers;
-    element_readers.push_back(
-        new UploadBytesElementReader(request_body_.data(),
-                                     request_body_.length()));
+    std::vector<scoped_ptr<UploadElementReader>> element_readers;
+    element_readers.push_back(make_scoped_ptr(new UploadBytesElementReader(
+        request_body_.data(), request_body_.length())));
     upload_data_stream_.reset(
-        new ElementsUploadDataStream(element_readers.Pass(), 0));
+        new ElementsUploadDataStream(std::move(element_readers), 0));
     request_.method = "POST";
     request_.url = GURL("https://test.example.com/");
     request_.upload_data_stream = upload_data_stream_.get();
@@ -214,8 +218,7 @@ class QuicEndToEndTest : public PlatformTest {
                      const std::string& body) {
     ASSERT_TRUE(consumer.is_done());
     ASSERT_EQ(OK, consumer.error());
-    EXPECT_EQ(status_line,
-              consumer.response_info()->headers->GetStatusLine());
+    EXPECT_EQ(status_line, consumer.response_info()->headers->GetStatusLine());
     EXPECT_EQ(body, consumer.content());
   }
 
@@ -223,6 +226,7 @@ class QuicEndToEndTest : public PlatformTest {
   MappedHostResolver host_resolver_;
   MockCertVerifier cert_verifier_;
   TransportSecurityState transport_security_state_;
+  scoped_ptr<CTVerifier> cert_transparency_verifier_;
   scoped_refptr<SSLConfigServiceDefaults> ssl_config_service_;
   scoped_ptr<ProxyService> proxy_service_;
   scoped_ptr<HttpAuthHandlerFactory> auth_handler_factory_;
@@ -252,10 +256,16 @@ TEST_F(QuicEndToEndTest, LargeGetWithNoPacketLoss) {
   // Will terminate when the last consumer completes.
   base::MessageLoop::current()->Run();
 
-  CheckResponse(consumer, "HTTP/1.1 200 OK", response);
+  CheckResponse(consumer, "HTTP/1.1 200", response);
 }
 
-TEST_F(QuicEndToEndTest, LargePostWithNoPacketLoss) {
+// crbug.com/559173
+#if defined(THREAD_SANITIZER)
+#define MAYBE_LargePostWithNoPacketLoss DISABLED_LargePostWithNoPacketLoss
+#else
+#define MAYBE_LargePostWithNoPacketLoss LargePostWithNoPacketLoss
+#endif
+TEST_F(QuicEndToEndTest, MAYBE_LargePostWithNoPacketLoss) {
   InitializePostRequest(1024 * 1024);
 
   AddToCache(request_.url.PathForRequest(), 200, "OK", kResponseBody);
@@ -267,10 +277,16 @@ TEST_F(QuicEndToEndTest, LargePostWithNoPacketLoss) {
   // Will terminate when the last consumer completes.
   base::MessageLoop::current()->Run();
 
-  CheckResponse(consumer, "HTTP/1.1 200 OK", kResponseBody);
+  CheckResponse(consumer, "HTTP/1.1 200", kResponseBody);
 }
 
-TEST_F(QuicEndToEndTest, LargePostWithPacketLoss) {
+// crbug.com/559173
+#if defined(THREAD_SANITIZER)
+#define MAYBE_LargePostWithPacketLoss DISABLED_LargePostWithPacketLoss
+#else
+#define MAYBE_LargePostWithPacketLoss LargePostWithPacketLoss
+#endif
+TEST_F(QuicEndToEndTest, MAYBE_LargePostWithPacketLoss) {
   // FLAGS_fake_packet_loss_percentage = 30;
   InitializePostRequest(1024 * 1024);
 
@@ -284,7 +300,7 @@ TEST_F(QuicEndToEndTest, LargePostWithPacketLoss) {
   // Will terminate when the last consumer completes.
   base::MessageLoop::current()->Run();
 
-  CheckResponse(consumer, "HTTP/1.1 200 OK", kResponseBody);
+  CheckResponse(consumer, "HTTP/1.1 200", kResponseBody);
 }
 
 // crbug.com/536845
@@ -302,18 +318,17 @@ TEST_F(QuicEndToEndTest, MAYBE_UberTest) {
   std::vector<TestTransactionConsumer*> consumers;
   size_t num_requests = 100;
   for (size_t i = 0; i < num_requests; ++i) {
-      TestTransactionConsumer* consumer =
-          new TestTransactionConsumer(DEFAULT_PRIORITY,
-                                      transaction_factory_.get());
-      consumers.push_back(consumer);
-      consumer->Start(&request_, BoundNetLog());
+    TestTransactionConsumer* consumer = new TestTransactionConsumer(
+        DEFAULT_PRIORITY, transaction_factory_.get());
+    consumers.push_back(consumer);
+    consumer->Start(&request_, BoundNetLog());
   }
 
   // Will terminate when the last consumer completes.
   base::MessageLoop::current()->Run();
 
   for (size_t i = 0; i < num_requests; ++i) {
-    CheckResponse(*consumers[i], "HTTP/1.1 200 OK", kResponseBody);
+    CheckResponse(*consumers[i], "HTTP/1.1 200", kResponseBody);
   }
   STLDeleteElements(&consumers);
 }

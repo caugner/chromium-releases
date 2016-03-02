@@ -4,6 +4,9 @@
 
 #include "sync/internal_api/public/shared_model_type_processor.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -11,6 +14,8 @@
 #include "sync/internal_api/public/activation_context.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/non_blocking_sync_common.h"
+#include "sync/internal_api/public/test/fake_metadata_change_list.h"
+#include "sync/internal_api/public/test/fake_model_type_service.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/syncable/syncable_util.h"
 #include "sync/test/engine/mock_commit_queue.h"
@@ -28,7 +33,7 @@ static const syncer::ModelType kModelType = syncer::PREFERENCES;
 // to be re-tested here.
 //
 // These tests skip past initialization and focus on steady state sync engine
-// behvior.  This is where we test how the type sync proxy responds to the
+// behavior.  This is where we test how the processor responds to the
 // model's requests to make changes to its data, the messages incoming from the
 // sync server, and what happens when the two conflict.
 //
@@ -41,7 +46,8 @@ static const syncer::ModelType kModelType = syncer::PREFERENCES;
 // - Writes to permanent storage. (TODO)
 // - Callbacks into the model. (TODO)
 // - Requests to the sync thread.  Tested with MockCommitQueue.
-class SharedModelTypeProcessorTest : public ::testing::Test {
+class SharedModelTypeProcessorTest : public ::testing::Test,
+                                     public FakeModelTypeService {
  public:
   SharedModelTypeProcessorTest();
   ~SharedModelTypeProcessorTest() override;
@@ -64,8 +70,10 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
   void Restart();
 
   // Local data modification.  Emulates signals from the model thread.
-  void WriteItem(const std::string& tag, const std::string& value);
-  void DeleteItem(const std::string& tag);
+  void WriteItem(const std::string& tag,
+                 const std::string& value,
+                 MetadataChangeList* change_list);
+  void DeleteItem(const std::string& tag, MetadataChangeList* change_list);
 
   // Emulates an "initial sync done" message from the
   // CommitQueue.
@@ -74,14 +82,14 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
   // Emulate updates from the server.
   // This harness has some functionality to help emulate server behavior.
   // See the definitions of these methods for more information.
-  void UpdateFromServer(int64 version_offset,
+  void UpdateFromServer(int64_t version_offset,
                         const std::string& tag,
                         const std::string& value);
-  void TombstoneFromServer(int64 version_offset, const std::string& tag);
+  void TombstoneFromServer(int64_t version_offset, const std::string& tag);
 
   // Emulate the receipt of pending updates from the server.
   // Pending updates are usually caused by a temporary decryption failure.
-  void PendingUpdateFromServer(int64 version_offset,
+  void PendingUpdateFromServer(int64_t version_offset,
                                const std::string& tag,
                                const std::string& value,
                                const std::string& key_name);
@@ -114,6 +122,12 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
   // when receiving items.
   void SetServerEncryptionKey(const std::string& key_name);
 
+  MockCommitQueue* mock_queue();
+  SharedModelTypeProcessor* type_processor();
+
+  const EntityChangeList* entity_change_list() const;
+  const FakeMetadataChangeList* metadata_change_list() const;
+
  private:
   static std::string GenerateTagHash(const std::string& tag);
   static sync_pb::EntitySpecifics GenerateSpecifics(const std::string& tag,
@@ -123,11 +137,18 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
       const std::string& value,
       const std::string& key_name);
 
-  int64 GetServerVersion(const std::string& tag);
-  void SetServerVersion(const std::string& tag, int64 version);
+  int64_t GetServerVersion(const std::string& tag);
+  void SetServerVersion(const std::string& tag, int64_t version);
 
   void StartDone(syncer::SyncError error,
                  scoped_ptr<ActivationContext> context);
+
+  // FakeModelTypeService overrides.
+  std::string GetClientTag(const EntityData& entity_data) override;
+  scoped_ptr<MetadataChangeList> CreateMetadataChangeList() override;
+  syncer::SyncError ApplySyncChanges(
+      scoped_ptr<MetadataChangeList> metadata_change_list,
+      EntityChangeList entity_changes) override;
 
   // This sets ThreadTaskRunnerHandle on the current thread, which the type
   // processor will pick up as the sync task runner.
@@ -140,14 +161,17 @@ class SharedModelTypeProcessorTest : public ::testing::Test {
   scoped_ptr<SharedModelTypeProcessor> type_processor_;
 
   DataTypeState data_type_state_;
+
+  // The last received EntityChangeList.
+  scoped_ptr<EntityChangeList> entity_change_list_;
+  // The last received MetadataChangeList.
+  scoped_ptr<FakeMetadataChangeList> metadata_change_list_;
 };
 
 SharedModelTypeProcessorTest::SharedModelTypeProcessorTest()
     : mock_queue_(new MockCommitQueue()),
       mock_queue_ptr_(mock_queue_),
-      type_processor_(
-          new SharedModelTypeProcessor(kModelType,
-                                       base::WeakPtr<ModelTypeStore>())) {}
+      type_processor_(new SharedModelTypeProcessor(kModelType, this)) {}
 
 SharedModelTypeProcessorTest::~SharedModelTypeProcessorTest() {}
 
@@ -194,30 +218,36 @@ void SharedModelTypeProcessorTest::StartDone(
   // Hand off ownership of |mock_queue_ptr_|, while keeping
   // an unsafe pointer to it.  This is why we can only connect once.
   DCHECK(mock_queue_ptr_);
-  context->type_processor->OnConnect(mock_queue_ptr_.Pass());
+  context->type_processor->OnConnect(std::move(mock_queue_ptr_));
   // The context's type processor is a proxy; run the task it posted.
   sync_loop_.RunUntilIdle();
 }
 
 void SharedModelTypeProcessorTest::WriteItem(const std::string& tag,
-                                             const std::string& value) {
-  const std::string tag_hash = GenerateTagHash(tag);
-  type_processor_->Put(tag, GenerateSpecifics(tag, value));
+                                             const std::string& value,
+                                             MetadataChangeList* change_list) {
+  scoped_ptr<EntityData> entity_data = make_scoped_ptr(new EntityData());
+  entity_data->specifics = GenerateSpecifics(tag, value);
+  entity_data->non_unique_name = tag;
+  type_processor_->Put(tag, std::move(entity_data), change_list);
 }
 
-void SharedModelTypeProcessorTest::DeleteItem(const std::string& tag) {
-  type_processor_->Delete(tag);
+void SharedModelTypeProcessorTest::DeleteItem(const std::string& tag,
+                                              MetadataChangeList* change_list) {
+  type_processor_->Delete(tag, change_list);
 }
 
 void SharedModelTypeProcessorTest::OnInitialSyncDone() {
   data_type_state_.initial_sync_done = true;
   UpdateResponseDataList empty_update_list;
 
+  // TODO(stanisc): crbug/569645: replace this with loading the initial state
+  // via LoadMetadata callback.
   type_processor_->OnUpdateReceived(data_type_state_, empty_update_list,
                                     empty_update_list);
 }
 
-void SharedModelTypeProcessorTest::UpdateFromServer(int64 version_offset,
+void SharedModelTypeProcessorTest::UpdateFromServer(int64_t version_offset,
                                                     const std::string& tag,
                                                     const std::string& value) {
   const std::string tag_hash = GenerateTagHash(tag);
@@ -231,7 +261,7 @@ void SharedModelTypeProcessorTest::UpdateFromServer(int64 version_offset,
 }
 
 void SharedModelTypeProcessorTest::PendingUpdateFromServer(
-    int64 version_offset,
+    int64_t version_offset,
     const std::string& tag,
     const std::string& value,
     const std::string& key_name) {
@@ -246,7 +276,7 @@ void SharedModelTypeProcessorTest::PendingUpdateFromServer(
                                     list);
 }
 
-void SharedModelTypeProcessorTest::TombstoneFromServer(int64 version_offset,
+void SharedModelTypeProcessorTest::TombstoneFromServer(int64_t version_offset,
                                                        const std::string& tag) {
   // Overwrite the existing server version if this is the new highest version.
   std::string tag_hash = GenerateTagHash(tag);
@@ -266,7 +296,7 @@ bool SharedModelTypeProcessorTest::HasPendingUpdate(
   const UpdateResponseDataList list = type_processor_->GetPendingUpdates();
   for (UpdateResponseDataList::const_iterator it = list.begin();
        it != list.end(); ++it) {
-    if (it->client_tag_hash == client_tag_hash)
+    if (it->entity->client_tag_hash == client_tag_hash)
       return true;
   }
   return false;
@@ -279,7 +309,7 @@ UpdateResponseData SharedModelTypeProcessorTest::GetPendingUpdate(
   const UpdateResponseDataList list = type_processor_->GetPendingUpdates();
   for (UpdateResponseDataList::const_iterator it = list.begin();
        it != list.end(); ++it) {
-    if (it->client_tag_hash == client_tag_hash)
+    if (it->entity->client_tag_hash == client_tag_hash)
       return *it;
   }
   NOTREACHED();
@@ -307,6 +337,24 @@ void SharedModelTypeProcessorTest::UpdateDesiredEncryptionKey(
 void SharedModelTypeProcessorTest::SetServerEncryptionKey(
     const std::string& key_name) {
   mock_queue_->SetServerEncryptionKey(key_name);
+}
+
+MockCommitQueue* SharedModelTypeProcessorTest::mock_queue() {
+  return mock_queue_;
+}
+
+SharedModelTypeProcessor* SharedModelTypeProcessorTest::type_processor() {
+  return type_processor_.get();
+}
+
+const EntityChangeList* SharedModelTypeProcessorTest::entity_change_list()
+    const {
+  return entity_change_list_.get();
+}
+
+const FakeMetadataChangeList*
+SharedModelTypeProcessorTest::metadata_change_list() const {
+  return metadata_change_list_.get();
 }
 
 std::string SharedModelTypeProcessorTest::GenerateTagHash(
@@ -337,6 +385,32 @@ SharedModelTypeProcessorTest::GenerateEncryptedSpecifics(
   return specifics;
 }
 
+std::string SharedModelTypeProcessorTest::GetClientTag(
+    const EntityData& entity_data) {
+  // The tag is the preference name - see GenerateSpecifics.
+  return entity_data.specifics.preference().name();
+}
+
+scoped_ptr<MetadataChangeList>
+SharedModelTypeProcessorTest::CreateMetadataChangeList() {
+  // Reset the current first and return a new one.
+  metadata_change_list_.reset();
+  return scoped_ptr<MetadataChangeList>(new FakeMetadataChangeList());
+}
+
+syncer::SyncError SharedModelTypeProcessorTest::ApplySyncChanges(
+    scoped_ptr<MetadataChangeList> metadata_change_list,
+    EntityChangeList entity_changes) {
+  EXPECT_FALSE(metadata_change_list_);
+  // |metadata_change_list| is expected to be an instance of
+  // FakeMetadataChangeList - see above.
+  metadata_change_list_.reset(
+      static_cast<FakeMetadataChangeList*>(metadata_change_list.release()));
+  EXPECT_TRUE(metadata_change_list_);
+  entity_change_list_.reset(new EntityChangeList(entity_changes));
+  return syncer::SyncError();
+}
+
 size_t SharedModelTypeProcessorTest::GetNumCommitRequestLists() {
   return mock_queue_->GetNumCommitRequestLists();
 }
@@ -364,21 +438,110 @@ TEST_F(SharedModelTypeProcessorTest, CreateLocalItem) {
   InitializeToReadyState();
   EXPECT_EQ(0U, GetNumCommitRequestLists());
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+  WriteItem("tag1", "value1", &change_list);
 
   // Verify the commit request this operation has triggered.
   EXPECT_EQ(1U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
-  const CommitRequestData& tag1_data = GetLatestCommitRequestForTag("tag1");
+  const CommitRequestData& tag1_request_data =
+      GetLatestCommitRequestForTag("tag1");
+  const EntityData& tag1_data = tag1_request_data.entity.value();
 
+  EXPECT_EQ(kUncommittedVersion, tag1_request_data.base_version);
   EXPECT_TRUE(tag1_data.id.empty());
-  EXPECT_EQ(kUncommittedVersion, tag1_data.base_version);
-  EXPECT_FALSE(tag1_data.ctime.is_null());
-  EXPECT_FALSE(tag1_data.mtime.is_null());
+  EXPECT_FALSE(tag1_data.creation_time.is_null());
+  EXPECT_FALSE(tag1_data.modification_time.is_null());
   EXPECT_EQ("tag1", tag1_data.non_unique_name);
-  EXPECT_FALSE(tag1_data.deleted);
+  EXPECT_FALSE(tag1_data.is_deleted());
   EXPECT_EQ("tag1", tag1_data.specifics.preference().name());
   EXPECT_EQ("value1", tag1_data.specifics.preference().value());
+
+  EXPECT_EQ(1U, change_list.GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record.action);
+  EXPECT_EQ("tag1", record.tag);
+  EXPECT_TRUE(record.metadata.has_client_tag_hash());
+  EXPECT_FALSE(record.metadata.has_server_id());
+  EXPECT_FALSE(record.metadata.is_deleted());
+  EXPECT_EQ(1, record.metadata.sequence_number());
+  EXPECT_EQ(0, record.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record.metadata.server_version());
+  EXPECT_TRUE(record.metadata.has_creation_time());
+  EXPECT_TRUE(record.metadata.has_modification_time());
+  EXPECT_TRUE(record.metadata.has_specifics_hash());
+}
+
+// The purpose of this test case is to test setting |client_tag_hash| and |id|
+// on the EntityData object as we pass it into the Put method of the processor.
+// TODO(skym): Update this test to verify that specifying a |client_tag_hash|
+// on update has no effect once crbug/561818 is completed.
+TEST_F(SharedModelTypeProcessorTest, CreateAndModifyWithOverrides) {
+  InitializeToReadyState();
+  EXPECT_EQ(0U, GetNumCommitRequestLists());
+
+  FakeMetadataChangeList change_list;
+
+  scoped_ptr<EntityData> entity_data = make_scoped_ptr(new EntityData());
+  entity_data->specifics.mutable_preference()->set_name("name1");
+  entity_data->specifics.mutable_preference()->set_value("value1");
+
+  entity_data->non_unique_name = "name1";
+  entity_data->client_tag_hash = "hash";
+  entity_data->id = "cid1";
+  type_processor()->Put("tag1", std::move(entity_data), &change_list);
+
+  // Don't access through tag because we forced a specific hash.
+  EXPECT_EQ(1U, GetNumCommitRequestLists());
+  ASSERT_TRUE(mock_queue()->HasCommitRequestForTagHash("hash"));
+  const EntityData& out_entity1 =
+      mock_queue()->GetLatestCommitRequestForTagHash("hash").entity.value();
+
+  EXPECT_EQ("hash", out_entity1.client_tag_hash);
+  EXPECT_EQ("cid1", out_entity1.id);
+  EXPECT_EQ("value1", out_entity1.specifics.preference().value());
+
+  EXPECT_EQ(1U, change_list.GetNumRecords());
+
+  entity_data.reset(new EntityData());
+  entity_data->specifics.mutable_preference()->set_name("name2");
+  entity_data->specifics.mutable_preference()->set_value("value2");
+  entity_data->non_unique_name = "name2";
+  entity_data->client_tag_hash = "hash";
+  // TODO (skym): Consider removing this. The ID should never be changed by the
+  // client once established.
+  entity_data->id = "cid2";
+
+  type_processor()->Put("tag1", std::move(entity_data), &change_list);
+
+  EXPECT_EQ(2U, GetNumCommitRequestLists());
+  ASSERT_TRUE(mock_queue()->HasCommitRequestForTagHash("hash"));
+  const EntityData& out_entity2 =
+      mock_queue()->GetLatestCommitRequestForTagHash("hash").entity.value();
+
+  // Should still see old cid1 value, override is not respected on update.
+  EXPECT_EQ("hash", out_entity2.client_tag_hash);
+  EXPECT_EQ("cid1", out_entity2.id);
+  EXPECT_EQ("value2", out_entity2.specifics.preference().value());
+
+  EXPECT_EQ(2U, change_list.GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record1 = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record1.tag);
+  EXPECT_EQ("cid1", record1.metadata.server_id());
+  EXPECT_EQ("hash", record1.metadata.client_tag_hash());
+
+  const FakeMetadataChangeList::Record& record2 = change_list.GetNthRecord(1);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record2.action);
+  EXPECT_EQ("tag1", record2.tag);
+  // TODO (skym): Is this correct?
+  EXPECT_EQ("cid1", record2.metadata.server_id());
+  EXPECT_EQ("hash", record2.metadata.client_tag_hash());
+
+  EXPECT_NE(record1.metadata.specifics_hash(),
+            record2.metadata.specifics_hash());
 }
 
 // Creates a new local item then modifies it.
@@ -387,30 +550,62 @@ TEST_F(SharedModelTypeProcessorTest, CreateAndModifyLocalItem) {
   InitializeToReadyState();
   EXPECT_EQ(0U, GetNumCommitRequestLists());
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+
+  WriteItem("tag1", "value1", &change_list);
   EXPECT_EQ(1U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
-  const CommitRequestData& tag1_v1_data = GetLatestCommitRequestForTag("tag1");
+  const CommitRequestData& tag1_v1_request_data =
+      GetLatestCommitRequestForTag("tag1");
+  const EntityData& tag1_v1_data = tag1_v1_request_data.entity.value();
 
-  WriteItem("tag1", "value2");
+  WriteItem("tag1", "value2", &change_list);
   EXPECT_EQ(2U, GetNumCommitRequestLists());
 
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
-  const CommitRequestData& tag1_v2_data = GetLatestCommitRequestForTag("tag1");
+  const CommitRequestData& tag1_v2_request_data =
+      GetLatestCommitRequestForTag("tag1");
+  const EntityData& tag1_v2_data = tag1_v2_request_data.entity.value();
 
   // Test some of the relations between old and new commit requests.
+  EXPECT_GT(tag1_v2_request_data.sequence_number,
+            tag1_v1_request_data.sequence_number);
   EXPECT_EQ(tag1_v1_data.specifics.preference().value(), "value1");
-  EXPECT_GT(tag1_v2_data.sequence_number, tag1_v1_data.sequence_number);
 
   // Perform a thorough examination of the update-generated request.
+  EXPECT_EQ(kUncommittedVersion, tag1_v2_request_data.base_version);
   EXPECT_TRUE(tag1_v2_data.id.empty());
-  EXPECT_EQ(kUncommittedVersion, tag1_v2_data.base_version);
-  EXPECT_FALSE(tag1_v2_data.ctime.is_null());
-  EXPECT_FALSE(tag1_v2_data.mtime.is_null());
+  EXPECT_FALSE(tag1_v2_data.creation_time.is_null());
+  EXPECT_FALSE(tag1_v2_data.modification_time.is_null());
   EXPECT_EQ("tag1", tag1_v2_data.non_unique_name);
-  EXPECT_FALSE(tag1_v2_data.deleted);
+  EXPECT_FALSE(tag1_v2_data.is_deleted());
   EXPECT_EQ("tag1", tag1_v2_data.specifics.preference().name());
   EXPECT_EQ("value2", tag1_v2_data.specifics.preference().value());
+
+  EXPECT_EQ(2U, change_list.GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record1 = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record1.tag);
+  EXPECT_FALSE(record1.metadata.has_server_id());
+  EXPECT_FALSE(record1.metadata.is_deleted());
+  EXPECT_EQ(1, record1.metadata.sequence_number());
+  EXPECT_EQ(0, record1.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record1.metadata.server_version());
+
+  const FakeMetadataChangeList::Record& record2 = change_list.GetNthRecord(1);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record2.tag);
+  EXPECT_FALSE(record2.metadata.has_server_id());
+  EXPECT_FALSE(record2.metadata.is_deleted());
+  EXPECT_EQ(2, record2.metadata.sequence_number());
+  EXPECT_EQ(0, record2.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record2.metadata.server_version());
+
+  EXPECT_EQ(record1.metadata.client_tag_hash(),
+            record2.metadata.client_tag_hash());
+  EXPECT_NE(record1.metadata.specifics_hash(),
+            record2.metadata.specifics_hash());
 }
 
 // Deletes an item we've never seen before.
@@ -418,8 +613,12 @@ TEST_F(SharedModelTypeProcessorTest, CreateAndModifyLocalItem) {
 TEST_F(SharedModelTypeProcessorTest, DeleteUnknown) {
   InitializeToReadyState();
 
-  DeleteItem("tag1");
+  FakeMetadataChangeList change_list;
+
+  DeleteItem("tag1", &change_list);
   EXPECT_EQ(0U, GetNumCommitRequestLists());
+
+  EXPECT_EQ(0U, change_list.GetNumRecords());
 }
 
 // Creates an item locally then deletes it.
@@ -430,21 +629,53 @@ TEST_F(SharedModelTypeProcessorTest, DeleteUnknown) {
 TEST_F(SharedModelTypeProcessorTest, DeleteServerUnknown) {
   InitializeToReadyState();
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+
+  // TODO(stanisc): crbug.com/573333: Review this case. If the flush of
+  // all locally modified items was scheduled to run on a separate task, than
+  // the correct behavior would be to commit just the detele, or perhaps no
+  // commit at all.
+
+  WriteItem("tag1", "value1", &change_list);
   EXPECT_EQ(1U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   const CommitRequestData& tag1_v1_data = GetLatestCommitRequestForTag("tag1");
 
-  DeleteItem("tag1");
+  DeleteItem("tag1", &change_list);
   EXPECT_EQ(2U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   const CommitRequestData& tag1_v2_data = GetLatestCommitRequestForTag("tag1");
 
   EXPECT_GT(tag1_v2_data.sequence_number, tag1_v1_data.sequence_number);
 
-  EXPECT_TRUE(tag1_v2_data.id.empty());
+  EXPECT_TRUE(tag1_v2_data.entity->id.empty());
   EXPECT_EQ(kUncommittedVersion, tag1_v2_data.base_version);
-  EXPECT_TRUE(tag1_v2_data.deleted);
+  EXPECT_TRUE(tag1_v2_data.entity->is_deleted());
+
+  EXPECT_EQ(2U, change_list.GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record1 = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record1.tag);
+  EXPECT_FALSE(record1.metadata.is_deleted());
+  EXPECT_EQ(1, record1.metadata.sequence_number());
+  EXPECT_EQ(0, record1.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record1.metadata.server_version());
+
+  // TODO(stanisc): crbug.com/573333: Review this case. Depending on the
+  // implementation the second action performed on metadata change list might
+  // be CLEAR_METADATA. For a real implementation of MetadataChangeList this
+  // might also mean that the change list wouldn't contain any metadata
+  // records at all - the first call would create an entry and the second would
+  // remove it.
+
+  const FakeMetadataChangeList::Record& record2 = change_list.GetNthRecord(1);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record2.tag);
+  EXPECT_TRUE(record2.metadata.is_deleted());
+  EXPECT_EQ(2, record2.metadata.sequence_number());
+  EXPECT_EQ(0, record2.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record2.metadata.server_version());
 }
 
 // Creates an item locally then deletes it.
@@ -455,12 +686,14 @@ TEST_F(SharedModelTypeProcessorTest, DeleteServerUnknown) {
 TEST_F(SharedModelTypeProcessorTest, DeleteServerUnknown_RacyCommitResponse) {
   InitializeToReadyState();
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+
+  WriteItem("tag1", "value1", &change_list);
   EXPECT_EQ(1U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   const CommitRequestData& tag1_v1_data = GetLatestCommitRequestForTag("tag1");
 
-  DeleteItem("tag1");
+  DeleteItem("tag1", &change_list);
   EXPECT_EQ(2U, GetNumCommitRequestLists());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
 
@@ -468,6 +701,33 @@ TEST_F(SharedModelTypeProcessorTest, DeleteServerUnknown_RacyCommitResponse) {
   // response didn't arrive on our thread until after the delete was issued to
   // the sync thread.  It will update some metadata, but won't do much else.
   SuccessfulCommitResponse(tag1_v1_data);
+
+  // In reality the change list used to commit local changes should never
+  // overlap with the changelist used to deliver commit confirmation. In this
+  // test setup the two change lists are isolated - one is on the stack and
+  // another is the class member.
+
+  // Local metadata changes.
+  EXPECT_EQ(2U, change_list.GetNumRecords());
+
+  // Metadata changes from commit response.
+  EXPECT_TRUE(metadata_change_list());
+  EXPECT_EQ(2U, metadata_change_list()->GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record1 =
+      metadata_change_list()->GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_DATA_TYPE_STATE, record1.action);
+
+  const FakeMetadataChangeList::Record& record2 =
+      metadata_change_list()->GetNthRecord(1);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record2.action);
+  EXPECT_EQ("tag1", record2.tag);
+  // Deleted from the second local modification.
+  EXPECT_TRUE(record2.metadata.is_deleted());
+  // sequence_number = 2 from the second local modification.
+  EXPECT_EQ(2, record2.metadata.sequence_number());
+  // acked_sequence_number = 1 from the first commit response.
+  EXPECT_EQ(1, record2.metadata.acked_sequence_number());
 
   // TODO(rlarocque): Verify the state of the item is correct once we get
   // storage hooked up in these tests.  For example, verify the item is still
@@ -480,19 +740,39 @@ TEST_F(SharedModelTypeProcessorTest, TwoIndependentItems) {
   InitializeToReadyState();
   EXPECT_EQ(0U, GetNumCommitRequestLists());
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+
+  WriteItem("tag1", "value1", &change_list);
 
   // There should be one commit request for this item only.
   ASSERT_EQ(1U, GetNumCommitRequestLists());
   EXPECT_EQ(1U, GetNthCommitRequestList(0).size());
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
 
-  WriteItem("tag2", "value2");
+  WriteItem("tag2", "value2", &change_list);
 
   // The second write should trigger another single-item commit request.
   ASSERT_EQ(2U, GetNumCommitRequestLists());
   EXPECT_EQ(1U, GetNthCommitRequestList(1).size());
   ASSERT_TRUE(HasCommitRequestForTag("tag2"));
+
+  EXPECT_EQ(2U, change_list.GetNumRecords());
+
+  const FakeMetadataChangeList::Record& record1 = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record1.tag);
+  EXPECT_FALSE(record1.metadata.is_deleted());
+  EXPECT_EQ(1, record1.metadata.sequence_number());
+  EXPECT_EQ(0, record1.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record1.metadata.server_version());
+
+  const FakeMetadataChangeList::Record& record2 = change_list.GetNthRecord(1);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record2.action);
+  EXPECT_EQ("tag2", record2.tag);
+  EXPECT_FALSE(record2.metadata.is_deleted());
+  EXPECT_EQ(1, record2.metadata.sequence_number());
+  EXPECT_EQ(0, record2.metadata.acked_sequence_number());
+  EXPECT_EQ(kUncommittedVersion, record2.metadata.server_version());
 }
 
 // Starts the type sync proxy with no local state.
@@ -501,8 +781,18 @@ TEST_F(SharedModelTypeProcessorTest, TwoIndependentItems) {
 TEST_F(SharedModelTypeProcessorTest, NoCommitsUntilInitialSyncDone) {
   Start();
 
-  WriteItem("tag1", "value1");
+  FakeMetadataChangeList change_list;
+
+  WriteItem("tag1", "value1", &change_list);
   EXPECT_EQ(0U, GetNumCommitRequestLists());
+
+  // Even though there the item hasn't been committed its metadata should have
+  // already been updated and the sequence number changed.
+  EXPECT_EQ(1U, change_list.GetNumRecords());
+  const FakeMetadataChangeList::Record& record1 = change_list.GetNthRecord(0);
+  EXPECT_EQ(FakeMetadataChangeList::UPDATE_METADATA, record1.action);
+  EXPECT_EQ("tag1", record1.tag);
+  EXPECT_EQ(1, record1.metadata.sequence_number());
 
   OnInitialSyncDone();
   EXPECT_EQ(1U, GetNumCommitRequestLists());
@@ -516,19 +806,21 @@ TEST_F(SharedModelTypeProcessorTest, NoCommitsUntilInitialSyncDone) {
 TEST_F(SharedModelTypeProcessorTest, Stop) {
   InitializeToReadyState();
 
+  FakeMetadataChangeList change_list;
+
   // The first item is fully committed.
-  WriteItem("tag1", "value1");
+  WriteItem("tag1", "value1", &change_list);
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   SuccessfulCommitResponse(GetLatestCommitRequestForTag("tag1"));
 
   // The second item has a commit request in progress.
-  WriteItem("tag2", "value2");
+  WriteItem("tag2", "value2", &change_list);
   EXPECT_TRUE(HasCommitRequestForTag("tag2"));
 
   Stop();
 
   // The third item is added after stopping.
-  WriteItem("tag3", "value3");
+  WriteItem("tag3", "value3", &change_list);
 
   Restart();
 
@@ -552,19 +844,21 @@ TEST_F(SharedModelTypeProcessorTest, Stop) {
 TEST_F(SharedModelTypeProcessorTest, Disable) {
   InitializeToReadyState();
 
+  FakeMetadataChangeList change_list;
+
   // The first item is fully committed.
-  WriteItem("tag1", "value1");
+  WriteItem("tag1", "value1", &change_list);
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   SuccessfulCommitResponse(GetLatestCommitRequestForTag("tag1"));
 
   // The second item has a commit request in progress.
-  WriteItem("tag2", "value2");
+  WriteItem("tag2", "value2", &change_list);
   EXPECT_TRUE(HasCommitRequestForTag("tag2"));
 
   Disable();
 
   // The third item is added after disable.
-  WriteItem("tag3", "value3");
+  WriteItem("tag3", "value3", &change_list);
 
   // Now we re-enable.
   Restart();
@@ -645,17 +939,21 @@ TEST_F(SharedModelTypeProcessorTest, StopWithPendingUpdates) {
 }
 
 // Test re-encrypt everything when desired encryption key changes.
-TEST_F(SharedModelTypeProcessorTest, ReEncryptCommitsWithNewKey) {
+// TODO(stanisc): crbug/561814: Disabled due to data caching changes in
+// ModelTypeEntity. Revisit the test once fetching of data is implemented.
+TEST_F(SharedModelTypeProcessorTest, DISABLED_ReEncryptCommitsWithNewKey) {
   InitializeToReadyState();
 
+  FakeMetadataChangeList change_list;
+
   // Commit an item.
-  WriteItem("tag1", "value1");
+  WriteItem("tag1", "value1", &change_list);
   ASSERT_TRUE(HasCommitRequestForTag("tag1"));
   const CommitRequestData& tag1_v1_data = GetLatestCommitRequestForTag("tag1");
   SuccessfulCommitResponse(tag1_v1_data);
 
   // Create another item and don't wait for its commit response.
-  WriteItem("tag2", "value2");
+  WriteItem("tag2", "value2", &change_list);
 
   ASSERT_EQ(2U, GetNumCommitRequestLists());
 
@@ -677,7 +975,9 @@ TEST_F(SharedModelTypeProcessorTest, ReEncryptCommitsWithNewKey) {
 }
 
 // Test receipt of updates with new and old keys.
-TEST_F(SharedModelTypeProcessorTest, ReEncryptUpdatesWithNewKey) {
+// TODO(stanisc): crbug/561814: Disabled due to data caching changes in
+// ModelTypeEntity. Revisit the test once fetching of data is implemented.
+TEST_F(SharedModelTypeProcessorTest, DISABLED_ReEncryptUpdatesWithNewKey) {
   InitializeToReadyState();
 
   // Receive an unencrpted update.
@@ -710,4 +1010,4 @@ TEST_F(SharedModelTypeProcessorTest, ReEncryptUpdatesWithNewKey) {
   EXPECT_FALSE(HasCommitRequestForTag("enc_k2"));
 }
 
-}  // namespace syncer
+}  // namespace syncer_v2

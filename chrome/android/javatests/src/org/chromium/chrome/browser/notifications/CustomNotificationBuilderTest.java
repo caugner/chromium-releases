@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.notifications;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -28,6 +29,7 @@ import java.util.Arrays;
 /**
  * Instrumentation unit tests for CustomNotificationBuilder.
  */
+@SuppressLint("NewApi") // For the |extras| property of Notification.
 @SuppressWarnings("deprecation") // For the |icon| and |largeIcon| properties of Notification.
 public class CustomNotificationBuilderTest extends InstrumentationTestCase {
     @SmallTest
@@ -56,6 +58,8 @@ public class CustomNotificationBuilderTest extends InstrumentationTestCase {
                                                     createIntent(context, "ActionButtonOne"))
                                             .addAction(0 /* iconId */, "button",
                                                     createIntent(context, "ActionButtonTwo"))
+                                            .addSettingsAction(0 /* iconId */, "settings",
+                                                    createIntent(context, "SettingsButton"))
                                             .build();
         View compactView = notification.contentView.apply(context, new LinearLayout(context));
         View bigView = notification.bigContentView.apply(context, new LinearLayout(context));
@@ -63,9 +67,13 @@ public class CustomNotificationBuilderTest extends InstrumentationTestCase {
         assertEquals(R.drawable.ic_chrome, notification.icon);
         assertNotNull(((ImageView) compactView.findViewById(R.id.icon)).getDrawable());
         assertNotNull(((ImageView) bigView.findViewById(R.id.icon)).getDrawable());
+        assertNotNull(notification.largeIcon);
         assertEquals("title", getIdenticalText(R.id.title, compactView, bigView));
+        assertEquals("title", notification.extras.getString(Notification.EXTRA_TITLE));
         assertEquals("body", getIdenticalText(R.id.body, compactView, bigView));
+        assertEquals("body", notification.extras.getString(Notification.EXTRA_TEXT));
         assertEquals("origin", getIdenticalText(R.id.origin, compactView, bigView));
+        assertEquals("origin", notification.extras.getString(Notification.EXTRA_SUB_TEXT));
         assertEquals("ticker", notification.tickerText.toString());
         assertEquals(Notification.DEFAULT_ALL, notification.defaults);
         assertEquals(1, notification.vibrate.length);
@@ -73,6 +81,9 @@ public class CustomNotificationBuilderTest extends InstrumentationTestCase {
         assertSame(contentIntent, notification.contentIntent);
         assertSame(deleteIntent, notification.deleteIntent);
 
+        // The regular actions and the settings action are added together in the notification
+        // actions array, so they can be exposed on e.g. Wear and custom lockscreens.
+        assertEquals(3, notification.actions.length);
         ArrayList<View> buttons = new ArrayList<>();
         bigView.findViewsWithText(buttons, "button", View.FIND_VIEWS_WITH_TEXT);
         assertEquals(2, buttons.size());

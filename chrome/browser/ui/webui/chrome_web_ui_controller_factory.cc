@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 
+#include <stddef.h>
+
 #include <vector>
 
 #include "base/bind.h"
@@ -11,6 +13,7 @@
 #include "base/location.h"
 #include "base/prefs/pref_service.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
@@ -38,12 +41,13 @@
 #include "chrome/browser/ui/webui/local_state/local_state_ui.h"
 #include "chrome/browser/ui/webui/log_web_ui_url.h"
 #include "chrome/browser/ui/webui/md_downloads/md_downloads_ui.h"
+#include "chrome/browser/ui/webui/md_history_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/password_manager_internals/password_manager_internals_ui.h"
-#include "chrome/browser/ui/webui/plugins_ui.h"
+#include "chrome/browser/ui/webui/plugins/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/settings/md_settings_ui.h"
@@ -83,6 +87,7 @@
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/ui/webui/policy_material_design_ui.h"
 #include "chrome/browser/ui/webui/policy_ui.h"
 #endif
 
@@ -110,7 +115,6 @@
 #if defined(OS_ANDROID) || defined(OS_IOS)
 #include "chrome/browser/ui/webui/net_export_ui.h"
 #else
-#include "chrome/browser/devtools/device/webrtc/webrtc_device_provider.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/ui/webui/copresence_ui.h"
@@ -130,7 +134,6 @@
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
 #include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
 #include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
-#include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_ui.h"
@@ -138,7 +141,6 @@
 #include "chrome/browser/ui/webui/chromeos/nfc_debug_ui.h"
 #include "chrome/browser/ui/webui/chromeos/power_ui.h"
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
-#include "chrome/browser/ui/webui/chromeos/salsa_ui.h"
 #include "chrome/browser/ui/webui/chromeos/set_time_ui.h"
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
@@ -154,10 +156,6 @@
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/app_launcher_page_ui.h"
-#endif
-
-#if defined(USE_AURA)
-#include "chrome/browser/ui/webui/gesture_config_ui.h"
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
@@ -336,6 +334,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<DomainReliabilityInternalsUI>;
   if (url.host() == chrome::kChromeUIFlagsHost)
     return &NewWebUI<FlagsUI>;
+  if (url.host() == chrome::kChromeUIGCMInternalsHost)
+    return &NewWebUI<GCMInternalsUI>;
   if (url.host() == chrome::kChromeUIHistoryFrameHost)
     return &NewWebUI<HistoryUI>;
   if (url.host() == chrome::kChromeUIInstantHost)
@@ -397,8 +397,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       return &NewWebUI<MdDownloadsUI>;
     return &NewWebUI<DownloadsUI>;
   }
-  if (url.host() == chrome::kChromeUIGCMInternalsHost)
-    return &NewWebUI<GCMInternalsUI>;
   // Help is implemented with native UI elements on Android.
   if (url.host() == chrome::kChromeUIHelpFrameHost)
     return &NewWebUI<HelpUI>;
@@ -453,8 +451,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::CryptohomeUI>;
   if (url.host() == chrome::kChromeUIDriveInternalsHost)
     return &NewWebUI<chromeos::DriveInternalsUI>;
-  if (url.host() == chrome::kChromeUIImageBurnerHost)
-    return &NewWebUI<ImageBurnUI>;
   if (url.host() == chrome::kChromeUIFirstRunHost)
     return &NewWebUI<chromeos::FirstRunUI>;
   if (url.host() == chrome::kChromeUIKeyboardOverlayHost)
@@ -473,8 +469,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<proximity_auth::ProximityAuthUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
     return &NewWebUI<chromeos::ProxySettingsUI>;
-  if (url.host() == chrome::kChromeUISalsaHost)
-    return &NewWebUI<SalsaUI>;
   if (url.host() == chrome::kChromeUISetTimeHost)
     return &NewWebUI<chromeos::SetTimeUI>;
   if (url.host() == chrome::kChromeUISimUnlockHost)
@@ -485,13 +479,13 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::SlowTraceController>;
   if (url.host() == chrome::kChromeUIVoiceSearchHost)
     return &NewWebUI<VoiceSearchUI>;
-#endif  // defined(OS_CHROMEOS)
-#if !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
+#if !defined(GOOGLE_CHROME_BUILD) && !defined(NDEBUG)
   if (!base::SysInfo::IsRunningOnChromeOS()) {
     if (url.host() == chrome::kChromeUIDeviceEmulatorHost)
       return &NewWebUI<DeviceEmulatorUI>;
   }
-#endif // !defined(OFFICIAL_BUILD) && defined(OS_CHROMEOS) && !defined(NDEBUG)
+#endif  // !defined(GOOGLE_CHROME_BUILD) && !defined(NDEBUG)
+#endif  // defined(OS_CHROMEOS)
 #if defined(OS_ANDROID) || defined(OS_IOS)
   if (url.host() == chrome::kChromeUINetExportHost)
     return &NewWebUI<NetExportUI>;
@@ -502,8 +496,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<InlineLoginUI>;
   if (url.SchemeIs(content::kChromeDevToolsScheme))
     return &NewWebUI<DevToolsUI>;
-  if (url.host() == chrome::kChromeUIWebRTCDeviceProviderHost)
-    return &NewWebUI<WebRTCDeviceProvider::WebUI>;
 
   // chrome://inspect isn't supported on Android nor iOS. Page debugging is
   // handled by a remote devtools on the host machine, and other elements, i.e.
@@ -531,10 +523,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUITabModalConfirmDialogHost) {
     return &NewWebUI<ConstrainedWebDialogUI>;
   }
-#endif
-#if defined(USE_AURA)
-  if (url.host() == chrome::kChromeUIGestureConfigHost)
-    return &NewWebUI<GestureConfigUI>;
 #endif
 #if (defined(USE_NSS_CERTS) || defined(USE_OPENSSL_CERTS)) && defined(USE_AURA)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
@@ -600,7 +588,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       url.host() == dom_distiller::kChromeUIDomDistillerHost) {
     return &NewWebUI<dom_distiller::DomDistillerUi>;
   }
-
+  // Material Design history is on its own host, rather than on an Uber page.
+  if (::switches::MdHistoryEnabled() &&
+      url.host() == chrome::kChromeUIHistoryHost) {
+    return &NewWebUI<MdHistoryUI>;
+  }
   if (SiteEngagementService::IsEnabled() &&
       url.host() == chrome::kChromeUISiteEngagementHost) {
     return &NewWebUI<SiteEngagementUI>;
@@ -713,9 +705,8 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
       bitmap_result.bitmap_data = bitmap;
       // Leave |bitmap_result|'s icon URL as the default of GURL().
       bitmap_result.icon_type = favicon_base::FAVICON;
-      favicon_bitmap_results->push_back(bitmap_result);
-
       bitmap_result.pixel_size = candidate_sizes[selected_index];
+      favicon_bitmap_results->push_back(bitmap_result);
     }
   }
 

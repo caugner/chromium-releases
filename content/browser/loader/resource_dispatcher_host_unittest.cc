@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+#include <utility>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/shared_memory.h"
 #include "base/pickle.h"
@@ -38,8 +39,8 @@
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/child_process_host.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/resource_response.h"
 #include "content/public/test/test_browser_context.h"
@@ -152,7 +153,6 @@ static ResourceHostMsg_Request CreateResourceRequest(const char* method,
   request.should_reset_appcache = false;
   request.is_main_frame = true;
   request.parent_is_main_frame = false;
-  request.parent_render_frame_id = -1;
   request.transition_type = ui::PAGE_TRANSITION_LINK;
   request.allow_download = true;
   return request;
@@ -255,7 +255,8 @@ class TestFilterSpecifyingChild : public ResourceMessageFilter {
   ~TestFilterSpecifyingChild() override {}
 
  private:
-  void GetContexts(const ResourceHostMsg_Request& request,
+  void GetContexts(ResourceType resource_type,
+                   int origin_pid,
                    ResourceContext** resource_context,
                    net::URLRequestContext** request_context) {
     *resource_context = resource_context_;
@@ -948,6 +949,9 @@ class ResourceDispatcherHostTest : public testing::Test,
                                        ResourceType type);
 
   void MakeWebContentsAssociatedTestRequest(int request_id, const GURL& url);
+  void MakeWebContentsAssociatedTestRequestWithResourceType(int request_id,
+                                                            const GURL& url,
+                                                            ResourceType type);
 
   // Generates a request with the given priority.
   void MakeTestRequestWithPriority(int render_view_id,
@@ -1072,8 +1076,15 @@ void ResourceDispatcherHostTest::MakeTestRequestWithResourceType(
 void ResourceDispatcherHostTest::MakeWebContentsAssociatedTestRequest(
     int request_id,
     const GURL& url) {
-  ResourceHostMsg_Request request =
-      CreateResourceRequest("GET", RESOURCE_TYPE_SUB_RESOURCE, url);
+  MakeWebContentsAssociatedTestRequestWithResourceType(
+      request_id, url, RESOURCE_TYPE_SUB_RESOURCE);
+}
+
+void ResourceDispatcherHostTest::
+    MakeWebContentsAssociatedTestRequestWithResourceType(int request_id,
+                                                         const GURL& url,
+                                                         ResourceType type) {
+  ResourceHostMsg_Request request = CreateResourceRequest("GET", type, url);
   request.origin_pid = web_contents_->GetRenderProcessHost()->GetID();
   request.render_frame_id = web_contents_->GetMainFrame()->GetRoutingID();
   ResourceHostMsg_RequestResource msg(web_contents_->GetRoutingID(), request_id,
@@ -1102,19 +1113,14 @@ void ResourceDispatcherHostTest::MakeWebContentsAssociatedDownloadRequest(
       browser_context_->GetResourceContext()->GetRequestContext();
   scoped_ptr<net::URLRequest> request(
       request_context->CreateRequest(url, net::DEFAULT_PRIORITY, NULL));
-  host_.BeginDownload(
-      request.Pass(),
-      Referrer(),
-      false,  // is_content_initiated
-      browser_context_->GetResourceContext(),
-      web_contents_->GetRenderProcessHost()->GetID(),
-      web_contents_->GetRoutingID(),
-      web_contents_->GetMainFrame()->GetRoutingID(),
-      false,
-      false,
-      save_info.Pass(),
-      DownloadItem::kInvalidId,
-      ResourceDispatcherHostImpl::DownloadStartedCallback());
+  host_.BeginDownload(std::move(request), Referrer(),
+                      false,  // is_content_initiated
+                      browser_context_->GetResourceContext(),
+                      web_contents_->GetRenderProcessHost()->GetID(),
+                      web_contents_->GetRoutingID(),
+                      web_contents_->GetMainFrame()->GetRoutingID(), false,
+                      false, std::move(save_info), DownloadItem::kInvalidId,
+                      ResourceDispatcherHostImpl::DownloadStartedCallback());
 }
 
 void ResourceDispatcherHostTest::CancelRequest(int request_id) {
@@ -2037,7 +2043,7 @@ TEST_F(ResourceDispatcherHostTest, CalculateApproximateMemoryCost) {
   scoped_ptr<net::UploadElementReader> reader(new net::UploadBytesElementReader(
       upload_content.data(), upload_content.size()));
   req->set_upload(
-      net::ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
+      net::ElementsUploadDataStream::CreateWithReader(std::move(reader), 0));
 
   // Since the upload throttling is disabled, this has no effect on the cost.
   EXPECT_EQ(
@@ -2437,7 +2443,6 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContextDetached) {
 TEST_F(ResourceDispatcherHostTest, CancelRequestsForContextTransferred) {
   EXPECT_EQ(0, host_.pending_requests());
 
-  int render_view_id = 0;
   int request_id = 1;
 
   std::string raw_headers("HTTP/1.1 200 OK\n"
@@ -2447,17 +2452,16 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContextTransferred) {
   SetResponse(raw_headers, response_data);
   HandleScheme("http");
 
-  MakeTestRequestWithResourceType(filter_.get(), render_view_id, request_id,
-                                  GURL("http://example.com/blah"),
-                                  RESOURCE_TYPE_MAIN_FRAME);
+  MakeWebContentsAssociatedTestRequestWithResourceType(
+      request_id, GURL("http://example.com/blah"), RESOURCE_TYPE_MAIN_FRAME);
 
-
-  GlobalRequestID global_request_id(filter_->child_id(), request_id);
+  GlobalRequestID global_request_id(web_contents_filter_->child_id(),
+                                    request_id);
   host_.MarkAsTransferredNavigation(global_request_id);
 
   // And now simulate a cancellation coming from the renderer.
   ResourceHostMsg_CancelRequest msg(request_id);
-  host_.OnMessageReceived(msg, filter_.get());
+  host_.OnMessageReceived(msg, web_contents_filter_.get());
 
   // Since the request is marked as being transferred,
   // the cancellation above should have been ignored and the request
@@ -2465,19 +2469,18 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContextTransferred) {
   EXPECT_EQ(1, host_.pending_requests());
 
   // Cancelling by other methods shouldn't work either.
-  host_.CancelRequestsForProcess(render_view_id);
+  host_.CancelRequestsForProcess(web_contents_->GetRoutingID());
   EXPECT_EQ(1, host_.pending_requests());
 
   // Cancelling by context should work.
-  host_.CancelRequestsForContext(filter_->resource_context());
+  host_.CancelRequestsForContext(web_contents_filter_->resource_context());
   EXPECT_EQ(0, host_.pending_requests());
 }
 
 // Test transferred navigations with text/html, which doesn't trigger any
 // content sniffing.
 TEST_F(ResourceDispatcherHostTest, TransferNavigationHtml) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserSideNavigation)) {
+  if (IsBrowserSideNavigationEnabled()) {
     SUCCEED() << "Test is not applicable with browser side navigation enabled";
     return;
   }
@@ -2551,8 +2554,7 @@ TEST_F(ResourceDispatcherHostTest, TransferNavigationHtml) {
 // Test transferring two navigations with text/html, to ensure the resource
 // accounting works.
 TEST_F(ResourceDispatcherHostTest, TransferTwoNavigationsHtml) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserSideNavigation)) {
+  if (IsBrowserSideNavigationEnabled()) {
     SUCCEED() << "Test is not applicable with browser side navigation enabled";
     return;
   }
@@ -2639,8 +2641,7 @@ TEST_F(ResourceDispatcherHostTest, TransferTwoNavigationsHtml) {
 // MimeTypeResourceHandler to buffer the response to sniff the content before
 // the transfer occurs.
 TEST_F(ResourceDispatcherHostTest, TransferNavigationText) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserSideNavigation)) {
+  if (IsBrowserSideNavigationEnabled()) {
     SUCCEED() << "Test is not applicable with browser side navigation enabled";
     return;
   }
@@ -2714,8 +2715,7 @@ TEST_F(ResourceDispatcherHostTest, TransferNavigationText) {
 }
 
 TEST_F(ResourceDispatcherHostTest, TransferNavigationWithProcessCrash) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserSideNavigation)) {
+  if (IsBrowserSideNavigationEnabled()) {
     SUCCEED() << "Test is not applicable with browser side navigation enabled";
     return;
   }
@@ -2805,8 +2805,7 @@ TEST_F(ResourceDispatcherHostTest, TransferNavigationWithProcessCrash) {
 }
 
 TEST_F(ResourceDispatcherHostTest, TransferNavigationWithTwoRedirects) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBrowserSideNavigation)) {
+  if (IsBrowserSideNavigationEnabled()) {
     SUCCEED() << "Test is not applicable with browser side navigation enabled";
     return;
   }
@@ -3492,7 +3491,7 @@ net::URLRequestJob* TestURLRequestJobFactory::MaybeCreateJobWithProtocolHandler(
   if (test_fixture_->loader_test_request_info_) {
     DCHECK_EQ(test_fixture_->loader_test_request_info_->url, request->url());
     scoped_ptr<LoadInfoTestRequestInfo> info =
-        test_fixture_->loader_test_request_info_.Pass();
+        std::move(test_fixture_->loader_test_request_info_);
     return new URLRequestLoadInfoJob(request, network_delegate,
                                      info->load_state, info->upload_progress);
   }

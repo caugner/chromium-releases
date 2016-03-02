@@ -57,6 +57,7 @@ source_set("test_support") {
   ]
   public_deps = [
     ":copresence",
+    "//base",
     "//components/copresence/proto",
   ]
 }
@@ -81,7 +82,7 @@ source_set("unit_tests") {
     "//components/copresence/proto",
     "//components/gcm_driver:test_support",
     "//net:test_support",
-    "//testing/gtest",
     "//testing/gmock",
+    "//testing/gtest",
   ]
 }

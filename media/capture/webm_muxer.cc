@@ -15,24 +15,24 @@ namespace media {
 
 namespace {
 
-void WriteOpusHeader(const media::AudioParameters& params, uint8* header) {
+void WriteOpusHeader(const media::AudioParameters& params, uint8_t* header) {
   // See https://wiki.xiph.org/OggOpus#ID_Header.
   // Set magic signature.
   std::string label = "OpusHead";
-  memcpy(header + OPUS_EXTRADATA_LABEL_OFFSET, &label, label.size());
+  memcpy(header + OPUS_EXTRADATA_LABEL_OFFSET, label.c_str(), label.size());
   // Set Opus version.
   header[OPUS_EXTRADATA_VERSION_OFFSET] = 1;
   // Set channel count.
   header[OPUS_EXTRADATA_CHANNELS_OFFSET] = params.channels();
   // Set pre-skip
-  uint16 skip = 0;
-  memcpy(header + OPUS_EXTRADATA_SKIP_SAMPLES_OFFSET, &skip, sizeof(uint16));
+  uint16_t skip = 0;
+  memcpy(header + OPUS_EXTRADATA_SKIP_SAMPLES_OFFSET, &skip, sizeof(uint16_t));
   // Set original input sample rate in Hz.
-  uint32 sample_rate = params.sample_rate();
+  uint32_t sample_rate = params.sample_rate();
   memcpy(header + OPUS_EXTRADATA_SAMPLE_RATE_OFFSET, &sample_rate,
-         sizeof(uint32));
+         sizeof(uint32_t));
   // Set output gain in dB.
-  uint16 gain = 0;
+  uint16_t gain = 0;
   memcpy(header + OPUS_EXTRADATA_GAIN_OFFSET, &gain, 2);
 
   // Set channel mapping.
@@ -45,8 +45,10 @@ void WriteOpusHeader(const media::AudioParameters& params, uint8* header) {
     header[OPUS_EXTRADATA_NUM_STREAMS_OFFSET] = params.channels();
     header[OPUS_EXTRADATA_NUM_COUPLED_OFFSET] = 0;
     // Set the actual stream map.
-    memcpy(header + OPUS_EXTRADATA_STREAM_MAP_OFFSET,
-           kOpusVorbisChannelMap[params.channels() - 1], params.channels());
+    for (int i = 0; i < params.channels(); ++i) {
+      header[OPUS_EXTRADATA_STREAM_MAP_OFFSET + i] =
+          kOpusVorbisChannelMap[params.channels() - 1][i];
+    }
   } else {
     header[OPUS_EXTRADATA_CHANNEL_MAPPING_OFFSET] = 0;
   }
@@ -119,21 +121,27 @@ void WebmMuxer::OnEncodedVideo(const scoped_refptr<VideoFrame>& video_frame,
       first_frame_timestamp_ = timestamp;
   }
 
-  // TODO(ajose): Don't drop data. http://crbug.com/547948
-  // TODO(ajose): Update this when we support multiple tracks.
-  // http://crbug.com/528523
+  // TODO(ajose): Support multiple tracks: http://crbug.com/528523
   if (has_audio_ && !audio_track_index_) {
     DVLOG(1) << __FUNCTION__ << ": delaying until audio track ready.";
+    if (is_key_frame)  // Upon Key frame reception, empty the encoded queue.
+      encoded_frames_queue_.clear();
+
+    encoded_frames_queue_.push_back(make_scoped_ptr(new EncodedVideoFrame(
+        std::move(encoded_data), timestamp, is_key_frame)));
     return;
   }
 
-  most_recent_timestamp_ =
-      std::max(most_recent_timestamp_, timestamp - first_frame_timestamp_);
-  segment_.AddFrame(reinterpret_cast<const uint8_t*>(encoded_data->data()),
-                    encoded_data->size(), video_track_index_,
-                    most_recent_timestamp_.InMicroseconds() *
-                        base::Time::kNanosecondsPerMicrosecond,
-                    is_key_frame);
+  // Dump all saved encoded video frames if any.
+  while (!encoded_frames_queue_.empty()) {
+    AddFrame(std::move(encoded_frames_queue_.front()->data), video_track_index_,
+             encoded_frames_queue_.front()->timestamp,
+             encoded_frames_queue_.front()->is_keyframe);
+    encoded_frames_queue_.pop_front();
+  }
+
+  AddFrame(std::move(encoded_data), video_track_index_, timestamp,
+           is_key_frame);
 }
 
 void WebmMuxer::OnEncodedAudio(const media::AudioParameters& params,
@@ -148,21 +156,23 @@ void WebmMuxer::OnEncodedAudio(const media::AudioParameters& params,
       first_frame_timestamp_ = timestamp;
   }
 
-  // TODO(ajose): Don't drop data. http://crbug.com/547948
-  // TODO(ajose): Update this when we support multiple tracks.
-  // http://crbug.com/528523
+  // TODO(ajose): Don't drop audio data: http://crbug.com/547948
+  // TODO(ajose): Support multiple tracks: http://crbug.com/528523
   if (has_video_ && !video_track_index_) {
     DVLOG(1) << __FUNCTION__ << ": delaying until video track ready.";
     return;
   }
 
-  most_recent_timestamp_ =
-      std::max(most_recent_timestamp_, timestamp - first_frame_timestamp_);
-  segment_.AddFrame(reinterpret_cast<const uint8_t*>(encoded_data->data()),
-                    encoded_data->size(), audio_track_index_,
-                    most_recent_timestamp_.InMicroseconds() *
-                        base::Time::kNanosecondsPerMicrosecond,
-                    true /* is_key_frame -- always true for audio */);
+  // Dump all saved encoded video frames if any.
+  while (!encoded_frames_queue_.empty()) {
+    AddFrame(std::move(encoded_frames_queue_.front()->data), video_track_index_,
+             encoded_frames_queue_.front()->timestamp,
+             encoded_frames_queue_.front()->is_keyframe);
+    encoded_frames_queue_.pop_front();
+  }
+
+  AddFrame(std::move(encoded_data), audio_track_index_, timestamp,
+           true /* is_key_frame -- always true for audio */);
 }
 
 void WebmMuxer::AddVideoTrack(const gfx::Size& frame_size, double frame_rate) {
@@ -211,7 +221,7 @@ void WebmMuxer::AddAudioTrack(const media::AudioParameters& params) {
   DCHECK_EQ(params.sample_rate(), audio_track->sample_rate());
   DCHECK_EQ(params.channels(), static_cast<int>(audio_track->channels()));
 
-  uint8 opus_header[OPUS_EXTRADATA_SIZE];
+  uint8_t opus_header[OPUS_EXTRADATA_SIZE];
   WriteOpusHeader(params, opus_header);
 
   if (!audio_track->SetCodecPrivate(opus_header, OPUS_EXTRADATA_SIZE))
@@ -250,5 +260,30 @@ void WebmMuxer::ElementStartNotify(mkvmuxer::uint64 element_id,
   DCHECK_GE(position, position_.ValueOrDefault(0))
       << "Can't go back in a live WebM stream.";
 }
+
+void WebmMuxer::AddFrame(scoped_ptr<std::string> encoded_data,
+                         uint8_t track_index,
+                         base::TimeTicks timestamp,
+                         bool is_key_frame) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!has_video_ || video_track_index_);
+  DCHECK(!has_audio_ || audio_track_index_);
+
+  most_recent_timestamp_ =
+      std::max(most_recent_timestamp_, timestamp - first_frame_timestamp_);
+
+  segment_.AddFrame(reinterpret_cast<const uint8_t*>(encoded_data->data()),
+                    encoded_data->size(), track_index,
+                    most_recent_timestamp_.InMicroseconds() *
+                        base::Time::kNanosecondsPerMicrosecond,
+                    is_key_frame);
+}
+
+WebmMuxer::EncodedVideoFrame::EncodedVideoFrame(scoped_ptr<std::string> data,
+                                                base::TimeTicks timestamp,
+                                                bool is_keyframe)
+    : data(std::move(data)), timestamp(timestamp), is_keyframe(is_keyframe) {}
+
+WebmMuxer::EncodedVideoFrame::~EncodedVideoFrame() {}
 
 }  // namespace media

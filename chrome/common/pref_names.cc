@@ -4,7 +4,8 @@
 
 #include "chrome/common/pref_names.h"
 
-#include "base/basictypes.h"
+#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/common/pref_font_webkit_names.h"
 
 namespace prefs {
@@ -12,6 +13,10 @@ namespace prefs {
 // *************** PROFILE PREFS ***************
 // These are attached to the user profile
 
+#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+// A preference to keep list of ARC apps and its state.
+const char kArcApps[] = "arc.apps";
+#endif
 
 // A bool pref that keeps whether the child status for this profile was already
 // successfully checked via ChildAccountService.
@@ -65,7 +70,7 @@ const char kSessionExitedCleanly[] = "profile.exited_cleanly";
 const char kSessionExitType[] = "profile.exit_type";
 
 // An integer pref. Holds one of several values:
-// 0: (deprecated) open the homepage on startup.
+// 0: unused, previously indicated to open the homepage on startup
 // 1: restore the last session.
 // 2: this was used to indicate a specific session should be restored. It is
 //    no longer used, but saved to avoid conflict with old preferences.
@@ -74,23 +79,9 @@ const char kSessionExitType[] = "profile.exit_type";
 // 5: open the New Tab Page on startup.
 const char kRestoreOnStartup[] = "session.restore_on_startup";
 
-// A preference to keep track of whether we have already checked whether we
-// need to migrate the user from kRestoreOnStartup=0 to kRestoreOnStartup=4.
-// We only need to do this check once, on upgrade from m18 or lower to m19 or
-// higher.
-const char kRestoreOnStartupMigrated[] = "session.restore_on_startup_migrated";
-
-// Serialized migration time of kURLsToRestoreOnStartup (see
-// base::Time::ToInternalValue for details on serialization format).
-const char kRestoreStartupURLsMigrationTime[] =
-    "session.startup_urls_migration_time";
-
 // The URLs to restore on startup or when the home button is pressed. The URLs
 // are only restored on startup if kRestoreOnStartup is 4.
 const char kURLsToRestoreOnStartup[] = "session.startup_urls";
-
-// Old startup url pref name for kURLsToRestoreOnStartup.
-const char kURLsToRestoreOnStartupOld[] = "session.urls_to_restore_on_startup";
 
 // Stores the email address associated with the google account of the custodian
 // of the supervised user, set when the supervised user is created.
@@ -341,6 +332,11 @@ const char kWebKitLoadsImagesAutomatically[] =
     "webkit.webprefs.loads_images_automatically";
 const char kWebKitPluginsEnabled[] = "webkit.webprefs.plugins_enabled";
 
+// Boolean that is true when Data Saver is enabled.
+// TODO(bengr): Migrate the preference string to "data_saver.enabled"
+// (crbug.com/564207).
+const char kDataSaverEnabled[] = "spdy_proxy.enabled";
+
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
 
@@ -374,7 +370,7 @@ const char kIncognitoModeAvailability[] = "incognito.mode_availability";
 // Boolean that is true when Suggest support is enabled.
 const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // String indicating the Contextual Search enabled state.
 // "false" - opt-out (disabled)
 // "" (empty string) - undecided
@@ -386,6 +382,10 @@ const char kContextualSearchEnabled[] = "search.contextual_search_enabled";
 // Boolean that indicates whether the browser should put up a confirmation
 // window when the user is attempting to quit. Mac only.
 const char kConfirmToQuitEnabled[] = "browser.confirm_to_quit";
+
+// Boolean that indicates whether the browser should hide the toolbar when it's
+// in fullscreen. Mac only.
+const char kHideFullscreenToolbar[] = "browser.hide_fullscreen_toolbar";
 #endif
 
 // Boolean which specifies whether we should ask the user if we should download
@@ -508,6 +508,9 @@ const char kLanguageEnabledExtensionImes[] =
     "settings.language.enabled_extension_imes";
 const char kLanguageEnabledExtensionImesSyncable[] =
     "settings.language.enabled_extension_imes_syncable";
+
+// A boolean pref set to true if the IME menu is activated.
+const char kLangugaeImeMenuActivated[] = "settings.language.ime_menu_activated";
 
 // A boolean pref to indicate whether we still need to add the globally synced
 // input methods. False after the initial post-OOBE sync.
@@ -858,9 +861,6 @@ const char kLastClearBrowsingDataTime[] =
 // Boolean pref to define the default values for using spellchecker.
 const char kEnableContinuousSpellcheck[] = "browser.enable_spellchecking";
 
-// Boolean pref to define the default values for using auto spell correct.
-const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
-
 // Boolean pref to define the default setting for "block offensive words".
 // The old key value is kept to avoid unnecessary migration code.
 const char kSpeechRecognitionFilterProfanities[] =
@@ -1014,7 +1014,7 @@ const char kAutofillDialogWalletShippingSameAsBilling[] =
 const char kAutofillGeneratedCardBubbleTimesShown[] =
     "autofill.generated_card_bubble_times_shown";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // A dictionary that tracks the defaults to be set on the next invocation
 // of the requestAutocomplete dialog.
 const char kAutofillDialogDefaults[] = "autofill.rac_dialog_defaults";
@@ -1134,11 +1134,6 @@ const char kSupervisedUserCreationAllowed[] =
 // List pref containing the users supervised by this user.
 const char kSupervisedUsers[] = "profile.managed_users";
 
-// String that indicates that the profile reset prompt has already been shown to
-// the user (profile).
-const char kProfileResetPromptMementoInProfilePrefs[] =
-    "profile.reset_prompt_memento";
-
 // List pref containing the extension ids which are not allowed to send
 // notifications to the message center.
 const char kMessageCenterDisabledExtensionIds[] =
@@ -1196,7 +1191,7 @@ const char kEasyUnlockPairing[] = "easy_unlock.pairing";
 // in order to use Easy Unlock.
 const char kEasyUnlockProximityRequired[] = "easy_unlock.proximity_required";
 
-#if defined(ENABLE_EXTENSIONS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+#if defined(ENABLE_EXTENSIONS)
 // These device IDs are used by the copresence component, to uniquely identify
 // this device to the server. For privacy, authenticated and unauthenticated
 // calls are made using different device IDs.
@@ -1210,6 +1205,11 @@ const char kToolbarIconSurfacingBubbleAcknowledged[] =
     "toolbar_icon_surfacing_bubble_acknowledged";
 const char kToolbarIconSurfacingBubbleLastShowTime[] =
     "toolbar_icon_surfacing_bubble_show_time";
+
+// Used to track component actions in the toolbar that were migrated from
+// extensions.
+const char kToolbarMigratedComponentActionStatus[] =
+    "toolbar_migrated_component_action_status";
 #endif
 
 #if defined(ENABLE_WEBRTC)
@@ -1259,14 +1259,6 @@ const char kProfileCreatedByVersion[] = "profile.created_by_version";
 // them.
 const char kProfileInfoCache[] = "profile.info_cache";
 
-// Dictionary that maps profile keys to strings that indicate that the profile
-// reset prompt has already been shown to the corresponding user (profile).
-// This is semantically similar to kProfileResetPromptMementoInProfilePrefs, see
-// chrome/browser/profile_resetter/automatic_profile_resetter_mementos.h for an
-// explanation of why this redundancy is needed.
-const char kProfileResetPromptMementosInLocalState[] =
-    "profile.reset_prompt_mementos";
-
 // Boolean that specifies whether or not crash reports are sent
 // over the network for analysis.
 #if defined(OS_ANDROID)
@@ -1292,7 +1284,7 @@ const char kStabilityKernelCrashCount[] =
 const char kStabilitySystemUncleanShutdownCount[] =
     "user_experience_metrics.stability.system_unclean_shutdowns";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // Activity type that is currently in the foreground for the UMA session.
 // Uses the ActivityTypeIds::Type enum.
 const char kStabilityForegroundActivityType[] =
@@ -1452,7 +1444,7 @@ const char kDisablePluginFinder[] = "plugins.disable_plugin_finder";
 // Customized app page names that appear on the New Tab Page.
 const char kNtpAppPageNames[] = "ntp.app_page_names";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // Keeps track of currently open tabs collapsed state in the Other Devices menu.
 const char kNtpCollapsedCurrentlyOpenTabs[] = "ntp.collapsed_open_tabs";
 #endif
@@ -1460,7 +1452,7 @@ const char kNtpCollapsedCurrentlyOpenTabs[] = "ntp.collapsed_open_tabs";
 // Keeps track of which sessions are collapsed in the Other Devices menu.
 const char kNtpCollapsedForeignSessions[] = "ntp.collapsed_foreign_sessions";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // Keeps track of recently closed tabs collapsed state in the Other Devices
 // menu.
 const char kNtpCollapsedRecentlyClosedTabs[] =
@@ -1476,7 +1468,7 @@ const char kNtpCollapsedSyncPromo[] = "ntp.collapsed_sync_promo";
 // Which page should be visible on the new tab page v4
 const char kNtpShownPage[] = "ntp.shown_page";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // Ordered list of website suggestions shown on the new tab page that will allow
 // retaining the order even if the suggestions change over time.
 const char kNTPSuggestionsURL[] = "ntp.suggestions_url";
@@ -1578,12 +1570,7 @@ const char kWebAppCreateInQuickLaunchBar[] =
 // corresponding access token.
 const char kGeolocationAccessToken[] = "geolocation.access_token";
 
-#if defined(OS_ANDROID)
-// Boolean that controls the enabled-state of Geolocation in content.
-const char kGeolocationEnabled[] = "geolocation.enabled";
-#endif
-
-#if defined(ENABLE_GOOGLE_NOW)
+#if BUILDFLAG(ENABLE_GOOGLE_NOW)
 // Boolean that is true when Google services can use the user's location.
 const char kGoogleGeolocationAccessEnabled[] =
     "googlegeolocationaccess.enabled";
@@ -1698,12 +1685,6 @@ const char kHotwordAudioLoggingEnabled[] = "hotword.audio_logging_enabled";
 // It is used for comparison since the hotword voice search trigger must be
 // reinstalled to handle a new language.
 const char kHotwordPreviousLanguage[] = "hotword.previous_language";
-
-#if defined(OS_ANDROID)
-// Boolean that controls the global enabled-state of protected media identifier.
-const char kProtectedMediaIdentifierEnabled[] =
-    "protected_media_identifier.enabled";
-#endif
 
 #if defined(OS_CHROMEOS)
 // Dictionary for transient storage of settings that should go into device
@@ -2022,34 +2003,9 @@ const char kShelfPreferences[] = "shelf_preferences";
 // a confirmation dialog.
 const char kLogoutDialogDurationMs[] = "logout_dialog_duration_ms";
 const char kPinnedLauncherApps[] = "pinned_launcher_apps";
+const char kPolicyPinnedLauncherApps[] = "policy_pinned_launcher_apps";
 // Boolean value indicating whether to show a logout button in the ash tray.
 const char kShowLogoutButtonInTray[] = "show_logout_button_in_tray";
-#endif
-
-#if defined(USE_AURA)
-// Tuning settings for gestures.
-const char kMaxSeparationForGestureTouchesInPixels[] =
-    "gesture.max_separation_for_gesture_touches_in_pixels";
-const char kSemiLongPressTimeInMs[] = "gesture.semi_long_press_time_in_ms";
-const char kTabScrubActivationDelayInMs[] =
-    "gesture.tab_scrub_activation_delay_in_ms";
-const char kFlingMaxCancelToDownTimeInMs[] =
-    "gesture.fling_max_cancel_to_down_time_in_ms";
-const char kFlingMaxTapGapTimeInMs[] = "gesture.fling_max_tap_gap_time_in_ms";
-const char kOverscrollHorizontalThresholdComplete[] =
-    "overscroll.horizontal_threshold_complete";
-const char kOverscrollVerticalThresholdComplete[] =
-    "overscroll.vertical_threshold_complete";
-const char kOverscrollMinimumThresholdStart[] =
-    "overscroll.minimum_threshold_start";
-const char kOverscrollMinimumThresholdStartTouchpad[] =
-    "overscroll.minimum_threshold_start_touchpad";
-const char kOverscrollVerticalThresholdStart[] =
-    "overscroll.vertical_threshold_start";
-const char kOverscrollHorizontalResistThreshold[] =
-    "overscroll.horizontal_resist_threshold";
-const char kOverscrollVerticalResistThreshold[] =
-    "overscroll.vertical_resist_threshold";
 #endif
 
 #if defined(OS_WIN)
@@ -2148,7 +2104,7 @@ const char kEnableDRM[] = "settings.privacy.drm_enabled";
 const char kWatchdogExtensionActive[] =
     "profile.extensions.activity_log.num_consumers_active";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 // A list of partner bookmark rename/remove mappings.
 // Each list item is a dictionary containing a "url", a "provider_title" and
 // "mapped_title" entries, detailing the bookmark target URL (if any), the title
@@ -2202,5 +2158,18 @@ const char kBackgroundTracingLastUpload[] = "background_tracing.last_upload";
 
 const char kAllowDinosaurEasterEgg[] =
     "allow_dinosaur_easter_egg";
+
+#if defined(OS_ANDROID)
+// Whether the update menu item was clicked. Used to facilitate logging whether
+// Chrome was updated after the menu item is clicked.
+const char kClickedUpdateMenuItem[] = "omaha.clicked_update_menu_item";
+#endif
+
+#if defined(ENABLE_MEDIA_ROUTER)
+// Whether or not the Media Router first run flow has been acknowledged by the
+// user.
+const char kMediaRouterFirstRunFlowAcknowledged[] =
+    "media_router.firstrunflow.acknowledged";
+#endif
 
 }  // namespace prefs

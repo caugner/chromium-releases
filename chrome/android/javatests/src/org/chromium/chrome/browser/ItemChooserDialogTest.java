@@ -77,8 +77,8 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
         return dialog;
     }
 
-    private void selectItem(Dialog dialog, int position, final String expectedItemId)
-            throws InterruptedException {
+    private void selectItem(Dialog dialog, int position, final String expectedItemId,
+            final boolean expectedEnabledState) throws InterruptedException {
         final ListView items = (ListView) dialog.findViewById(R.id.items);
         final Button button = (Button) dialog.findViewById(R.id.positive);
 
@@ -90,18 +90,18 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
         });
 
         // Verify first item selected gets selected.
-        // TODO(finnur): Stop using coordinates 10, 10 when crbug.com/532237 is fixed.
-        TouchCommon.singleClickView(items.getChildAt(position - 1), 10, 10);
+        TouchCommon.singleClickView(items.getChildAt(position - 1));
 
         CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return button.isEnabled();
+                return button.isEnabled() == expectedEnabledState;
             }
         });
 
-        // TODO(finnur): Stop using coordinates 10, 10 when crbug.com/532237 is fixed.
-        TouchCommon.singleClickView(button, 10, 10);
+        if (!expectedEnabledState) return;
+
+        TouchCommon.singleClickView(button);
 
         CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
@@ -151,7 +151,7 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
         assertFalse(button.isEnabled());
 
         // Select the first item and verify it got selected.
-        selectItem(dialog, 1, "key");
+        selectItem(dialog, 1, "key", true);
 
         mChooserDialog.dismiss();
     }
@@ -169,9 +169,9 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
 
         // Disable one item and try to select it.
         mChooserDialog.setEnabled("key", false);
-        selectItem(dialog, 1, "None");
+        selectItem(dialog, 1, "None", false);
         // The other is still selectable.
-        selectItem(dialog, 2, "key2");
+        selectItem(dialog, 2, "key2", true);
 
         mChooserDialog.dismiss();
     }

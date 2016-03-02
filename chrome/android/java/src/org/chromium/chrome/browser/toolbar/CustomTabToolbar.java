@@ -37,13 +37,13 @@ import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
 import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.components.dom_distiller.core.DomDistillerService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
+import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -214,7 +214,10 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
         // It takes some time to parse the title of the webcontent, and before that Tab#getTitle
         // always return the url. We postpone the title animation until the title is authentic.
-        if (mShouldShowTitle && !TextUtils.equals(currentTab.getTitle(), currentTab.getUrl())) {
+        // TODO(yusufo): Clear the explicit references to about:blank here and for domain.
+        if (mShouldShowTitle
+                && !TextUtils.equals(currentTab.getTitle(), currentTab.getUrl())
+                && !TextUtils.equals(currentTab.getTitle(), "about:blank")) {
             long duration = System.currentTimeMillis() - mInitializeTimeStamp;
             if (duration >= TITLE_ANIM_DELAY_MS) {
                 mTitleAnimationStarter.run();
@@ -560,4 +563,27 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public void backKeyPressed() { }
+
+    @Override
+    public void showAppMenuUpdateBadge() {
+    }
+
+    @Override
+    public boolean isShowingAppMenuUpdateBadge() {
+        return false;
+    }
+
+    @Override
+    public void removeAppMenuUpdateBadge(boolean animate) {
+    }
+
+    @Override
+    protected void setAppMenuUpdateBadgeToVisible(boolean animate) {
+    }
+
+    @Override
+    public View getMenuButtonWrapper() {
+        // This class has no menu button wrapper, so return the menu button instead.
+        return mMenuButton;
+    }
 }

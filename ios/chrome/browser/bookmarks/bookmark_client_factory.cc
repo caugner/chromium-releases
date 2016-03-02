@@ -10,21 +10,13 @@
 #include "ios/chrome/browser/bookmarks/bookmark_client_impl.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
 #include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/public/provider/chrome/browser/keyed_service_provider.h"
 
 namespace {
 
 scoped_ptr<KeyedService> BuildBookmarkClientImpl(web::BrowserState* context) {
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  return make_scoped_ptr(new BookmarkClientImpl(
-      browser_state,
-      ios::GetKeyedServiceProvider()->GetManagedBookmarkServiceForBrowserState(
-          browser_state)));
-#else
-  return make_scoped_ptr(new BookmarkClientImpl(browser_state, nullptr));
-#endif
+  return make_scoped_ptr(new BookmarkClientImpl(browser_state));
 }
 
 }  // namespace
@@ -51,16 +43,13 @@ BookmarkClientFactory::BookmarkClientFactory()
     : BrowserStateKeyedServiceFactory(
           "BookmarkClient",
           BrowserStateDependencyManager::GetInstance()) {
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  DependsOn(ios::GetKeyedServiceProvider()->GetManagedBookmarkServiceFactory());
-#endif
 }
 
 BookmarkClientFactory::~BookmarkClientFactory() {}
 
 scoped_ptr<KeyedService> BookmarkClientFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  return BuildBookmarkClientImpl(context).Pass();
+  return BuildBookmarkClientImpl(context);
 }
 
 web::BrowserState* BookmarkClientFactory::GetBrowserStateToUse(

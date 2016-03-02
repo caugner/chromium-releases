@@ -116,7 +116,8 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
 
             boolean openInForeground = mOrderController.willOpenInForeground(type, mIncognito)
                     || webContents != null;
-            TabDelegateFactory delegateFactory = new TabDelegateFactory();
+            TabDelegateFactory delegateFactory = parent == null ? new TabDelegateFactory()
+                    : parent.getDelegateFactory();
             Tab tab;
             if (webContents != null) {
                 // A WebContents was passed through the Intent.  Create a new Tab to hold it.
@@ -129,7 +130,8 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
                         == TabModel.INVALID_TAB_INDEX;
                 tab = Tab.createLiveTab(assignedTabId, mActivity, mIncognito,
                         mNativeWindow, type, parentId, !openInForeground);
-                tab.initialize(webContents, mTabContentManager, delegateFactory, !openInForeground);
+                tab.initialize(
+                        webContents, mTabContentManager, delegateFactory, !openInForeground, false);
                 tab.setParentIntent(parentIntent);
                 webContents.resumeLoadingCreatedWebContents();
             } else if (!openInForeground && SysUtils.isLowEndDevice()) {
@@ -141,7 +143,7 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
                 //                    currently no way to pipe that information to this function.
                 tab = Tab.createTabForLazyLoad(mActivity, mIncognito, mNativeWindow, type,
                         parentId, loadUrlParams);
-                tab.initialize(null, mTabContentManager, delegateFactory, !openInForeground);
+                tab.initialize(null, mTabContentManager, delegateFactory, !openInForeground, false);
                 mTabSaver.addTabToSaveQueue(tab);
             } else {
                 webContents =
@@ -150,7 +152,8 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
 
                 tab = Tab.createLiveTab(Tab.INVALID_TAB_ID, mActivity, mIncognito,
                         mNativeWindow, type, parentId, !openInForeground);
-                tab.initialize(webContents, mTabContentManager, delegateFactory, !openInForeground);
+                tab.initialize(
+                        webContents, mTabContentManager, delegateFactory, !openInForeground, false);
                 tab.loadUrl(loadUrlParams);
             }
             tab.getTabRedirectHandler().updateIntent(intent);
@@ -169,7 +172,7 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
     }
 
     @Override
-    public boolean createTabWithWebContents(WebContents webContents, int parentId,
+    public boolean createTabWithWebContents(Tab parent, WebContents webContents, int parentId,
             TabLaunchType type, String url) {
         // The parent tab was already closed.  Do not open child tabs.
         if (mTabModel.isClosurePending(parentId)) return false;
@@ -180,10 +183,11 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
         if (index != TabModel.INVALID_TAB_INDEX) position = index + 1;
 
         boolean openInForeground = mOrderController.willOpenInForeground(type, mIncognito);
+        TabDelegateFactory delegateFactory = parent == null ? new TabDelegateFactory()
+                : parent.getDelegateFactory();
         Tab tab = Tab.createLiveTab(Tab.INVALID_TAB_ID, mActivity, mIncognito,
                 mNativeWindow, type, parentId, !openInForeground);
-        tab.initialize(
-                webContents, mTabContentManager, new TabDelegateFactory(), !openInForeground);
+        tab.initialize(webContents, mTabContentManager, delegateFactory, !openInForeground, false);
         mTabModel.addTab(tab, position, type);
         return true;
     }
@@ -276,7 +280,7 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
                 id, mActivity, state.isIncognito(), mNativeWindow, state.parentId, state);
         boolean selectTab = mOrderController.willOpenInForeground(TabLaunchType.FROM_RESTORE,
                 state.isIncognito());
-        tab.initialize(null, mTabContentManager, new TabDelegateFactory(), !selectTab);
+        tab.initialize(null, mTabContentManager, new TabDelegateFactory(), !selectTab, false);
         assert state.isIncognito() == mIncognito;
         mTabModel.addTab(tab, index, TabLaunchType.FROM_RESTORE);
         return tab;

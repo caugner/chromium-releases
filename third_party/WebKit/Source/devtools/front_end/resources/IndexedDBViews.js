@@ -110,7 +110,7 @@ WebInspector.IDBDatabaseView.prototype = {
 
 /**
  * @constructor
- * @extends {WebInspector.DataGridContainerWidget}
+ * @extends {WebInspector.VBox}
  * @param {!WebInspector.IndexedDBModel} model
  * @param {!WebInspector.IndexedDBModel.DatabaseId} databaseId
  * @param {!WebInspector.IndexedDBModel.ObjectStore} objectStore
@@ -118,7 +118,7 @@ WebInspector.IDBDatabaseView.prototype = {
  */
 WebInspector.IDBDataView = function(model, databaseId, objectStore, index)
 {
-    WebInspector.DataGridContainerWidget.call(this);
+    WebInspector.VBox.call(this);
     this.registerRequiredCSS("resources/indexedDBViews.css");
 
     this._model = model;
@@ -206,8 +206,7 @@ WebInspector.IDBDataView.prototype = {
 
     _createEditorToolbar: function()
     {
-        var editorToolbar = new WebInspector.Toolbar(this.element);
-        editorToolbar.element.classList.add("data-view-toolbar");
+        var editorToolbar = new WebInspector.Toolbar("data-view-toolbar", this.element);
 
         this._pageBackButton = new WebInspector.ToolbarButton(WebInspector.UIString("Show previous page"), "play-backwards-toolbar-item");
         this._pageBackButton.addEventListener("click", this._pageBackButtonClicked, this);
@@ -253,9 +252,9 @@ WebInspector.IDBDataView.prototype = {
         this._index = index;
 
         if (this._dataGrid)
-            this.removeDataGrid(this._dataGrid);
+            this._dataGrid.asWidget().detach();
         this._dataGrid = this._createDataGrid();
-        this.appendDataGrid(this._dataGrid);
+        this._dataGrid.asWidget().show(this.element);
 
         this._skipCount = 0;
         this._updateData(true);
@@ -361,7 +360,7 @@ WebInspector.IDBDataView.prototype = {
         this._entries = [];
     },
 
-    __proto__: WebInspector.DataGridContainerWidget.prototype
+    __proto__: WebInspector.VBox.prototype
 }
 
 /**

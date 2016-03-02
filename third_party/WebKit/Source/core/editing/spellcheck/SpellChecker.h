@@ -57,7 +57,6 @@ public:
 
     bool isContinuousSpellCheckingEnabled() const;
     void toggleContinuousSpellChecking();
-    bool isGrammarCheckingEnabled();
     void ignoreSpelling();
     bool isSpellCheckingEnabledInFocusedNode() const;
     bool isSpellCheckingEnabledFor(Node*) const;
@@ -106,8 +105,7 @@ private:
     void removeMarkers(const VisibleSelection&, DocumentMarker::MarkerTypes);
     bool unifiedTextCheckerEnabled() const;
 
-    void chunkAndMarkAllMisspellingsAndBadGrammar(TextCheckingTypeMask textCheckingOptions, const TextCheckingParagraph& fullParagraphToCheck, bool asynchronous);
-    void markAllMisspellingsAndBadGrammarInRanges(TextCheckingTypeMask textCheckingOptions, const EphemeralRange& checkingRange, const EphemeralRange& paragraphRange, bool asynchronous, int requestNumber, int* checkingLength = 0);
+    void chunkAndMarkAllMisspellingsAndBadGrammar(TextCheckingTypeMask textCheckingOptions, const TextCheckingParagraph& fullParagraphToCheck);
 
     RawPtrWillBeMember<LocalFrame> m_frame;
     const OwnPtrWillBeMember<SpellCheckRequester> m_spellCheckRequester;

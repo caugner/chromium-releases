@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/json/json_writer.h"
+#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/test/histogram_tester.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/password_manager/sync/browser/password_manager_setting_migrator_service.h"
@@ -147,16 +149,6 @@ class TestPrefModelAssociatorClient
 
   bool IsMergeableDictionaryPreference(
       const std::string& pref_name) const override {
-    return false;
-  }
-
-  bool IsMigratedPreference(const std::string& new_pref_name,
-                            std::string* old_pref_name) const override {
-    return false;
-  }
-
-  bool IsOldMigratedPreference(const std::string& old_pref_name,
-                               std::string* new_pref_name) const override {
     return false;
   }
 

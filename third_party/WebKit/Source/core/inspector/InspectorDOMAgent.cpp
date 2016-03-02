@@ -28,7 +28,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/inspector/InspectorDOMAgent.h"
 
 #include "bindings/core/v8/BindingSecurity.h"
@@ -160,7 +159,7 @@ ScriptValue nodeAsScriptValue(ScriptState* scriptState, Node* node)
     ScriptState::Scope scope(scriptState);
     v8::Isolate* isolate = scriptState->isolate();
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "nodeAsScriptValue", "InjectedScriptHost", scriptState->context()->Global(), isolate);
-    if (!BindingSecurity::shouldAllowAccessToNode(isolate, callingDOMWindow(isolate), node, exceptionState))
+    if (!BindingSecurity::shouldAllowAccessTo(isolate, callingDOMWindow(isolate), node, exceptionState))
         return ScriptValue(scriptState, v8::Null(isolate));
     return ScriptValue(scriptState, toV8(node, scriptState->context()->Global(), isolate));
 }
@@ -1475,7 +1474,7 @@ String InspectorDOMAgent::documentURLString(Document* document)
 
 static String documentBaseURLString(Document* document)
 {
-    return document->completeURL("").string();
+    return document->baseURLForOverride(document->baseURL()).string();
 }
 
 static TypeBuilder::DOM::ShadowRootType::Enum shadowRootType(ShadowRoot* shadowRoot)
@@ -1568,13 +1567,14 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
                 value->setPseudoElements(pseudoElements.release());
                 forcePushChildren = true;
             }
+            if (!element->ownerDocument()->xmlVersion().isEmpty())
+                value->setXmlVersion(element->ownerDocument()->xmlVersion());
         }
 
         if (element->isInsertionPoint()) {
             value->setDistributedNodes(buildArrayForDistributedNodes(toInsertionPoint(element)));
             forcePushChildren = true;
         }
-
     } else if (node->isDocumentNode()) {
         Document* document = toDocument(node);
         value->setDocumentURL(documentURLString(document));
@@ -2122,12 +2122,14 @@ PassRefPtr<TypeBuilder::Runtime::RemoteObject> InspectorDOMAgent::resolveNode(No
     if (!frame)
         return nullptr;
 
-    ScriptState* state = ScriptState::forMainWorld(frame);
-    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(state);
+    ScriptState* scriptState = ScriptState::forMainWorld(frame);
+    if (!scriptState)
+        return nullptr;
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(scriptState);
     if (injectedScript.isEmpty())
         return nullptr;
 
-    ScriptValue scriptValue = nodeAsScriptValue(state, node);
+    ScriptValue scriptValue = nodeAsScriptValue(scriptState, node);
     return injectedScript.wrapObject(scriptValue, objectGroup);
 }
 
@@ -2144,6 +2146,7 @@ bool InspectorDOMAgent::pushDocumentUponHandlelessOperation(ErrorString* errorSt
 DEFINE_TRACE(InspectorDOMAgent)
 {
     visitor->trace(m_domListener);
+    visitor->trace(m_inspectedFrames);
     visitor->trace(m_injectedScriptManager);
 #if ENABLE(OILPAN)
     visitor->trace(m_documentNodeToIdMap);

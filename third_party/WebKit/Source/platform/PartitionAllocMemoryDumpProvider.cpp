@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "platform/PartitionAllocMemoryDumpProvider.h"
 
 #include "public/platform/WebMemoryAllocatorDump.h"
 #include "public/platform/WebProcessMemoryDump.h"
 #include "wtf/Partitions.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -27,6 +27,8 @@ String getPartitionDumpName(const char* partitionName)
 // PartitionAllocMemoryDumpProvider. This implements an interface that will
 // be called with memory statistics for each bucket in the allocator.
 class PartitionStatsDumperImpl final : public PartitionStatsDumper {
+    DISALLOW_NEW();
+    WTF_MAKE_NONCOPYABLE(PartitionStatsDumperImpl);
 public:
     PartitionStatsDumperImpl(WebProcessMemoryDump* memoryDump, WebMemoryDumpLevelOfDetail levelOfDetail)
         : m_memoryDump(memoryDump)

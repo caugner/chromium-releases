@@ -49,6 +49,7 @@ class Page;
 class Region;
 class ScrollableArea;
 class WebCompositorAnimationTimeline;
+class WebLayerTreeView;
 
 class CORE_EXPORT ScrollingCoordinator final : public NoBaseWillBeGarbageCollectedFinalized<ScrollingCoordinator> {
     WTF_MAKE_NONCOPYABLE(ScrollingCoordinator);
@@ -59,14 +60,16 @@ public:
     ~ScrollingCoordinator();
     DECLARE_TRACE();
 
-    void willCloseLayerTreeView();
+    void layerTreeViewInitialized(WebLayerTreeView&);
+    void willCloseLayerTreeView(WebLayerTreeView&);
+
     void willBeDestroyed();
 
     // Return whether this scrolling coordinator handles scrolling for the given frame view.
     bool coordinatesScrollingForFrameView(FrameView*) const;
 
-    // Called when any frame has done its layout.
-    void notifyLayoutUpdated();
+    // Called when any frame has done its layout or compositing has changed.
+    void notifyGeometryChanged();
     // Called when any frame recalculates its overflows after style change.
     void notifyOverflowUpdated();
 
@@ -155,9 +158,6 @@ private:
     void removeWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
 
     bool frameViewIsDirty() const;
-
-    void createProgrammaticScrollAnimatorTimeline();
-    void destroyProgrammaticScrollAnimatorTimeline();
 
     OwnPtr<WebCompositorAnimationTimeline> m_programmaticScrollAnimatorTimeline;
 

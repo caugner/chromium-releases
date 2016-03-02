@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/animation/SVGNumberInterpolationType.h"
 
 #include "core/animation/InterpolationEnvironment.h"
@@ -12,7 +11,7 @@
 
 namespace blink {
 
-PassOwnPtr<InterpolationValue> SVGNumberInterpolationType::maybeConvertNeutral() const
+PassOwnPtr<InterpolationValue> SVGNumberInterpolationType::maybeConvertNeutral(const UnderlyingValue&, ConversionCheckers&) const
 {
     return InterpolationValue::create(*this, InterpolableNumber::create(0));
 }

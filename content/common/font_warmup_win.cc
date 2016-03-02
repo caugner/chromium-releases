@@ -5,12 +5,14 @@
 #include "content/common/font_warmup_win.h"
 
 #include <dwrite.h>
+#include <stdint.h>
 #include <map>
 
 #include "base/debug/alias.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/numerics/safe_math.h"
@@ -21,18 +23,19 @@
 #include "base/win/iat_patch_function.h"
 #include "base/win/windows_version.h"
 #include "content/public/common/dwrite_font_platform_win.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "skia/ext/fontmgr_default_win.h"
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/public/web/win/WebFontRendering.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/ports/SkFontMgr.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
-#include "ui/gfx/hud_font.h"
 
 namespace content {
 
 namespace {
 
+// The Skia font manager, used for the life of the process (leaked at the end).
 SkFontMgr* g_warmup_fontmgr = nullptr;
 
 base::win::IATPatchFunction g_iat_patch_open_sc_manager;
@@ -94,56 +97,6 @@ NTSTATUS WINAPI NtALpcConnectPortPatch(HANDLE* port_handle,
                                        void* in_message_attributes,
                                        void* time_out) {
   return STATUS_ACCESS_DENIED;
-}
-
-// Directwrite connects to the font cache service to retrieve information about
-// fonts installed on the system etc. This works well outside the sandbox and
-// within the sandbox as long as the lpc connection maintained by the current
-// process with the font cache service remains valid. It appears that there
-// are cases when this connection is dropped after which directwrite is unable
-// to connect to the font cache service which causes problems with characters
-// disappearing.
-// Directwrite has fallback code to enumerate fonts if it is unable to connect
-// to the font cache service. We need to intercept the following APIs to
-// ensure that it does not connect to the font cache service.
-// NtALpcConnectPort
-// OpenSCManagerW
-// OpenServiceW
-// StartServiceW
-// CloseServiceHandle.
-// These are all IAT patched.
-void PatchServiceManagerCalls() {
-  static bool is_patched = false;
-  if (is_patched)
-    return;
-  const char* service_provider_dll =
-      (base::win::GetVersion() >= base::win::VERSION_WIN8
-           ? "api-ms-win-service-management-l1-1-0.dll"
-           : "advapi32.dll");
-
-  is_patched = true;
-
-  DWORD patched =
-      g_iat_patch_open_sc_manager.Patch(L"dwrite.dll", service_provider_dll,
-                                        "OpenSCManagerW", OpenSCManagerWPatch);
-  DCHECK(patched == 0);
-
-  patched = g_iat_patch_close_service_handle.Patch(
-      L"dwrite.dll", service_provider_dll, "CloseServiceHandle",
-      CloseServiceHandlePatch);
-  DCHECK(patched == 0);
-
-  patched = g_iat_patch_open_service.Patch(L"dwrite.dll", service_provider_dll,
-                                           "OpenServiceW", OpenServiceWPatch);
-  DCHECK(patched == 0);
-
-  patched = g_iat_patch_start_service.Patch(
-      L"dwrite.dll", service_provider_dll, "StartServiceW", StartServiceWPatch);
-  DCHECK(patched == 0);
-
-  patched = g_iat_patch_nt_connect_port.Patch(
-      L"dwrite.dll", "ntdll.dll", "NtAlpcConnectPort", NtALpcConnectPortPatch);
-  DCHECK(patched == 0);
 }
 
 // Windows-only DirectWrite support. These warm up the DirectWrite paths
@@ -303,6 +256,7 @@ skia::RefPtr<SkTypeface> GetTypefaceFromLOGFONT(const LOGFONTW* log_font) {
                                        : SkFontStyle::kUpright_Slant);
 
   std::string family_name = base::WideToUTF8(log_font->lfFaceName);
+  ppapi::ProxyAutoLock lock;  // Needed for DirectWrite font proxy.
   return skia::AdoptRef(
       g_warmup_fontmgr->matchFamilyStyle(family_name.c_str(), style));
 }
@@ -461,6 +415,56 @@ GdiFontPatchDataImpl::GdiFontPatchDataImpl(const base::FilePath& path) {
 
 }  // namespace
 
+// Directwrite connects to the font cache service to retrieve information about
+// fonts installed on the system etc. This works well outside the sandbox and
+// within the sandbox as long as the lpc connection maintained by the current
+// process with the font cache service remains valid. It appears that there
+// are cases when this connection is dropped after which directwrite is unable
+// to connect to the font cache service which causes problems with characters
+// disappearing.
+// Directwrite has fallback code to enumerate fonts if it is unable to connect
+// to the font cache service. We need to intercept the following APIs to
+// ensure that it does not connect to the font cache service.
+// NtALpcConnectPort
+// OpenSCManagerW
+// OpenServiceW
+// StartServiceW
+// CloseServiceHandle.
+// These are all IAT patched.
+void PatchServiceManagerCalls() {
+  static bool is_patched = false;
+  if (is_patched)
+    return;
+  const char* service_provider_dll =
+      (base::win::GetVersion() >= base::win::VERSION_WIN8
+           ? "api-ms-win-service-management-l1-1-0.dll"
+           : "advapi32.dll");
+
+  is_patched = true;
+
+  DWORD patched =
+      g_iat_patch_open_sc_manager.Patch(L"dwrite.dll", service_provider_dll,
+                                        "OpenSCManagerW", OpenSCManagerWPatch);
+  DCHECK(patched == 0);
+
+  patched = g_iat_patch_close_service_handle.Patch(
+      L"dwrite.dll", service_provider_dll, "CloseServiceHandle",
+      CloseServiceHandlePatch);
+  DCHECK(patched == 0);
+
+  patched = g_iat_patch_open_service.Patch(L"dwrite.dll", service_provider_dll,
+                                           "OpenServiceW", OpenServiceWPatch);
+  DCHECK(patched == 0);
+
+  patched = g_iat_patch_start_service.Patch(
+      L"dwrite.dll", service_provider_dll, "StartServiceW", StartServiceWPatch);
+  DCHECK(patched == 0);
+
+  patched = g_iat_patch_nt_connect_port.Patch(
+      L"dwrite.dll", "ntdll.dll", "NtAlpcConnectPort", NtALpcConnectPortPatch);
+  DCHECK(patched == 0);
+}
+
 void DoPreSandboxWarmupForTypeface(SkTypeface* typeface) {
   SkPaint paint_warmup;
   paint_warmup.setTypeface(typeface);
@@ -484,7 +488,10 @@ SkFontMgr* GetPreSandboxWarmupFontMgr() {
 }
 
 GdiFontPatchData* PatchGdiFontEnumeration(const base::FilePath& path) {
-  // We assume the fontmgr is already warmed up before calling this.
+  if (ShouldUseDirectWriteFontProxyFieldTrial() && !g_warmup_fontmgr)
+    g_warmup_fontmgr = SkFontMgr_New_DirectWrite();
+  // If not using the font proxy, we assume |g_warmup_fontmgr| is already
+  // initialized before this function is called.
   DCHECK(g_warmup_fontmgr);
   return new GdiFontPatchDataImpl(path);
 }
@@ -508,14 +515,12 @@ void WarmupDirectWrite() {
   // code to use these objects after warmup.
   SetDefaultSkiaFactory(GetPreSandboxWarmupFontMgr());
 
-  // We need to warm up *some* font for DirectWrite. We also need to pass one
-  // down for the CC HUD code, so use the same one here. Note that we don't use
+  // We need to warm up *some* font for DirectWrite. Note that we don't use
   // a monospace as would be nice in an attempt to avoid a small startup time
   // regression, see http://crbug.com/463613.
   skia::RefPtr<SkTypeface> hud_typeface = skia::AdoptRef(
       GetPreSandboxWarmupFontMgr()->legacyCreateTypeface("Times New Roman", 0));
   DoPreSandboxWarmupForTypeface(hud_typeface.get());
-  gfx::SetHudTypeface(hud_typeface);
 }
 
 }  // namespace content

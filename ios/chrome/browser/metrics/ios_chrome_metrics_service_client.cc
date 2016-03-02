@@ -4,6 +4,9 @@
 
 #include "ios/chrome/browser/metrics/ios_chrome_metrics_service_client.h"
 
+#include <stdint.h>
+
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -95,7 +98,7 @@ scoped_ptr<IOSChromeMetricsServiceClient> IOSChromeMetricsServiceClient::Create(
       new IOSChromeMetricsServiceClient(state_manager));
   client->Initialize();
 
-  return client.Pass();
+  return client;
 }
 
 // static
@@ -122,7 +125,7 @@ bool IOSChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
   return ::IsOffTheRecordSessionActive();
 }
 
-int32 IOSChromeMetricsServiceClient::GetProduct() {
+int32_t IOSChromeMetricsServiceClient::GetProduct() {
   return metrics::ChromeUserMetricsExtension::CHROME;
 }
 
@@ -252,7 +255,7 @@ void IOSChromeMetricsServiceClient::Initialize() {
       new IOSStabilityMetricsProvider(metrics_service_.get()));
   if (ios_stability_metrics_provider) {
     metrics_service_->RegisterMetricsProvider(
-        ios_stability_metrics_provider.Pass());
+        std::move(ios_stability_metrics_provider));
   } else {
     NOTREACHED() << "No IOSStabilityMetricsProvider registered.";
   }

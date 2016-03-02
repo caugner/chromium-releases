@@ -4,11 +4,15 @@
 
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
@@ -17,6 +21,7 @@
 #include "chrome/browser/notifications/persistent_notification_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
@@ -51,10 +56,6 @@
 #include "extensions/common/permissions/permissions_data.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "base/strings/string_number_conversions.h"
-#endif
-
 using content::BrowserContext;
 using content::BrowserThread;
 using content::PlatformNotificationContext;
@@ -87,6 +88,47 @@ void CancelNotification(const std::string& id, ProfileID profile_id) {
       ->GetNotificationUIManager()->CancelById(id, profile_id);
 }
 
+// Callback to run once the profile has been loaded in order to perform a
+// given |operation| in a notification.
+void ProfileLoadedCallback(
+    PlatformNotificationServiceImpl::NotificationOperation operation,
+    const GURL& origin,
+    int64_t persistent_notification_id,
+    int action_index,
+    bool incognito,
+    Profile* profile,
+    Profile::CreateStatus status) {
+  if (status == Profile::CREATE_STATUS_CREATED) {
+    // This is an intermediate state, we will be also called
+    // again with CREATE_STATUS_INITIALIZED once everything is ready
+    // so ignore it.
+    return;
+  }
+  if (status != Profile::CREATE_STATUS_INITIALIZED) {
+    LOG(WARNING) << "Profile not loaded correctly";
+    return;
+  }
+  DCHECK(profile);
+  profile = incognito ? profile->GetOffTheRecordProfile() : profile;
+
+  switch (operation) {
+    case PlatformNotificationServiceImpl::NOTIFICATION_CLICK:
+      PlatformNotificationServiceImpl::GetInstance()
+          ->OnPersistentNotificationClick(profile, persistent_notification_id,
+                                          origin, action_index);
+      break;
+    case PlatformNotificationServiceImpl::NOTIFICATION_CLOSE:
+      PlatformNotificationServiceImpl::GetInstance()
+          ->OnPersistentNotificationClose(profile, persistent_notification_id,
+                                          origin, true);
+      break;
+    case PlatformNotificationServiceImpl::NOTIFICATION_SETTINGS:
+      LOG(WARNING) << "NOTIFICATION_SETTINGS action not implemented";
+      break;
+  }
+  // TODO(miguelg) Implement the site settings operation.
+}
+
 }  // namespace
 
 // static
@@ -96,9 +138,42 @@ PlatformNotificationServiceImpl::GetInstance() {
 }
 
 PlatformNotificationServiceImpl::PlatformNotificationServiceImpl()
-    : notification_ui_manager_for_tests_(nullptr) {}
+    : native_notification_ui_manager_(
+          NotificationUIManager::CreateNativeNotificationManager()),
+      notification_ui_manager_for_tests_(nullptr) {}
 
 PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() {}
+
+void PlatformNotificationServiceImpl::ProcessPersistentNotificationOperation(
+    NotificationOperation operation,
+    const std::string& profile_id,
+    bool incognito,
+    const GURL& origin,
+    int64_t persistent_notification_id,
+    int action_index) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  DCHECK(profile_manager);
+
+  // ProfileManager does not offer a good interface to load a profile or
+  // fail. Instead it offers a method to create the profile and simply load it
+  // if it already exist. We therefore check first that the profile is there
+  // and fail early otherwise.
+  const base::FilePath profile_path =
+      profile_manager->GetProfileInfoCache().GetUserDataDir().AppendASCII(
+          profile_id);
+
+  if (profile_manager->GetProfileInfoCache().GetIndexOfProfileWithPath(
+          profile_path) == std::string::npos) {
+    LOG(ERROR) << "Loading a path that does not exist";
+    return;
+  }
+
+  profile_manager->CreateProfileAsync(
+      profile_path,
+      base::Bind(&ProfileLoadedCallback, operation, origin,
+                 persistent_notification_id, action_index, incognito),
+      base::string16(), std::string(), std::string());
+}
 
 void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
     BrowserContext* browser_context,
@@ -274,7 +349,7 @@ void PlatformNotificationServiceImpl::DisplayNotification(
   DCHECK_EQ(0u, notification_data.actions.size());
 
   NotificationObjectProxy* proxy =
-      new NotificationObjectProxy(browser_context, delegate.Pass());
+      new NotificationObjectProxy(browser_context, std::move(delegate));
   Notification notification = CreateNotificationFromData(
       profile, origin, icon, notification_data, proxy);
 
@@ -331,14 +406,19 @@ void PlatformNotificationServiceImpl::ClosePersistentNotification(
   DCHECK(profile);
 
 #if defined(OS_ANDROID)
-  // TODO(peter): Remove this conversion when the notification ids are being
-  // generated by the caller of this method.
-  std::string textual_persistent_notification_id =
-      base::Int64ToString(persistent_notification_id);
-  GetNotificationUIManager()->CancelById(
-      textual_persistent_notification_id,
-      NotificationUIManager::GetProfileID(profile));
+  bool cancel_by_persistent_id = true;
 #else
+  bool cancel_by_persistent_id = (native_notification_ui_manager_ != nullptr);
+#endif
+
+  if (cancel_by_persistent_id) {
+    // TODO(peter): Remove this conversion when the notification ids are being
+    // generated by the caller of this method.
+    GetNotificationUIManager()->CancelById(
+        base::Int64ToString(persistent_notification_id),
+        NotificationUIManager::GetProfileID(profile));
+  }
+
   auto iter = persistent_notifications_.find(persistent_notification_id);
   if (iter == persistent_notifications_.end())
     return;
@@ -347,7 +427,6 @@ void PlatformNotificationServiceImpl::ClosePersistentNotification(
       iter->second, NotificationUIManager::GetProfileID(profile));
 
   persistent_notifications_.erase(iter);
-#endif
 }
 
 bool PlatformNotificationServiceImpl::GetDisplayedPersistentNotifications(
@@ -422,6 +501,10 @@ NotificationUIManager*
 PlatformNotificationServiceImpl::GetNotificationUIManager() const {
   if (notification_ui_manager_for_tests_)
     return notification_ui_manager_for_tests_;
+
+  if (native_notification_ui_manager_) {
+    return native_notification_ui_manager_.get();
+  }
 
   return g_browser_process->notification_ui_manager();
 }

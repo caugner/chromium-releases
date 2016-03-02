@@ -4,6 +4,8 @@
 
 #include "content/renderer/media/webmediaplayer_ms_compositor.h"
 
+#include <stdint.h>
+
 #include "base/command_line.h"
 #include "base/hash.h"
 #include "base/single_thread_task_runner.h"
@@ -59,7 +61,7 @@ scoped_refptr<media::VideoFrame> CopyFrameToI420(
       // GPU Process crashed.
       bitmap.eraseColor(SK_ColorTRANSPARENT);
     }
-    libyuv::ARGBToI420(reinterpret_cast<uint8*>(bitmap.getPixels()),
+    libyuv::ARGBToI420(reinterpret_cast<uint8_t*>(bitmap.getPixels()),
                        bitmap.rowBytes(),
                        new_frame->data(media::VideoFrame::kYPlane),
                        new_frame->stride(media::VideoFrame::kYPlane),
@@ -102,13 +104,15 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
       last_render_length_(base::TimeDelta::FromSecondsD(1.0 / 60.0)),
       total_frame_count_(0),
       dropped_frame_count_(0),
-      stopped_(true) {
+      stopped_(true),
+      weak_ptr_factory_(this) {
   main_message_loop_ = base::MessageLoop::current();
 
   const blink::WebMediaStream web_stream(
       blink::WebMediaStreamRegistry::lookupMediaStreamDescriptor(url));
   blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
-  web_stream.videoTracks(video_tracks);
+  if (!web_stream.isNull())
+    web_stream.videoTracks(video_tracks);
 
   const bool remote_video =
       video_tracks.size() && video_tracks[0].source().remote();
@@ -123,7 +127,7 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
   }
 
   // Just for logging purpose.
-  const uint32 hash_value = base::Hash(url.string().utf8());
+  const uint32_t hash_value = base::Hash(url.string().utf8());
   serial_ = (hash_value << 1) | (remote_video ? 1 : 0);
 }
 
@@ -269,7 +273,7 @@ void WebMediaPlayerMSCompositor::StartRendering() {
   DCHECK(thread_checker_.CalledOnValidThread());
   compositor_task_runner_->PostTask(
       FROM_HERE, base::Bind(&WebMediaPlayerMSCompositor::StartRenderingInternal,
-                            base::Unretained(this)));
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void WebMediaPlayerMSCompositor::StartRenderingInternal() {
@@ -284,7 +288,7 @@ void WebMediaPlayerMSCompositor::StopRendering() {
   DCHECK(thread_checker_.CalledOnValidThread());
   compositor_task_runner_->PostTask(
       FROM_HERE, base::Bind(&WebMediaPlayerMSCompositor::StopRenderingInternal,
-                            base::Unretained(this)));
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void WebMediaPlayerMSCompositor::StopRenderingInternal() {
@@ -371,4 +375,19 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
   main_message_loop_->PostTask(
       FROM_HERE, base::Bind(&WebMediaPlayerMS::ResetCanvasCache, player_));
 }
+
+void WebMediaPlayerMSCompositor::SetAlgorithmEnabledForTesting(
+    bool algorithm_enabled) {
+  if (!algorithm_enabled) {
+    rendering_frame_buffer_.reset();
+    return;
+  }
+
+  if (!rendering_frame_buffer_) {
+    rendering_frame_buffer_.reset(new media::VideoRendererAlgorithm(
+        base::Bind(&WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
+                   base::Unretained(this))));
+  }
 }
+
+}  // namespace content

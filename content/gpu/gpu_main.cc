@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
 #include <stdlib.h>
 
-#if defined(OS_WIN)
-#include <dwmapi.h>
-#include <windows.h>
-#endif
+#include <utility>
 
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
@@ -47,6 +45,11 @@
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
 
+#if defined(OS_WIN)
+#include <dwmapi.h>
+#include <windows.h>
+#endif
+
 #if defined(OS_ANDROID)
 #include "base/trace_event/memory_dump_manager.h"
 #include "components/tracing/graphics_memory_dump_provider_android.h"
@@ -55,12 +58,13 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "base/win/scoped_com_initializer.h"
-#include "content/common/gpu/media/dxva_video_decode_accelerator.h"
+#include "content/common/gpu/media/dxva_video_decode_accelerator_win.h"
 #include "sandbox/win/src/sandbox.h"
 #endif
 
 #if defined(USE_X11)
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/x/x11_switches.h"
 #endif
 
 #if defined(OS_LINUX)
@@ -147,6 +151,12 @@ int GpuMain(const MainFunctionParams& parameters) {
       SEM_NOOPENFILEERRORBOX);
 #elif defined(USE_X11)
   ui::SetDefaultX11ErrorHandlers();
+
+#if !defined(OS_CHROMEOS)
+  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kWindowDepth));
+#endif
+
 #endif
 
   logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
@@ -189,7 +199,7 @@ int GpuMain(const MainFunctionParams& parameters) {
   // This is necessary for CoreAnimation layers hosted in the GPU process to be
   // drawn. See http://crbug.com/312462.
   scoped_ptr<base::MessagePump> pump(new base::MessagePumpCFRunLoop());
-  base::MessageLoop main_message_loop(pump.Pass());
+  base::MessageLoop main_message_loop(std::move(pump));
 #else
   base::MessageLoop main_message_loop(base::MessageLoop::TYPE_IO);
 #endif
@@ -357,8 +367,8 @@ int GpuMain(const MainFunctionParams& parameters) {
     gpu_info.sandboxed = Sandbox::SandboxIsCurrentlyActive();
 #endif
 
-    gpu_info.video_decode_accelerator_supported_profiles =
-        content::GpuVideoDecodeAccelerator::GetSupportedProfiles();
+    gpu_info.video_decode_accelerator_capabilities =
+        content::GpuVideoDecodeAccelerator::GetCapabilities();
     gpu_info.video_encode_accelerator_supported_profiles =
         content::GpuVideoEncodeAccelerator::GetSupportedProfiles();
     gpu_info.jpeg_decode_accelerator_supported =

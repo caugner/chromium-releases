@@ -12,9 +12,6 @@ public abstract class ChromeSwitches {
     // Switches used from Java.  Please continue switch style used Chrome where
     // options-have-hypens and are_not_split_with_underscores.
 
-    /** Testing: pretend that the switch value is the name of a child account. */
-    public static final String CHILD_ACCOUNT = "child-account";
-
     /** Mimic a low end device */
     public static final String ENABLE_ACCESSIBILITY_TAB_SWITCHER =
             "enable-accessibility-tab-switcher";
@@ -96,15 +93,29 @@ public abstract class ChromeSwitches {
      */
     public static final String ENABLE_NTP_SNIPPETS = "enable-ntp-snippets";
 
+    /**
+     * Enable interests on the NTP
+     */
+    public static final String ENABLE_INTERESTS = "enable-interests";
+
+    /**
+     * Forces the update menu item to show.
+     */
+    public static final String FORCE_SHOW_UPDATE_MENU_ITEM = "force-show-update-menu-item";
+
+    /**
+     * Forces the update menu badge to show.
+     */
+    public static final String FORCE_SHOW_UPDATE_MENU_BADGE = "force-show-update-menu-badge";
+
+    /**
+     * Sets the market URL for Chrome for use in testing.
+     */
+    public static final String MARKET_URL_FOR_TESTING = "market-url-for-testing";
+
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Native Switches
     ///////////////////////////////////////////////////////////////////////////////////////////////
-
-    /**
-     * Enable enhanced bookmarks feature.
-     * Native switch - switches::kEnhancedBookmarksExperiment
-     */
-    public static final String ENABLE_ENHANCED_BOOKMARKS = "enhanced-bookmarks-experiment";
 
     /** Enable the DOM Distiller. */
     public static final String ENABLE_DOM_DISTILLER = "enable-dom-distiller";
@@ -112,10 +123,6 @@ public abstract class ChromeSwitches {
     /** Enable experimental web-platform features, such as Push Messaging. */
     public static final String EXPERIMENTAL_WEB_PLAFTORM_FEATURES =
             "enable-experimental-web-platform-features";
-
-    /** Enable Reader Mode button animation. */
-    public static final String ENABLE_READER_MODE_BUTTON_ANIMATION =
-            "enable-dom-distiller-button-animation";
 
     /**
      * Use sandbox Wallet environment for requestAutocomplete.
@@ -161,9 +168,38 @@ public abstract class ChromeSwitches {
     public static final String PROGRESS_BAR_ANIMATION = "progress-bar-animation";
 
     /**
-     * Enable offline pages.
+     * Specifies Android NTP behaviour on clicking a Most{Visited/Likely} tile.
+     * Specifically whether to refocus an existing tab with the same url or host or to load the url
+     * in the current tab.
+     * Native switch - switches::kNtpSwitchToExistingTab
+     */
+    public static final String NTP_SWITCH_TO_EXISTING_TAB = "ntp-switch-to-existing-tab";
+
+    /**
+     * Enables offline pages.
+     * Native switch - switches::kEnableOfflinePages
      */
     public static final String ENABLE_OFFLINE_PAGES = "enable-offline-pages";
+
+    /**
+     * Enables offline pages, showing 'bookmarks' name in UI strings.
+     * Native switch - switches::kEnableOfflinePagesAsBookmarks
+     */
+    public static final String ENABLE_OFFLINE_PAGES_AS_BOOKMARKS =
+            "enable-offline-pages-as-bookmarks";
+
+    /**
+     * Enables offline pages, showing 'saved pages' name in UI strings.
+     * Native switch - switches::kEnableOfflinePagesAsSavedPages
+     */
+    public static final String ENABLE_OFFLINE_PAGES_AS_SAVED_PAGES =
+            "enable-offline-pages-as-saved-pages";
+
+    /**
+     * Disables offline pages.
+     * Native switch - switches::kDisableOfflinePages
+     */
+    public static final String DISABLE_OFFLINE_PAGES = "disable-offline-pages";
 
     /**
      * Enable keyboard accessory view that shows autofill suggestions on top of the keyboard.
@@ -179,12 +215,6 @@ public abstract class ChromeSwitches {
     public static final String ENABLE_HUNG_RENDERER_INFOBAR = "enable-hung-renderer-infobar";
 
     /**
-     * Enable Physical Web feature.
-     * Native switch - switches::kEnablePhysicalWeb
-     */
-    public static final String ENABLE_PHYSICAL_WEB = "enable-physical-web";
-
-    /**
      * Enables Web Notification custom layouts.
      * Native switch - switches::kEnableWebNotificationCustomLayouts
      */
@@ -197,6 +227,12 @@ public abstract class ChromeSwitches {
      */
     public static final String DISABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS =
             "disable-web-notification-custom-layouts";
+
+    /**
+     * Enable tab switcher in document mode (merged tabs and apps option).
+     */
+    public static final String ENABLE_TAB_SWITCHER_IN_DOCUMENT_MODE =
+            "enable-tab-switcher-in-document-mode";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

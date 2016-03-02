@@ -46,7 +46,19 @@
 #include "wtf/RefCounted.h"
 #include "wtf/TypeTraits.h"
 
+#if defined(LEAK_SANITIZER)
+#include "wtf/LeakAnnotations.h"
+#endif
+
 namespace blink {
+
+// Marker used to annotate persistent objects and collections with,
+// so as to enable reliable testing for persistent references via
+// a type trait (see TypeTraits.h's IsPersistentReferenceType<>.)
+#define IS_PERSISTENT_REFERENCE_TYPE()               \
+    public:                                          \
+        using IsPersistentReferenceTypeMarker = int; \
+    private:
 
 enum WeaknessPersistentConfiguration {
     NonWeakPersistentConfiguration,
@@ -60,6 +72,7 @@ enum CrossThreadnessPersistentConfiguration {
 
 template<typename T, WeaknessPersistentConfiguration weaknessConfiguration, CrossThreadnessPersistentConfiguration crossThreadnessConfiguration>
 class PersistentBase {
+    IS_PERSISTENT_REFERENCE_TYPE();
 public:
     PersistentBase() : m_raw(nullptr)
     {
@@ -183,6 +196,17 @@ public:
         return *this;
     }
 
+#if defined(LEAK_SANITIZER)
+    PersistentBase* registerAsStaticReference()
+    {
+        if (m_persistentNode) {
+            ASSERT(ThreadState::current());
+            ThreadState::current()->registerStaticPersistentNode(m_persistentNode);
+            LEAK_SANITIZER_IGNORE_OBJECT(this);
+        }
+        return this;
+    }
+#endif
 
 private:
     NO_LAZY_SWEEP_SANITIZE_ADDRESS
@@ -208,7 +232,7 @@ private:
 
         TraceCallback traceCallback = TraceMethodDelegate<PersistentBase<T, weaknessConfiguration, crossThreadnessConfiguration>, &PersistentBase<T, weaknessConfiguration, crossThreadnessConfiguration>::trace>::trampoline;
         if (crossThreadnessConfiguration == CrossThreadPersistentConfiguration) {
-            m_persistentNode = ThreadState::crossThreadPersistentRegion().allocatePersistentNode(this, traceCallback);
+            m_persistentNode = Heap::crossThreadPersistentRegion().allocatePersistentNode(this, traceCallback);
         } else {
             ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
             ASSERT(state->checkThread());
@@ -225,7 +249,7 @@ private:
             return;
 
         if (crossThreadnessConfiguration == CrossThreadPersistentConfiguration) {
-            ThreadState::crossThreadPersistentRegion().freePersistentNode(m_persistentNode);
+            Heap::crossThreadPersistentRegion().freePersistentNode(m_persistentNode);
         } else {
             ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
             ASSERT(state->checkThread());
@@ -516,6 +540,7 @@ class PersistentHeapCollectionBase : public Collection {
     // heap collections are always allocated off-heap. This allows persistent collections to be used in
     // DEFINE_STATIC_LOCAL et. al.
     WTF_USE_ALLOCATOR(PersistentHeapCollectionBase, WTF::PartitionAllocator);
+    IS_PERSISTENT_REFERENCE_TYPE();
 public:
     PersistentHeapCollectionBase()
     {
@@ -545,7 +570,20 @@ public:
         visitor->trace(*static_cast<Collection*>(this));
     }
 
+#if defined(LEAK_SANITIZER)
+    PersistentHeapCollectionBase* registerAsStaticReference()
+    {
+        if (m_persistentNode) {
+            ASSERT(ThreadState::current());
+            ThreadState::current()->registerStaticPersistentNode(m_persistentNode);
+            LEAK_SANITIZER_IGNORE_OBJECT(this);
+        }
+        return this;
+    }
+#endif
+
 private:
+
     NO_LAZY_SWEEP_SANITIZE_ADDRESS
     void initialize()
     {
@@ -1047,25 +1085,32 @@ class PLATFORM_EXPORT DummyBase<void> { };
 
 template<typename T> T* adoptRefWillBeNoop(T* ptr)
 {
-    static const bool notRefCounted = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCounted>::value;
-    static_assert(notRefCounted, "you must adopt");
+    static const bool isGarbageCollected = IsGarbageCollectedType<T>::value;
+    static const bool isRefCounted = WTF::IsSubclassOfTemplate<typename std::remove_const<T>::type, RefCounted>::value;
+    static_assert(isGarbageCollected && !isRefCounted, "T needs to be a non-refcounted, garbage collected type.");
     return ptr;
 }
 
 template<typename T> T* adoptPtrWillBeNoop(T* ptr)
 {
-    static const bool notRefCounted = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCounted>::value;
-    static_assert(notRefCounted, "you must adopt");
+    static const bool isGarbageCollected = IsGarbageCollectedType<T>::value;
+    static_assert(isGarbageCollected, "T needs to be a garbage collected type.");
     return ptr;
 }
 
 #define USING_FAST_MALLOC_WILL_BE_REMOVED(type) // do nothing when oilpan is enabled.
+#define USING_FAST_MALLOC_WITH_TYPE_NAME_WILL_BE_REMOVED(type)
 #define DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(type) // do nothing
 #define DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(type) // do nothing
 #define DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(type) // do nothing
 
+#if defined(LEAK_SANITIZER)
 #define DEFINE_STATIC_REF_WILL_BE_PERSISTENT(type, name, arguments) \
-    static type* name = (new Persistent<type>(arguments))->get();
+    static type* name = *(new Persistent<type>(arguments))->registerAsStaticReference()
+#else
+#define DEFINE_STATIC_REF_WILL_BE_PERSISTENT(type, name, arguments) \
+    static type* name = *(new Persistent<type>(arguments))
+#endif
 
 #else // !ENABLE(OILPAN)
 
@@ -1133,6 +1178,7 @@ template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeNoop(T* ptr) { retu
 template<typename T> PassOwnPtrWillBeRawPtr<T> adoptPtrWillBeNoop(T* ptr) { return adoptPtr(ptr); }
 
 #define USING_FAST_MALLOC_WILL_BE_REMOVED(type) USING_FAST_MALLOC(type)
+#define USING_FAST_MALLOC_WITH_TYPE_NAME_WILL_BE_REMOVED(type) USING_FAST_MALLOC_WITH_TYPE_NAME(type)
 #define DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(type) \
     public:                                            \
         ~type();                                       \
@@ -1151,13 +1197,13 @@ template<typename T> PassOwnPtrWillBeRawPtr<T> adoptPtrWillBeNoop(T* ptr) { retu
 #endif // ENABLE(OILPAN)
 
 template<typename T, bool = IsGarbageCollectedType<T>::value>
-class PointerFieldStorageTrait {
+class RawPtrOrMemberTrait {
 public:
     using Type = RawPtr<T>;
 };
 
 template<typename T>
-class PointerFieldStorageTrait<T, true> {
+class RawPtrOrMemberTrait<T, true> {
 public:
     using Type = Member<T>;
 };
@@ -1183,7 +1229,7 @@ public:
     void clear() { m_object.clear(); }
 
 private:
-    typename PointerFieldStorageTrait<T>::Type m_object;
+    typename RawPtrOrMemberTrait<T>::Type m_object;
 };
 
 // SelfKeepAlive<Object> is the idiom to use for objects that have to keep
@@ -1253,15 +1299,50 @@ private:
     Persistent<Self> m_keepAlive;
 };
 
+// Only a very reduced form of weak heap object references can currently be held
+// by WTF::Closure<>s. i.e., bound as a 'this' pointer only.
+//
+// TODO(sof): once wtf/Functional.h is able to work over platform/heap/ types
+// (like CrossThreadWeakPersistent<>), drop the restriction on weak persistent
+// use by function closures (and rename this ad-hoc type.)
 template<typename T>
-class AllowCrossThreadWeakPersistent {
+class CrossThreadWeakPersistentThisPointer {
     STACK_ALLOCATED();
 public:
-    explicit AllowCrossThreadWeakPersistent(T* value) : m_value(value) { }
+    explicit CrossThreadWeakPersistentThisPointer(T* value) : m_value(value) { }
     CrossThreadWeakPersistent<T> value() const { return m_value; }
 private:
     CrossThreadWeakPersistent<T> m_value;
 };
+
+// LEAK_SANITIZER_DISABLED_SCOPE: all allocations made in the current scope
+// will be exempted from LSan consideration.
+//
+// TODO(sof): move this to wtf/LeakAnnotations.h (LeakSanitizer.h?) once
+// wtf/ can freely call upon Oilpan functionality.
+#if defined(LEAK_SANITIZER)
+class LeakSanitizerDisableScope {
+    STACK_ALLOCATED();
+    WTF_MAKE_NONCOPYABLE(LeakSanitizerDisableScope);
+public:
+    LeakSanitizerDisableScope()
+    {
+        __lsan_disable();
+        if (ThreadState::current())
+            ThreadState::current()->enterStaticReferenceRegistrationDisabledScope();
+    }
+
+    ~LeakSanitizerDisableScope()
+    {
+        __lsan_enable();
+        if (ThreadState::current())
+            ThreadState::current()->leaveStaticReferenceRegistrationDisabledScope();
+    }
+};
+#define LEAK_SANITIZER_DISABLED_SCOPE LeakSanitizerDisableScope lsanDisabledScope
+#else
+#define LEAK_SANITIZER_DISABLED_SCOPE
+#endif
 
 } // namespace blink
 
@@ -1494,17 +1575,21 @@ struct ParamStorageTraits<RawPtr<T>> : public PointerParamStorageTraits<T*, blin
 };
 
 template<typename T>
-struct ParamStorageTraits<blink::AllowCrossThreadWeakPersistent<T>> {
+struct ParamStorageTraits<blink::CrossThreadWeakPersistentThisPointer<T>> {
     static_assert(sizeof(T), "T must be fully defined");
     using StorageType = blink::CrossThreadWeakPersistent<T>;
 
-    static StorageType wrap(const blink::AllowCrossThreadWeakPersistent<T>& value) { return value.value(); }
+    static StorageType wrap(const blink::CrossThreadWeakPersistentThisPointer<T>& value) { return value.value(); }
 
-    // Currently assume that the call sites of this unwrap() account for cleared weak references also.
-    // TODO(sof): extend WTF::FunctionWrapper call overloading to also handle (CrossThread)WeakPersistent.
-    static T* unwrap(const StorageType& value) { return value.get(); }
+    // WTF::FunctionWrapper<> handles WeakPtr<>, so recast this weak persistent
+    // into it.
+    //
+    // TODO(sof): remove this hack once wtf/Functional.h can also work with a type like
+    // CrossThreadWeakPersistent<>.
+    static WeakPtr<T> unwrap(const StorageType& value) { return WeakPtr<T>(WeakReference<T>::create(value.get())); }
 };
 
+// Adoption is not needed nor wanted for RefCountedGarbageCollected<>-derived types.
 template<typename T>
 PassRefPtr<T> adoptRef(blink::RefCountedGarbageCollected<T>*) = delete;
 

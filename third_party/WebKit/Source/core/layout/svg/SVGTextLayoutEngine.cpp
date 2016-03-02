@@ -17,7 +17,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/layout/svg/SVGTextLayoutEngine.h"
 
 #include "core/layout/svg/LayoutSVGInlineText.h"
@@ -110,6 +109,26 @@ void SVGTextLayoutEngine::updateRelativePositionAdjustmentsIfNeeded(float dx, fl
     m_dy = dy;
 }
 
+static void computeGlyphOverflow(SVGInlineTextBox* textBox, SVGTextFragment& textFragment)
+{
+    LineLayoutSVGInlineText textLineLayout = LineLayoutSVGInlineText(textBox->lineLayoutItem());
+    TextRun run = SVGTextMetrics::constructTextRun(textLineLayout, textFragment.characterOffset, textFragment.length, textLineLayout.styleRef().direction());
+
+    float scalingFactor = textLineLayout.scalingFactor();
+    ASSERT(scalingFactor);
+    const Font& scaledFont = textLineLayout.scaledFont();
+    FloatRect glyphOverflowBounds;
+
+    float width = scaledFont.width(run, nullptr, &glyphOverflowBounds);
+    float ascent = scaledFont.fontMetrics().floatAscent();
+    float descent = scaledFont.fontMetrics().floatDescent();
+    textFragment.glyphOverflow.setFromBounds(glyphOverflowBounds, ascent, descent, width);
+    textFragment.glyphOverflow.top /= scalingFactor;
+    textFragment.glyphOverflow.left /= scalingFactor;
+    textFragment.glyphOverflow.right /= scalingFactor;
+    textFragment.glyphOverflow.bottom /= scalingFactor;
+}
+
 void SVGTextLayoutEngine::recordTextFragment(SVGInlineTextBox* textBox)
 {
     ASSERT(!m_currentTextFragment.length);
@@ -138,6 +157,7 @@ void SVGTextLayoutEngine::recordTextFragment(SVGInlineTextBox* textBox)
         }
     }
 
+    computeGlyphOverflow(textBox, m_currentTextFragment);
     textBox->textFragments().append(m_currentTextFragment);
     m_currentTextFragment = SVGTextFragment();
 }
@@ -450,8 +470,7 @@ void SVGTextLayoutEngine::layoutTextOnLineOrPath(SVGInlineTextBox* textBox, Line
                 break;
 
             FloatPoint point;
-            bool ok = m_textPathCalculator->pointAndNormalAtLength(textPathOffset, point, angle);
-            ASSERT_UNUSED(ok, ok);
+            m_textPathCalculator->pointAndNormalAtLength(textPathOffset, point, angle);
             x = point.x();
             y = point.y();
 
@@ -502,13 +521,10 @@ void SVGTextLayoutEngine::layoutTextOnLineOrPath(SVGInlineTextBox* textBox, Line
             if (m_isVerticalText)
                 m_currentTextFragment.transform.rotate(90);
 
+            m_currentTextFragment.isVertical = m_isVerticalText;
             m_currentTextFragment.isTextOnPath = m_inPathLayout && m_textPathScaling != 1;
-            if (m_currentTextFragment.isTextOnPath) {
-                if (m_isVerticalText)
-                    m_currentTextFragment.lengthAdjustTransform.scaleNonUniform(1, m_textPathScaling);
-                else
-                    m_currentTextFragment.lengthAdjustTransform.scaleNonUniform(m_textPathScaling, 1);
-            }
+            if (m_currentTextFragment.isTextOnPath)
+                m_currentTextFragment.lengthAdjustScale = m_textPathScaling;
         }
 
         // Update current text position, after processing of the current character finished.

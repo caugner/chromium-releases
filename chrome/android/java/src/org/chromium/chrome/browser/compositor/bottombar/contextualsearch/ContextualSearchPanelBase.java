@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.compositor.bottombar.contextualsearch;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.os.Handler;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -148,7 +149,7 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
     /**
      * Ratio of dps per pixel.
      */
-    private float mPxToDp;
+    protected float mPxToDp;
 
     /**
      * The approximate Y coordinate of the selection in pixels.
@@ -232,6 +233,11 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
      */
     protected abstract void onClosed(StateChangeReason reason);
 
+    /**
+     * @return The absolute amount in DP that the top controls have shifted off screen.
+     */
+    protected abstract float getTopControlsOffsetDp();
+
     // ============================================================================================
     // General methods from Contextual Search Manager
     // ============================================================================================
@@ -312,6 +318,13 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
     }
 
     /**
+     * @return Whether the narrow version of the Panel is supported, in any orientation.
+     */
+    protected boolean isNarrowSizePanelSupported() {
+        return !isFullscreenSizePanel() || getFullscreenHeight() > SMALL_PANEL_WIDTH_THRESHOLD_DP;
+    }
+
+    /**
      * @return The current width of the Contextual Search Panel.
      */
     protected float calculateSearchPanelWidth() {
@@ -368,15 +381,16 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
      * @return The fullscreen height.
      */
     private float getFullscreenHeight() {
-        float height = mLayoutHeight;
-        // NOTE(pedrosimonetti): getHeight() only returns the content height
-        // when the Toolbar is not showing. If we don't add the Toolbar height
-        // here, there will be a "jump" when swiping the Search Panel around.
-        // TODO(pedrosimonetti): Find better way to get the fullscreen height.
-        if (mIsToolbarShowing) {
-            height += mToolbarHeight;
-        }
-        return height;
+        // NOTE(mdjones): This value will always be the same for a particular orientation; it is
+        // the content height + visible toolbar height.
+        return mLayoutHeight + (getToolbarHeight() - getTopControlsOffsetDp());
+    }
+
+    /**
+     * @return The maximum height of the Contextual Search Panel in dps.
+     */
+    public float getMaximumHeight() {
+        return mMaximumHeight;
     }
 
     /**
@@ -635,6 +649,18 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
      */
     public float getBasePageBrightness() {
         return mBasePageBrightness;
+    }
+
+    /**
+     * @return The color to fill the base page when viewport is resized/changes orientation.
+     */
+    public int getBasePageBackgroundColor() {
+        // TODO(pedrosimonetti): Get the color from the CVC and apply a proper brightness transform.
+        // NOTE(pedrosimonetti): Assumes the background color of the base page to be white (255)
+        // and applies a simple brightness transformation based on the base page value.
+        int value = Math.round(255 * mBasePageBrightness);
+        value = MathUtils.clamp(value, 0, 255);
+        return Color.rgb(value, value, value);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1172,6 +1198,13 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
     }
 
     /**
+     * @return The peeking height of the panel's bar in dp.
+     */
+    protected float getBarHeightPeeking() {
+        return mSearchBarHeightPeeking;
+    }
+
+    /**
      * @return Whether the Panel Promo is visible.
      */
     protected boolean isPromoVisible() {
@@ -1187,6 +1220,8 @@ abstract class ContextualSearchPanelBase implements ContextualSearchPromoHost {
      */
     private void updatePromoVisibility(float percentage) {
         if (isPromoVisible()) {
+            createPromoView();
+
             mPromoVisible = true;
 
             mPromoHeightPx = Math.round(MathUtils.clamp(percentage * mPromoContentHeightPx,

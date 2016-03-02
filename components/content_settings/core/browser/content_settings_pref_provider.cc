@@ -4,6 +4,8 @@
 
 #include "components/content_settings/core/browser/content_settings_pref_provider.h"
 
+#include <stddef.h>
+
 #include <map>
 #include <string>
 #include <utility>
@@ -32,14 +34,12 @@
 namespace {
 
 // Obsolete prefs.
-// TODO(msramek): Remove the cleanup code after two releases (i.e. in M48).
-const char kObsoleteContentSettingsPatternPairs[] =
-    "profile.content_settings.pattern_pairs";
-const char kObsoleteMigratedContentSettingsPatternPairs[] =
-    "profile.migrated_content_settings_exceptions";
 // TODO(msramek): Remove the cleanup code after two releases (i.e. in M50).
 const char kObsoleteMetroSwitchToDesktopExceptions[] =
     "profile.content_settings.exceptions.metro_switch_to_desktop";
+
+const char kObsoleteMediaStreamExceptions[] =
+    "profile.content_settings.exceptions.media_stream";
 
 }  // namespace
 
@@ -66,13 +66,10 @@ void PrefProvider::RegisterProfilePrefs(
   // Obsolete prefs ----------------------------------------------------------
 
   registry->RegisterDictionaryPref(
-      kObsoleteContentSettingsPatternPairs,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(kObsoleteMigratedContentSettingsPatternPairs,
-                                false);
-  registry->RegisterDictionaryPref(
       kObsoleteMetroSwitchToDesktopExceptions,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+
+  registry->RegisterDictionaryPref(kObsoleteMediaStreamExceptions);
 }
 
 PrefProvider::PrefProvider(PrefService* prefs, bool incognito)
@@ -95,12 +92,12 @@ PrefProvider::PrefProvider(PrefService* prefs, bool incognito)
   WebsiteSettingsRegistry* website_settings =
       WebsiteSettingsRegistry::GetInstance();
   for (const WebsiteSettingsInfo* info : *website_settings) {
-    content_settings_prefs_.set(
+    content_settings_prefs_.insert(std::make_pair(
         info->type(),
         make_scoped_ptr(new ContentSettingsPref(
             info->type(), prefs_, &pref_change_registrar_, info->pref_name(),
             is_incognito_,
-            base::Bind(&PrefProvider::Notify, base::Unretained(this)))));
+            base::Bind(&PrefProvider::Notify, base::Unretained(this))))));
   }
 
   if (!is_incognito_) {
@@ -119,7 +116,7 @@ PrefProvider::~PrefProvider() {
   DCHECK(!prefs_);
 }
 
-RuleIterator* PrefProvider::GetRuleIterator(
+scoped_ptr<RuleIterator> PrefProvider::GetRuleIterator(
     ContentSettingsType content_type,
     const ResourceIdentifier& resource_identifier,
     bool incognito) const {
@@ -186,11 +183,11 @@ base::Time PrefProvider::GetLastUsage(
 ContentSettingsPref* PrefProvider::GetPref(ContentSettingsType type) const {
   auto it = content_settings_prefs_.find(type);
   DCHECK(it != content_settings_prefs_.end());
-  return it->second;
+  return it->second.get();
 }
 
 void PrefProvider::SetClockForTesting(scoped_ptr<base::Clock> clock) {
-  clock_ = clock.Pass();
+  clock_ = std::move(clock);
 }
 
 void PrefProvider::Notify(
@@ -205,9 +202,8 @@ void PrefProvider::Notify(
 }
 
 void PrefProvider::DiscardObsoletePreferences() {
-  prefs_->ClearPref(kObsoleteContentSettingsPatternPairs);
-  prefs_->ClearPref(kObsoleteMigratedContentSettingsPatternPairs);
   prefs_->ClearPref(kObsoleteMetroSwitchToDesktopExceptions);
+  prefs_->ClearPref(kObsoleteMediaStreamExceptions);
 }
 
 }  // namespace content_settings

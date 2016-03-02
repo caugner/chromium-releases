@@ -21,7 +21,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/dom/ScriptLoader.h"
 
 #include "bindings/core/v8/ScriptController.h"
@@ -43,6 +42,7 @@
 #include "core/frame/SubresourceIntegrity.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html/CrossOriginAttribute.h"
 #include "core/html/HTMLScriptElement.h"
 #include "core/html/imports/HTMLImport.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -67,9 +67,9 @@ ScriptLoader::ScriptLoader(Element* element, bool parserInserted, bool alreadySt
     , m_haveFiredLoad(false)
     , m_willBeParserExecuted(false)
     , m_readyToBeParserExecuted(false)
+    , m_willExecuteInOrder(false)
     , m_willExecuteWhenDocumentFinishedParsing(false)
     , m_forceAsync(!parserInserted)
-    , m_willExecuteInOrder(false)
 {
     ASSERT(m_element);
     if (parserInserted && element->document().scriptableDocumentParser() && !element->document().isInDocumentWrite())
@@ -249,8 +249,8 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition, Legacy
         m_willBeParserExecuted = true;
         m_readyToBeParserExecuted = true;
     } else if (client->hasSourceAttribute() && !client->asyncAttributeValue() && !m_forceAsync) {
-        m_willExecuteInOrder = true;
         m_pendingScript = PendingScript(m_element, m_resource.get());
+        m_willExecuteInOrder = true;
         contextDocument->scriptRunner()->queueScriptForExecution(this, ScriptRunner::IN_ORDER_EXECUTION);
         // Note that watchForLoad can immediately call notifyFinished.
         m_pendingScript.watchForLoad(this);
@@ -259,7 +259,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition, Legacy
         LocalFrame* frame = m_element->document().frame();
         if (frame) {
             ScriptState* scriptState = ScriptState::forMainWorld(frame);
-            if (scriptState->contextIsValid())
+            if (scriptState)
                 ScriptStreamer::startStreaming(m_pendingScript, PendingScript::Async, frame->settings(), scriptState, frame->frameScheduler()->loadingTaskRunner());
         }
         contextDocument->scriptRunner()->queueScriptForExecution(this, ScriptRunner::ASYNC_EXECUTION);
@@ -290,9 +290,9 @@ bool ScriptLoader::fetchScript(const String& sourceUrl, FetchRequest::DeferOptio
     if (!stripLeadingAndTrailingHTMLSpaces(sourceUrl).isEmpty()) {
         FetchRequest request(ResourceRequest(elementDocument->completeURL(sourceUrl)), m_element->localName());
 
-        AtomicString crossOriginMode = m_element->fastGetAttribute(HTMLNames::crossoriginAttr);
-        if (!crossOriginMode.isNull())
-            request.setCrossOriginAccessControl(elementDocument->securityOrigin(), crossOriginMode);
+        CrossOriginAttributeValue crossOrigin = crossOriginAttributeValue(m_element->fastGetAttribute(HTMLNames::crossoriginAttr));
+        if (crossOrigin != CrossOriginAttributeNotSet)
+            request.setCrossOriginAccessControl(elementDocument->securityOrigin(), crossOrigin);
         request.setCharset(scriptCharset());
 
         bool scriptPassesCSP = elementDocument->contentSecurityPolicy()->allowScriptWithNonce(m_element->fastGetAttribute(HTMLNames::nonceAttr));
@@ -301,8 +301,8 @@ bool ScriptLoader::fetchScript(const String& sourceUrl, FetchRequest::DeferOptio
         request.setDefer(defer);
 
         String integrityAttr = m_element->fastGetAttribute(HTMLNames::integrityAttr);
-        IntegrityMetadataSet metadataSet;
         if (!integrityAttr.isEmpty()) {
+            IntegrityMetadataSet metadataSet;
             SubresourceIntegrity::parseIntegrityAttribute(integrityAttr, metadataSet, elementDocument.get());
             request.setIntegrityMetadata(metadataSet);
         }
@@ -331,6 +331,19 @@ bool isSVGScriptLoader(Element* element)
     return isSVGScriptElement(*element);
 }
 
+void ScriptLoader::logScriptMimetype(ScriptResource* resource, LocalFrame* frame, String mimetype)
+{
+    bool text = mimetype.lower().startsWith("text/");
+    bool application = mimetype.lower().startsWith("application/");
+    bool expectedJs = MIMETypeRegistry::isSupportedJavaScriptMIMEType(mimetype) || (text && isLegacySupportedJavaScriptLanguage(mimetype.substring(5)));
+    bool sameOrigin = m_element->document().securityOrigin()->canRequest(m_resource->url());
+    if (expectedJs) {
+        return;
+    }
+    UseCounter::Feature feature = sameOrigin ? (text ? UseCounter::SameOriginTextScript : application ? UseCounter::SameOriginApplicationScript : UseCounter::SameOriginOtherScript) : (text ? UseCounter::CrossOriginTextScript : application ? UseCounter::CrossOriginApplicationScript : UseCounter::CrossOriginOtherScript);
+    UseCounter::count(frame, feature);
+}
+
 bool ScriptLoader::executeScript(const ScriptSourceCode& sourceCode, double* compilationFinishTime)
 {
     ASSERT(m_alreadyStarted);
@@ -356,15 +369,20 @@ bool ScriptLoader::executeScript(const ScriptSourceCode& sourceCode, double* com
 
     if (m_isExternalScript) {
         ScriptResource* resource = m_resource ? m_resource.get() : sourceCode.resource();
-        if (resource && !resource->mimeTypeAllowedByNosniff()) {
-            contextDocument->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Refused to execute script from '" + resource->url().elidedString() + "' because its MIME type ('" + resource->mimeType() + "') is not executable, and strict MIME type checking is enabled."));
-            return false;
-        }
+        if (resource) {
+            if (!resource->mimeTypeAllowedByNosniff()) {
+                contextDocument->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Refused to execute script from '" + resource->url().elidedString() + "' because its MIME type ('" + resource->mimeType() + "') is not executable, and strict MIME type checking is enabled."));
+                return false;
+            }
 
-        if (resource && resource->mimeType().lower().startsWith("image/")) {
-            contextDocument->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Refused to execute script from '" + resource->url().elidedString() + "' because its MIME type ('" + resource->mimeType() + "') is not executable."));
-            UseCounter::count(frame, UseCounter::BlockedSniffingImageToScript);
-            return false;
+            String mimetype = resource->mimeType();
+            if (mimetype.lower().startsWith("image/")) {
+                contextDocument->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Refused to execute script from '" + resource->url().elidedString() + "' because its MIME type ('" + resource->mimeType() + "') is not executable."));
+                UseCounter::count(frame, UseCounter::BlockedSniffingImageToScript);
+                return false;
+            }
+
+            logScriptMimetype(resource, frame, mimetype);
         }
     }
 
@@ -440,14 +458,9 @@ void ScriptLoader::notifyFinished(Resource* resource)
 
     ScriptRunner::ExecutionType runOrder = m_willExecuteInOrder ? ScriptRunner::IN_ORDER_EXECUTION : ScriptRunner::ASYNC_EXECUTION;
     if (m_resource->errorOccurred()) {
-        dispatchErrorEvent();
-        // The error handler can move the HTMLScriptElement to a new document.
-        // In that case, we must notify the ScriptRunner of the new document,
-        // not the ScriptRunner of the old docuemnt.
-        contextDocument = m_element->document().contextDocument().get();
-        if (!contextDocument)
-            return;
         contextDocument->scriptRunner()->notifyScriptLoadError(this, runOrder);
+        dispatchErrorEvent();
+        detach();
         return;
     }
     contextDocument->scriptRunner()->notifyScriptReady(this, runOrder);

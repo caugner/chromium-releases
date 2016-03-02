@@ -52,11 +52,11 @@ WebInspector.ComputedStyleWidget = function(stylesSidebarPane, sharedModel)
     var filterInput = WebInspector.StylesSidebarPane.createPropertyFilterElement(WebInspector.UIString("Filter"), hbox, filterCallback.bind(this));
     filterContainerElement.appendChild(filterInput);
 
-    var toolbar = new WebInspector.Toolbar(hbox);
-    toolbar.element.classList.add("styles-pane-toolbar");
+    var toolbar = new WebInspector.Toolbar("styles-pane-toolbar", hbox);
     toolbar.appendToolbarItem(new WebInspector.ToolbarCheckbox(WebInspector.UIString("Show all"), undefined, this._showInheritedComputedStylePropertiesSetting));
 
     this._propertiesOutline = new TreeOutlineInShadow();
+    this._propertiesOutline.hideOverflow();
     this._propertiesOutline.registerRequiredCSS("elements/computedStyleSidebarPane.css");
     this._propertiesOutline.element.classList.add("monospace", "computed-properties");
     this.element.appendChild(this._propertiesOutline.element);
@@ -119,6 +119,7 @@ WebInspector.ComputedStyleWidget.prototype = {
             return createTextNode(text);
         var swatch = WebInspector.ColorSwatch.create();
         swatch.setColorText(text);
+        swatch.setFormat(WebInspector.Color.detectColorFormat(color));
         return swatch;
     },
 

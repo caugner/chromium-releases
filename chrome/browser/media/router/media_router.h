@@ -5,16 +5,20 @@
 #ifndef CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_H_
 #define CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/media/router/media_route.h"
 #include "chrome/browser/media/router/media_sink.h"
 #include "chrome/browser/media/router/media_source.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "content/public/browser/presentation_service_delegate.h"
 #include "content/public/browser/presentation_session_message.h"
 
 namespace content {
@@ -30,7 +34,8 @@ class MediaSinksObserver;
 class PresentationConnectionStateObserver;
 class PresentationSessionMessagesObserver;
 
-// Type of callback used in |CreateRoute()| and |JoinRoute()|. Callback is
+// Type of callback used in |CreateRoute()|, |JoinRoute()|, and
+// |ConnectRouteByRouteId()|. Callback is
 // invoked when the route request either succeeded or failed.
 // On success:
 // |route|: The route created or joined.
@@ -47,6 +52,12 @@ using MediaRouteResponseCallback =
     base::Callback<void(const MediaRoute* route,
                         const std::string& presentation_id,
                         const std::string& error)>;
+
+// Subscription object returned by calling
+// |AddPresentationConnectionStateChangedCallback|. See the method comments for
+// details.
+using PresentationConnectionStateSubscription = base::CallbackList<void(
+    content::PresentationConnectionState)>::Subscription;
 
 // An interface for handling resources related to media routing.
 // Responsible for registering observers for receiving sink availability
@@ -77,6 +88,23 @@ class MediaRouter : public KeyedService {
       content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) = 0;
 
+  // Creates a route and connects it to an existing route identified by
+  // |route_id|. |route_id| must refer to a non-local route, unnassociated with
+  // a Presentation ID, because a new Presentation ID will be created.
+  // |source|: The source to route to the existing route.
+  // |route_id|: Route ID of the existing route.
+  // |origin|, |web_contents|: Origin and WebContents of the join route request.
+  // Used for validation when enforcing same-origin and/or same-tab scope.
+  // (See CreateRoute documentation).
+  // Each callback in |callbacks| is invoked with a response indicating
+  // success or failure, in the order they are listed.
+  virtual void ConnectRouteByRouteId(
+      const MediaSource::Id& source_id,
+      const MediaRoute::Id& route_id,
+      const GURL& origin,
+      content::WebContents* web_contents,
+      const std::vector<MediaRouteResponseCallback>& callbacks) = 0;
+
   // Joins an existing route identified by |presentation_id|.
   // |source|: The source to route to the existing route.
   // |presentation_id|: Presentation ID of the existing route.
@@ -92,8 +120,12 @@ class MediaRouter : public KeyedService {
       content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks) = 0;
 
-  // Closes the media route specified by |route_id|.
-  virtual void CloseRoute(const MediaRoute::Id& route_id) = 0;
+  // Terminates the media route specified by |route_id|.
+  virtual void TerminateRoute(const MediaRoute::Id& route_id) = 0;
+
+  // Detaches the media route specified by |route_id|. The request might come
+  // from the page or from an event like navigation or garbage collection.
+  virtual void DetachRoute(const MediaRoute::Id& route_id) = 0;
 
   // Posts |message| to a MediaSink connected via MediaRoute with |route_id|.
   virtual void SendRouteMessage(const MediaRoute::Id& route_id,
@@ -104,7 +136,7 @@ class MediaRouter : public KeyedService {
   // This is called for Blob / ArrayBuffer / ArrayBufferView types.
   virtual void SendRouteBinaryMessage(
       const MediaRoute::Id& route_id,
-      scoped_ptr<std::vector<uint8>> data,
+      scoped_ptr<std::vector<uint8_t>> data,
       const SendRouteMessageCallback& callback) = 0;
 
   // Adds a new |issue|.
@@ -113,13 +145,18 @@ class MediaRouter : public KeyedService {
   // Clears the issue with the id |issue_id|.
   virtual void ClearIssue(const Issue::Id& issue_id) = 0;
 
-  // Indicates that a presentation session has detached from the underlying
-  // MediaRoute |route_id| (due to navigation, garbage collection, etc.)
-  virtual void OnPresentationSessionDetached(
-      const MediaRoute::Id& route_id) = 0;
+  // Returns whether or not there is currently an active local displayable
+  // route.
+  virtual bool HasLocalDisplayRoute() const = 0;
 
-  // Returns whether or not there is currently an active local route.
-  virtual bool HasLocalRoute() const = 0;
+  // Adds |callback| to listen for state changes for presentation connected to
+  // |route_id|. The returned Subscription object is owned by the caller.
+  // |callback| will be invoked whenever there are state changes, until the
+  // caller destroys the Subscription object.
+  virtual scoped_ptr<PresentationConnectionStateSubscription>
+  AddPresentationConnectionStateChangedCallback(
+      const MediaRoute::Id& route_id,
+      const content::PresentationConnectionStateChangedCallback& callback) = 0;
 
  private:
   friend class IssuesObserver;
@@ -191,15 +228,6 @@ class MediaRouter : public KeyedService {
   // Removes the LocalMediaRoutesObserver |observer|.
   virtual void UnregisterLocalMediaRoutesObserver(
       LocalMediaRoutesObserver* observer) = 0;
-
-  // Registers/unregisters a PresentationConnectionStateObserver to receive
-  // updates on state changes for a PresentationConnection. MediaRouter does
-  // not own |observer|. When |observer| is about to be destroyed, it must be
-  // unregistered from MediaRouter.
-  virtual void RegisterPresentationConnectionStateObserver(
-      PresentationConnectionStateObserver* observer) = 0;
-  virtual void UnregisterPresentationConnectionStateObserver(
-      PresentationConnectionStateObserver* observer) = 0;
 };
 
 }  // namespace media_router

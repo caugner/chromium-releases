@@ -33,18 +33,35 @@ import org.chromium.chromoting.help.HelpContext;
 import org.chromium.chromoting.help.HelpSingleton;
 import org.chromium.chromoting.jni.JniInterface;
 
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
 /**
  * A simple screen that does nothing except display a DesktopView and notify it of rotations.
  */
-public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibilityChangeListener {
+public class Desktop
+        extends AppCompatActivity implements View.OnSystemUiVisibilityChangeListener,
+                                             CapabilityManager.CapabilitiesChangedListener {
+    /** Used to set/store the selected input mode. */
+    public enum InputMode {
+        UNKNOWN,
+        TRACKPAD,
+        TOUCH;
+
+        public boolean isSet() {
+            return this != UNKNOWN;
+        }
+    }
+
     /**
      * Preference used for displaying an interestitial dialog only when the user first accesses the
      * Cardboard function.
      */
     private static final String PREFERENCE_CARDBOARD_DIALOG_SEEN = "cardboard_dialog_seen";
+
+    /** Preference used to track the last input mode selected by the user. */
+    private static final String PREFERENCE_INPUT_MODE = "input_mode";
 
     /** The amount of time to wait to hide the Actionbar after user input is seen. */
     private static final int ACTIONBAR_AUTO_HIDE_DELAY_MS = 3000;
@@ -60,6 +77,9 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
     /** Flag to indicate whether the current activity is switching to Cardboard desktop activity. */
     private boolean mSwitchToCardboardDesktopActivity;
 
+    /** Flag to indicate whether to manually hide the system UI when the OSK is dismissed. */
+    private boolean mHideSystemUIOnSoftKeyboardDismiss = false;
+
     /** Indicates whether a Soft Input UI (such as a keyboard) is visible. */
     private boolean mSoftInputVisible = false;
 
@@ -68,6 +88,13 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
 
     /** The Toolbar instance backing our SupportActionBar. */
     private Toolbar mToolbar;
+
+    /** Tracks the current input mode (e.g. trackpad/touch). */
+    private InputMode mInputMode = InputMode.UNKNOWN;
+
+    /** Indicates whether the remote host supports touch injection. */
+    private CapabilityManager.HostCapability mHostTouchCapability =
+            CapabilityManager.HostCapability.UNKNOWN;
 
     /** Called when the activity is first created. */
     @Override
@@ -100,6 +127,8 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
         mActivityLifecycleListener = CapabilityManager.getInstance().onActivityAcceptingListener(
                 this, Capabilities.CAST_CAPABILITY);
         mActivityLifecycleListener.onActivityCreated(this, savedInstanceState);
+
+        mInputMode = getInitialInputModeValue();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             attachKeyboardVisibilityListener();
@@ -136,6 +165,7 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
         mActivityLifecycleListener.onActivityStarted(this);
         JniInterface.enableVideoChannel(true);
         mRemoteHostDesktop.attachRedrawCallback();
+        CapabilityManager.getInstance().addListener(this);
     }
 
     @Override
@@ -158,6 +188,7 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
 
     @Override
     protected void onStop() {
+        CapabilityManager.getInstance().removeListener(this);
         mActivityLifecycleListener.onActivityStopped(this);
         super.onStop();
         if (mSwitchToCardboardDesktopActivity) {
@@ -214,12 +245,65 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
             });
         }
 
-        // TODO(joedow): Remove this line when touch input mode has been implemented.
-        menu.findItem(R.id.actionbar_input_mode).setVisible(false);
-
         ChromotingUtil.tintMenuIcons(this, menu);
 
+        // Wait to set the input mode until after the default tinting has been applied.
+        setInputMode(mInputMode);
+
         return super.onCreateOptionsMenu(menu);
+    }
+
+    private InputMode getInitialInputModeValue() {
+        // Load the previously-selected input mode from Preferences.
+        // TODO(joedow): Evaluate and determine if we should use a different input mode based on
+        //               a device characteristic such as screen size.
+        InputMode inputMode = InputMode.TRACKPAD;
+        String previousInputMode =
+                getPreferences(MODE_PRIVATE)
+                        .getString(PREFERENCE_INPUT_MODE, inputMode.name());
+
+        try {
+            inputMode = InputMode.valueOf(previousInputMode);
+        } catch (IllegalArgumentException ex) {
+            // Invalid or unexpected value was found, just use the default mode.
+        }
+
+        return inputMode;
+    }
+
+    private void setInputMode(InputMode inputMode) {
+        Menu menu = mToolbar.getMenu();
+        MenuItem trackpadModeMenuItem = menu.findItem(R.id.actionbar_trackpad_mode);
+        MenuItem touchModeMenuItem = menu.findItem(R.id.actionbar_touch_mode);
+        if (inputMode == InputMode.TRACKPAD) {
+            trackpadModeMenuItem.setVisible(true);
+            touchModeMenuItem.setVisible(false);
+        } else if (inputMode == InputMode.TOUCH) {
+            touchModeMenuItem.setVisible(true);
+            trackpadModeMenuItem.setVisible(false);
+        } else {
+            assert false : "Unreached";
+            return;
+        }
+
+        mInputMode = inputMode;
+        getPreferences(MODE_PRIVATE)
+                .edit()
+                .putString(PREFERENCE_INPUT_MODE, mInputMode.name())
+                .apply();
+
+        mRemoteHostDesktop.changeInputMode(mInputMode, mHostTouchCapability);
+    }
+
+    @Override
+    public void onCapabilitiesChanged(List<String> newCapabilities) {
+        if (newCapabilities.contains(Capabilities.TOUCH_CAPABILITY)) {
+            mHostTouchCapability = CapabilityManager.HostCapability.SUPPORTED;
+        } else {
+            mHostTouchCapability = CapabilityManager.HostCapability.UNSUPPORTED;
+        }
+
+        mRemoteHostDesktop.changeInputMode(mInputMode, mHostTouchCapability);
     }
 
     // Any time an onTouchListener is attached, a lint warning about filtering touch events is
@@ -306,6 +390,8 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
     }
 
     public void showActionBar() {
+        mHideSystemUIOnSoftKeyboardDismiss = false;
+
         // Request exit from any fullscreen mode. The action-bar controls will be shown in response
         // to the SystemUiVisibility notification. The visibility of the action-bar should be tied
         // to the fullscreen state of the system, so there's no need to explicitly show it here.
@@ -358,6 +444,12 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
         // and still allow the system to hide the ActionBar normally when no keyboard is present.
         if (mSoftInputVisible) {
             hideActionBarWithoutSystemUi();
+
+            // Android OSes prior to Marshmallow do not call onSystemUiVisibilityChange after the
+            // OSK is dismissed if the user has interacted with the status bar.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                mHideSystemUIOnSoftKeyboardDismiss = true;
+            }
         }
     }
 
@@ -376,6 +468,16 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
 
         if (id == R.id.actionbar_cardboard) {
             onCardboardItemSelected();
+            return true;
+        }
+        if (id == R.id.actionbar_trackpad_mode) {
+            // When the trackpad icon is tapped, we want to switch the input mode to touch.
+            setInputMode(InputMode.TOUCH);
+            return true;
+        }
+        if (id == R.id.actionbar_touch_mode) {
+            // When the touch icon is tapped, we want to switch the input mode to trackpad.
+            setInputMode(InputMode.TRACKPAD);
             return true;
         }
         if (id == R.id.actionbar_keyboard) {
@@ -443,6 +545,20 @@ public class Desktop extends AppCompatActivity implements View.OnSystemUiVisibil
                 mSoftInputVisible = (bottom < mMaxBottomValue);
                 mRemoteHostDesktop.onSoftInputMethodVisibilityChanged(
                         mSoftInputVisible, new Rect(left, top, right, bottom));
+
+                if (!mSoftInputVisible && mHideSystemUIOnSoftKeyboardDismiss) {
+                    // Queue a task which will run after the current action (OSK dismiss) has
+                    // completed, otherwise the hide request will not take effect.
+                    new Handler().post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (mHideSystemUIOnSoftKeyboardDismiss) {
+                                mHideSystemUIOnSoftKeyboardDismiss = false;
+                                hideActionBar();
+                            }
+                        }
+                    });
+                }
             }
         });
     }

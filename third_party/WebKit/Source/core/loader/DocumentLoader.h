@@ -98,7 +98,6 @@ public:
     void stopLoading();
     bool isLoading() const;
     const ResourceResponse& response() const { return m_response; }
-    const ResourceError& mainDocumentError() const { return m_mainDocumentError; }
     bool isClientRedirect() const { return m_isClientRedirect; }
     void setIsClientRedirect(bool isClientRedirect) { m_isClientRedirect = isClientRedirect; }
     bool replacesCurrentHistoryItem() const { return m_replacesCurrentHistoryItem; }
@@ -181,8 +180,8 @@ private:
     void redirectReceived(Resource*, ResourceRequest&, const ResourceResponse&) final;
     void updateRequest(Resource*, const ResourceRequest&) final;
     void responseReceived(Resource*, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) final;
-    void dataReceived(Resource*, const char* data, unsigned length) final;
-    void processData(const char* data, unsigned length);
+    void dataReceived(Resource*, const char* data, size_t length) final;
+    void processData(const char* data, size_t length);
     void notifyFinished(Resource*) final;
     String debugName() const override { return "DocumentLoader"; }
 
@@ -212,8 +211,6 @@ private:
     ResourceRequest m_request;
 
     ResourceResponse m_response;
-
-    ResourceError m_mainDocumentError;
 
     bool m_isClientRedirect;
     bool m_replacesCurrentHistoryItem;

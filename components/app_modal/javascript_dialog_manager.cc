@@ -4,12 +4,15 @@
 
 #include "components/app_modal/javascript_dialog_manager.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
-#include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/javascript_dialog_extensions_client.h"
 #include "components/app_modal/javascript_native_dialog_factory.h"
 #include "components/app_modal/native_app_modal_dialog.h"
@@ -58,12 +61,12 @@ JavaScriptDialogManager* JavaScriptDialogManager::GetInstance() {
 
 void JavaScriptDialogManager::SetNativeDialogFactory(
     scoped_ptr<JavaScriptNativeDialogFactory> factory) {
-  native_dialog_factory_ = factory.Pass();
+  native_dialog_factory_ = std::move(factory);
 }
 
 void JavaScriptDialogManager::SetExtensionsClient(
     scoped_ptr<JavaScriptDialogExtensionsClient> extensions_client) {
-  extensions_client_ = extensions_client.Pass();
+  extensions_client_ = std::move(extensions_client);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -88,13 +91,45 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
   *did_suppress_message = false;
 
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_
-          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-              web_contents)];
+      &javascript_dialog_extra_data_[web_contents];
 
   if (extra_data->suppress_javascript_messages_) {
+    // If a page tries to open dialogs in a tight loop, the number of
+    // suppressions logged can grow out of control. Arbitrarily cap the number
+    // logged at 100. That many suppressed dialogs is enough to indicate the
+    // page is doing something very hinky.
+    if (extra_data->suppressed_dialog_count_ < 100) {
+      // Log a suppressed dialog as one that opens and then closes immediately.
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "JSDialogs.FineTiming.TimeBetweenDialogCreatedAndSameDialogClosed",
+          base::TimeDelta());
+
+      // Only increment the count if it's not already at the limit, to prevent
+      // overflow.
+      extra_data->suppressed_dialog_count_++;
+    }
+
     *did_suppress_message = true;
     return;
+  }
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (!last_creation_time_.is_null()) {
+    // A new dialog has been created: log the time since the last one was
+    // created.
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "JSDialogs.FineTiming.TimeBetweenDialogCreatedAndNextDialogCreated",
+        now - last_creation_time_);
+  }
+  last_creation_time_ = now;
+
+  // Also log the time since a dialog was closed, but only if this is the first
+  // dialog that was opened since the closing.
+  if (!last_close_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "JSDialogs.FineTiming.TimeBetweenDialogClosedAndNextDialogCreated",
+        now - last_close_time_);
+    last_close_time_ = base::TimeTicks();
   }
 
   bool is_alert = message_type == content::JAVASCRIPT_MESSAGE_TYPE_ALERT;
@@ -123,9 +158,7 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
     bool is_reload,
     const DialogClosedCallback& callback) {
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_
-          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-              web_contents)];
+      &javascript_dialog_extra_data_[web_contents];
 
   if (extra_data->suppress_javascript_messages_) {
     // If a site harassed the user enough for them to put it on mute, then it
@@ -183,9 +216,7 @@ bool JavaScriptDialogManager::HandleJavaScriptDialog(
 void JavaScriptDialogManager::ResetDialogState(
     content::WebContents* web_contents) {
   CancelActiveAndPendingDialogs(web_contents);
-  javascript_dialog_extra_data_.erase(
-      JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-          web_contents));
+  javascript_dialog_extra_data_.erase(web_contents);
 }
 
 base::string16 JavaScriptDialogManager::GetTitle(
@@ -245,6 +276,8 @@ void JavaScriptDialogManager::OnDialogClosed(
   // lazy background page after the dialog closes. (Dialogs are closed before
   // their WebContents is destroyed so |web_contents| is still valid here.)
   extensions_client_->OnDialogClosed(web_contents);
+
+  last_close_time_ = base::TimeTicks::Now();
 
   callback.Run(success, user_input);
 }

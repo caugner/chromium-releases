@@ -5,7 +5,10 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_DELEGATE_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_DELEGATE_H_
 
-#include "base/basictypes.h"
+#include <stdint.h>
+
+#include <vector>
+
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
@@ -37,6 +40,9 @@ struct NativeWebKeyboardEvent;
 //  of the RenderWidgetHost.
 class CONTENT_EXPORT RenderWidgetHostDelegate {
  public:
+  // The RenderWidgetHost has just been created.
+  virtual void RenderWidgetCreated(RenderWidgetHostImpl* render_widget_host) {}
+
   // The RenderWidgetHost is going to be deleted.
   virtual void RenderWidgetDeleted(RenderWidgetHostImpl* render_widget_host) {}
 
@@ -168,6 +174,11 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 #if defined(OS_WIN)
   virtual gfx::NativeViewAccessible GetParentNativeViewAccessible();
 #endif
+
+  // Called when the widget has sent a compositor proto.  This is used in Blimp
+  // mode with the RemoteChannel compositor.
+  virtual void ForwardCompositorProto(RenderWidgetHostImpl* render_widget_host,
+                                      const std::vector<uint8_t>& proto) {}
 
  protected:
   virtual ~RenderWidgetHostDelegate() {}

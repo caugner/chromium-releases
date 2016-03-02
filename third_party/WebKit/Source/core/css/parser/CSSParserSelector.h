@@ -40,7 +40,7 @@ public:
     PassOwnPtr<CSSSelector> releaseSelector() { return m_selector.release(); }
 
     CSSSelector::Relation relation() const { return m_selector->relation(); }
-    void setValue(const AtomicString& value) { m_selector->setValue(value); }
+    void setValue(const AtomicString& value, bool matchLowerCase = false) { m_selector->setValue(value, matchLowerCase); }
     void setAttribute(const QualifiedName& value, CSSSelector::AttributeMatchType matchType) { m_selector->setAttribute(value, matchType); }
     void setArgument(const AtomicString& value) { m_selector->setArgument(value); }
     void setNth(int a, int b) { m_selector->setNth(a, b); }
@@ -55,32 +55,27 @@ public:
     void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector>>& selectorVector);
     void setSelectorList(PassOwnPtr<CSSSelectorList>);
 
-    bool hasHostPseudoSelector() const;
+    bool isHostPseudoSelector() const;
 
+    CSSSelector::Match match() const { return m_selector->match(); }
     CSSSelector::PseudoType pseudoType() const { return m_selector->pseudoType(); }
+    const CSSSelectorList* selectorList() const { return m_selector->selectorList(); }
 
-    // TODO(esprehn): This set of cases doesn't make sense, why PseudoShadow but not a check for ::content or /deep/ ?
-    bool crossesTreeScopes() const { return pseudoType() == CSSSelector::PseudoWebKitCustomElement || pseudoType() == CSSSelector::PseudoCue || pseudoType() == CSSSelector::PseudoShadow; }
+    bool needsImplicitShadowCrossingCombinatorForMatching() const { return pseudoType() == CSSSelector::PseudoWebKitCustomElement || pseudoType() == CSSSelector::PseudoCue || pseudoType() == CSSSelector::PseudoShadow; }
 
     bool isSimple() const;
-    bool hasShadowPseudo() const;
 
     CSSParserSelector* tagHistory() const { return m_tagHistory.get(); }
     void setTagHistory(PassOwnPtr<CSSParserSelector> selector) { m_tagHistory = selector; }
     void clearTagHistory() { m_tagHistory.clear(); }
-    void insertTagHistory(CSSSelector::Relation before, PassOwnPtr<CSSParserSelector>, CSSSelector::Relation after);
     void appendTagHistory(CSSSelector::Relation, PassOwnPtr<CSSParserSelector>);
+    PassOwnPtr<CSSParserSelector> releaseTagHistory();
     void prependTagSelector(const QualifiedName&, bool tagIsImplicit = false);
 
 private:
     OwnPtr<CSSSelector> m_selector;
     OwnPtr<CSSParserSelector> m_tagHistory;
 };
-
-inline bool CSSParserSelector::hasShadowPseudo() const
-{
-    return m_selector->relation() == CSSSelector::ShadowPseudo;
-}
 
 } // namespace blink
 

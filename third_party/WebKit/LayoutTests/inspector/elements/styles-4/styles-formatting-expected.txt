@@ -8,177 +8,195 @@ Running: initFormattedStyle
 Running: testFormattedInsertStart
 raw cssText:
 {
+    /* leading comment */
     firstProperty: rgba(1, 2, 3, 0);
-    property1: value1;
-    property2: value2;
-    property3: value3
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedRemoveStart
 raw cssText:
 {
-    property1: value1;
-    property2: value2;
-    property3: value3
+    /* leading comment */
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedInsertMiddle
 raw cssText:
 {
-    property1: value1;
+    /* leading comment */
+    color: red;   /* comment1 */
     middleProperty: middleValue /* comment */;
-    property2: value2;
-    property3: value3
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedRemoveMiddle
 raw cssText:
 {
-    property1: value1;
-    property2: value2;
-    property3: value3
+    /* leading comment */
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedInsertEnd
 raw cssText:
 {
-    property1: value1;
-    property2: value2;
-    property3: value3;
+    /* leading comment */
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
     endProperty: endValue;
 }
 
 Running: testFormattedRemoveEnd
 raw cssText:
 {
-    property1: value1;
-    property2: value2;
-    property3: value3;
+    /* leading comment */
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedDisableStart
 raw cssText:
 {
-    /* property1: value1; */
-    property2: value2;
-    property3: value3;
+    /* leading comment */
+    /* color: red; */   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
 }
 
 Running: testFormattedDisableEnd
 raw cssText:
 {
-    /* property1: value1; */
-    property2: value2;
-    /* property3: value3; */
+    /* leading comment */
+    /* color: red; */   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    /* padding: 0; */
 }
 
 Running: testFormattedDisableMiddle
 raw cssText:
 {
-    /* property1: value1; */
-    /* property2: value2; */
-    /* property3: value3; */
+    /* leading comment */
+    /* color: red; */   /* comment1 */
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    /* padding: 0; */
 }
 
 Running: testFormattedInsert1
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    /* property1: value1; */
-    /* property2: value2; */
-    /* property3: value3; */
+    /* color: red; */   /* comment1 */
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    /* padding: 0; */
 }
 
 Running: testFormattedInsert2
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    /* property1: value1; */
+    /* color: red; */   /* comment1 */
     propB: valB;
-    /* property2: value2; */
-    /* property3: value3; */
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    /* padding: 0; */
 }
 
 Running: testFormattedInsert3
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    /* property1: value1; */
+    /* color: red; */   /* comment1 */
     propB: valB;
-    /* property2: value2; */
-    /* property3: value3; */
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    /* padding: 0; */
     propC: valC;
 }
 
 Running: testFormattedEnableStart
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    /* property2: value2; */
-    /* property3: value3; */
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    /* padding: 0; */
     propC: valC;
 }
 
 Running: testFormattedEnableEnd
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    /* property2: value2; */
-    property3: value3;
+    /* zoom: 1; *//* comment2 */ /* like: property */
+    padding: 0;
     propC: valC;
 }
 
 Running: testFormattedEnableMiddle
 raw cssText:
 {
+    /* leading comment */
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    property2: value2;
-    property3: value3;
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
     propC: valC;
 }
 
 Running: testFormattedWithMeta
 raw cssText:
 {
+    /* leading comment */
     -webkit-animation: linear;
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    property2: value2;
-    property3: value3;
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
     propC: valC;
 }
 
 Running: testFormattedWithMetaValue
 raw cssText:
 {
+    /* leading comment */
     -webkit-animation: linear;
     unicode-bidi: webkit-isolate;
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    property2: value2;
-    property3: value3;
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
     propC: valC;
 }
 
 Running: testFormattedWithAtoms
 raw cssText:
 {
+    /* leading comment */
     border-left: 1px solid rgb(1,1,1);
     -webkit-animation: linear;
     unicode-bidi: webkit-isolate;
     propA: valA;
-    property1: value1;
+    color: red;   /* comment1 */
     propB: valB;
-    property2: value2;
-    property3: value3;
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0;
     propC: valC;
 }
 
@@ -186,49 +204,49 @@ Running: initUnformattedStyle
 
 Running: testUnformattedInsertStart
 raw cssText:
-{firstProperty: firstValue;property1:value1;property2:value2;property3:value3;}
+{/*leading comment*/firstProperty: firstValue;color:red;zoom:1;padding:0;}
 
 Running: testUnformattedRemoveStart
 raw cssText:
-{property1:value1;property2:value2;property3:value3;}
+{/*leading comment*/color:red;zoom:1;padding:0;}
 
 Running: testUnformattedInsertMiddle
 raw cssText:
-{property1:value1;middleProperty: middleValue;property2:value2;property3:value3;}
+{/*leading comment*/color:red;middleProperty: middleValue;zoom:1;padding:0;}
 
 Running: testUnformattedRemoveMiddle
 raw cssText:
-{property1:value1;property2:value2;property3:value3;}
+{/*leading comment*/color:red;zoom:1;padding:0;}
 
 Running: testUnformattedInsertEnd
 raw cssText:
-{property1:value1;property2:value2;property3:value3;endProperty: endValue;}
+{/*leading comment*/color:red;zoom:1;padding:0;endProperty: endValue;}
 
 Running: testUnformattedRemoveEnd
 raw cssText:
-{property1:value1;property2:value2;property3:value3;}
+{/*leading comment*/color:red;zoom:1;padding:0;}
 
 Running: testUnformattedDisableStart
 raw cssText:
-{/* property1:value1; */property2:value2;property3:value3;}
+{/*leading comment*//* color:red; */zoom:1;padding:0;}
 
 Running: testUnformattedDisableEnd
 raw cssText:
-{/* property1:value1; */property2:value2;/* property3:value3; */}
+{/*leading comment*//* color:red; */zoom:1;/* padding:0; */}
 
 Running: testUnformattedDisableMiddle
 raw cssText:
-{/* property1:value1; *//* property2:value2; *//* property3:value3; */}
+{/*leading comment*//* color:red; *//* zoom:1; *//* padding:0; */}
 
 Running: testUnformattedEnableStart
 raw cssText:
-{property1:value1;/* property2:value2; *//* property3:value3; */}
+{/*leading comment*/color:red;/* zoom:1; *//* padding:0; */}
 
 Running: testUnformattedEnableEnd
 raw cssText:
-{property1:value1;/* property2:value2; */property3:value3;}
+{/*leading comment*/color:red;/* zoom:1; */padding:0;}
 
 Running: testUnformattedEnableMiddle
 raw cssText:
-{property1:value1;property2:value2;property3:value3;}
+{/*leading comment*/color:red;zoom:1;padding:0;}
 

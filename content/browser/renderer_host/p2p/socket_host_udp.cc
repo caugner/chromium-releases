@@ -10,6 +10,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/p2p/socket_host_throttler.h"
 #include "content/common/p2p_messages.h"
 #include "content/public/browser/content_browser_client.h"
@@ -75,7 +76,7 @@ P2PSocketHostUdp::PendingPacket::PendingPacket(
     const net::IPEndPoint& to,
     const std::vector<char>& content,
     const rtc::PacketOptions& options,
-    uint64 id)
+    uint64_t id)
     : to(to),
       data(new net::IOBuffer(content.size())),
       size(content.size()),
@@ -133,7 +134,8 @@ bool P2PSocketHostUdp::Init(const net::IPEndPoint& local_address,
 
   int result = socket_->Listen(local_address);
   if (result < 0) {
-    LOG(ERROR) << "bind() failed: " << result;
+    LOG(ERROR) << "bind() to " << local_address.ToString()
+               << " failed: " << result;
     OnError();
     return false;
   }
@@ -232,7 +234,7 @@ void P2PSocketHostUdp::HandleReadResult(int result) {
 void P2PSocketHostUdp::Send(const net::IPEndPoint& to,
                             const std::vector<char>& data,
                             const rtc::PacketOptions& options,
-                            uint64 packet_id) {
+                            uint64_t packet_id) {
   if (!socket_) {
     // The Send message may be sent after the an OnError message was
     // sent by hasn't been processed the renderer.

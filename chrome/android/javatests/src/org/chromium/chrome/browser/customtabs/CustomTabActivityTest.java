@@ -10,14 +10,17 @@ import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_PHONE;
 import android.app.Activity;
 import android.app.Application;
 import android.app.Instrumentation;
+import android.app.Instrumentation.ActivityMonitor;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -29,6 +32,8 @@ import android.test.suitebuilder.annotation.SmallTest;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.ImageButton;
 
 import org.chromium.base.ThreadUtils;
@@ -36,17 +41,17 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.toolbar.CustomTabToolbar;
 import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
 import org.chromium.content.browser.BrowserStartupController;
@@ -54,6 +59,7 @@ import org.chromium.content.browser.BrowserStartupController.StartupCallback;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.ArrayList;
@@ -94,6 +100,8 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     private static final String TEST_PAGE_2 = TestHttpServerClient.getUrl(
             "chrome/test/data/android/test.html");
     private static final String TEST_MENU_TITLE = "testMenuTitle";
+
+    private static int sIdToIncrement = 1;
 
     private CustomTabActivity mActivity;
 
@@ -157,6 +165,21 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         return pi;
     }
 
+    private Bundle makeBottomBarBundle(int id, Bitmap icon, String description) {
+        Bundle bundle = new Bundle();
+        Intent testIntent = new Intent();
+        testIntent.setClass(getInstrumentation().getContext(), DummyBroadcastReceiver.class);
+        testIntent.setAction(TEST_ACTION);
+        PendingIntent pi = PendingIntent.getBroadcast(getInstrumentation().getTargetContext(), 0,
+                testIntent, 0);
+
+        bundle.putInt(CustomTabsIntent.KEY_ID, sIdToIncrement++);
+        bundle.putString(CustomTabsIntent.KEY_DESCRIPTION, description);
+        bundle.putParcelable(CustomTabsIntent.KEY_PENDING_INTENT, pi);
+        bundle.putParcelable(CustomTabsIntent.KEY_ICON, icon);
+        return bundle;
+    }
+
     private void openAppMenuAndAssertMenuShown() throws InterruptedException {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
@@ -165,12 +188,31 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
             }
         });
 
-        assertTrue("App menu was not shown", CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria("App menu was not shown") {
             @Override
             public boolean isSatisfied() {
                 return mActivity.getAppMenuHandler().isAppMenuShowing();
             }
-        }));
+        });
+    }
+
+    /**
+     * @return The number of visible and enabled items in the given menu.
+     */
+    private int getActualMenuSize(Menu menu) {
+        int actualMenuSize = 0;
+        for (int i = 0; i < menu.size(); i++) {
+            MenuItem item = menu.getItem(i);
+            if (item.isVisible() && item.isEnabled()) actualMenuSize++;
+        }
+        return actualMenuSize;
+    }
+
+    private Bitmap createTestBitmap(int widthDp, int heightDp) {
+        Resources testRes = getInstrumentation().getTargetContext().getResources();
+        float density = testRes.getDisplayMetrics().density;
+        return Bitmap.createBitmap((int) (widthDp * density),
+                (int) (heightDp * density), Bitmap.Config.ARGB_8888);
     }
 
     /**
@@ -242,39 +284,60 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      * Test the entries in the app menu.
      */
     @SmallTest
-    public void testCustomTabAppMenu() throws InterruptedException {
+    public void testAppMenu() throws InterruptedException {
         Intent intent = createMinimalCustomTabIntent();
         int numMenuEntries = 1;
         addMenuEntriesToIntent(intent, numMenuEntries);
         startCustomTabActivityWithIntent(intent);
 
         openAppMenuAndAssertMenuShown();
+        Menu menu = getActivity().getAppMenuHandler().getAppMenu().getMenu();
         final int expectedMenuSize = numMenuEntries + NUM_CHROME_MENU_ITEMS;
-        Menu menu = getActivity().getAppMenuHandler().getAppMenuForTest().getMenuForTest();
+        final int actualMenuSize = getActualMenuSize(menu);
+
         assertNotNull("App menu is not initialized: ", menu);
-        assertEquals(expectedMenuSize, menu.size());
+        assertEquals(expectedMenuSize, actualMenuSize);
         assertNotNull(menu.findItem(R.id.forward_menu_id));
         assertNotNull(menu.findItem(R.id.info_menu_id));
         assertNotNull(menu.findItem(R.id.reload_menu_id));
         assertNotNull(menu.findItem(R.id.find_in_page_id));
-        assertNotNull(menu.findItem(R.id.open_in_chrome_id));
+        assertNotNull(menu.findItem(R.id.open_in_browser_id));
+        assertFalse(menu.findItem(R.id.share_menu_id).isVisible());
+        assertFalse(menu.findItem(R.id.share_menu_id).isEnabled());
     }
+
+    /**
+     * Tests if the default share item can be shown in the app menu.
+     */
+    @SmallTest
+    public void testShareMenuItem() throws InterruptedException {
+        Intent intent = createMinimalCustomTabIntent();
+        intent.putExtra(CustomTabsIntent.EXTRA_DEFAULT_SHARE_MENU_ITEM, true);
+        startCustomTabActivityWithIntent(intent);
+
+        openAppMenuAndAssertMenuShown();
+        Menu menu = getActivity().getAppMenuHandler().getAppMenu().getMenu();
+        assertTrue(menu.findItem(R.id.share_menu_id).isVisible());
+        assertTrue(menu.findItem(R.id.share_menu_id).isEnabled());
+    }
+
 
     /**
      * Test that only up to 5 entries are added to the custom menu.
      */
     @SmallTest
-    public void testCustomTabMaxMenuItems() throws InterruptedException {
+    public void testMaxMenuItems() throws InterruptedException {
         Intent intent = createMinimalCustomTabIntent();
         int numMenuEntries = 7;
         addMenuEntriesToIntent(intent, numMenuEntries);
         startCustomTabActivityWithIntent(intent);
 
         openAppMenuAndAssertMenuShown();
-        int expectedMenuSize = MAX_MENU_CUSTOM_ITEMS + NUM_CHROME_MENU_ITEMS;
-        Menu menu = getActivity().getAppMenuHandler().getAppMenuForTest().getMenuForTest();
+        Menu menu = getActivity().getAppMenuHandler().getAppMenu().getMenu();
+        final int expectedMenuSize = MAX_MENU_CUSTOM_ITEMS + NUM_CHROME_MENU_ITEMS;
+        final int actualMenuSize = getActualMenuSize(menu);
         assertNotNull("App menu is not initialized: ", menu);
-        assertEquals(expectedMenuSize, menu.size());
+        assertEquals(expectedMenuSize, actualMenuSize);
     }
 
     /**
@@ -301,51 +364,41 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
             }
         });
 
-        assertTrue("Pending Intent was not sent.", CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria("Pending Intent was not sent.") {
             @Override
             public boolean isSatisfied() {
                 return onFinished.isSent();
             }
-        }));
+        });
     }
 
     /**
      * Test whether clicking "Open in Chrome" takes us to a chrome normal tab, loading the same url.
      */
     @SmallTest
-    public void testOpenInChrome() throws InterruptedException {
+    public void testOpenInBrowser() throws InterruptedException {
         startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
-
-        boolean isDocumentMode = FeatureUtilities.isDocumentMode(
-                getInstrumentation().getTargetContext());
-        String activityName;
-        if (isDocumentMode) {
-            activityName = DocumentActivity.class.getName();
-        } else {
-            activityName = ChromeTabbedActivity.class.getName();
-        }
-        Instrumentation.ActivityMonitor monitor = getInstrumentation().addMonitor(activityName,
-                null, false);
-
+        IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
+        filter.addDataScheme(Uri.parse(TestHttpServerClient.getUrl("")).getScheme());
+        final ActivityMonitor monitor = getInstrumentation().addMonitor(filter, null, false);
         openAppMenuAndAssertMenuShown();
+        final String menuItemTitle = mActivity.getString(R.string.menu_open_in_product_default);
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mActivity.onMenuOrKeyboardAction(R.id.open_in_chrome_id, false);
+                MenuItem item = mActivity.getAppMenuHandler()
+                        .getAppMenu().getMenu().findItem(R.id.open_in_browser_id);
+                assertNotNull(item);
+                assertEquals(menuItemTitle, item.getTitle().toString());
+                mActivity.onMenuOrKeyboardAction(R.id.open_in_browser_id, false);
             }
         });
-
-        final ChromeActivity chromeActivity = (ChromeActivity) monitor
-                .waitForActivityWithTimeout(ACTIVITY_START_TIMEOUT_MS);
-        assertNotNull("A normal chrome activity did not start.", chromeActivity);
-        assertTrue("The normal tab was not initiated correctly.",
-                CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        Tab tab = chromeActivity.getActivityTab();
-                        return tab != null && tab.getUrl().equals(TEST_PAGE);
-                    }
-                }));
+        CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return getInstrumentation().checkMonitorHit(monitor, 1);
+            }
+        });
     }
 
     /**
@@ -375,13 +428,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     public void testActionButton() throws InterruptedException {
-        final int iconHeightDp = 48;
-        final int iconWidthDp = 96;
-        Resources testRes = getInstrumentation().getTargetContext().getResources();
-        float density = testRes.getDisplayMetrics().density;
-        Bitmap expectedIcon = Bitmap.createBitmap((int) (iconWidthDp * density),
-                (int) (iconHeightDp * density), Bitmap.Config.ARGB_8888);
-
+        Bitmap expectedIcon = createTestBitmap(96, 48);
         Intent intent = createMinimalCustomTabIntent();
         final PendingIntent pi = addActionButtonToIntent(intent, expectedIcon, "Good test");
         startCustomTabActivityWithIntent(intent);
@@ -409,12 +456,12 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
             }
         });
 
-        assertTrue("Pending Intent was not sent.", CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria("Pending Intent was not sent.") {
             @Override
             public boolean isSatisfied() {
                 return onFinished.isSent();
             }
-        }));
+        });
     }
 
     /**
@@ -423,13 +470,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     public void testActionButtonBadRatio() throws InterruptedException {
-        final int iconHeightDp = 20;
-        final int iconWidthDp = 60;
-        Resources testRes = getInstrumentation().getTargetContext().getResources();
-        float density = testRes.getDisplayMetrics().density;
-        Bitmap expectedIcon = Bitmap.createBitmap((int) (iconWidthDp * density),
-                (int) (iconHeightDp * density), Bitmap.Config.ARGB_8888);
-
+        Bitmap expectedIcon = createTestBitmap(60, 20);
         Intent intent = createMinimalCustomTabIntent();
         addActionButtonToIntent(intent, expectedIcon, "Good test");
         startCustomTabActivityWithIntent(intent);
@@ -444,7 +485,38 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                 View.VISIBLE != actionButton.getVisibility());
 
         CustomTabIntentDataProvider dataProvider = mActivity.getIntentDataProvider();
-        assertNull(dataProvider.getActionButtonParams());
+        assertNull(dataProvider.getCustomButtonOnToolbar());
+    }
+
+    @SmallTest
+    public void testBottomBar() throws InterruptedException {
+        final int numItems = 3;
+        final Bitmap expectedIcon = createTestBitmap(48, 24);
+        final int barColor = Color.GREEN;
+
+        Intent intent = createMinimalCustomTabIntent();
+        ArrayList<Bundle> bundles = new ArrayList<>();
+        for (int i = 1; i <= numItems; i++) {
+            Bundle bundle = makeBottomBarBundle(i, expectedIcon, Integer.toString(i));
+            bundles.add(bundle);
+        }
+        intent.putExtra(CustomTabsIntent.EXTRA_TOOLBAR_ITEMS, bundles);
+        intent.putExtra(CustomTabsIntent.EXTRA_SECONDARY_TOOLBAR_COLOR, barColor);
+        startCustomTabActivityWithIntent(intent);
+
+        ViewGroup bottomBar = (ViewGroup) getActivity().findViewById(R.id.bottombar);
+        assertNotNull(bottomBar);
+        assertEquals("Bottom Bar showing incorrect number of buttons.",
+                numItems, bottomBar.getChildCount());
+        assertEquals("Bottom bar not showing correct color", barColor,
+                ((ColorDrawable) bottomBar.getBackground()).getColor());
+        for (int i = 1; i <= numItems; i++) {
+            ImageButton button = (ImageButton) bottomBar.getChildAt(i - 1);
+            assertTrue("Bottom Bar button does not have the correct bitmap.",
+                    expectedIcon.sameAs(((BitmapDrawable) button.getDrawable()).getBitmap()));
+            assertEquals("Bottom Bar button does not have correct content description",
+                    Integer.toString(i), button.getContentDescription());
+        }
     }
 
     @SmallTest
@@ -468,12 +540,12 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                                         (new CustomTabsTestUtils.DummyCallback()).asBinder()));
                     }
                 }));
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mActivity.getActivityTab().getUrl().equals(TEST_PAGE);
-                    }
-        }));
+        CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivity.getActivityTab().getUrl().equals(TEST_PAGE);
+            }
+        });
         assertTrue("CustomTabContentHandler can't handle intent with same session",
                 ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Boolean>() {
                     @Override
@@ -496,12 +568,39 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         } catch (TimeoutException e) {
             fail();
         }
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return mActivity.getActivityTab().getUrl().equals(TEST_PAGE_2);
+            }
+        });
+    }
+
+    @SmallTest
+    public void testCreateNewTab() throws InterruptedException, TimeoutException {
+        final String testUrl = TestHttpServerClient.getUrl(
+                "chrome/test/data/android/customtabs/test_window_open.html");
+        startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
+                getInstrumentation().getTargetContext(), testUrl, null));
+        final TabModelSelector tabSelector = getActivity().getTabModelSelector();
+
+        final CallbackHelper openTabHelper = new CallbackHelper();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                tabSelector.getModel(false).addObserver(new EmptyTabModelObserver() {
                     @Override
-                    public boolean isSatisfied() {
-                        return mActivity.getActivityTab().getUrl().equals(TEST_PAGE_2);
+                    public void didAddTab(Tab tab, TabLaunchType type) {
+                        openTabHelper.notifyCalled();
                     }
-        }));
+                });
+            }
+        });
+        DOMUtils.clickNode(this, getActivity().getActivityTab().getContentViewCore(), "new_window");
+
+        openTabHelper.waitForCallback(0, 1);
+        assertEquals("A new tab should have been created.", 2,
+                tabSelector.getModel(false).getCount());
     }
 
     @SmallTest
@@ -648,6 +747,29 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         startActivityCompletely(createMinimalCustomTabIntent());
         assertNull("Should not have a tab switcher button.",
                 mActivity.findViewById(R.id.tab_switcher_button));
+    }
+
+    /**
+     * Test whether the url shown on prerender gets updated from about:blank.
+     * Non-regression test for crbug.com/554236.
+     */
+    @SmallTest
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testPrerenderingCorrectUrl() throws Exception {
+        Context context = getInstrumentation().getTargetContext().getApplicationContext();
+        final CustomTabsConnection connection = warmUpAndWait();
+        ICustomTabsCallback cb = new CustomTabsTestUtils.DummyCallback();
+        connection.newSession(cb);
+        assertTrue(connection.mayLaunchUrl(cb, Uri.parse(TEST_PAGE), null, null));
+        try {
+            startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
+                    context, TEST_PAGE, cb.asBinder()));
+        } catch (InterruptedException e) {
+            fail();
+        }
+        assertEquals(Uri.parse(TEST_PAGE).getHost() + ":" + Uri.parse(TEST_PAGE).getPort(),
+                ((EditText) mActivity.findViewById(R.id.url_bar)).getText()
+                        .toString());
     }
 
     private void mayLaunchUrlWithoutWarmup(boolean noPrerendering) {

@@ -12,7 +12,7 @@
 
 <dom-module id="site-details-permission">
   <link rel="import" type="css"
-      href="chrome://md-settings/settings_page/settings_page.css">
+      href="chrome://md-settings/settings_shared.css">
   <link rel="import" type="css" href="site_details_permission.css">
   <template>
     <div id="details" class="horizontal layout top" hidden>
@@ -26,9 +26,10 @@
         </div>
         <div class="permission-list">
           <paper-dropdown-menu>
-            <paper-menu id="permission" class="dropdown-content">
-              <paper-item>[[i18n_.allowAction]]</paper-item>
-              <paper-item>[[i18n_.blockAction]]</paper-item>
+            <paper-menu id="permission" class="dropdown-content"
+                on-iron-select="onPermissionMenuIronSelect_">
+              <paper-item id="allow">[[i18n_.allowAction]]</paper-item>
+              <paper-item id="block">[[i18n_.blockAction]]</paper-item>
             </paper-menu>
           </paper-dropdown-menu>
         </div>

@@ -8,6 +8,8 @@
 #ifndef CHROME_BROWSER_SAFE_BROWSING_LOCAL_DATABASE_MANAGER_H_
 #define CHROME_BROWSER_SAFE_BROWSING_LOCAL_DATABASE_MANAGER_H_
 
+#include <stddef.h>
+
 #include <deque>
 #include <map>
 #include <set>
@@ -17,13 +19,14 @@
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
+#include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/util.h"
 #include "url/gurl.h"
 
@@ -237,9 +240,10 @@ class LocalSafeBrowsingDatabaseManager
   void DatabaseLoadComplete();
 
   // Called on the database thread to add/remove chunks and host keys.
-  void AddDatabaseChunks(const std::string& list,
-                         scoped_ptr<ScopedVector<SBChunkData> > chunks,
-                         AddChunksCallback callback);
+  void AddDatabaseChunks(
+      const std::string& list,
+      scoped_ptr<std::vector<scoped_ptr<SBChunkData>>> chunks,
+      AddChunksCallback callback);
 
   void DeleteDatabaseChunks(
       scoped_ptr<std::vector<SBChunkDelete> > chunk_deletes);
@@ -297,7 +301,7 @@ class LocalSafeBrowsingDatabaseManager
   void UpdateFinished(bool success) override;
   void GetChunks(GetChunksCallback callback) override;
   void AddChunks(const std::string& list,
-                 scoped_ptr<ScopedVector<SBChunkData>> chunks,
+                 scoped_ptr<std::vector<scoped_ptr<SBChunkData>>> chunks,
                  AddChunksCallback callback) override;
   void DeleteChunks(
       scoped_ptr<std::vector<SBChunkDelete>> chunk_deletes) override;

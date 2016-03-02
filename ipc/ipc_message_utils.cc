@@ -4,6 +4,9 @@
 
 #include "ipc/ipc_message_utils.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
@@ -12,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_attachment.h"
 #include "ipc/ipc_message_attachment_set.h"
@@ -656,9 +660,6 @@ void ParamTraits<base::SharedMemoryHandle>::Log(const param_type& p,
 #elif defined(OS_WIN)
 void ParamTraits<base::SharedMemoryHandle>::Write(Message* m,
                                                   const param_type& p) {
-  // Longs on windows are 32 bits.
-  uint32_t pid = p.GetPID();
-  m->WriteUInt32(pid);
   m->WriteBool(p.NeedsBrokering());
 
   if (p.NeedsBrokering()) {
@@ -672,11 +673,6 @@ void ParamTraits<base::SharedMemoryHandle>::Write(Message* m,
 bool ParamTraits<base::SharedMemoryHandle>::Read(const Message* m,
                                                  base::PickleIterator* iter,
                                                  param_type* r) {
-  uint32_t pid_int;
-  if (!iter->ReadUInt32(&pid_int))
-    return false;
-  base::ProcessId pid = pid_int;
-
   bool needs_brokering;
   if (!iter->ReadBool(&needs_brokering))
     return false;
@@ -685,7 +681,8 @@ bool ParamTraits<base::SharedMemoryHandle>::Read(const Message* m,
     HandleWin handle_win;
     if (!ParamTraits<HandleWin>::Read(m, iter, &handle_win))
       return false;
-    *r = base::SharedMemoryHandle(handle_win.get_handle(), pid);
+    *r = base::SharedMemoryHandle(handle_win.get_handle(),
+                                  base::GetCurrentProcId());
     return true;
   }
 
@@ -693,14 +690,12 @@ bool ParamTraits<base::SharedMemoryHandle>::Read(const Message* m,
   if (!iter->ReadInt(&handle_int))
     return false;
   HANDLE handle = LongToHandle(handle_int);
-  *r = base::SharedMemoryHandle(handle, pid);
+  *r = base::SharedMemoryHandle(handle, base::GetCurrentProcId());
   return true;
 }
 
 void ParamTraits<base::SharedMemoryHandle>::Log(const param_type& p,
                                                 std::string* l) {
-  LogParam(p.GetPID(), l);
-  l->append(" ");
   LogParam(p.GetHandle(), l);
   l->append(" needs brokering: ");
   LogParam(p.NeedsBrokering(), l);

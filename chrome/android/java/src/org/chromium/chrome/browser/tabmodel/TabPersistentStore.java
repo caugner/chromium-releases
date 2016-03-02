@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.tabmodel;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Pair;
 import android.util.SparseIntArray;
@@ -16,8 +17,10 @@ import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.customtabs.CustomTabDelegateFactory;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.LoadUrlParams;
 
@@ -33,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * This class handles saving and loading tab state from the persistent storage.
@@ -58,6 +62,9 @@ public class TabPersistentStore extends TabPersister {
 
     /** Prevents race conditions when setting the sBaseStateDirectory. */
     private static final Object BASE_STATE_DIRECTORY_LOCK = new Object();
+
+    @VisibleForTesting
+    static boolean sReportingDisabledForTests = false;
 
     /**
      * Callback interface to use while reading the persisted TabModelSelector info from disk.
@@ -232,10 +239,18 @@ public class TabPersistentStore extends TabPersister {
         mTabContentManager = cache;
     }
 
+    private static void logExecutionTime(String name, long time) {
+        if (!sReportingDisabledForTests) {
+            RecordHistogram.recordTimesHistogram("Android.StrictMode.TabPersistentStore." + name,
+                    SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
+        }
+    }
+
     public void saveState() {
         // Temporarily allowing disk access. TODO: Fix. See http://b/5518024
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
+            long time = SystemClock.elapsedRealtime();
             // The list of tabs should be saved first in case our activity is terminated early.
             // Explicitly toss out any existing SaveListTask because they only save the TabModel as
             // it looked when the SaveListTask was first created.
@@ -297,6 +312,7 @@ public class TabPersistentStore extends TabPersister {
                 }
             }
             mTabsToSave.clear();
+            logExecutionTime("SaveStateTime", time);
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -309,7 +325,9 @@ public class TabPersistentStore extends TabPersister {
      */
     public int loadState() {
         try {
+            long time = SystemClock.elapsedRealtime();
             waitForMigrationToFinish();
+            logExecutionTime("LoadStateTime", time);
         } catch (InterruptedException e) {
             // Ignore these exceptions, we'll do the best we can.
         } catch (ExecutionException e) {
@@ -411,7 +429,9 @@ public class TabPersistentStore extends TabPersister {
         // block here waiting for that task to complete only if needed. See http://b/5518170
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
+            long time = SystemClock.elapsedRealtime();
             TabState state = TabState.restoreTabState(getStateDirectory(), tabToRestore.id);
+            logExecutionTime("RestoreTabTime", time);
             restoreTab(tabToRestore, state, setAsActive);
         } catch (Exception e) {
             // Catch generic exception to prevent a corrupted state from crashing the app
@@ -509,6 +529,10 @@ public class TabPersistentStore extends TabPersister {
     }
 
     public void addTabToSaveQueue(Tab tab) {
+        // TODO(ianwen): remove this check once we figure out a better plan to disable tab saving.
+        if (tab.getDelegateFactory() instanceof CustomTabDelegateFactory) {
+            return;
+        }
         if (!mTabsToSave.contains(tab) && tab.isTabStateDirty() && !isTabUrlContentScheme(tab)) {
             mTabsToSave.addLast(tab);
         }
@@ -656,6 +680,7 @@ public class TabPersistentStore extends TabPersister {
         // Temporarily allowing disk access. TODO: Fix. See http://crbug.com/473357
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
+            long time = SystemClock.elapsedRealtime();
             assert  mTabModelSelector.getModel(true).getCount() == 0;
             assert  mTabModelSelector.getModel(false).getCount() == 0;
             int maxId = 0;
@@ -704,6 +729,7 @@ public class TabPersistentStore extends TabPersister {
                 });
                 maxId = Math.max(maxId, curId);
             }
+            logExecutionTime("LoadStateInternalTime", time);
             return maxId;
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
@@ -719,6 +745,7 @@ public class TabPersistentStore extends TabPersister {
         // block here waiting for that task to complete only if needed. See http://b/5518170
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
+            long time = SystemClock.elapsedRealtime();
             File stateFile = new File(folder, SAVED_STATE_FILE);
             if (!stateFile.exists()) return 0;
 
@@ -754,6 +781,7 @@ public class TabPersistentStore extends TabPersister {
                 callback.onDetailsRead(i, id, tabUrl, isIncognito,
                         i == standardActiveIndex, i == incognitoActiveIndex);
             }
+            logExecutionTime("ReadSavedStateTime", time);
             return nextId;
         } finally {
             StreamUtil.closeQuietly(stream);
@@ -905,7 +933,16 @@ public class TabPersistentStore extends TabPersister {
     }
 
     private void cleanupAllEncryptedPersistentData() {
-        String[] files = getStateDirectory().list();
+        String[] files = null;
+        // Temporarily allowing disk access. TODO: Fix. See http://crbug.com/473357
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        try {
+            long time = SystemClock.elapsedRealtime();
+            files = getStateDirectory().list();
+            logExecutionTime("CleanupAllEncryptedTime", time);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
         if (files != null) {
             for (String file : files) {
                 if (file.startsWith(TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO)) {

@@ -45,15 +45,6 @@ files-toggle-ripple::shadow .ripple.activated {
   opacity: 0.4;
 }
 
-/**
- * Default size of slider knob is large for Gallery. Overwrite it to make it
- * half of the original size.
- */
-paper-slider::shadow .expand:not(.pin) > #sliderKnob > #sliderKnobInner {
-  height: 50%;
-  width: 50%;
-}
-
 .gallery,
 .gallery > .content {
   bottom: 0;
@@ -231,8 +222,16 @@ paper-slider::shadow .expand:not(.pin) > #sliderKnob > #sliderKnobInner {
   pointer-events: auto;
 }
 
+.gallery:not([tools]) > files-tooltip {
+  opacity: 0;
+}
+
 /* Hide immediately when entering the slideshow. */
 .gallery[tools][slideshow] > .toolbar {
+  transition-duration: 0ms;
+}
+
+.gallery[tools][slideshow] > files-tooltip {
   transition-duration: 0ms;
 }
 

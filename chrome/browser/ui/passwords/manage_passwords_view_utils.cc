@@ -4,11 +4,17 @@
 
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 
+#include <stddef.h>
+
+#include <algorithm>
+
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/url_formatter/elide_url.h"
+#include "grit/components_strings.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -50,13 +56,23 @@ void GetSavePasswordDialogTitleTextAndLinkRange(
     const GURL& user_visible_url,
     const GURL& form_origin_url,
     bool is_smartlock_branding_enabled,
-    bool is_update_password_bubble,
+    PasswordTittleType dialog_type,
     base::string16* title,
     gfx::Range* title_link_range) {
   std::vector<size_t> offsets;
   std::vector<base::string16> replacements;
-  int title_id =
-      is_update_password_bubble ? IDS_UPDATE_PASSWORD : IDS_SAVE_PASSWORD;
+  int title_id = 0;
+  switch (dialog_type) {
+    case PasswordTittleType::SAVE_PASSWORD:
+      title_id = IDS_SAVE_PASSWORD;
+      break;
+    case PasswordTittleType::SAVE_ACCOUNT:
+      title_id = IDS_SAVE_ACCOUNT;
+      break;
+    case PasswordTittleType::UPDATE_PASSWORD:
+      title_id = IDS_UPDATE_PASSWORD;
+      break;
+  }
 
   // Check whether the registry controlled domains for user-visible URL (i.e.
   // the one seen in the omnibox) and the password form post-submit navigation
@@ -141,4 +157,10 @@ void GetBrandedTextAndLinkRange(bool is_smartlock_branding_enabled,
         l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TITLE_BRAND));
     *link_range = gfx::Range();
   }
+}
+
+base::string16 GetDisplayUsername(const autofill::PasswordForm& form) {
+  return form.username_value.empty()
+             ? l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_EMPTY_LOGIN)
+             : form.username_value;
 }

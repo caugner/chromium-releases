@@ -29,7 +29,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/html/forms/RangeInputType.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -53,6 +52,7 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/SliderThumbElement.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutSlider.h"
 #include "platform/PlatformMouseEvent.h"
 #include "wtf/MathExtras.h"
@@ -306,6 +306,14 @@ String RangeInputType::sanitizeValue(const String& proposedValue) const
     StepRange stepRange(createStepRange(RejectAny));
     const Decimal proposedNumericValue = parseToNumber(proposedValue, stepRange.defaultValue());
     return serializeForNumberType(stepRange.clampValue(proposedNumericValue));
+}
+
+void RangeInputType::warnIfValueIsInvalid(const String& value) const
+{
+    if (value.isEmpty() || !element().sanitizeValue(value).isEmpty())
+        return;
+    element().document().addConsoleMessage(ConsoleMessage::create(RenderingMessageSource, WarningMessageLevel,
+        String::format("The specified value %s is not a valid number. The value must match to the following regular expression: -?(\\d+|\\d+\\.\\d+|\\.\\d+)([eE][-+]?\\d+)?", JSONValue::quoteString(value).utf8().data())));
 }
 
 void RangeInputType::disabledAttributeChanged()

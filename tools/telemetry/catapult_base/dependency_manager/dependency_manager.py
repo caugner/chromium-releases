@@ -2,15 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import logging
 import os
-import shutil
-import stat
-import tempfile
-import zipfile
+import sys
 
-from catapult_base import cloud_storage
-from catapult_base import support_binaries
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 from catapult_base.dependency_manager import base_config
 from catapult_base.dependency_manager import exceptions
 
@@ -56,7 +52,7 @@ class DependencyManager(object):
     for config in configs:
       self._UpdateDependencies(config)
 
-  def FetchPath(self, dependency, platform, try_support_binaries=False):
+  def FetchPath(self, dependency, platform):
     """Get a path to an executable for |dependency|, downloading as needed.
 
     A path to a default executable may be returned if a platform specific
@@ -68,9 +64,6 @@ class DependencyManager(object):
         platform: Name of the platform the dependency will run on. Often of the
             form 'os_architecture'. Must match those specified in the config(s)
             used in this DependencyManager.
-        try_support_binaries: True if support_binaries should be queried if the
-            dependency_manager was not initialized with data for |dependency|.
-
     Returns:
         A path to an executable of |dependency| that will run on |platform|,
         downloading from cloud storage if needed.
@@ -92,30 +85,15 @@ class DependencyManager(object):
     """
     dependency_info = self._GetDependencyInfo(dependency, platform)
     if not dependency_info:
-      if not try_support_binaries:
-        raise exceptions.NoPathFoundError(dependency, platform)
-      # TODO(aiolos): Remove the support_binaries call and always raise
-      # NoPathFound once the binary dependencies are moved over to the new
-      # system.
-
-      # platform should be of the form '%s_%s' % (os_name, arch_name) when
-      # called from the binary_manager.
-      platform_parts = platform.split('_', 1)
-      assert len(platform_parts) == 2
-      platform_os, platform_arch = platform_parts
-      logging.info('Calling into support_binaries with dependency %s, platform '
-                   '%s and arch %s. support_binaries is deprecated.'
-                   % (dependency, platform_os, platform_arch))
-      return support_binaries.FindPath(dependency, platform_arch,
-                                       platform_os)
-    path = self._LocalPath(dependency_info)
+      raise exceptions.NoPathFoundError(dependency, platform)
+    path = dependency_info.GetLocalPath()
     if not path or not os.path.exists(path):
-      path = self._CloudStoragePath(dependency_info)
+      path = dependency_info.GetRemotePath()
       if not path or not os.path.exists(path):
         raise exceptions.NoPathFoundError(dependency, platform)
     return path
 
-  def LocalPath(self, dependency, platform, try_support_binaries=False):
+  def LocalPath(self, dependency, platform):
     """Get a path to a locally stored executable for |dependency|.
 
     A path to a default executable may be returned if a platform specific
@@ -128,24 +106,16 @@ class DependencyManager(object):
         platform: Name of the platform the dependency will run on. Often of the
             form 'os_architecture'. Must match those specified in the config(s)
             used in this DependencyManager.
-        try_support_binaries: True if support_binaries should be queried if the
-            dependency_manager was not initialized with data for |dependency|.
-
     Returns:
         A path to an executable for |dependency| that will run on |platform|.
 
     Raises:
         NoPathFoundError: If a local copy of the executable cannot be found.
     """
-    # TODO(aiolos): Remove the support_binaries call and always raise
-    # NoPathFound once the binary dependencies are moved over to the new
-    # system.
     dependency_info = self._GetDependencyInfo(dependency, platform)
     if not dependency_info:
-      if not try_support_binaries:
-        raise exceptions.NoPathFoundError(dependency, platform)
-      return support_binaries.FindLocallyBuiltPath(dependency)
-    local_path = self._LocalPath(dependency_info)
+      raise exceptions.NoPathFoundError(dependency, platform)
+    local_path = dependency_info.GetLocalPath()
     if not local_path or not os.path.exists(local_path):
       raise exceptions.NoPathFoundError(dependency, platform)
     return local_path
@@ -199,136 +169,4 @@ class DependencyManager(object):
     if not device_type in dependency_dict:
       device_type = DEFAULT_TYPE
     return dependency_dict.get(device_type)
-
-  @staticmethod
-  def _LocalPath(dependency_info):
-    """Return a path to a locally stored file for |dependency_info|.
-
-    Will not download the file.
-
-    Args:
-        dependency_info: A DependencyInfo instance for the dependency to be
-            found and the platform it should run on.
-
-    Returns: A path to a local file, or None if not found.
-    """
-    if dependency_info:
-      paths = dependency_info.local_paths
-      for local_path in paths:
-        if os.path.exists(local_path):
-          return local_path
-    return None
-
-  @staticmethod
-  def _CloudStoragePath(dependency_info):
-    """Return a path to a downloaded file for |dependency_info|.
-
-    May not download the file if it has already been downloaded.
-
-    Args:
-        dependency_info: A DependencyInfo instance for the dependency to be
-            found and the platform it should run on.
-
-    Returns: A path to an executable that was stored in cloud_storage, or None
-       if not found.
-
-    Raises:
-        CredentialsError: If cloud_storage credentials aren't configured.
-        PermissionError: If cloud_storage credentials are configured, but not
-            with an account that has permission to download the needed file.
-        NotFoundError: If the needed file does not exist where expected in
-            cloud_storage.
-        ServerError: If an internal server error is hit while downloading the
-            needed file.
-        CloudStorageError: If another error occured while downloading the remote
-            path.
-        FileNotFoundError: If the download was otherwise unsuccessful.
-    """
-    if not dependency_info:
-      return None
-    cs_path = dependency_info.cs_remote_path
-    cs_hash = dependency_info.cs_hash
-    cs_bucket = dependency_info.cs_bucket
-    download_path = dependency_info.download_path
-    if not cs_path or not cs_bucket or not cs_hash or not download_path:
-      return None
-
-    download_dir = os.path.dirname(download_path)
-    if not os.path.exists(download_dir):
-      os.makedirs(download_dir)
-
-    cloud_storage.GetIfHashChanged(cs_path, download_path, cs_bucket, cs_hash)
-    if not os.path.exists(download_path):
-      raise exceptions.FileNotFoundError(download_path)
-
-    # TODO(aiolos): Add tests once the refactor is completed. crbug.com/551158
-    unzip_location = dependency_info.unzip_location
-    if unzip_location:
-      download_path = DependencyManager._UnzipFile(
-          download_path, unzip_location, dependency_info.path_within_archive)
-
-    os.chmod(download_path,
-             stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRGRP)
-    return os.path.abspath(download_path)
-
-
-  @staticmethod
-  def _UnzipFile(archive_file, unzip_location, path_within_archive):
-    """Unzips a file if it is a zip file.
-
-    Args:
-        archive_file: The downloaded file to unzip.
-        unzip_location: The destination directory to unzip to.
-        path_within_archive: The relative location of the dependency
-            within the unzipped archive.
-
-    Returns:
-        The path to the unzipped dependency.
-
-    Raises:
-        ValueError: If |archive_file| is not a zipfile.
-        ArchiveError: If the dependency cannot be found in the unzipped
-            location.
-    """
-    # TODO(aiolos): Add tests once the refactor is completed. crbug.com/551158
-    if not zipfile.is_zipfile(archive_file):
-      raise ValueError(
-          'Attempting to unzip a non-archive file at %s' % archive_file)
-    tmp_location = None
-    if os.path.exists(unzip_location):
-      os_tmp_dir = '%stmp' % os.sep
-      tmp_location = tempfile.mkdtemp(dir=os_tmp_dir)
-      shutil.move(unzip_location, tmp_location)
-    try:
-      with zipfile.ZipFile(archive_file, 'r') as archive:
-        for content in archive.namelist():
-          # Ensure all contents in zip file are extracted into the
-          # unzip_location. zipfile.extractall() is a security risk, and should
-          # not be used without prior verification that the python verion
-          # being used is at least 2.7.4
-          dest = os.path.join(unzip_location,
-                              content[content.find(os.path.sep)+1:])
-          if not os.path.isdir(os.path.dirname(dest)):
-            os.makedirs(os.path.dirname(dest))
-          if not os.path.basename(dest):
-            continue
-          with archive.open(content) as unzipped_content:
-            logging.debug(
-                'Extracting %s to %s (%s)', content, dest, archive_file)
-            with file(dest, 'wb') as dest_file:
-              dest_file.write(unzipped_content.read())
-            permissions = archive.getinfo(content).external_attr >> 16
-            if permissions:
-              os.chmod(dest, permissions)
-      download_path = os.path.join(unzip_location, path_within_archive)
-      if not download_path:
-        raise exceptions.ArchiveError('Expected path %s was not extracted from '
-                                      'the downloaded archive.', download_path)
-    except:
-      if tmp_location:
-        shutil.move(tmp_location, unzip_location)
-      raise
-    if tmp_location:
-      shutil.rmtree(tmp_location)
-    return download_path
 

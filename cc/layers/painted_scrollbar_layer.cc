@@ -7,8 +7,6 @@
 #include <algorithm>
 
 #include "base/auto_reset.h"
-#include "base/basictypes.h"
-#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/painted_scrollbar_layer_impl.h"
 #include "cc/resources/ui_resource_bitmap.h"
@@ -35,15 +33,15 @@ scoped_refptr<PaintedScrollbarLayer> PaintedScrollbarLayer::Create(
     const LayerSettings& settings,
     scoped_ptr<Scrollbar> scrollbar,
     int scroll_layer_id) {
-  return make_scoped_refptr(
-      new PaintedScrollbarLayer(settings, scrollbar.Pass(), scroll_layer_id));
+  return make_scoped_refptr(new PaintedScrollbarLayer(
+      settings, std::move(scrollbar), scroll_layer_id));
 }
 
 PaintedScrollbarLayer::PaintedScrollbarLayer(const LayerSettings& settings,
                                              scoped_ptr<Scrollbar> scrollbar,
                                              int scroll_layer_id)
     : Layer(settings),
-      scrollbar_(scrollbar.Pass()),
+      scrollbar_(std::move(scrollbar)),
       scroll_layer_id_(scroll_layer_id),
       internal_contents_scale_(1.f),
       thumb_thickness_(scrollbar_->ThumbThickness()),

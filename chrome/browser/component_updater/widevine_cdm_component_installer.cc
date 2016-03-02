@@ -4,9 +4,11 @@
 
 #include "chrome/browser/component_updater/widevine_cdm_component_installer.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/base_paths.h"
@@ -372,7 +374,7 @@ void RegisterWidevineCdmComponent(ComponentUpdateService* cus) {
       new WidevineCdmComponentInstallerTraits);
   // |cus| will take ownership of |installer| during installer->Register(cus).
   DefaultComponentInstaller* installer =
-      new DefaultComponentInstaller(traits.Pass());
+      new DefaultComponentInstaller(std::move(traits));
   installer->Register(cus, base::Closure());
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
 }

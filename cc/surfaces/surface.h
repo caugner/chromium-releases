@@ -5,6 +5,9 @@
 #ifndef CC_SURFACES_SURFACE_H_
 #define CC_SURFACES_SURFACE_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <map>
 #include <set>
 #include <vector>
@@ -14,7 +17,6 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "cc/base/scoped_ptr_vector.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/quads/render_pass_id.h"
 #include "cc/surfaces/surface_factory.h"
@@ -49,7 +51,8 @@ class CC_SURFACES_EXPORT Surface {
   // Adds each CopyOutputRequest in the current frame to copy_requests. The
   // caller takes ownership of them.
   void TakeCopyOutputRequests(
-      std::multimap<RenderPassId, CopyOutputRequest*>* copy_requests);
+      std::multimap<RenderPassId, scoped_ptr<CopyOutputRequest>>*
+          copy_requests);
   // Returns the most recent frame that is eligible to be rendered.
   const CompositorFrame* GetEligibleFrame();
 

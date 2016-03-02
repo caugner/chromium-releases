@@ -5,13 +5,16 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_TEXTURE_MANAGER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_TEXTURE_MANAGER_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
 #include <list>
 #include <set>
 #include <string>
 #include <vector>
-#include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
@@ -109,9 +112,7 @@ class GPU_EXPORT Texture {
     return num_uncleared_mips_;
   }
 
-  uint32 estimated_size() const {
-    return estimated_size_;
-  }
+  uint32_t estimated_size() const { return estimated_size_; }
 
   bool CanRenderTo() const {
     return target_ != GL_TEXTURE_EXTERNAL_OES;
@@ -124,8 +125,16 @@ class GPU_EXPORT Texture {
 
   void SetServiceId(GLuint service_id) {
     DCHECK(service_id);
+    DCHECK_EQ(owned_service_id_, service_id_);
     service_id_ = service_id;
+    owned_service_id_ = service_id;
   }
+
+  // Causes us to report |service_id| as our service id, but does not delete
+  // it when we are destroyed.  Will rebind any OES_EXTERNAL texture units to
+  // our new service id in all contexts.  If |service_id| is zero, then we
+  // revert to our original service id.
+  void SetUnownedServiceId(GLuint service_id);
 
   // Returns the target this texure was first bound to or 0 if it has not
   // been bound. Once a texture is bound to a specific target it can never be
@@ -265,14 +274,16 @@ class GPU_EXPORT Texture {
     GLenum type;
     scoped_refptr<gl::GLImage> image;
     ImageState image_state;
-    uint32 estimated_size;
+    uint32_t estimated_size;
   };
 
   struct FaceInfo {
     FaceInfo();
     ~FaceInfo();
 
+    // This is relative to base_level and max_level of a texture.
     GLsizei num_mip_levels;
+    // This contains slots for all levels starting at 0.
     std::vector<LevelInfo> level_infos;
   };
 
@@ -362,10 +373,11 @@ class GPU_EXPORT Texture {
                                   GLenum format,
                                   GLenum type);
 
-  // Returns true if texture mip level is complete relative to first level.
-  static bool TextureMipComplete(const Texture::LevelInfo& level0_face,
+  // Returns true if texture mip level is complete relative to base level.
+  // Note that level_diff = level - base_level.
+  static bool TextureMipComplete(const Texture::LevelInfo& base_level_face,
                                  GLenum target,
-                                 GLint level,
+                                 GLint level_diff,
                                  GLenum internal_format,
                                  GLsizei width,
                                  GLsizei height,
@@ -418,6 +430,19 @@ class GPU_EXPORT Texture {
   // referencing this texture.
   void IncAllFramebufferStateChangeCount();
 
+  void UpdateBaseLevel(GLint base_level);
+  void UpdateMaxLevel(GLint max_level);
+  void UpdateNumMipLevels();
+
+  // Increment the generation counter for all managers that have a reference to
+  // this texture.
+  void IncrementManagerServiceIdGeneration();
+
+  // Return the service id of the texture that we will delete when we are
+  // destroyed.  Normally, this is the same as service_id(), unless it is
+  // overridden by SetUnownedServiceId.
+  GLuint owned_service_id() const { return owned_service_id_; }
+
   MailboxManager* mailbox_manager_;
 
   // Info about each face and level of texture.
@@ -433,6 +458,15 @@ class GPU_EXPORT Texture {
 
   // The id of the texure
   GLuint service_id_;
+
+  // The id of the texture that we are responsible for deleting.  Normally,
+  // this is the same as service_id_, unless a call to SetUnownedServiceId
+  // overrides it.  In that case, we'll use the overridden service id (stored
+  // in |service_id_|) for all purposes except deleting the texture name.
+  // Whoever calls SetUnownedServiceId is assumed to handle deleting that id,
+  // and only after we are either deleted or told to stop using it via
+  // another call to SetUnownedServiceId.
+  GLuint owned_service_id_;
 
   // Whether all renderable mips of this texture have been cleared.
   bool cleared_;
@@ -490,7 +524,7 @@ class GPU_EXPORT Texture {
   bool has_images_;
 
   // Size in bytes this texture is assumed to take in memory.
-  uint32 estimated_size_;
+  uint32_t estimated_size_;
 
   // Cache of the computed CanRenderCondition flag.
   CanRenderCondition can_render_condition_;
@@ -656,6 +690,9 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
                                     GLsizei width,
                                     GLsizei height,
                                     GLsizei depth);
+
+  static GLenum ExtractFormatFromStorageFormat(GLenum internalformat);
+  static GLenum ExtractTypeFromStorageFormat(GLenum internalformat);
 
   // Checks if a dimensions are valid for a given target.
   bool ValidForTarget(
@@ -849,7 +886,7 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
     GLenum format;
     GLenum type;
     const void* pixels;
-    uint32 pixels_size;
+    uint32_t pixels_size;
     TexImageCommandType command_type;
   };
 
@@ -878,7 +915,7 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
     GLenum format;
     GLenum type;
     const void* pixels;
-    uint32 pixels_size;
+    uint32_t pixels_size;
     // TODO(kkinnunen): currently this is used only for TexSubImage2D.
   };
 
@@ -920,6 +957,11 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
   static bool CombineAdjacentRects(const gfx::Rect& rect1,
                                    const gfx::Rect& rect2,
                                    gfx::Rect* result);
+
+  // Get / set the current generation number of this manager.  This generation
+  // number changes whenever the service_id of one or more Textures change.
+  uint32_t GetServiceIdGeneration() const;
+  void IncrementServiceIdGeneration();
 
  private:
   friend class Texture;
@@ -996,6 +1038,8 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
   scoped_refptr<TextureRef> default_textures_[kNumDefaultTextures];
 
   std::vector<DestructionObserver*> destruction_observers_;
+
+  uint32_t current_service_id_generation_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureManager);
 };

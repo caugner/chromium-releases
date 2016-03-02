@@ -129,6 +129,13 @@ public:
     virtual void didDetectXSS(const KURL&, bool didBlockEntirePage) = 0;
     virtual void didDispatchPingLoader(const KURL&) = 0;
 
+    // The given main resource displayed content with certificate errors
+    // with the given URL and security info.
+    virtual void didDisplayContentWithCertificateErrors(const KURL&, const CString& securityInfo, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) = 0;
+    // The given main resource ran content with certificate errors with
+    // the given URL and security info.
+    virtual void didRunContentWithCertificateErrors(const KURL&, const CString& securityInfo, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) = 0;
+
     // Will be called when |PerformanceTiming| events are updated
     virtual void didChangePerformanceTiming() { }
 
@@ -178,7 +185,7 @@ public:
     virtual bool allowPlugins(bool enabledPerSettings) { return enabledPerSettings; }
     virtual bool allowImage(bool enabledPerSettings, const KURL&) { return enabledPerSettings; }
     virtual bool allowMedia(const KURL&) { return true; }
-    virtual bool allowDisplayingInsecureContent(bool enabledPerSettings, SecurityOrigin*, const KURL&) { return enabledPerSettings; }
+    virtual bool allowDisplayingInsecureContent(bool enabledPerSettings, const KURL&) { return enabledPerSettings; }
     virtual bool allowRunningInsecureContent(bool enabledPerSettings, SecurityOrigin*, const KURL&) { return enabledPerSettings; }
 
     // This callback notifies the client that the frame was about to run
@@ -190,9 +197,14 @@ public:
     // This callback is similar, but for plugins.
     virtual void didNotAllowPlugins() { }
 
+    // This callback notifies the client that the frame created a Keygen element.
+    virtual void didUseKeygen() { }
+
     virtual WebCookieJar* cookieJar() const = 0;
 
     virtual void didChangeName(const String&) { }
+
+    virtual void didEnforceStrictMixedContentChecking() {}
 
     virtual void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) { }
 
@@ -223,8 +235,6 @@ public:
     virtual SharedWorkerRepositoryClient* sharedWorkerRepositoryClient() { return 0; }
 
     virtual PassOwnPtr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) = 0;
-
-    virtual void didStopAllLoaders() { }
 
     virtual void dispatchDidChangeManifest() { }
 

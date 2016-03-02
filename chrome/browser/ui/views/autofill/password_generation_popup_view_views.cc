@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/autofill/password_generation_popup_view_views.h"
 
+#include "base/macros.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_controller.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
@@ -251,7 +252,9 @@ void PasswordGenerationPopupViewViews::OnPaint(gfx::Canvas* canvas) {
 }
 
 void PasswordGenerationPopupViewViews::StyledLabelLinkClicked(
-    const gfx::Range& range, int event_flags) {
+    views::StyledLabel* label,
+    const gfx::Range& range,
+    int event_flags) {
   controller_->OnSavedPasswordsLinkClicked();
 }
 

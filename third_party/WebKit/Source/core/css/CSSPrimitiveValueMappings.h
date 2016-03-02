@@ -44,7 +44,6 @@
 #include "platform/fonts/FontSmoothingMode.h"
 #include "platform/fonts/TextRenderingMode.h"
 #include "platform/graphics/GraphicsTypes.h"
-#include "platform/graphics/Path.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextRun.h"
@@ -4507,8 +4506,8 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(OverflowAlignment overflo
     case OverflowAlignmentDefault:
         m_value.valueID = CSSValueDefault;
         break;
-    case OverflowAlignmentTrue:
-        m_value.valueID = CSSValueTrue;
+    case OverflowAlignmentUnsafe:
+        m_value.valueID = CSSValueUnsafe;
         break;
     case OverflowAlignmentSafe:
         m_value.valueID = CSSValueSafe;
@@ -4519,15 +4518,15 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(OverflowAlignment overflo
 template<> inline OverflowAlignment CSSPrimitiveValue::convertTo() const
 {
     switch (m_value.valueID) {
-    case CSSValueTrue:
-        return OverflowAlignmentTrue;
+    case CSSValueUnsafe:
+        return OverflowAlignmentUnsafe;
     case CSSValueSafe:
         return OverflowAlignmentSafe;
     default:
         break;
     }
     ASSERT_NOT_REACHED();
-    return OverflowAlignmentTrue;
+    return OverflowAlignmentUnsafe;
 }
 
 template<> inline CSSPrimitiveValue::CSSPrimitiveValue(ScrollBehavior behavior)
@@ -4593,6 +4592,49 @@ template<> inline ScrollSnapType CSSPrimitiveValue::convertTo() const
     }
     ASSERT_NOT_REACHED();
     return ScrollSnapTypeNone;
+}
+
+template<> inline CSSPrimitiveValue::CSSPrimitiveValue(Containment snapType)
+    : CSSValue(PrimitiveClass)
+{
+    init(UnitType::ValueID);
+    switch (snapType) {
+    case ContainsNone:
+        m_value.valueID = CSSValueNone;
+        break;
+    case ContainsStrict:
+        m_value.valueID = CSSValueStrict;
+        break;
+    case ContainsPaint:
+        m_value.valueID = CSSValuePaint;
+        break;
+    case ContainsStyle:
+        m_value.valueID = CSSValueStyle;
+        break;
+    case ContainsLayout:
+        m_value.valueID = CSSValueLayout;
+        break;
+    }
+}
+
+template<> inline Containment CSSPrimitiveValue::convertTo() const
+{
+    switch (getValueID()) {
+    case CSSValueNone:
+        return ContainsNone;
+    case CSSValueStrict:
+        return ContainsStrict;
+    case CSSValuePaint:
+        return ContainsPaint;
+    case CSSValueStyle:
+        return ContainsStyle;
+    case CSSValueLayout:
+        return ContainsLayout;
+    default:
+        break;
+    }
+    ASSERT_NOT_REACHED();
+    return ContainsNone;
 }
 
 } // namespace blink

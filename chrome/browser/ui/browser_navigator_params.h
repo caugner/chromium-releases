@@ -10,6 +10,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/site_instance.h"
@@ -55,7 +56,8 @@ namespace chrome {
 struct NavigateParams {
 #if defined(OS_ANDROID)
   explicit NavigateParams(content::WebContents* a_target_contents);
-#else
+#endif
+#if !defined(OS_ANDROID) || defined(USE_AURA)
   NavigateParams(Browser* browser,
                  const GURL& a_url,
                  ui::PageTransition a_transition);
@@ -205,7 +207,7 @@ struct NavigateParams {
   // Default is IGNORE.
   RefBehavior ref_behavior;
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) || defined(USE_AURA)
   // [in]  Specifies a Browser object where the navigation could occur or the
   //       tab could be added. Navigate() is not obliged to use this Browser if
   //       it is not compatible with the operation being performed. This can be
@@ -224,11 +226,6 @@ struct NavigateParams {
   // The profile that is initiating the navigation. If there is a non-NULL
   // browser passed in via |browser|, it's profile will be used instead.
   Profile* initiating_profile;
-
-  // Refers to a navigation that was parked in the browser in order to be
-  // transferred to another RVH. Only used in case of a redirection of a request
-  // to a different site that created a new RVH.
-  content::GlobalRequestID transferred_global_request_id;
 
   // Refers to which desktop this navigation should occur on. May be passed
   // explicitly or inferred from an existing Browser instance.

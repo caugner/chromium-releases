@@ -8,8 +8,13 @@
 #include "base/macros.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "ui/aura/window_tree_host_platform.h"
+#include "ui/views/mus/mus_export.h"
 
 class SkBitmap;
+
+namespace bitmap_uploader {
+class BitmapUploader;
+}
 
 namespace mojo {
 class Shell;
@@ -21,6 +26,7 @@ class Window;
 
 namespace ui {
 class Compositor;
+class ViewProp;
 }
 
 namespace views {
@@ -28,9 +34,8 @@ namespace views {
 class InputMethodMUS;
 class NativeWidgetMus;
 class PlatformWindowMus;
-class SurfaceContextFactory;
 
-class WindowTreeHostMus : public aura::WindowTreeHostPlatform {
+class VIEWS_MUS_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
  public:
   WindowTreeHostMus(mojo::Shell* shell,
                     NativeWidgetMus* native_widget_,
@@ -39,6 +44,9 @@ class WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   ~WindowTreeHostMus() override;
 
   PlatformWindowMus* platform_window();
+  bitmap_uploader::BitmapUploader* bitmap_uploader() {
+    return bitmap_uploader_.get();
+  }
   ui::PlatformWindowState show_state() const { return show_state_; }
 
  private:
@@ -47,11 +55,13 @@ class WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void OnClosed() override;
   void OnWindowStateChanged(ui::PlatformWindowState new_state) override;
   void OnActivationChanged(bool active) override;
+  void OnCloseRequest() override;
 
   NativeWidgetMus* native_widget_;
   scoped_ptr<InputMethodMUS> input_method_;
-  scoped_ptr<SurfaceContextFactory> context_factory_;
   ui::PlatformWindowState show_state_;
+  scoped_ptr<bitmap_uploader::BitmapUploader> bitmap_uploader_;
+  scoped_ptr<ui::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHostMus);
 };

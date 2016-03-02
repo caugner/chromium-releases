@@ -4,11 +4,14 @@
 
 #include "components/password_manager/content/browser/credential_manager_dispatcher.h"
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
@@ -140,17 +143,25 @@ TestCredentialManagerDispatcher::GetDriver() {
   return driver_;
 }
 
-class MockPasswordManagerDriver : public StubPasswordManagerDriver {
- public:
-  MOCK_METHOD0(GetPasswordManager, PasswordManager*());
-};
-
 void RunAllPendingTasks() {
   base::RunLoop run_loop;
   base::MessageLoop::current()->PostTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   run_loop.Run();
 }
+
+class SlightlyLessStubbyPasswordManagerDriver
+    : public StubPasswordManagerDriver {
+ public:
+  explicit SlightlyLessStubbyPasswordManagerDriver(
+      PasswordManagerClient* client)
+      : password_manager_(client) {}
+
+  PasswordManager* GetPasswordManager() override { return &password_manager_; }
+
+ private:
+  PasswordManager password_manager_;
+};
 
 }  // namespace
 
@@ -162,12 +173,12 @@ class CredentialManagerDispatcherTest
   void SetUp() override {
     content::RenderViewHostTestHarness::SetUp();
     store_ = new TestPasswordStore;
-    client_.reset(new MockPasswordManagerClient(store_.get()));
-    password_manager_.reset(new PasswordManager(client_.get()));
-    ON_CALL(mock_driver_, GetPasswordManager())
-        .WillByDefault(testing::Return(password_manager_.get()));
+    client_.reset(
+        new testing::NiceMock<MockPasswordManagerClient>(store_.get()));
+    stub_driver_.reset(
+        new SlightlyLessStubbyPasswordManagerDriver(client_.get()));
     dispatcher_.reset(new TestCredentialManagerDispatcher(
-        web_contents(), client_.get(), &mock_driver_));
+        web_contents(), client_.get(), stub_driver_.get()));
     ON_CALL(*client_, IsSavingAndFillingEnabledForCurrentPage())
         .WillByDefault(testing::Return(true));
     ON_CALL(*client_, IsOffTheRecord()).WillByDefault(testing::Return(false));
@@ -224,7 +235,7 @@ class CredentialManagerDispatcherTest
   }
 
   void TearDown() override {
-    store_->Shutdown();
+    store_->ShutdownOnUIThread();
     content::RenderViewHostTestHarness::TearDown();
   }
 
@@ -236,7 +247,7 @@ class CredentialManagerDispatcherTest
 
     RunAllPendingTasks();
 
-    const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+    const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
     const IPC::Message* message =
         process()->sink().GetFirstMessageMatching(kMsgID);
     ASSERT_TRUE(message);
@@ -255,7 +266,7 @@ class CredentialManagerDispatcherTest
 
     RunAllPendingTasks();
 
-    const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+    const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
     const IPC::Message* message =
         process()->sink().GetFirstMessageMatching(kMsgID);
     ASSERT_TRUE(message);
@@ -275,10 +286,9 @@ class CredentialManagerDispatcherTest
   autofill::PasswordForm origin_path_form_;
   autofill::PasswordForm cross_origin_form_;
   scoped_refptr<TestPasswordStore> store_;
-  scoped_ptr<MockPasswordManagerClient> client_;
-  MockPasswordManagerDriver mock_driver_;
+  scoped_ptr<testing::NiceMock<MockPasswordManagerClient>> client_;
+  scoped_ptr<SlightlyLessStubbyPasswordManagerDriver> stub_driver_;
   scoped_ptr<CredentialManagerDispatcher> dispatcher_;
-  scoped_ptr<PasswordManager> password_manager_;
 };
 
 TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnStore) {
@@ -289,7 +299,7 @@ TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnStore) {
 
   dispatcher()->OnStore(kRequestId, info);
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -311,6 +321,63 @@ TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnStore) {
   EXPECT_EQ(autofill::PasswordForm::SCHEME_HTML, new_form.scheme);
 }
 
+TEST_F(CredentialManagerDispatcherTest, CredentialManagerStoreOverwrite) {
+  // Populate the PasswordStore with a form.
+  store_->AddLogin(form_);
+  RunAllPendingTasks();
+
+  // Calling 'OnStore' with a credential that matches |form_| should update
+  // the password without prompting the user.
+  CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_PASSWORD);
+  info.password = base::ASCIIToUTF16("Totally new password.");
+  dispatcher()->OnStore(kRequestId, info);
+
+  EXPECT_CALL(*client_, PromptUserToSavePasswordPtr(
+                            _, CredentialSourceType::CREDENTIAL_SOURCE_API))
+      .Times(testing::Exactly(0));
+
+  const uint32_t kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
+  const IPC::Message* message =
+      process()->sink().GetFirstMessageMatching(kMsgID);
+  EXPECT_TRUE(message);
+  process()->sink().ClearMessages();
+
+  // Allow the PasswordFormManager to talk to the password store, determine
+  // the form is a match for an existing form, and update the PasswordStore.
+  RunAllPendingTasks();
+
+  TestPasswordStore::PasswordMap passwords = store_->stored_passwords();
+  EXPECT_EQ(1U, passwords.size());
+  EXPECT_EQ(1U, passwords[form_.signon_realm].size());
+  EXPECT_EQ(base::ASCIIToUTF16("Totally new password."),
+            passwords[form_.signon_realm][0].password_value);
+}
+
+TEST_F(CredentialManagerDispatcherTest,
+       CredentialManagerStoreOverwriteZeroClick) {
+  // Set the global zero click flag on, and populate the PasswordStore with a
+  // form that's set to skip zero click.
+  client_->set_zero_click_enabled(true);
+  form_.skip_zero_click = true;
+  store_->AddLogin(form_);
+  RunAllPendingTasks();
+
+  // Calling 'OnStore' with a credential that matches |form_| should update
+  // the password without prompting the user.
+  CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_PASSWORD);
+  info.password = base::ASCIIToUTF16("Totally new password.");
+  dispatcher()->OnStore(kRequestId, info);
+  process()->sink().ClearMessages();
+
+  // Allow the PasswordFormManager to talk to the password store, determine
+  // the form is a match for an existing form, and update the PasswordStore.
+  RunAllPendingTasks();
+
+  // Verify that the update didn't toggle the skip_zero_click flag off.
+  TestPasswordStore::PasswordMap passwords = store_->stored_passwords();
+  EXPECT_TRUE(passwords[form_.signon_realm][0].skip_zero_click);
+}
+
 TEST_F(CredentialManagerDispatcherTest,
        CredentialManagerSignInWithSavingDisabledForCurrentPage) {
   CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_PASSWORD);
@@ -322,7 +389,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   dispatcher()->OnStore(kRequestId, info);
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_AcknowledgeStore::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -349,7 +416,7 @@ TEST_F(CredentialManagerDispatcherTest,
   dispatcher()->OnRequireUserMediation(kRequestId);
   RunAllPendingTasks();
 
-  const uint32 kMsgID =
+  const uint32_t kMsgID =
       CredentialManagerMsg_AcknowledgeRequireUserMediation::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
@@ -414,7 +481,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -440,7 +507,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -464,7 +531,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -482,7 +549,7 @@ TEST_F(
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -529,7 +596,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -556,7 +623,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -585,7 +652,7 @@ TEST_F(CredentialManagerDispatcherTest,
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
@@ -612,14 +679,14 @@ TEST_F(CredentialManagerDispatcherTest,
   dispatcher()->OnRequestCredential(kRequestId, false, federations);
 
   // Check that the second request triggered a rejection.
-  uint32 kMsgID = CredentialManagerMsg_RejectCredentialRequest::ID;
+  uint32_t kMsgID = CredentialManagerMsg_RejectCredentialRequest::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   EXPECT_TRUE(message);
 
   CredentialManagerMsg_RejectCredentialRequest::Param reject_param;
   CredentialManagerMsg_RejectCredentialRequest::Read(message, &reject_param);
-  EXPECT_EQ(blink::WebCredentialManagerError::ErrorTypePendingRequest,
+  EXPECT_EQ(blink::WebCredentialManagerPendingRequestError,
             base::get<1>(reject_param));
   EXPECT_CALL(*client_, PromptUserToChooseCredentialsPtr(_, _, _, _))
       .Times(testing::Exactly(1));
@@ -698,7 +765,7 @@ TEST_F(CredentialManagerDispatcherTest, IncognitoZeroClickRequestCredential) {
 
   RunAllPendingTasks();
 
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
+  const uint32_t kMsgID = CredentialManagerMsg_SendCredential::ID;
   const IPC::Message* message =
       process()->sink().GetFirstMessageMatching(kMsgID);
   ASSERT_TRUE(message);

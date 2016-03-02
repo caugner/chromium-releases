@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/website_settings/mock_permission_bubble_view.h"
@@ -45,14 +46,9 @@ class PermissionBubbleManagerBrowserTest : public InProcessBrowserTest {
 
 // Requests before the load event should be bundled into one bubble.
 // http://crbug.com/512849 flaky
-#if defined(OS_WIN)
-#define MAYBE_RequestsBeforeLoad DISABLED_RequestsBeforeLoad
-#else
-#define MAYBE_RequestsBeforeLoad RequestsBeforeLoad
-#endif
 IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
-                       MAYBE_RequestsBeforeLoad) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+                       DISABLED_RequestsBeforeLoad) {
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(),
@@ -67,7 +63,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
 // Requests before the load should not be bundled with a request after the load.
 IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
                        RequestsBeforeAfterLoad) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(),
@@ -89,7 +85,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
 #define MAYBE_NavTwice NavTwice
 #endif
 IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest, MAYBE_NavTwice) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(),
@@ -117,7 +113,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest, MAYBE_NavTwice) {
 #endif
 IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
                        MAYBE_NavTwiceWithHash) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(),
@@ -138,7 +134,7 @@ IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest,
 
 // Bubble requests should be shown after in-page navigation.
 IN_PROC_BROWSER_TEST_F(PermissionBubbleManagerBrowserTest, InPageNavigation) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(),

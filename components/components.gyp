@@ -20,8 +20,8 @@
     'certificate_reporting.gypi',
     'cloud_devices.gypi',
     'component_updater.gypi',
-    'compression.gypi',
     'content_settings.gypi',
+    'contextual_search.gypi',
     'cookie_config.gypi',
     'crash.gypi',
     'cronet.gypi',
@@ -56,6 +56,7 @@
     'net_log.gypi',
     'network_hints.gypi',
     'network_time.gypi',
+    'ntp_snippets.gypi',
     'offline_pages.gypi',
     'omnibox.gypi',
     'onc.gypi',
@@ -71,11 +72,11 @@
     'proxy_config.gypi',
     'query_parser.gypi',
     'rappor.gypi',
-    'renderer_context_menu.gypi',
     'search.gypi',
     'search_engines.gypi',
     'search_provider_logos.gypi',
     'security_interstitials.gypi',
+    'security_state.gypi',
     'sessions.gypi',
     'signin.gypi',
     'ssl_config.gypi',
@@ -98,6 +99,7 @@
     'version_info.gypi',
     'version_ui.gypi',
     'web_resource.gypi',
+    'web_restriction.gypi',
     'webdata.gypi',
     'webdata_services.gypi',
   ],
@@ -122,6 +124,7 @@
         'packed_ct_ev_whitelist.gypi',
         'page_load_metrics.gypi',
         'power.gypi',
+        'renderer_context_menu.gypi',
         'safe_browsing_db.gypi',
         'safe_json.gypi',
         'visitedlink.gypi',
@@ -129,6 +132,7 @@
         'web_cache.gypi',
         'web_contents_delegate_android.gypi',
         'web_modal.gypi',
+        'webusb.gypi',
       ],
     }],
     ['OS == "ios"', {
@@ -143,11 +147,11 @@
         'feedback.gypi',
         'proximity_auth.gypi',
         'storage_monitor.gypi',
-        'webusb.gypi',
       ]
     }],
     ['chromeos == 1', {
       'includes': [
+        'arc.gypi',
         'pairing.gypi',
         'timers.gypi',
         'wifi_sync.gypi',
@@ -195,6 +199,11 @@
       'includes': [
         'rlz.gypi',
       ],
-    }]
+    }],
+    ['use_ash==1', {
+      'includes': [
+        'exo.gypi',
+      ],
+    }],
   ],
 }

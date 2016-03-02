@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
@@ -137,7 +137,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledViaPreference) {
       syncer::AUTOFILL_WALLET_DATA));
   // TODO(pvalenzuela): Assert that the local root node for AUTOFILL_WALLET_DATA
   // exists.
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_METADATA));
 }
 
@@ -157,7 +157,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_METADATA));
 }
 
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
   ASSERT_FALSE(enabled_checker.TimedOut());
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
+  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_METADATA));
 
   // Then disable the experiment.

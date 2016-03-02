@@ -135,7 +135,7 @@ WebInspector.ConsoleViewMessage.prototype = {
     _formatMessage: function()
     {
         this._formattedMessage = createElement("span");
-        this._formattedMessage.appendChild(WebInspector.Widget.createStyleElement("components/objectValue.css"));
+        WebInspector.appendStyle(this._formattedMessage, "components/objectValue.css");
         this._formattedMessage.className = "console-message-text source-code";
 
         /**
@@ -1245,14 +1245,14 @@ WebInspector.ConsoleViewMessage.prototype = {
             if (!isCallFrameLine)
                 continue;
 
-            var openBracketIndex = lines[i].indexOf("(");
-            var closeBracketIndex = lines[i].indexOf(")");
+            var openBracketIndex = -1;
+            var closeBracketIndex = -1;
+            var match = /\([^\)\(]+\)/.exec(lines[i]);
+            if (match) {
+                openBracketIndex = match.index;
+                closeBracketIndex = match.index + match[0].length - 1;
+            }
             var hasOpenBracket = openBracketIndex !== -1;
-            var hasCloseBracket = closeBracketIndex !== -1;
-
-            if ((openBracketIndex > closeBracketIndex) ||  (hasOpenBracket ^ hasCloseBracket))
-                return null;
-
             var left = hasOpenBracket ? openBracketIndex + 1 : lines[i].indexOf("at") + 3;
             var right = hasOpenBracket ? closeBracketIndex : lines[i].length;
             var linkCandidate = lines[i].substring(left, right);

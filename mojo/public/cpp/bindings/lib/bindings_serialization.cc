@@ -4,6 +4,9 @@
 
 #include "mojo/public/cpp/bindings/lib/bindings_serialization.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "mojo/public/cpp/environment/logging.h"
 
 namespace mojo {
@@ -85,6 +88,14 @@ void DecodeHandle(Interface_Data* data, std::vector<Handle>* handles) {
 void DecodeHandle(MojoHandle* handle, std::vector<Handle>* handles) {
   DecodeHandle(reinterpret_cast<Handle*>(handle), handles);
 }
+
+SerializationContext::SerializationContext() {}
+
+SerializationContext::SerializationContext(
+    scoped_refptr<MultiplexRouter> in_router)
+    : router(std::move(in_router)) {}
+
+SerializationContext::~SerializationContext() {}
 
 }  // namespace internal
 }  // namespace mojo

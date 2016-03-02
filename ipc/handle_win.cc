@@ -4,6 +4,8 @@
 
 #include "ipc/handle_win.h"
 
+#include <utility>
+
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,7 +25,7 @@ void ParamTraits<HandleWin>::Write(Message* m, const param_type& p) {
   scoped_refptr<IPC::internal::HandleAttachmentWin> attachment(
       new IPC::internal::HandleAttachmentWin(p.get_handle(),
                                              p.get_permissions()));
-  if (!m->WriteAttachment(attachment.Pass()))
+  if (!m->WriteAttachment(std::move(attachment)))
     NOTREACHED();
 }
 
@@ -45,6 +47,7 @@ bool ParamTraits<HandleWin>::Read(const Message* m,
   IPC::internal::HandleAttachmentWin* handle_attachment =
       static_cast<IPC::internal::HandleAttachmentWin*>(brokerable_attachment);
   r->set_handle(handle_attachment->get_handle());
+  handle_attachment->reset_handle_ownership();
   return true;
 }
 

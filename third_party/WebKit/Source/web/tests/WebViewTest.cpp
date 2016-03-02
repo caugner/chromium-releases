@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "public/web/WebView.h"
 
 #include "bindings/core/v8/V8Document.h"
@@ -87,13 +86,17 @@
 #include "public/web/WebViewClient.h"
 #include "public/web/WebWidget.h"
 #include "public/web/WebWidgetClient.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include <gtest/gtest.h>
+
+#if OS(MACOSX)
+#include "public/web/mac/WebSubstringUtil.h"
+#endif
 
 using blink::FrameTestHelpers::loadFrame;
 using blink::URLTestHelpers::toKURL;
@@ -571,7 +574,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent)
     PaintLayer* rootLayer = view->layoutView()->layer();
     LayoutRect paintRect(0, 0, kWidth, kHeight);
     PaintLayerPaintingInfo paintingInfo(rootLayer, paintRect, GlobalPaintNormalPhase, LayoutSize());
-    PaintLayerPainter(*rootLayer).paintLayerContents(&pictureBuilder.context(), paintingInfo, PaintLayerPaintingCompositingAllPhases);
+    PaintLayerPainter(*rootLayer).paintLayerContents(pictureBuilder.context(), paintingInfo, PaintLayerPaintingCompositingAllPhases);
 
     pictureBuilder.endRecording()->playback(&canvas);
 
@@ -1588,7 +1591,7 @@ TEST_F(WebViewTest, ClientTapHandlingNullWebViewClient)
     event.sourceDevice = WebGestureDeviceTouchscreen;
     event.x = 3;
     event.y = 8;
-    EXPECT_FALSE(webView->handleInputEvent(event));
+    EXPECT_EQ(WebInputEventResult::NotHandled, webView->handleInputEvent(event));
     webView->close();
     // Explicitly close as the frame as no frame client to do so on frameDetached().
     localFrame->close();
@@ -1637,6 +1640,39 @@ TEST_F(WebViewTest, BlinkCaretOnTypingAfterLongPress)
     EXPECT_FALSE(mainFrame->frame()->selection().isCaretBlinkingSuspended());
 }
 #endif
+
+TEST_F(WebViewTest, BlinkCaretOnClosingContextMenu)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("form.html"));
+    WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + "form.html", true);
+
+    webView->setInitialFocus(false);
+    runPendingTasks();
+
+    // We suspend caret blinking when pressing with mouse right button.
+    // Note that we do not send MouseUp event here since it will be consumed
+    // by the context menu once it shows up.
+    WebMouseEvent mouseEvent;
+    mouseEvent.button = WebMouseEvent::ButtonRight;
+    mouseEvent.x = 1;
+    mouseEvent.y = 1;
+    mouseEvent.clickCount = 1;
+    mouseEvent.type = WebInputEvent::MouseDown;
+    webView->handleInputEvent(mouseEvent);
+    runPendingTasks();
+
+    WebLocalFrameImpl* mainFrame = toWebLocalFrameImpl(webView->mainFrame());
+    EXPECT_TRUE(mainFrame->frame()->selection().isCaretBlinkingSuspended());
+
+    // Caret blinking is still suspended after showing context menu.
+    webView->showContextMenu();
+    EXPECT_TRUE(mainFrame->frame()->selection().isCaretBlinkingSuspended());
+
+    // Caret blinking will be resumed only after context menu is closed.
+    webView->didCloseContextMenu();
+
+    EXPECT_FALSE(mainFrame->frame()->selection().isCaretBlinkingSuspended());
+}
 
 TEST_F(WebViewTest, SelectionOnReadOnlyInput)
 {
@@ -2440,28 +2476,32 @@ TEST_F(WebViewTest, TextInputFlags)
     HTMLInputElement* inputElement = toHTMLInputElement(document->getElementById("input"));
     document->setFocusedElement(inputElement, FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
     webViewImpl->setFocus(true);
-    WebTextInputInfo info = webViewImpl->textInputInfo();
+    WebTextInputInfo info1 = webViewImpl->textInputInfo();
     EXPECT_EQ(
         WebTextInputFlagAutocompleteOff | WebTextInputFlagAutocorrectOff | WebTextInputFlagSpellcheckOff | WebTextInputFlagAutocapitalizeNone,
-        info.flags);
+        info1.flags);
 
     // (A.2) Verifies autocorrect/autocomplete/spellcheck flags are On and
     // autocapitalize is set to sentences.
     inputElement = toHTMLInputElement(document->getElementById("input2"));
     document->setFocusedElement(inputElement, FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
     webViewImpl->setFocus(true);
-    info = webViewImpl->textInputInfo();
+    WebTextInputInfo info2 = webViewImpl->textInputInfo();
     EXPECT_EQ(
         WebTextInputFlagAutocompleteOn | WebTextInputFlagAutocorrectOn | WebTextInputFlagSpellcheckOn | WebTextInputFlagAutocapitalizeSentences,
-        info.flags);
+        info2.flags);
 
     // (B) <textarea> Verifies the default text input flags are
     // WebTextInputFlagAutocapitalizeSentences.
     HTMLTextAreaElement* textAreaElement = toHTMLTextAreaElement(document->getElementById("textarea"));
     document->setFocusedElement(textAreaElement, FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
     webViewImpl->setFocus(true);
-    info = webViewImpl->textInputInfo();
-    EXPECT_EQ(WebTextInputFlagAutocapitalizeSentences, info.flags);
+    WebTextInputInfo info3 = webViewImpl->textInputInfo();
+    EXPECT_EQ(WebTextInputFlagAutocapitalizeSentences, info3.flags);
+
+    // (C) Verifies the WebTextInputInfo's don't equal.
+    EXPECT_FALSE(info1.equals(info2));
+    EXPECT_FALSE(info2.equals(info3));
 
     // Free the webView before freeing the NonUserInputTextUpdateWebViewClient.
     m_webViewHelper.reset();
@@ -3146,5 +3186,34 @@ TEST_F(WebViewTest, StopLoadingIfJavaScriptURLReturnsNoStringResult)
     ASSERT_TRUE(document);
     EXPECT_FALSE(document->frame()->isLoading());
 }
+
+#if OS(MACOSX)
+TEST_F(WebViewTest, WebSubstringUtil)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("content_editable_populated.html"));
+    WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + "content_editable_populated.html");
+    webView->settings()->setDefaultFontSize(12);
+    webView->resize(WebSize(400, 400));
+    WebLocalFrameImpl* frame = toWebLocalFrameImpl(webView->mainFrame());
+    FrameView* frameView = frame->frame()->view();
+
+    WebPoint baselinePoint;
+    NSAttributedString* result = WebSubstringUtil::attributedSubstringInRange(frame, 10, 3, &baselinePoint);
+    ASSERT_TRUE(!!result);
+
+    WebPoint point(baselinePoint.x, frameView->height() - baselinePoint.y);
+    result = WebSubstringUtil::attributedWordAtPoint(webView, point, baselinePoint);
+    ASSERT_TRUE(!!result);
+
+    webView->setZoomLevel(3);
+
+    result = WebSubstringUtil::attributedSubstringInRange(frame, 5, 5, &baselinePoint);
+    ASSERT_TRUE(!!result);
+
+    point = WebPoint(baselinePoint.x, frameView->height() - baselinePoint.y);
+    result = WebSubstringUtil::attributedWordAtPoint(webView, point, baselinePoint);
+    ASSERT_TRUE(!!result);
+}
+#endif
 
 } // namespace blink

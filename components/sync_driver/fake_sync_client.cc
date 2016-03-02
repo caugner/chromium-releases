@@ -5,8 +5,6 @@
 #include "components/sync_driver/fake_sync_client.h"
 
 #include "base/bind.h"
-#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/password_manager/core/browser/password_store.h"
 #include "components/sync_driver/fake_sync_service.h"
 #include "sync/util/extensions_activity.h"
 
@@ -15,6 +13,10 @@ namespace sync_driver {
 namespace {
 
 void DummyClearBrowsingDataCallback(base::Time start, base::Time end) {}
+
+void DummyRegisterPlatformTypesCallback(SyncService* sync_service,
+                                        syncer::ModelTypeSet,
+                                        syncer::ModelTypeSet) {}
 
 }  // namespace
 
@@ -28,7 +30,7 @@ FakeSyncClient::FakeSyncClient(SyncApiComponentFactory* factory)
 
 FakeSyncClient::~FakeSyncClient() {}
 
-void FakeSyncClient::Initialize(SyncService* sync_service) {}
+void FakeSyncClient::Initialize() {}
 
 SyncService* FakeSyncClient::GetSyncService() {
   return sync_service_.get();
@@ -50,11 +52,6 @@ history::HistoryService* FakeSyncClient::GetHistoryService() {
   return nullptr;
 }
 
-scoped_refptr<password_manager::PasswordStore>
-FakeSyncClient::GetPasswordStore() {
-  return scoped_refptr<password_manager::PasswordStore>();
-}
-
 ClearBrowsingDataCallback FakeSyncClient::GetClearBrowsingDataCallback() {
   return base::Bind(&DummyClearBrowsingDataCallback);
 }
@@ -63,13 +60,13 @@ base::Closure FakeSyncClient::GetPasswordStateChangedCallback() {
   return base::Bind(&base::DoNothing);
 }
 
-autofill::PersonalDataManager* FakeSyncClient::GetPersonalDataManager() {
-  return nullptr;
+sync_driver::SyncApiComponentFactory::RegisterDataTypesMethod
+FakeSyncClient::GetRegisterPlatformTypesCallback() {
+  return base::Bind(&DummyRegisterPlatformTypesCallback);
 }
 
-scoped_refptr<autofill::AutofillWebDataService>
-FakeSyncClient::GetWebDataService() {
-  return scoped_refptr<autofill::AutofillWebDataService>();
+autofill::PersonalDataManager* FakeSyncClient::GetPersonalDataManager() {
+  return nullptr;
 }
 
 BookmarkUndoService* FakeSyncClient::GetBookmarkUndoServiceIfExists() {

@@ -4,6 +4,8 @@
 
 #include "media/base/android/media_codec_player.h"
 
+#include <utility>
+
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -45,7 +47,7 @@ MediaCodecPlayer::MediaCodecPlayer(
                          on_decoder_resources_released_cb,
                          frame_url),
       ui_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      demuxer_(demuxer.Pass()),
+      demuxer_(std::move(demuxer)),
       state_(kStatePaused),
       interpolator_(&default_tick_clock_),
       pending_start_(false),
@@ -159,7 +161,7 @@ void MediaCodecPlayer::SetVideoSurface(gfx::ScopedJavaSurface surface) {
     return;
   }
 
-  video_decoder_->SetVideoSurface(surface.Pass());
+  video_decoder_->SetVideoSurface(std::move(surface));
 
   if (surface_is_empty) {
     // Remove video surface.
@@ -362,6 +364,16 @@ void MediaCodecPlayer::SetVolume(double volume) {
 
   DVLOG(1) << __FUNCTION__ << " " << volume;
   audio_decoder_->SetVolume(volume);
+}
+
+bool MediaCodecPlayer::HasAudio() const {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  return audio_decoder_->HasStream();
+}
+
+bool MediaCodecPlayer::HasVideo() const {
+  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
+  return video_decoder_->HasStream();
 }
 
 int MediaCodecPlayer::GetVideoWidth() {
@@ -609,12 +621,12 @@ bool MediaCodecPlayer::IsPrerollingForTests(DemuxerStream::Type type) const {
 
 // Events from Player, called on UI thread
 
-void MediaCodecPlayer::RequestPermissionAndPostResult(
-    base::TimeDelta duration) {
+void MediaCodecPlayer::RequestPermissionAndPostResult(base::TimeDelta duration,
+                                                      bool has_audio) {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " duration:" << duration;
 
-  bool granted = manager()->RequestPlay(player_id(), duration);
+  bool granted = manager()->RequestPlay(player_id(), duration, has_audio);
   GetMediaTaskRunner()->PostTask(
       FROM_HERE, base::Bind(&MediaCodecPlayer::OnPermissionDecided,
                             media_weak_this_, granted));
@@ -947,9 +959,17 @@ void MediaCodecPlayer::OnMediaCryptoReady(
   // and the surface requirement does not change until new SetCdm() is called.
 
   DCHECK(media_crypto);
-  DCHECK(!media_crypto->is_null());
 
-  media_crypto_ = media_crypto.Pass();
+  if (media_crypto->is_null()) {
+    // TODO(timav): Fail playback nicely here if needed. Note that we could get
+    // here even though the stream to play is unencrypted and therefore
+    // MediaCrypto is not needed. In that case, we may ignore this error and
+    // continue playback, or fail the playback.
+    LOG(ERROR) << "MediaCrypto creation failed.";
+    return;
+  }
+
+  media_crypto_ = std::move(media_crypto);
 
   if (audio_decoder_) {
     audio_decoder_->SetNeedsReconfigure();
@@ -1012,16 +1032,6 @@ base::TimeDelta MediaCodecPlayer::GetPendingSeek() const {
   return pending_seek_;
 }
 
-bool MediaCodecPlayer::HasAudio() const {
-  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
-  return audio_decoder_->HasStream();
-}
-
-bool MediaCodecPlayer::HasVideo() const {
-  DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
-  return video_decoder_->HasStream();
-}
-
 void MediaCodecPlayer::SetDemuxerConfigs(const DemuxerConfigs& configs) {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " " << configs;
@@ -1054,7 +1064,7 @@ void MediaCodecPlayer::RequestPlayPermission() {
 
   ui_task_runner_->PostTask(
       FROM_HERE, base::Bind(&MediaPlayerAndroid::RequestPermissionAndPostResult,
-                            WeakPtrForUIThread(), duration_));
+                            WeakPtrForUIThread(), duration_, HasAudio()));
 }
 
 void MediaCodecPlayer::StartPrefetchDecoders() {

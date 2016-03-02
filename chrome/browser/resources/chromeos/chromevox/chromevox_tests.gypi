@@ -83,7 +83,9 @@
       'cvox2/background/automation_util_test.extjs',
       'cvox2/background/background_test.extjs',
       'cvox2/background/cursors_test.extjs',
+      'cvox2/background/live_regions_test.extjs',
       'cvox2/background/output_test.extjs',
+      'cvox2/background/tree_walker_test.extjs',
       'host/chrome/tts_background_test.extjs',
     ],
   },
@@ -120,6 +122,11 @@
             '<(DEPTH)/components/nacl.gyp:nacl_helper',
             '<(DEPTH)/components/nacl_nonsfi.gyp:nacl_helper_nonsfi',
             '<(DEPTH)/native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
+          ],
+        }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
           ],
         }],
       ],

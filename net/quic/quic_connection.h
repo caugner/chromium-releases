@@ -17,6 +17,8 @@
 #define NET_QUIC_QUIC_CONNECTION_H_
 
 #include <stddef.h>
+#include <stdint.h>
+
 #include <deque>
 #include <list>
 #include <map>
@@ -24,15 +26,16 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/ip_endpoint.h"
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/quic_alarm.h"
 #include "net/quic/quic_blocked_writer_interface.h"
-#include "net/quic/quic_connection_stats.h"
+#include "net/quic/quic_fec_group.h"
+#include "net/quic/quic_framer.h"
 #include "net/quic/quic_packet_creator.h"
 #include "net/quic/quic_packet_generator.h"
 #include "net/quic/quic_packet_writer.h"
@@ -48,7 +51,6 @@ namespace net {
 class QuicClock;
 class QuicConfig;
 class QuicConnection;
-class QuicDecrypter;
 class QuicEncrypter;
 class QuicFecGroup;
 class QuicRandom;
@@ -148,7 +150,7 @@ class NET_EXPORT_PRIVATE QuicConnectionVisitorInterface {
 // points.  Implementations must not mutate the state of the connection
 // as a result of these callbacks.
 class NET_EXPORT_PRIVATE QuicConnectionDebugVisitor
-    : public QuicPacketGenerator::DebugDelegate,
+    : public QuicPacketCreator::DebugDelegate,
       public QuicSentPacketManager::DebugDelegate {
  public:
   ~QuicConnectionDebugVisitor() override {}
@@ -156,7 +158,6 @@ class NET_EXPORT_PRIVATE QuicConnectionDebugVisitor
   // Called when a packet has been sent.
   virtual void OnPacketSent(const SerializedPacket& serialized_packet,
                             QuicPacketNumber original_packet_number,
-                            EncryptionLevel level,
                             TransmissionType transmission_type,
                             size_t encrypted_length,
                             QuicTime sent_time) {}
@@ -172,8 +173,7 @@ class NET_EXPORT_PRIVATE QuicConnectionDebugVisitor
 
   // Called when a packet is received with a connection id that does not
   // match the ID of this connection.
-  virtual void OnIncorrectConnectionId(
-      QuicConnectionId connection_id) {}
+  virtual void OnIncorrectConnectionId(QuicConnectionId connection_id) {}
 
   // Called when an undecryptable packet has been received.
   virtual void OnUndecryptablePacket() {}
@@ -207,8 +207,7 @@ class NET_EXPORT_PRIVATE QuicConnectionDebugVisitor
   virtual void OnRstStreamFrame(const QuicRstStreamFrame& frame) {}
 
   // Called when a ConnectionCloseFrame has been parsed.
-  virtual void OnConnectionCloseFrame(
-      const QuicConnectionCloseFrame& frame) {}
+  virtual void OnConnectionCloseFrame(const QuicConnectionCloseFrame& frame) {}
 
   // Called when a WindowUpdate has been parsed.
   virtual void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {}
@@ -242,6 +241,10 @@ class NET_EXPORT_PRIVATE QuicConnectionDebugVisitor
   virtual void OnResumeConnectionState(
       const CachedNetworkParameters& cached_network_params) {}
 
+  // Called when the connection parameters are set from the supplied
+  // |config|.
+  virtual void OnSetFromConfig(const QuicConfig& config) {}
+
   // Called when RTT may have changed, including when an RTT is read from
   // the config.
   virtual void OnRttChanged(QuicTime::Delta rtt) const {}
@@ -261,6 +264,9 @@ class NET_EXPORT_PRIVATE QuicConnectionHelperInterface {
   // notify |delegate| when the alarm fires.  Caller takes ownership
   // of the new alarm, which will not yet be "set" to fire.
   virtual QuicAlarm* CreateAlarm(QuicAlarm::Delegate* delegate) = 0;
+
+  // Returns a QuicBufferAllocator to be used for all stream frame buffers.
+  virtual QuicBufferAllocator* GetBufferAllocator() = 0;
 };
 
 class NET_EXPORT_PRIVATE QuicConnection
@@ -275,21 +281,13 @@ class NET_EXPORT_PRIVATE QuicConnection
     BUNDLE_PENDING_ACK = 2,
   };
 
-  class PacketWriterFactory {
-   public:
-    virtual ~PacketWriterFactory() {}
-
-    virtual QuicPacketWriter* Create(QuicConnection* connection) const = 0;
-  };
-
-  // Constructs a new QuicConnection for |connection_id| and |address|. Invokes
-  // writer_factory->Create() to get a writer; |owns_writer| specifies whether
-  // the connection takes ownership of the returned writer. |helper| must
-  // outlive this connection.
+  // Constructs a new QuicConnection for |connection_id| and |address| using
+  // |writer| to write packets. |owns_writer| specifies whether the connection
+  // takes ownership of |writer|. |helper| must outlive this connection.
   QuicConnection(QuicConnectionId connection_id,
                  IPEndPoint address,
                  QuicConnectionHelperInterface* helper,
-                 const PacketWriterFactory& writer_factory,
+                 QuicPacketWriter* writer,
                  bool owns_writer,
                  Perspective perspective,
                  const QuicVersionVector& supported_versions);
@@ -321,12 +319,12 @@ class NET_EXPORT_PRIVATE QuicConnection
   // If |listener| is provided, then it will be informed once ACKs have been
   // received for all the packets written in this call.
   // The |listener| is not owned by the QuicConnection and must outlive it.
-  QuicConsumedData SendStreamData(QuicStreamId id,
-                                  QuicIOVector iov,
-                                  QuicStreamOffset offset,
-                                  bool fin,
-                                  FecProtection fec_protection,
-                                  QuicAckListenerInterface* listener);
+  virtual QuicConsumedData SendStreamData(QuicStreamId id,
+                                          QuicIOVector iov,
+                                          QuicStreamOffset offset,
+                                          bool fin,
+                                          FecProtection fec_protection,
+                                          QuicAckListenerInterface* listener);
 
   // Send a RST_STREAM frame to the peer.
   virtual void SendRstStream(QuicStreamId id,
@@ -337,8 +335,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   virtual void SendBlocked(QuicStreamId id);
 
   // Send a WINDOW_UPDATE frame to the peer.
-  virtual void SendWindowUpdate(QuicStreamId id,
-                                QuicStreamOffset byte_offset);
+  virtual void SendWindowUpdate(QuicStreamId id, QuicStreamOffset byte_offset);
 
   // Sends the connection close packet without affecting the state of the
   // connection.  This should only be called if the session is actively being
@@ -348,7 +345,6 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // Sends a connection close frame to the peer, and closes the connection by
   // calling CloseConnection(notifying the visitor as it does so).
-  virtual void SendConnectionClose(QuicErrorCode error);
   virtual void SendConnectionCloseWithDetails(QuicErrorCode error,
                                               const std::string& details);
   // Notifies the visitor of the close and marks the connection as disconnected.
@@ -385,6 +381,10 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // Set the packet writer.
   void SetQuicPacketWriter(QuicPacketWriter* writer, bool owns_writer) {
+    DCHECK(writer != nullptr);
+    if (writer_ != nullptr && owns_writer_) {
+      delete writer_;
+    }
     writer_ = writer;
     owns_writer_ = owns_writer;
   }
@@ -431,7 +431,9 @@ class NET_EXPORT_PRIVATE QuicConnection
                             IsHandshake handshake) override;
   void PopulateAckFrame(QuicAckFrame* ack) override;
   void PopulateStopWaitingFrame(QuicStopWaitingFrame* stop_waiting) override;
-  void OnSerializedPacket(const SerializedPacket& packet) override;
+
+  // QuicPacketCreator::DelegateInterface
+  void OnSerializedPacket(SerializedPacket* packet) override;
   void OnResetFecGroup() override;
 
   // QuicSentPacketManager::NetworkChangeVisitor
@@ -499,7 +501,11 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Otherwise, it will reschedule the timeout alarm.
   void CheckForTimeout();
 
-  // Sends a ping, and resets the ping alarm.
+  // Called when the ping alarm fires. Causes a ping frame to be sent only
+  // if the retransmission alarm is not running.
+  void OnPingTimeout();
+
+  // Sends a ping frame.
   void SendPing();
 
   // Sets up a packet with an QuicAckFrame and sends it out.
@@ -572,7 +578,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   // as densely as possible into packets.  In addition, this bundler
   // can be configured to ensure that an ACK frame is included in the
   // first packet created, if there's new ack information to be sent.
-  class ScopedPacketBundler {
+  class NET_EXPORT_PRIVATE ScopedPacketBundler {
    public:
     // In addition to all outgoing frames being bundled when the
     // bundler is in scope, setting |include_ack| to true ensures that
@@ -620,39 +626,24 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Return the name of the cipher of the primary decrypter of the framer.
   const char* cipher_name() const { return framer_.decrypter()->cipher_name(); }
   // Return the id of the cipher of the primary decrypter of the framer.
-  uint32 cipher_id() const { return framer_.decrypter()->cipher_id(); }
+  uint32_t cipher_id() const { return framer_.decrypter()->cipher_id(); }
 
   std::vector<QuicEncryptedPacket*>* termination_packets() {
     return termination_packets_.get();
   }
 
+  bool ack_frame_updated() const;
+
  protected:
-  // Packets which have not been written to the wire.
-  // Owns the QuicPacket* packet.
-  struct QueuedPacket {
-    QueuedPacket(SerializedPacket packet,
-                 EncryptionLevel level);
-    QueuedPacket(SerializedPacket packet,
-                 EncryptionLevel level,
-                 TransmissionType transmission_type,
-                 QuicPacketNumber original_packet_number);
-
-    SerializedPacket serialized_packet;
-    const EncryptionLevel encryption_level;
-    TransmissionType transmission_type;
-    // The packet's original packet number if it is a retransmission.
-    // Otherwise it must be 0.
-    QuicPacketNumber original_packet_number;
-  };
-
   // Do any work which logically would be done in OnPacket but can not be
   // safely done until the packet is validated.  Returns true if the packet
-  // can be handled, false otherwise.
-  virtual bool ProcessValidatedPacket();
+  // can be handled, false otherwise. Also migrates the connection if the packet
+  // can be handled and peer address changes.
+  virtual bool ProcessValidatedPacket(const QuicPacketHeader& header);
 
   // Send a packet to the peer, and takes ownership of the packet if the packet
   // cannot be written immediately.
-  virtual void SendOrQueuePacket(QueuedPacket packet);
+  virtual void SendOrQueuePacket(SerializedPacket* packet);
 
   QuicConnectionHelperInterface* helper() { return helper_; }
 
@@ -676,7 +667,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   friend class test::QuicConnectionPeer;
   friend class test::PacketSavingConnection;
 
-  typedef std::list<QueuedPacket> QueuedPacketList;
+  typedef std::list<SerializedPacket> QueuedPacketList;
   typedef std::map<QuicFecGroupNumber, QuicFecGroup*> FecGroupMap;
 
   // Writes the given packet to socket, encrypted with packet's
@@ -686,17 +677,21 @@ class NET_EXPORT_PRIVATE QuicConnection
   // retransmittable frames to nullptr.
   // Saves the connection close packet for later transmission, even if the
   // writer is write blocked.
-  bool WritePacket(QueuedPacket* packet);
+  bool WritePacket(SerializedPacket* packet);
 
   // Does the main work of WritePacket, but does not delete the packet or
   // retransmittable frames upon success.
-  bool WritePacketInner(QueuedPacket* packet);
+  bool WritePacketInner(SerializedPacket* packet);
 
   // Make sure an ack we got from our peer is sane.
-  bool ValidateAckFrame(const QuicAckFrame& incoming_ack);
+  // Returns nullptr for valid acks or an error std::string if it was invalid.
+  const char* ValidateAckFrame(const QuicAckFrame& incoming_ack);
 
   // Make sure a stop waiting we got from our peer is sane.
-  bool ValidateStopWaitingFrame(const QuicStopWaitingFrame& stop_waiting);
+  // Returns nullptr if the frame is valid or an error std::string if it was
+  // invalid.
+  const char* ValidateStopWaitingFrame(
+      const QuicStopWaitingFrame& stop_waiting);
 
   // Sends a version negotiation packet to the peer.
   void SendVersionNegotiationPacket();
@@ -704,7 +699,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Clears any accumulated frames from the last received packet.
   void ClearLastFrames();
 
-  // Deletes and clears any QueuedPackets.
+  // Deletes and clears any queued packets.
   void ClearQueuedPackets();
 
   // Closes the connection if the sent or received packet manager are tracking
@@ -719,7 +714,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   void WritePendingRetransmissions();
 
   // Returns true if the packet should be discarded and not sent.
-  bool ShouldDiscardPacket(const QueuedPacket& packet);
+  bool ShouldDiscardPacket(const SerializedPacket& packet);
 
   // Queues |packet| in the hopes that it can be decrypted in the
   // future, when a new key is installed.
@@ -736,16 +731,13 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   void ProcessStopWaitingFrame(const QuicStopWaitingFrame& stop_waiting);
 
-  // Queues an ack or sets the ack alarm when an incoming packet arrives that
-  // should be acked.
-  void MaybeQueueAck();
-
-  // Checks if the last packet should instigate an ack.
-  bool ShouldLastPacketInstigateAck() const;
-
   // Sends any packets which are a response to the last packet, including both
   // acks and pending writes if an ack opened the congestion window.
   void MaybeSendInResponseToPacket();
+
+  // Queue an ack or set the ack alarm if needed.  |was_missing| is true if
+  // the most recently received packet was formerly missing.
+  void MaybeQueueAck(bool was_missing);
 
   // Gets the least unacked packet number, which is the next packet number
   // to be sent if there are no outstanding packets.
@@ -775,8 +767,8 @@ class NET_EXPORT_PRIVATE QuicConnection
   void CheckForAddressMigration(const IPEndPoint& self_address,
                                 const IPEndPoint& peer_address);
 
-  HasRetransmittableData IsRetransmittable(const QueuedPacket& packet);
-  bool IsTerminationPacket(const QueuedPacket& packet);
+  HasRetransmittableData IsRetransmittable(const SerializedPacket& packet);
+  bool IsTerminationPacket(const SerializedPacket& packet);
 
   // Set the size of the packet we are targeting while doing path MTU discovery.
   void SetMtuDiscoveryTarget(QuicByteCount target);
@@ -809,13 +801,13 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Used to store latest peer IP address for IP address migration.
   IPAddressNumber migrating_peer_ip_;
   // Used to store latest peer port to possibly migrate to later.
-  uint16 migrating_peer_port_;
+  uint16_t migrating_peer_port_;
 
   // True if the last packet has gotten far enough in the framer to be
   // decrypted.
   bool last_packet_decrypted_;
   bool last_packet_revived_;  // True if the last packet was revived from FEC.
-  QuicByteCount last_size_;  // Size of the last received packet.
+  QuicByteCount last_size_;   // Size of the last received packet.
   EncryptionLevel last_decrypted_packet_level_;
   QuicPacketHeader last_header_;
   QuicStopWaitingFrame last_stop_waiting_frame_;
@@ -862,11 +854,15 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // Indicates whether an ack should be sent the next time we try to write.
   bool ack_queued_;
-  // Indicates how many consecutive packets have arrived without sending an ack.
+  // How many retransmittable packets have arrived without sending an ack.
+  QuicPacketCount num_retransmittable_packets_received_since_last_ack_sent_;
+  // How many consecutive packets have arrived without sending an ack.
   QuicPacketCount num_packets_received_since_last_ack_sent_;
   // Indicates how many consecutive times an ack has arrived which indicates
   // the peer needs to stop waiting for some packets.
   int stop_waiting_count_;
+  // When true, ack only every 10 packets as long as they arrive close together.
+  bool ack_decimation_enabled_;
 
   // Indicates the retransmit alarm is going to be set by the
   // ScopedRetransmitAlarmDelayer
@@ -982,6 +978,9 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // Whether a GoAway has been received.
   bool goaway_received_;
+
+  // If true, multipath is enabled for this connection.
+  bool multipath_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };

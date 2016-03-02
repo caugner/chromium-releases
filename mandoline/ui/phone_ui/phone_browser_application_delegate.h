@@ -5,6 +5,8 @@
 #ifndef MANDOLINE_UI_PHONE_UI_PHONE_BROWSER_APPLICATION_DELEGATE_H_
 #define MANDOLINE_UI_PHONE_UI_PHONE_BROWSER_APPLICATION_DELEGATE_H_
 
+#include <stdint.h>
+
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/mus/public/cpp/window_observer.h"
@@ -14,9 +16,9 @@
 #include "components/web_view/public/interfaces/web_view.mojom.h"
 // TODO(beng): move this file somewhere common.
 #include "mandoline/ui/desktop_ui/public/interfaces/launch_handler.mojom.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 
 namespace mus {
 class View;

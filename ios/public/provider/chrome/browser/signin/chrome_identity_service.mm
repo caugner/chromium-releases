@@ -8,7 +8,10 @@ namespace ios {
 
 ChromeIdentityService::ChromeIdentityService() {}
 
-ChromeIdentityService::~ChromeIdentityService() {}
+ChromeIdentityService::~ChromeIdentityService() {
+  FOR_EACH_OBSERVER(Observer, observer_list_,
+                    OnChromeIdentityServiceWillBeDestroyed());
+}
 
 bool ChromeIdentityService::IsValidIdentity(ChromeIdentity* identity) const {
   return false;
@@ -67,6 +70,10 @@ UIImage* ChromeIdentityService::GetCachedAvatarForIdentity(
   return nil;
 }
 
+void ChromeIdentityService::GetHostedDomainForIdentity(
+    ChromeIdentity* identity,
+    GetHostedDomainCallback callback) {}
+
 void ChromeIdentityService::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
 }
@@ -75,15 +82,19 @@ void ChromeIdentityService::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+bool ChromeIdentityService::IsInvalidGrantError(NSDictionary* user_info) {
+  return false;
+}
+
 void ChromeIdentityService::FireIdentityListChanged() {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnIdentityListChanged());
 }
 
 void ChromeIdentityService::FireAccessTokenRefreshFailed(
     ChromeIdentity* identity,
-    AccessTokenErrorReason error) {
+    NSDictionary* user_info) {
   FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnAccessTokenRefreshFailed(identity, error));
+                    OnAccessTokenRefreshFailed(identity, user_info));
 }
 
 void ChromeIdentityService::FireProfileDidUpdate(ChromeIdentity* identity) {

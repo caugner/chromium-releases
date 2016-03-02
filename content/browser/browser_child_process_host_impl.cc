@@ -11,17 +11,20 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "build/build_config.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/browser/histogram_message_filter.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/memory/memory_message_filter.h"
 #include "content/browser/profiler_message_filter.h"
 #include "content/browser/tracing/trace_message_filter.h"
 #include "content/common/child_process_host_impl.h"
+#include "content/common/child_process_messages.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/browser_thread.h"
@@ -32,9 +35,16 @@
 #include "content/public/common/result_codes.h"
 #include "ipc/attachment_broker.h"
 #include "ipc/attachment_broker_privileged.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
 
 #if defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
+#endif
+
+
+#if defined(MOJO_SHELL_CLIENT)
+#include "content/browser/mojo/mojo_shell_client_host.h"
+#include "content/common/mojo/mojo_shell_connection_impl.h"
 #endif
 
 namespace content {
@@ -142,7 +152,7 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
   AddFilter(new TraceMessageFilter(data_.id));
   AddFilter(new ProfilerMessageFilter(process_type));
   AddFilter(new HistogramMessageFilter);
-  AddFilter(new MemoryMessageFilter);
+  AddFilter(new MemoryMessageFilter(this, process_type));
 
   g_child_process_list.Get().push_back(this);
   GetContentClient()->browser()->BrowserChildProcessHostCreated(this);
@@ -273,7 +283,7 @@ bool BrowserChildProcessHostImpl::OnMessageReceived(
   return delegate_->OnMessageReceived(message);
 }
 
-void BrowserChildProcessHostImpl::OnChannelConnected(int32 peer_pid) {
+void BrowserChildProcessHostImpl::OnChannelConnected(int32_t peer_pid) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   is_channel_connected_ = true;
@@ -302,13 +312,17 @@ void BrowserChildProcessHostImpl::OnChannelError() {
 
 void BrowserChildProcessHostImpl::OnBadMessageReceived(
     const IPC::Message& message) {
+  TerminateOnBadMessageReceived(message.type());
+}
+
+void BrowserChildProcessHostImpl::TerminateOnBadMessageReceived(uint32_t type) {
   HistogramBadMessageTerminated(data_.process_type);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableKillAfterBadIPC)) {
     return;
   }
   LOG(ERROR) << "Terminating child process for bad IPC message of type "
-      << message.type();
+             << type;
 
   // Create a memory dump. This will contain enough stack frames to work out
   // what the bad message was.
@@ -397,13 +411,28 @@ void BrowserChildProcessHostImpl::OnProcessLaunchFailed() {
 void BrowserChildProcessHostImpl::OnProcessLaunched() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/465841
-  // is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "465841 BrowserChildProcessHostImpl::OnProcessLaunched"));
   const base::Process& process = child_process_->GetProcess();
   DCHECK(process.IsValid());
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("use-new-edk")) {
+    mojo::embedder::ScopedPlatformHandle client_pipe;
+#if defined(MOJO_SHELL_CLIENT)
+    if (IsRunningInMojoShell()) {
+      client_pipe = RegisterProcessWithBroker(process.Pid());
+    } else
+#endif
+    {
+      client_pipe = mojo::embedder::ChildProcessLaunched(process.Handle());
+    }
+    Send(new ChildProcessMsg_SetMojoParentPipeHandle(
+        IPC::GetFileHandleForProcess(
+#if defined(OS_WIN)
+                                     client_pipe.release().handle,
+#else
+                                     client_pipe.release().fd,
+#endif
+                                     process.Handle(), true)));
+  }
 
 #if defined(OS_WIN)
   // Start a WaitableEventWatcher that will invoke OnProcessExitedEarly if the

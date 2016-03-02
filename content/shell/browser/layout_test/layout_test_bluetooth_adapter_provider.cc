@@ -4,6 +4,8 @@
 
 #include "content/shell/browser/layout_test/layout_test_bluetooth_adapter_provider.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/format_macros.h"
@@ -109,11 +111,12 @@ std::set<BluetoothUUID> GetUUIDs(
   std::set<BluetoothUUID> result;
   filter->GetUUIDs(result);
   return result;
-};
+}
 
 // Notifies the adapter's observers that the services have been discovered.
 void NotifyServicesDiscovered(MockBluetoothAdapter* adapter,
                               MockBluetoothDevice* device) {
+  device->SetGattServicesDiscoveryComplete(true);
   FOR_EACH_OBSERVER(BluetoothAdapter::Observer, adapter->GetObservers(),
                     GattServicesDiscovered(adapter, device));
 }
@@ -128,35 +131,35 @@ LayoutTestBluetoothAdapterProvider::GetBluetoothAdapter(
     const std::string& fake_adapter_name) {
   if (fake_adapter_name == "BaseAdapter")
     return GetBaseAdapter();
-  else if (fake_adapter_name == "NotPresentAdapter")
+  if (fake_adapter_name == "NotPresentAdapter")
     return GetNotPresentAdapter();
-  else if (fake_adapter_name == "NotPoweredAdapter")
+  if (fake_adapter_name == "NotPoweredAdapter")
     return GetNotPoweredAdapter();
-  else if (fake_adapter_name == "ScanFilterCheckingAdapter")
+  if (fake_adapter_name == "ScanFilterCheckingAdapter")
     return GetScanFilterCheckingAdapter();
-  else if (fake_adapter_name == "EmptyAdapter")
+  if (fake_adapter_name == "EmptyAdapter")
     return GetEmptyAdapter();
-  else if (fake_adapter_name == "FailStartDiscoveryAdapter")
+  if (fake_adapter_name == "FailStartDiscoveryAdapter")
     return GetFailStartDiscoveryAdapter();
-  else if (fake_adapter_name == "GlucoseHeartRateAdapter")
+  if (fake_adapter_name == "GlucoseHeartRateAdapter")
     return GetGlucoseHeartRateAdapter();
-  else if (fake_adapter_name == "UnicodeDeviceAdapter")
+  if (fake_adapter_name == "UnicodeDeviceAdapter")
     return GetUnicodeDeviceAdapter();
-  else if (fake_adapter_name == "MissingServiceHeartRateAdapter")
+  if (fake_adapter_name == "MissingServiceHeartRateAdapter")
     return GetMissingServiceHeartRateAdapter();
-  else if (fake_adapter_name == "MissingCharacteristicHeartRateAdapter")
+  if (fake_adapter_name == "MissingCharacteristicHeartRateAdapter")
     return GetMissingCharacteristicHeartRateAdapter();
-  else if (fake_adapter_name == "HeartRateAdapter")
+  if (fake_adapter_name == "HeartRateAdapter")
     return GetHeartRateAdapter();
-  else if (fake_adapter_name == "FailingConnectionsAdapter")
+  if (fake_adapter_name == "FailingConnectionsAdapter")
     return GetFailingConnectionsAdapter();
-  else if (fake_adapter_name == "FailingGATTOperationsAdapter")
+  if (fake_adapter_name == "FailingGATTOperationsAdapter")
     return GetFailingGATTOperationsAdapter();
-  else if (fake_adapter_name == "SecondDiscoveryFindsHeartRateAdapter")
+  if (fake_adapter_name == "SecondDiscoveryFindsHeartRateAdapter")
     return GetSecondDiscoveryFindsHeartRateAdapter();
-  else if (fake_adapter_name == "DelayedServicesDiscoveryAdapter")
+  if (fake_adapter_name == "DelayedServicesDiscoveryAdapter")
     return GetDelayedServicesDiscoveryAdapter();
-  else if (fake_adapter_name == "")
+  if (fake_adapter_name.empty())
     return nullptr;
 
   if (base::StartsWith(fake_adapter_name, "PowerValueAdapter",
@@ -194,7 +197,7 @@ LayoutTestBluetoothAdapterProvider::GetBluetoothAdapter(
   }
 
   NOTREACHED() << fake_adapter_name;
-  return NULL;
+  return nullptr;
 }
 
 // Adapters
@@ -216,7 +219,7 @@ LayoutTestBluetoothAdapterProvider::GetBaseAdapter() {
   // matching the address provided if the device was added to the mock.
   ON_CALL(*adapter, GetDevice(_)).WillByDefault(GetMockDevice(adapter.get()));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -225,7 +228,7 @@ LayoutTestBluetoothAdapterProvider::GetPresentAdapter() {
   scoped_refptr<NiceMockBluetoothAdapter> adapter(GetBaseAdapter());
   ON_CALL(*adapter, IsPresent()).WillByDefault(Return(true));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -234,7 +237,7 @@ LayoutTestBluetoothAdapterProvider::GetNotPresentAdapter() {
   scoped_refptr<NiceMockBluetoothAdapter> adapter(GetBaseAdapter());
   ON_CALL(*adapter, IsPresent()).WillByDefault(Return(false));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -243,7 +246,7 @@ LayoutTestBluetoothAdapterProvider::GetPoweredAdapter() {
   scoped_refptr<NiceMockBluetoothAdapter> adapter(GetPresentAdapter());
   ON_CALL(*adapter, IsPowered()).WillByDefault(Return(true));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -252,7 +255,7 @@ LayoutTestBluetoothAdapterProvider::GetNotPoweredAdapter() {
   scoped_refptr<NiceMockBluetoothAdapter> adapter(GetPresentAdapter());
   ON_CALL(*adapter, IsPowered()).WillByDefault(Return(false));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -279,7 +282,7 @@ LayoutTestBluetoothAdapterProvider::GetScanFilterCheckingAdapter() {
   // We need to add a device otherwise requestDevice would reject.
   adapter->AddMockDevice(GetBatteryDevice(adapter.get()));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -290,7 +293,7 @@ LayoutTestBluetoothAdapterProvider::GetFailStartDiscoveryAdapter() {
   ON_CALL(*adapter, StartDiscoverySessionWithFilterRaw(_, _, _))
       .WillByDefault(RunCallback<2 /* error_callback */>());
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -302,7 +305,7 @@ LayoutTestBluetoothAdapterProvider::GetEmptyAdapter() {
       .WillByDefault(RunCallbackWithResult<1 /* success_callback */>(
           []() { return GetDiscoverySession(); }));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -315,7 +318,7 @@ LayoutTestBluetoothAdapterProvider::GetPowerValueAdapter(int8_t tx_power,
   ON_CALL(*device, GetInquiryTxPower()).WillByDefault(Return(tx_power));
   ON_CALL(*device, GetInquiryRSSI()).WillByDefault(Return(rssi));
 
-  adapter->AddMockDevice(device.Pass());
+  adapter->AddMockDevice(std::move(device));
 
   return adapter;
 }
@@ -342,7 +345,7 @@ LayoutTestBluetoothAdapterProvider::GetGlucoseHeartRateAdapter() {
   adapter->AddMockDevice(GetHeartRateDevice(adapter.get()));
   adapter->AddMockDevice(GetGlucoseDevice(adapter.get()));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -352,7 +355,7 @@ LayoutTestBluetoothAdapterProvider::GetUnicodeDeviceAdapter() {
 
   adapter->AddMockDevice(GetBaseDevice(adapter.get(), "❤❤❤❤❤❤❤❤❤"));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // Adds a device to |adapter| and notifies all observers about that new device.
@@ -360,7 +363,7 @@ LayoutTestBluetoothAdapterProvider::GetUnicodeDeviceAdapter() {
 static void AddDevice(scoped_refptr<NiceMockBluetoothAdapter> adapter,
                       scoped_ptr<NiceMockBluetoothDevice> new_device) {
   NiceMockBluetoothDevice* new_device_ptr = new_device.get();
-  adapter->AddMockDevice(new_device.Pass());
+  adapter->AddMockDevice(std::move(new_device));
   FOR_EACH_OBSERVER(BluetoothAdapter::Observer, adapter->GetObservers(),
                     DeviceAdded(adapter.get(), new_device_ptr));
 }
@@ -396,7 +399,7 @@ LayoutTestBluetoothAdapterProvider::GetMissingServiceHeartRateAdapter() {
 
   adapter->AddMockDevice(GetHeartRateDevice(adapter.get()));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -413,11 +416,11 @@ LayoutTestBluetoothAdapterProvider::GetMissingCharacteristicHeartRateAdapter() {
 
   // Intentionally NOT adding a characteristic to heart_rate service.
 
-  device->AddMockService(generic_access.Pass());
-  device->AddMockService(heart_rate.Pass());
-  adapter->AddMockDevice(device.Pass());
+  device->AddMockService(std::move(generic_access));
+  device->AddMockService(std::move(heart_rate));
+  adapter->AddMockDevice(std::move(device));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -451,7 +454,7 @@ LayoutTestBluetoothAdapterProvider::GetDelayedServicesDiscoveryAdapter() {
         scoped_ptr<NiceMockBluetoothGattService> heart_rate(
             GetBaseGATTService(device_ptr, kHeartRateServiceUUID));
 
-        device_ptr->AddMockService(heart_rate.Pass());
+        device_ptr->AddMockService(std::move(heart_rate));
         base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE, base::Bind(&NotifyServicesDiscovered,
                                   make_scoped_refptr(adapter_ptr), device_ptr));
@@ -460,9 +463,9 @@ LayoutTestBluetoothAdapterProvider::GetDelayedServicesDiscoveryAdapter() {
         return services;
       }));
 
-  adapter->AddMockDevice(device.Pass());
+  adapter->AddMockDevice(std::move(device));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -476,7 +479,7 @@ LayoutTestBluetoothAdapterProvider::GetHeartRateAdapter() {
 
   device->AddMockService(GetGenericAccessService(adapter.get(), device.get()));
   device->AddMockService(GetHeartRateService(adapter.get(), device.get()));
-  adapter->AddMockDevice(device.Pass());
+  adapter->AddMockDevice(std::move(device));
 
   return adapter;
 }
@@ -486,13 +489,13 @@ scoped_refptr<NiceMockBluetoothAdapter>
 LayoutTestBluetoothAdapterProvider::GetFailingConnectionsAdapter() {
   scoped_refptr<NiceMockBluetoothAdapter> adapter(GetEmptyAdapter());
 
-  for (int error = BluetoothDevice::ERROR_UNKNOWN;
-       error <= BluetoothDevice::ERROR_UNSUPPORTED_DEVICE; error++) {
+  for (int error = 0; error < BluetoothDevice::NUM_CONNECT_ERROR_CODES;
+    error++) {
     adapter->AddMockDevice(GetUnconnectableDevice(
         adapter.get(), static_cast<BluetoothDevice::ConnectErrorCode>(error)));
   }
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // static
@@ -518,10 +521,10 @@ LayoutTestBluetoothAdapterProvider::GetFailingGATTOperationsAdapter() {
         static_cast<BluetoothGattService::GattErrorCode>(error)));
   }
 
-  device->AddMockService(service.Pass());
-  adapter->AddMockDevice(device.Pass());
+  device->AddMockService(std::move(service));
+  adapter->AddMockDevice(std::move(device));
 
-  return adapter.Pass();
+  return adapter;
 }
 
 // Discovery Sessions
@@ -535,7 +538,7 @@ LayoutTestBluetoothAdapterProvider::GetDiscoverySession() {
   ON_CALL(*discovery_session, Stop(_, _))
       .WillByDefault(RunCallback<0 /* success_callback */>());
 
-  return discovery_session.Pass();
+  return discovery_session;
 }
 
 // Devices
@@ -573,7 +576,7 @@ LayoutTestBluetoothAdapterProvider::GetBaseDevice(
   ON_CALL(*device, GetProductID()).WillByDefault(Return(1));
   ON_CALL(*device, GetDeviceID()).WillByDefault(Return(2));
 
-  return device.Pass();
+  return device;
 }
 
 // static
@@ -619,7 +622,7 @@ LayoutTestBluetoothAdapterProvider::GetConnectableDevice(
                 adapter, device_ptr->GetAddress()));
           }));
 
-  return device.Pass();
+  return device;
 }
 
 // static
@@ -637,7 +640,7 @@ LayoutTestBluetoothAdapterProvider::GetUnconnectableDevice(
   ON_CALL(*device, CreateGattConnection(_, _))
       .WillByDefault(RunCallback<1 /* error_callback */>(error_code));
 
-  return device.Pass();
+  return device;
 }
 
 // static
@@ -670,7 +673,7 @@ LayoutTestBluetoothAdapterProvider::GetBaseGATTService(
       .WillByDefault(Invoke(service.get(),
                             &MockBluetoothGattService::GetMockCharacteristic));
 
-  return service.Pass();
+  return service;
 }
 
 // static
@@ -697,9 +700,9 @@ LayoutTestBluetoothAdapterProvider::GetGenericAccessService(
 
   // Write response.
   ON_CALL(*device_name, WriteRemoteCharacteristic(_, _, _))
-      .WillByDefault(RunCallback<1 /* sucess callback */>());
+      .WillByDefault(RunCallback<1 /* success callback */>());
 
-  generic_access->AddMockCharacteristic(device_name.Pass());
+  generic_access->AddMockCharacteristic(std::move(device_name));
 
   return generic_access;
 }
@@ -731,7 +734,7 @@ LayoutTestBluetoothAdapterProvider::GetHeartRateService(
             notify_session->StartTestNotifications(adapter, measurement_ptr,
                                                    rate);
 
-            return notify_session.Pass();
+            return notify_session;
           }));
 
   // Body Sensor Location Characteristic
@@ -754,8 +757,8 @@ LayoutTestBluetoothAdapterProvider::GetHeartRateService(
             return location;
           }));
 
-  heart_rate->AddMockCharacteristic(heart_rate_measurement.Pass());
-  heart_rate->AddMockCharacteristic(body_sensor_location.Pass());
+  heart_rate->AddMockCharacteristic(std::move(heart_rate_measurement));
+  heart_rate->AddMockCharacteristic(std::move(body_sensor_location));
 
   return heart_rate;
 }
@@ -800,7 +803,7 @@ LayoutTestBluetoothAdapterProvider::GetErrorCharacteristic(
   ON_CALL(*characteristic, StartNotifySession(_, _))
       .WillByDefault(RunCallback<1 /* error_callback */>(error_code));
 
-  return characteristic.Pass();
+  return characteristic;
 }
 
 // Notify sessions
@@ -819,7 +822,7 @@ LayoutTestBluetoothAdapterProvider::GetBaseGATTNotifySession(
               &MockBluetoothGattNotifySession::StopTestNotifications),
           RunCallback<0>()));
 
-  return session.Pass();
+  return session;
 }
 
 // Helper functions
@@ -827,6 +830,51 @@ LayoutTestBluetoothAdapterProvider::GetBaseGATTNotifySession(
 // static
 std::string LayoutTestBluetoothAdapterProvider::errorUUID(uint32_t alias) {
   return base::StringPrintf("%08x-97e5-4cd7-b9f1-f5a427670c59", alias);
+}
+
+// static
+BluetoothUUID LayoutTestBluetoothAdapterProvider::connectErrorUUID(
+    BluetoothDevice::ConnectErrorCode error_code) {
+  // Case values listed in alphabetical order.
+  // Associated UUIDs are defined in layout tests and should remain stable
+  // even if BluetoothDevice enum values change.
+  switch (error_code) {
+    case BluetoothDevice::ERROR_ATTRIBUTE_LENGTH_INVALID:
+      return BluetoothUUID("0008");
+    case BluetoothDevice::ERROR_AUTH_CANCELED:
+      return BluetoothUUID("0004");
+    case BluetoothDevice::ERROR_AUTH_FAILED:
+      return BluetoothUUID("0003");
+    case BluetoothDevice::ERROR_AUTH_REJECTED:
+      return BluetoothUUID("0005");
+    case BluetoothDevice::ERROR_AUTH_TIMEOUT:
+      return BluetoothUUID("0006");
+    case BluetoothDevice::ERROR_CONNECTION_CONGESTED:
+      return BluetoothUUID("0009");
+    case BluetoothDevice::ERROR_FAILED:
+      return BluetoothUUID("0002");
+    case BluetoothDevice::ERROR_INPROGRESS:
+      return BluetoothUUID("0001");
+    case BluetoothDevice::ERROR_INSUFFICIENT_ENCRYPTION:
+      return BluetoothUUID("000a");
+    case BluetoothDevice::ERROR_OFFSET_INVALID:
+      return BluetoothUUID("000b");
+    case BluetoothDevice::ERROR_READ_NOT_PERMITTED:
+      return BluetoothUUID("000c");
+    case BluetoothDevice::ERROR_REQUEST_NOT_SUPPORTED:
+      return BluetoothUUID("000d");
+    case BluetoothDevice::ERROR_UNKNOWN:
+      return BluetoothUUID("0000");
+    case BluetoothDevice::ERROR_UNSUPPORTED_DEVICE:
+      return BluetoothUUID("0007");
+    case BluetoothDevice::ERROR_WRITE_NOT_PERMITTED:
+      return BluetoothUUID("000e");
+    case BluetoothDevice::NUM_CONNECT_ERROR_CODES:
+      NOTREACHED();
+      return BluetoothUUID();
+  }
+  NOTREACHED();
+  return BluetoothUUID();
 }
 
 // static

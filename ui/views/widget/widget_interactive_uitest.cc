@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -847,7 +850,7 @@ TEST_F(WidgetTestInteractive, MAYBE_SystemModalWindowReleasesCapture) {
 
   ASSERT_FALSE(focus_listener.focus_changes().empty());
   EXPECT_EQ(top_level_widget.GetNativeView(),
-            focus_listener.focus_changes().back());;
+            focus_listener.focus_changes().back());
 
   EXPECT_FALSE(top_level_widget.HasCapture());
   top_level_widget.SetCapture(NULL);
@@ -1587,6 +1590,34 @@ TEST_F(WidgetInputMethodInteractiveTest, TextField) {
   textfield->SetReadOnly(true);
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE,
             widget->GetInputMethod()->GetTextInputType());
+  widget->CloseNow();
+}
+
+// Test input method should not work for accelerator.
+TEST_F(WidgetInputMethodInteractiveTest, AcceleratorInTextfield) {
+  Widget* widget = CreateWidget();
+  Textfield* textfield = new Textfield;
+  widget->GetRootView()->AddChildView(textfield);
+  ShowSync(widget);
+  textfield->SetTextInputType(ui::TEXT_INPUT_TYPE_TEXT);
+  textfield->RequestFocus();
+
+  ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
+                         ui::VKEY_F, ui::EF_ALT_DOWN);
+  ui::Accelerator accelerator(key_event);
+  widget->GetFocusManager()->RegisterAccelerator(
+      accelerator, ui::AcceleratorManager::kNormalPriority,
+      textfield);
+
+  widget->OnKeyEvent(&key_event);
+  EXPECT_TRUE(key_event.stopped_propagation());
+
+  widget->GetFocusManager()->UnregisterAccelerators(textfield);
+
+  ui::KeyEvent key_event2(key_event);
+  widget->OnKeyEvent(&key_event2);
+  EXPECT_FALSE(key_event2.stopped_propagation());
+
   widget->CloseNow();
 }
 

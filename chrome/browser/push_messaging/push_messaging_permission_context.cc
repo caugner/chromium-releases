@@ -12,25 +12,27 @@
 #include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/origin_util.h"
 
-const ContentSettingsType kPushSettingType =
-    CONTENT_SETTINGS_TYPE_PUSH_MESSAGING;
-
 PushMessagingPermissionContext::PushMessagingPermissionContext(Profile* profile)
-    : PermissionContextBase(profile, CONTENT_SETTINGS_TYPE_PUSH_MESSAGING),
+    : PermissionContextBase(profile,
+                            content::PermissionType::PUSH_MESSAGING,
+                            CONTENT_SETTINGS_TYPE_PUSH_MESSAGING),
       profile_(profile),
-      weak_factory_ui_thread_(this) {
-}
+      weak_factory_ui_thread_(this) {}
 
-PushMessagingPermissionContext::~PushMessagingPermissionContext() {
-}
+PushMessagingPermissionContext::~PushMessagingPermissionContext() {}
 
 ContentSetting PushMessagingPermissionContext::GetPermissionStatus(
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
+  // It's possible for this to return CONTENT_SETTING_BLOCK in cases where
+  // HostContentSettingsMap::GetContentSetting returns CONTENT_SETTING_ALLOW.
+  // TODO(johnme): This is likely to break assumptions made elsewhere, so we
+  // should try to remove this quirk.
 #if defined(ENABLE_NOTIFICATIONS)
   if (requesting_origin != embedding_origin)
     return CONTENT_SETTING_BLOCK;
@@ -67,7 +69,7 @@ ContentSetting PushMessagingPermissionContext::GetPermissionStatus(
 //  - You need to request it from a top level domain
 //  - You need to have notification permission granted.
 //  - You need to not have push permission explicitly blocked.
-//  - If those two things are true it is granted without prompting.
+//  - If those 3 things are true it is granted without prompting.
 // This is done to avoid double prompting for notifications and push.
 void PushMessagingPermissionContext::DecidePermission(
     content::WebContents* web_contents,
@@ -79,13 +81,6 @@ void PushMessagingPermissionContext::DecidePermission(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 #if defined(ENABLE_NOTIFICATIONS)
   if (requesting_origin != embedding_origin) {
-    NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
-                        false /* persist */, CONTENT_SETTING_BLOCK);
-    return;
-  }
-
-  if (IsRestrictedToSecureOrigins() &&
-      !content::IsOriginSecure(requesting_origin)) {
     NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                         false /* persist */, CONTENT_SETTING_BLOCK);
     return;
@@ -120,12 +115,12 @@ void PushMessagingPermissionContext::DecidePushPermission(
   ContentSetting push_content_setting =
       HostContentSettingsMapFactory::GetForProfile(profile_)
           ->GetContentSettingAndMaybeUpdateLastUsage(
-              requesting_origin, embedding_origin, kPushSettingType,
+              requesting_origin, embedding_origin, content_settings_type(),
               std::string());
 
   if (push_content_setting == CONTENT_SETTING_BLOCK) {
     DVLOG(1) << "Push permission was explicitly blocked.";
-    PermissionUmaUtil::PermissionDenied(kPushSettingType, requesting_origin);
+    PermissionUmaUtil::PermissionDenied(permission_type(), requesting_origin);
     NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                         true /* persist */, CONTENT_SETTING_BLOCK);
     return;
@@ -138,7 +133,7 @@ void PushMessagingPermissionContext::DecidePushPermission(
     return;
   }
 
-  PermissionUmaUtil::PermissionGranted(kPushSettingType, requesting_origin);
+  PermissionUmaUtil::PermissionGranted(permission_type(), requesting_origin);
   NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                       true /* persist */, CONTENT_SETTING_ALLOW);
 }

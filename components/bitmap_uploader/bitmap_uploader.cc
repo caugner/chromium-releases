@@ -4,17 +4,22 @@
 
 #include "components/bitmap_uploader/bitmap_uploader.h"
 
+#include <stddef.h>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "components/mus/public/cpp/window.h"
 #include "components/mus/public/cpp/window_surface.h"
-#include "mojo/application/public/cpp/connect.h"
-#include "mojo/application/public/interfaces/shell.mojom.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
 #include "mojo/converters/surfaces/surfaces_utils.h"
+#include "mojo/public/c/gles2/chromium_extension.h"
 #include "mojo/public/c/gles2/gles2.h"
 #include "mojo/services/network/public/interfaces/url_loader.mojom.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/connect.h"
+#include "mojo/shell/public/interfaces/shell.mojom.h"
 
 namespace bitmap_uploader {
 namespace {
@@ -22,12 +27,15 @@ namespace {
 const uint32_t g_transparent_color = 0x00000000;
 
 void LostContext(void*) {
-  DCHECK(false);
+  // TODO(fsamuel): Figure out if there's something useful to do here.
 }
 
 void OnGotContentHandlerID(uint32_t content_handler_id) {}
 
 }  // namespace
+
+const char kBitmapUploaderForAcceleratedWidget[] =
+    "__BITMAP_UPLOADER_ACCELERATED_WIDGET__";
 
 BitmapUploader::BitmapUploader(mus::Window* window)
     : window_(window),
@@ -37,7 +45,6 @@ BitmapUploader::BitmapUploader(mus::Window* window)
       format_(BGRA),
       next_resource_id_(1u),
       id_namespace_(0u),
-      local_id_(0u),
       surface_client_binding_(this) {}
 
 BitmapUploader::~BitmapUploader() {
@@ -51,9 +58,10 @@ void BitmapUploader::Init(mojo::Shell* shell) {
   mojo::ServiceProviderPtr gpu_service_provider;
   mojo::URLRequestPtr request2(mojo::URLRequest::New());
   request2->url = mojo::String::From("mojo:mus");
-  shell->ConnectToApplication(request2.Pass(),
+  shell->ConnectToApplication(std::move(request2),
                               mojo::GetProxy(&gpu_service_provider), nullptr,
-                              nullptr, base::Bind(&OnGotContentHandlerID));
+                              mojo::CreatePermissiveCapabilityFilter(),
+                              base::Bind(&OnGotContentHandlerID));
   ConnectToService(gpu_service_provider.get(), &gpu_service_);
 
   mus::mojom::CommandBufferPtr gles2_client;
@@ -61,7 +69,7 @@ void BitmapUploader::Init(mojo::Shell* shell) {
   gles2_context_ = MojoGLES2CreateContext(
       gles2_client.PassInterface().PassHandle().release().value(),
       nullptr,
-      &LostContext, NULL, mojo::Environment::GetDefaultAsyncWaiter());
+      &LostContext, nullptr, mojo::Environment::GetDefaultAsyncWaiter());
   MojoGLES2MakeCurrent(gles2_context_);
 }
 
@@ -81,7 +89,7 @@ void BitmapUploader::SetBitmap(int width,
                                Format format) {
   width_ = width;
   height_ = height;
-  bitmap_ = data.Pass();
+  bitmap_ = std::move(data);
   format_ = format;
   if (surface_)
     Upload();
@@ -96,7 +104,7 @@ void BitmapUploader::Upload() {
   mus::mojom::CompositorFrameMetadataPtr meta =
       mus::mojom::CompositorFrameMetadata::New();
   meta->device_scale_factor = 1.0f;
-  frame->metadata = meta.Pass();
+  frame->metadata = std::move(meta);
 
   frame->resources.resize(0u);
 
@@ -123,7 +131,12 @@ void BitmapUploader::Upload() {
     GLbyte mailbox[GL_MAILBOX_SIZE_CHROMIUM];
     glGenMailboxCHROMIUM(mailbox);
     glProduceTextureCHROMIUM(GL_TEXTURE_2D, mailbox);
-    gpu::SyncToken sync_token(glInsertSyncPointCHROMIUM());
+
+    const GLuint64 fence_sync = glInsertFenceSyncCHROMIUM();
+    glShallowFlushCHROMIUM();
+
+    gpu::SyncToken sync_token;
+    glGenSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
 
     mus::mojom::TransferableResourcePtr resource =
         mus::mojom::TransferableResource::New();
@@ -140,9 +153,10 @@ void BitmapUploader::Upload() {
     mailbox_holder->texture_target = GL_TEXTURE_2D;
     mailbox_holder->sync_token =
         mus::mojom::SyncToken::From<gpu::SyncToken>(sync_token);
-    resource->mailbox_holder = mailbox_holder.Pass();
-    resource->is_repeated = false;
+    resource->mailbox_holder = std::move(mailbox_holder);
+    resource->read_lock_fences_enabled = false;
     resource->is_software = false;
+    resource->is_overlay_candidate = false;
 
     mus::mojom::QuadPtr quad = mus::mojom::Quad::New();
     quad->material = mus::mojom::MATERIAL_TEXTURE_CONTENT;
@@ -184,9 +198,9 @@ void BitmapUploader::Upload() {
       texture_state->vertex_opacity.push_back(1.f);
     texture_state->y_flipped = false;
 
-    frame->resources.push_back(resource.Pass());
-    quad->texture_quad_state = texture_state.Pass();
-    pass->quads.push_back(quad.Pass());
+    frame->resources.push_back(std::move(resource));
+    quad->texture_quad_state = std::move(texture_state);
+    pass->quads.push_back(std::move(quad));
   }
 
   if (color_ != g_transparent_color) {
@@ -204,14 +218,14 @@ void BitmapUploader::Upload() {
     color_state->color->rgba = color_;
     color_state->force_anti_aliasing_off = false;
 
-    quad->solid_color_quad_state = color_state.Pass();
-    pass->quads.push_back(quad.Pass());
+    quad->solid_color_quad_state = std::move(color_state);
+    pass->quads.push_back(std::move(quad));
   }
 
-  frame->passes.push_back(pass.Pass());
+  frame->passes.push_back(std::move(pass));
 
   // TODO(rjkroege, fsamuel): We should throttle frames.
-  surface_->SubmitCompositorFrame(frame.Pass(), mojo::Closure());
+  surface_->SubmitCompositorFrame(std::move(frame), mojo::Closure());
 }
 
 uint32_t BitmapUploader::BindTextureForSize(const mojo::Size size) {
@@ -243,7 +257,7 @@ void BitmapUploader::ReturnResources(
   MojoGLES2MakeCurrent(gles2_context_);
   // TODO(jamesr): Recycle.
   for (size_t i = 0; i < resources.size(); ++i) {
-    mus::mojom::ReturnedResourcePtr resource = resources[i].Pass();
+    mus::mojom::ReturnedResourcePtr resource = std::move(resources[i]);
     DCHECK_EQ(1, resource->count);
     glWaitSyncTokenCHROMIUM(
         resource->sync_token.To<gpu::SyncToken>().GetConstData());

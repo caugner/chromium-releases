@@ -123,6 +123,14 @@ DevToolsAPIImpl.prototype = {
     },
 
     /**
+     * @param {!Adb.PortForwardingStatus} status
+     */
+    devicesPortForwardingStatusChanged: function(status)
+    {
+        this._dispatchOnInspectorFrontendAPI("devicesPortForwardingStatusChanged", [status]);
+    },
+
+    /**
      * @param {!Array.<!Adb.Device>} devices
      */
     devicesUpdated: function(devices)
@@ -392,7 +400,13 @@ InspectorFrontendHostImpl.prototype = {
      */
     setInspectedPageBounds: function(bounds)
     {
-        DevToolsAPI.sendMessageToEmbedder("setInspectedPageBounds", [bounds], null);
+        var converted = {
+          x: Math.round(DevToolsHost.convertLengthForEmbedder(bounds.x)),
+          y: Math.round(DevToolsHost.convertLengthForEmbedder(bounds.y)),
+          width: Math.round(DevToolsHost.convertLengthForEmbedder(bounds.width)),
+          height: Math.round(DevToolsHost.convertLengthForEmbedder(bounds.height))
+        };
+        DevToolsAPI.sendMessageToEmbedder("setInspectedPageBounds", [converted], null);
     },
 
     /**
@@ -937,3 +951,13 @@ if (window.domAutomationController) {
 }
 
 })(window);
+
+if (!DOMTokenList.prototype.__originalDOMTokenListToggle) {
+    DOMTokenList.prototype.__originalDOMTokenListToggle = DOMTokenList.prototype.toggle;
+    DOMTokenList.prototype.toggle = function(token, force)
+    {
+        if (arguments.length === 1)
+            force = !this.contains(token);
+        return this.__originalDOMTokenListToggle(token, !!force);
+    }
+}

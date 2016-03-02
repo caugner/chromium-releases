@@ -4,6 +4,10 @@
 
 #include "mojo/runner/context.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -24,10 +28,6 @@
 #include "components/devtools_service/public/cpp/switches.h"
 #include "components/devtools_service/public/interfaces/devtools_service.mojom.h"
 #include "components/tracing/tracing_switches.h"
-#include "mojo/application/public/cpp/application_connection.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/package_manager/package_manager_impl.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/runner/host/in_process_native_runner.h"
 #include "mojo/runner/host/out_of_process_native_runner.h"
@@ -40,6 +40,10 @@
 #include "mojo/services/tracing/public/interfaces/tracing.mojom.h"
 #include "mojo/shell/application_loader.h"
 #include "mojo/shell/connect_to_application_params.h"
+#include "mojo/shell/package_manager/package_manager_impl.h"
+#include "mojo/shell/public/cpp/application_connection.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 #include "mojo/shell/query_util.h"
 #include "mojo/shell/switches.h"
 #include "mojo/util/filename_util.h"
@@ -54,6 +58,7 @@ namespace {
 class Setup {
  public:
   Setup() {
+    embedder::PreInitializeParentProcess();
     embedder::Init();
   }
 
@@ -63,7 +68,7 @@ class Setup {
   DISALLOW_COPY_AND_ASSIGN(Setup);
 };
 
-void InitContentHandlers(package_manager::PackageManagerImpl* manager,
+void InitContentHandlers(shell::PackageManagerImpl* manager,
                          const base::CommandLine& command_line) {
   // Default content handlers.
   manager->RegisterContentHandler("application/javascript",
@@ -140,7 +145,7 @@ void InitDevToolsServiceIfNeeded(shell::ApplicationManager* manager,
                                     std::string(),
                                     shell::GetPermissiveCapabilityFilter()));
   params->set_services(GetProxy(&devtools_service_provider));
-  manager->ConnectToApplication(params.Pass());
+  manager->ConnectToApplication(std::move(params));
 
   devtools_service::DevToolsCoordinatorPtr devtools_coordinator;
   devtools_service_provider->ConnectToService(
@@ -153,14 +158,14 @@ class TracingServiceProvider : public ServiceProvider {
  public:
   TracingServiceProvider(Tracer* tracer,
                          InterfaceRequest<ServiceProvider> request)
-      : tracer_(tracer), binding_(this, request.Pass()) {}
+      : tracer_(tracer), binding_(this, std::move(request)) {}
   ~TracingServiceProvider() override {}
 
   void ConnectToService(const mojo::String& service_name,
                         ScopedMessagePipeHandle client_handle) override {
     if (tracer_ && service_name == tracing::TraceProvider::Name_) {
       tracer_->ConnectToProvider(
-          MakeRequest<tracing::TraceProvider>(client_handle.Pass()));
+          MakeRequest<tracing::TraceProvider>(std::move(client_handle)));
     }
   }
 
@@ -212,7 +217,7 @@ bool Context::Init(const base::FilePath& shell_file_root) {
                            task_runners_->io_runner(),
                            embedder::ScopedPlatformHandle());
 
-  package_manager_ = new package_manager::PackageManagerImpl(
+  package_manager_ = new shell::PackageManagerImpl(
       shell_file_root, task_runners_->blocking_pool());
   InitContentHandlers(package_manager_, command_line);
 
@@ -232,7 +237,7 @@ bool Context::Init(const base::FilePath& shell_file_root) {
         new InProcessNativeRunnerFactory(task_runners_->blocking_pool()));
   }
   application_manager_.reset(new shell::ApplicationManager(
-      make_scoped_ptr(package_manager_), runner_factory.Pass(),
+      make_scoped_ptr(package_manager_), std::move(runner_factory),
       task_runners_->blocking_pool()));
 
   ServiceProviderPtr tracing_services;
@@ -246,15 +251,15 @@ bool Context::Init(const base::FilePath& shell_file_root) {
   params->SetTarget(shell::Identity(GURL("mojo:tracing"), std::string(),
                                     shell::GetPermissiveCapabilityFilter()));
   params->set_services(GetProxy(&tracing_services));
-  params->set_exposed_services(tracing_exposed_services.Pass());
-  application_manager_->ConnectToApplication(params.Pass());
+  params->set_exposed_services(std::move(tracing_exposed_services));
+  application_manager_->ConnectToApplication(std::move(params));
 
   if (command_line.HasSwitch(tracing::kTraceStartup)) {
     tracing::TraceCollectorPtr coordinator;
     auto coordinator_request = GetProxy(&coordinator);
     tracing_services->ConnectToService(tracing::TraceCollector::Name_,
                                        coordinator_request.PassMessagePipe());
-    tracer_.StartCollectingFromTracingService(coordinator.Pass());
+    tracer_.StartCollectingFromTracingService(std::move(coordinator));
   }
 
   // Record the shell startup metrics used for performance testing.
@@ -286,7 +291,9 @@ void Context::Shutdown() {
   TRACE_EVENT0("mojo_shell", "Context::Shutdown");
   DCHECK_EQ(base::MessageLoop::current()->task_runner(),
             task_runners_->shell_runner());
-  embedder::ShutdownIPCSupport();
+  // Post a task in case OnShutdownComplete is called synchronously.
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(embedder::ShutdownIPCSupport));
   // We'll quit when we get OnShutdownComplete().
   base::MessageLoop::current()->Run();
 }
@@ -309,10 +316,10 @@ void Context::Run(const GURL& url) {
   params->SetTarget(shell::Identity(url, std::string(),
                                     shell::GetPermissiveCapabilityFilter()));
   params->set_services(GetProxy(&services));
-  params->set_exposed_services(exposed_services.Pass());
+  params->set_exposed_services(std::move(exposed_services));
   params->set_on_application_end(
       base::Bind(&Context::OnApplicationEnd, base::Unretained(this), url));
-  application_manager_->ConnectToApplication(params.Pass());
+  application_manager_->ConnectToApplication(std::move(params));
 }
 
 void Context::RunCommandLineApplication(const base::Closure& callback) {

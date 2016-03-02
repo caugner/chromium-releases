@@ -11,7 +11,7 @@ from telemetry.internal.platform.power_monitor import pm_mock
 
 class FuelGaugePowerMonitorMonitorTest(unittest.TestCase):
 
-  def testEnergyComsumption(self):
+  def testEnergyConsumption(self):
     fuel_gauge_delta = 100
     results = (
         android_fuelgauge_power_monitor.FuelGaugePowerMonitor.ProcessPowerData(
@@ -22,8 +22,7 @@ class FuelGaugePowerMonitorMonitorTest(unittest.TestCase):
 
   def testMonitorCycle(self):
     battery = pm_mock.MockBattery(None, voltage=5.0, fuelgauge=[5.e6, 3.e6])
-    backend = pm_mock.MockPlatformBackend()
-    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery, backend)
+    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery)
     pm.StartMonitoringPower(None)
     results = pm.StopMonitoringPower()
     self.assertEqual(results['identifier'], 'fuel_gauge')
@@ -31,8 +30,7 @@ class FuelGaugePowerMonitorMonitorTest(unittest.TestCase):
 
   def testDoubleStop(self):
     battery = pm_mock.MockBattery(None, voltage=5.0, fuelgauge=[5.e6, 3.e6])
-    backend = pm_mock.MockPlatformBackend()
-    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery, backend)
+    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery)
     pm.StartMonitoringPower(None)
     pm.StopMonitoringPower()
     with self.assertRaises(AssertionError):
@@ -40,8 +38,7 @@ class FuelGaugePowerMonitorMonitorTest(unittest.TestCase):
 
   def testDoubleStart(self):
     battery = pm_mock.MockBattery(None, voltage=5.0, fuelgauge=[5.e6, 3.e6])
-    backend = pm_mock.MockPlatformBackend()
-    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery, backend)
+    pm = android_fuelgauge_power_monitor.FuelGaugePowerMonitor(battery)
     pm.StartMonitoringPower(None)
     with self.assertRaises(AssertionError):
       pm.StartMonitoringPower(None)

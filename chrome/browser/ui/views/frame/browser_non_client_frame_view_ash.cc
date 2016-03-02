@@ -6,24 +6,26 @@
 
 #include <algorithm>
 
+#include "ash/ash_layout_constants.h"
 #include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/frame/default_header_painter.h"
 #include "ash/frame/frame_border_hit_test_controller.h"
 #include "ash/frame/header_painter_util.h"
 #include "ash/shell.h"
 #include "base/profiler/scoped_tracker.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/web_app_left_header_view_ash.h"
-#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -44,6 +46,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/scoped_canvas.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -176,6 +179,14 @@ int BrowserNonClientFrameViewAsh::GetTopInset(bool restored) const {
     return 0;
 
   if (browser_view()->IsTabStripVisible()) {
+    if (ui::MaterialDesignController::IsModeMaterial()) {
+      const int header_height = restored
+          ? GetAshLayoutSize(
+                AshLayoutSize::BROWSER_RESTORED_CAPTION_BUTTON).height()
+          : header_painter_->GetHeaderHeight();
+      return header_height - browser_view()->GetTabStripHeight();
+    }
+
     return ((frame()->IsMaximized() || frame()->IsFullscreen()) && !restored) ?
         kTabstripTopSpacingShort : kTabstripTopSpacingTall;
   }
@@ -330,16 +341,14 @@ void BrowserNonClientFrameViewAsh::Layout() {
   // position of the window controls.
   header_painter_->LayoutHeader();
 
-  int painted_height = 0;
+  int painted_height = GetTopInset(false);
   if (browser_view()->IsTabStripVisible()) {
-    painted_height = GetTopInset(false) +
-        browser_view()->tabstrip()->GetPreferredSize().height();
+    painted_height += browser_view()->tabstrip()->GetPreferredSize().height();
   } else if (browser_view()->IsToolbarVisible()) {
     // Paint the header so that it overlaps with the top few pixels of the
     // toolbar because the top few pixels of the toolbar are not opaque.
-    painted_height = GetTopInset(false) + kFrameShadowThickness * 2;
-  } else {
-    painted_height = GetTopInset(false);
+    const int kToolbarTopEdgeExclusion = 2;
+    painted_height += kToolbarTopEdgeExclusion;
   }
   header_painter_->SetHeaderHeightForPainting(painted_height);
 
@@ -619,7 +628,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
   int w = toolbar_bounds.width();
   int y = toolbar_bounds.y();
   int h = toolbar_bounds.height();
-  ui::ThemeProvider* tp = GetThemeProvider();
+  const ui::ThemeProvider* tp = GetThemeProvider();
 
   if (ui::MaterialDesignController::IsModeMaterial()) {
     // Paint the main toolbar image.  Since this image is also used to draw the
@@ -635,13 +644,29 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
         x, y,
         w, theme_toolbar->height());
 
+    // Draw the separator line atop the toolbar, on the left and right of the
+    // tabstrip.
+    // TODO(tdanderson): Draw the separator line for non-tabbed windows.
+    if (browser_view()->IsTabStripVisible()) {
+      gfx::Rect separator_rect(x, y, w, 0);
+      gfx::ScopedCanvas scoped_canvas(canvas);
+      gfx::Rect tabstrip_bounds(
+          GetBoundsForTabStrip(browser_view()->tabstrip()));
+      tabstrip_bounds.set_x(GetMirroredXForRect(tabstrip_bounds));
+      canvas->sk_canvas()->clipRect(gfx::RectToSkRect(tabstrip_bounds),
+                                    SkRegion::kDifference_Op);
+      separator_rect.set_y(tabstrip_bounds.bottom());
+      BrowserView::Paint1pxHorizontalLine(
+          canvas, tp->GetColor(ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR),
+          separator_rect, true);
+    }
+
     // Draw the content/toolbar separator.
     toolbar_bounds.Inset(kClientEdgeThickness, 0);
     BrowserView::Paint1pxHorizontalLine(
         canvas,
-        ThemeProperties::GetDefaultColor(
-            ThemeProperties::COLOR_TOOLBAR_SEPARATOR),
-        toolbar_bounds);
+        tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR),
+        toolbar_bounds, true);
   } else {
     // Gross hack: We split the toolbar images into two pieces, since sometimes
     // (popup mode) the toolbar isn't tall enough to show the whole image.  The
@@ -698,17 +723,16 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
     canvas->FillRect(
         gfx::Rect(x + kClientEdgeThickness,
                   toolbar_bounds.bottom() - kClientEdgeThickness,
-                  w - (2 * kClientEdgeThickness),
-                  kClientEdgeThickness),
-        ThemeProperties::GetDefaultColor(
-            ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+                  w - (2 * kClientEdgeThickness), kClientEdgeThickness),
+        tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR));
   }
 }
 
 void BrowserNonClientFrameViewAsh::PaintContentEdge(gfx::Canvas* canvas) {
   DCHECK(!UsePackagedAppHeaderStyle() && !UseWebAppHeaderStyle());
-  canvas->FillRect(gfx::Rect(0, caption_button_container_->bounds().bottom(),
-                             width(), kClientEdgeThickness),
-                   ThemeProperties::GetDefaultColor(
-                       ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+  canvas->FillRect(
+      gfx::Rect(0, caption_button_container_->bounds().bottom(), width(),
+                kClientEdgeThickness),
+      GetThemeProvider()->GetColor(
+          ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR));
 }

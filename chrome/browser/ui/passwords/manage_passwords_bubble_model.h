@@ -5,15 +5,18 @@
 #ifndef CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_BUBBLE_MODEL_H_
 #define CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_BUBBLE_MODEL_H_
 
+#include <utility>
+
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
+#include "base/time/clock.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
+#include "components/password_manager/core/browser/statistics_table.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/gfx/range/range.h"
 
-class ManagePasswordsIconController;
-class ManagePasswordsUIController;
 class Profile;
 
 namespace content {
@@ -136,19 +139,12 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   bool ShouldShowAutoSigninWarmWelcome() const;
 
 #if defined(UNIT_TEST)
-  // Gets and sets the reason the bubble was displayed.
-  password_manager::metrics_util::UIDisplayDisposition display_disposition()
-      const {
-    return display_disposition_;
-  }
-
   // Gets the reason the bubble was dismissed.
   password_manager::metrics_util::UIDismissalReason dismissal_reason() const {
     return dismissal_reason_;
   }
 
-  // State setter.
-  void set_state(password_manager::ui::State state) { state_ = state; }
+  void set_clock(scoped_ptr<base::Clock> clock) { clock_ = std::move(clock); }
 #endif
 
  private:
@@ -184,6 +180,12 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   password_manager::metrics_util::UIDismissalReason dismissal_reason_;
   password_manager::metrics_util::UpdatePasswordSubmissionEvent
       update_password_submission_event_;
+
+  // Current statistics for the save password bubble;
+  password_manager::InteractionsStats interaction_stats_;
+
+  // Used to retrieve the current time, in base::Time units.
+  scoped_ptr<base::Clock> clock_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsBubbleModel);
 };

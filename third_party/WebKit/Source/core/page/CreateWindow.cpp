@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/page/CreateWindow.h"
 
 #include "core/dom/Document.h"
@@ -155,11 +154,13 @@ DOMWindow* createWindow(const String& urlString, const AtomicString& frameName, 
     // We pass the opener frame for the lookupFrame in case the active frame is different from
     // the opener frame, and the name references a frame relative to the opener frame.
     bool created;
-    Frame* newFrame = createWindow(*activeFrame, openerFrame, frameRequest, windowFeatures, NavigationPolicyIgnore, MaybeSetOpener, created);
+    ShouldSetOpener opener = windowFeatures.noopener ? NeverSetOpener : MaybeSetOpener;
+    Frame* newFrame = createWindow(*activeFrame, openerFrame, frameRequest, windowFeatures, NavigationPolicyIgnore, opener, created);
     if (!newFrame)
         return nullptr;
 
-    newFrame->client()->setOpener(&openerFrame);
+    if (!windowFeatures.noopener)
+        newFrame->client()->setOpener(&openerFrame);
 
     if (!newFrame->domWindow()->isInsecureScriptAccess(callingWindow, completedURL)) {
         if (!urlString.isEmpty() || created)

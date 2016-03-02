@@ -14,11 +14,7 @@ if (is_android) {
 
 declare_args() {
   content_shell_product_name = "Content Shell"
-
-  # The "19" is so that sites that sniff for version think that this is
-  # something reasonably current; the "77.34.5" is a hint that this isn't a
-  # standard Chrome.
-  content_shell_version = "19.77.34.5"
+  content_shell_version = "99.77.34.5"
 }
 
 config("content_shell_lib_warnings") {
@@ -199,7 +195,7 @@ static_library("content_shell_lib") {
     "//base/allocator",
     "//base/third_party/dynamic_annotations",
     "//cc",
-    "//components/crash/content/app:app_breakpad_mac_to_be_deleted",
+    "//components/crash/content/app:app_breakpad_mac_win_to_be_deleted",
     "//components/devtools_discovery",
     "//components/devtools_http_handler",
     "//components/plugins/renderer",
@@ -241,7 +237,10 @@ static_library("content_shell_lib") {
     #'copy_test_netscape_plugin',  TODO(GYP)
   ]
   if (enable_plugins) {
-    deps += [ "//content/ppapi_plugin" ]
+    deps += [
+      "//content/ppapi_plugin",
+      "//ppapi:blink_test_plugin",
+    ]
   }
 
   if (is_win) {
@@ -288,9 +287,9 @@ static_library("content_shell_lib") {
       sources += [ "browser/shell_views.cc" ]
       deps += [
         "//ui/resources",
-        "//ui/views/controls/webview",
         "//ui/views",
         "//ui/views:test_support",
+        "//ui/views/controls/webview",
       ]
     } else {
       sources += [ "browser/shell_aura.cc" ]
@@ -457,7 +456,7 @@ if (!is_android && !is_mac) {
 
 if (is_win) {
   # GYP version: content/content_shell_and_tests.gyp:content_shell_crash_service
-  executable("crash_service") {
+  executable("content_shell_crash_service") {
     sources = [
       "tools/content_shell_crash_service.cc",
     ]

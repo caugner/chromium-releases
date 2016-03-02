@@ -5,6 +5,7 @@
 #ifndef RejectedPromises_h
 #define RejectedPromises_h
 
+#include "core/fetch/AccessControlStatus.h"
 #include "platform/heap/Handle.h"
 
 namespace v8 {
@@ -25,11 +26,10 @@ public:
         return adoptRefWillBeNoop(new RejectedPromises);
     }
 
-    RejectedPromises();
     void dispose();
     DECLARE_TRACE();
 
-    void rejectedWithNoHandler(ScriptState*, v8::PromiseRejectMessage, const String& errorMessage, const String& resourceName, int scriptId, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>);
+    void rejectedWithNoHandler(ScriptState*, v8::PromiseRejectMessage, const String& errorMessage, const String& resourceName, int scriptId, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>, AccessControlStatus);
     void handlerAdded(v8::PromiseRejectMessage);
 
     void processQueue();
@@ -37,8 +37,9 @@ public:
 private:
     class Message;
 
-    using MessageQueue = WillBeHeapDeque<OwnPtrWillBeMember<Message>>;
+    RejectedPromises();
 
+    using MessageQueue = WillBeHeapDeque<OwnPtrWillBeMember<Message>>;
     PassOwnPtrWillBeRawPtr<MessageQueue> createMessageQueue();
 
     void processQueueNow(PassOwnPtrWillBeRawPtr<MessageQueue>);

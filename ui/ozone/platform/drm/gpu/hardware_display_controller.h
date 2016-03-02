@@ -12,9 +12,9 @@
 #include <map>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/containers/scoped_ptr_hash_map.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "ui/gfx/swap_result.h"
@@ -125,8 +125,7 @@ class OZONE_EXPORT HardwareDisplayController {
   // doesn't change any state.
   bool TestPageFlip(const OverlayPlaneList& plane_list);
 
-  std::vector<uint32_t> GetCompatibleHardwarePlaneIds(
-      const OverlayPlane& plane) const;
+  bool IsFormatSupported(uint32_t fourcc_format, uint32_t z_order) const;
 
   // Set the hardware cursor to show the contents of |surface|.
   bool SetCursor(const scoped_refptr<ScanoutBuffer>& buffer);
@@ -149,8 +148,8 @@ class OZONE_EXPORT HardwareDisplayController {
 
   uint64_t GetTimeOfLastFlip() const;
 
-  const std::vector<CrtcController*>& crtc_controllers() const {
-    return crtc_controllers_.get();
+  const std::vector<scoped_ptr<CrtcController>>& crtc_controllers() const {
+    return crtc_controllers_;
   }
 
   scoped_refptr<DrmDevice> GetAllocationDrmDevice() const;
@@ -165,7 +164,7 @@ class OZONE_EXPORT HardwareDisplayController {
 
   // Stores the CRTC configuration. This is used to identify monitors and
   // configure them.
-  ScopedVector<CrtcController> crtc_controllers_;
+  std::vector<scoped_ptr<CrtcController>> crtc_controllers_;
 
   // Location of the controller on the screen.
   gfx::Point origin_;

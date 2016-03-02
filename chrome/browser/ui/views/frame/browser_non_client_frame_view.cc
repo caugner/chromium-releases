@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
@@ -60,6 +61,8 @@ BrowserNonClientFrameView::~BrowserNonClientFrameView() {
     cache.RemoveObserver(this);
   }
 }
+
+void BrowserNonClientFrameView::OnBrowserViewInitViewsComplete() {}
 
 void BrowserNonClientFrameView::UpdateToolbar() {
 }
@@ -118,17 +121,12 @@ bool BrowserNonClientFrameView::ShouldPaintAsThemed() const {
 }
 
 SkColor BrowserNonClientFrameView::GetFrameColor() const {
-  const bool incognito = browser_view_->IsOffTheRecord();
-  ThemeProperties::OverwritableByUserThemeProperty color_id;
-  if (ShouldPaintAsActive()) {
-    color_id = incognito ? ThemeProperties::COLOR_FRAME_INCOGNITO
-                         : ThemeProperties::COLOR_FRAME;
-  } else {
-    color_id = incognito ? ThemeProperties::COLOR_FRAME_INCOGNITO_INACTIVE
-                         : ThemeProperties::COLOR_FRAME_INACTIVE;
-  }
+  ThemeProperties::OverwritableByUserThemeProperty color_id =
+      ShouldPaintAsActive() ? ThemeProperties::COLOR_FRAME
+                            : ThemeProperties::COLOR_FRAME_INACTIVE;
   return ShouldPaintAsThemed() ? GetThemeProvider()->GetColor(color_id)
-                               : ThemeProperties::GetDefaultColor(color_id);
+                               : ThemeProperties::GetDefaultColor(
+                                     color_id, browser_view_->IsOffTheRecord());
 }
 
 gfx::ImageSkia* BrowserNonClientFrameView::GetFrameImage() const {
@@ -166,7 +164,7 @@ gfx::ImageSkia* BrowserNonClientFrameView::GetFrameImage() const {
 }
 
 gfx::ImageSkia* BrowserNonClientFrameView::GetFrameOverlayImage() const {
-  ui::ThemeProvider* tp = GetThemeProvider();
+  const ui::ThemeProvider* tp = GetThemeProvider();
   if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
       browser_view_->IsBrowserTypeNormal() &&
       !browser_view_->IsOffTheRecord()) {
@@ -208,8 +206,7 @@ void BrowserNonClientFrameView::UpdateOldAvatarButton() {
         AddChildView(supervised_user_avatar_label_);
       }
 #endif
-      avatar_button_ = new AvatarMenuButton(
-          browser_view_->browser(), !browser_view_->IsRegularOrGuestSession());
+      avatar_button_ = new AvatarMenuButton(browser_view_);
       avatar_button_->set_id(VIEW_ID_AVATAR_BUTTON);
       AddChildView(avatar_button_);
       // Invalidate here because adding a child does not invalidate the layout.
@@ -239,9 +236,9 @@ void BrowserNonClientFrameView::UpdateOldAvatarButton() {
   bool should_show_avatar_menu =
       avatar_button_ || AvatarMenu::ShouldShowAvatarMenu();
 
-  if (!AvatarMenuButton::GetAvatarImages(
-          browser_view_->browser()->profile(), should_show_avatar_menu, &avatar,
-          &taskbar_badge_avatar, &is_rectangle)) {
+  if (!AvatarMenuButton::GetAvatarImages(browser_view_, should_show_avatar_menu,
+                                         &avatar, &taskbar_badge_avatar,
+                                         &is_rectangle)) {
     return;
   }
 
@@ -307,10 +304,9 @@ void BrowserNonClientFrameView::UpdateTaskbarDecoration() {
   // returns false, don't bother trying to update the taskbar decoration since
   // the returned images are not initialized.  This can happen if the user
   // deletes the current profile.
-  if (AvatarMenuButton::GetAvatarImages(browser_view_->browser()->profile(),
-                                        AvatarMenu::ShouldShowAvatarMenu(),
-                                        &avatar, &taskbar_badge_avatar,
-                                        &is_rectangle)) {
+  if (AvatarMenuButton::GetAvatarImages(
+          browser_view_, AvatarMenu::ShouldShowAvatarMenu(), &avatar,
+          &taskbar_badge_avatar, &is_rectangle)) {
     // For popups and panels which don't have the avatar button, we still
     // need to draw the taskbar decoration. Even though we have an icon on the
     // window's relaunch details, we draw over it because the user may have

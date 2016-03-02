@@ -4,16 +4,18 @@
 
 #include "components/html_viewer/web_graphics_context_3d_command_buffer_impl.h"
 
+#include <stdint.h>
+
 #include "components/html_viewer/blink_basic_type_converters.h"
 #include "components/html_viewer/global_state.h"
 #include "components/mus/public/cpp/context_provider.h"
 #include "components/mus/public/interfaces/gpu.mojom.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/gles2/gles2_context.h"
 #include "mojo/gpu/mojo_gles2_impl_autogen.h"
 #include "mojo/public/cpp/environment/environment.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 
 namespace html_viewer {
 
@@ -34,10 +36,8 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
   gl_info->rendererInfo = gpu_info->renderer_info.To<blink::WebString>();
   gl_info->driverVersion = gpu_info->driver_version.To<blink::WebString>();
 
-  mojo::URLRequestPtr request(mojo::URLRequest::New());
-  request->url = mojo::String::From("mojo:mus");
   mus::mojom::GpuPtr gpu_service;
-  app->ConnectToService(request.Pass(), &gpu_service);
+  app->ConnectToService("mojo:mus", &gpu_service);
   mus::mojom::CommandBufferPtr cb;
   gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
   return new WebGraphicsContext3DCommandBufferImpl(

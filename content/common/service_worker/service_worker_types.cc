@@ -21,6 +21,7 @@ const char kFetchScriptError[] =
 
 ServiceWorkerFetchRequest::ServiceWorkerFetchRequest()
     : mode(FETCH_REQUEST_MODE_NO_CORS),
+      is_main_resource_load(false),
       request_context_type(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
       frame_type(REQUEST_CONTEXT_FRAME_TYPE_NONE),
       blob_size(0),
@@ -35,6 +36,7 @@ ServiceWorkerFetchRequest::ServiceWorkerFetchRequest(
     const Referrer& referrer,
     bool is_reload)
     : mode(FETCH_REQUEST_MODE_NO_CORS),
+      is_main_resource_load(false),
       request_context_type(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
       frame_type(REQUEST_CONTEXT_FRAME_TYPE_NONE),
       url(url),
@@ -62,7 +64,7 @@ ServiceWorkerResponse::ServiceWorkerResponse(
     blink::WebServiceWorkerResponseType response_type,
     const ServiceWorkerHeaderMap& headers,
     const std::string& blob_uuid,
-    uint64 blob_size,
+    uint64_t blob_size,
     const GURL& stream_url,
     blink::WebServiceWorkerResponseError error)
     : url(url),
@@ -73,8 +75,7 @@ ServiceWorkerResponse::ServiceWorkerResponse(
       blob_uuid(blob_uuid),
       blob_size(blob_size),
       stream_url(stream_url),
-      error(error) {
-}
+      error(error) {}
 
 ServiceWorkerResponse::~ServiceWorkerResponse() {}
 

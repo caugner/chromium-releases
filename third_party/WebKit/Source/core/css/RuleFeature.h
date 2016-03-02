@@ -101,8 +101,8 @@ protected:
     InvalidationSet* invalidationSetForSelector(const CSSSelector&, InvalidationType);
 
 private:
-    using InvalidationSetMap = HashMap<AtomicString, RefPtr<InvalidationData>>;
-    using PseudoTypeInvalidationSetMap = HashMap<CSSSelector::PseudoType, RefPtr<InvalidationData>, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
+    using InvalidationSetMap = HashMap<AtomicString, InvalidationData>;
+    using PseudoTypeInvalidationSetMap = HashMap<CSSSelector::PseudoType, InvalidationData, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
 
     struct FeatureMetadata {
         DISALLOW_NEW();
@@ -138,27 +138,19 @@ private:
 
     struct InvalidationSetFeatures {
         DISALLOW_NEW();
-        InvalidationSetFeatures()
-            : maxDirectAdjacentSelectors(UINT_MAX)
-            , customPseudoElement(false)
-            , hasBeforeOrAfter(false)
-            , treeBoundaryCrossing(false)
-            , adjacent(false)
-            , insertionPointCrossing(false)
-            , forceSubtree(false)
-        { }
 
         Vector<AtomicString> classes;
         Vector<AtomicString> attributes;
         AtomicString id;
         AtomicString tagName;
-        unsigned maxDirectAdjacentSelectors;
-        bool customPseudoElement;
-        bool hasBeforeOrAfter;
-        bool treeBoundaryCrossing;
-        bool adjacent;
-        bool insertionPointCrossing;
-        bool forceSubtree;
+        unsigned maxDirectAdjacentSelectors = UINT_MAX;
+        bool customPseudoElement = false;
+        bool hasBeforeOrAfter = false;
+        bool treeBoundaryCrossing = false;
+        bool adjacent = false;
+        bool insertionPointCrossing = false;
+        bool forceSubtree = false;
+        bool contentPseudoCrossing = false;
     };
 
     static bool extractInvalidationSetFeature(const CSSSelector&, InvalidationSetFeatures&);

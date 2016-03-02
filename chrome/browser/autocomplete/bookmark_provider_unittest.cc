@@ -4,10 +4,13 @@
 
 #include "components/omnibox/browser/bookmark_provider.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
@@ -262,8 +265,8 @@ TEST_F(BookmarkProviderTest, Positions) {
     {"frankly frankly",       1, {{{0, 7}, {8, 15}, {0, 0}}}},
     {"foobar foo",            1, {{{0, 6}, {7, 13}, {0, 0}}}},
     {"foo foobar",            1, {{{0, 6}, {7, 13}, {0, 0}}}},
-    // This ensures that leading whitespace in the title is removed.
-    {"hello",                 1, {{{0, 5}, {7, 12}, {0, 0}}}},
+    // This ensures that leading whitespace in the title is not removed.
+    {"hello",                 1, {{{1, 6}, {9, 14}, {0, 0}}}},
     // This ensures that empty titles yield empty classifications.
     {"emptytitle",            1, {}},
   };

@@ -7,6 +7,8 @@ package org.chromium.chrome.browser.media.remote;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.support.v7.media.MediaRouteSelector;
+import android.support.v7.media.MediaRouter;
+import android.support.v7.media.MediaRouter.RouteInfo;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
@@ -56,7 +58,7 @@ public interface MediaRouteController extends TransportControl.Listener {
 
         void pauseLocal();
 
-        int getLocalPosition();
+        long getLocalPosition();
 
         /**
          * Tells the rest of Chrome that we are starting to cast, so that user inputs control cast
@@ -107,7 +109,7 @@ public interface MediaRouteController extends TransportControl.Listener {
         /**
          * @return the requested seek location. Only meaningful if isSeekRequested is true.
          */
-        int getSeekLocation();
+        long getSeekLocation();
     }
 
     /**
@@ -152,14 +154,14 @@ public interface MediaRouteController extends TransportControl.Listener {
          * Called when the duration of the currently playing video changes.
          * @param durationMillis the new duration in ms.
          */
-        void onDurationUpdated(int durationMillis);
+        void onDurationUpdated(long durationMillis);
 
         /**
          * Called when the media route controller receives new information about the
          * current position in the video.
          * @param positionMillis the current position in the video in ms.
          */
-        void onPositionChanged(int positionMillis);
+        void onPositionChanged(long positionMillis);
 
         /**
          * Called if the title of the video changes
@@ -280,12 +282,12 @@ public interface MediaRouteController extends TransportControl.Listener {
      *
      * @return The current position of the remote playback in milliseconds.
      */
-    int getPosition();
+    long getPosition();
 
     /**
      * @return The stream duration in milliseconds.
      */
-    int getDuration();
+    long getDuration();
 
     /**
      * @return Whether the video is currently being played.
@@ -302,7 +304,7 @@ public interface MediaRouteController extends TransportControl.Listener {
      *
      * @param msec The position to seek to, in milliseconds.
      */
-    void seekTo(int msec);
+    void seekTo(long msec);
 
     /**
      * Stop the current remote playback completely and release all resources.
@@ -345,12 +347,12 @@ public interface MediaRouteController extends TransportControl.Listener {
     Bitmap getPoster();
 
     /**
-     * Used to switch video or audio streams when already casting.
-     * If the mediaRouteController not casting does nothing.
-     * If the mediaRouteController is already casting, then the calling RemoteMediaPlayerBridge
-     * takes over the cast device and starts casting its stream.
-     * @param mMediaStateListener
-     * @return true if the new stream has been cast, false if not.
+     * Called when a new route has been selected
+     * @param player TODO
+     * @param router The MediaRouter.
+     * @param route The selected route.
      */
-    boolean playerTakesOverCastDevice(MediaStateListener mediaStateListener);
+    void onRouteSelected(MediaStateListener player, MediaRouter router, RouteInfo route);
+
+
 }

@@ -8,7 +8,6 @@
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "crypto/openssl_util.h"
 #include "net/quic/crypto/crypto_protocol.h"
@@ -94,12 +93,14 @@ bool ProofSourceChromium::GetProof(const IPAddressNumber& server_ip,
                           private_key_->key()) ||
       !EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PSS_PADDING) ||
       !EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, -1) ||
-      !EVP_DigestSignUpdate(sign_context.get(), reinterpret_cast<const uint8*>(
-                                                    kProofSignatureLabel),
-                            sizeof(kProofSignatureLabel)) ||
-      !EVP_DigestSignUpdate(sign_context.get(), reinterpret_cast<const uint8*>(
-                                                    server_config.data()),
-                            server_config.size())) {
+      !EVP_DigestSignUpdate(
+          sign_context.get(),
+          reinterpret_cast<const uint8_t*>(kProofSignatureLabel),
+          sizeof(kProofSignatureLabel)) ||
+      !EVP_DigestSignUpdate(
+          sign_context.get(),
+          reinterpret_cast<const uint8_t*>(server_config.data()),
+          server_config.size())) {
     return false;
   }
 
@@ -110,12 +111,11 @@ bool ProofSourceChromium::GetProof(const IPAddressNumber& server_ip,
   }
   std::vector<uint8_t> signature(len);
   // Sign it.
-  if (!EVP_DigestSignFinal(sign_context.get(), vector_as_array(&signature),
-                           &len)) {
+  if (!EVP_DigestSignFinal(sign_context.get(), signature.data(), &len)) {
     return false;
   }
   signature.resize(len);
-  out_signature->assign(reinterpret_cast<const char*>(&signature[0]),
+  out_signature->assign(reinterpret_cast<const char*>(signature.data()),
                         signature.size());
   *out_certs = &certificates_;
   VLOG(1) << "signature: "

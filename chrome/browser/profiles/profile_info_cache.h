@@ -5,15 +5,17 @@
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_INFO_CACHE_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_INFO_CACHE_H_
 
+#include <stddef.h>
+
 #include <map>
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
@@ -105,6 +107,16 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
   size_t GetAvatarIconIndexOfProfileAtIndex(size_t index) const;
 
+  // Statistics
+  bool HasStatsBrowsingHistoryOfProfileAtIndex(size_t index) const;
+  int GetStatsBrowsingHistoryOfProfileAtIndex(size_t index) const;
+  bool HasStatsPasswordsOfProfileAtIndex(size_t index) const;
+  int GetStatsPasswordsOfProfileAtIndex(size_t index) const;
+  bool HasStatsBookmarksOfProfileAtIndex(size_t index) const;
+  int GetStatsBookmarksOfProfileAtIndex(size_t index) const;
+  bool HasStatsSettingsOfProfileAtIndex(size_t index) const;
+  int GetStatsSettingsOfProfileAtIndex(size_t index) const;
+
   void SetProfileActiveTimeAtIndex(size_t index);
   // Warning: This will re-sort profiles and thus may change indices!
   void SetNameOfProfileAtIndex(size_t index, const base::string16& name);
@@ -145,6 +157,12 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // profile. Note that the icon may not be unique since there are a limited
   // set of default icons.
   size_t ChooseAvatarIconIndexForNewProfile() const;
+
+  // Statistics
+  void SetStatsBrowsingHistoryOfProfileAtIndex(size_t index, int value);
+  void SetStatsPasswordsOfProfileAtIndex(size_t index, int value);
+  void SetStatsBookmarksOfProfileAtIndex(size_t index, int value);
+  void SetStatsSettingsOfProfileAtIndex(size_t index, int value);
 
   const base::FilePath& GetUserDataDir() const;
 

@@ -649,7 +649,8 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   void UnmapTexSubImage2DCHROMIUM(const void* mem) override;
   void ResizeCHROMIUM(GLuint width,
                       GLuint height,
-                      GLfloat scale_factor) override;
+                      GLfloat scale_factor,
+                      GLboolean alpha) override;
   const GLchar* GetRequestableExtensionsCHROMIUM() override;
   void RequestExtensionCHROMIUM(const char* extension) override;
   void GetProgramInfoCHROMIUM(GLuint program,
@@ -668,7 +669,6 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                               GLsizei bufsize,
                               GLsizei* size,
                               void* info) override;
-  GLuint CreateStreamTextureCHROMIUM(GLuint texture) override;
   GLuint CreateImageCHROMIUM(ClientBuffer buffer,
                              GLsizei width,
                              GLsizei height,
@@ -691,16 +691,14 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                    GLsizei height,
                                    GLuint ioSurfaceId,
                                    GLuint plane) override;
-  void CopyTextureCHROMIUM(GLenum target,
-                           GLenum source_id,
+  void CopyTextureCHROMIUM(GLenum source_id,
                            GLenum dest_id,
                            GLint internalformat,
                            GLenum dest_type,
                            GLboolean unpack_flip_y,
                            GLboolean unpack_premultiply_alpha,
                            GLboolean unpack_unmultiply_alpha) override;
-  void CopySubTextureCHROMIUM(GLenum target,
-                              GLenum source_id,
+  void CopySubTextureCHROMIUM(GLenum source_id,
                               GLenum dest_id,
                               GLint xoffset,
                               GLint yoffset,
@@ -711,18 +709,7 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                               GLboolean unpack_flip_y,
                               GLboolean unpack_premultiply_alpha,
                               GLboolean unpack_unmultiply_alpha) override;
-  void CompressedCopyTextureCHROMIUM(GLenum target,
-                                     GLenum source_id,
-                                     GLenum dest_id) override;
-  void CompressedCopySubTextureCHROMIUM(GLenum target,
-                                        GLenum source_id,
-                                        GLenum dest_id,
-                                        GLint xoffset,
-                                        GLint yoffset,
-                                        GLint x,
-                                        GLint y,
-                                        GLsizei width,
-                                        GLsizei height) override;
+  void CompressedCopyTextureCHROMIUM(GLenum source_id, GLenum dest_id) override;
   void DrawArraysInstancedANGLE(GLenum mode,
                                 GLint first,
                                 GLsizei count,
@@ -769,6 +756,7 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   void GenSyncTokenCHROMIUM(GLuint64 fence_sync, GLbyte* sync_token) override;
   void GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
                                       GLbyte* sync_token) override;
+  void VerifySyncTokensCHROMIUM(GLbyte** sync_tokens, GLsizei count) override;
   void WaitSyncTokenCHROMIUM(const GLbyte* sync_token) override;
   void DrawBuffersEXT(GLsizei count, const GLenum* bufs) override;
   void DiscardBackbufferCHROMIUM() override;
@@ -786,9 +774,14 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                                const GLfloat* contents_rect,
                                GLfloat opacity,
-                               const GLuint background_color,
-                               const GLfloat* bounds_size,
+                               GLuint background_color,
+                               GLuint edge_aa_mask,
+                               const GLfloat* bounds_rect,
+                               GLboolean is_clipped,
+                               const GLfloat* clip_rect,
+                               GLint sorting_context_id,
                                const GLfloat* transform) override;
+  void CommitOverlayPlanesCHROMIUM() override;
   void SwapInterval(GLint interval) override;
   void FlushDriverCachesCHROMIUM() override;
   void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) override;
@@ -884,9 +877,18 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                            GLenum genMode,
                                            GLint components,
                                            const GLfloat* coeffs) override;
+  void CoverageModulationCHROMIUM(GLenum components) override;
   GLenum GetGraphicsResetStatusKHR() override;
   void BlendBarrierKHR() override;
   void ApplyScreenSpaceAntialiasingCHROMIUM() override;
+  void BindFragDataLocationIndexedEXT(GLuint program,
+                                      GLuint colorNumber,
+                                      GLuint index,
+                                      const char* name) override;
+  void BindFragDataLocationEXT(GLuint program,
+                               GLuint colorNumber,
+                               const char* name) override;
+  GLint GetFragDataIndexEXT(GLuint program, const char* name) override;
 
  private:
   MojoGLES2Context context_;

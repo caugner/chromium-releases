@@ -5,12 +5,14 @@
 #include "content/common/gpu/gpu_channel_manager.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_memory_buffer_factory.h"
 #include "content/common/gpu/gpu_memory_manager.h"
@@ -27,6 +29,10 @@
 #include "ipc/message_filter.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_share_group.h"
+
+#if defined(OS_CHROMEOS)
+#include "content/common/gpu/media/gpu_arc_video_service.h"
+#endif
 
 namespace content {
 
@@ -56,11 +62,10 @@ GpuChannelManager::GpuChannelManager(
       shutdown_event_(shutdown_event),
       share_group_(new gfx::GLShareGroup),
       mailbox_manager_(gpu::gles2::MailboxManager::Create()),
-      gpu_memory_manager_(
-          this,
-          GpuMemoryManager::kDefaultMaxSurfacesWithFrontbufferSoftLimit),
+      gpu_memory_manager_(this),
       sync_point_manager_(sync_point_manager),
-      sync_point_client_waiter_(new gpu::SyncPointClientWaiter),
+      sync_point_client_waiter_(
+          sync_point_manager->CreateSyncPointClientWaiter()),
       gpu_memory_buffer_factory_(gpu_memory_buffer_factory),
       weak_factory_(this) {
   DCHECK(task_runner);
@@ -116,15 +121,15 @@ int GpuChannelManager::GenerateRouteID() {
   return ++last_id;
 }
 
-void GpuChannelManager::AddRoute(int32 routing_id, IPC::Listener* listener) {
+void GpuChannelManager::AddRoute(int32_t routing_id, IPC::Listener* listener) {
   router_.AddRoute(routing_id, listener);
 }
 
-void GpuChannelManager::RemoveRoute(int32 routing_id) {
+void GpuChannelManager::RemoveRoute(int32_t routing_id) {
   router_.RemoveRoute(routing_id);
 }
 
-GpuChannel* GpuChannelManager::LookupChannel(int32 client_id) const {
+GpuChannel* GpuChannelManager::LookupChannel(int32_t client_id) const {
   const auto& it = gpu_channels_.find(client_id);
   return it != gpu_channels_.end() ? it->second : nullptr;
 }
@@ -137,6 +142,10 @@ bool GpuChannelManager::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_CreateViewCommandBuffer,
                         OnCreateViewCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuMsg_DestroyGpuMemoryBuffer, OnDestroyGpuMemoryBuffer)
+#if defined(OS_CHROMEOS)
+    IPC_MESSAGE_HANDLER(GpuMsg_CreateArcVideoAcceleratorChannel,
+                        OnCreateArcVideoAcceleratorChannel)
+#endif
     IPC_MESSAGE_HANDLER(GpuMsg_LoadedShader, OnLoadedShader)
     IPC_MESSAGE_HANDLER(GpuMsg_UpdateValueState, OnUpdateValueState)
 #if defined(OS_ANDROID)
@@ -181,7 +190,7 @@ void GpuChannelManager::OnEstablishChannel(
     channel->SetPreemptByFlag(preemption_flag_.get());
   IPC::ChannelHandle channel_handle = channel->Init(shutdown_event_);
 
-  gpu_channels_.set(params.client_id, channel.Pass());
+  gpu_channels_.set(params.client_id, std::move(channel));
 
   Send(new GpuHostMsg_ChannelEstablished(channel_handle));
 }
@@ -198,9 +207,9 @@ void GpuChannelManager::OnCloseChannel(
 
 void GpuChannelManager::OnCreateViewCommandBuffer(
     const gfx::GLSurfaceHandle& window,
-    int32 client_id,
+    int32_t client_id,
     const GPUCreateCommandBufferConfig& init_params,
-    int32 route_id) {
+    int32_t route_id) {
   CreateCommandBufferResult result = CREATE_COMMAND_BUFFER_FAILED;
 
   auto it = gpu_channels_.find(client_id);
@@ -234,7 +243,7 @@ void GpuChannelManager::OnDestroyGpuMemoryBuffer(
         sync_point_manager()->GetSyncPointClientState(
             sync_token.namespace_id(), sync_token.command_buffer_id());
     if (release_state) {
-      sync_point_client_waiter_->Wait(
+      sync_point_client_waiter_->WaitOutOfOrder(
           release_state.get(), sync_token.release_count(),
           base::Bind(&GpuChannelManager::DestroyGpuMemoryBuffer,
                      base::Unretained(this), id, client_id));
@@ -245,6 +254,28 @@ void GpuChannelManager::OnDestroyGpuMemoryBuffer(
   // No sync token or invalid sync token, destroy immediately.
   DestroyGpuMemoryBuffer(id, client_id);
 }
+
+#if defined(OS_CHROMEOS)
+void GpuChannelManager::OnCreateArcVideoAcceleratorChannel() {
+  if (!gpu_arc_video_service_) {
+    gpu_arc_video_service_.reset(
+        new GpuArcVideoService(shutdown_event_, io_task_runner_));
+  }
+
+  gpu_arc_video_service_->CreateChannel(
+      base::Bind(&GpuChannelManager::ArcVideoAcceleratorChannelCreated,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void GpuChannelManager::ArcVideoAcceleratorChannelCreated(
+    const IPC::ChannelHandle& handle) {
+  Send(new GpuHostMsg_ArcVideoAcceleratorChannelCreated(handle));
+}
+
+void GpuChannelManager::OnShutdownArcVideoService() {
+  gpu_arc_video_service_.reset();
+}
+#endif
 
 void GpuChannelManager::OnUpdateValueState(
     int client_id, unsigned int target, const gpu::ValueState& state) {

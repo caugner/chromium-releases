@@ -63,6 +63,7 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -70,6 +71,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -87,12 +89,12 @@
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
+#include "net/base/sockaddr_storage.h"
 #include "net/cert/asn1_util.h"
-#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_ev_whitelist.h"
+#include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/scoped_nss_types.h"
@@ -2066,7 +2068,7 @@ void SSLClientSocketNSS::Core::UpdateConnectionStatus() {
 }
 
 void SSLClientSocketNSS::Core::UpdateNextProto() {
-  uint8 buf[256];
+  uint8_t buf[256];
   SSLNextProtoState state;
   unsigned buf_len;
 
@@ -2358,7 +2360,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(
     const HostPortPair& host_and_port,
     const SSLConfig& ssl_config,
     const SSLClientSocketContext& context)
-    : transport_(transport_socket.Pass()),
+    : transport_(std::move(transport_socket)),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
       cert_verifier_(context.cert_verifier),
@@ -2371,7 +2373,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(
       nss_fd_(NULL),
       net_log_(transport_->socket()->NetLog()),
       transport_security_state_(context.transport_security_state),
-      policy_enforcer_(context.cert_policy_enforcer),
+      policy_enforcer_(context.ct_policy_enforcer),
       valid_thread_id_(base::kInvalidThreadId) {
   DCHECK(cert_verifier_);
 
@@ -2661,11 +2663,11 @@ int SSLClientSocketNSS::Write(IOBuffer* buf, int buf_len,
   return rv;
 }
 
-int SSLClientSocketNSS::SetReceiveBufferSize(int32 size) {
+int SSLClientSocketNSS::SetReceiveBufferSize(int32_t size) {
   return transport_->socket()->SetReceiveBufferSize(size);
 }
 
-int SSLClientSocketNSS::SetSendBufferSize(int32 size) {
+int SSLClientSocketNSS::SetSendBufferSize(int32_t size) {
   return transport_->socket()->SetSendBufferSize(size);
 }
 
@@ -2772,7 +2774,7 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
     }
   }
 
-  for (std::vector<uint16>::const_iterator it =
+  for (std::vector<uint16_t>::const_iterator it =
            ssl_config_.disabled_cipher_suites.begin();
        it != ssl_config_.disabled_cipher_suites.end(); ++it) {
     // This will fail if the specified cipher is not implemented by NSS, but
@@ -2780,18 +2782,23 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
     SSL_CipherPrefSet(nss_fd_, *it, PR_FALSE);
   }
 
-  if (!(ssl_config_.rc4_enabled &&
-        ssl_config_.deprecated_cipher_suites_enabled)) {
-    const PRUint16* const ssl_ciphers = SSL_GetImplementedCiphers();
-    const PRUint16 num_ciphers = SSL_GetNumImplementedCiphers();
-    for (int i = 0; i < num_ciphers; i++) {
-      SSLCipherSuiteInfo info;
-      if (SSL_GetCipherSuiteInfo(ssl_ciphers[i], &info, sizeof(info)) !=
-          SECSuccess) {
-        continue;
-      }
-      if (info.symCipher == ssl_calg_rc4)
-        SSL_CipherPrefSet(nss_fd_, ssl_ciphers[i], PR_FALSE);
+  const PRUint16* const ssl_ciphers = SSL_GetImplementedCiphers();
+  const PRUint16 num_ciphers = SSL_GetNumImplementedCiphers();
+  for (int i = 0; i < num_ciphers; i++) {
+    SSLCipherSuiteInfo info;
+    if (SSL_GetCipherSuiteInfo(ssl_ciphers[i], &info, sizeof(info)) !=
+        SECSuccess) {
+      continue;
+    }
+    if (info.symCipher == ssl_calg_rc4 &&
+        !(ssl_config_.rc4_enabled &&
+          ssl_config_.deprecated_cipher_suites_enabled)) {
+      SSL_CipherPrefSet(nss_fd_, ssl_ciphers[i], PR_FALSE);
+    }
+    if (info.keaType == ssl_kea_dh &&
+        !ssl_config_.deprecated_cipher_suites_enabled) {
+      // Only offer DHE on the second handshake. https://crbug.com/538690
+      SSL_CipherPrefSet(nss_fd_, ssl_ciphers[i], PR_FALSE);
     }
   }
 
@@ -3152,25 +3159,7 @@ bool SSLClientSocketNSS::CalledOnValidThread() const {
 }
 
 void SSLClientSocketNSS::AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const {
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.verified_scts.begin();
-       iter != ct_verify_result_.verified_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter, ct::SCT_STATUS_OK));
-  }
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.invalid_scts.begin();
-       iter != ct_verify_result_.invalid_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter, ct::SCT_STATUS_INVALID));
-  }
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.unknown_logs_scts.begin();
-       iter != ct_verify_result_.unknown_logs_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter,
-                                            ct::SCT_STATUS_LOG_UNKNOWN));
-  }
+  ssl_info->UpdateSignedCertificateTimestamps(ct_verify_result_);
 }
 
 // static

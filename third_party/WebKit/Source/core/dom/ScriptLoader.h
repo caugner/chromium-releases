@@ -35,7 +35,7 @@ namespace blink {
 class Element;
 class ScriptLoaderClient;
 class ScriptSourceCode;
-
+class LocalFrame;
 
 class CORE_EXPORT ScriptLoader : public NoBaseWillBeGarbageCollectedFinalized<ScriptLoader>, private ScriptResourceClient {
     USING_FAST_MALLOC_WILL_BE_REMOVED(ScriptLoader);
@@ -92,6 +92,7 @@ protected:
 private:
     bool ignoresLoadRequest() const;
     bool isScriptForEventSupported() const;
+    void logScriptMimetype(ScriptResource*, LocalFrame*, String);
 
     bool fetchScript(const String& sourceUrl, FetchRequest::DeferOption);
 
@@ -107,17 +108,17 @@ private:
     String m_characterEncoding;
     String m_fallbackCharacterEncoding;
 
-    PendingScript m_pendingScript;
-
     bool m_parserInserted : 1;
     bool m_isExternalScript : 1;
     bool m_alreadyStarted : 1;
     bool m_haveFiredLoad : 1;
     bool m_willBeParserExecuted : 1; // Same as "The parser will handle executing the script."
     bool m_readyToBeParserExecuted : 1;
+    bool m_willExecuteInOrder : 1;
     bool m_willExecuteWhenDocumentFinishedParsing : 1;
     bool m_forceAsync : 1;
-    bool m_willExecuteInOrder : 1;
+
+    PendingScript m_pendingScript;
 };
 
 ScriptLoader* toScriptLoaderIfPossible(Element*);

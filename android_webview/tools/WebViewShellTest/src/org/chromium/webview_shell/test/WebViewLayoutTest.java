@@ -82,6 +82,8 @@ public class WebViewLayoutTest
                            "webexposed/global-interface-listing-expected.txt", true);
     }
 
+    // This is a non-failing test to avoid 'blind' rebaselines by the sheriff
+    // (see crbug.com/564765).
     @MediumTest
     public void testNoUnexpectedInterfaces() throws Exception {
         ensureJsTestCopied();
@@ -103,7 +105,10 @@ public class WebViewLayoutTest
                 newInterfaces.append(interfaceS + "\n");
             }
         }
-        assertEquals("Unexpected new webview interfaces found", "", newInterfaces.toString());
+
+        if (newInterfaces.length() > 0) {
+            Log.w(TAG, "Unexpected WebView interfaces found: " + newInterfaces.toString());
+        }
     }
 
     @MediumTest
@@ -191,6 +196,7 @@ public class WebViewLayoutTest
         mTestActivity.setGrantPermission(false);
     }
 
+    @MediumTest
     public void testBatteryApi() throws Exception {
         runWebViewLayoutTest("blink-apis/battery-status/battery-callback.html",
                 "blink-apis/battery-status/battery-callback-expected.txt");

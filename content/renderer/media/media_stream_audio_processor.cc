@@ -4,11 +4,16 @@
 
 #include "content/renderer/media/media_stream_audio_processor.h"
 
+#include <stddef.h>
+#include <stdint.h>
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/media/media_stream_audio_processor_options.h"
 #include "content/renderer/media/rtc_media_constraints.h"
@@ -97,15 +102,8 @@ void RecordProcessingState(AudioTrackProcessingStates state) {
 }
 
 bool IsDelayAgnosticAecEnabled() {
-  // Note: It's important to query the field trial state first, to ensure that
-  // UMA reports the correct group.
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("UseDelayAgnosticAEC");
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableDelayAgnosticAec))
-    return false;
-
-  return (group_name == "Enabled" || group_name == "DefaultEnabled");
+  return !command_line->HasSwitch(switches::kDisableDelayAgnosticAec);
 }
 
 // Checks if the default minimum starting volume value for the AGC is overridden
@@ -414,7 +412,7 @@ void MediaStreamAudioProcessor::OnAecDumpFile(
   DCHECK(file.IsValid());
 
   if (audio_processing_)
-    StartEchoCancellationDump(audio_processing_.get(), file.Pass());
+    StartEchoCancellationDump(audio_processing_.get(), std::move(file));
   else
     file.Close();
 }
@@ -705,7 +703,7 @@ int MediaStreamAudioProcessor::ProcessData(const float* const* process_ptrs,
 
   base::subtle::Atomic32 render_delay_ms =
       base::subtle::Acquire_Load(&render_delay_ms_);
-  int64 capture_delay_ms = capture_delay.InMilliseconds();
+  int64_t capture_delay_ms = capture_delay.InMilliseconds();
   DCHECK_LT(capture_delay_ms,
             std::numeric_limits<base::subtle::Atomic32>::max());
   int total_delay_ms =  capture_delay_ms + render_delay_ms;

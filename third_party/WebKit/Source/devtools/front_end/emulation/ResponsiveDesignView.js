@@ -62,14 +62,10 @@ WebInspector.ResponsiveDesignView.prototype = {
 
         this._mediaInspectorContainer = this._canvasContainer.element.createChild("div", "responsive-design-media-container");
         WebInspector.Tooltip.addNativeOverrideContainer(this._mediaInspectorContainer);
-        this._mediaInspector = new WebInspector.MediaQueryInspector(WebInspector.overridesSupport.settings.deviceWidth);
+        var deviceWidthSetting = WebInspector.overridesSupport.settings.deviceWidth;
+        this._mediaInspector = new WebInspector.MediaQueryInspector(deviceWidthSetting.get.bind(deviceWidthSetting), deviceWidthSetting.set.bind(deviceWidthSetting));
         this._updateMediaQueryInspector();
 
-        this._warningInfobar = new WebInspector.Infobar(WebInspector.Infobar.Type.Warning, WebInspector.moduleSetting("disableOverridesWarning"));
-        this._warningInfobar.element.classList.add("responsive-design-warning");
-        this._warningInfobar.setCloseCallback(WebInspector.overridesSupport.clearWarningMessage.bind(WebInspector.overridesSupport));
-        this._canvasContainer.element.appendChild(this._warningInfobar.element);
-        this._warningMessage = this._warningInfobar.element.createChild("span");
         WebInspector.overridesSupport.addEventListener(WebInspector.OverridesSupport.Events.OverridesWarningUpdated, this._overridesWarningUpdated, this);
 
         this._slidersContainer = this._canvasContainer.element.createChild("div", "vbox responsive-design-sliders-container");
@@ -105,7 +101,6 @@ WebInspector.ResponsiveDesignView.prototype = {
         this._increasePageScaleButton.addEventListener("click", this._pageScaleButtonClicked.bind(this, true), false);
 
         this._mediaInspector.addEventListener(WebInspector.MediaQueryInspector.Events.CountUpdated, this._updateMediaQueryInspectorButton, this);
-        this._mediaInspector.addEventListener(WebInspector.MediaQueryInspector.Events.HeightUpdated, this.onResize, this);
         this._overridesWarningUpdated();
     },
 
@@ -636,7 +631,7 @@ WebInspector.ResponsiveDesignView.prototype = {
 
     _createButtonsSection: function()
     {
-        var buttonsToolbar = new WebInspector.Toolbar(this._toolbarElement);
+        var buttonsToolbar = new WebInspector.Toolbar("", this._toolbarElement);
         buttonsToolbar.makeVertical();
         buttonsToolbar.setColor("white");
         buttonsToolbar.setToggledColor("rgb(105, 194, 236)");
@@ -647,7 +642,7 @@ WebInspector.ResponsiveDesignView.prototype = {
         resetButton.addEventListener("click", WebInspector.overridesSupport.reset, WebInspector.overridesSupport);
 
         // Media Query Inspector.
-        this._toggleMediaInspectorButton = new WebInspector.ToolbarButton(WebInspector.UIString("Media queries not found"), "waterfall-toolbar-item");
+        this._toggleMediaInspectorButton = new WebInspector.ToolbarToggle(WebInspector.UIString("Media queries not found"), "waterfall-toolbar-item");
         this._toggleMediaInspectorButton.setToggled(this._showMediaQueryInspectorSetting.get());
         this._toggleMediaInspectorButton.setEnabled(false);
         this._toggleMediaInspectorButton.addEventListener("click", this._onToggleMediaInspectorButtonClick, this);
@@ -761,8 +756,23 @@ WebInspector.ResponsiveDesignView.prototype = {
     _overridesWarningUpdated: function()
     {
         var message = WebInspector.overridesSupport.warningMessage();
-        this._warningMessage.textContent = message;
-        this._warningInfobar.setVisible(!!message);
+        if (!message) {
+            if (this._warningInfobar) {
+                this._warningInfobar.dispose();
+                delete this._warningInfobar;
+            }
+        }
+
+        if (!this._warningInfobar) {
+            this._warningInfobar = WebInspector.Infobar.create(WebInspector.Infobar.Type.Warning, message, WebInspector.moduleSetting("disableOverridesWarning"));
+            if (this._warningInfobar) {
+                this._warningInfobar.element.classList.add("responsive-design-warning");
+                this._warningInfobar.setCloseCallback(WebInspector.overridesSupport.clearWarningMessage.bind(WebInspector.overridesSupport));
+                this._canvasContainer.element.appendChild(this._warningInfobar.element);
+            }
+        } else {
+            this._warningInfobar.setText(message);
+        }
     },
 
     _showEmulationInDrawer: function()

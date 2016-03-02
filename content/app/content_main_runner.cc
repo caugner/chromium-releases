@@ -4,10 +4,13 @@
 
 #include "content/public/app/content_main_runner.h"
 
+#include <stddef.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include <string>
+#include <utility>
 
+#include "base/allocator/allocator_check.h"
 #include "base/allocator/allocator_extension.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
@@ -17,6 +20,7 @@
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/statistics_recorder.h"
@@ -30,7 +34,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "components/tracing/trace_config_file.h"
+#include "components/tracing/trace_to_console.h"
 #include "components/tracing/tracing_switches.h"
 #include "content/browser/browser_main.h"
 #include "content/common/set_process_title.h"
@@ -85,9 +91,7 @@
 #if !defined(OS_IOS)
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "content/app/mac/mac_init.h"
-#include "content/browser/browser_io_surface_manager_mac.h"
 #include "content/browser/mach_broker_mac.h"
-#include "content/child/child_io_surface_manager_mac.h"
 #include "content/common/sandbox_init_mac.h"
 #endif  // !OS_IOS
 #endif  // OS_WIN
@@ -281,7 +285,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
   }
 
   // This function call can return multiple times, once per fork().
-  if (!ZygoteMain(main_function_params, zygote_fork_delegates.Pass()))
+  if (!ZygoteMain(main_function_params, std::move(zygote_fork_delegates)))
     return 1;
 
   if (delegate) delegate->ZygoteForked();
@@ -414,25 +418,6 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   }
 
 #if defined(USE_TCMALLOC)
-  static bool GetAllocatorWasteSizeThunk(size_t* size) {
-    size_t heap_size, allocated_bytes, unmapped_bytes;
-    MallocExtension* ext = MallocExtension::instance();
-    if (ext->GetNumericProperty("generic.heap_size", &heap_size) &&
-        ext->GetNumericProperty("generic.current_allocated_bytes",
-                                &allocated_bytes) &&
-        ext->GetNumericProperty("tcmalloc.pageheap_unmapped_bytes",
-                                &unmapped_bytes)) {
-      *size = heap_size - allocated_bytes - unmapped_bytes;
-      return true;
-    }
-    DCHECK(false);
-    return false;
-  }
-
-  static void GetStatsThunk(char* buffer, int buffer_length) {
-    MallocExtension::instance()->GetStats(buffer, buffer_length);
-  }
-
   static bool GetNumericPropertyThunk(const char* name, size_t* value) {
     return MallocExtension::instance()->GetNumericProperty(name, value);
   }
@@ -471,9 +456,6 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     tc_set_new_mode(1);
 
     // On windows, we've already set these thunks up in _heap_init()
-    base::allocator::SetGetAllocatorWasteSizeFunction(
-        GetAllocatorWasteSizeThunk);
-    base::allocator::SetGetStatsFunction(GetStatsThunk);
     base::allocator::SetGetNumericPropertyFunction(GetNumericPropertyThunk);
     base::allocator::SetReleaseFreeMemoryFunction(ReleaseFreeMemoryThunk);
 
@@ -591,18 +573,13 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif
 
 #if defined(OS_WIN)
-    bool init_device_scale_factor = true;
     if (command_line.HasSwitch(switches::kDeviceScaleFactor)) {
       std::string scale_factor_string = command_line.GetSwitchValueASCII(
           switches::kDeviceScaleFactor);
       double scale_factor = 0;
-      if (base::StringToDouble(scale_factor_string, &scale_factor)) {
-        init_device_scale_factor = false;
-        gfx::InitDeviceScaleFactor(scale_factor);
-      }
+      if (base::StringToDouble(scale_factor_string, &scale_factor))
+        gfx::SetDefaultDeviceScaleFactor(scale_factor);
     }
-    if (init_device_scale_factor)
-      gfx::InitDeviceScaleFactor(gfx::GetDPIScale());
 #endif
 
     if (!GetContentClient())
@@ -623,6 +600,15 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       base::trace_event::TraceConfig trace_config(
           command_line.GetSwitchValueASCII(switches::kTraceStartup),
           base::trace_event::RECORD_UNTIL_FULL);
+      base::trace_event::TraceLog::GetInstance()->SetEnabled(
+          trace_config,
+          base::trace_event::TraceLog::RECORDING_MODE);
+    } else if (command_line.HasSwitch(switches::kTraceToConsole)) {
+      base::trace_event::TraceConfig trace_config =
+          tracing::GetConfigForTraceToConsole();
+      LOG(ERROR) << "Start " << switches::kTraceToConsole
+                 << " with CategoryFilter '"
+                 << trace_config.ToCategoryFilterString() << "'.";
       base::trace_event::TraceLog::GetInstance()->SetEnabled(
           trace_config,
           base::trace_event::TraceLog::RECORDING_MODE);
@@ -665,22 +651,15 @@ class ContentMainRunnerImpl : public ContentMainRunner {
         (!delegate_ || delegate_->ShouldSendMachPort(process_type))) {
       MachBroker::ChildSendTaskPortToParent();
     }
-
-    if (!command_line.HasSwitch(switches::kSingleProcess) &&
-        !process_type.empty() && (process_type == switches::kRendererProcess ||
-                                  process_type == switches::kGpuProcess)) {
-      base::mac::ScopedMachSendRight service_port =
-          BrowserIOSurfaceManager::LookupServicePort(getppid());
-      if (service_port.is_valid()) {
-        ChildIOSurfaceManager::GetInstance()->set_service_port(
-            service_port.release());
-        gfx::IOSurfaceManager::SetInstance(
-            ChildIOSurfaceManager::GetInstance());
-      }
-    }
 #elif defined(OS_WIN)
     base::win::SetupCRT(command_line);
 #endif
+
+    // If we are on a platform where the default allocator is overridden (shim
+    // layer on windows, tcmalloc on Linux Desktop) smoke-tests that the
+    // overriding logic is working correctly. If not causes a hard crash, as its
+    // unexpected absence has security implications.
+    CHECK(base::allocator::IsAllocatorInitialized());
 
 #if defined(OS_POSIX)
     if (!process_type.empty()) {

@@ -22,7 +22,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/dom/Range.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -148,6 +147,12 @@ void Range::dispose()
     // A prompt detach from the owning Document helps avoid GC overhead.
     m_ownerDocument->detachRange(this);
 #endif
+}
+
+bool Range::inDocument() const
+{
+    ASSERT(m_start.inDocument() == m_end.inDocument());
+    return m_start.inDocument();
 }
 
 void Range::setDocument(Document& document)

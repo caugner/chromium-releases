@@ -13,7 +13,7 @@
     'linux_link_pulseaudio%': 0,
     'conditions': [
       # Enable ALSA and Pulse for runtime selection.
-      ['(OS=="linux" or OS=="freebsd" or OS=="solaris") and (embedded!=1 or (chromecast==1 and target_arch!="arm"))', {
+      ['(OS=="linux" or OS=="freebsd" or OS=="solaris") and ((embedded!=1 and chromecast==0) or is_cast_desktop_build==1)', {
         # ALSA is always needed for Web MIDI even if the cras is enabled.
         'use_alsa%': 1,
         'conditions': [
@@ -33,12 +33,18 @@
       }, {
         'use_low_memory_buffer%': 0,
       }],
-      ['chromecast==1', {
+      ['proprietary_codecs==1 and chromecast==1', {
+        # Enable AC3/EAC3 audio demuxing. Actual decoding must be provided by
+        # the platform (or HDMI sink in Chromecast for audio pass-through case).
+        'enable_ac3_eac3_audio_demuxing%': 1,
         # Enable HEVC/H265 demuxing. Actual decoding must be provided by the
         # platform.
         'enable_hevc_demuxing%': 1,
+        'enable_mse_mpeg2ts_stream_parser%': 1,
       }, {
+        'enable_ac3_eac3_audio_demuxing%': 0,
         'enable_hevc_demuxing%': 0,
+        'enable_mse_mpeg2ts_stream_parser%': 0,
       }],
     ],
   },
@@ -48,16 +54,31 @@
   ],
   'targets': [
     {
+      # GN version: //media:media_features
+      'target_name': 'media_features',
+      'includes': [ '../build/buildflag_header.gypi' ],
+      'variables': {
+        'buildflag_header_path': 'media/media_features.h',
+        'buildflag_flags': [
+          "ENABLE_AC3_EAC3_AUDIO_DEMUXING=<(enable_ac3_eac3_audio_demuxing)",
+          "ENABLE_HEVC_DEMUXING=<(enable_hevc_demuxing)",
+          "ENABLE_MSE_MPEG2TS_STREAM_PARSER=<(enable_mse_mpeg2ts_stream_parser)",
+        ],
+      },
+    },
+    {
       # GN version: //media
       'target_name': 'media',
       'type': '<(component)',
       'dependencies': [
+        'media_features',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../crypto/crypto.gyp:crypto',
         '../gpu/gpu.gyp:command_buffer_common',
         '../skia/skia.gyp:skia',
+        '../third_party/libwebm/libwebm.gyp:libwebm',
         '../third_party/libyuv/libyuv.gyp:libyuv',
         '../third_party/opus/opus.gyp:opus',
         '../ui/events/events.gyp:events_base',
@@ -130,6 +151,8 @@
         'audio/audio_power_monitor.cc',
         'audio/audio_power_monitor.h',
         'audio/audio_source_diverter.h',
+        'audio/audio_streams_tracker.cc',
+        'audio/audio_streams_tracker.h',
         'audio/clockless_audio_sink.cc',
         'audio/clockless_audio_sink.h',
         'audio/cras/audio_manager_cras.cc',
@@ -303,6 +326,8 @@
         'base/key_systems_support_uma.h',
         'base/keyboard_event_counter.cc',
         'base/keyboard_event_counter.h',
+        'base/loopback_audio_converter.cc',
+        'base/loopback_audio_converter.h',
         'base/mac/avfoundation_glue.h',
         'base/mac/avfoundation_glue.mm',
         'base/mac/coremedia_glue.h',
@@ -391,6 +416,8 @@
         'base/video_capture_types.h',
         'base/video_capturer_source.cc',
         'base/video_capturer_source.h',
+        'base/video_codecs.cc',
+        'base/video_codecs.h',
         'base/video_decoder.cc',
         'base/video_decoder.h',
         'base/video_decoder_config.cc',
@@ -486,10 +513,16 @@
         'capture/video/win/video_capture_device_mf_win.h',
         'capture/video/win/video_capture_device_win.cc',
         'capture/video/win/video_capture_device_win.h',
+        'capture/webm_muxer.cc',
+        'capture/webm_muxer.h',
         'cdm/aes_decryptor.cc',
         'cdm/aes_decryptor.h',
         'cdm/cdm_adapter.cc',
         'cdm/cdm_adapter.h',
+        'cdm/cdm_buffer_impl.cc',
+        'cdm/cdm_buffer_impl.h',
+        'cdm/cdm_helpers.cc',
+        'cdm/cdm_helpers.h',
         'cdm/default_cdm_factory.cc',
         'cdm/default_cdm_factory.h',
         'cdm/json_web_key.cc',
@@ -555,6 +588,8 @@
         'filters/in_memory_url_protocol.h',
         'filters/jpeg_parser.cc',
         'filters/jpeg_parser.h',
+        'filters/media_source_state.cc',
+        'filters/media_source_state.h',
         'filters/opus_audio_decoder.cc',
         'filters/opus_audio_decoder.h',
         'filters/opus_constants.cc',
@@ -710,15 +745,6 @@
             'filters/vpx_video_decoder.h',
           ],
         }],
-        ['media_use_libwebm==1', {
-          'dependencies': [
-            '<(DEPTH)/third_party/libwebm/libwebm.gyp:libwebm',
-          ],
-          'sources': [
-            'capture/webm_muxer.cc',
-            'capture/webm_muxer.h',
-          ],
-        }],
         ['OS=="android"', {
           'dependencies': [
             'media_android_jni_headers',
@@ -746,20 +772,13 @@
               'defines': [
                 # On Android, FFmpeg is built without video decoders. We only
                 # support hardware video decoding.
-                'ENABLE_MEDIA_PIPELINE_ON_ANDROID',
                 'DISABLE_FFMPEG_VIDEO_DECODERS',
               ],
               'direct_dependent_settings': {
                 'defines': [
-                  'ENABLE_MEDIA_PIPELINE_ON_ANDROID',
                   'DISABLE_FFMPEG_VIDEO_DECODERS',
                 ],
               },
-            }, {  # media_use_ffmpeg == 0
-              'sources!': [
-                'filters/opus_audio_decoder.cc',
-                'filters/opus_audio_decoder.h',
-              ],
             }],
           ],
         }],
@@ -997,6 +1016,7 @@
         ['OS=="win"', {
           'link_settings':  {
             'libraries': [
+              '-ldxguid.lib',
               '-lmf.lib',
               '-lmfplat.lib',
               '-lmfreadwrite.lib',
@@ -1043,32 +1063,6 @@
             'filters/ffmpeg_h264_to_annex_b_bitstream_converter.h',
             'filters/h264_to_annex_b_bitstream_converter.cc',
             'filters/h264_to_annex_b_bitstream_converter.h',
-            'formats/mp2t/es_adapter_video.cc',
-            'formats/mp2t/es_adapter_video.h',
-            'formats/mp2t/es_parser.cc',
-            'formats/mp2t/es_parser.h',
-            'formats/mp2t/es_parser_adts.cc',
-            'formats/mp2t/es_parser_adts.h',
-            'formats/mp2t/es_parser_h264.cc',
-            'formats/mp2t/es_parser_h264.h',
-            'formats/mp2t/es_parser_mpeg1audio.cc',
-            'formats/mp2t/es_parser_mpeg1audio.h',
-            'formats/mp2t/mp2t_common.h',
-            'formats/mp2t/mp2t_stream_parser.cc',
-            'formats/mp2t/mp2t_stream_parser.h',
-            'formats/mp2t/timestamp_unroller.cc',
-            'formats/mp2t/timestamp_unroller.h',
-            'formats/mp2t/ts_packet.cc',
-            'formats/mp2t/ts_packet.h',
-            'formats/mp2t/ts_section.h',
-            'formats/mp2t/ts_section_pat.cc',
-            'formats/mp2t/ts_section_pat.h',
-            'formats/mp2t/ts_section_pes.cc',
-            'formats/mp2t/ts_section_pes.h',
-            'formats/mp2t/ts_section_pmt.cc',
-            'formats/mp2t/ts_section_pmt.h',
-            'formats/mp2t/ts_section_psi.cc',
-            'formats/mp2t/ts_section_psi.h',
             'formats/mp4/aac.cc',
             'formats/mp4/aac.h',
             'formats/mp4/avc.cc',
@@ -1099,10 +1093,37 @@
             'formats/mpeg/mpeg_audio_stream_parser_base.h',
           ],
         }],
-        ['proprietary_codecs==1 and enable_hevc_demuxing==1', {
-          'defines': [
-            'ENABLE_HEVC_DEMUXING'
+        ['proprietary_codecs==1 and enable_mse_mpeg2ts_stream_parser==1', {
+          'sources': [
+            'formats/mp2t/es_adapter_video.cc',
+            'formats/mp2t/es_adapter_video.h',
+            'formats/mp2t/es_parser.cc',
+            'formats/mp2t/es_parser.h',
+            'formats/mp2t/es_parser_adts.cc',
+            'formats/mp2t/es_parser_adts.h',
+            'formats/mp2t/es_parser_h264.cc',
+            'formats/mp2t/es_parser_h264.h',
+            'formats/mp2t/es_parser_mpeg1audio.cc',
+            'formats/mp2t/es_parser_mpeg1audio.h',
+            'formats/mp2t/mp2t_common.h',
+            'formats/mp2t/mp2t_stream_parser.cc',
+            'formats/mp2t/mp2t_stream_parser.h',
+            'formats/mp2t/timestamp_unroller.cc',
+            'formats/mp2t/timestamp_unroller.h',
+            'formats/mp2t/ts_packet.cc',
+            'formats/mp2t/ts_packet.h',
+            'formats/mp2t/ts_section.h',
+            'formats/mp2t/ts_section_pat.cc',
+            'formats/mp2t/ts_section_pat.h',
+            'formats/mp2t/ts_section_pes.cc',
+            'formats/mp2t/ts_section_pes.h',
+            'formats/mp2t/ts_section_pmt.cc',
+            'formats/mp2t/ts_section_pmt.h',
+            'formats/mp2t/ts_section_psi.cc',
+            'formats/mp2t/ts_section_psi.h',
           ],
+        }],
+        ['proprietary_codecs==1 and enable_hevc_demuxing==1', {
           'sources': [
             'filters/h265_parser.cc',
             'filters/h265_parser.h',
@@ -1178,6 +1199,8 @@
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../third_party/libwebm/libwebm.gyp:libwebm',
+        '../third_party/libyuv/libyuv.gyp:libyuv',
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -1186,12 +1209,12 @@
       ],
       'sources': [
         'base/android/access_unit_queue_unittest.cc',
-        'base/android/media_codec_bridge_unittest.cc',
         'base/android/media_codec_decoder_unittest.cc',
         'base/android/media_codec_player_unittest.cc',
         'base/android/media_drm_bridge_unittest.cc',
         'base/android/media_player_bridge_unittest.cc',
         'base/android/media_source_player_unittest.cc',
+        'base/android/sdk_media_codec_bridge_unittest.cc',
         'base/android/test_data_factory.cc',
         'base/android/test_data_factory.h',
         'base/android/test_statistics.h',
@@ -1258,7 +1281,10 @@
         'capture/content/video_capture_oracle_unittest.cc',
         'capture/video/fake_video_capture_device_unittest.cc',
         'capture/video/video_capture_device_unittest.cc',
+        'capture/webm_muxer_unittest.cc',
         'cdm/aes_decryptor_unittest.cc',
+        'cdm/external_clear_key_test_helper.cc',
+        'cdm/external_clear_key_test_helper.h',
         'cdm/json_web_key_unittest.cc',
         'ffmpeg/ffmpeg_common_unittest.cc',
         'filters/audio_clock_unittest.cc',
@@ -1325,9 +1351,6 @@
           ],
         }],
         ['proprietary_codecs==1 and enable_hevc_demuxing==1', {
-          'defines': [
-            'ENABLE_HEVC_DEMUXING'
-          ],
           'sources': [
             'filters/h265_parser_unittest.cc',
           ],
@@ -1347,26 +1370,22 @@
           ],
         }],
         # Even if FFmpeg is enabled on Android we don't want these.
-        # TODO(watk): Refactor tests that could be made to run on Android.
+        # TODO(watk): Refactor tests that could be made to run on Android. See
+        # http://crbug.com/570762
         ['media_use_ffmpeg==0 or OS=="android"', {
           'sources!': [
             'base/audio_video_metadata_extractor_unittest.cc',
-            'base/container_names_unittest.cc',
             'base/media_file_checker_unittest.cc',
-            'filters/audio_file_reader_unittest.cc',
-            'filters/blocking_url_protocol_unittest.cc',
             'filters/ffmpeg_video_decoder_unittest.cc',
-            'filters/in_memory_url_protocol_unittest.cc',
             'test/pipeline_integration_test.cc',
             'test/pipeline_integration_test_base.cc',
-          ],
-        }],
-        ['media_use_libwebm==1', {
-          'dependencies': [
-            '<(DEPTH)/third_party/libwebm/libwebm.gyp:libwebm',
-          ],
-          'sources': [
-            'capture/webm_muxer_unittest.cc',
+
+            # These tests are confused by Android always having proprietary
+            # codecs enabled, but ffmpeg_branding=Chromium. These should be
+            # fixed, see http://crbug.com/570762.
+            'filters/audio_decoder_unittest.cc',
+            'filters/audio_file_reader_unittest.cc',
+            'filters/ffmpeg_demuxer_unittest.cc',
           ],
         }],
 
@@ -1416,14 +1435,6 @@
             'filters/h264_to_annex_b_bitstream_converter_unittest.cc',
             'formats/common/stream_parser_test_base.cc',
             'formats/common/stream_parser_test_base.h',
-            'formats/mp2t/es_adapter_video_unittest.cc',
-            'formats/mp2t/es_parser_adts_unittest.cc',
-            'formats/mp2t/es_parser_h264_unittest.cc',
-            'formats/mp2t/es_parser_mpeg1audio_unittest.cc',
-            'formats/mp2t/es_parser_test_base.cc',
-            'formats/mp2t/es_parser_test_base.h',
-            'formats/mp2t/mp2t_stream_parser_unittest.cc',
-            'formats/mp2t/timestamp_unroller_unittest.cc',
             'formats/mp4/aac_unittest.cc',
             'formats/mp4/avc_unittest.cc',
             'formats/mp4/box_reader_unittest.cc',
@@ -1433,6 +1444,18 @@
             'formats/mp4/track_run_iterator_unittest.cc',
             'formats/mpeg/adts_stream_parser_unittest.cc',
             'formats/mpeg/mpeg1_audio_stream_parser_unittest.cc',
+          ],
+        }],
+        ['proprietary_codecs==1 and enable_mse_mpeg2ts_stream_parser==1', {
+          'sources': [
+            'formats/mp2t/es_adapter_video_unittest.cc',
+            'formats/mp2t/es_parser_adts_unittest.cc',
+            'formats/mp2t/es_parser_h264_unittest.cc',
+            'formats/mp2t/es_parser_mpeg1audio_unittest.cc',
+            'formats/mp2t/es_parser_test_base.cc',
+            'formats/mp2t/es_parser_test_base.h',
+            'formats/mp2t/mp2t_stream_parser_unittest.cc',
+            'formats/mp2t/timestamp_unroller_unittest.cc',
           ],
         }],
         ['OS=="mac"', {
@@ -1481,6 +1504,15 @@
             'USE_NEON'
           ],
         }],
+        ['OS=="android" or media_use_ffmpeg==0', {
+          # TODO(watk): Refactor tests that could be made to run on Android.
+          # See http://crbug.com/570762
+          'sources!': [
+            'base/demuxer_perftest.cc',
+            'test/pipeline_integration_perftest.cc',
+            'test/pipeline_integration_test_base.cc',
+          ],
+        }],
         ['OS=="android"', {
           'dependencies': [
             '../testing/android/native_test.gyp:native_test_native_code',
@@ -1490,12 +1522,6 @@
         ['media_use_ffmpeg==1', {
           'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-          ],
-        }, {  # media_use_ffmpeg==0
-          'sources!': [
-            'base/demuxer_perftest.cc',
-            'test/pipeline_integration_perftest.cc',
-            'test/pipeline_integration_test_base.cc',
           ],
         }],
       ],
@@ -1516,6 +1542,7 @@
           'audio/audio_output_proxy_unittest.cc',
           'audio/audio_parameters_unittest.cc',
           'audio/audio_power_monitor_unittest.cc',
+          'audio/audio_streams_tracker_unittest.cc',
           'audio/fake_audio_worker_unittest.cc',
           'audio/point_unittest.cc',
           'audio/simple_sources_unittest.cc',
@@ -1540,7 +1567,7 @@
               'audio/mac/audio_low_latency_input_mac_unittest.cc',
             ],
           }],
-          ['chromeos==1', {
+          ['chromeos==1 or chromecast==1', {
             'sources': [
               'audio/sounds/audio_stream_handler_unittest.cc',
               'audio/sounds/sounds_manager_unittest.cc',
@@ -1818,10 +1845,10 @@
             'base/android/java/src/org/chromium/media/AudioManagerAndroid.java',
             'base/android/java/src/org/chromium/media/AudioRecordInput.java',
             'base/android/java/src/org/chromium/media/MediaCodecBridge.java',
+            'base/android/java/src/org/chromium/media/MediaCodecUtil.java',
             'base/android/java/src/org/chromium/media/MediaDrmBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerListener.java',
-            'base/android/java/src/org/chromium/media/WebAudioMediaCodecBridge.java',
           ],
           'variables': {
             'jni_gen_package': 'media',
@@ -1867,6 +1894,8 @@
             'base/android/media_codec_player.h',
             'base/android/media_codec_video_decoder.cc',
             'base/android/media_codec_video_decoder.h',
+            'base/android/media_codec_util.cc',
+            'base/android/media_codec_util.h',
             'base/android/media_common_android.h',
             'base/android/media_decoder_job.cc',
             'base/android/media_decoder_job.h',
@@ -1892,11 +1921,21 @@
             'base/android/media_task_runner.cc',
             'base/android/media_task_runner.h',
             'base/android/media_url_interceptor.h',
+            'base/android/provision_fetcher.h',
+            'base/android/sdk_media_codec_bridge.cc',
+            'base/android/sdk_media_codec_bridge.h',
             'base/android/video_decoder_job.cc',
             'base/android/video_decoder_job.h',
-            'base/android/webaudio_media_codec_bridge.cc',
-            'base/android/webaudio_media_codec_bridge.h',
-            'base/android/webaudio_media_codec_info.h',
+          ],
+          'conditions': [
+            # Only 64 bit builds are using android-21 NDK library, check common.gypi
+            ['target_arch=="arm64" or target_arch=="x64" or target_arch=="mips64el"', {
+              'sources': [
+                'base/android/ndk_media_codec_bridge.cc',
+                'base/android/ndk_media_codec_bridge.h',
+                'base/android/ndk_media_codec_wrapper.cc',
+              ],
+            }],
           ],
           'dependencies': [
             '../base/base.gyp:base',
@@ -1971,7 +2010,9 @@
         ],
       ],
     }],
-    ['media_use_ffmpeg==1', {
+    # TODO(watk): Refactor tests that could be made to run on Android. See
+    # http://crbug.com/570762
+    ['media_use_ffmpeg==1 and OS!="android"', {
       'targets': [
         {
           # GN version: //media:ffmpeg_regression_tests

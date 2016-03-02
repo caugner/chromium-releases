@@ -33,9 +33,6 @@ ClipboardApiTest.HostedAppNoPermission
 # http://crbug.com/475172
 BasicExtensionSettingsWebUITest.testUninstall
 
-# https://crbug.com/501106
-CrElementsBrowserTest.CrElementsTest
-
 # https://crbug.com/504192
 NaClBrowserTestGLibc.ExitStatus0
 NaClBrowserTestGLibc.ExitStatusNeg2
@@ -52,6 +49,7 @@ PluginPowerSaverBrowserTest.LargeCrossOriginObscured
 # The test takes too long.
 SmartSessionRestoreMRUTest.PRE_CorrectLoadingOrder
 SmartSessionRestoreMRUTest.CorrectLoadingOrder
+SmartSessionRestoreTest.PRE_CorrectLoadingOrder
 
 # https://crbug.com/516368
 PushMessagingBrowserTest.PushEventSuccess
@@ -75,9 +73,33 @@ MaterialPDFExtensionTest.Bookmark
 MaterialPDFExtensionTest.WhitespaceTitle
 MaterialPDFExtensionTest.ZoomManager
 PDFExtensionTest.WhitespaceTitle
+PDFExtensionTest.ToolbarManager
 
 # https://crbug.com/530729
 SiteDetailsBrowserTest.ManyCrossSiteIframes
 
+# https://crbug.com/534718
+CrSettingsBrowserTest.CrSettingsTest
+
 # https://crbug.com/550653
 CrashRecoveryBrowserTest.LoadInNewTab
+
+# https://crbug.com/561085
+DistillablePageUtilsBrowserTestAdaboost.TestDelegate
+
+# https://crbug.com/561088
+CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled.ExtensionManagerSplitSectionsTest
+CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled.ExtensionManagerAppSectionVisibilityTest
+
+# https://crbug.com/562434
+AppearanceSettingsBrowserTest.uiTests
+
+# https://crbug.com/571263
+DistillablePageUtilsBrowserTestAlways.TestDelegate
+DistillablePageUtilsBrowserTestOG.TestDelegate
+
+# https://crbug.com/577850
+LoginPromptBrowserTest.ShouldReplaceExistingInterstitialWhenNavigated
+
+# https://crbug.com/577853
+OnStartupSettingsBrowserTest.uiTests

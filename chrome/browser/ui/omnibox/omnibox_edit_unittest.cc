@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -70,7 +73,9 @@ class TestingOmniboxView : public OmniboxView {
   }
   void OnRevertTemporaryText() override {}
   void OnBeforePossibleChange() override {}
-  bool OnAfterPossibleChange() override { return false; }
+  bool OnAfterPossibleChange(bool allow_keyword_ui_change) override {
+    return false;
+  }
   gfx::NativeView GetNativeView() const override { return NULL; }
   gfx::NativeView GetRelativeWindowForPopup() const override { return NULL; }
   void SetGrayTextAutocompletion(const base::string16& input) override {}

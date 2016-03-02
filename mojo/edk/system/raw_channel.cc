@@ -4,9 +4,11 @@
 
 #include "mojo/edk/system/raw_channel.h"
 
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
@@ -200,12 +202,16 @@ void RawChannel::Init(Delegate* delegate) {
 }
 
 void RawChannel::EnsureLazyInitialized() {
-  if (!initialized_) {
-    internal::g_io_thread_task_runner->PostTask(
-        FROM_HERE,
-        base::Bind(&RawChannel::LockAndCallLazyInitialize,
-        weak_ptr_factory_.GetWeakPtr()));
+  {
+    base::AutoLock locker(write_lock_);
+    if (initialized_)
+      return;
   }
+
+  internal::g_io_thread_task_runner->PostTask(
+      FROM_HERE,
+      base::Bind(&RawChannel::LockAndCallLazyInitialize,
+      weak_ptr_factory_.GetWeakPtr()));
 }
 
 void RawChannel::LockAndCallLazyInitialize() {
@@ -221,7 +227,7 @@ void RawChannel::LazyInitialize() {
   if (initialized_)
     return;
   initialized_ = true;
-  internal::ChannelStarted();
+  base::MessageLoop::current()->AddDestructionObserver(this);
 
   OnInit();
 
@@ -263,9 +269,9 @@ void RawChannel::Shutdown() {
   // Reset the delegate so that it won't receive further calls.
   delegate_ = nullptr;
   if (calling_delegate_) {
-    base::MessageLoop::current()->PostTask(
-            FROM_HERE,
-            base::Bind(&RawChannel::Shutdown, weak_ptr_factory_.GetWeakPtr()));
+    internal::g_io_thread_task_runner->PostTask(
+        FROM_HERE,
+        base::Bind(&RawChannel::Shutdown, weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
@@ -283,11 +289,11 @@ void RawChannel::Shutdown() {
     {
       base::AutoLock read_locker(read_lock_);
       base::AutoLock locker(write_lock_);
-      OnShutdownNoLock(read_buffer_.Pass(), write_buffer_.Pass());
+      OnShutdownNoLock(std::move(read_buffer_), std::move(write_buffer_));
+      if (initialized_)
+        base::MessageLoop::current()->RemoveDestructionObserver(this);
     }
 
-    if (initialized_)
-      internal::ChannelShutdown();
     delete this;
     return;
   }
@@ -334,7 +340,7 @@ bool RawChannel::WriteMessage(scoped_ptr<MessageInTransit> message) {
     return false;
 
   bool queue_was_empty = write_buffer_->message_queue_.IsEmpty();
-  EnqueueMessageNoLock(message.Pass());
+  EnqueueMessageNoLock(std::move(message));
   if (queue_was_empty && write_ready_)
     return SendQueuedMessagesNoLock();
 
@@ -397,7 +403,7 @@ void RawChannel::SetSerializedData(
       scoped_ptr<MessageInTransit> message(new MessageInTransit(
           MessageInTransit::Type::RAW_MESSAGE, message_num_bytes,
           static_cast<const char*>(serialized_write_buffer) + offset));
-      write_buffer_->message_queue_.AddMessage(message.Pass());
+      write_buffer_->message_queue_.AddMessage(std::move(message));
       offset += message_num_bytes;
     }
   }
@@ -525,7 +531,7 @@ void RawChannel::SerializeWriteBuffer(
 
 void RawChannel::EnqueueMessageNoLock(scoped_ptr<MessageInTransit> message) {
   write_lock_.AssertAcquired();
-  write_buffer_->message_queue_.AddMessage(message.Pass());
+  write_buffer_->message_queue_.AddMessage(std::move(message));
 }
 
 bool RawChannel::OnReadMessageForRawChannel(
@@ -564,7 +570,7 @@ void RawChannel::CallOnError(Delegate::Error error) {
   } else {
     // We depend on delegate to delete since it could be waiting to call
     // ReleaseHandle.
-    base::MessageLoop::current()->PostTask(
+    internal::g_io_thread_task_runner->PostTask(
         FROM_HERE,
         base::Bind(&RawChannel::Shutdown, weak_ptr_factory_.GetWeakPtr()));
   }
@@ -588,7 +594,7 @@ bool RawChannel::OnWriteCompletedInternalNoLock(IOResult io_result,
       if (!delegate_) {
         // Shutdown must have been called and we were waiting to flush all
         // pending writes. Now we're done.
-        base::MessageLoop::current()->PostTask(
+        internal::g_io_thread_task_runner->PostTask(
             FROM_HERE,
             base::Bind(&RawChannel::Shutdown, weak_ptr_factory_.GetWeakPtr()));
       }
@@ -643,7 +649,8 @@ void RawChannel::DispatchMessages(bool* did_dispatch_message,
       return;  // |this| may have been destroyed in |CallOnError()|.
     }
 
-    if (message_view.type() != MessageInTransit::Type::MESSAGE) {
+    if (message_view.type() != MessageInTransit::Type::MESSAGE &&
+        message_view.type() != MessageInTransit::Type::QUIT_MESSAGE) {
       if (!OnReadMessageForRawChannel(message_view)) {
         CallOnError(Delegate::ERROR_READ_BAD_MESSAGE);
         *stop_dispatching = true;
@@ -659,9 +666,8 @@ void RawChannel::DispatchMessages(bool* did_dispatch_message,
             &platform_handle_table);
 
         if (num_platform_handles > 0) {
-          platform_handles =
-              GetReadPlatformHandles(num_platform_handles,
-                                      platform_handle_table).Pass();
+          platform_handles = GetReadPlatformHandles(num_platform_handles,
+                                                    platform_handle_table);
           if (!platform_handles) {
             LOG(ERROR) << "Invalid number of platform handles received";
             CallOnError(Delegate::ERROR_READ_BAD_MESSAGE);
@@ -676,7 +682,7 @@ void RawChannel::DispatchMessages(bool* did_dispatch_message,
       if (delegate_) {
         DCHECK(!calling_delegate_);
         calling_delegate_ = true;
-        delegate_->OnReadMessage(message_view, platform_handles.Pass());
+        delegate_->OnReadMessage(message_view, std::move(platform_handles));
         calling_delegate_ = false;
       }
     }
@@ -715,8 +721,18 @@ void RawChannel::UpdateWriteBuffer(size_t platform_handles_written,
 }
 
 void RawChannel::CallOnReadCompleted(IOResult io_result, size_t bytes_read) {
-  base::AutoLock locker(read_lock());
+  base::AutoLock locker(read_lock_);
   OnReadCompletedNoLock(io_result, bytes_read);
+}
+
+void RawChannel::WillDestroyCurrentMessageLoop() {
+  {
+    base::AutoLock locker(read_lock_);
+    OnReadCompletedNoLock(IO_FAILED_SHUTDOWN, 0);
+  }
+  // The PostTask inside Shutdown() will never be called, so manually call it
+  // here to avoid leaks in LSAN builds.
+  Shutdown();
 }
 
 }  // namespace edk

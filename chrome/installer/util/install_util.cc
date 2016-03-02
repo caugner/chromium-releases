@@ -17,6 +17,7 @@
 #include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
@@ -26,7 +27,6 @@
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "base/win/metro.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
@@ -88,8 +88,8 @@ const wchar_t* const kStages[] = {
   kStageUninstallingChromeFrame,
 };
 
-COMPILE_ASSERT(installer::NUM_STAGES == arraysize(kStages),
-               kStages_disagrees_with_Stage_comma_they_must_match_bang);
+static_assert(installer::NUM_STAGES == arraysize(kStages),
+              "kStages disagrees with Stage; they must match!");
 
 // Creates a zero-sized non-decorated foreground window that doesn't appear
 // in the taskbar. This is used as a parent window for calls to ShellExecuteEx
@@ -129,13 +129,6 @@ HWND CreateUACForegroundWindow() {
 
 }  // namespace
 
-bool InstallUtil::ShouldInstallMetroProperties() {
-  // Install Metro properties on Windows versions that Chrome supports as well
-  // as on any version prior to Win8 to ease in-place upgrades to Win8.
-  return base::win::IsChromeMetroSupported() ||
-         base::win::GetVersion() < base::win::VERSION_WIN8;
-}
-
 base::string16 InstallUtil::GetActiveSetupPath(BrowserDistribution* dist) {
   static const wchar_t kInstalledComponentsPath[] =
       L"Software\\Microsoft\\Active Setup\\Installed Components\\";
@@ -161,11 +154,8 @@ void InstallUtil::TriggerActiveSetupCommand() {
   // and the time setup.exe checks for it.
   cmd.AppendSwitch(installer::switches::kForceConfigureUserSettings);
 
-  base::LaunchOptions launch_options;
-  if (base::win::IsMetroProcess())
-    launch_options.force_breakaway_from_job_ = true;
   base::Process process =
-      base::LaunchProcess(cmd.GetCommandLineString(), launch_options);
+      base::LaunchProcess(cmd.GetCommandLineString(), base::LaunchOptions());
   if (!process.IsValid())
     PLOG(ERROR) << cmd.GetCommandLineString();
 }

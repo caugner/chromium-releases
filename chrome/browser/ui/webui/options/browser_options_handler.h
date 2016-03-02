@@ -7,14 +7,15 @@
 
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_member.h"
 #include "base/scoped_observer.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/shell_integration.h"
@@ -351,7 +352,7 @@ class BrowserOptionsHandler
   void SetupExtensionControlledIndicators();
 
   // Setup the value and the disabled property for metrics reporting for (except
-  // CrOS and Android).
+  // Android).
   void SetupMetricsReportingCheckbox();
 
   // Called when the MetricsReportingEnabled checkbox values are changed.
@@ -359,10 +360,12 @@ class BrowserOptionsHandler
   void HandleMetricsReportingChange(const base::ListValue* args);
 
   // Notifies the result of MetricsReportingEnabled change to Javascript layer.
-  void MetricsReportingChangeCallback(bool enabled);
+  void NotifyUIOfMetricsReportingChange(bool enabled);
 
   // Calls a Javascript function to set the state of MetricsReporting checkbox.
-  void SetMetricsReportingCheckbox(bool checked, bool disabled);
+  void SetMetricsReportingCheckbox(bool checked,
+                                   bool policy_managed,
+                                   bool owner_managed);
 
 #if defined(OS_CHROMEOS)
   // Setup the accessibility features for ChromeOS.
@@ -372,6 +375,10 @@ class BrowserOptionsHandler
   // Returns a newly created dictionary with a number of properties that
   // correspond to the status of sync.
   scoped_ptr<base::DictionaryValue> GetSyncStateDictionary();
+
+  // Checks whether on Chrome OS the current user is the device owner. Returns
+  // true on other platforms.
+  bool IsDeviceOwnerProfile();
 
   scoped_refptr<ShellIntegration::DefaultBrowserWorker> default_browser_worker_;
 

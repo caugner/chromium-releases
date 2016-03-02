@@ -6,9 +6,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "components/sessions/ios/ios_serialized_navigation_builder.h"
-#include "components/sync_driver/glue/synced_window_delegate.h"
-#include "components/sync_driver/sessions/synced_window_delegates_getter.h"
 #include "components/sync_sessions/sync_sessions_client.h"
+#include "components/sync_sessions/synced_window_delegate.h"
+#include "components/sync_sessions/synced_window_delegates_getter.h"
 #include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
 #include "ios/web/public/favicon_status.h"
 #include "ios/web/public/navigation_item.h"
@@ -53,15 +53,15 @@ std::string IOSChromeSyncedTabDelegate::GetExtensionAppId() const {
 }
 
 bool IOSChromeSyncedTabDelegate::IsInitialBlankNavigation() const {
-  return web_state_->GetNavigationManager()->GetEntryCount() == 0;
+  return web_state_->GetNavigationManager()->GetItemCount() == 0;
 }
 
 int IOSChromeSyncedTabDelegate::GetCurrentEntryIndex() const {
-  return web_state_->GetNavigationManager()->GetCurrentEntryIndex();
+  return web_state_->GetNavigationManager()->GetCurrentItemIndex();
 }
 
 int IOSChromeSyncedTabDelegate::GetEntryCount() const {
-  return web_state_->GetNavigationManager()->GetEntryCount();
+  return web_state_->GetNavigationManager()->GetItemCount();
 }
 
 GURL IOSChromeSyncedTabDelegate::GetVirtualURLAtIndex(int i) const {

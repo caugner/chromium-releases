@@ -20,7 +20,6 @@ import android.os.Process;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceFragment.OnPreferenceStartFragmentCallback;
-import android.support.v4.view.ViewCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
@@ -33,6 +32,7 @@ import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.profiles.Profile;
 
 /**
@@ -71,7 +71,7 @@ public class Preferences extends AppCompatActivity implements
         // killed, or for tests. This should happen before super.onCreate() because it might
         // recreate a fragment, and a fragment might depend on the native library.
         try {
-            ((ChromeApplication) getApplication()).startBrowserProcessesAndLoadLibrariesSync(true);
+            ChromeBrowserInitializer.getInstance(this).handleSynchronousStartup();
         } catch (ProcessInitException e) {
             Log.e(TAG, "Failed to start browser process.", e);
             // This can only ever happen, if at all, when the activity is started from an Android
@@ -91,9 +91,6 @@ public class Preferences extends AppCompatActivity implements
         boolean displayHomeAsUp = getIntent().getBooleanExtra(EXTRA_DISPLAY_HOME_AS_UP, true);
 
         if (displayHomeAsUp) getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-
-        // This must be called before the fragment transaction below.
-        workAroundPlatformBugs();
 
         // If savedInstanceState is non-null, then the activity is being
         // recreated and super.onCreate() has already recreated the fragment.
@@ -235,21 +232,5 @@ public class Preferences extends AppCompatActivity implements
             // Something terribly wrong has happened.
             throw new RuntimeException(ex);
         }
-    }
-
-    private void workAroundPlatformBugs() {
-        // Workaround for an Android bug where the fragment's view may not be attached to the view
-        // hierarchy. http://b/18525402
-        getSupportActionBar();
-
-        // Workaround for HTC One S bug which causes all the text in settings to turn white.
-        // This must be called after setContentView().
-        // https://code.google.com/p/android/issues/detail?id=78819
-        ViewCompat.postOnAnimation(getWindow().getDecorView(), new Runnable() {
-            @Override
-            public void run() {
-                setTheme(R.style.PreferencesTheme);
-            }
-        });
     }
 }

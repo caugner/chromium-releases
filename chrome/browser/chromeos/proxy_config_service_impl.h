@@ -7,8 +7,8 @@
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "components/onc/onc_constants.h"
@@ -52,6 +52,7 @@ class ProxyConfigServiceImpl : public PrefProxyConfigTrackerImpl,
 
   // NetworkStateHandlerObserver implementation.
   void DefaultNetworkChanged(const NetworkState* network) override;
+  void OnShuttingDown() override;
 
  protected:
   friend class UIProxyConfigService;

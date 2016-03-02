@@ -5,12 +5,14 @@
 #ifndef MOJO_SHELL_SHELL_APPLICATION_DELEGATE_H_
 #define MOJO_SHELL_SHELL_APPLICATION_DELEGATE_H_
 
-#include "mojo/application/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+
+#include <stdint.h>
 
 #include "base/macros.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
-#include "mojo/shell/application_manager.mojom.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
+#include "mojo/shell/public/interfaces/application_manager.mojom.h"
 
 namespace mojo {
 namespace shell {
@@ -35,9 +37,14 @@ class ShellApplicationDelegate
       InterfaceRequest<mojom::ApplicationManager> request) override;
 
   // Overridden from mojom::ApplicationManager:
-  void CreateInstanceForHandle(ScopedHandle channel,
-                               const String& url,
-                               const String& qualifier) override;
+  void CreateInstanceForHandle(
+      ScopedHandle channel,
+      const String& url,
+      CapabilityFilterPtr filter,
+      InterfaceRequest<mojom::PIDReceiver> pid_receiver) override;
+  void RegisterProcessWithBroker(uint32_t pid, ScopedHandle pipe) override;
+  void AddListener(
+      mojom::ApplicationManagerListenerPtr listener) override;
 
   mojo::shell::ApplicationManager* manager_;
 

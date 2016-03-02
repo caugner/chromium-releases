@@ -113,7 +113,7 @@ void TracingHandler::OnTraceDataCollected(const std::string& trace_fragment) {
   message.reserve(message.size() + trace_fragment.size() + messageSuffixSize);
   message += trace_fragment;
   message += "] } }";
-  client_->SendRawMessage(message);
+  client_->SendRawNotification(message);
 }
 
 void TracingHandler::OnTraceComplete() {
@@ -224,7 +224,7 @@ Response TracingHandler::RequestMemoryDump(DevToolsCommandId command_id) {
 }
 
 void TracingHandler::OnMemoryDumpFinished(DevToolsCommandId command_id,
-                                          uint64 dump_guid,
+                                          uint64_t dump_guid,
                                           bool success) {
   client_->SendRequestMemoryDumpResponse(
       command_id,

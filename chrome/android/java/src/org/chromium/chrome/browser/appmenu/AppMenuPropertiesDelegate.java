@@ -14,7 +14,8 @@ import org.chromium.chrome.browser.ChromeBrowserProviderClient;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmark.BookmarksBridge;
-import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
+import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.share.ShareHelper;
@@ -110,16 +111,17 @@ public class AppMenuPropertiesDelegate {
                 }
             }
 
+            menu.findItem(R.id.update_menu_id).setVisible(
+                    UpdateMenuItemHelper.getInstance().shouldShowMenuItem(mActivity));
+
             // Hide "Recent tabs" in incognito mode or when sync can't be enabled.
             MenuItem recentTabsMenuItem = menu.findItem(R.id.recent_tabs_menu_id);
             recentTabsMenuItem.setVisible(!isIncognito && FeatureUtilities.canAllowSync(mActivity));
             recentTabsMenuItem.setTitle(R.string.menu_recent_tabs);
 
-            if (OfflinePageBridge.isEnabled()) {
-                MenuItem allBookmarksMenuItem = menu.findItem(R.id.all_bookmarks_menu_id);
-                allBookmarksMenuItem.setTitle(mActivity.getString(
-                        R.string.menu_bookmarks_offline_pages));
-            }
+            MenuItem allBookmarksMenuItem = menu.findItem(R.id.all_bookmarks_menu_id);
+            allBookmarksMenuItem.setTitle(
+                    mActivity.getString(OfflinePageUtils.getStringId(R.string.menu_bookmarks)));
 
             // Don't allow "chrome://" pages to be shared.
             menu.findItem(R.id.share_row_menu_id).setVisible(!isChromeScheme);

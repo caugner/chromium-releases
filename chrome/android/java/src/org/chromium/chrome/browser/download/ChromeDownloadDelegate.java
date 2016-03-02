@@ -54,7 +54,7 @@ import java.io.File;
  */
 public class ChromeDownloadDelegate
         implements ContentViewDownloadDelegate, InfoBarListeners.Confirm {
-    private static final String TAG = "cr.Download";
+    private static final String TAG = "Download";
 
     // The application context.
     private final Context mContext;
@@ -67,6 +67,7 @@ public class ChromeDownloadDelegate
     @Override
     public void onConfirmInfoBarButtonClicked(ConfirmInfoBar infoBar, boolean confirm) {
         assert mTab != null;
+        if (mPendingRequest == null) return;
         if (mPendingRequest.hasDownloadId()) {
             nativeDangerousDownloadValidated(mTab, mPendingRequest.getDownloadId(), confirm);
             if (confirm) {
@@ -467,6 +468,7 @@ public class ChromeDownloadDelegate
     private void enqueueDownloadManagerRequest(final DownloadInfo info) {
         DownloadManagerService.getDownloadManagerService(
                 mContext.getApplicationContext()).enqueueDownloadManagerRequest(info, true);
+        closeBlankTab();
     }
 
     /**

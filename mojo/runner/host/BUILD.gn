@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/generate_mojo_shell_assets_list.gni")
 import("//mojo/public/mojo_application.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/test.gni")
@@ -66,8 +65,8 @@ source_set("lib") {
     "//mojo/gles2",
     "//mojo/message_pump",
     "//mojo/platform_handle:platform_handle_impl",
-    "//mojo/runner/child:interfaces",
     "//mojo/runner:init",
+    "//mojo/runner/child:interfaces",
     "//mojo/shell",
     "//third_party/mojo/src/mojo/edk/system",
   ]

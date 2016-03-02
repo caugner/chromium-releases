@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "build/build_config.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "media/audio/audio_output_device.h"
 #include "media/base/audio_hardware_config.h"
@@ -83,9 +84,9 @@ media::AudioRendererMixer* AudioRendererMixerManager::GetMixer(
   media::AudioParameters hardware_params =
       sink->GetOutputDevice()->GetOutputParameters();
 
-// On ChromeOS we can rely on the playback device to handle resampling, so
-// don't waste cycles on it here.
-#if defined(OS_CHROMEOS)
+// On ChromeOS and Android we can rely on the playback device to handle
+// resampling, so don't waste cycles on it here.
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
   int sample_rate = params.sample_rate();
 #else
   int sample_rate =
@@ -113,7 +114,7 @@ media::AudioRendererMixer* AudioRendererMixerManager::GetMixer(
     output_params = params;
 
   media::AudioRendererMixer* mixer =
-      new media::AudioRendererMixer(params, output_params, sink);
+      new media::AudioRendererMixer(output_params, sink);
   AudioRendererMixerReference mixer_reference = { mixer, 1 };
   mixers_[key] = mixer_reference;
   return mixer;

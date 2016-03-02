@@ -11,7 +11,9 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxyUma;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 
 /**
  * Each time a tab loads with Lo-Fi this controller saves that tab id and title to the stack of
@@ -26,6 +28,7 @@ public class LoFiBarPopupController implements SnackbarManager.SnackbarControlle
     private final Context mContext;
     private final boolean mDisabled;
     private Tab mTab;
+    private boolean mLoFiPopupShownForPageLoad = false;
 
     /**
      * Creates an instance of a {@link LoFiBarPopupController}.
@@ -39,16 +42,63 @@ public class LoFiBarPopupController implements SnackbarManager.SnackbarControlle
     }
 
     /**
+     * Called on new page loads to indicate that a Lo-Fi snackbar has not been shown yet.
+     */
+    public void resetLoFiPopupShownForPageLoad() {
+        mLoFiPopupShownForPageLoad = false;
+    }
+
+    /**
+     * If a Lo-Fi snackbar has not been shown for the current page load, creates a Lo-Fi snackbar
+     * for the given tab and shows it. If the tab is hidden, waits until it is visible to show the
+     * snackbar.
+     *
+     * @param tab The tab to show the snackbar on.
+     * @param isPreview Whether the snackbar should have the Lo-Fi preview message.
+     */
+    public void maybeCreateLoFiBar(Tab tab, final boolean isPreview) {
+        if (mLoFiPopupShownForPageLoad) return;
+        mLoFiPopupShownForPageLoad = true;
+        if (tab.isHidden()) {
+            TabObserver tabObserver = new EmptyTabObserver() {
+                @Override
+                public void onShown(Tab tab) {
+                    showLoFiBar(tab, isPreview);
+                    tab.removeObserver(this);
+                }
+
+                @Override
+                public void onHidden(Tab tab) {
+                    dismissLoFiBar();
+                }
+
+                @Override
+                public void onDestroyed(Tab tab) {
+                    dismissLoFiBar();
+                }
+            };
+            tab.addObserver(tabObserver);
+            return;
+        }
+        showLoFiBar(tab, isPreview);
+    }
+
+    /**
      * @param tab The tab. Saved to reload the page.
      */
-    public void showLoFiBar(Tab tab) {
+    private void showLoFiBar(Tab tab, boolean isPreview) {
         if (mDisabled) return;
         mTab = tab;
-        mSnackbarManager.showSnackbar(Snackbar.make(
-                mContext.getString(R.string.data_reduction_lo_fi_snackbar_message), this)
-                .setAction(mContext.getString(R.string.data_reduction_lo_fi_snackbar_action),
-                        tab.getId())
-                .setDuration(DEFAULT_LO_FI_SNACKBAR_SHOW_DURATION_MS));
+        String message = mContext
+                .getString(isPreview ? R.string.data_reduction_lo_fi_preview_snackbar_message
+                        : R.string.data_reduction_lo_fi_snackbar_message);
+        String buttonText = mContext
+                .getString(isPreview ? R.string.data_reduction_lo_fi_preview_snackbar_action
+                        : R.string.data_reduction_lo_fi_snackbar_action);
+        mSnackbarManager.showSnackbar(Snackbar.make(message, this)
+                .setAction(buttonText, tab.getId())
+                .setDuration(DEFAULT_LO_FI_SNACKBAR_SHOW_DURATION_MS)
+                .setForceDisplay());
         DataReductionProxySettings.getInstance().incrementLoFiSnackbarShown();
         DataReductionProxyUma.dataReductionProxyLoFiUIAction(
                 DataReductionProxyUma.ACTION_LOAD_IMAGES_SNACKBAR_SHOWN);
@@ -57,7 +107,7 @@ public class LoFiBarPopupController implements SnackbarManager.SnackbarControlle
     /**
      * Dismisses the snackbar.
      */
-    public void dismissLoFiBar() {
+    private void dismissLoFiBar() {
         if (mSnackbarManager.isShowing()) mSnackbarManager.dismissSnackbars(this);
     }
 

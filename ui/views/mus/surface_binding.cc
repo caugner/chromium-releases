@@ -4,10 +4,14 @@
 
 #include "ui/views/mus/surface_binding.h"
 
+#include <stdint.h>
+
 #include <map>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/threading/thread_local.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface.h"
@@ -19,11 +23,12 @@
 #include "components/mus/public/cpp/window.h"
 #include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/mus/public/interfaces/gpu.mojom.h"
-#include "mojo/application/public/cpp/connect.h"
-#include "mojo/application/public/interfaces/shell.mojom.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/connect.h"
+#include "mojo/shell/public/interfaces/shell.mojom.h"
 #include "ui/views/mus/window_tree_host_mus.h"
 
 namespace views {
@@ -127,8 +132,9 @@ void SurfaceBinding::PerConnectionState::Init() {
   mojo::ServiceProviderPtr service_provider;
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From("mojo:mus");
-  shell_->ConnectToApplication(request.Pass(), GetProxy(&service_provider),
-                               nullptr, nullptr,
+  shell_->ConnectToApplication(std::move(request), GetProxy(&service_provider),
+                               nullptr,
+                               mojo::CreatePermissiveCapabilityFilter(),
                                base::Bind(&OnGotContentHandlerID));
   ConnectToService(service_provider.get(), &gpu_);
 }

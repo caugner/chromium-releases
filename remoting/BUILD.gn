@@ -43,9 +43,8 @@ group("remoting_all") {
 
   if (is_android) {
     deps += [
-      #"//remoting:remoting_apk",
-      #"//remoting:remoting_test_apk",
-      #"//remoting:remoting_unittests_apk",
+      "//remoting/android:remoting_apk",
+      "//remoting/android:remoting_test_apk",
     ]
   }
 
@@ -53,7 +52,6 @@ group("remoting_all") {
     deps += [
       "//remoting:remoting_perftests",
       "//remoting/host",
-
       "//remoting/host:remoting_native_messaging_manifests",
     ]
 
@@ -143,10 +141,6 @@ if (!is_mac) {
       "//third_party/webrtc",
     ]
 
-    if (is_android) {
-      deps += [ "//testing/android/native_test:native_test_native_code" ]
-    }
-
     if (enable_remoting_host) {
       deps += [
         "//remoting/codec:unit_tests",
@@ -160,6 +154,10 @@ if (!is_mac) {
         "//third_party/libjingle:libjingle_webrtc",
         "//third_party/libjingle:libpeerconnection",
       ]
+    }
+
+    if (is_android) {
+      deps += [ "//net/android:net_java" ]
     }
   }
 
@@ -182,8 +180,8 @@ if (!is_mac) {
         "//net:test_support",
         "//remoting/base",
         "//testing/gtest",
-        "//third_party/webrtc/modules/desktop_capture",
         "//third_party/libjingle",
+        "//third_party/webrtc/modules/desktop_capture",
       ]
 
       if (enable_webrtc) {

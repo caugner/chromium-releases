@@ -28,8 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Location.h"
@@ -38,6 +36,7 @@
 #include "platform/SharedBuffer.h"
 #include "platform/mhtml/MHTMLArchive.h"
 #include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebString.h"
@@ -48,8 +47,8 @@
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "public/web/WebView.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "web/tests/FrameTestHelpers.h"
-#include <gtest/gtest.h>
 
 using blink::URLTestHelpers::toKURL;
 
@@ -81,11 +80,11 @@ private:
     size_t m_index;
 };
 
-class MHTMLTest : public testing::Test {
+class MHTMLTest : public ::testing::Test {
 public:
     MHTMLTest()
     {
-        m_filePath = Platform::current()->unitTestSupport()->webKitRootDir();
+        m_filePath = testing::blinkRootDir();
         m_filePath.append("/Source/web/tests/data/mhtml/");
     }
 
@@ -140,16 +139,35 @@ protected:
         addResource("http://www.test.com/ol-dot.png", "image/png", "ol-dot.png");
     }
 
+    static PassRefPtr<SharedBuffer> generateMHTMLData(
+        const Vector<SerializedResource>& resources,
+        MHTMLArchive::EncodingPolicy encodingPolicy,
+        const String& title, const String& mimeType)
+    {
+        // This boundary is as good as any other.  Plus it gets used in almost
+        // all the examples in the MHTML spec - RFC 2557.
+        String boundary = String::fromUTF8("boundary-example");
+
+        RefPtr<SharedBuffer> mhtmlData = SharedBuffer::create();
+        MHTMLArchive::generateMHTMLHeader(boundary, title, mimeType, *mhtmlData);
+        for (const auto& resource : resources) {
+            MHTMLArchive::generateMHTMLPart(
+                boundary, String(), encodingPolicy, resource, *mhtmlData);
+        }
+        MHTMLArchive::generateMHTMLFooter(boundary, *mhtmlData);
+        return mhtmlData.release();
+    }
+
     PassRefPtr<SharedBuffer> serialize(const char *title, const char *mime,  MHTMLArchive::EncodingPolicy encodingPolicy)
     {
-        return MHTMLArchive::generateMHTMLData(m_resources, encodingPolicy, title, mime);
+        return generateMHTMLData(m_resources, encodingPolicy, title, mime);
     }
 
 private:
     PassRefPtr<SharedBuffer> readFile(const char* fileName)
     {
         String filePath = m_filePath + fileName;
-        return Platform::current()->unitTestSupport()->readFromFile(filePath);
+        return testing::readFromFile(filePath);
     }
 
     String m_filePath;

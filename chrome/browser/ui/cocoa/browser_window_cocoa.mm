@@ -27,6 +27,7 @@
 #include "chrome/browser/ui/browser_commands_mac.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
+#import "chrome/browser/ui/cocoa/autofill/save_card_bubble_view_bridge.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
@@ -64,6 +65,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
@@ -297,13 +299,25 @@ StatusBubble* BrowserWindowCocoa::GetStatusBubble() {
 }
 
 void BrowserWindowCocoa::UpdateTitleBar() {
-  NSString* newTitle =
-      base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
+  NSString* newTitle = WindowTitle();
 
-  pending_window_title_.reset(
-      [BrowserWindowUtils scheduleReplaceOldTitle:pending_window_title_.get()
-                                     withNewTitle:newTitle
-                                        forWindow:window()]);
+  pending_window_title_.reset([BrowserWindowUtils
+      scheduleReplaceOldTitle:pending_window_title_.get()
+                 withNewTitle:newTitle
+                    forWindow:window()]);
+}
+
+NSString* BrowserWindowCocoa::WindowTitle() {
+  if (media_state_ == TAB_MEDIA_STATE_AUDIO_PLAYING) {
+    return l10n_util::GetNSStringF(IDS_WINDOW_AUDIO_PLAYING_MAC,
+                                   browser_->GetWindowTitleForCurrentTab(),
+                                   base::SysNSStringToUTF16(@"🔊"));
+  } else if (media_state_ == TAB_MEDIA_STATE_AUDIO_MUTING) {
+    return l10n_util::GetNSStringF(IDS_WINDOW_AUDIO_MUTING_MAC,
+                                   browser_->GetWindowTitleForCurrentTab(),
+                                   base::SysNSStringToUTF16(@"🔇"));
+  }
+  return base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
 }
 
 void BrowserWindowCocoa::BookmarkBarStateChanged(
@@ -421,6 +435,10 @@ void BrowserWindowCocoa::UpdateExclusiveAccessExitBubbleContent(
   [controller_ updateFullscreenExitBubbleURL:url bubbleType:bubble_type];
 }
 
+void BrowserWindowCocoa::OnExclusiveAccessUserInput() {
+  // TODO(mgiuca): Route this signal to the exclusive access bubble on Mac.
+}
+
 bool BrowserWindowCocoa::ShouldHideUIForFullscreen() const {
   // On Mac, fullscreen mode has most normal things (in a slide-down panel).
   return false;
@@ -442,8 +460,19 @@ void BrowserWindowCocoa::UpdateFullscreenWithToolbar(bool with_toolbar) {
   [controller_ updateFullscreenWithToolbar:with_toolbar];
 }
 
+void BrowserWindowCocoa::ToggleFullscreenToolbar() {
+  PrefService* prefs = browser_->profile()->GetPrefs();
+  bool hideToolbar = !prefs->GetBoolean(prefs::kHideFullscreenToolbar);
+  [controller_ setFullscreenToolbarHidden:hideToolbar];
+  prefs->SetBoolean(prefs::kHideFullscreenToolbar, hideToolbar);
+}
+
 bool BrowserWindowCocoa::IsFullscreenWithToolbar() const {
   return IsFullscreen() && ![controller_ inPresentationMode];
+}
+
+bool BrowserWindowCocoa::ShouldHideFullscreenToolbar() const {
+  return [controller_ shouldHideFullscreenToolbar];
 }
 
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
@@ -542,6 +571,11 @@ void BrowserWindowCocoa::AddFindBar(
   [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
+void BrowserWindowCocoa::UpdateMediaState(TabMediaState media_state) {
+  media_state_ = media_state;
+  UpdateTitleBar();
+}
+
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
   restart_browser::RequestRestart(window());
 }
@@ -633,8 +667,7 @@ autofill::SaveCardBubbleView* BrowserWindowCocoa::ShowSaveCreditCardBubble(
     content::WebContents* web_contents,
     autofill::SaveCardBubbleController* controller,
     bool user_gesture) {
-  NOTIMPLEMENTED();
-  return nullptr;
+  return new autofill::SaveCardBubbleViewBridge(controller, controller_);
 }
 
 void BrowserWindowCocoa::ShowTranslateBubble(
@@ -651,16 +684,6 @@ void BrowserWindowCocoa::ShowTranslateBubble(
   [controller_ showTranslateBubbleForWebContents:contents
                                             step:step
                                        errorType:error_type];
-}
-
-bool BrowserWindowCocoa::IsProfileResetBubbleSupported() const {
-  return false;
-}
-
-GlobalErrorBubbleViewBase* BrowserWindowCocoa::ShowProfileResetBubble(
-    const base::WeakPtr<ProfileResetGlobalError>& global_error) {
-  NOTREACHED();
-  return nullptr;
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -715,7 +738,7 @@ void BrowserWindowCocoa::ShowWebsiteSettings(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const SecurityStateModel::SecurityInfo& security_info) {
+    const security_state::SecurityStateModel::SecurityInfo& security_info) {
   WebsiteSettingsUIBridge::Show(window(), profile, web_contents, url,
                                 security_info);
 }
@@ -825,14 +848,25 @@ NSWindow* BrowserWindowCocoa::window() const {
 
 void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton(
     AvatarBubbleMode mode,
-    const signin::ManageAccountsParams& manage_accounts_params) {
+    const signin::ManageAccountsParams& manage_accounts_params,
+    signin_metrics::AccessPoint access_point) {
   AvatarBaseController* controller = [controller_ avatarButtonController];
   NSView* anchor = [controller buttonView];
   if ([anchor isHiddenOrHasHiddenAncestor])
-    anchor = [[controller_ toolbarController] wrenchButton];
+    anchor = [[controller_ toolbarController] appMenuButton];
   [controller showAvatarBubbleAnchoredAt:anchor
                                 withMode:mode
-                         withServiceType:manage_accounts_params.service_type];
+                         withServiceType:manage_accounts_params.service_type
+                         fromAccessPoint:access_point];
+}
+
+void BrowserWindowCocoa::ShowModalSigninWindow(
+    AvatarBubbleMode mode,
+    signin_metrics::AccessPoint access_point) {
+  NOTREACHED();
+}
+void BrowserWindowCocoa::CloseModalSigninWindow() {
+  NOTREACHED();
 }
 
 int

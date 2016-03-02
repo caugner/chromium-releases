@@ -5,6 +5,8 @@
 #include "chrome/browser/extensions/menu_manager.h"
 
 #include <algorithm>
+#include <tuple>
+#include <utility>
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -213,7 +215,7 @@ scoped_ptr<base::DictionaryValue> MenuItem::ToValue() const {
   value->Set(kDocumentURLPatternsKey,
              document_url_patterns_.ToValue().release());
   value->Set(kTargetURLPatternsKey, target_url_patterns_.ToValue().release());
-  return value.Pass();
+  return value;
 }
 
 // static
@@ -717,7 +719,8 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
                   scoped_ptr<base::ListValue>(args->DeepCopy())));
     event->restrict_to_browser_context = context;
     event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
-    event_router->DispatchEventToExtension(item->extension_id(), event.Pass());
+    event_router->DispatchEventToExtension(item->extension_id(),
+                                           std::move(event));
   }
   {
     // Dispatch to .contextMenus.onClicked handler.
@@ -726,12 +729,13 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
                       : events::CONTEXT_MENUS_ON_CLICKED,
         webview_guest ? api::chrome_web_view_internal::OnClicked::kEventName
                       : api::context_menus::OnClicked::kEventName,
-        args.Pass()));
+        std::move(args)));
     event->restrict_to_browser_context = context;
     event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
     if (webview_guest)
       event->filter_info.SetInstanceID(webview_guest->view_instance_id());
-    event_router->DispatchEventToExtension(item->extension_id(), event.Pass());
+    event_router->DispatchEventToExtension(item->extension_id(),
+                                           std::move(event));
   }
 }
 
@@ -977,19 +981,8 @@ bool MenuItem::Id::operator!=(const Id& other) const {
 }
 
 bool MenuItem::Id::operator<(const Id& other) const {
-  if (incognito < other.incognito)
-    return true;
-  if (incognito == other.incognito) {
-    if (extension_key < other.extension_key)
-      return true;
-    if (extension_key == other.extension_key) {
-      if (uid < other.uid)
-        return true;
-      if (uid == other.uid)
-        return string_uid < other.string_uid;
-    }
-  }
-  return false;
+  return std::tie(incognito, extension_key, uid, string_uid) <
+    std::tie(other.incognito, other.extension_key, other.uid, other.string_uid);
 }
 
 }  // namespace extensions

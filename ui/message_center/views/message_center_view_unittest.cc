@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/message_center/views/message_center_view.h"
+
 #include <map>
+#include <utility>
 
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -14,7 +18,6 @@
 #include "ui/message_center/notification_list.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/message_center_controller.h"
-#include "ui/message_center/views/message_center_view.h"
 #include "ui/message_center/views/message_list_view.h"
 #include "ui/message_center/views/notification_view.h"
 
@@ -131,6 +134,8 @@ class MessageCenterViewTest : public testing::Test,
 
   // Overridden from MockNotificationView::Test
   void RegisterCall(CallType type) override;
+
+  void FireOnMouseExitedEvent();
 
   void LogBounds(int depth, views::View* view);
 
@@ -296,6 +301,16 @@ void MessageCenterViewTest::RegisterCall(CallType type) {
   callCounts_[type] += 1;
 }
 
+void MessageCenterViewTest::FireOnMouseExitedEvent() {
+  ui::MouseEvent dummy_event(ui::ET_MOUSE_EXITED /* type */,
+                             gfx::Point(0,0) /* location */,
+                             gfx::Point(0,0) /* root location */,
+                             base::TimeDelta() /* time_stamp */,
+                             0 /* flags */,
+                             0 /*changed_button_flags */);
+  message_center_view_->OnMouseExited(dummy_event);
+}
+
 void MessageCenterViewTest::LogBounds(int depth, views::View* view) {
   base::string16 inset;
   for (int i = 0; i < depth; ++i)
@@ -358,7 +373,7 @@ TEST_F(MessageCenterViewTest, SizeAfterUpdate) {
 
   int previous_height = GetMessageListView()->height();
 
-  UpdateNotification(kNotificationId2, notification.Pass());
+  UpdateNotification(kNotificationId2, std::move(notification));
 
   // Wait until the animation finishes if available.
   if (GetAnimator()->IsAnimating())
@@ -416,7 +431,7 @@ TEST_F(MessageCenterViewTest, PositionAfterUpdate) {
       gfx::Image(), base::UTF8ToUTF16("display source"), GURL(),
       NotifierId(NotifierId::APPLICATION, "extension_id"),
       message_center::RichNotificationData(), NULL));
-  UpdateNotification(kNotificationId2, notification.Pass());
+  UpdateNotification(kNotificationId2, std::move(notification));
 
   // Wait until the animation finishes if available.
   if (GetAnimator()->IsAnimating())
@@ -440,6 +455,8 @@ TEST_F(MessageCenterViewTest, PositionAfterRemove) {
   int previous_height = GetMessageListView()->height();
   int previous_notification2_y =
       GetNotificationView(kNotificationId2)->bounds().y();
+  int previous_notification2_height =
+      GetNotificationView(kNotificationId2)->bounds().height();
 
   EXPECT_EQ(2, GetMessageListView()->child_count());
   RemoveNotification(kNotificationId2, false);
@@ -457,8 +474,18 @@ TEST_F(MessageCenterViewTest, PositionAfterRemove) {
   // The size should be kept.
   EXPECT_EQ(previous_height, GetMessageListView()->height());
 
+  // Notification 2 is successfully removed.
   EXPECT_FALSE(GetNotificationView(kNotificationId2));
   EXPECT_TRUE(GetNotificationView(kNotificationId1));
+
+  // Mouse cursor moves out of the message center. This resets the reposition
+  // target in the message list.
+  FireOnMouseExitedEvent();
+
+  // The height should shrink from the height of the removed notification 2.
+  EXPECT_EQ(previous_height - previous_notification2_height -
+                (kMarginBetweenItems - MessageView::GetShadowInsets().bottom()),
+            GetMessageListView()->height());
 }
 
 }  // namespace message_center

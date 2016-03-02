@@ -8,6 +8,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "url/origin.h"
 
 #if defined(ENABLE_EXTENSIONS)
 #include "extensions/browser/extension_registry.h"
@@ -65,18 +66,15 @@ void CollectForScenario(std::map<RenderFrameHost*, GURL>* frame_urls,
                         RenderFrameHost* frame) {
   BrowserContext* context = primary->GetBrowserContext();
 
-  GURL url = frame->GetLastCommittedURL();
+  // Determine the site from the frame's origin, with a fallback to the
+  // frame's URL.  In cases like <iframe sandbox>, we can wind up with an http
+  // URL but a unique origin.  The origin of the resource will still determine
+  // process placement.
+  url::Origin origin = frame->GetLastCommittedOrigin();
+  GURL site = SiteInstance::GetSiteForURL(
+      context, origin.unique() ? frame->GetLastCommittedURL()
+                               : GURL(origin.Serialize()));
 
-  // Treat about:blank url specially: use the URL on the SiteInstance if it is
-  // assigned. The rest of this computation must not depend on the
-  // SiteInstance's URL, since its value reflects the current process model, and
-  // this computation is simulating other process models.
-  if (url == GURL(url::kAboutBlankURL) &&
-      !frame->GetSiteInstance()->GetSiteURL().is_empty()) {
-    url = frame->GetSiteInstance()->GetSiteURL();
-  }
-
-  GURL site = SiteInstance::GetSiteForURL(context, url);
   bool should_isolate = ShouldIsolate(context, scenario, site);
 
   // Treat a subframe as part of its parent site if neither needs isolation.
@@ -105,13 +103,41 @@ void CollectForScenario(std::map<RenderFrameHost*, GURL>* frame_urls,
   (*frame_urls)[frame] = site;
 }
 
+content::SiteInstance* DeterminePrimarySiteInstance(
+    content::SiteInstance* instance,
+    SiteData* site_data) {
+  // Find the BrowsingInstance this WebContents belongs to by iterating over
+  // the "primary" SiteInstances of each BrowsingInstance we've seen so far.
+  for (auto& existing_site_instance : site_data->instances) {
+    if (instance->IsRelatedSiteInstance(existing_site_instance.first)) {
+      existing_site_instance.second.insert(instance);
+      return existing_site_instance.first;
+    }
+  }
+
+  // Add |instance| as the "primary" SiteInstance of a new BrowsingInstance.
+  site_data->instances[instance].clear();
+  site_data->instances[instance].insert(instance);
+
+  return instance;
+}
+
+void CollectCurrentSnapshot(SiteData* site_data, RenderFrameHost* frame) {
+  if (frame->GetParent()) {
+    if (frame->GetSiteInstance() != frame->GetParent()->GetSiteInstance())
+      site_data->out_of_process_frames++;
+  }
+
+  DeterminePrimarySiteInstance(frame->GetSiteInstance(), site_data);
+}
+
 }  // namespace
 
 IsolationScenario::IsolationScenario() : policy(ISOLATE_ALL_SITES) {}
 
 IsolationScenario::~IsolationScenario() {}
 
-SiteData::SiteData() {
+SiteData::SiteData() : out_of_process_frames(0) {
   for (int i = 0; i <= ISOLATION_SCENARIO_LAST; i++)
     scenarios[i].policy = static_cast<IsolationScenarioType>(i);
 }
@@ -125,21 +151,8 @@ SiteDetails::~SiteDetails() {}
 void SiteDetails::CollectSiteInfo(WebContents* contents,
                                   SiteData* site_data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Find the BrowsingInstance this WebContents belongs to by iterating over
-  // the "primary" SiteInstances of each BrowsingInstance we've seen so far.
-  SiteInstance* instance = contents->GetSiteInstance();
-  SiteInstance* primary = NULL;
-  for (SiteInstance* already_collected_instance : site_data->instances) {
-    if (instance->IsRelatedSiteInstance(already_collected_instance)) {
-      primary = already_collected_instance;
-      break;
-    }
-  }
-  if (!primary) {
-    // Remember this as the "primary" SiteInstance of a new BrowsingInstance.
-    primary = instance;
-    site_data->instances.push_back(instance);
-  }
+  SiteInstance* primary =
+      DeterminePrimarySiteInstance(contents->GetSiteInstance(), site_data);
 
   // Now keep track of how many sites we have in this BrowsingInstance (and
   // overall), including sites in iframes.
@@ -149,6 +162,9 @@ void SiteDetails::CollectSiteInfo(WebContents* contents,
         base::Bind(&CollectForScenario, base::Unretained(&memo),
                    base::Unretained(primary), base::Unretained(&scenario)));
   }
+
+  contents->ForEachFrame(
+      base::Bind(&CollectCurrentSnapshot, base::Unretained(site_data)));
 }
 
 void SiteDetails::UpdateHistograms(
@@ -158,10 +174,12 @@ void SiteDetails::UpdateHistograms(
   // Reports a set of site-based process metrics to UMA.
   int process_limit = RenderProcessHost::GetMaxRendererProcessCount();
 
-  // Sum the number of sites and SiteInstances in each BrowserContext.
+  // Sum the number of sites and SiteInstances in each BrowserContext and
+  // the total number of out-of-process iframes.
   int num_sites[ISOLATION_SCENARIO_LAST + 1] = {};
   int num_isolated_site_instances[ISOLATION_SCENARIO_LAST + 1] = {};
   int num_browsing_instances = 0;
+  int num_oopifs = 0;
   for (BrowserContextSiteDataMap::const_iterator i = site_data_map.begin();
        i != site_data_map.end(); ++i) {
     for (const IsolationScenario& scenario : i->second.scenarios) {
@@ -173,6 +191,11 @@ void SiteDetails::UpdateHistograms(
     }
     num_browsing_instances += i->second.scenarios[ISOLATE_ALL_SITES]
                                   .browsing_instance_site_map.size();
+    for (const auto& site_instance : i->second.instances) {
+      UMA_HISTOGRAM_COUNTS_100("SiteIsolation.SiteInstancesPerBrowsingInstance",
+                               site_instance.second.size());
+    }
+    num_oopifs += i->second.out_of_process_frames;
   }
 
   // Predict the number of processes needed when isolating all sites, when
@@ -193,6 +216,7 @@ void SiteDetails::UpdateHistograms(
   UMA_HISTOGRAM_COUNTS_100(
       "SiteIsolation.BrowsingInstanceCount",
       num_browsing_instances);
+  UMA_HISTOGRAM_COUNTS_100("SiteIsolation.OutOfProcessIframes", num_oopifs);
 
   // ISOLATE_NOTHING metrics.
   UMA_HISTOGRAM_COUNTS_100("SiteIsolation.IsolateNothingProcessCountNoLimit",

@@ -4,6 +4,8 @@
 
 #include <windows.h>  // NOLINT
 #include <shlwapi.h>  // NOLINT
+#include <stddef.h>
+#include <userenv.h>  // NOLINT
 
 #include "chrome/app/main_dll_loader_win.h"
 
@@ -12,14 +14,17 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
@@ -39,8 +44,9 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/module_util_win.h"
 #include "chrome/installer/util/util_constants.h"
-#include "components/crash/content/app/breakpad_win.h"
 #include "components/crash/content/app/crash_reporter_client.h"
+#include "components/crash/content/app/crashpad.h"
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/app/sandbox_helper_win.h"
 #include "content/public/common/content_switches.h"
 #include "sandbox/win/src/sandbox.h"
@@ -51,19 +57,35 @@ typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*);
 
 typedef void (*RelaunchChromeBrowserWithNewCommandLineIfNeededFunc)();
 
-base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
-    LAZY_INSTANCE_INITIALIZER;
-
 // Loads |module| after setting the CWD to |module|'s directory. Returns a
 // reference to the loaded module on success, or null on error.
-HMODULE LoadModuleWithDirectory(const base::FilePath& module, bool pre_read) {
+HMODULE LoadModuleWithDirectory(const base::FilePath& module) {
   ::SetCurrentDirectoryW(module.DirName().value().c_str());
 
-  if (pre_read) {
-    // We pre-read the binary to warm the memory caches (fewer hard faults to
-    // page parts of the binary in).
-    const size_t kStepSize = 1024 * 1024;
-    PreReadFile(module, kStepSize);
+  // Get pre-read options from the PreRead field trial.
+  const startup_metric_utils::PreReadOptions pre_read_options =
+      startup_metric_utils::GetPreReadOptions();
+
+  // Pre-read the binary to warm the memory caches (avoids a lot of random IO).
+  if (pre_read_options.pre_read) {
+    base::ThreadPriority previous_priority = base::ThreadPriority::NORMAL;
+    if (pre_read_options.high_priority) {
+      previous_priority = base::PlatformThread::GetCurrentThreadPriority();
+      base::PlatformThread::SetCurrentThreadPriority(
+          base::ThreadPriority::DISPLAY);
+    }
+
+    if (pre_read_options.prefetch_virtual_memory) {
+      base::MemoryMappedFile module_memory_map;
+      const bool map_initialize_success = module_memory_map.Initialize(module);
+      DCHECK(map_initialize_success);
+      PreReadMemoryMappedFile(module_memory_map, module);
+    } else {
+      PreReadFile(module);
+    }
+
+    if (pre_read_options.high_priority)
+      base::PlatformThread::SetCurrentThreadPriority(previous_priority);
   }
 
   return ::LoadLibraryExW(module.value().c_str(), nullptr,
@@ -80,19 +102,53 @@ void ClearDidRun(const base::FilePath& dll_path) {
   GoogleUpdateSettings::UpdateDidRunState(false, system_level);
 }
 
-bool InMetroMode() {
-  return (wcsstr(
-      ::GetCommandLineW(), L" -ServerName:DefaultBrowserServer") != nullptr);
+typedef int (*InitMetro)();
+
+#if BUILDFLAG(ENABLE_KASKO)
+
+// For ::GetProfileType().
+#pragma comment(lib, "userenv.lib")
+
+// For ::GetProfileType().
+#pragma comment(lib, "userenv.lib")
+
+// Returns a string containing a list of all modifiers for the loaded profile.
+std::wstring GetProfileType() {
+  std::wstring profile_type;
+  DWORD profile_bits = 0;
+  if (::GetProfileType(&profile_bits)) {
+    static const struct {
+      DWORD bit;
+      const wchar_t* name;
+    } kBitNames[] = {
+      { PT_MANDATORY, L"mandatory" },
+      { PT_ROAMING, L"roaming" },
+      { PT_TEMPORARY, L"temporary" },
+    };
+    for (size_t i = 0; i < arraysize(kBitNames); ++i) {
+      const DWORD this_bit = kBitNames[i].bit;
+      if ((profile_bits & this_bit) != 0) {
+        profile_type.append(kBitNames[i].name);
+        profile_bits &= ~this_bit;
+        if (profile_bits != 0)
+          profile_type.append(L", ");
+      }
+    }
+  } else {
+    DWORD last_error = ::GetLastError();
+    base::SStringPrintf(&profile_type, L"error %u", last_error);
+  }
+  return profile_type;
 }
 
-typedef int (*InitMetro)();
+#endif  // BUILDFLAG(ENABLE_KASKO)
 
 }  // namespace
 
 //=============================================================================
 
 MainDllLoader::MainDllLoader()
-    : dll_(nullptr), metro_mode_(InMetroMode()) {
+    : dll_(nullptr) {
 }
 
 MainDllLoader::~MainDllLoader() {
@@ -106,11 +162,9 @@ MainDllLoader::~MainDllLoader() {
 // installed build.
 HMODULE MainDllLoader::Load(base::string16* version, base::FilePath* module) {
   const base::char16* dll_name = nullptr;
-  if (metro_mode_) {
-    dll_name = installer::kChromeMetroDll;
-  } else if (process_type_ == "service" || process_type_.empty()) {
+  if (process_type_ == switches::kServiceProcess || process_type_.empty()) {
     dll_name = installer::kChromeDll;
-  } else if (process_type_ == "watcher") {
+  } else if (process_type_ == switches::kWatcherProcess) {
     dll_name = kChromeWatcherDll;
   } else {
 #if defined(CHROME_MULTIPLE_DLL)
@@ -125,8 +179,7 @@ HMODULE MainDllLoader::Load(base::string16* version, base::FilePath* module) {
     PLOG(ERROR) << "Cannot find module " << dll_name;
     return nullptr;
   }
-  const bool pre_read = !metro_mode_;
-  HMODULE dll = LoadModuleWithDirectory(*module, pre_read);
+  HMODULE dll = LoadModuleWithDirectory(*module);
   if (!dll) {
     PLOG(ERROR) << "Failed to load Chrome DLL from " << module->value();
     return nullptr;
@@ -146,17 +199,7 @@ int MainDllLoader::Launch(HINSTANCE instance) {
   base::string16 version;
   base::FilePath file;
 
-  if (metro_mode_) {
-    HMODULE metro_dll = Load(&version, &file);
-    if (!metro_dll)
-      return chrome::RESULT_CODE_MISSING_DATA;
-
-    InitMetro chrome_metro_main =
-        reinterpret_cast<InitMetro>(::GetProcAddress(metro_dll, "InitMetro"));
-    return chrome_metro_main();
-  }
-
-  if (process_type_ == "watcher") {
+  if (process_type_ == switches::kWatcherProcess) {
     chrome::RegisterPathProvider();
 
     base::win::ScopedHandle parent_process;
@@ -204,18 +247,6 @@ int MainDllLoader::Launch(HINSTANCE instance) {
   sandbox::SandboxInterfaceInfo sandbox_info = {0};
   content::InitializeSandboxInfo(&sandbox_info);
 
-  crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
-  bool exit_now = true;
-  if (process_type_.empty()) {
-    if (breakpad::ShowRestartDialogIfCrashed(&exit_now)) {
-      // We restarted because of a previous crash. Ask user if we should
-      // Relaunch. Only for the browser process. See crbug.com/132119.
-      if (exit_now)
-        return content::RESULT_CODE_NORMAL_EXIT;
-    }
-  }
-  breakpad::InitCrashReporter(process_type_);
-
   dll_ = Load(&version, &file);
   if (!dll_)
     return chrome::RESULT_CODE_MISSING_DATA;
@@ -228,12 +259,6 @@ int MainDllLoader::Launch(HINSTANCE instance) {
       reinterpret_cast<DLL_MAIN>(::GetProcAddress(dll_, "ChromeMain"));
   int rc = chrome_main(instance, &sandbox_info);
   rc = OnBeforeExit(rc, file);
-  // Sandboxed processes close some system DLL handles after lockdown so ignore
-  // EXCEPTION_INVALID_HANDLE generated on Windows 10 during shutdown of these
-  // processes.
-  // TODO(wfh): Check whether MS have fixed this in Win10 RTM. crbug.com/456193
-  if (base::win::GetVersion() >= base::win::VERSION_WIN10)
-    breakpad::ConsumeInvalidHandleExceptions();
   return rc;
 }
 
@@ -264,9 +289,9 @@ class ChromeDllLoader : public MainDllLoader {
 
  private:
   scoped_ptr<ChromeWatcherClient> chrome_watcher_client_;
-#if defined(KASKO)
+#if BUILDFLAG(ENABLE_KASKO)
   scoped_ptr<KaskoClient> kasko_client_;
-#endif  // KASKO
+#endif
 };
 
 void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
@@ -275,22 +300,30 @@ void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
     RecordDidRun(dll_path);
 
     // Launch the watcher process if stats collection consent has been granted.
-    if (g_chrome_crash_client.Get().GetCollectStatsConsent()) {
+#if defined(GOOGLE_CHROME_BUILD)
+    const bool stats_collection_consent =
+        GoogleUpdateSettings::GetCollectStatsConsent();
+#else
+    const bool stats_collection_consent = false;
+#endif
+    if (stats_collection_consent) {
       base::FilePath exe_path;
       if (PathService::Get(base::FILE_EXE, &exe_path)) {
         chrome_watcher_client_.reset(new ChromeWatcherClient(
             base::Bind(&GenerateChromeWatcherCommandLine, exe_path)));
         if (chrome_watcher_client_->LaunchWatcher()) {
-#if defined(KASKO)
+#if BUILDFLAG(ENABLE_KASKO)
           kasko::api::MinidumpType minidump_type = kasko::api::SMALL_DUMP_TYPE;
           if (base::CommandLine::ForCurrentProcess()->HasSwitch(
                   switches::kFullMemoryCrashReport)) {
             minidump_type = kasko::api::FULL_DUMP_TYPE;
           } else {
-            bool is_per_user_install =
-                g_chrome_crash_client.Get().GetIsPerUserInstall(
-                    base::FilePath(exe_path));
-            if (g_chrome_crash_client.Get().GetShouldDumpLargerDumps(
+            // TODO(scottmg): Point this at the common global one when it's
+            // moved back into the .exe. http://crbug.com/546288.
+            ChromeCrashReporterClient chrome_crash_client;
+            bool is_per_user_install = chrome_crash_client.GetIsPerUserInstall(
+                base::FilePath(exe_path));
+            if (chrome_crash_client.GetShouldDumpLargerDumps(
                     is_per_user_install)) {
               minidump_type = kasko::api::LARGER_DUMP_TYPE;
             }
@@ -298,7 +331,7 @@ void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
 
           kasko_client_.reset(
               new KaskoClient(chrome_watcher_client_.get(), minidump_type));
-#endif  // KASKO
+#endif  // BUILDFLAG(ENABLE_KASKO)
         }
       }
     }
@@ -321,9 +354,9 @@ int ChromeDllLoader::OnBeforeExit(int return_code,
     ClearDidRun(dll_path);
   }
 
-#if defined(KASKO)
+#if BUILDFLAG(ENABLE_KASKO)
   kasko_client_.reset();
-#endif  // KASKO
+#endif
   chrome_watcher_client_.reset();
 
   return return_code;

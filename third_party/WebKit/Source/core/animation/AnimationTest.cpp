@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/animation/Animation.h"
 
 #include "core/animation/AnimationClock.h"
@@ -40,7 +39,7 @@
 #include "core/dom/QualifiedName.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/weborigin/KURL.h"
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 

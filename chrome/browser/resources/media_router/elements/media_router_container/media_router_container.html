@@ -11,8 +11,29 @@
 <link rel="import" href="../media_router_header/media_router_header.html">
 <link rel="import" href="../route_details/route_details.html">
 <dom-module id="media-router-container">
+  <link rel="import" type="css" href="../../media_router_common.css">
   <link rel="import" type="css" href="media_router_container.css">
   <template>
+    <template is="dom-if"
+        if="[[computeShowFirstRunFlow_(showFirstRunFlow, currentView_)]]">
+      <div id="first-run-flow">
+        <div id="first-run-title">[[firstRunFlowTitle_]]</div>
+        <div id="first-run-text">
+          <span>[[firstRunFlowText_]]</span>
+          <a href="[[firstRunFlowLearnMoreUrl]]">
+            <span class="first-run-learn-more">
+              [[firstRunFlowLearnMore_]]
+            </span>
+          </a>
+        </div>
+        <div id="first-run-button-container">
+          <paper-button id="first-run-button" class="button"
+              on-click="acknowledgeFirstRunFlow_">
+            <span>[[firstRunFlowButtonText_]]</span>
+          </paper-button>
+        </div>
+      </div>
+    </template>
     <media-router-header id="container-header"
         class$="[[currentView_]]" view="[[currentView_]]"
         heading-text="[[computeHeaderText_(currentView_, headerText)]]"
@@ -20,42 +41,38 @@
         tooltip="[[computeHeaderTooltip_(currentView_, headerTextTooltip)]]"
         on-back-click="showSinkList_">
     </media-router-header>
-    <template is="dom-if"
-        if="[[computeIssueBannerShown_(currentView_, issue)]]">
-      <issue-banner id="issue-banner" issue="[[issue]]"
-          class$="[[computeIssueBannerClass_(issue)]]"
-          on-issue-action-click="showSinkList_">
-      </issue-banner>
+    <template is="dom-if" if="[[!computeCastModeListHidden_(currentView_)]]">
+      <paper-menu id="cast-mode-list">
+        <template is="dom-repeat" id="defaultCastModeList"
+            items="[[computeDefaultCastModeList_(castModeList)]]">
+          <paper-item on-click="onCastModeClick_">
+            <iron-icon class="cast-mode-icon"
+                icon="[[computeCastModeIcon_(item)]]">
+            </iron-icon>
+            <div><span>[[item.host]]</span></div>
+          </paper-item>
+        </template>
+        <div id="share-screen-text"
+            hidden$="[[computeShareScreenSubheadingHidden_(castModeList)]]">
+          <span>[[shareYourScreenSubheadingText_]]</span>
+        </div>
+        <template is="dom-repeat" id="nonDefaultCastModeList"
+            items="[[computeNonDefaultCastModeList_(castModeList)]]">
+          <paper-item on-click="onCastModeClick_">
+            <iron-icon class="cast-mode-icon"
+                icon="[[computeCastModeIcon_(item)]]">
+            </iron-icon>
+            <div><span>[[item.description]]</span></div>
+          </paper-item>
+        </template>
+      </paper-menu>
     </template>
-    <paper-menu id="cast-mode-list"
-        hidden$="[[computeCastModeHidden_(currentView_)]]">
-      <template is="dom-repeat" id="defaultCastModeList"
-          items="[[computeDefaultCastModeList_(castModeList)]]">
-        <paper-item on-click="onCastModeClick_">
-          <iron-icon class="cast-mode-icon"
-              icon="[[computeCastModeIcon_(item)]]">
-          </iron-icon>
-          <div><span>[[item.host]]</span></div>
-        </paper-item>
-      </template>
-      <div id="share-screen-text"
-          hidden$="[[computeShareScreenSubheadingHidden_(castModeList)]]">
-        <span>[[shareYourScreenSubheadingText_]]</span>
-      </div>
-      <template is="dom-repeat" id="nonDefaultCastModeList"
-          items="[[computeNonDefaultCastModeList_(castModeList)]]">
-        <paper-item on-click="onCastModeClick_">
-          <iron-icon class="cast-mode-icon"
-              icon="[[computeCastModeIcon_(item)]]">
-          </iron-icon>
-          <div><span>[[item.description]]</span></div>
-        </paper-item>
-      </template>
-    </paper-menu>
-    <route-details id="route-details" route="[[currentRoute_]]"
-        on-close-route-click="onCloseRouteClick_"
-        hidden$="[[computeRouteDetailsHidden_(currentView_, issue)]]">
-    </route-details>
+    <template is="dom-if"
+        if="[[!computeRouteDetailsHidden_(currentView_, issue)]]">
+      <route-details id="route-details" route="[[currentRoute_]]"
+          on-close-route-click="onCloseRouteClick_">
+      </route-details>
+    </template>
     <div id="sink-list-view"
         hidden$="[[computeSinkListViewHidden_(currentView_, issue)]]">
       <div id="device-missing"
@@ -69,7 +86,7 @@
         </a>
       </div>
       <paper-menu id="sink-list"
-          hidden$="[[computeSinkListHidden_(currentView_, issue)]]">
+          hidden$="[[computeSinkListHidden_(sinksToShow_)]]">
         <template is="dom-repeat" id="sinkList" items="[[sinksToShow_]]">
           <paper-item class="sink" on-click="onSinkClick_">
             <div class="sink-content">
@@ -86,20 +103,33 @@
               </div>
               <div>
                 <div class="sink-text">
-                  <span>[[item.name]]</span>
+                  <span dir="auto">[[item.name]]</span>
+                  <template is="dom-if"
+                      if="[[!computeSinkDomainHidden_(item)]]">
+                    <span class="sink-domain">
+                      [[item.domain]]
+                    </span>
+                  </template>
                 </div>
-                <div class="sink-text route"
-                    hidden$="[[computeRouteInSinkListHidden_(item.id, sinkToRouteMap_)]]">
-                  <span>[[
-                      computeRouteInSinkListValue_(item.id, sinkToRouteMap_)
-                          ]]</span>
-                </div>
+                <template is="dom-if"
+                    if="[[!computeSinkSubtextHidden_(item, sinkToRouteMap_)]]">
+                  <div class="sink-text sink-subtext">
+                    <span>[[computeSinkSubtext_(item, sinkToRouteMap_)]]</span>
+                  </div>
+              </template>
               </div>
             </div>
           </paper-item>
         </template>
       </paper-menu>
     </div>
+    <template is="dom-if"
+        if="[[computeIssueBannerShown_(currentView_, issue)]]">
+      <issue-banner id="issue-banner" issue="[[issue]]"
+          class$="[[computeIssueBannerClass_(issue)]]"
+          on-issue-action-click="showSinkList_">
+      </issue-banner>
+    </template>
   </template>
   <script src="media_router_container.js"></script>
 </dom-module>

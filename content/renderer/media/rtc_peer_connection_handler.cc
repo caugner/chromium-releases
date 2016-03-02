@@ -4,6 +4,8 @@
 
 #include "content/renderer/media/rtc_peer_connection_handler.h"
 
+#include <string.h>
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +21,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/common/content_switches.h"
+#include "content/renderer/media/media_stream_audio_track.h"
 #include "content/renderer/media/media_stream_track.h"
 #include "content/renderer/media/peer_connection_tracker.h"
 #include "content/renderer/media/remote_media_stream_impl.h"
@@ -32,6 +35,7 @@
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/media/webrtc_uma_histograms.h"
 #include "content/renderer/render_thread_impl.h"
+#include "media/base/media_switches.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebRTCConfiguration.h"
 #include "third_party/WebKit/public/platform/WebRTCDataChannelInit.h"
@@ -198,7 +202,7 @@ void GetNativeRtcConfiguration(
         base::UTF16ToUTF8(base::StringPiece16(webkit_server.username()));
     server.password =
         base::UTF16ToUTF8(base::StringPiece16(webkit_server.credential()));
-    server.uri = webkit_server.uri().spec();
+    server.uri = webkit_server.uri().string().utf8();
     webrtc_config->servers.push_back(server);
   }
 
@@ -766,7 +770,7 @@ class RTCPeerConnectionHandler::Observer
   void OnAddStreamImpl(scoped_ptr<RemoteMediaStreamImpl> stream) {
     DCHECK(stream->webkit_stream().extraData()) << "Initialization not done";
     if (handler_)
-      handler_->OnAddStream(stream.Pass());
+      handler_->OnAddStream(std::move(stream));
   }
 
   void OnRemoveStreamImpl(const scoped_refptr<MediaStreamInterface>& stream) {
@@ -776,7 +780,7 @@ class RTCPeerConnectionHandler::Observer
 
   void OnDataChannelImpl(scoped_ptr<RtcDataChannelHandler> handler) {
     if (handler_)
-      handler_->OnDataChannel(handler.Pass());
+      handler_->OnDataChannel(std::move(handler));
   }
 
   void OnIceCandidateImpl(const std::string& sdp, const std::string& sdp_mid,
@@ -872,6 +876,9 @@ bool RTCPeerConnectionHandler::initialize(
 
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   GetNativeRtcConfiguration(server_configuration, &config);
+  config.disable_prerenderer_smoothing =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableRTCSmoothnessAlgorithm);
 
   RTCMediaConstraints constraints(options);
 
@@ -1357,7 +1364,7 @@ blink::WebRTCDTMFSenderHandler* RTCPeerConnectionHandler::createDTMFSender(
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::createDTMFSender");
   DVLOG(1) << "createDTMFSender.";
 
-  MediaStreamTrack* native_track = MediaStreamTrack::GetTrack(track);
+  MediaStreamAudioTrack* native_track = MediaStreamAudioTrack::GetTrack(track);
   if (!native_track || !native_track->is_local_track() ||
       track.source().type() != blink::WebMediaStreamSource::TypeAudio) {
     DLOG(ERROR) << "The DTMF sender requires a local audio track.";

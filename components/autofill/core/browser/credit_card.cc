@@ -5,14 +5,15 @@
 #include "components/autofill/core/browser/credit_card.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <algorithm>
 #include <ostream>
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -20,6 +21,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/validation.h"
@@ -484,6 +486,15 @@ base::string16 CreditCard::TypeAndLastFourDigits() const {
   // ellipsis.
   // TODO(estade): i18n?
   return type + base::UTF8ToUTF16("\xC2\xA0\xE2\x8B\xAF") + digits;
+}
+
+base::string16 CreditCard::AbbreviatedExpirationDateForDisplay() const {
+  base::string16 month = ExpirationMonthAsString();
+  base::string16 year = Expiration2DigitYearAsString();
+  return month.empty() || year.empty()
+             ? base::string16()
+             : l10n_util::GetStringFUTF16(
+                   IDS_AUTOFILL_CREDIT_CARD_EXPIRATION_DATE_ABBR, month, year);
 }
 
 void CreditCard::operator=(const CreditCard& credit_card) {

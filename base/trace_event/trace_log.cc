@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "base/base_switches.h"
 #include "base/bind.h"
@@ -13,9 +14,11 @@
 #include "base/debug/leak_annotations.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/process/process_metrics.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/stringprintf.h"
@@ -26,15 +29,15 @@
 #include "base/threading/thread_id_name_manager.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/heap_profiler_allocation_context_tracker.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
-#include "base/trace_event/memory_profiler_allocation_context.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_buffer.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_synthetic_delay.h"
-#include "base/trace_event/trace_log.h"
 #include "base/trace_event/trace_sampling_thread.h"
+#include "build/build_config.h"
 
 #if defined(OS_WIN)
 #include "base/trace_event/trace_event_etw_export_win.h"
@@ -82,11 +85,6 @@ const size_t kEchoToConsoleTraceEventBufferChunks = 256;
 
 const size_t kTraceEventBufferSizeInBytes = 100 * 1024;
 const int kThreadFlushTimeoutMs = 3000;
-
-#if !defined(OS_NACL)
-// These categories will cause deadlock when ECHO_TO_CONSOLE. crbug.com/325575.
-const char kEchoToConsoleCategoryFilter[] = "-ipc,-task";
-#endif
 
 #define MAX_CATEGORY_GROUPS 100
 
@@ -143,7 +141,6 @@ void InitializeMetadataEvent(TraceEvent* trace_event,
       &g_category_group_enabled[g_category_metadata],
       metadata_name,
       trace_event_internal::kNoId,  // id
-      trace_event_internal::kNoId,  // context_id
       trace_event_internal::kNoId,  // bind_id
       num_args,
       &arg_name,
@@ -169,7 +166,7 @@ class AutoThreadLocalBoolean {
 
 // Use this function instead of TraceEventHandle constructor to keep the
 // overhead of ScopedTracer (trace_event.h) constructor minimum.
-void MakeHandle(uint32 chunk_seq,
+void MakeHandle(uint32_t chunk_seq,
                 size_t chunk_index,
                 size_t event_index,
                 TraceEventHandle* handle) {
@@ -177,8 +174,8 @@ void MakeHandle(uint32 chunk_seq,
   DCHECK(chunk_index <= TraceBufferChunk::kMaxChunkIndex);
   DCHECK(event_index < TraceBufferChunk::kTraceBufferChunkSize);
   handle->chunk_seq = chunk_seq;
-  handle->chunk_index = static_cast<uint16>(chunk_index);
-  handle->event_index = static_cast<uint16>(event_index);
+  handle->chunk_index = static_cast<uint16_t>(chunk_index);
+  handle->event_index = static_cast<uint16_t>(event_index);
 }
 
 }  // namespace
@@ -211,15 +208,16 @@ class TraceLog::ThreadLocalEventBuffer
     : public MessageLoop::DestructionObserver,
       public MemoryDumpProvider {
  public:
-  ThreadLocalEventBuffer(TraceLog* trace_log);
+  explicit ThreadLocalEventBuffer(TraceLog* trace_log);
   ~ThreadLocalEventBuffer() override;
 
   TraceEvent* AddTraceEvent(TraceEventHandle* handle);
 
   TraceEvent* GetEventByHandle(TraceEventHandle handle) {
     if (!chunk_ || handle.chunk_seq != chunk_->seq() ||
-        handle.chunk_index != chunk_index_)
-      return NULL;
+        handle.chunk_index != chunk_index_) {
+      return nullptr;
+    }
 
     return chunk_->GetEventAt(handle.event_index);
   }
@@ -328,7 +326,7 @@ void TraceLog::ThreadLocalEventBuffer::FlushWhileLocked() {
   trace_log_->lock_.AssertAcquired();
   if (trace_log_->CheckGeneration(generation_)) {
     // Return the chunk to the buffer only if the generation matches.
-    trace_log_->logged_events_->ReturnChunk(chunk_index_, chunk_.Pass());
+    trace_log_->logged_events_->ReturnChunk(chunk_index_, std::move(chunk_));
   }
   // Otherwise this method may be called from the destructor, or TraceLog will
   // find the generation mismatch and delete this buffer soon.
@@ -375,23 +373,6 @@ TraceLog::TraceLog()
   SetProcessID(0);
 #else
   SetProcessID(static_cast<int>(GetCurrentProcId()));
-
-  // NaCl also shouldn't access the command line.
-  if (CommandLine::InitializedForCurrentProcess() &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kTraceToConsole)) {
-    std::string filter = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kTraceToConsole);
-    if (filter.empty()) {
-      filter = kEchoToConsoleCategoryFilter;
-    } else {
-      filter.append(",");
-      filter.append(kEchoToConsoleCategoryFilter);
-    }
-
-    LOG(ERROR) << "Start " << switches::kTraceToConsole
-               << " with CategoryFilter '" << filter << "'.";
-    SetEnabled(TraceConfig(filter, ECHO_TO_CONSOLE), RECORDING_MODE);
-  }
 #endif
 
   logged_events_.reset(CreateTraceBuffer());
@@ -512,7 +493,7 @@ void TraceLog::UpdateSyntheticDelaysFromTraceConfig() {
       double target_duration = strtod(token.c_str(), &duration_end);
       if (duration_end != token.c_str()) {
         delay->SetTargetDuration(TimeDelta::FromMicroseconds(
-            static_cast<int64>(target_duration * 1e6)));
+            static_cast<int64_t>(target_duration * 1e6)));
       } else if (token == "static") {
         delay->SetMode(TraceEventSyntheticDelay::STATIC);
       } else if (token == "oneshot") {
@@ -769,10 +750,7 @@ void TraceLog::RemoveEnabledStateObserver(EnabledStateObserver* listener) {
 
 bool TraceLog::HasEnabledStateObserver(EnabledStateObserver* listener) const {
   AutoLock lock(lock_);
-  std::vector<EnabledStateObserver*>::const_iterator it =
-      std::find(enabled_state_observer_list_.begin(),
-                enabled_state_observer_list_.end(), listener);
-  return it != enabled_state_observer_list_.end();
+  return ContainsValue(enabled_state_observer_list_, listener);
 }
 
 TraceLogStatus TraceLog::GetStatus() const {
@@ -795,7 +773,7 @@ TraceEvent* TraceLog::AddEventToThreadSharedChunkWhileLocked(
 
   if (thread_shared_chunk_ && thread_shared_chunk_->IsFull()) {
     logged_events_->ReturnChunk(thread_shared_chunk_index_,
-                                thread_shared_chunk_.Pass());
+                                std::move(thread_shared_chunk_));
   }
 
   if (!thread_shared_chunk_) {
@@ -833,7 +811,7 @@ void TraceLog::SetEventCallbackEnabled(const TraceConfig& trace_config,
                           reinterpret_cast<subtle::AtomicWord>(cb));
   event_callback_trace_config_ = trace_config;
   UpdateCategoryGroupEnabledFlags();
-};
+}
 
 void TraceLog::SetEventCallbackDisabled() {
   AutoLock lock(lock_);
@@ -892,7 +870,7 @@ void TraceLog::FlushInternal(const TraceLog::OutputCallback& cb,
 
     if (thread_shared_chunk_) {
       logged_events_->ReturnChunk(thread_shared_chunk_index_,
-                                  thread_shared_chunk_.Pass());
+                                  std::move(thread_shared_chunk_));
     }
 
     if (thread_message_loops_.size()) {
@@ -989,7 +967,7 @@ void TraceLog::FinishFlush(int generation, bool discard_events) {
     return;
   }
 
-  ConvertTraceEventsToTraceFormat(previous_logged_events.Pass(),
+  ConvertTraceEventsToTraceFormat(std::move(previous_logged_events),
                                   flush_output_callback,
                                   argument_filter_predicate);
 }
@@ -1049,9 +1027,9 @@ void TraceLog::FlushButLeaveBufferIntact(
     if (thread_shared_chunk_) {
       // Return the chunk to the main buffer to flush the sampling data.
       logged_events_->ReturnChunk(thread_shared_chunk_index_,
-                                  thread_shared_chunk_.Pass());
+                                  std::move(thread_shared_chunk_));
     }
-    previous_logged_events = logged_events_->CloneForIteration().Pass();
+    previous_logged_events = logged_events_->CloneForIteration();
 
     if (trace_options() & kInternalEnableArgumentFilter) {
       CHECK(!argument_filter_predicate_.is_null());
@@ -1059,7 +1037,7 @@ void TraceLog::FlushButLeaveBufferIntact(
     }
   }  // release lock
 
-  ConvertTraceEventsToTraceFormat(previous_logged_events.Pass(),
+  ConvertTraceEventsToTraceFormat(std::move(previous_logged_events),
                                   flush_output_callback,
                                   argument_filter_predicate);
 }
@@ -1089,7 +1067,6 @@ TraceEventHandle TraceLog::AddTraceEvent(
       category_group_enabled,
       name,
       id,
-      trace_event_internal::kNoId,  // context_id
       trace_event_internal::kNoId,  // bind_id
       thread_id,
       now,
@@ -1101,12 +1078,12 @@ TraceEventHandle TraceLog::AddTraceEvent(
       flags);
 }
 
-TraceEventHandle TraceLog::AddTraceEventWithContextId(
+TraceEventHandle TraceLog::AddTraceEventWithBindId(
     char phase,
     const unsigned char* category_group_enabled,
     const char* name,
     unsigned long long id,
-    unsigned long long context_id,
+    unsigned long long bind_id,
     int num_args,
     const char** arg_names,
     const unsigned char* arg_types,
@@ -1120,8 +1097,7 @@ TraceEventHandle TraceLog::AddTraceEventWithContextId(
       category_group_enabled,
       name,
       id,
-      context_id,
-      trace_event_internal::kNoId,  // bind_id
+      bind_id,
       thread_id,
       now,
       num_args,
@@ -1150,7 +1126,6 @@ TraceEventHandle TraceLog::AddTraceEventWithProcessId(
       category_group_enabled,
       name,
       id,
-      trace_event_internal::kNoId,  // context_id
       trace_event_internal::kNoId,  // bind_id
       process_id,
       now,
@@ -1169,7 +1144,6 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
     const unsigned char* category_group_enabled,
     const char* name,
     unsigned long long id,
-    unsigned long long context_id,
     int thread_id,
     const TimeTicks& timestamp,
     int num_args,
@@ -1183,7 +1157,6 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
       category_group_enabled,
       name,
       id,
-      context_id,
       trace_event_internal::kNoId,  // bind_id
       thread_id,
       timestamp,
@@ -1200,7 +1173,6 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
     const unsigned char* category_group_enabled,
     const char* name,
     unsigned long long id,
-    unsigned long long context_id,
     unsigned long long bind_id,
     int thread_id,
     const TimeTicks& timestamp,
@@ -1307,7 +1279,6 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
                               category_group_enabled,
                               name,
                               id,
-                              context_id,
                               bind_id,
                               num_args,
                               arg_names,
@@ -1379,16 +1350,15 @@ void TraceLog::AddMetadataEvent(
     const scoped_refptr<ConvertableToTraceFormat>* convertable_values,
     unsigned int flags) {
   scoped_ptr<TraceEvent> trace_event(new TraceEvent);
+  AutoLock lock(lock_);
   trace_event->Initialize(
       0,  // thread_id
       TimeTicks(), ThreadTicks(), TRACE_EVENT_PHASE_METADATA,
       &g_category_group_enabled[g_category_metadata], name,
       trace_event_internal::kNoId,  // id
-      trace_event_internal::kNoId,  // context_id
       trace_event_internal::kNoId,  // bind_id
       num_args, arg_names, arg_types, arg_values, convertable_values, flags);
-  AutoLock lock(lock_);
-  metadata_events_.push_back(trace_event.Pass());
+  metadata_events_.push_back(std::move(trace_event));
 }
 
 // May be called when a COMPELETE event ends and the unfinished event has been
@@ -1521,7 +1491,7 @@ void TraceLog::CancelWatchEvent() {
   watch_event_callback_.Reset();
 }
 
-uint64 TraceLog::MangleEventId(uint64 id) {
+uint64_t TraceLog::MangleEventId(uint64_t id) {
   return id ^ process_id_hash_;
 }
 
@@ -1529,7 +1499,7 @@ void TraceLog::AddMetadataEventsWhileLocked() {
   lock_.AssertAcquired();
 
   // Copy metadata added by |AddMetadataEvent| into the trace log.
-  for (TraceEvent* event : metadata_events_)
+  for (const scoped_ptr<TraceEvent>& event : metadata_events_)
     AddEventToThreadSharedChunkWhileLocked(nullptr, false)->CopyFrom(*event);
 
 #if !defined(OS_NACL)  // NaCl shouldn't expose the process id.
@@ -1756,7 +1726,6 @@ ScopedTraceBinaryEfficient::ScopedTraceBinaryEfficient(
             category_group_enabled_,
             name,
             trace_event_internal::kNoId,  // id
-            trace_event_internal::kNoId,  // context_id
             static_cast<int>(base::PlatformThread::CurrentId()),  // thread_id
             base::TimeTicks::Now(),
             trace_event_internal::kZeroNumArgs,

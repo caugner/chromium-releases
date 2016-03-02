@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+#include <stdint.h>
+#include <utility>
+
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -113,21 +117,21 @@ class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
     QuitMessageLoop();
   }
 
-  void DisplayPasskey(BluetoothDevice* device, uint32 passkey) override {
+  void DisplayPasskey(BluetoothDevice* device, uint32_t passkey) override {
     ++call_count_;
     ++display_passkey_count_;
     last_passkey_ = passkey;
     QuitMessageLoop();
   }
 
-  void KeysEntered(BluetoothDevice* device, uint32 entered) override {
+  void KeysEntered(BluetoothDevice* device, uint32_t entered) override {
     ++call_count_;
     ++keys_entered_count_;
     last_entered_ = entered;
     QuitMessageLoop();
   }
 
-  void ConfirmPasskey(BluetoothDevice* device, uint32 passkey) override {
+  void ConfirmPasskey(BluetoothDevice* device, uint32_t passkey) override {
     ++call_count_;
     ++confirm_passkey_count_;
     last_passkey_ = passkey;
@@ -148,8 +152,8 @@ class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
   int keys_entered_count_;
   int confirm_passkey_count_;
   int authorize_pairing_count_;
-  uint32 last_passkey_;
-  uint32 last_entered_;
+  uint32_t last_passkey_;
+  uint32_t last_entered_;
   std::string last_pincode_;
 
  private:
@@ -175,7 +179,10 @@ class BluetoothBlueZTest : public testing::Test {
     dbus_setter->SetBluetoothAdapterClient(
         scoped_ptr<bluez::BluetoothAdapterClient>(
             fake_bluetooth_adapter_client_));
+
     fake_bluetooth_device_client_ = new bluez::FakeBluetoothDeviceClient;
+    // Use the original fake behavior for these tests.
+    fake_bluetooth_device_client_->set_delay_start_discovery(true);
     dbus_setter->SetBluetoothDeviceClient(
         scoped_ptr<bluez::BluetoothDeviceClient>(
             fake_bluetooth_device_client_));
@@ -1402,7 +1409,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscovery) {
       true, base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -1467,7 +1474,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryFail) {
   fake_bluetooth_adapter_client_->MakeSetDiscoveryFilterFail();
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -1517,13 +1524,13 @@ TEST_F(BluetoothBlueZTest, QueuedSetDiscoveryFilterBeforeStartDiscovery) {
 
   // Queue two requests to start discovery session with filter.
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter2.Pass(),
+      std::move(discovery_filter2),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -1614,13 +1621,13 @@ TEST_F(BluetoothBlueZTest, QueuedSetDiscoveryFilterBeforeStartDiscoveryFail) {
 
   // Queue two requests to start discovery session with filter.
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter2.Pass(),
+      std::move(discovery_filter2),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -1716,7 +1723,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterAfterStartDiscovery) {
   scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(df);
 
   discovery_sessions_[0]->SetDiscoveryFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
 
@@ -1795,7 +1802,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
     }
 
     adapter_->StartDiscoverySessionWithFilter(
-        discovery_filter.Pass(),
+        std::move(discovery_filter),
         base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                    base::Unretained(this)),
         base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -1919,7 +1926,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
     }
 
     adapter_->StartDiscoverySessionWithFilter(
-        discovery_filter.Pass(),
+        std::move(discovery_filter),
         base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                    base::Unretained(this)),
         base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -2001,7 +2008,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(df);
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -2023,7 +2030,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   discovery_filter = scoped_ptr<BluetoothDiscoveryFilter>(df);
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter.Pass(),
+      std::move(discovery_filter),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
@@ -2047,7 +2054,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   scoped_ptr<BluetoothDiscoveryFilter> discovery_filter3(df3);
 
   adapter_->StartDiscoverySessionWithFilter(
-      discovery_filter3.Pass(),
+      std::move(discovery_filter3),
       base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                  base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));

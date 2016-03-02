@@ -4,10 +4,13 @@
 
 #include "chrome/browser/profiles/profile_info_cache.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -19,6 +22,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -60,6 +64,10 @@ const char kSupervisedUserId[] = "managed_user_id";
 const char kProfileIsEphemeral[] = "is_ephemeral";
 const char kActiveTimeKey[] = "active_time";
 const char kIsAuthErrorKey[] = "is_auth_error";
+const char kStatsBrowsingHistoryKey[] = "stats_browsing_history";
+const char kStatsPasswordsKey[] = "stats_passwords";
+const char kStatsBookmarksKey[] = "stats_bookmarks";
+const char kStatsSettingsKey[] = "stats_settings";
 
 // First eight are generic icons, which use IDS_NUMBERED_PROFILE_NAME.
 const int kDefaultNames[] = {
@@ -499,6 +507,55 @@ size_t ProfileInfoCache::GetAvatarIconIndexOfProfileAtIndex(size_t index)
   return icon_index;
 }
 
+bool ProfileInfoCache::HasStatsBrowsingHistoryOfProfileAtIndex(size_t index)
+    const {
+  int value = 0;
+  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsBrowsingHistoryKey,
+                                                     &value);
+}
+
+int ProfileInfoCache::GetStatsBrowsingHistoryOfProfileAtIndex(size_t index)
+    const {
+  int value = 0;
+  GetInfoForProfileAtIndex(index)->GetInteger(kStatsBrowsingHistoryKey, &value);
+  return value;
+}
+
+bool ProfileInfoCache::HasStatsPasswordsOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsPasswordsKey,
+                                                     &value);
+}
+
+int ProfileInfoCache::GetStatsPasswordsOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  GetInfoForProfileAtIndex(index)->GetInteger(kStatsPasswordsKey, &value);
+  return value;
+}
+
+bool ProfileInfoCache::HasStatsBookmarksOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsBookmarksKey,
+                                                     &value);
+}
+
+int ProfileInfoCache::GetStatsBookmarksOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  GetInfoForProfileAtIndex(index)->GetInteger(kStatsBookmarksKey, &value);
+  return value;
+}
+
+bool ProfileInfoCache::HasStatsSettingsOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsSettingsKey, &value);
+}
+
+int ProfileInfoCache::GetStatsSettingsOfProfileAtIndex(size_t index) const {
+  int value = 0;
+  GetInfoForProfileAtIndex(index)->GetInteger(kStatsSettingsKey, &value);
+  return value;
+}
+
 void ProfileInfoCache::SetProfileActiveTimeAtIndex(size_t index) {
   if (base::Time::Now() - GetProfileActiveTimeAtIndex(index) <
       base::TimeDelta::FromHours(1)) {
@@ -909,6 +966,42 @@ size_t ProfileInfoCache::ChooseAvatarIconIndexForNewProfile() const {
   return 0;
 }
 
+void ProfileInfoCache::SetStatsBrowsingHistoryOfProfileAtIndex(size_t index,
+                                                               int value) {
+  scoped_ptr<base::DictionaryValue> info(
+      GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetInteger(kStatsBrowsingHistoryKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetStatsPasswordsOfProfileAtIndex(size_t index,
+                                                         int value) {
+  scoped_ptr<base::DictionaryValue> info(
+      GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetInteger(kStatsPasswordsKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetStatsBookmarksOfProfileAtIndex(size_t index,
+                                                         int value) {
+  scoped_ptr<base::DictionaryValue> info(
+      GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetInteger(kStatsBookmarksKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetStatsSettingsOfProfileAtIndex(size_t index,
+                                                        int value) {
+  scoped_ptr<base::DictionaryValue> info(
+      GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetInteger(kStatsSettingsKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
 const base::FilePath& ProfileInfoCache::GetUserDataDir() const {
   return user_data_dir_;
 }
@@ -1281,7 +1374,7 @@ bool ProfileInfoCache::GetProfileAttributesWithPath(
     // The profile info is in the cache but its entry isn't created yet, insert
     // it in the map.
     scoped_ptr<ProfileAttributesEntry> new_entry(new ProfileAttributesEntry());
-    profile_attributes_entries_.add(path, new_entry.Pass());
+    profile_attributes_entries_.add(path, std::move(new_entry));
     profile_attributes_entries_.get(path)->Initialize(this, path);
   }
 

@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/dom/CrossThreadTask.h"
 
 #include "platform/heap/Handle.h"
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 

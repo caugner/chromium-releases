@@ -24,7 +24,7 @@ import java.util.List;
  * Utilities dealing with extracting information from intents.
  */
 public class IntentUtils {
-    private static final String TAG = "cr_IntentUtils";
+    private static final String TAG = "IntentUtils";
 
     /** See {@link #isIntentTooLarge(Intent)}. */
     private static final int MAX_INTENT_SIZE_THRESHOLD = 750000;
@@ -66,6 +66,19 @@ public class IntentUtils {
         } catch (Throwable t) {
             // Catches un-parceling exceptions.
             Log.e(TAG, "getIntExtra failed on intent " + intent);
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Just like {@link Bundle#getInt(String, int)} but doesn't throw exceptions.
+     */
+    public static int safeGetInt(Bundle bundle, String name, int defaultValue) {
+        try {
+            return bundle.getInt(name, defaultValue);
+        } catch (Throwable t) {
+            // Catches un-parceling exceptions.
+            Log.e(TAG, "getInt failed on bundle " + bundle);
             return defaultValue;
         }
     }

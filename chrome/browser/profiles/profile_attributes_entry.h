@@ -5,9 +5,12 @@
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_ATTRIBUTES_ENTRY_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_ATTRIBUTES_ENTRY_H_
 
+#include <stddef.h>
+
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 
@@ -84,6 +87,16 @@ class ProfileAttributesEntry {
   // Returns the index of the default icon used by the profile.
   size_t GetAvatarIconIndex() const;
 
+  // Browsing statistics of the profile.
+  bool HasStatsBrowsingHistory() const;
+  int GetStatsBrowsingHistory() const;
+  bool HasStatsPasswords() const;
+  int GetStatsPasswords() const;
+  bool HasStatsBookmarks() const;
+  int GetStatsBookmarks() const;
+  bool HasStatsSettings() const;
+  int GetStatsSettings() const;
+
   void SetName(const base::string16& name);
   void SetShortcutName(const base::string16& name);
   void SetIsOmitted(bool is_omitted);
@@ -101,6 +114,12 @@ class ProfileAttributesEntry {
   void SetIsUsingDefaultAvatar(bool value);
   void SetIsAuthError(bool value);
   void SetAvatarIconIndex(size_t icon_index);
+
+  // Get the statistics of the profile.
+  void SetStatsBrowsingHistory(int value);
+  void SetStatsPasswords(int value);
+  void SetStatsBookmarks(int value);
+  void SetStatsSettings(int value);
 
   void SetAuthInfo(const std::string& gaia_id,
                    const base::string16& user_name);

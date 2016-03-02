@@ -6,12 +6,14 @@
 #define CHROME_BROWSER_UI_VIEWS_WEBSITE_SETTINGS_WEBSITE_SETTINGS_POPUP_VIEW_H_
 
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/ssl/security_state_model.h"
+#include "chrome/browser/ui/views/website_settings/chosen_object_view_observer.h"
 #include "chrome/browser/ui/views/website_settings/permission_selector_view_observer.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
+#include "components/security_state/security_state_model.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
@@ -38,9 +40,17 @@ class TabbedPane;
 class Widget;
 }
 
+enum : int {
+  // Left icon margin.
+  kPermissionIconMarginLeft = 6,
+  // The width of the column that contains the permissions icons.
+  kPermissionIconColumnWidth = 20,
+};
+
 // The views implementation of the website settings UI.
 class WebsiteSettingsPopupView : public content::WebContentsObserver,
                                  public PermissionSelectorViewObserver,
+                                 public ChosenObjectViewObserver,
                                  public views::BubbleDelegateView,
                                  public views::ButtonListener,
                                  public views::LinkListener,
@@ -51,12 +61,13 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   ~WebsiteSettingsPopupView() override;
 
   // If |anchor_view| is null, |anchor_rect| is used to anchor the bubble.
-  static void ShowPopup(views::View* anchor_view,
-                        const gfx::Rect& anchor_rect,
-                        Profile* profile,
-                        content::WebContents* web_contents,
-                        const GURL& url,
-                        const SecurityStateModel::SecurityInfo& security_info);
+  static void ShowPopup(
+      views::View* anchor_view,
+      const gfx::Rect& anchor_rect,
+      Profile* profile,
+      content::WebContents* web_contents,
+      const GURL& url,
+      const security_state::SecurityStateModel::SecurityInfo& security_info);
 
   static bool IsPopupShowing();
 
@@ -69,7 +80,7 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& url,
-      const SecurityStateModel::SecurityInfo& security_info);
+      const security_state::SecurityStateModel::SecurityInfo& security_info);
 
   // WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
@@ -77,6 +88,10 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   // PermissionSelectorViewObserver implementation.
   void OnPermissionChanged(
       const WebsiteSettingsUI::PermissionInfo& permission) override;
+
+  // ChosenObjectViewObserver implementation.
+  void OnChosenObjectDeleted(
+      const WebsiteSettingsUI::ChosenObjectInfo& info) override;
 
   // views::BubbleDelegateView implementation.
   void OnWidgetDestroying(views::Widget* widget) override;
@@ -88,10 +103,11 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   void LinkClicked(views::Link* source, int event_flags) override;
 
   // views::StyledLabelListener implementation.
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
-  // views::TabbedPaneListener implementations.
+  // views::TabbedPaneListener implementation.
   void TabSelectedAt(int index) override;
 
   // views::View implementation.
@@ -100,7 +116,8 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   // WebsiteSettingsUI implementations.
   void SetCookieInfo(const CookieInfoList& cookie_info_list) override;
   void SetPermissionInfo(
-      const PermissionInfoList& permission_info_list) override;
+      const PermissionInfoList& permission_info_list,
+      const ChosenObjectInfoList& chosen_object_info_list) override;
   void SetIdentityInfo(const IdentityInfo& identity_info) override;
   void SetSelectedTab(TabId tab_id) override;
 

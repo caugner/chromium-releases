@@ -16,17 +16,18 @@
 #include <openssl/ssl.h>
 #include <string.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/profiler/scoped_tracker.h"
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_local.h"
 #include "base/values.h"
 #include "crypto/ec_private_key.h"
@@ -34,9 +35,9 @@
 #include "crypto/scoped_openssl_types.h"
 #include "net/base/ip_address_number.h"
 #include "net/base/net_errors.h"
-#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_ev_whitelist.h"
+#include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/x509_certificate_net_log_param.h"
 #include "net/cert/x509_util_openssl.h"
@@ -54,7 +55,7 @@
 #endif
 
 #if !defined(OS_NACL)
-#include "net/ssl/ssl_platform_key.h"
+#include "net/ssl/ssl_key_logger.h"
 #endif
 
 #if defined(USE_NSS_CERTS) || defined(OS_IOS)
@@ -101,7 +102,7 @@ void FreeX509Stack(STACK_OF(X509)* ptr) {
 using ScopedX509Stack = crypto::ScopedOpenSSL<STACK_OF(X509), FreeX509Stack>;
 
 // Used for encoding the |connection_status| field of an SSLInfo object.
-int EncodeSSLConnectionStatus(uint16 cipher_suite,
+int EncodeSSLConnectionStatus(uint16_t cipher_suite,
                               int compression,
                               int version) {
   return cipher_suite |
@@ -149,12 +150,7 @@ ScopedX509Stack OSCertHandlesToOpenSSL(
       return ScopedX509Stack();
     sk_X509_push(stack.get(), x509.release());
   }
-  return stack.Pass();
-}
-
-int LogErrorCallback(const char* str, size_t len, void* context) {
-  LOG(ERROR) << base::StringPiece(str, len);
-  return 1;
+  return stack;
 }
 
 bool EVP_MDToPrivateKeyHash(const EVP_MD* md, SSLPrivateKey::Hash* hash) {
@@ -179,33 +175,6 @@ bool EVP_MDToPrivateKeyHash(const EVP_MD* md, SSLPrivateKey::Hash* hash) {
   }
 }
 
-#if !defined(OS_NACL)
-class PlatformKeyTaskRunner {
- public:
-  PlatformKeyTaskRunner() {
-    // Serialize all the private key operations on a single background
-    // thread to avoid problems with buggy smartcards.
-    worker_pool_ = new base::SequencedWorkerPool(1, "Platform Key Thread");
-    task_runner_ = worker_pool_->GetSequencedTaskRunnerWithShutdownBehavior(
-        worker_pool_->GetSequenceToken(),
-        base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-  }
-
-  scoped_refptr<base::SequencedTaskRunner> task_runner() {
-    return task_runner_;
-  }
-
- private:
-  scoped_refptr<base::SequencedWorkerPool> worker_pool_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformKeyTaskRunner);
-};
-
-base::LazyInstance<PlatformKeyTaskRunner>::Leaky g_platform_key_task_runner =
-    LAZY_INSTANCE_INITIALIZER;
-#endif
-
 class ScopedCBB {
  public:
   ScopedCBB() { CBB_zero(&cbb_); }
@@ -217,6 +186,45 @@ class ScopedCBB {
   CBB cbb_;
   DISALLOW_COPY_AND_ASSIGN(ScopedCBB);
 };
+
+scoped_ptr<base::Value> NetLogPrivateKeyOperationCallback(
+    SSLPrivateKey::Type type,
+    SSLPrivateKey::Hash hash,
+    NetLogCaptureMode mode) {
+  std::string type_str;
+  switch (type) {
+    case SSLPrivateKey::Type::RSA:
+      type_str = "RSA";
+      break;
+    case SSLPrivateKey::Type::ECDSA:
+      type_str = "ECDSA";
+      break;
+  }
+
+  std::string hash_str;
+  switch (hash) {
+    case SSLPrivateKey::Hash::MD5_SHA1:
+      hash_str = "MD5_SHA1";
+      break;
+    case SSLPrivateKey::Hash::SHA1:
+      hash_str = "SHA1";
+      break;
+    case SSLPrivateKey::Hash::SHA256:
+      hash_str = "SHA256";
+      break;
+    case SSLPrivateKey::Hash::SHA384:
+      hash_str = "SHA384";
+      break;
+    case SSLPrivateKey::Hash::SHA512:
+      hash_str = "SHA512";
+      break;
+  }
+
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue);
+  value->SetString("type", type_str);
+  value->SetString("hash", hash_str);
+  return std::move(value);
+}
 
 }  // namespace
 
@@ -239,6 +247,16 @@ class SSLClientSocketOpenSSL::SSLContext {
   bool SetClientSocketForSSL(SSL* ssl, SSLClientSocketOpenSSL* socket) {
     return SSL_set_ex_data(ssl, ssl_socket_data_index_, socket) != 0;
   }
+
+#if !defined(OS_NACL)
+  void SetSSLKeyLogFile(
+      const base::FilePath& path,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
+    DCHECK(!ssl_key_logger_);
+    ssl_key_logger_.reset(new SSLKeyLogger(path, task_runner));
+    SSL_CTX_set_keylog_callback(ssl_ctx_.get(), KeyLogCallback);
+  }
+#endif
 
   static const SSL_PRIVATE_KEY_METHOD kPrivateKeyMethod;
 
@@ -369,11 +387,21 @@ class SSLClientSocketOpenSSL::SSLContext {
     return socket->PrivateKeySignCompleteCallback(out, out_len, max_out);
   }
 
+#if !defined(OS_NACL)
+  static void KeyLogCallback(const SSL* ssl, const char* line) {
+    GetInstance()->ssl_key_logger_->WriteLine(line);
+  }
+#endif
+
   // This is the index used with SSL_get_ex_data to retrieve the owner
   // SSLClientSocketOpenSSL object from an SSL instance.
   int ssl_socket_data_index_;
 
   ScopedSSL_CTX ssl_ctx_;
+
+#if !defined(OS_NACL)
+  scoped_ptr<SSLKeyLogger> ssl_key_logger_;
+#endif
 
   // TODO(davidben): Use a separate cache per URLRequestContext.
   // https://crbug.com/458365
@@ -500,7 +528,7 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       tb_negotiated_param_(TB_PARAM_ECDSAP256),
       ssl_(NULL),
       transport_bio_(NULL),
-      transport_(transport_socket.Pass()),
+      transport_(std::move(transport_socket)),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
       ssl_session_cache_shard_(context.ssl_session_cache_shard),
@@ -513,7 +541,7 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       ssl_failure_state_(SSL_FAILURE_NONE),
       signature_result_(kNoPendingResult),
       transport_security_state_(context.transport_security_state),
-      policy_enforcer_(context.cert_policy_enforcer),
+      policy_enforcer_(context.ct_policy_enforcer),
       net_log_(transport_->socket()->NetLog()),
       weak_factory_(this) {
   DCHECK(cert_verifier_);
@@ -523,17 +551,13 @@ SSLClientSocketOpenSSL::~SSLClientSocketOpenSSL() {
   Disconnect();
 }
 
+#if !defined(OS_NACL)
 void SSLClientSocketOpenSSL::SetSSLKeyLogFile(
-    const std::string& ssl_keylog_file) {
-  crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  BIO* bio = BIO_new_file(ssl_keylog_file.c_str(), "a");
-  if (!bio) {
-    LOG(ERROR) << "Failed to open " << ssl_keylog_file;
-    ERR_print_errors_cb(&LogErrorCallback, NULL);
-  } else {
-    SSL_CTX_set_keylog_bio(SSLContext::GetInstance()->ssl_ctx(), bio);
-  }
+    const base::FilePath& ssl_keylog_file,
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
+  SSLContext::GetInstance()->SetSSLKeyLogFile(ssl_keylog_file, task_runner);
 }
+#endif
 
 void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
@@ -680,7 +704,6 @@ void SSLClientSocketOpenSSL::Disconnect() {
   channel_id_request_.Cancel();
   ssl_failure_state_ = SSL_FAILURE_NONE;
 
-  private_key_.reset();
   signature_result_ = kNoPendingResult;
   signature_.clear();
 }
@@ -785,7 +808,7 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       SSL_SESSION_get_key_exchange_info(SSL_get_session(ssl_));
 
   ssl_info->connection_status = EncodeSSLConnectionStatus(
-      static_cast<uint16>(SSL_CIPHER_get_id(cipher)), 0 /* no compression */,
+      static_cast<uint16_t>(SSL_CIPHER_get_id(cipher)), 0 /* no compression */,
       GetNetSSLVersion(ssl_));
 
   if (!SSL_get_secure_renegotiation_support(ssl_))
@@ -853,11 +876,11 @@ int SSLClientSocketOpenSSL::Write(IOBuffer* buf,
   return rv;
 }
 
-int SSLClientSocketOpenSSL::SetReceiveBufferSize(int32 size) {
+int SSLClientSocketOpenSSL::SetReceiveBufferSize(int32_t size) {
   return transport_->socket()->SetReceiveBufferSize(size);
 }
 
-int SSLClientSocketOpenSSL::SetSendBufferSize(int32 size) {
+int SSLClientSocketOpenSSL::SetSendBufferSize(int32_t size) {
   return transport_->socket()->SetSendBufferSize(size);
 }
 
@@ -963,12 +986,9 @@ int SSLClientSocketOpenSSL::Init() {
     command.append(":!RC4");
   }
 
-  if (ssl_config_.deprecated_cipher_suites_enabled) {
-    // Add TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384 under a fallback. This is
-    // believed to work around a bug in some out-of-date Microsoft IIS servers
-    // which cause them to require the version downgrade
-    // (https://crbug.com/433406).
-    command.append(":ECDHE-RSA-AES256-SHA384");
+  if (!ssl_config_.deprecated_cipher_suites_enabled) {
+    // Only offer DHE on the second handshake. https://crbug.com/538690
+    command.append(":!kDHE");
   }
 
   // Remove any disabled ciphers.
@@ -1004,10 +1024,10 @@ int SSLClientSocketOpenSSL::Init() {
     // Get list of ciphers that are enabled.
     STACK_OF(SSL_CIPHER)* enabled_ciphers = SSL_get_ciphers(ssl_);
     DCHECK(enabled_ciphers);
-    std::vector<uint16> enabled_ciphers_vector;
+    std::vector<uint16_t> enabled_ciphers_vector;
     for (size_t i = 0; i < sk_SSL_CIPHER_num(enabled_ciphers); ++i) {
       const SSL_CIPHER* cipher = sk_SSL_CIPHER_value(enabled_ciphers, i);
-      const uint16 id = static_cast<uint16>(SSL_CIPHER_get_id(cipher));
+      const uint16_t id = static_cast<uint16_t>(SSL_CIPHER_get_id(cipher));
       enabled_ciphers_vector.push_back(id);
     }
 
@@ -1112,7 +1132,7 @@ int SSLClientSocketOpenSSL::DoHandshake() {
       return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     }
     if (ssl_error == SSL_ERROR_WANT_PRIVATE_KEY_OPERATION) {
-      DCHECK(private_key_);
+      DCHECK(ssl_config_.client_private_key);
       DCHECK_NE(kNoPendingResult, signature_result_);
       GotoState(STATE_HANDSHAKE);
       return ERR_IO_PENDING;
@@ -1579,7 +1599,7 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
       pending_read_error_ = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     } else if (pending_read_ssl_error_ ==
                SSL_ERROR_WANT_PRIVATE_KEY_OPERATION) {
-      DCHECK(private_key_);
+      DCHECK(ssl_config_.client_private_key);
       DCHECK_NE(kNoPendingResult, signature_result_);
       pending_read_error_ = ERR_IO_PENDING;
     } else {
@@ -1869,18 +1889,9 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
       return -1;
     }
 
-#if defined(OS_NACL)
-      OpenSSLPutNetError(FROM_HERE, ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY);
-      return -1;
-#else
-    // TODO(davidben): Lift this call up to the embedder so we can actually test
-    // this code. https://crbug.com/394131
-    private_key_ = FetchClientCertPrivateKey(
-        ssl_config_.client_cert.get(),
-        g_platform_key_task_runner.Get().task_runner());
-    if (!private_key_) {
-      // Could not find the private key. Fail the handshake and surface an
-      // appropriate error to the caller.
+    if (!ssl_config_.client_private_key) {
+      // The caller supplied a null private key. Fail the handshake and surface
+      // an appropriate error to the caller.
       LOG(WARNING) << "Client cert found without private key";
       OpenSSLPutNetError(FROM_HERE, ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY);
       return -1;
@@ -1889,7 +1900,7 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
     SSL_set_private_key_method(ssl_, &SSLContext::kPrivateKeyMethod);
 
     std::vector<SSLPrivateKey::Hash> digest_prefs =
-        private_key_->GetDigestPreferences();
+        ssl_config_.client_private_key->GetDigestPreferences();
 
     size_t digests_len = digest_prefs.size();
     std::vector<int> digests;
@@ -1913,9 +1924,7 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
       }
     }
 
-    SSL_set_private_key_digest_prefs(ssl_, vector_as_array(&digests),
-                                     digests.size());
-#endif  // !OS_NACL
+    SSL_set_private_key_digest_prefs(ssl_, digests.data(), digests.size());
 
     int cert_count = 1 + sk_X509_num(chain.get());
     net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_PROVIDED,
@@ -1959,14 +1968,14 @@ int SSLClientSocketOpenSSL::CertVerifyCallback(X509_STORE_CTX* store_ctx) {
 
 // SelectNextProtoCallback is called by OpenSSL during the handshake. If the
 // server supports NPN, selects a protocol from the list that the server
-// provides. According to third_party/openssl/openssl/ssl/ssl_lib.c, the
+// provides. According to third_party/boringssl/src/ssl/ssl_lib.c, the
 // callback can assume that |in| is syntactically valid.
 int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
                                                     unsigned char* outlen,
                                                     const unsigned char* in,
                                                     unsigned int inlen) {
   if (ssl_config_.npn_protos.empty()) {
-    *out = reinterpret_cast<uint8*>(
+    *out = reinterpret_cast<uint8_t*>(
         const_cast<char*>(kDefaultSupportedNPNProtocol));
     *outlen = arraysize(kDefaultSupportedNPNProtocol) - 1;
     npn_status_ = kNextProtoUnsupported;
@@ -2079,25 +2088,7 @@ int SSLClientSocketOpenSSL::NewSessionCallback(SSL_SESSION* session) {
 }
 
 void SSLClientSocketOpenSSL::AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const {
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.verified_scts.begin();
-       iter != ct_verify_result_.verified_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter, ct::SCT_STATUS_OK));
-  }
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.invalid_scts.begin();
-       iter != ct_verify_result_.invalid_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter, ct::SCT_STATUS_INVALID));
-  }
-  for (ct::SCTList::const_iterator iter =
-       ct_verify_result_.unknown_logs_scts.begin();
-       iter != ct_verify_result_.unknown_logs_scts.end(); ++iter) {
-    ssl_info->signed_certificate_timestamps.push_back(
-        SignedCertificateTimestampAndStatus(*iter,
-                                            ct::SCT_STATUS_LOG_UNKNOWN));
-  }
+  ssl_info->UpdateSignedCertificateTimestamps(ct_verify_result_);
 }
 
 std::string SSLClientSocketOpenSSL::GetSessionCacheKey() const {
@@ -2149,7 +2140,7 @@ bool SSLClientSocketOpenSSL::IsRenegotiationAllowed() const {
 }
 
 int SSLClientSocketOpenSSL::PrivateKeyTypeCallback() {
-  switch (private_key_->GetType()) {
+  switch (ssl_config_.client_private_key->GetType()) {
     case SSLPrivateKey::Type::RSA:
       return EVP_PKEY_RSA;
     case SSLPrivateKey::Type::ECDSA:
@@ -2160,7 +2151,7 @@ int SSLClientSocketOpenSSL::PrivateKeyTypeCallback() {
 }
 
 size_t SSLClientSocketOpenSSL::PrivateKeyMaxSignatureLenCallback() {
-  return private_key_->GetMaxSignatureLengthInBytes();
+  return ssl_config_.client_private_key->GetMaxSignatureLengthInBytes();
 }
 
 ssl_private_key_result_t SSLClientSocketOpenSSL::PrivateKeySignCallback(
@@ -2172,9 +2163,7 @@ ssl_private_key_result_t SSLClientSocketOpenSSL::PrivateKeySignCallback(
     size_t in_len) {
   DCHECK_EQ(kNoPendingResult, signature_result_);
   DCHECK(signature_.empty());
-  DCHECK(private_key_);
-
-  net_log_.BeginEvent(NetLog::TYPE_SSL_PRIVATE_KEY_OPERATION);
+  DCHECK(ssl_config_.client_private_key);
 
   SSLPrivateKey::Hash hash;
   if (!EVP_MDToPrivateKeyHash(md, &hash)) {
@@ -2182,8 +2171,13 @@ ssl_private_key_result_t SSLClientSocketOpenSSL::PrivateKeySignCallback(
     return ssl_private_key_failure;
   }
 
+  net_log_.BeginEvent(
+      NetLog::TYPE_SSL_PRIVATE_KEY_OPERATION,
+      base::Bind(&NetLogPrivateKeyOperationCallback,
+                 ssl_config_.client_private_key->GetType(), hash));
+
   signature_result_ = ERR_IO_PENDING;
-  private_key_->SignDigest(
+  ssl_config_.client_private_key->SignDigest(
       hash, base::StringPiece(reinterpret_cast<const char*>(in), in_len),
       base::Bind(&SSLClientSocketOpenSSL::OnPrivateKeySignComplete,
                  weak_factory_.GetWeakPtr()));
@@ -2195,7 +2189,7 @@ ssl_private_key_result_t SSLClientSocketOpenSSL::PrivateKeySignCompleteCallback(
     size_t* out_len,
     size_t max_out) {
   DCHECK_NE(kNoPendingResult, signature_result_);
-  DCHECK(private_key_);
+  DCHECK(ssl_config_.client_private_key);
 
   if (signature_result_ == ERR_IO_PENDING)
     return ssl_private_key_retry;
@@ -2207,7 +2201,7 @@ ssl_private_key_result_t SSLClientSocketOpenSSL::PrivateKeySignCompleteCallback(
     OpenSSLPutNetError(FROM_HERE, ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED);
     return ssl_private_key_failure;
   }
-  memcpy(out, vector_as_array(&signature_), signature_.size());
+  memcpy(out, signature_.data(), signature_.size());
   *out_len = signature_.size();
   signature_.clear();
   return ssl_private_key_success;
@@ -2218,7 +2212,7 @@ void SSLClientSocketOpenSSL::OnPrivateKeySignComplete(
     const std::vector<uint8_t>& signature) {
   DCHECK_EQ(ERR_IO_PENDING, signature_result_);
   DCHECK(signature_.empty());
-  DCHECK(private_key_);
+  DCHECK(ssl_config_.client_private_key);
 
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_SSL_PRIVATE_KEY_OPERATION,
                                     error);

@@ -5,6 +5,7 @@
 #ifndef UI_BASE_IME_IME_ENGINE_OBSERVER_H_
 #define UI_BASE_IME_IME_ENGINE_OBSERVER_H_
 
+#include "build/build_config.h"
 #include "ui/base/ime/ime_engine_handler_interface.h"
 
 namespace ui {
@@ -12,6 +13,9 @@ namespace ui {
 class IMEEngineObserver {
  public:
   virtual ~IMEEngineObserver() {}
+
+  // Called when the IME becomes the active IME.
+  virtual void OnActivate(const std::string& engine_id) = 0;
 
   // Called when a text field gains focus, and will be sending key events.
   virtual void OnFocus(
@@ -36,6 +40,16 @@ class IMEEngineObserver {
   virtual void OnCompositionBoundsChanged(
       const std::vector<gfx::Rect>& bounds) = 0;
 
+  // Returns whether the observer is interested in key events.
+  virtual bool IsInterestedInKeyEvent() const = 0;
+
+  // Called when a surrounding text is changed.
+  virtual void OnSurroundingTextChanged(const std::string& engine_id,
+                                        const std::string& text,
+                                        int cursor_pos,
+                                        int anchor_pos,
+                                        int offset_pos) = 0;
+
 // ChromeOS only APIs.
 #if defined(OS_CHROMEOS)
 
@@ -45,15 +59,11 @@ class IMEEngineObserver {
     MOUSE_BUTTON_MIDDLE,
   };
 
-  // Called when the IME becomes the active IME.
-  virtual void OnActivate(const std::string& engine_id) = 0;
-
   // Called when an InputContext's properties change while it is focused.
   virtual void OnInputContextUpdate(
       const IMEEngineHandlerInterface::InputContext& context) = 0;
 
-  // Returns whether the observer is interested in key events.
-  virtual bool IsInterestedInKeyEvent() const = 0;
+
 
   // Called when the user clicks on an item in the candidate list.
   virtual void OnCandidateClicked(const std::string& engine_id,
@@ -63,13 +73,6 @@ class IMEEngineObserver {
   // Called when a menu item for this IME is interacted with.
   virtual void OnMenuItemActivated(const std::string& engine_id,
                                    const std::string& menu_id) = 0;
-
-  // Called when a surrounding text is changed.
-  virtual void OnSurroundingTextChanged(const std::string& engine_id,
-                                        const std::string& text,
-                                        int cursor_pos,
-                                        int anchor_pos,
-                                        int offset_pos) = 0;
 #endif
 };
 

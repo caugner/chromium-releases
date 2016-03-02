@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
@@ -196,13 +197,20 @@ DownloadTargetDeterminer::Result
     // (WebStore, Drag&Drop). Treat the path as a virtual path. We will
     // eventually determine whether this is a local path and if not, figure out
     // a local path.
+
+    std::string suggested_filename = download_->GetSuggestedFilename();
+    if (suggested_filename.empty() &&
+        download_->GetMimeType() == "application/x-x509-user-cert") {
+      suggested_filename = "user.crt";
+    }
+
     std::string default_filename(
         l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
     base::FilePath generated_filename = net::GenerateFileName(
         download_->GetURL(),
         download_->GetContentDisposition(),
         GetProfile()->GetPrefs()->GetString(prefs::kDefaultCharset),
-        download_->GetSuggestedFilename(),
+        suggested_filename,
         download_->GetMimeType(),
         default_filename);
     should_prompt_ = ShouldPromptForDownload(generated_filename);

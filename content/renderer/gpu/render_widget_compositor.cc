@@ -4,12 +4,15 @@
 
 #include "content/renderer/gpu/render_widget_compositor.h"
 
+#include <stddef.h>
 #include <limits>
 #include <string>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
@@ -17,6 +20,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/base/switches.h"
@@ -31,10 +35,12 @@
 #include "cc/output/copy_output_result.h"
 #include "cc/output/latency_info_swap_promise.h"
 #include "cc/output/swap_promise.h"
+#include "cc/proto/compositor_message.pb.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/trees/latency_info_swap_promise_monitor.h"
 #include "cc/trees/layer_tree_host.h"
+#include "cc/trees/remote_proto_channel.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
@@ -215,6 +221,7 @@ RenderWidgetCompositor::RenderWidgetCompositor(
       compositor_deps_(compositor_deps),
       never_visible_(false),
       layout_and_paint_async_callback_(nullptr),
+      remote_proto_channel_receiver_(nullptr),
       weak_factory_(this) {
 }
 
@@ -245,10 +252,10 @@ void RenderWidgetCompositor::Initialize() {
   settings.accelerated_animation_enabled =
       compositor_deps_->IsThreadedAnimationEnabled();
 
-  if (cmd->HasSwitch(switches::kEnableCompositorAnimationTimelines)) {
-    settings.use_compositor_animation_timelines = true;
-    blink::WebRuntimeFeatures::enableCompositorAnimationTimelines(true);
-  }
+  settings.use_compositor_animation_timelines =
+      !cmd->HasSwitch(switches::kDisableCompositorAnimationTimelines);
+  blink::WebRuntimeFeatures::enableCompositorAnimationTimelines(
+      settings.use_compositor_animation_timelines);
 
   settings.default_tile_size = CalculateDefaultTileSize(widget_);
   if (cmd->HasSwitch(switches::kDefaultTileWidth)) {
@@ -327,8 +334,8 @@ void RenderWidgetCompositor::Initialize() {
 
   settings.verify_property_trees =
       cmd->HasSwitch(cc::switches::kEnablePropertyTreeVerification);
-  settings.use_property_trees =
-      cmd->HasSwitch(cc::switches::kEnableCompositorPropertyTrees);
+  if (cmd->HasSwitch(cc::switches::kDisableCompositorPropertyTrees))
+    settings.use_property_trees = false;
   settings.renderer_settings.allow_antialiasing &=
       !cmd->HasSwitch(cc::switches::kDisableCompositedAntialiasing);
   // The means the renderer compositor has 2 possible modes:
@@ -341,8 +348,6 @@ void RenderWidgetCompositor::Initialize() {
   // These flags should be mirrored by UI versions in ui/compositor/.
   settings.initial_debug_state.show_debug_borders =
       cmd->HasSwitch(cc::switches::kShowCompositedLayerBorders);
-  settings.initial_debug_state.show_fps_counter =
-      cmd->HasSwitch(cc::switches::kShowFPSCounter);
   settings.initial_debug_state.show_layer_animation_bounds_rects =
       cmd->HasSwitch(cc::switches::kShowLayerAnimationBounds);
   settings.initial_debug_state.show_paint_rects =
@@ -385,7 +390,6 @@ void RenderWidgetCompositor::Initialize() {
   if (base::SysInfo::IsLowEndDevice())
     settings.gpu_rasterization_enabled = false;
   settings.using_synchronous_renderer_compositor = using_synchronous_compositor;
-  settings.record_full_layer = widget_->DoesRecordFullLayer();
   if (using_synchronous_compositor) {
     // Android WebView uses system scrollbars, so make ours invisible.
     settings.scrollbar_animator = cc::LayerTreeSettings::NO_ANIMATOR;
@@ -478,6 +482,11 @@ void RenderWidgetCompositor::Initialize() {
   cc::TaskGraphRunner* task_graph_runner =
       compositor_deps_->GetTaskGraphRunner();
 
+  bool use_remote_compositing = cmd->HasSwitch(switches::kUseRemoteCompositing);
+
+  if (use_remote_compositing)
+    settings.use_external_begin_frame_source = false;
+
   scoped_ptr<cc::BeginFrameSource> external_begin_frame_source;
   if (settings.use_external_begin_frame_source) {
     external_begin_frame_source =
@@ -491,8 +500,14 @@ void RenderWidgetCompositor::Initialize() {
   params.settings = &settings;
   params.task_graph_runner = task_graph_runner;
   params.main_task_runner = main_thread_compositor_task_runner;
-  params.external_begin_frame_source = external_begin_frame_source.Pass();
-  if (compositor_thread_task_runner.get()) {
+  params.external_begin_frame_source = std::move(external_begin_frame_source);
+  if (use_remote_compositing) {
+    DCHECK(!compositor_thread_task_runner.get());
+
+    // TODO(khushalsagar): Replace this with LayerTreeHost::CreateRemote
+    // See crbug/550687.
+    layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
+  } else if (compositor_thread_task_runner.get()) {
     layer_tree_host_ = cc::LayerTreeHost::CreateThreaded(
         compositor_thread_task_runner, &params);
   } else {
@@ -546,7 +561,7 @@ RenderWidgetCompositor::CreateLatencyInfoSwapPromiseMonitor(
 
 void RenderWidgetCompositor::QueueSwapPromise(
     scoped_ptr<cc::SwapPromise> swap_promise) {
-  layer_tree_host_->QueueSwapPromise(swap_promise.Pass());
+  layer_tree_host_->QueueSwapPromise(std::move(swap_promise));
 }
 
 int RenderWidgetCompositor::GetSourceFrameNumber() const {
@@ -573,13 +588,14 @@ int RenderWidgetCompositor::ScheduleMicroBenchmark(
     const std::string& name,
     scoped_ptr<base::Value> value,
     const base::Callback<void(scoped_ptr<base::Value>)>& callback) {
-  return layer_tree_host_->ScheduleMicroBenchmark(name, value.Pass(), callback);
+  return layer_tree_host_->ScheduleMicroBenchmark(name, std::move(value),
+                                                  callback);
 }
 
 bool RenderWidgetCompositor::SendMessageToMicroBenchmark(
     int id,
     scoped_ptr<base::Value> value) {
-  return layer_tree_host_->SendMessageToMicroBenchmark(id, value.Pass());
+  return layer_tree_host_->SendMessageToMicroBenchmark(id, std::move(value));
 }
 
 void RenderWidgetCompositor::setRootLayer(const blink::WebLayer& layer) {
@@ -872,7 +888,8 @@ void RenderWidgetCompositor::UpdateLayerTreeHost() {
     // For WebViewImpl, this will always have a root layer.  For other widgets,
     // the widget may be closed before servicing this request, so ignore it.
     if (cc::Layer* root_layer = layer_tree_host_->root_layer()) {
-      root_layer->RequestCopyOfOutput(temporary_copy_output_request_.Pass());
+      root_layer->RequestCopyOfOutput(
+          std::move(temporary_copy_output_request_));
     } else {
       temporary_copy_output_request_->SendEmptyResult();
       temporary_copy_output_request_ = nullptr;
@@ -912,7 +929,7 @@ void RenderWidgetCompositor::RequestNewOutputSurface() {
 
   DCHECK_EQ(surface->capabilities().max_frames_pending, 1);
 
-  layer_tree_host_->SetOutputSurface(surface.Pass());
+  layer_tree_host_->SetOutputSurface(std::move(surface));
 }
 
 void RenderWidgetCompositor::DidInitializeOutputSurface() {
@@ -968,6 +985,19 @@ void RenderWidgetCompositor::DidAbortSwapBuffers() {
   widget_->OnSwapBuffersAborted();
 }
 
+void RenderWidgetCompositor::SetProtoReceiver(ProtoReceiver* receiver) {
+  remote_proto_channel_receiver_ = receiver;
+}
+
+void RenderWidgetCompositor::SendCompositorProto(
+    const cc::proto::CompositorMessage& proto) {
+  int signed_size = proto.ByteSize();
+  size_t unsigned_size = base::checked_cast<size_t>(signed_size);
+  std::vector<uint8_t> serialized(unsigned_size);
+  proto.SerializeToArray(serialized.data(), signed_size);
+  widget_->ForwardCompositorProto(serialized);
+}
+
 void RenderWidgetCompositor::RecordFrameTimingEvents(
     scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
     scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events) {
@@ -1003,6 +1033,21 @@ void RenderWidgetCompositor::RecordFrameTimingEvents(
 void RenderWidgetCompositor::SetSurfaceIdNamespace(
     uint32_t surface_id_namespace) {
   layer_tree_host_->set_surface_id_namespace(surface_id_namespace);
+}
+
+void RenderWidgetCompositor::OnHandleCompositorProto(
+    const std::vector<uint8_t>& proto) {
+  DCHECK(remote_proto_channel_receiver_);
+
+  scoped_ptr<cc::proto::CompositorMessage> deserialized(
+      new cc::proto::CompositorMessage);
+  int signed_size = base::checked_cast<int>(proto.size());
+  if (!deserialized->ParseFromArray(proto.data(), signed_size)) {
+    LOG(ERROR) << "Unable to parse compositor proto.";
+    return;
+  }
+
+  remote_proto_channel_receiver_->OnProtoReceived(std::move(deserialized));
 }
 
 cc::ManagedMemoryPolicy RenderWidgetCompositor::GetGpuMemoryPolicy(

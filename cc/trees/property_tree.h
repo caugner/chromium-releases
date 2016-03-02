@@ -5,15 +5,33 @@
 #ifndef CC_TREES_PROPERTY_TREE_H_
 #define CC_TREES_PROPERTY_TREE_H_
 
+#include <stddef.h>
+
 #include <vector>
 
-#include "base/basictypes.h"
 #include "cc/base/cc_export.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
+
+namespace proto {
+class ClipNodeData;
+class EffectNodeData;
+class PropertyTree;
+class PropertyTrees;
+class TranformNodeData;
+class TransformTreeData;
+class TreeNode;
+}
+
+// ------------------------------*IMPORTANT*---------------------------------
+// Each class declared here has a corresponding proto defined in
+// cc/proto/property_tree.proto. When making any changes to a class structure
+// including addition/deletion/updation of a field, please also make the
+// change to its proto and the ToProtobuf and FromProtobuf methods for that
+// class.
 
 template <typename T>
 struct CC_EXPORT TreeNode {
@@ -22,6 +40,11 @@ struct CC_EXPORT TreeNode {
   int parent_id;
   int owner_id;
   T data;
+
+  bool operator==(const TreeNode<T>& other) const;
+
+  void ToProtobuf(proto::TreeNode* proto) const;
+  void FromProtobuf(const proto::TreeNode& proto);
 };
 
 struct CC_EXPORT TransformNodeData {
@@ -141,6 +164,8 @@ struct CC_EXPORT TransformNodeData {
   gfx::Vector2dF source_offset;
   gfx::Vector2dF source_to_parent;
 
+  bool operator==(const TransformNodeData& other) const;
+
   void set_to_parent(const gfx::Transform& transform) {
     to_parent = transform;
     is_invertible = to_parent.IsInvertible();
@@ -150,6 +175,9 @@ struct CC_EXPORT TransformNodeData {
 
   void update_post_local_transform(const gfx::PointF& position,
                                    const gfx::Point3F& transform_origin);
+
+  void ToProtobuf(proto::TreeNode* proto) const;
+  void FromProtobuf(const proto::TreeNode& proto);
 };
 
 typedef TreeNode<TransformNodeData> TransformNode;
@@ -198,6 +226,11 @@ struct CC_EXPORT ClipNodeData {
 
   // Nodes that correspond to unclipped surfaces disregard ancestor clips.
   bool resets_clip : 1;
+
+  bool operator==(const ClipNodeData& other) const;
+
+  void ToProtobuf(proto::TreeNode* proto) const;
+  void FromProtobuf(const proto::TreeNode& proto);
 };
 
 typedef TreeNode<ClipNodeData> ClipNode;
@@ -209,8 +242,14 @@ struct CC_EXPORT EffectNodeData {
   float screen_space_opacity;
 
   bool has_render_surface;
+  int num_copy_requests_in_subtree;
   int transform_id;
   int clip_id;
+
+  bool operator==(const EffectNodeData& other) const;
+
+  void ToProtobuf(proto::TreeNode* proto) const;
+  void FromProtobuf(const proto::TreeNode& proto);
 };
 
 typedef TreeNode<EffectNodeData> EffectNode;
@@ -220,6 +259,8 @@ class CC_EXPORT PropertyTree {
  public:
   PropertyTree();
   virtual ~PropertyTree();
+
+  bool operator==(const PropertyTree<T>& other) const;
 
   int Insert(const T& tree_node, int parent_id);
 
@@ -248,7 +289,13 @@ class CC_EXPORT PropertyTree {
   void set_needs_update(bool needs_update) { needs_update_ = needs_update; }
   bool needs_update() const { return needs_update_; }
 
+  std::vector<T>& nodes() { return nodes_; }
+  const std::vector<T>& nodes() const { return nodes_; }
+
   int next_available_id() const { return static_cast<int>(size()); }
+
+  void ToProtobuf(proto::PropertyTree* proto) const;
+  void FromProtobuf(const proto::PropertyTree& proto);
 
  private:
   // Copy and assign are permitted. This is how we do tree sync.
@@ -261,6 +308,8 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
  public:
   TransformTree();
   ~TransformTree() override;
+
+  bool operator==(const TransformTree& other) const;
 
   void clear() override;
 
@@ -331,6 +380,9 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
   void SetDeviceTransform(const gfx::Transform& transform,
                           gfx::PointF root_position);
   void SetDeviceTransformScaleFactor(const gfx::Transform& transform);
+  float device_transform_scale_factor() const {
+    return device_transform_scale_factor_;
+  }
 
   void SetInnerViewportBoundsDelta(gfx::Vector2dF bounds_delta);
   gfx::Vector2dF inner_viewport_bounds_delta() const {
@@ -347,6 +399,18 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
 
   bool HasNodesAffectedByInnerViewportBoundsDelta() const;
   bool HasNodesAffectedByOuterViewportBoundsDelta() const;
+
+  const std::vector<int>& nodes_affected_by_inner_viewport_bounds_delta()
+      const {
+    return nodes_affected_by_inner_viewport_bounds_delta_;
+  }
+  const std::vector<int>& nodes_affected_by_outer_viewport_bounds_delta()
+      const {
+    return nodes_affected_by_outer_viewport_bounds_delta_;
+  }
+
+  void ToProtobuf(proto::PropertyTree* proto) const;
+  void FromProtobuf(const proto::PropertyTree& proto);
 
  private:
   // Returns true iff the node at |desc_id| is a descendant of the node at
@@ -398,18 +462,38 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
 
 class CC_EXPORT ClipTree final : public PropertyTree<ClipNode> {
  public:
+  bool operator==(const ClipTree& other) const;
+
   void SetViewportClip(gfx::RectF viewport_rect);
   gfx::RectF ViewportClip();
+
+  void ToProtobuf(proto::PropertyTree* proto) const;
+  void FromProtobuf(const proto::PropertyTree& proto);
 };
 
 class CC_EXPORT EffectTree final : public PropertyTree<EffectNode> {
  public:
-  void UpdateOpacities(int id);
+  bool operator==(const EffectTree& other) const;
+
+  void UpdateEffects(int id);
+
+  void ClearCopyRequests();
+
+  void ToProtobuf(proto::PropertyTree* proto) const;
+  void FromProtobuf(const proto::PropertyTree& proto);
+
+ private:
+  void UpdateOpacities(EffectNode* node, EffectNode* parent_node);
 };
 
 class CC_EXPORT PropertyTrees final {
  public:
   PropertyTrees();
+
+  bool operator==(const PropertyTrees& other) const;
+
+  void ToProtobuf(proto::PropertyTrees* proto) const;
+  void FromProtobuf(const proto::PropertyTrees& proto);
 
   TransformTree transform_tree;
   EffectTree effect_tree;

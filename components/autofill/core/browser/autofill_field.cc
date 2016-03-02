@@ -4,6 +4,8 @@
 
 #include "components/autofill/core/browser/autofill_field.h"
 
+#include <stdint.h>
+
 #include "base/command_line.h"
 #include "base/i18n/string_search.h"
 #include "base/logging.h"
@@ -15,11 +17,13 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/phone_number.h"
 #include "components/autofill/core/browser/state_names.h"
 #include "components/autofill/core/common/autofill_l10n_util.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/common/autofill_util.h"
 #include "grit/components_strings.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_formatter.h"
@@ -170,9 +174,8 @@ bool FillStateSelectControl(const base::string16& value,
 }
 
 bool FillCountrySelectControl(const base::string16& value,
-                              const std::string& app_locale,
                               FormFieldData* field_data) {
-  std::string country_code = AutofillCountry::GetCountryCode(value, app_locale);
+  std::string country_code = CountryNames::GetInstance()->GetCountryCode(value);
   if (country_code.empty())
     return false;
 
@@ -183,8 +186,8 @@ bool FillCountrySelectControl(const base::string16& value,
     // target country code.
     base::string16 value = field_data->option_values[i];
     base::string16 contents = field_data->option_contents[i];
-    if (country_code == AutofillCountry::GetCountryCode(value, app_locale) ||
-        country_code == AutofillCountry::GetCountryCode(contents, app_locale)) {
+    if (country_code == CountryNames::GetInstance()->GetCountryCode(value) ||
+        country_code == CountryNames::GetInstance()->GetCountryCode(contents)) {
       field_data->value = value;
       return true;
     }
@@ -199,6 +202,22 @@ bool FillExpirationMonthSelectControl(const base::string16& value,
   int index = 0;
   if (!StringToInt(value, &index) || index <= 0 || index > 12)
     return false;
+
+  if (field->option_values.size() == 12) {
+    // The select only contains the months.
+    // If the first value of the select is 0, decrement the value of the index
+    // so January is associated with 0 instead of 1.
+    int first_value;
+    if (StringToInt(field->option_values[0], &first_value) && first_value == 0)
+      --index;
+  } else if (field->option_values.size() == 13) {
+    // The select uses the first value as a placeholder.
+    // If the first value of the select is 1, increment the value of the index
+    // to skip the placeholder value (January = 2).
+    int first_value;
+    if (StringToInt(field->option_values[0], &first_value) && first_value == 1)
+      ++index;
+  }
 
   for (const base::string16& option_value : field->option_values) {
     int converted_value = 0;
@@ -311,18 +330,22 @@ bool FillSelectControl(const AutofillType& type,
   if (value.empty())
     return false;
 
-  // First, search for exact matches.
+  ServerFieldType storable_type = type.GetStorableType();
+
+  // Credit card expiration month is checked first since an exact match on value
+  // may not be correct.
+  if (storable_type == CREDIT_CARD_EXP_MONTH)
+    return FillExpirationMonthSelectControl(value, app_locale, field);
+
+  // Search for exact matches.
   if (SetSelectControlValue(value, field))
     return true;
 
   // If that fails, try specific fallbacks based on the field type.
-  ServerFieldType storable_type = type.GetStorableType();
   if (storable_type == ADDRESS_HOME_STATE) {
     return FillStateSelectControl(value, field);
   } else if (storable_type == ADDRESS_HOME_COUNTRY) {
-    return FillCountrySelectControl(value, app_locale, field);
-  } else if (storable_type == CREDIT_CARD_EXP_MONTH) {
-    return FillExpirationMonthSelectControl(value, app_locale, field);
+    return FillCountrySelectControl(value, field);
   } else if (storable_type == CREDIT_CARD_EXP_2_DIGIT_YEAR ||
              storable_type == CREDIT_CARD_EXP_4_DIGIT_YEAR) {
     return FillYearSelectControl(value, field);
@@ -382,10 +405,9 @@ std::string Hash32Bit(const std::string& str) {
   std::string hash_bin = base::SHA1HashString(str);
   DCHECK_EQ(base::kSHA1Length, hash_bin.length());
 
-  uint32 hash32 = ((hash_bin[0] & 0xFF) << 24) |
-                  ((hash_bin[1] & 0xFF) << 16) |
-                  ((hash_bin[2] & 0xFF) << 8) |
-                   (hash_bin[3] & 0xFF);
+  uint32_t hash32 = ((hash_bin[0] & 0xFF) << 24) |
+                    ((hash_bin[1] & 0xFF) << 16) | ((hash_bin[2] & 0xFF) << 8) |
+                    (hash_bin[3] & 0xFF);
 
   return base::UintToString(hash32);
 }
@@ -401,12 +423,11 @@ base::string16 RemoveWhitespace(const base::string16& value) {
 AutofillField::AutofillField()
     : server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
-      html_type_(HTML_TYPE_UNKNOWN),
+      html_type_(HTML_TYPE_UNSPECIFIED),
       html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED),
       credit_card_number_offset_(0),
-      previously_autofilled_(false) {
-}
+      previously_autofilled_(false) {}
 
 AutofillField::AutofillField(const FormFieldData& field,
                              const base::string16& unique_name)
@@ -414,12 +435,11 @@ AutofillField::AutofillField(const FormFieldData& field,
       unique_name_(unique_name),
       server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
-      html_type_(HTML_TYPE_UNKNOWN),
+      html_type_(HTML_TYPE_UNSPECIFIED),
       html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED),
       credit_card_number_offset_(0),
-      previously_autofilled_(false) {
-}
+      previously_autofilled_(false) {}
 
 AutofillField::~AutofillField() {}
 
@@ -456,7 +476,7 @@ void AutofillField::SetHtmlType(HtmlFieldType type, HtmlFieldMode mode) {
 }
 
 AutofillType AutofillField::Type() const {
-  if (html_type_ != HTML_TYPE_UNKNOWN)
+  if (html_type_ != HTML_TYPE_UNSPECIFIED)
     return AutofillType(html_type_, html_mode_);
 
   if (server_type_ != NO_SERVER_DATA) {
@@ -500,7 +520,14 @@ bool AutofillField::FillFormField(const AutofillField& field,
                                   FormFieldData* field_data) {
   AutofillType type = field.Type();
 
-  if (type.GetStorableType() == PHONE_HOME_NUMBER) {
+  // Don't fill if autocomplete=off is set on |field| on desktop for non credit
+  // card related fields.
+  if (!field.should_autocomplete && IsDesktopPlatform() &&
+      (type.group() != CREDIT_CARD)) {
+    return false;
+  }
+
+  if (type.group() == PHONE_HOME) {
     FillPhoneNumberField(field, value, field_data);
     return true;
   } else if (field_data->form_control_type == "select-one") {
@@ -519,27 +546,42 @@ bool AutofillField::FillFormField(const AutofillField& field,
   return true;
 }
 
+// TODO(crbug.com/581514): Add support for filling only the prefix/suffix for
+// phone numbers with 10 or 11 digits.
 base::string16 AutofillField::GetPhoneNumberValue(
     const AutofillField& field,
     const base::string16& number,
     const FormFieldData& field_data) {
-  // Check to see if the size field matches the "prefix" or "suffix" size.
-  // If so, return the appropriate substring.
-  if (number.length() !=
-          PhoneNumber::kPrefixLength + PhoneNumber::kSuffixLength) {
+  // TODO(crbug.com/581485): Investigate the use of libphonenumber here.
+  // Check to see if the |field| size matches the "prefix" or "suffix" size or
+  // if
+  // the field was labeled as such. If so, return the appropriate substring.
+  if (number.length() ==
+      PhoneNumber::kPrefixLength + PhoneNumber::kSuffixLength) {
+    if (field.phone_part() == AutofillField::PHONE_PREFIX ||
+        field_data.max_length == PhoneNumber::kPrefixLength) {
+      return number.substr(PhoneNumber::kPrefixOffset,
+                           PhoneNumber::kPrefixLength);
+    }
+
+    if (field.phone_part() == AutofillField::PHONE_SUFFIX ||
+        field_data.max_length == PhoneNumber::kSuffixLength) {
+      return number.substr(PhoneNumber::kSuffixOffset,
+                           PhoneNumber::kSuffixLength);
+    }
+  }
+
+  // If no max length was specified, return the complete number.
+  if (field_data.max_length == 0)
     return number;
-  }
 
-  if (field.phone_part() == AutofillField::PHONE_PREFIX ||
-      field_data.max_length == PhoneNumber::kPrefixLength) {
-    return
-        number.substr(PhoneNumber::kPrefixOffset, PhoneNumber::kPrefixLength);
-  }
-
-  if (field.phone_part() == AutofillField::PHONE_SUFFIX ||
-      field_data.max_length == PhoneNumber::kSuffixLength) {
-    return
-        number.substr(PhoneNumber::kSuffixOffset, PhoneNumber::kSuffixLength);
+  // If |number| exceeds the maximum size of the field, cut the first part to
+  // provide a valid number for the field. For example, the number 15142365264
+  // with a field with a max length of 10 would return 5142365264, thus removing
+  // the country code and remaining valid.
+  if (number.length() > field_data.max_length) {
+    return number.substr(number.length() - field_data.max_length,
+                         field_data.max_length);
   }
 
   return number;

@@ -4,7 +4,9 @@
 
 #include "components/password_manager/core/browser/password_manager.h"
 
+#include <stddef.h>
 #include <map>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
@@ -13,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/form_data_predictions.h"
@@ -20,11 +23,13 @@
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/keychain_migration_status_mac.h"
+#include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -223,8 +228,9 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
       client_->IsSavingAndFillingEnabledForCurrentPage();
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_PROVISIONALLY_SAVE_PASSWORD_METHOD);
     logger->LogPasswordForm(Logger::STRING_PROVISIONALLY_SAVE_PASSWORD_FORM,
                             form);
@@ -452,8 +458,9 @@ void PasswordManager::CreatePendingLoginManagers(
     password_manager::PasswordManagerDriver* driver,
     const std::vector<PasswordForm>& forms) {
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_CREATE_LOGIN_MANAGERS_METHOD);
   }
 
@@ -525,8 +532,9 @@ void PasswordManager::CreatePendingLoginManagers(
 
 bool PasswordManager::CanProvisionalManagerSave() {
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_CAN_PROVISIONAL_MANAGER_SAVE_METHOD);
   }
 
@@ -554,6 +562,7 @@ bool PasswordManager::ShouldPromptUserToSavePassword() const {
          (provisional_save_manager_->IsNewLogin() ||
           provisional_save_manager_
               ->is_possible_change_password_form_without_username() ||
+          provisional_save_manager_->retry_password_form_password_update() ||
           (provisional_save_manager_->password_overridden() &&
            client_->IsUpdatePasswordUIEnabled())) &&
          !provisional_save_manager_->has_generated_password() &&
@@ -566,8 +575,9 @@ void PasswordManager::OnPasswordFormsRendered(
     bool did_stop_loading) {
   CreatePendingLoginManagers(driver, visible_forms);
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_ON_PASSWORD_FORMS_RENDERED_METHOD);
   }
 
@@ -613,7 +623,7 @@ void PasswordManager::OnPasswordFormsRendered(
           if (!provisional_save_manager_->has_generated_password()) {
             if (logger) {
               logger->LogPasswordForm(Logger::STRING_PASSWORD_FORM_REAPPEARED,
-                                      visible_forms[i]);
+                                      all_visible_forms_[i]);
               logger->LogMessage(Logger::STRING_DECISION_DROP);
             }
             provisional_save_manager_.reset();
@@ -643,8 +653,9 @@ void PasswordManager::OnInPageNavigation(
     password_manager::PasswordManagerDriver* driver,
     const PasswordForm& password_form) {
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_ON_IN_PAGE_NAVIGATION);
   }
 
@@ -658,8 +669,9 @@ void PasswordManager::OnInPageNavigation(
 
 void PasswordManager::OnLoginSuccessful() {
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_ON_ASK_USER_OR_SAVE_PASSWORD);
   }
 
@@ -689,9 +701,10 @@ void PasswordManager::OnLoginSuccessful() {
         (!provisional_save_manager_->best_matches().empty() &&
          provisional_save_manager_
              ->is_possible_change_password_form_without_username()) ||
-        provisional_save_manager_->password_overridden();
+        provisional_save_manager_->password_overridden() ||
+        provisional_save_manager_->retry_password_form_password_update();
     if (client_->PromptUserToSaveOrUpdatePassword(
-            provisional_save_manager_.Pass(),
+            std::move(provisional_save_manager_),
             CredentialSourceType::CREDENTIAL_SOURCE_PASSWORD_MANAGER,
             update_password)) {
       if (logger)
@@ -703,7 +716,7 @@ void PasswordManager::OnLoginSuccessful() {
     provisional_save_manager_->Save();
 
     if (provisional_save_manager_->has_generated_password()) {
-      client_->AutomaticPasswordSave(provisional_save_manager_.Pass());
+      client_->AutomaticPasswordSave(std::move(provisional_save_manager_));
     } else {
       provisional_save_manager_.reset();
     }
@@ -722,8 +735,9 @@ void PasswordManager::Autofill(password_manager::PasswordManagerDriver* driver,
   DCHECK_EQ(PasswordForm::SCHEME_HTML, preferred_match.scheme);
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_PASSWORDMANAGER_AUTOFILL);
   }
 
@@ -749,8 +763,9 @@ void PasswordManager::AutofillHttpAuth(
   DCHECK_NE(PasswordForm::SCHEME_HTML, preferred_match.scheme);
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+  if (password_manager_util::IsLoggingActive(client_)) {
+    logger.reset(
+        new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogMessage(Logger::STRING_PASSWORDMANAGER_AUTOFILLHTTPAUTH);
     logger->LogBoolean(Logger::STRING_LOGINMODELOBSERVER_PRESENT,
                        observers_.might_have_observers());

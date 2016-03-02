@@ -8,6 +8,15 @@
 		<data>
 		eD0Asf8/OXa6v2aNFp33nh5bsGw=
 		</data>
+		<key>Resources/Base.lproj/InfoPlist.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			VPj12JOfhf20Glf0iP7cnVZnGeQ=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
 		<key>Resources/Base.lproj/MainMenu.nib</key>
 		<dict>
 			<key>hash</key>
@@ -28,6 +37,15 @@
 		<data>
 		eD0Asf8/OXa6v2aNFp33nh5bsGw=
 		</data>
+		<key>Resources/Base.lproj/InfoPlist.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			VPj12JOfhf20Glf0iP7cnVZnGeQ=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
 		<key>Resources/Base.lproj/MainMenu.nib</key>
 		<dict>
 			<key>hash</key>

@@ -84,11 +84,12 @@ public:
 
     virtual bool shouldLoadNewResource(Resource::Type) const { return false; }
     virtual void willStartLoadingResource(ResourceRequest&);
-    virtual void didLoadResource();
+    virtual void didLoadResource(Resource*);
 
     virtual void addResourceTiming(const ResourceTimingInfo&);
     virtual bool allowImage(bool, const KURL&) const { return false; }
     virtual bool canRequest(Resource::Type, const ResourceRequest&, const KURL&, const ResourceLoaderOptions&, bool forPreload, FetchRequest::OriginRestriction) const { return false; }
+    virtual bool allowResponse(Resource::Type, const ResourceRequest&, const KURL&, const ResourceLoaderOptions&) const { return false; }
 
     virtual bool isControlledByServiceWorker() const { return false; }
     virtual int64_t serviceWorkerID() const { return -1; }

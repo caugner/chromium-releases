@@ -4,15 +4,16 @@
 
 #include "components/html_viewer/blink_text_input_type_converters.h"
 
-#include "base/basictypes.h"
+#include <stdint.h>
+
 #include "base/macros.h"
 
 namespace mojo {
 
-#define TEXT_INPUT_TYPE_ASSERT(NAME, Name) \
-  COMPILE_ASSERT(static_cast<int32>(TEXT_INPUT_TYPE_##NAME) == \
-                 static_cast<int32>(blink::WebTextInputType##Name), \
-                 text_input_type_should_match)
+#define TEXT_INPUT_TYPE_ASSERT(NAME, Name)                               \
+  static_assert(static_cast<int32_t>(TEXT_INPUT_TYPE_##NAME) ==          \
+                    static_cast<int32_t>(blink::WebTextInputType##Name), \
+                "text_input_type should match")
 TEXT_INPUT_TYPE_ASSERT(NONE, None);
 TEXT_INPUT_TYPE_ASSERT(TEXT, Text);
 TEXT_INPUT_TYPE_ASSERT(PASSWORD, Password);
@@ -29,10 +30,10 @@ TEXT_INPUT_TYPE_ASSERT(TIME, Time);
 TEXT_INPUT_TYPE_ASSERT(WEEK, Week);
 TEXT_INPUT_TYPE_ASSERT(TEXT_AREA, TextArea);
 
-#define TEXT_INPUT_FLAG_ASSERT(NAME, Name) \
-  COMPILE_ASSERT(static_cast<int32>(TEXT_INPUT_FLAG_##NAME) == \
-                 static_cast<int32>(blink::WebTextInputFlag##Name), \
-                 text_input_flag_should_match)
+#define TEXT_INPUT_FLAG_ASSERT(NAME, Name)                               \
+  static_assert(static_cast<int32_t>(TEXT_INPUT_FLAG_##NAME) ==          \
+                    static_cast<int32_t>(blink::WebTextInputFlag##Name), \
+                "text_input_flag should match")
 TEXT_INPUT_FLAG_ASSERT(NONE, None);
 TEXT_INPUT_FLAG_ASSERT(AUTOCOMPLETE_ON, AutocompleteOn);
 TEXT_INPUT_FLAG_ASSERT(AUTOCOMPLETE_OFF, AutocompleteOff);

@@ -5,6 +5,7 @@
 #include "content/public/browser/content_browser_client.h"
 
 #include "base/files/file_path.h"
+#include "build/build_config.h"
 #include "content/public/browser/client_certificate_delegate.h"
 #include "content/public/common/sandbox_type.h"
 #include "media/base/cdm_factory.h"
@@ -175,7 +176,7 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
                                           ResourceContext* context,
                                           int render_process_id,
                                           int render_frame_id,
-                                          net::CookieOptions* options) {
+                                          const net::CookieOptions& options) {
   return true;
 }
 
@@ -216,6 +217,11 @@ bool ContentBrowserClient::AllowWebRTCIdentityCache(const GURL& url,
   return true;
 }
 #endif  // defined(ENABLE_WEBRTC)
+
+bool ContentBrowserClient::AllowKeygen(const GURL& url,
+                                       content::ResourceContext* context) {
+  return true;
+}
 
 QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
   return nullptr;
@@ -405,7 +411,18 @@ base::string16 ContentBrowserClient::GetAppContainerSidForSandboxType(
       L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
       L"924012148-129201922");
 }
-#endif
+
+bool ContentBrowserClient::IsWin32kLockdownEnabledForMimeType(
+    const std::string& mime_type) const {
+  // TODO(wfh): Enable this by default once Win32k lockdown for PPAPI processes
+  // is enabled by default in Chrome. See crbug.com/523278.
+  return false;
+}
+
+bool ContentBrowserClient::ShouldUseWindowsPrefetchArgument() const {
+  return true;
+}
+#endif  // defined(OS_WIN)
 
 #if defined(VIDEO_HOLE)
 ExternalVideoSurfaceContainer*

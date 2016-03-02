@@ -5,6 +5,8 @@
 #ifndef UI_VIEWS_VIEW_H_
 #define UI_VIEWS_VIEW_H_
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <map>
 #include <set>
@@ -14,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "ui/accessibility/ax_enums.h"
@@ -106,7 +109,8 @@ class RootView;
 class VIEWS_EXPORT View : public ui::LayerDelegate,
                           public ui::LayerOwner,
                           public ui::AcceleratorTarget,
-                          public ui::EventTarget {
+                          public ui::EventTarget,
+                          public ui::EventHandler {
  public:
   typedef std::vector<View*> Views;
 
@@ -317,6 +321,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Compositor.
   void SetPaintToLayer(bool paint_to_layer);
 
+  // Overridden from ui::LayerOwner:
+  scoped_ptr<ui::Layer> RecreateLayer() override;
+
   // RTL positioning -----------------------------------------------------------
 
   // Methods for accessing the bounds and position of the view, relative to its
@@ -510,11 +517,12 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   Border* border() { return border_.get(); }
 
   // Get the theme provider from the parent widget.
-  ui::ThemeProvider* GetThemeProvider() const;
+  const ui::ThemeProvider* GetThemeProvider() const;
 
   // Returns the NativeTheme to use for this View. This calls through to
-  // GetNativeTheme() on the Widget this View is in. If this View is not in a
-  // Widget this returns ui::NativeTheme::instance().
+  // GetNativeTheme() on the Widget this View is in, or provides a default
+  // theme if there's no widget. Warning: the default theme might not be
+  // correct; you should probably override OnNativeThemeChanged().
   ui::NativeTheme* GetNativeTheme() {
     return const_cast<ui::NativeTheme*>(
         const_cast<const View*>(this)->GetNativeTheme());
@@ -588,7 +596,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Returns true if the mouse cursor is over |view| and mouse events are
   // enabled.
-  bool IsMouseHovered();
+  bool IsMouseHovered() const;
 
   // This method is invoked when the user clicks on this view.
   // The provided event is in the receiver's coordinate system.
@@ -1181,7 +1189,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Returns whether we're in the middle of a drag session that was initiated
   // by us.
-  bool InDrag();
+  bool InDrag() const;
 
   // Returns how much the mouse needs to move in one direction to start a
   // drag. These methods cache in a platform-appropriate way. These values are
@@ -1215,6 +1223,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   friend class internal::PostEventDispatchHandler;
   friend class internal::RootView;
   friend class FocusManager;
+  friend class ViewLayerTest;
   friend class Widget;
 
   // Painting  -----------------------------------------------------------------
@@ -1230,6 +1239,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Invoked before and after the bounds change to schedule painting the old and
   // new bounds.
   void SchedulePaintBoundsChanged(SchedulePaintType type);
+
+  // Schedules a paint on the parent View if it exists.
+  void SchedulePaintOnParent();
 
   // Tree operations -----------------------------------------------------------
 

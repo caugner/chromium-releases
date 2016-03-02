@@ -11,6 +11,7 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/common/features.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -24,7 +25,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "url/gurl.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/download/download_request_infobar_delegate_android.h"
 #else
 #include "chrome/browser/download/download_permission_request.h"
@@ -99,7 +100,7 @@ void DownloadRequestLimiter::TabDownloadState::DidGetUserGesture() {
     return;
   }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   bool promptable = InfoBarService::FromWebContents(web_contents()) != nullptr;
 #else
   bool promptable =
@@ -133,7 +134,7 @@ void DownloadRequestLimiter::TabDownloadState::PromptUserForDownload(
   if (is_showing_prompt())
     return;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   DownloadRequestInfoBarDelegateAndroid::Create(
       InfoBarService::FromWebContents(web_contents_), factory_.GetWeakPtr());
 #else
@@ -306,15 +307,14 @@ DownloadRequestLimiter::GetDownloadState(
   return state;
 }
 
-void DownloadRequestLimiter::CanDownload(int render_process_host_id,
-                                         int render_view_id,
-                                         const GURL& url,
-                                         const std::string& request_method,
-                                         const Callback& callback) {
+void DownloadRequestLimiter::CanDownload(
+    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    const GURL& url,
+    const std::string& request_method,
+    const Callback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  content::WebContents* originating_contents =
-      tab_util::GetWebContentsByID(render_process_host_id, render_view_id);
+  content::WebContents* originating_contents = web_contents_getter.Run();
   if (!originating_contents) {
     // The WebContents was closed, don't allow the download.
     callback.Run(false);
@@ -330,12 +330,8 @@ void DownloadRequestLimiter::CanDownload(int render_process_host_id,
   // OnCanDownloadDecided is invoked, we look it up by |render_process_host_id|
   // and |render_view_id|.
   base::Callback<void(bool)> can_download_callback = base::Bind(
-      &DownloadRequestLimiter::OnCanDownloadDecided,
-      factory_.GetWeakPtr(),
-      render_process_host_id,
-      render_view_id,
-      request_method,
-      callback);
+      &DownloadRequestLimiter::OnCanDownloadDecided, factory_.GetWeakPtr(),
+      web_contents_getter, request_method, callback);
 
   originating_contents->GetDelegate()->CanDownload(
       url,
@@ -344,13 +340,12 @@ void DownloadRequestLimiter::CanDownload(int render_process_host_id,
 }
 
 void DownloadRequestLimiter::OnCanDownloadDecided(
-    int render_process_host_id,
-    int render_view_id,
+    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const std::string& request_method,
-    const Callback& orig_callback, bool allow) {
+    const Callback& orig_callback,
+    bool allow) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  content::WebContents* originating_contents =
-      tab_util::GetWebContentsByID(render_process_host_id, render_view_id);
+  content::WebContents* originating_contents = web_contents_getter.Run();
   if (!originating_contents || !allow) {
     orig_callback.Run(false);
     return;

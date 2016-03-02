@@ -14,7 +14,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.SystemClock;
-import android.test.FlakyTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.text.TextUtils;
 
@@ -184,7 +183,7 @@ public class UrlOverridingTest extends ChromeActivityTestCaseBase<ChromeActivity
         // For sub frames, the |loadFailCallback| run through different threads
         // from the ExternalNavigationHandler. As a result, there is no guarantee
         // when url override result would come.
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(
+        CriteriaHelper.pollForUIThreadCriteria(
                 new Criteria() {
                     @Override
                     public boolean isSatisfied() {
@@ -202,7 +201,7 @@ public class UrlOverridingTest extends ChromeActivityTestCaseBase<ChromeActivity
                         return expectedFinalUrl == null
                                 || TextUtils.equals(expectedFinalUrl, tab.getUrl());
                     }
-                }));
+                });
     }
 
     @SmallTest
@@ -224,11 +223,7 @@ public class UrlOverridingTest extends ChromeActivityTestCaseBase<ChromeActivity
                 TestHttpServerClient.getUrl(NAVIGATION_FROM_USER_GESTURE_PAGE), true, true, true);
     }
 
-    /*
-     * crbug.com/485665.
-     * @SmallTest
-     */
-    @FlakyTest
+    @SmallTest
     public void testNavigationFromUserGestureInSubFrame() throws InterruptedException {
         loadUrlAndWaitForIntentUrl(
                 TestHttpServerClient.getUrl(NAVIGATION_FROM_USER_GESTURE_PARENT_FRAME_PAGE), true,
@@ -241,11 +236,7 @@ public class UrlOverridingTest extends ChromeActivityTestCaseBase<ChromeActivity
                 TestHttpServerClient.getUrl(NAVIGATION_FROM_XHR_CALLBACK_PAGE), true, true, true);
     }
 
-    /*
-     * crbug.com/485665.
-     * @SmallTest
-     */
-    @FlakyTest
+    @SmallTest
     public void testNavigationFromXHRCallbackInSubFrame() throws InterruptedException {
         loadUrlAndWaitForIntentUrl(
                 TestHttpServerClient.getUrl(NAVIGATION_FROM_XHR_CALLBACK_PARENT_FRAME_PAGE), true,
@@ -296,12 +287,12 @@ public class UrlOverridingTest extends ChromeActivityTestCaseBase<ChromeActivity
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         targetContext.startActivity(intent);
 
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return mActivityMonitor.getHits() == 1;
             }
-        }));
+        });
     }
 
     @Override

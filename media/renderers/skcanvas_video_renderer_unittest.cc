@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface_stub.h"
@@ -10,6 +13,7 @@
 #include "media/base/video_util.h"
 #include "media/renderers/skcanvas_video_renderer.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
@@ -155,7 +159,7 @@ SkCanvasVideoRendererTest::SkCanvasVideoRendererTest()
   // Each color region in the cropped frame is on a 2x2 block granularity, to
   // avoid sharing UV samples between regions.
 
-  static const uint8 cropped_y_plane[] = {
+  static const uint8_t cropped_y_plane[] = {
       0,   0,   0,   0,   0,   0,   0,   0,   76, 76, 76, 76, 76, 76, 76, 76,
       0,   0,   0,   0,   0,   0,   0,   0,   76, 76, 76, 76, 76, 76, 76, 76,
       0,   0,   0,   0,   0,   0,   0,   0,   76, 76, 76, 76, 76, 76, 76, 76,
@@ -174,14 +178,14 @@ SkCanvasVideoRendererTest::SkCanvasVideoRendererTest()
       149, 149, 149, 149, 149, 149, 149, 149, 29, 29, 29, 29, 29, 29, 29, 29,
   };
 
-  static const uint8 cropped_u_plane[] = {
+  static const uint8_t cropped_u_plane[] = {
       128, 128, 128, 128, 84,  84,  84,  84,  128, 128, 128, 128, 84,
       84,  84,  84,  128, 128, 128, 128, 84,  84,  84,  84,  128, 128,
       128, 128, 84,  84,  84,  84,  43,  43,  43,  43,  255, 255, 255,
       255, 43,  43,  43,  43,  255, 255, 255, 255, 43,  43,  43,  43,
       255, 255, 255, 255, 43,  43,  43,  43,  255, 255, 255, 255,
   };
-  static const uint8 cropped_v_plane[] = {
+  static const uint8_t cropped_v_plane[] = {
       128, 128, 128, 128, 255, 255, 255, 255, 128, 128, 128, 128, 255,
       255, 255, 255, 128, 128, 128, 128, 255, 255, 255, 255, 128, 128,
       128, 128, 255, 255, 255, 255, 21,  21,  21,  21,  107, 107, 107,
@@ -189,9 +193,13 @@ SkCanvasVideoRendererTest::SkCanvasVideoRendererTest()
       107, 107, 107, 107, 21,  21,  21,  21,  107, 107, 107, 107,
   };
 
-  media::CopyYPlane(cropped_y_plane, 16, 16, cropped_frame().get());
-  media::CopyUPlane(cropped_u_plane, 8, 8, cropped_frame().get());
-  media::CopyVPlane(cropped_v_plane, 8, 8, cropped_frame().get());
+  libyuv::I420Copy(cropped_y_plane, 16, cropped_u_plane, 8, cropped_v_plane, 8,
+                   cropped_frame()->data(VideoFrame::kYPlane),
+                   cropped_frame()->stride(VideoFrame::kYPlane),
+                   cropped_frame()->data(VideoFrame::kUPlane),
+                   cropped_frame()->stride(VideoFrame::kUPlane),
+                   cropped_frame()->data(VideoFrame::kVPlane),
+                   cropped_frame()->stride(VideoFrame::kVPlane), 16, 16);
 }
 
 SkCanvasVideoRendererTest::~SkCanvasVideoRendererTest() {}

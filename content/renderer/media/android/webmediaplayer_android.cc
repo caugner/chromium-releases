@@ -4,6 +4,8 @@
 
 #include "content/renderer/media/android/webmediaplayer_android.h"
 
+#include <stddef.h>
+
 #include <limits>
 
 #include "base/android/build_info.h"
@@ -24,14 +26,15 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/media/android/renderer_demuxer_android.h"
 #include "content/renderer/media/android/renderer_media_player_manager.h"
-#include "content/renderer/media/crypto/render_cdm_factory.h"
-#include "content/renderer/media/crypto/renderer_cdm_manager.h"
+#include "content/renderer/media/cdm/render_cdm_factory.h"
+#include "content/renderer/media/cdm/renderer_cdm_manager.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
+#include "media/base/android/media_codec_util.h"
 #include "media/base/android/media_common_android.h"
 #include "media/base/android/media_player_android.h"
 #include "media/base/bind_to_current_loop.h"
@@ -43,6 +46,7 @@
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
+#include "media/blink/webmediaplayer_cast_android.h"
 #include "media/blink/webmediaplayer_delegate.h"
 #include "media/blink/webmediaplayer_util.h"
 #include "net/base/mime_util.h"
@@ -66,7 +70,7 @@
 #include "third_party/skia/include/gpu/SkGrPixelRef.h"
 #include "ui/gfx/image/image.h"
 
-static const uint32 kGLTextureExternalOES = 0x8D65;
+static const uint32_t kGLTextureExternalOES = 0x8D65;
 static const int kSDKVersionToSupportSecurityOriginCheck = 20;
 
 using blink::WebMediaPlayer;
@@ -83,10 +87,21 @@ namespace {
 // Prefix for histograms related to Encrypted Media Extensions.
 const char* kMediaEme = "Media.EME.";
 
+// Values for Media.Android.IsHttpLiveStreamingMediaPredictionResult UMA.
+// Never reuse values!
+enum MediaTypePredictionResult {
+  PREDICTION_RESULT_ALL_CORRECT,
+  PREDICTION_RESULT_ALL_INCORRECT,
+  PREDICTION_RESULT_PATH_BASED_WAS_BETTER,
+  PREDICTION_RESULT_URL_BASED_WAS_BETTER,
+  // Must always be larger than the largest logged value.
+  PREDICTION_RESULT_MAX
+};
+
 // File-static function is to allow it to run even after WMPA is deleted.
 void OnReleaseTexture(
     const scoped_refptr<content::StreamTextureFactory>& factories,
-    uint32 texture_id,
+    uint32_t texture_id,
     const gpu::SyncToken& sync_token) {
   GLES2Interface* gl = factories->ContextGL();
   gl->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
@@ -137,12 +152,16 @@ class SyncTokenClientImpl : public media::VideoFrame::SyncTokenClient {
       : web_graphics_context_(web_graphics_context) {}
   ~SyncTokenClientImpl() override {}
   void GenerateSyncToken(gpu::SyncToken* sync_token) override {
-    if (!web_graphics_context_->insertSyncPoint(sync_token->GetData())) {
+    const blink::WGC3Duint64 fence_sync =
+        web_graphics_context_->insertFenceSyncCHROMIUM();
+    web_graphics_context_->shallowFlushCHROMIUM();
+    if (!web_graphics_context_->genSyncTokenCHROMIUM(fence_sync,
+                                                     sync_token->GetData())) {
       sync_token->Clear();
     }
   }
   void WaitSyncToken(const gpu::SyncToken& sync_token) override {
-    web_graphics_context_->waitSyncToken(sync_token.GetConstData());
+    web_graphics_context_->waitSyncTokenCHROMIUM(sync_token.GetConstData());
   }
 
  private:
@@ -161,6 +180,8 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
     RendererMediaPlayerManager* player_manager,
     media::CdmFactory* cdm_factory,
     scoped_refptr<StreamTextureFactory> factory,
+    int frame_id,
+    bool enable_texture_copy,
     const media::WebMediaPlayerParams& params)
     : RenderFrameObserver(RenderFrame::FromWebFrame(frame)),
       frame_(frame),
@@ -201,6 +222,8 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       allow_stored_credentials_(false),
       is_local_resource_(false),
       interpolator_(&default_tick_clock_),
+      frame_id_(frame_id),
+      enable_texture_copy_(enable_texture_copy),
       suppress_deleting_texture_(false),
       weak_factory_(this) {
   DCHECK(player_manager_);
@@ -686,21 +709,21 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
           mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES) ||
          (is_remote_ && mailbox_holder.texture_target == GL_TEXTURE_2D));
 
-  web_graphics_context->waitSyncToken(mailbox_holder.sync_token.GetConstData());
+  web_graphics_context->waitSyncTokenCHROMIUM(
+      mailbox_holder.sync_token.GetConstData());
 
   // Ensure the target of texture is set before copyTextureCHROMIUM, otherwise
   // an invalid texture target may be used for copy texture.
-  uint32 src_texture =
-      web_graphics_context->createAndConsumeTextureCHROMIUM(
-          mailbox_holder.texture_target, mailbox_holder.mailbox.name);
+  uint32_t src_texture = web_graphics_context->createAndConsumeTextureCHROMIUM(
+      mailbox_holder.texture_target, mailbox_holder.mailbox.name);
 
   // Application itself needs to take care of setting the right flip_y
   // value down to get the expected result.
   // flip_y==true means to reverse the video orientation while
   // flip_y==false means to keep the intrinsic orientation.
-  web_graphics_context->copyTextureCHROMIUM(
-      GL_TEXTURE_2D, src_texture, texture, internal_format, type,
-      flip_y, premultiply_alpha, false);
+  web_graphics_context->copyTextureCHROMIUM(src_texture, texture,
+                                            internal_format, type, flip_y,
+                                            premultiply_alpha, false);
 
   web_graphics_context->deleteTexture(src_texture);
   web_graphics_context->flush();
@@ -961,7 +984,6 @@ void WebMediaPlayerAndroid::OnTimeUpdate(base::TimeDelta current_timestamp,
 void WebMediaPlayerAndroid::OnConnectedToRemoteDevice(
     const std::string& remote_playback_message) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-  DCHECK(!media_source_delegate_);
   DrawRemotePlaybackText(remote_playback_message);
   is_remote_ = true;
   SetNeedsEstablishPeer(false);
@@ -970,7 +992,6 @@ void WebMediaPlayerAndroid::OnConnectedToRemoteDevice(
 
 void WebMediaPlayerAndroid::OnDisconnectedFromRemoteDevice() {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-  DCHECK(!media_source_delegate_);
   SetNeedsEstablishPeer(true);
   if (!paused())
     EstablishSurfaceTexturePeer();
@@ -1070,7 +1091,7 @@ void WebMediaPlayerAndroid::OnPlayerReleased() {
 #endif  // defined(VIDEO_HOLE)
 }
 
-void WebMediaPlayerAndroid::ReleaseMediaResources() {
+void WebMediaPlayerAndroid::SuspendAndReleaseResources() {
   switch (network_state_) {
     // Pause the media player and inform WebKit if the player is in a good
     // shape.
@@ -1089,7 +1110,7 @@ void WebMediaPlayerAndroid::ReleaseMediaResources() {
     case WebMediaPlayer::NetworkStateDecodeError:
       break;
   }
-  player_manager_->ReleaseResources(player_id_);
+  player_manager_->SuspendAndReleaseResources(player_id_);
   if (!needs_external_surface_)
     SetNeedsEstablishPeer(true);
 }
@@ -1136,112 +1157,21 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackText(
   // OnVideoSizeChanged, which is when the frame sizes of the video file
   // change). Perhaps have to poll (on main thread of course)?
   gfx::Size video_size_css_px = video_weblayer_->bounds();
-  float device_scale_factor = frame_->view()->deviceScaleFactor();
+  RenderView* render_view = RenderView::FromWebView(frame_->view());
+  float device_scale_factor = render_view->GetDeviceScaleFactor();
   // canvas_size will be the size in device pixels when pageScaleFactor == 1
   gfx::Size canvas_size(
       static_cast<int>(video_size_css_px.width() * device_scale_factor),
       static_cast<int>(video_size_css_px.height() * device_scale_factor));
 
-  SkBitmap bitmap;
-  bitmap.allocN32Pixels(canvas_size.width(), canvas_size.height());
-
-  // Create the canvas and draw the "Casting to <Chromecast>" text on it.
-  SkCanvas canvas(bitmap);
-  canvas.drawColor(SK_ColorBLACK);
-
-  const SkScalar kTextSize(40);
-  const SkScalar kMinPadding(40);
-
-  SkPaint paint;
-  paint.setAntiAlias(true);
-  paint.setFilterQuality(kHigh_SkFilterQuality);
-  paint.setColor(SK_ColorWHITE);
-  paint.setTypeface(SkTypeface::CreateFromName("sans", SkTypeface::kBold));
-  paint.setTextSize(kTextSize);
-
-  // Calculate the vertical margin from the top
-  SkPaint::FontMetrics font_metrics;
-  paint.getFontMetrics(&font_metrics);
-  SkScalar sk_vertical_margin = kMinPadding - font_metrics.fAscent;
-
-  // Measure the width of the entire text to display
-  size_t display_text_width = paint.measureText(
-      remote_playback_message.c_str(), remote_playback_message.size());
-  std::string display_text(remote_playback_message);
-
-  if (display_text_width + (kMinPadding * 2) > canvas_size.width()) {
-    // The text is too long to fit in one line, truncate it and append ellipsis
-    // to the end.
-
-    // First, figure out how much of the canvas the '...' will take up.
-    const std::string kTruncationEllipsis("\xE2\x80\xA6");
-    SkScalar sk_ellipse_width = paint.measureText(
-        kTruncationEllipsis.c_str(), kTruncationEllipsis.size());
-
-    // Then calculate how much of the text can be drawn with the '...' appended
-    // to the end of the string.
-    SkScalar sk_max_original_text_width(
-        canvas_size.width() - (kMinPadding * 2) - sk_ellipse_width);
-    size_t sk_max_original_text_length = paint.breakText(
-        remote_playback_message.c_str(),
-        remote_playback_message.size(),
-        sk_max_original_text_width);
-
-    // Remove the part of the string that doesn't fit and append '...'.
-    display_text.erase(sk_max_original_text_length,
-        remote_playback_message.size() - sk_max_original_text_length);
-    display_text.append(kTruncationEllipsis);
-    display_text_width = paint.measureText(
-        display_text.c_str(), display_text.size());
-  }
-
-  // Center the text horizontally.
-  SkScalar sk_horizontal_margin =
-      (canvas_size.width() - display_text_width) / 2.0;
-  canvas.drawText(display_text.c_str(),
-      display_text.size(),
-      sk_horizontal_margin,
-      sk_vertical_margin,
-      paint);
-
-  GLES2Interface* gl = stream_texture_factory_->ContextGL();
-  GLuint remote_playback_texture_id = 0;
-  gl->GenTextures(1, &remote_playback_texture_id);
-  GLuint texture_target = GL_TEXTURE_2D;
-  gl->BindTexture(texture_target, remote_playback_texture_id);
-  gl->TexParameteri(texture_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  gl->TexParameteri(texture_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  gl->TexParameteri(texture_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  gl->TexParameteri(texture_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  {
-    SkAutoLockPixels lock(bitmap);
-    gl->TexImage2D(texture_target,
-                   0 /* level */,
-                   GL_RGBA /* internalformat */,
-                   bitmap.width(),
-                   bitmap.height(),
-                   0 /* border */,
-                   GL_RGBA /* format */,
-                   GL_UNSIGNED_BYTE /* type */,
-                   bitmap.getPixels());
-  }
-
-  gpu::Mailbox texture_mailbox;
-  gl->GenMailboxCHROMIUM(texture_mailbox.name);
-  gl->ProduceTextureCHROMIUM(texture_target, texture_mailbox.name);
-  gl->Flush();
-  gpu::SyncToken texture_mailbox_sync_token(gl->InsertSyncPointCHROMIUM());
-
-  scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
-      media::PIXEL_FORMAT_ARGB,
-      gpu::MailboxHolder(texture_mailbox, texture_mailbox_sync_token,
-                         texture_target),
-      media::BindToCurrentLoop(base::Bind(&OnReleaseTexture,
-                                          stream_texture_factory_,
-                                          remote_playback_texture_id)),
-      canvas_size /* coded_size */, gfx::Rect(canvas_size) /* visible_rect */,
-      canvas_size /* natural_size */, base::TimeDelta() /* timestamp */);
+  scoped_refptr<VideoFrame> new_frame(media::MakeTextFrameForCast(
+      remote_playback_message,
+      canvas_size,
+      canvas_size,
+      base::Bind(&StreamTextureFactory::ContextGL,
+                 stream_texture_factory_)));
+  if (!new_frame)
+    return;
   SetCurrentFrameInternal(new_frame);
 }
 
@@ -1279,6 +1209,8 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
             &OnReleaseTexture, stream_texture_factory_, texture_id_ref)),
         natural_size_, gfx::Rect(natural_size_), natural_size_,
         base::TimeDelta());
+    new_frame->metadata()->SetBoolean(media::VideoFrameMetadata::COPY_REQUIRED,
+                                      enable_texture_copy_);
     SetCurrentFrameInternal(new_frame);
   }
 }
@@ -1395,7 +1327,7 @@ void WebMediaPlayerAndroid::EstablishSurfaceTexturePeer() {
     return;
 
   if (stream_texture_factory_.get() && stream_id_)
-    stream_texture_factory_->EstablishPeer(stream_id_, player_id_);
+    stream_texture_factory_->EstablishPeer(stream_id_, player_id_, frame_id_);
 
   // Set the deferred size because the size was changed in remote mode.
   if (!is_remote_ && cached_stream_texture_size_ != natural_size_) {
@@ -1751,7 +1683,7 @@ void WebMediaPlayerAndroid::OnKeyAdded(const std::string& session_id) {
 
 void WebMediaPlayerAndroid::OnKeyError(const std::string& session_id,
                                        media::MediaKeys::KeyError error_code,
-                                       uint32 system_code) {
+                                       uint32_t system_code) {
   EmeUMAHistogramEnumeration(current_key_system_, "KeyError",
                              error_code, media::MediaKeys::kMaxKeyError);
 
@@ -1772,7 +1704,7 @@ void WebMediaPlayerAndroid::OnKeyError(const std::string& session_id,
 }
 
 void WebMediaPlayerAndroid::OnKeyMessage(const std::string& session_id,
-                                         const std::vector<uint8>& message,
+                                         const std::vector<uint8_t>& message,
                                          const GURL& destination_url) {
   DCHECK(destination_url.is_empty() || destination_url.is_valid());
 
@@ -1789,7 +1721,7 @@ void WebMediaPlayerAndroid::OnMediaSourceOpened(
 
 void WebMediaPlayerAndroid::OnEncryptedMediaInitData(
     media::EmeInitDataType init_data_type,
-    const std::vector<uint8>& init_data) {
+    const std::vector<uint8_t>& init_data) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
   // Do not fire NeedKey event if encrypted media is not enabled.
@@ -1808,7 +1740,7 @@ void WebMediaPlayerAndroid::OnEncryptedMediaInitData(
     init_data_type_ = init_data_type;
 
   encrypted_client_->encrypted(ConvertToWebInitDataType(init_data_type),
-                               vector_as_array(&init_data), init_data.size());
+                               init_data.data(), init_data.size());
 }
 
 void WebMediaPlayerAndroid::OnWaitingForDecryptionKey() {
@@ -1914,11 +1846,8 @@ void WebMediaPlayerAndroid::enterFullscreen() {
 }
 
 bool WebMediaPlayerAndroid::IsHLSStream() const {
-  std::string mime;
-  GURL url = redirected_url_.is_empty() ? url_ : redirected_url_;
-  if (!net::GetMimeTypeFromFile(base::FilePath(url.path()), &mime))
-    return false;
-  return !mime.compare("application/x-mpegurl");
+  const GURL& url = redirected_url_.is_empty() ? url_ : redirected_url_;
+  return media::MediaCodecUtil::IsHLSURL(url);
 }
 
 void WebMediaPlayerAndroid::ReportHLSMetrics() const {
@@ -1931,6 +1860,21 @@ void WebMediaPlayerAndroid::ReportHLSMetrics() const {
     media::RecordOriginOfHLSPlayback(
         GURL(frame_->document().securityOrigin().toString()));
   }
+
+  // Assuming that |is_hls| is the ground truth, test predictions.
+  bool is_hls_path = media::MediaCodecUtil::IsHLSPath(url_);
+  bool is_hls_url = media::MediaCodecUtil::IsHLSURL(url_);
+  MediaTypePredictionResult result = PREDICTION_RESULT_ALL_INCORRECT;
+  if (is_hls_path == is_hls && is_hls_url == is_hls) {
+    result = PREDICTION_RESULT_ALL_CORRECT;
+  } else if (is_hls_path == is_hls) {
+    result = PREDICTION_RESULT_PATH_BASED_WAS_BETTER;
+  } else if (is_hls_url == is_hls) {
+    result = PREDICTION_RESULT_URL_BASED_WAS_BETTER;
+  }
+  UMA_HISTOGRAM_ENUMERATION(
+      "Media.Android.IsHttpLiveStreamingMediaPredictionResult",
+      result, PREDICTION_RESULT_MAX);
 }
 
 }  // namespace content

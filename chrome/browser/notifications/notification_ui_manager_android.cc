@@ -6,8 +6,10 @@
 
 #include <utility>
 
+#include "base/android/context_utils.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -39,6 +41,12 @@ NotificationUIManager* NotificationUIManager::Create(PrefService* local_state) {
   return new NotificationUIManagerAndroid();
 }
 
+// static
+NotificationUIManager*
+NotificationUIManager::CreateNativeNotificationManager() {
+  return nullptr;
+}
+
 NotificationUIManagerAndroid::NotificationUIManagerAndroid() {
   java_object_.Reset(
       Java_NotificationUIManager_create(
@@ -52,58 +60,52 @@ NotificationUIManagerAndroid::~NotificationUIManagerAndroid() {
                                      java_object_.obj());
 }
 
-bool NotificationUIManagerAndroid::OnNotificationClicked(
+void NotificationUIManagerAndroid::OnNotificationClicked(
     JNIEnv* env,
-    jobject java_object,
+    const JavaParamRef<jobject>& java_object,
     jlong persistent_notification_id,
-    jstring java_origin,
-    jstring java_tag,
+    const JavaParamRef<jstring>& java_origin,
+    const JavaParamRef<jstring>& java_profile_id,
+    jboolean incognito,
+    const JavaParamRef<jstring>& java_tag,
     jint action_index) {
   GURL origin(ConvertJavaStringToUTF8(env, java_origin));
   std::string tag = ConvertJavaStringToUTF8(env, java_tag);
+  std::string profile_id = ConvertJavaStringToUTF8(env, java_profile_id);
 
   regenerated_notification_infos_[persistent_notification_id] =
       std::make_pair(origin.spec(), tag);
 
-  // TODO(peter): Rather than assuming that the last used profile is the
-  // appropriate one for this notification, the used profile should be
-  // stored as part of the notification's data. See https://crbug.com/437574.
-  PlatformNotificationServiceImpl::GetInstance()->OnPersistentNotificationClick(
-      ProfileManager::GetLastUsedProfile(),
-      persistent_notification_id,
-      origin,
-      action_index);
-
-  return true;
+  PlatformNotificationServiceImpl::GetInstance()
+      ->ProcessPersistentNotificationOperation(
+          PlatformNotificationServiceImpl::NOTIFICATION_CLICK, profile_id,
+          incognito, origin, persistent_notification_id, action_index);
 }
 
-bool NotificationUIManagerAndroid::OnNotificationClosed(
+void NotificationUIManagerAndroid::OnNotificationClosed(
     JNIEnv* env,
-    jobject java_object,
+    const JavaParamRef<jobject>& java_object,
     jlong persistent_notification_id,
-    jstring java_origin,
-    jstring java_tag,
+    const JavaParamRef<jstring>& java_origin,
+    const JavaParamRef<jstring>& java_profile_id,
+    jboolean incognito,
+    const JavaParamRef<jstring>& java_tag,
     jboolean by_user) {
   GURL origin(ConvertJavaStringToUTF8(env, java_origin));
+  std::string profile_id = ConvertJavaStringToUTF8(env, java_profile_id);
   std::string tag = ConvertJavaStringToUTF8(env, java_tag);
 
   // The notification was closed by the platform, so clear all local state.
   regenerated_notification_infos_.erase(persistent_notification_id);
-
-  // TODO(peter): Rather than assuming that the last used profile is the
-  // appropriate one for this notification, the used profile should be
-  // stored as part of the notification's data. See https://crbug.com/437574.
-  PlatformNotificationServiceImpl::GetInstance()->OnPersistentNotificationClose(
-      ProfileManager::GetLastUsedProfile(),
-      persistent_notification_id,
-      origin,
-      by_user);
-
-  return true;
+  PlatformNotificationServiceImpl::GetInstance()
+      ->ProcessPersistentNotificationOperation(
+          PlatformNotificationServiceImpl::NOTIFICATION_CLOSE, profile_id,
+          incognito, origin, persistent_notification_id, -1);
 }
 
 void NotificationUIManagerAndroid::Add(const Notification& notification,
                                        Profile* profile) {
+  DCHECK(profile);
   JNIEnv* env = AttachCurrentThread();
 
   // The Android notification UI manager only supports Web Notifications, which
@@ -144,17 +146,13 @@ void NotificationUIManagerAndroid::Add(const Notification& notification,
   ScopedJavaLocalRef<jintArray> vibration_pattern =
       base::android::ToJavaIntArray(env, notification.vibration_pattern());
 
+  ScopedJavaLocalRef<jstring> profile_id =
+      ConvertUTF8ToJavaString(env, profile->GetPath().BaseName().value());
+
   Java_NotificationUIManager_displayNotification(
-      env,
-      java_object_.obj(),
-      persistent_notification_id,
-      origin.obj(),
-      tag.obj(),
-      title.obj(),
-      body.obj(),
-      icon.obj(),
-      vibration_pattern.obj(),
-      notification.silent(),
+      env, java_object_.obj(), persistent_notification_id, origin.obj(),
+      profile_id.obj(), profile->IsOffTheRecord(), tag.obj(), title.obj(),
+      body.obj(), icon.obj(), vibration_pattern.obj(), notification.silent(),
       action_titles.obj());
 
   regenerated_notification_infos_[persistent_notification_id] =

@@ -6,12 +6,8 @@ package org.chromium.chrome.browser.signin;
 
 import android.accounts.Account;
 import android.app.Activity;
-import android.app.Dialog;
-import android.app.DialogFragment;
-import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Bundle;
 import android.os.Handler;
 import android.support.v7.app.AlertDialog;
 
@@ -22,11 +18,9 @@ import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.notifications.GoogleServicesNotificationController;
-import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.chrome.browser.sync.SyncController;
-import org.chromium.sync.AndroidSyncSettings;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
+import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
 import org.chromium.sync.signin.ChromeSigninController;
 
 import javax.annotation.Nullable;
@@ -55,18 +49,10 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     /** Forced signin for child accounts. */
     public static final int SIGNIN_TYPE_FORCED_CHILD_ACCOUNT = 2;
 
-    // The timing of enabling the ProfileSyncService.
-    /** Postpone sync till the set up is fully complete. */
-    public static final int SIGNIN_SYNC_SETUP_IN_PROGRESS = 0;
-
-    /** Enable sync immediately. */
-    public static final int SIGNIN_SYNC_IMMEDIATELY = 1;
-
-    private static final String CLEAR_DATA_PROGRESS_DIALOG_TAG = "clear_data_progress";
-
-    private static final String TAG = "cr.SigninManager";
+    private static final String TAG = "SigninManager";
 
     private static SigninManager sSigninManager;
+    private static int sSignInAccessPoint = SigninAccessPoint.UNKNOWN;
 
     private final Context mContext;
     private final long mNativeSigninManagerAndroid;
@@ -82,14 +68,11 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     private final ObserverList<SignInAllowedObserver> mSignInAllowedObservers =
             new ObserverList<SignInAllowedObserver>();
 
-    private final SigninNotificationController mSigninNotificationController;
-
     private Activity mSignInActivity;
     private Account mSignInAccount;
     private SignInFlowObserver mSignInFlowObserver;
     private boolean mPassive = false;
 
-    private DialogFragment mClearDataProgressDialog;
     private Runnable mSignOutCallback;
 
     private ConfirmManagedSigninFragment mPolicyConfirmationDialog;
@@ -142,6 +125,21 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     }
 
     /**
+     * Hooks for wiping data during sign out.
+     */
+    public interface WipeDataHooks {
+        /**
+         * Called before data is wiped.
+         */
+        public void preWipeData();
+
+        /**
+         * Called after data is wiped.
+         */
+        public void postWipeData();
+    }
+
+    /**
      * A helper method for retrieving the application-wide SigninManager.
      * <p/>
      * Can only be accessed on the main thread.
@@ -163,12 +161,23 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         mNativeSigninManagerAndroid = nativeInit();
         mSigninAllowedByPolicy = nativeIsSigninAllowedByPolicy(mNativeSigninManagerAndroid);
 
-        // Setup notification system for Google services. This includes both sign-in and sync.
-        GoogleServicesNotificationController controller =
-                GoogleServicesNotificationController.get(mContext);
-        mSigninNotificationController = new SigninNotificationController(
-                mContext, controller, AccountManagementFragment.class);
         AccountTrackerService.get(mContext).addSystemAccountsSeededListener(this);
+    }
+
+    /**
+    * Log the access point when the user see the view of choosing account to sign in.
+    * @param accessPoint the enum value of AccessPoint defined in signin_metrics.h.
+    */
+    public static void logSigninStartAccessPoint(int accessPoint) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Signin.SigninStartedAccessPoint", accessPoint, SigninAccessPoint.MAX);
+        sSignInAccessPoint = accessPoint;
+    }
+
+    private void logSigninCompleteAccessPoint() {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Signin.SigninCompletedAccessPoint", sSignInAccessPoint, SigninAccessPoint.MAX);
+        sSignInAccessPoint = SigninAccessPoint.UNKNOWN;
     }
 
     /**
@@ -235,13 +244,6 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     }
 
     /**
-     * Return the SigninNotificationController.
-     */
-    public SigninNotificationController getSigninNotificationController() {
-        return mSigninNotificationController;
-    }
-
-    /**
     * Continue pending sign in after system accounts have been seeded into AccountTrackerService.
     */
     @Override
@@ -275,7 +277,7 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
      * @param passive If passive is true then this operation should not interact with the user.
      * @param observer The Observer to notify when the sign-in process is finished.
      */
-    public void startSignIn(Activity activity, final Account account, boolean passive,
+    public void startSignIn(@Nullable Activity activity, final Account account, boolean passive,
             final SignInFlowObserver observer) {
         if (mSignInAccount != null) {
             Log.w(TAG, "Ignoring sign-in request as another sign-in request is pending.");
@@ -295,7 +297,16 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         notifySignInAllowedChanged();
 
         if (!AccountTrackerService.get(mContext).checkAndSeedSystemAccounts()) {
-            mHasPendingSignin = true;
+            if (AccountIdProvider.getInstance().canBeUsed(mContext)) {
+                mHasPendingSignin = true;
+            } else {
+                UserRecoverableErrorHandler errorHandler = activity != null
+                        ? new UserRecoverableErrorHandler.ModalDialog(activity)
+                        : new UserRecoverableErrorHandler.SystemNotification();
+                ExternalAuthUtils.getInstance().canUseGooglePlayServices(mContext, errorHandler);
+                Log.w(TAG, "Cancelling the sign-in process as Google Play services is unavailable");
+                cancelSignIn();
+            }
             return;
         }
 
@@ -385,14 +396,6 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         // sync tries to start without being signed in natively and crashes.
         ChromeSigninController.get(mContext).setSignedInAccountName(mSignInAccount.name);
 
-        // Sign-in to sync.
-        ProfileSyncService profileSyncService = ProfileSyncService.get();
-        if (AndroidSyncSettings.isSyncEnabled(mContext)
-                && !profileSyncService.hasSyncSetupCompleted()) {
-            profileSyncService.setSetupInProgress(true);
-            profileSyncService.requestStart();
-        }
-
         if (mSignInFlowObserver != null) mSignInFlowObserver.onSigninComplete();
 
         // All done, cleanup.
@@ -408,29 +411,41 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     }
 
     /**
+     * Invokes signOut with no callback or wipeDataHooks.
+     */
+    public void signOut() {
+        signOut(null, null);
+    }
+
+    /**
+     * Invokes signOut() with no wipeDataHooks.
+     */
+    public void signOut(Runnable callback) {
+        signOut(callback, null);
+    }
+
+    /**
      * Signs out of Chrome.
      * <p/>
      * This method clears the signed-in username, stops sync and sends out a
      * sign-out notification on the native side.
      *
-     * @param activity If not null then a progress dialog is shown over the activity until signout
-     * completes, in case the account had management enabled. The activity must be valid until the
-     * callback is invoked.
      * @param callback Will be invoked after signout completes, if not null.
+     * @param wipeDataHooks Hooks to call during data wiping in case the account is managed.
      */
-    public void signOut(Activity activity, Runnable callback) {
+    public void signOut(Runnable callback, WipeDataHooks wipeDataHooks) {
         mSignOutCallback = callback;
 
         boolean wipeData = getManagementDomain() != null;
         Log.d(TAG, "Signing out, wipe data? " + wipeData);
 
-        ProfileSyncService.get().signOut();
-        ChromeSigninController.get(mContext).setSignedInAccountName(null);
-        mSigninNotificationController.onClearSignedInUser();
+        // Native signout must happen before resetting the account so data is deleted correctly.
+        // http://crbug.com/589028
         nativeSignOut(mNativeSigninManagerAndroid);
+        ChromeSigninController.get(mContext).setSignedInAccountName(null);
 
         if (wipeData) {
-            wipeProfileData(activity);
+            wipeProfileData(wipeDataHooks);
         } else {
             onSignOutDone();
         }
@@ -461,14 +476,10 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         notifySignInAllowedChanged();
     }
 
-    private void wipeProfileData(Activity activity) {
-        if (activity != null) {
-            mClearDataProgressDialog = new ClearDataProgressDialog();
-            mClearDataProgressDialog.show(activity.getFragmentManager(),
-                    CLEAR_DATA_PROGRESS_DIALOG_TAG);
-        }
+    private void wipeProfileData(WipeDataHooks hooks) {
+        if (hooks != null) hooks.preWipeData();
         // This will call back to onProfileDataWiped().
-        nativeWipeProfileData(mNativeSigninManagerAndroid);
+        nativeWipeProfileData(mNativeSigninManagerAndroid, hooks);
     }
 
     /**
@@ -479,13 +490,10 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
      *                   signin.
      * @param account    The account to sign into.
      * @param signInType The type of the sign-in (one of SIGNIN_TYPE constants).
-     * @param signInSync When to enable the ProfileSyncService (one of SIGNIN_SYNC constants).
-     * @param showSignInNotification Whether the sign-in notification should be shown.
      * @param observer   The observer to invoke when done, or null.
      */
     public void signInToSelectedAccount(@Nullable Activity activity, final Account account,
-            final int signInType, final int signInSync, final boolean showSignInNotification,
-            @Nullable final SignInFlowObserver observer) {
+            final int signInType, @Nullable final SignInFlowObserver observer) {
         // The SigninManager handles most of the sign-in flow, and onSigninComplete handles the
         // Chrome-specific details.
         final boolean passive = signInType != SIGNIN_TYPE_INTERACTIVE;
@@ -493,12 +501,6 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         startSignIn(activity, account, passive, new SignInFlowObserver() {
             @Override
             public void onSigninComplete() {
-                // TODO(acleung): Maybe GoogleServicesManager should have a
-                // sync = true but setSetupInProgress(true) state?
-                ProfileSyncService.get().setSetupInProgress(
-                        signInSync == SIGNIN_SYNC_SETUP_IN_PROGRESS);
-                SyncController.get(mContext).start();
-
                 if (observer != null) observer.onSigninComplete();
 
                 if (signInType != SIGNIN_TYPE_INTERACTIVE) {
@@ -506,14 +508,11 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
                 }
 
                 SigninManager.get(mContext).logInSignedInUser();
-                // If Chrome was started from an external intent we should show the sync signin
-                // popup, since the user has not seen the welcome screen where there is easy access
-                // to turn off sync.
-                if (showSignInNotification) {
-                    SigninManager.get(mContext)
-                            .getSigninNotificationController()
-                            .showSyncSignInNotification();
-                }
+                logSigninCompleteAccessPoint();
+                // Log signin in reason as defined in signin_metrics.h. Right now only
+                // SIGNIN_PRIMARY_ACCOUNT available on Android.
+                RecordHistogram.recordEnumeratedHistogram("Signin.SigninReason",
+                        SigninReason.SIGNIN_PRIMARY_ACCOUNT, SigninReason.MAX);
             }
             @Override
             public void onSigninCancelled() {
@@ -522,38 +521,9 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
         });
     }
 
-    /**
-     * This class must be public and static. Otherwise an exception will be thrown when Android
-     * recreates the fragment (e.g. after a configuration change).
-     */
-    public static class ClearDataProgressDialog extends DialogFragment {
-        @Override
-        public void onCreate(Bundle savedInstanceState) {
-            super.onCreate(savedInstanceState);
-            if (savedInstanceState != null) {
-                // Don't allow the dialog to be recreated by Android, since it wouldn't ever
-                // be dismissed after recreation.
-                dismiss();
-            }
-        }
-
-        @Override
-        public Dialog onCreateDialog(Bundle savedInstanceState) {
-            setCancelable(false);
-            ProgressDialog dialog = new ProgressDialog(getActivity());
-            dialog.setTitle(getString(R.string.wiping_profile_data_title));
-            dialog.setMessage(getString(R.string.wiping_profile_data_message));
-            dialog.setIndeterminate(true);
-            return dialog;
-        }
-    }
-
     @CalledByNative
-    private void onProfileDataWiped() {
-        if (mClearDataProgressDialog != null && mClearDataProgressDialog.isAdded()) {
-            mClearDataProgressDialog.dismissAllowingStateLoss();
-        }
-        mClearDataProgressDialog = null;
+    private void onProfileDataWiped(WipeDataHooks hooks) {
+        if (hooks != null) hooks.postWipeData();
         onSignOutDone();
     }
 
@@ -607,7 +577,7 @@ public class SigninManager implements AccountTrackerService.OnSystemAccountsSeed
     private native void nativeOnSignInCompleted(long nativeSigninManagerAndroid, String username);
     private native void nativeSignOut(long nativeSigninManagerAndroid);
     private native String nativeGetManagementDomain(long nativeSigninManagerAndroid);
-    private native void nativeWipeProfileData(long nativeSigninManagerAndroid);
+    private native void nativeWipeProfileData(long nativeSigninManagerAndroid, WipeDataHooks hooks);
     private native void nativeClearLastSignedInUser(long nativeSigninManagerAndroid);
     private native void nativeLogInSignedInUser(long nativeSigninManagerAndroid);
     private native boolean nativeIsSignedInOnNative(long nativeSigninManagerAndroid);

@@ -23,7 +23,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/layout/LayoutTableSection.h"
 
 #include "core/layout/HitTestResult.h"
@@ -35,6 +34,7 @@
 #include "core/layout/SubtreeLayoutScope.h"
 #include "core/paint/TableSectionPainter.h"
 #include "wtf/HashSet.h"
+#include <algorithm>
 #include <limits>
 
 namespace blink {
@@ -80,8 +80,8 @@ row, const LayoutTableCell* cell)
 
 void CellSpan::ensureConsistency(const unsigned maximumSpanSize)
 {
-    static_assert(WTF::IsSameType<decltype(m_start), unsigned>::value, "Asserts below assume m_start is unsigned");
-    static_assert(WTF::IsSameType<decltype(m_end), unsigned>::value, "Asserts below assume m_end is unsigned");
+    static_assert(std::is_same<decltype(m_start), unsigned>::value, "Asserts below assume m_start is unsigned");
+    static_assert(std::is_same<decltype(m_end), unsigned>::value, "Asserts below assume m_end is unsigned");
     RELEASE_ASSERT(m_start <= maximumSpanSize);
     RELEASE_ASSERT(m_end <= maximumSpanSize);
     RELEASE_ASSERT(m_start <= m_end);
@@ -789,25 +789,21 @@ int LayoutTableSection::calcRowLogicalHeight()
 
                         rowSpanCells.append(cell);
                         lastRowSpanCell = cell;
-
-                        // Find out the baseline. The baseline is set on the first row in a rowSpan.
-                        updateBaselineForCell(cell, r, baselineDescent);
                     }
-                    continue;
                 }
 
-                ASSERT(cell->rowSpan() == 1);
-
-                if (cell->hasOverrideLogicalContentHeight()) {
+                if (cell->rowIndex() == r && cell->hasOverrideLogicalContentHeight()) {
                     cell->clearIntrinsicPadding();
                     cell->clearOverrideSize();
                     cell->forceChildLayout();
                 }
 
-                m_rowPos[r + 1] = std::max(m_rowPos[r + 1], m_rowPos[r] + cell->logicalHeightForRowSizing());
+                if (cell->rowSpan() == 1)
+                    m_rowPos[r + 1] = std::max(m_rowPos[r + 1], m_rowPos[r] + cell->logicalHeightForRowSizing());
 
-                // Find out the baseline.
-                updateBaselineForCell(cell, r, baselineDescent);
+                // Find out the baseline. The baseline is set on the first row in a rowSpan.
+                if (cell->rowIndex() == r)
+                    updateBaselineForCell(cell, r, baselineDescent);
             }
         }
 
@@ -969,7 +965,7 @@ int LayoutTableSection::distributeExtraLogicalHeightToRows(int extraLogicalHeigh
 
 static bool shouldFlexCellChild(LayoutObject* cellDescendant)
 {
-    return cellDescendant->isReplaced() || (cellDescendant->isBox() && toLayoutBox(cellDescendant)->scrollsOverflow());
+    return cellDescendant->isAtomicInlineLevel() || (cellDescendant->isBox() && toLayoutBox(cellDescendant)->scrollsOverflow());
 }
 
 void LayoutTableSection::layoutRows()
@@ -1201,9 +1197,9 @@ int LayoutTableSection::calcBlockDirectionOuterBorder(BlockBorderSide side) cons
         const ComputedStyle& primaryCellStyle = current.primaryCell()->styleRef();
         const BorderValue& cb = side == BorderBefore ? primaryCellStyle.borderBefore() : primaryCellStyle.borderAfter(); // FIXME: Make this work with perpendicular and flipped cells.
         // FIXME: Don't repeat for the same col group
-        LayoutTableCol* colGroup = table()->colElement(c);
-        if (colGroup) {
-            const BorderValue& gb = side == BorderBefore ? colGroup->style()->borderBefore() : colGroup->style()->borderAfter();
+        LayoutTableCol* col = table()->colElement(c).innermostColOrColGroup();
+        if (col) {
+            const BorderValue& gb = side == BorderBefore ? col->style()->borderBefore() : col->style()->borderAfter();
             if (gb.style() == BHIDDEN || cb.style() == BHIDDEN)
                 continue;
             allHidden = false;
@@ -1242,8 +1238,8 @@ int LayoutTableSection::calcInlineDirectionOuterBorder(InlineBorderSide side) co
     if (sb.style() > BHIDDEN)
         borderWidth = sb.width();
 
-    if (LayoutTableCol* colGroup = table()->colElement(colIndex)) {
-        const BorderValue& gb = side == BorderStart ? colGroup->style()->borderStart() : colGroup->style()->borderEnd();
+    if (LayoutTableCol* col = table()->colElement(colIndex).innermostColOrColGroup()) {
+        const BorderValue& gb = side == BorderStart ? col->style()->borderStart() : col->style()->borderEnd();
         if (gb.style() == BHIDDEN)
             return -1;
         if (gb.style() > BHIDDEN && gb.width() > borderWidth)

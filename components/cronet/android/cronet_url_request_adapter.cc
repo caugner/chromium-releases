@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "cronet_url_request_adapter.h"
+#include "components/cronet/android/cronet_url_request_adapter.h"
 
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -107,9 +108,10 @@ CronetURLRequestAdapter::~CronetURLRequestAdapter() {
   DCHECK(context_->IsOnNetworkThread());
 }
 
-jboolean CronetURLRequestAdapter::SetHttpMethod(JNIEnv* env,
-                                                jobject jcaller,
-                                                jstring jmethod) {
+jboolean CronetURLRequestAdapter::SetHttpMethod(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller,
+    const JavaParamRef<jstring>& jmethod) {
   DCHECK(!context_->IsOnNetworkThread());
   std::string method(base::android::ConvertJavaStringToUTF8(env, jmethod));
   // Http method is a token, just as header name.
@@ -119,10 +121,11 @@ jboolean CronetURLRequestAdapter::SetHttpMethod(JNIEnv* env,
   return JNI_TRUE;
 }
 
-jboolean CronetURLRequestAdapter::AddRequestHeader(JNIEnv* env,
-                                                   jobject jcaller,
-                                                   jstring jname,
-                                                   jstring jvalue) {
+jboolean CronetURLRequestAdapter::AddRequestHeader(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller,
+    const JavaParamRef<jstring>& jname,
+    const JavaParamRef<jstring>& jvalue) {
   DCHECK(!context_->IsOnNetworkThread());
   std::string name(base::android::ConvertJavaStringToUTF8(env, jname));
   std::string value(base::android::ConvertJavaStringToUTF8(env, jvalue));
@@ -134,7 +137,9 @@ jboolean CronetURLRequestAdapter::AddRequestHeader(JNIEnv* env,
   return JNI_TRUE;
 }
 
-void CronetURLRequestAdapter::DisableCache(JNIEnv* env, jobject jcaller) {
+void CronetURLRequestAdapter::DisableCache(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) {
   DCHECK(!context_->IsOnNetworkThread());
   load_flags_ |= net::LOAD_DISABLE_CACHE;
 }
@@ -143,19 +148,21 @@ void CronetURLRequestAdapter::SetUpload(
     scoped_ptr<net::UploadDataStream> upload) {
   DCHECK(!context_->IsOnNetworkThread());
   DCHECK(!upload_);
-  upload_ = upload.Pass();
+  upload_ = std::move(upload);
 }
 
-void CronetURLRequestAdapter::Start(JNIEnv* env, jobject jcaller) {
+void CronetURLRequestAdapter::Start(JNIEnv* env,
+                                    const JavaParamRef<jobject>& jcaller) {
   DCHECK(!context_->IsOnNetworkThread());
   context_->PostTaskToNetworkThread(
       FROM_HERE, base::Bind(&CronetURLRequestAdapter::StartOnNetworkThread,
                             base::Unretained(this)));
 }
 
-void CronetURLRequestAdapter::GetStatus(JNIEnv* env,
-                                        jobject jcaller,
-                                        jobject jstatus_listener) const {
+void CronetURLRequestAdapter::GetStatus(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller,
+    const JavaParamRef<jobject>& jstatus_listener) const {
   DCHECK(!context_->IsOnNetworkThread());
   base::android::ScopedJavaGlobalRef<jobject> status_listener_ref;
   status_listener_ref.Reset(env, jstatus_listener);
@@ -164,8 +171,9 @@ void CronetURLRequestAdapter::GetStatus(JNIEnv* env,
                             base::Unretained(this), status_listener_ref));
 }
 
-void CronetURLRequestAdapter::FollowDeferredRedirect(JNIEnv* env,
-                                                     jobject jcaller) {
+void CronetURLRequestAdapter::FollowDeferredRedirect(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) {
   DCHECK(!context_->IsOnNetworkThread());
   context_->PostTaskToNetworkThread(
       FROM_HERE,
@@ -175,7 +183,10 @@ void CronetURLRequestAdapter::FollowDeferredRedirect(JNIEnv* env,
 }
 
 jboolean CronetURLRequestAdapter::ReadData(
-    JNIEnv* env, jobject jcaller, jobject jbyte_buffer, jint jposition,
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller,
+    const JavaParamRef<jobject>& jbyte_buffer,
+    jint jposition,
     jint jcapacity) {
   DCHECK(!context_->IsOnNetworkThread());
   DCHECK_LT(jposition, jcapacity);
@@ -198,7 +209,7 @@ jboolean CronetURLRequestAdapter::ReadData(
 }
 
 void CronetURLRequestAdapter::Destroy(JNIEnv* env,
-                                      jobject jcaller,
+                                      const JavaParamRef<jobject>& jcaller,
                                       jboolean jsend_on_canceled) {
   // Destroy could be called from any thread, including network thread (if
   // posting task to executor throws an exception), but is posted, so |this|
@@ -211,30 +222,35 @@ void CronetURLRequestAdapter::Destroy(JNIEnv* env,
 }
 
 base::android::ScopedJavaLocalRef<jstring>
-CronetURLRequestAdapter::GetHttpStatusText(JNIEnv* env, jobject jcaller) const {
+CronetURLRequestAdapter::GetHttpStatusText(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) const {
   DCHECK(context_->IsOnNetworkThread());
   const net::HttpResponseHeaders* headers = url_request_->response_headers();
   return ConvertUTF8ToJavaString(env, headers->GetStatusText());
 }
 
 base::android::ScopedJavaLocalRef<jstring>
-CronetURLRequestAdapter::GetNegotiatedProtocol(JNIEnv* env,
-                                               jobject jcaller) const {
+CronetURLRequestAdapter::GetNegotiatedProtocol(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) const {
   DCHECK(context_->IsOnNetworkThread());
   return ConvertUTF8ToJavaString(
       env, url_request_->response_info().npn_negotiated_protocol);
 }
 
 base::android::ScopedJavaLocalRef<jstring>
-CronetURLRequestAdapter::GetProxyServer(JNIEnv* env,
-                                        jobject jcaller) const {
+CronetURLRequestAdapter::GetProxyServer(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) const {
   DCHECK(context_->IsOnNetworkThread());
   return ConvertUTF8ToJavaString(
       env, url_request_->response_info().proxy_server.ToString());
 }
 
-jboolean CronetURLRequestAdapter::GetWasCached(JNIEnv* env,
-                                               jobject jcaller) const {
+jboolean CronetURLRequestAdapter::GetWasCached(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jcaller) const {
   DCHECK(context_->IsOnNetworkThread());
   return url_request_->response_info().was_cached;
 }
@@ -262,7 +278,7 @@ void CronetURLRequestAdapter::OnCertificateRequested(
     net::SSLCertRequestInfo* cert_request_info) {
   DCHECK(context_->IsOnNetworkThread());
   // Cronet does not support client certificates.
-  request->ContinueWithCertificate(nullptr);
+  request->ContinueWithCertificate(nullptr, nullptr);
 }
 
 void CronetURLRequestAdapter::OnSSLCertificateError(
@@ -321,7 +337,7 @@ void CronetURLRequestAdapter::StartOnNetworkThread() {
   url_request_->SetExtraRequestHeaders(initial_request_headers_);
   url_request_->SetPriority(initial_priority_);
   if (upload_)
-    url_request_->set_upload(upload_.Pass());
+    url_request_->set_upload(std::move(upload_));
   url_request_->Start();
 }
 
@@ -388,7 +404,7 @@ void CronetURLRequestAdapter::DestroyOnNetworkThread(bool send_on_canceled) {
 
 bool CronetURLRequestAdapter::MaybeReportError(net::URLRequest* request) const {
   DCHECK_NE(net::URLRequestStatus::IO_PENDING, url_request_->status().status());
-  DCHECK_EQ(request, url_request_);
+  DCHECK_EQ(request, url_request_.get());
   if (url_request_->status().is_success())
     return false;
   int net_error = url_request_->status().error();

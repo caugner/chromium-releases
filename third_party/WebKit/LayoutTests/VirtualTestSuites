@@ -22,6 +22,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "fast/compositorworker",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "compositing/webgl",
     "args": ["--enable-threaded-compositing"]
   },
@@ -51,13 +56,6 @@
     "base": "fast/scroll-behavior",
     "args": ["--enable-threaded-compositing",
              "--enable-prefer-compositing-to-lcd-text"]
-  },
-  {
-    "prefix": "threaded_animation_timelines",
-    "base": "fast/scroll-behavior",
-    "args": ["--enable-threaded-compositing",
-             "--enable-prefer-compositing-to-lcd-text",
-             "--enable-compositor-animation-timelines"]
   },
   {
     "prefix": "stable",
@@ -196,26 +194,23 @@
     "args": ["--enable-slimming-paint-v2"]
   },
   {
-    "prefix": "syncpaint",
-    "base": "compositing/repaint",
-    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
-    "references_use_default_args": true
+    "prefix": "spv2",
+    "base": "fast/block",
+    "args": ["--enable-slimming-paint-v2"]
   },
   {
-    "prefix": "syncpaint",
-    "base": "fast/repaint",
-    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
-    "references_use_default_args": true
+    "prefix": "scalefactor200",
+    "base": "fast/hidpi/static",
+    "args": ["--force-device-scale-factor=2"]
   },
   {
-    "prefix": "syncpaint",
-    "base": "paint",
-    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"],
-    "references_use_default_args": true
+    "prefix": "scalefactor150",
+    "base": "fast/hidpi/static",
+    "args": ["--force-device-scale-factor=1.5"]
   },
   {
-    "prefix": "syncpaint",
-    "base": "inspector/tracing",
-    "args": ["--enable-blink-features=SlimmingPaintSynchronizedPainting"]
+    "prefix": "scalefactor200withzoom",
+    "base": "fast/hidpi/static",
+    "args": ["--force-device-scale-factor=2", "--enable-use-zoom-for-dsf"]
   }
 ]

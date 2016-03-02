@@ -25,17 +25,16 @@
  *
  */
 
-#include "config.h"
 #include "core/dom/MainThreadTaskRunner.h"
 
 #include "core/dom/ExecutionContextTask.h"
 #include "core/testing/NullExecutionContext.h"
 #include "platform/heap/Handle.h"
 #include "platform/testing/UnitTestHelpers.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/Forward.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
-#include <gtest/gtest.h>
 
 namespace blink {
 

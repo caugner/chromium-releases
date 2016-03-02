@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/animation/InvalidatableInterpolation.h"
 
 #include "core/animation/InterpolationEnvironment.h"
@@ -131,7 +130,7 @@ const InterpolationValue* InvalidatableInterpolation::ensureValidInterpolation(c
 
 void InvalidatableInterpolation::setFlagIfInheritUsed(InterpolationEnvironment& environment) const
 {
-    if (!property().isCSSProperty())
+    if (!m_property.isCSSProperty() && !m_property.isPresentationAttribute())
         return;
     if (!environment.state().parentStyle())
         return;

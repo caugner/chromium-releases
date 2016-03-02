@@ -82,6 +82,7 @@
         '../wtf/wtf.gyp:wtf',
         '../wtf/wtf_tests.gyp:wtf_unittest_helpers',
         '<(DEPTH)/base/base.gyp:test_support_base',
+        '<(DEPTH)/cc/blink/cc_blink.gyp:cc_blink',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/harfbuzz-ng/harfbuzz.gyp:harfbuzz-ng',
         '<(DEPTH)/url/url.gyp:url_lib',
@@ -119,14 +120,20 @@
       'type': 'static_library',
       'dependencies': [
         '../config.gyp:config',
+        '../wtf/wtf.gyp:wtf',
         'blink_platform.gyp:blink_platform',
       ],
       'defines': [
         'INSIDE_BLINK',
       ],
+      'include_dirs': [
+        '<(SHARED_INTERMEDIATE_DIR)/blink',
+      ],
       'sources': [
         '<@(platform_test_support_files)',
       ],
+      # Disable c4267 warnings until we fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267 ],
     },
   ],
   'conditions': [

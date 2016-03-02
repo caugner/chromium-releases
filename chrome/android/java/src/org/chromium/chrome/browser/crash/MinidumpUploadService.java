@@ -7,10 +7,6 @@ package org.chromium.chrome.browser.crash;
 import android.app.IntentService;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.os.AsyncTask;
-import android.os.StrictMode;
-import android.preference.PreferenceManager;
 import android.support.annotation.StringDef;
 
 import org.chromium.base.Log;
@@ -18,7 +14,6 @@ import org.chromium.base.StreamUtil;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -90,32 +85,6 @@ public class MinidumpUploadService extends IntentService {
         }
         context.startService(LogcatExtractionService.createLogcatExtractionTask(
                 context, dumps, redirectAction));
-    }
-
-    @Override
-    public void onCreate() {
-        super.onCreate();
-        if (isMinidumpCleanNeeded()) {
-            // Temporarily allowing disk access while fixing. TODO: http://crbug.com/527429
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-            try {
-                final CrashFileManager crashFileManager =
-                        new CrashFileManager(getApplicationContext().getCacheDir());
-                // Cleaning minidumps in a background not to block the Ui thread.
-                // NOTE: {@link CrashFileManager#cleanAllMiniDumps()} is not thread-safe and can
-                // possibly result in race condition by calling from multiple threads. However, this
-                // should only result in warning messages in logs.
-                new AsyncTask<Void, Void, Void>() {
-                    @Override
-                    protected Void doInBackground(Void... params) {
-                        crashFileManager.cleanAllMiniDumps();
-                        return null;
-                    }
-                }.execute();
-            } finally {
-                StrictMode.setThreadPolicy(oldPolicy);
-            }
-        }
     }
 
     @Override
@@ -324,7 +293,7 @@ public class MinidumpUploadService extends IntentService {
                 }
             }
         } catch (IOException e) {
-            Log.w(TAG, "Error while reading crash file.", e);
+            Log.w(TAG, "Error while reading crash file.", e.toString());
         } finally {
             StreamUtil.closeQuietly(fileReader);
         }
@@ -373,28 +342,5 @@ public class MinidumpUploadService extends IntentService {
     public static void tryUploadAllCrashDumps(Context context) {
         Intent findAndUploadAllCrashesIntent = createFindAndUploadAllCrashesIntent(context);
         context.startService(findAndUploadAllCrashesIntent);
-    }
-
-    /**
-     * Checks whether it is the first time restrictions for cellular uploads should apply. Is used
-     * to determine whether unsent crash uploads should be deleted which should happen only once.
-     */
-    @VisibleForTesting
-    protected boolean isMinidumpCleanNeeded() {
-        SharedPreferences sharedPreferences =
-                PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
-
-        // If cellular upload logic is enabled and the preference used for that is not initialized
-        // then this is the first time that logic is enabled.
-        boolean cleanNeeded =
-                !sharedPreferences.contains(MinidumpUploadCallable.PREF_LAST_UPLOAD_DAY)
-                && PrivacyPreferencesManager.getInstance(getApplicationContext()).isUploadLimited();
-
-        // Initialize the preference with default value to make sure the above check works only
-        // once.
-        if (cleanNeeded) {
-            sharedPreferences.edit().putInt(MinidumpUploadCallable.PREF_LAST_UPLOAD_DAY, 0).apply();
-        }
-        return cleanNeeded;
     }
 }

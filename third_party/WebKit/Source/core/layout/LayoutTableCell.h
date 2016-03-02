@@ -137,7 +137,7 @@ public:
         Length styleWidth = style()->logicalWidth();
         if (!styleWidth.isAuto())
             return styleWidth;
-        if (LayoutTableCol* firstColumn = table()->colElement(col()))
+        if (LayoutTableCol* firstColumn = table()->colElement(col()).innermostColOrColGroup())
             return logicalWidthFromColumns(firstColumn, styleWidth);
         return styleWidth;
     }
@@ -270,6 +270,8 @@ public:
 
     const char* name() const override { return "LayoutTableCell"; }
 
+    bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const override;
+
 protected:
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
     void computePreferredLogicalWidths() override;
@@ -290,7 +292,7 @@ private:
 
     LayoutSize offsetFromContainer(const LayoutObject*, const LayoutPoint&, bool* offsetDependsOnPoint = nullptr) const override;
     LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* = nullptr) const override;
-    void mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
+    void mapToVisibleRectInAncestorSpace(const LayoutBoxModelObject* ancestor, LayoutRect&, const PaintInvalidationState*) const override;
 
     int borderHalfLeft(bool outer) const;
     int borderHalfRight(bool outer) const;

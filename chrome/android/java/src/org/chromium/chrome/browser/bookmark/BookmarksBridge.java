@@ -134,14 +134,21 @@ public class BookmarksBridge {
         }
 
         /**
-         * Called when the native side of bookmark is loaded and now in usable state.
+         * Invoked when the native side of bookmark is loaded and now in usable state.
          */
         public void bookmarkModelLoaded() {
             bookmarkModelChanged();
         }
 
         /**
-         *  Called when there are changes to the bookmark model that don't trigger any of the other
+         * Invoked when bookmarks became editable or non-editable.
+         */
+        public void editBookmarksEnabledChanged() {
+            bookmarkModelChanged();
+        }
+
+        /**
+         *  Invoked when there are changes to the bookmark model that don't trigger any of the other
          *  callback methods or it wasn't handled by other callback methods.
          *  Examples:
          *  - On partner bookmarks change.
@@ -204,6 +211,29 @@ public class BookmarksBridge {
      */
     public boolean isBookmarkModelLoaded() {
         return mIsNativeBookmarkModelLoaded;
+    }
+
+    /**
+     * Schedules a runnable to run after the bookmark model is loaded. If the
+     * model is already loaded, executes the runnable immediately.
+     * @return Whether the given runnable is executed synchronously.
+     */
+    public boolean runAfterBookmarkModelLoaded(final Runnable runnable) {
+        if (isBookmarkModelLoaded()) {
+            runnable.run();
+            return true;
+        }
+        addObserver(new BookmarkModelObserver() {
+            @Override
+            public void bookmarkModelLoaded() {
+                removeObserver(this);
+                runnable.run();
+            }
+            @Override
+            public void bookmarkModelChanged() {
+            }
+        });
+        return false;
     }
 
     /**
@@ -570,10 +600,6 @@ public class BookmarksBridge {
         return nativeIsEditBookmarksEnabled(mNativeBookmarksBridge);
     }
 
-    public static boolean isEnhancedBookmarksEnabled() {
-        return nativeIsEnhancedBookmarksFeatureEnabled();
-    }
-
     /**
      * Notifies the observer that bookmark model has been loaded.
      */
@@ -679,6 +705,13 @@ public class BookmarksBridge {
     }
 
     @CalledByNative
+    private void editBookmarksEnabledChanged() {
+        for (BookmarkModelObserver observer : mObservers) {
+            observer.editBookmarksEnabledChanged();
+        }
+    }
+
+    @CalledByNative
     private static BookmarkItem createBookmarkItem(long id, int type, String title, String url,
             boolean isFolder, long parentId, int parentIdType, boolean isEditable,
             boolean isManaged) {
@@ -765,7 +798,6 @@ public class BookmarksBridge {
     private native void nativeUndo(long nativeBookmarksBridge);
     private native void nativeStartGroupingUndos(long nativeBookmarksBridge);
     private native void nativeEndGroupingUndos(long nativeBookmarksBridge);
-    private static native boolean nativeIsEnhancedBookmarksFeatureEnabled();
     private native void nativeLoadEmptyPartnerBookmarkShimForTesting(long nativeBookmarksBridge);
     private native void nativeSearchBookmarks(long nativeBookmarksBridge,
             List<BookmarkMatch> bookmarkMatches, String query, int maxNumber);

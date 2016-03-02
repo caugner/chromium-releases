@@ -179,9 +179,6 @@ public:
     bool isCalculated() const { return type() == UnitType::Calc; }
     bool isCalculatedPercentageWithNumber() const { return typeWithCalcResolved() == UnitType::CalcPercentageWithNumber; }
     bool isCalculatedPercentageWithLength() const { return typeWithCalcResolved() == UnitType::CalcPercentageWithLength; }
-    static bool isDotsPerInch(UnitType type) { return type == UnitType::DotsPerInch; }
-    static bool isDotsPerPixel(UnitType type) { return type == UnitType::DotsPerPixel; }
-    static bool isDotsPerCentimeter(UnitType type) { return type == UnitType::DotsPerCentimeter; }
     static bool isResolution(UnitType type) { return type >= UnitType::DotsPerPixel && type <= UnitType::DotsPerCentimeter; }
     bool isFlex() const { return typeWithCalcResolved() == UnitType::Fraction; }
     bool isValueID() const { return type() == UnitType::ValueID; }
@@ -201,13 +198,11 @@ public:
     }
     template<typename T> static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> create(T value)
     {
-        static_assert(!WTF::IsSameType<T, CSSValueID>::value, "Do not call create() with a CSSValueID; call createIdentifier() instead");
+        static_assert(!std::is_same<T, CSSValueID>::value, "Do not call create() with a CSSValueID; call createIdentifier() instead");
         return adoptRefWillBeNoop(new CSSPrimitiveValue(value));
     }
 
     ~CSSPrimitiveValue();
-
-    void cleanup();
 
     UnitType typeWithCalcResolved() const;
 

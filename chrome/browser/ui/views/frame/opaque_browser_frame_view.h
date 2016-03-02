@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
@@ -84,6 +85,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   bool IsFullscreen() const override;
   bool IsTabStripVisible() const override;
   int GetTabStripHeight() const override;
+  bool IsToolbarVisible() const override;
   gfx::Size GetTabstripPreferredSize() const override;
 
  protected:
@@ -142,10 +144,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   void PaintRestoredFrameBorder(gfx::Canvas* canvas);
   void PaintMaximizedFrameBorder(gfx::Canvas* canvas);
   void PaintToolbarBackground(gfx::Canvas* canvas);
-  void PaintRestoredClientEdge(gfx::Canvas* canvas);
-
-  // Returns the bounds of the client area for the specified view size.
-  gfx::Rect CalculateClientAreaBounds(int width, int height) const;
+  void PaintClientEdge(gfx::Canvas* canvas);
 
   // Our layout manager also calculates various bounds.
   OpaqueBrowserFrameViewLayout* layout_;

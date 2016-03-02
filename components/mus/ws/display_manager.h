@@ -5,12 +5,15 @@
 #ifndef COMPONENTS_MUS_WS_DISPLAY_MANAGER_H_
 #define COMPONENTS_MUS_WS_DISPLAY_MANAGER_H_
 
+#include <stdint.h>
+
 #include <map>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "components/mus/ws/display_manager_delegate.h"
 #include "mojo/public/cpp/bindings/callback.h"
@@ -32,6 +35,7 @@ class ApplicationImpl;
 }  // namespace mojo
 
 namespace ui {
+class CursorLoader;
 class PlatformWindow;
 struct TextInputState;
 }  // namespace ui
@@ -68,6 +72,8 @@ class DisplayManager {
 
   virtual void SetTitle(const base::string16& title) = 0;
 
+  virtual void SetCursorById(int32_t cursor) = 0;
+
   virtual const mojom::ViewportMetrics& GetViewportMetrics() = 0;
 
   virtual void UpdateTextInputState(const ui::TextInputState& state) = 0;
@@ -103,6 +109,7 @@ class DefaultDisplayManager : public DisplayManager,
                      const gfx::Rect& bounds) override;
   void SetViewportSize(const gfx::Size& size) override;
   void SetTitle(const base::string16& title) override;
+  void SetCursorById(int32_t cursor) override;
   const mojom::ViewportMetrics& GetViewportMetrics() override;
   void UpdateTextInputState(const ui::TextInputState& state) override;
   void SetImeVisibility(bool visible) override;
@@ -148,6 +155,10 @@ class DefaultDisplayManager : public DisplayManager,
 
   scoped_ptr<TopLevelDisplayClient> top_level_display_client_;
   scoped_ptr<ui::PlatformWindow> platform_window_;
+
+#if !defined(OS_ANDROID)
+  scoped_ptr<ui::CursorLoader> cursor_loader_;
+#endif
 
   base::WeakPtrFactory<DefaultDisplayManager> weak_factory_;
 

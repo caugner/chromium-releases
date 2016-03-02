@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "wtf/PartitionAlloc.h"
 
 #include <string.h>
@@ -55,7 +54,7 @@ static_assert(WTF::kGenericMaxBucketed == 983040, "generic max bucketed");
 
 namespace WTF {
 
-int PartitionRootBase::gInitializedLock = 0;
+SpinLock PartitionRootBase::gInitializedLock;
 bool PartitionRootBase::gInitialized = false;
 PartitionPage PartitionRootBase::gSeedPage;
 PartitionBucket PartitionRootBase::gPagedBucket;
@@ -104,15 +103,15 @@ static uint16_t partitionBucketNumSystemPages(size_t size)
 static void partitionAllocBaseInit(PartitionRootBase* root)
 {
     ASSERT(!root->initialized);
-
-    spinLockLock(&PartitionRootBase::gInitializedLock);
-    if (!PartitionRootBase::gInitialized) {
-        PartitionRootBase::gInitialized = true;
-        // We mark the seed page as free to make sure it is skipped by our
-        // logic to find a new active page.
-        PartitionRootBase::gPagedBucket.activePagesHead = &PartitionRootGeneric::gSeedPage;
+    {
+        SpinLock::Guard guard(PartitionRootBase::gInitializedLock);
+        if (!PartitionRootBase::gInitialized) {
+            PartitionRootBase::gInitialized = true;
+            // We mark the seed page as free to make sure it is skipped by our
+            // logic to find a new active page.
+            PartitionRootBase::gPagedBucket.activePagesHead = &PartitionRootGeneric::gSeedPage;
+        }
     }
-    spinLockUnlock(&PartitionRootBase::gInitializedLock);
 
     root->initialized = true;
     root->totalSizeOfCommittedPages = 0;
@@ -166,7 +165,7 @@ void partitionAllocInit(PartitionRoot* root, size_t numBuckets, size_t maxAlloca
 
 void partitionAllocGenericInit(PartitionRootGeneric* root)
 {
-    spinLockLock(&root->lock);
+    SpinLock::Guard guard(root->lock);
 
     partitionAllocBaseInit(root);
 
@@ -243,8 +242,6 @@ void partitionAllocGenericInit(PartitionRootGeneric* root)
     // And there's one last bucket lookup that will be hit for e.g. malloc(-1),
     // which tries to overflow to a non-existant order.
     *bucketPtr = &PartitionRootGeneric::gPagedBucket;
-
-    spinLockUnlock(&root->lock);
 }
 
 static bool partitionAllocShutdownBucket(PartitionBucket* bucket)
@@ -293,6 +290,7 @@ bool partitionAllocShutdown(PartitionRoot* root)
 
 bool partitionAllocGenericShutdown(PartitionRootGeneric* root)
 {
+    SpinLock::Guard guard(root->lock);
     bool foundLeak = false;
     size_t i;
     for (i = 0; i < kGenericNumBuckets; ++i) {
@@ -1041,13 +1039,13 @@ bool partitionReallocDirectMappedInPlace(PartitionRootGeneric* root, PartitionPa
     return true;
 }
 
-void* partitionReallocGeneric(PartitionRootGeneric* root, void* ptr, size_t newSize)
+void* partitionReallocGeneric(PartitionRootGeneric* root, void* ptr, size_t newSize, const char* typeName)
 {
 #if defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
     return realloc(ptr, newSize);
 #else
     if (UNLIKELY(!ptr))
-        return partitionAllocGeneric(root, newSize);
+        return partitionAllocGeneric(root, newSize, typeName);
     if (UNLIKELY(!newSize)) {
         partitionFreeGeneric(root, ptr);
         return 0;
@@ -1065,7 +1063,7 @@ void* partitionReallocGeneric(PartitionRootGeneric* root, void* ptr, size_t newS
         // accessibility of memory pages and, if reducing the size, decommitting
         // them.
         if (partitionReallocDirectMappedInPlace(root, page, newSize)) {
-            PartitionAllocHooks::reallocHookIfEnabled(ptr, ptr, newSize);
+            PartitionAllocHooks::reallocHookIfEnabled(ptr, ptr, newSize, typeName);
             return ptr;
         }
     }
@@ -1084,7 +1082,7 @@ void* partitionReallocGeneric(PartitionRootGeneric* root, void* ptr, size_t newS
     }
 
     // This realloc cannot be resized in-place. Sadness.
-    void* ret = partitionAllocGeneric(root, newSize);
+    void* ret = partitionAllocGeneric(root, newSize, typeName);
     size_t copySize = actualOldSize;
     if (newSize < copySize)
         copySize = newSize;
@@ -1171,7 +1169,7 @@ static size_t partitionPurgePage(PartitionPage* page, bool discard)
     if (unprovisionedBytes && discard) {
         ASSERT(truncatedSlots > 0);
         size_t numNewEntries = 0;
-        page->numUnprovisionedSlots += truncatedSlots;
+        page->numUnprovisionedSlots += static_cast<uint16_t>(truncatedSlots);
         // Rewrite the freelist.
         PartitionFreelistEntry** entryPtr = &page->freelistHead;
         for (size_t slotIndex = 0; slotIndex < numSlots; ++slotIndex) {
@@ -1239,7 +1237,7 @@ void partitionPurgeMemory(PartitionRoot* root, int flags)
 
 void partitionPurgeMemoryGeneric(PartitionRootGeneric* root, int flags)
 {
-    spinLockLock(&root->lock);
+    SpinLock::Guard guard(root->lock);
     if (flags & PartitionPurgeDecommitEmptyPages)
         partitionDecommitEmptyPages(root);
     if (flags & PartitionPurgeDiscardUnusedSystemPages) {
@@ -1249,7 +1247,6 @@ void partitionPurgeMemoryGeneric(PartitionRootGeneric* root, int flags)
                 partitionPurgeBucket(bucket);
         }
     }
-    spinLockUnlock(&root->lock);
 }
 
 static void partitionDumpPageStats(PartitionBucketMemoryStats* statsOut, const PartitionPage* page)
@@ -1327,28 +1324,28 @@ void partitionDumpStatsGeneric(PartitionRootGeneric* partition, const char* part
     uint32_t directMapLengths[kMaxReportableDirectMaps];
     size_t numDirectMappedAllocations = 0;
 
-    spinLockLock(&partition->lock);
+    {
+        SpinLock::Guard guard(partition->lock);
 
-    for (size_t i = 0; i < kGenericNumBuckets; ++i) {
-        const PartitionBucket* bucket = &partition->buckets[i];
-        // Don't report the pseudo buckets that the generic allocator sets up in
-        // order to preserve a fast size->bucket map (see
-        // partitionAllocGenericInit for details).
-        if (!bucket->activePagesHead)
-            bucketStats[i].isValid = false;
-        else
-            partitionDumpBucketStats(&bucketStats[i], bucket);
+        for (size_t i = 0; i < kGenericNumBuckets; ++i) {
+            const PartitionBucket* bucket = &partition->buckets[i];
+            // Don't report the pseudo buckets that the generic allocator sets up in
+            // order to preserve a fast size->bucket map (see
+            // partitionAllocGenericInit for details).
+            if (!bucket->activePagesHead)
+                bucketStats[i].isValid = false;
+            else
+                partitionDumpBucketStats(&bucketStats[i], bucket);
+        }
+
+        for (PartitionDirectMapExtent* extent = partition->directMapList; extent; extent = extent->nextExtent) {
+            ASSERT(!extent->nextExtent || extent->nextExtent->prevExtent == extent);
+            directMapLengths[numDirectMappedAllocations] = extent->bucket->slotSize;
+            ++numDirectMappedAllocations;
+            if (numDirectMappedAllocations == kMaxReportableDirectMaps)
+                break;
+        }
     }
-
-    for (PartitionDirectMapExtent* extent = partition->directMapList; extent; extent = extent->nextExtent) {
-        ASSERT(!extent->nextExtent || extent->nextExtent->prevExtent == extent);
-        directMapLengths[numDirectMappedAllocations] = extent->bucket->slotSize;
-        ++numDirectMappedAllocations;
-        if (numDirectMappedAllocations == kMaxReportableDirectMaps)
-            break;
-    }
-
-    spinLockUnlock(&partition->lock);
 
     // partitionsDumpBucketStats is called after collecting stats because it
     // can try to allocate using PartitionAllocGeneric and it can't obtain the

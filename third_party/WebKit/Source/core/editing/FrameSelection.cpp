@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/editing/FrameSelection.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -338,7 +337,7 @@ void FrameSelection::setSelectionAlgorithm(const VisibleSelectionTemplate<Strate
     // Always clear the x position used for vertical arrow navigation.
     // It will be restored by the vertical arrow navigation code if necessary.
     m_selectionEditor->resetXPosForVerticalArrowNavigation();
-    RefPtrWillBeRawPtr<LocalFrame> protector(m_frame);
+    RefPtrWillBeRawPtr<LocalFrame> protector(m_frame.get());
     // This may dispatch a synchronous focus-related events.
     selectFrameElementInParentIfFullySelected();
     notifyLayoutObjectOfSelectionChange(userTriggered);
@@ -710,7 +709,7 @@ void FrameSelection::invalidateCaretRect()
     m_previousCaretVisibility = caretVisibility();
 }
 
-void FrameSelection::paintCaret(GraphicsContext* context, const LayoutPoint& paintOffset)
+void FrameSelection::paintCaret(GraphicsContext& context, const LayoutPoint& paintOffset)
 {
     if (selection().isCaret() && m_shouldPaintCaret) {
         updateCaretRect(PositionWithAffinity(selection().start(), selection().affinity()));
@@ -856,7 +855,7 @@ void FrameSelection::selectAll()
 
 bool FrameSelection::setSelectedRange(Range* range, TextAffinity affinity, SelectionDirectionalMode directional, SetSelectionOptions options)
 {
-    if (!range || !range->startContainer() || !range->endContainer())
+    if (!range || !range->inDocument())
         return false;
     ASSERT(range->startContainer()->document() == range->endContainer()->document());
     return setSelectedRange(EphemeralRange(range), affinity, directional, options);

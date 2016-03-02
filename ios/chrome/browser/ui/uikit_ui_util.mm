@@ -7,12 +7,15 @@
 #import <Accelerate/Accelerate.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
+#include <stddef.h>
+#include <stdint.h>
 #import <UIKit/UIKit.h>
 #include <cmath>
 
 #include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -149,14 +152,25 @@ void AddRoundedBorderShadow(UIView* view, CGFloat radius, UIColor* color) {
   CGPathRelease(path);
 }
 
-UIImage* CaptureView(UIView* view, CGFloat scale) {
+UIImage* CaptureViewWithOption(UIView* view,
+                               CGFloat scale,
+                               CaptureViewOption option) {
   UIGraphicsBeginImageContextWithOptions(view.bounds.size, YES /* opaque */,
                                          scale);
-  CGContext* context = UIGraphicsGetCurrentContext();
-  [view.layer renderInContext:context];
+  if (base::ios::IsRunningOnIOS9OrLater() && option != kClientSideRendering) {
+    [view drawViewHierarchyInRect:view.bounds
+               afterScreenUpdates:option == kAfterScreenUpdate];
+  } else {
+    CGContext* context = UIGraphicsGetCurrentContext();
+    [view.layer renderInContext:context];
+  }
   UIImage* image = UIGraphicsGetImageFromCurrentImageContext();
   UIGraphicsEndImageContext();
   return image;
+}
+
+UIImage* CaptureView(UIView* view, CGFloat scale) {
+  return CaptureViewWithOption(view, scale, kNoCaptureOption);
 }
 
 UIImage* GreyImage(UIImage* image) {
@@ -179,9 +193,32 @@ UIColor* GetSettingsBackgroundColor() {
   return [UIColor colorWithWhite:rgb alpha:1];
 }
 
+BOOL ImageHasAlphaChannel(UIImage* image) {
+  CGImageAlphaInfo info = CGImageGetAlphaInfo(image.CGImage);
+  switch (info) {
+    case kCGImageAlphaNone:
+    case kCGImageAlphaNoneSkipLast:
+    case kCGImageAlphaNoneSkipFirst:
+      return NO;
+    case kCGImageAlphaPremultipliedLast:
+    case kCGImageAlphaPremultipliedFirst:
+    case kCGImageAlphaLast:
+    case kCGImageAlphaFirst:
+    case kCGImageAlphaOnly:
+      return YES;
+  }
+}
+
 UIImage* ResizeImage(UIImage* image,
                      CGSize targetSize,
                      ProjectionMode projectionMode) {
+  return ResizeImage(image, targetSize, projectionMode, NO);
+}
+
+UIImage* ResizeImage(UIImage* image,
+                     CGSize targetSize,
+                     ProjectionMode projectionMode,
+                     BOOL opaque) {
   CGSize revisedTargetSize;
   CGRect projectTo;
 
@@ -193,7 +230,8 @@ UIImage* ResizeImage(UIImage* image,
 
   // Resize photo. Use UIImage drawing methods because they respect
   // UIImageOrientation as opposed to CGContextDrawImage().
-  UIGraphicsBeginImageContextWithOptions(revisedTargetSize, NO, image.scale);
+  UIGraphicsBeginImageContextWithOptions(revisedTargetSize, opaque,
+                                         image.scale);
   [image drawInRect:projectTo];
   UIImage* resizedPhoto = UIGraphicsGetImageFromCurrentImageContext();
   UIGraphicsEndImageContext();

@@ -10,6 +10,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_background_view.h"
@@ -289,7 +290,6 @@ class FrameAndStyleLock {
     // As soon as the style mask includes the flag NSFullScreenWindowMask, the
     // window is expected to receive fullscreen layout. This must be set before
     // the window is resized, as that causes a relayout.
-
     CALayer* root = [self rootLayerOfWindow:primaryWindow_];
     root.opacity = 0;
 
@@ -485,7 +485,10 @@ class FrameAndStyleLock {
       [fullscreenTabStripBackgroundView_ removeFromSuperview];
     }
 
-    // Checks if the contentView size is correct.
+    // Check if the contentView size is correct.
+    // TODO (spqchan): Currently, a popup window will fail this check since
+    // AppKit will shift the contentView up right after the window is resized.
+    // This will create a small janky movement at the end of the animation.
     NSSize expectedSize = finalFrame_.size;
     NSView* content = [primaryWindow_ contentView];
     DCHECK_EQ(NSHeight(content.frame), expectedSize.height);

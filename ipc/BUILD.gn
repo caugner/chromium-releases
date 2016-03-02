@@ -67,7 +67,6 @@ component("ipc") {
     "ipc_message_start.h",
     "ipc_message_utils.cc",
     "ipc_message_utils.h",
-    "ipc_param_traits.h",
     "ipc_platform_file.cc",
     "ipc_platform_file.h",
     "ipc_platform_file_attachment_posix.cc",
@@ -120,6 +119,9 @@ component("ipc") {
 
   defines = [ "IPC_IMPLEMENTATION" ]
 
+  public_deps = [
+    ":param_traits",
+  ]
   deps = [
     "//base",
 
@@ -134,6 +136,14 @@ component("ipc") {
   }
 }
 
+# This is provided as a separate target so other targets can provide param
+# traits implementations without necessarily linking to all of IPC.
+source_set("param_traits") {
+  public = [
+    "ipc_param_traits.h",
+  ]
+}
+
 group("ipc_tests_run") {
   testonly = true
   deps = [
@@ -146,7 +156,6 @@ test("ipc_tests") {
     "attachment_broker_mac_unittest.cc",
     "attachment_broker_privileged_mac_unittest.cc",
     "attachment_broker_privileged_win_unittest.cc",
-    "attachment_broker_unprivileged_win_unittest.cc",
     "ipc_channel_posix_unittest.cc",
     "ipc_channel_proxy_unittest.cc",
     "ipc_channel_reader_unittest.cc",
@@ -239,8 +248,10 @@ source_set("test_support") {
     "test_util_mac.cc",
     "test_util_mac.h",
   ]
-  deps = [
+  public_deps = [
     ":ipc",
+  ]
+  deps = [
     "//base",
     "//base/test:test_support",
     "//testing/gtest",

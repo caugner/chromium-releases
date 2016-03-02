@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
@@ -176,7 +177,7 @@ class BlockingLoginTest
       }
     }
 
-    return response.Pass();
+    return response;
   }
 
   // Creates a new canned response that will respond with the given HTTP
@@ -243,8 +244,6 @@ IN_PROC_BROWSER_TEST_P(BlockingLoginTest, LoginBlocksForUser) {
     EXPECT_TRUE(browser_policy_connector()->IsEnterpriseManaged());
     EXPECT_EQ(kDomain, browser_policy_connector()->GetEnterpriseDomain());
     EXPECT_FALSE(profile_added_);
-    EXPECT_EQ(policy::USER_AFFILIATION_MANAGED,
-              browser_policy_connector()->GetUserAffiliation(kUsername));
     RunUntilIdle();
     EXPECT_FALSE(
         user_manager->IsKnownUser(AccountId::FromUserEmail(kUsername)));

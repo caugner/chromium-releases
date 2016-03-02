@@ -2,16 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/page/PrintContext.h"
 
 #include "core/dom/Document.h"
-#include "core/frame/FrameHost.h"
+
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLElement.h"
-#include "core/html/HTMLIFrameElement.h"
+#include "core/layout/LayoutTestHelper.h"
 #include "core/layout/LayoutView.h"
-#include "core/loader/EmptyClients.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/PaintLayerPainter.h"
 #include "core/testing/DummyPageHolder.h"
@@ -21,7 +19,7 @@
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/testing/SkiaForCoreTesting.h"
 #include "platform/text/TextStream.h"
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
@@ -77,13 +75,12 @@ private:
     Vector<Operation> m_recordedOperations;
 };
 
-class PrintContextTest : public testing::Test {
+class PrintContextTest : public RenderingTest {
 protected:
     explicit PrintContextTest(PassOwnPtrWillBeRawPtr<FrameLoaderClient> frameLoaderClient = nullptr)
-        : m_pageHolder(DummyPageHolder::create(IntSize(kPageWidth, kPageHeight), nullptr, frameLoaderClient))
+        : RenderingTest(frameLoaderClient)
         , m_printContext(adoptPtrWillBeNoop(new MockPrintContext(document().frame()))) { }
 
-    Document& document() const { return m_pageHolder->document(); }
     MockPrintContext& printContext() { return *m_printContext.get(); }
 
     void setBodyInnerHTML(String bodyContent)
@@ -100,7 +97,7 @@ protected:
         SkPictureBuilder pictureBuilder(pageRect);
         GraphicsContext& context = pictureBuilder.context();
         context.setPrinting(true);
-        document().view()->paintContents(&context, GlobalPaintPrinting, pageRect);
+        document().view()->paintContents(context, GlobalPaintPrinting, pageRect);
         {
             DrawingRecorder recorder(context, *document().layoutView(), DisplayItem::PrintedContentDestinationLocations, pageRect);
             printContext().outputLinkedDestinations(context, pageRect);
@@ -136,48 +133,6 @@ protected:
 private:
     OwnPtr<DummyPageHolder> m_pageHolder;
     OwnPtrWillBePersistent<MockPrintContext> m_printContext;
-};
-
-class SingleChildFrameLoaderClient final : public EmptyFrameLoaderClient {
-public:
-    static PassOwnPtrWillBeRawPtr<SingleChildFrameLoaderClient> create() { return adoptPtrWillBeNoop(new SingleChildFrameLoaderClient); }
-
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_child);
-        EmptyFrameLoaderClient::trace(visitor);
-    }
-
-    Frame* firstChild() const override { return m_child.get(); }
-    Frame* lastChild() const override { return m_child.get(); }
-
-    void setChild(Frame* child) { m_child = child; }
-
-private:
-    SingleChildFrameLoaderClient() : m_child(nullptr) { }
-
-    RefPtrWillBeMember<Frame> m_child;
-};
-
-class FrameLoaderClientWithParent final : public EmptyFrameLoaderClient {
-public:
-    static PassOwnPtrWillBeRawPtr<FrameLoaderClientWithParent> create(Frame* parent)
-    {
-        return adoptPtrWillBeNoop(new FrameLoaderClientWithParent(parent));
-    }
-
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_parent);
-        EmptyFrameLoaderClient::trace(visitor);
-    }
-
-    Frame* parent() const override { return m_parent.get(); }
-
-private:
-    explicit FrameLoaderClientWithParent(Frame* parent) : m_parent(parent) { }
-
-    RefPtrWillBeMember<Frame> m_parent;
 };
 
 class PrintContextFrameTest : public PrintContextTest {
@@ -317,20 +272,9 @@ TEST_F(PrintContextFrameTest, WithSubframe)
         "<iframe id='frame' src='http://b.com/' width='500' height='500'"
         " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; left: 90px'></iframe>");
 
-    HTMLIFrameElement& iframe = *toHTMLIFrameElement(document().getElementById("frame"));
-    OwnPtrWillBeRawPtr<FrameLoaderClient> frameLoaderClient = FrameLoaderClientWithParent::create(document().frame());
-    RefPtrWillBePersistent<LocalFrame> subframe = LocalFrame::create(frameLoaderClient.get(), document().frame()->host(), &iframe);
-    subframe->setView(FrameView::create(subframe.get(), IntSize(500, 500)));
-    subframe->init();
-    static_cast<SingleChildFrameLoaderClient*>(document().frame()->client())->setChild(subframe.get());
-    document().frame()->host()->incrementSubframeCount();
-
-    Document& frameDocument = *iframe.contentDocument();
-    frameDocument.setBaseURLOverride(KURL(ParsedURLString, "http://b.com/"));
-    frameDocument.body()->setInnerHTML(absoluteBlockHtmlForLink(50, 60, 70, 80, "#fragment")
+    setupChildIframe("frame", absoluteBlockHtmlForLink(50, 60, 70, 80, "#fragment")
         + absoluteBlockHtmlForLink(150, 160, 170, 180, "http://www.google.com")
-        + absoluteBlockHtmlForLink(250, 260, 270, 280, "http://www.google.com#fragment"),
-        ASSERT_NO_EXCEPTION);
+        + absoluteBlockHtmlForLink(250, 260, 270, 280, "http://www.google.com#fragment"));
 
     printSinglePage(canvas);
 
@@ -340,10 +284,6 @@ TEST_F(PrintContextFrameTest, WithSubframe)
     EXPECT_SKRECT_EQ(250, 260, 170, 180, operations[0].rect);
     EXPECT_EQ(MockCanvas::DrawRect, operations[1].type);
     EXPECT_SKRECT_EQ(350, 360, 270, 280, operations[1].rect);
-
-    subframe->detach(FrameDetachType::Remove);
-    static_cast<SingleChildFrameLoaderClient*>(document().frame()->client())->setChild(nullptr);
-    document().frame()->host()->decrementSubframeCount();
 }
 
 TEST_F(PrintContextFrameTest, WithScrolledSubframe)
@@ -354,24 +294,13 @@ TEST_F(PrintContextFrameTest, WithScrolledSubframe)
         "<iframe id='frame' src='http://b.com/' width='500' height='500'"
         " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; left: 90px'></iframe>");
 
-    HTMLIFrameElement& iframe = *toHTMLIFrameElement(document().getElementById("frame"));
-    OwnPtrWillBeRawPtr<FrameLoaderClient> frameLoaderClient = FrameLoaderClientWithParent::create(document().frame());
-    RefPtrWillBePersistent<LocalFrame> subframe = LocalFrame::create(frameLoaderClient.get(), document().frame()->host(), &iframe);
-    subframe->setView(FrameView::create(subframe.get(), IntSize(500, 500)));
-    subframe->init();
-    static_cast<SingleChildFrameLoaderClient*>(document().frame()->client())->setChild(subframe.get());
-    document().frame()->host()->incrementSubframeCount();
-
-    Document& frameDocument = *iframe.contentDocument();
-    frameDocument.setBaseURLOverride(KURL(ParsedURLString, "http://b.com/"));
-    frameDocument.body()->setInnerHTML(
-        absoluteBlockHtmlForLink(10, 10, 20, 20, "http://invisible.com")
+    Document& frameDocument = setupChildIframe("frame", absoluteBlockHtmlForLink(10, 10, 20, 20, "http://invisible.com")
         + absoluteBlockHtmlForLink(50, 60, 70, 80, "http://partly.visible.com")
         + absoluteBlockHtmlForLink(150, 160, 170, 180, "http://www.google.com")
         + absoluteBlockHtmlForLink(250, 260, 270, 280, "http://www.google.com#fragment")
-        + absoluteBlockHtmlForLink(850, 860, 70, 80, "http://another.invisible.com"),
-        ASSERT_NO_EXCEPTION);
-    iframe.contentWindow()->scrollTo(100, 100);
+        + absoluteBlockHtmlForLink(850, 860, 70, 80, "http://another.invisible.com"));
+
+    frameDocument.domWindow()->scrollTo(100, 100);
 
     printSinglePage(canvas);
 
@@ -383,10 +312,6 @@ TEST_F(PrintContextFrameTest, WithScrolledSubframe)
     EXPECT_SKRECT_EQ(150, 160, 170, 180, operations[1].rect);
     EXPECT_EQ(MockCanvas::DrawRect, operations[2].type);
     EXPECT_SKRECT_EQ(250, 260, 270, 280, operations[2].rect);
-
-    subframe->detach(FrameDetachType::Remove);
-    static_cast<SingleChildFrameLoaderClient*>(document().frame()->client())->setChild(nullptr);
-    document().frame()->host()->decrementSubframeCount();
 }
 
 } // namespace blink

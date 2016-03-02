@@ -5,10 +5,11 @@
 #include "components/html_viewer/blink_platform_impl.h"
 
 #include <cmath>
+#include <utility>
 
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
@@ -26,9 +27,9 @@
 #include "components/scheduler/child/webthread_impl_for_worker_scheduler.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "components/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/application/public/cpp/connect.h"
 #include "mojo/common/user_agent.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/connect.h"
 #include "net/base/data_url.h"
 #include "net/base/ip_address_number.h"
 #include "net/base/net_errors.h"
@@ -51,11 +52,11 @@ class WebWaitableEventImpl : public blink::WebWaitableEvent {
     bool initially_signaled = state == InitialState::Signaled;
     impl_.reset(new base::WaitableEvent(manual_reset, initially_signaled));
   }
-  virtual ~WebWaitableEventImpl() {}
+  ~WebWaitableEventImpl() override {}
 
-  virtual void reset() { impl_->Reset(); }
-  virtual void wait() { impl_->Wait(); }
-  virtual void signal() { impl_->Signal(); }
+  void reset() override { impl_->Reset(); }
+  void wait() override { impl_->Wait(); }
+  void signal() override { impl_->Signal(); }
 
   base::WaitableEvent* impl() {
     return impl_.get();
@@ -77,22 +78,18 @@ BlinkPlatformImpl::BlinkPlatformImpl(
       main_thread_task_runner_(renderer_scheduler->DefaultTaskRunner()),
       main_thread_(renderer_scheduler->CreateMainThread()) {
   if (app) {
-    mojo::URLRequestPtr request(mojo::URLRequest::New());
-    request->url = mojo::String::From("mojo:network_service");
     scoped_ptr<mojo::ApplicationConnection> connection =
-        app->ConnectToApplication(request.Pass());
+        app->ConnectToApplication("mojo:network_service");
     connection->ConnectToService(&web_socket_factory_);
     connection->ConnectToService(&url_loader_factory_);
 
     mojo::CookieStorePtr cookie_store;
     connection->ConnectToService(&cookie_store);
-    cookie_jar_.reset(new WebCookieJarImpl(cookie_store.Pass()));
+    cookie_jar_.reset(new WebCookieJarImpl(std::move(cookie_store)));
 
     mojo::ClipboardPtr clipboard;
-    mojo::URLRequestPtr request2(mojo::URLRequest::New());
-    request2->url = mojo::String::From("mojo:clipboard");
-    app->ConnectToService(request2.Pass(), &clipboard);
-    clipboard_.reset(new WebClipboardImpl(clipboard.Pass()));
+    app->ConnectToService("mojo:clipboard", &clipboard);
+    clipboard_.reset(new WebClipboardImpl(std::move(clipboard)));
   }
 }
 
@@ -130,11 +127,6 @@ double BlinkPlatformImpl::currentTimeSeconds() {
 double BlinkPlatformImpl::monotonicallyIncreasingTimeSeconds() {
   return base::TimeTicks::Now().ToInternalValue() /
       static_cast<double>(base::Time::kMicrosecondsPerSecond);
-}
-
-void BlinkPlatformImpl::cryptographicallyRandomValues(unsigned char* buffer,
-                                                      size_t length) {
-  base::RandBytes(buffer, length);
 }
 
 bool BlinkPlatformImpl::isThreadedCompositingEnabled() {
@@ -263,6 +255,7 @@ bool BlinkPlatformImpl::isReservedIPAddress(
 blink::WebThread* BlinkPlatformImpl::createThread(const char* name) {
   scheduler::WebThreadImplForWorkerScheduler* thread =
       new scheduler::WebThreadImplForWorkerScheduler(name);
+  thread->Init();
   thread->TaskRunner()->PostTask(
       FROM_HERE, base::Bind(&BlinkPlatformImpl::UpdateWebThreadTLS,
                             base::Unretained(this), thread));
@@ -290,8 +283,7 @@ blink::WebWaitableEvent* BlinkPlatformImpl::waitMultipleEvents(
   std::vector<base::WaitableEvent*> events;
   for (size_t i = 0; i < web_events.size(); ++i)
     events.push_back(static_cast<WebWaitableEventImpl*>(web_events[i])->impl());
-  size_t idx = base::WaitableEvent::WaitMany(
-      vector_as_array(&events), events.size());
+  size_t idx = base::WaitableEvent::WaitMany(events.data(), events.size());
   DCHECK_LT(idx, web_events.size());
   return web_events[idx];
 }

@@ -18,7 +18,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/page/FrameTree.h"
 
 #include "core/dom/Document.h"
@@ -50,15 +49,6 @@ FrameTree::FrameTree(Frame* thisFrame)
 
 FrameTree::~FrameTree()
 {
-#if !ENABLE(OILPAN)
-    // FIXME: Why is this here? Doesn't this parallel what we already do in ~LocalFrame?
-    for (Frame* child = firstChild(); child; child = child->tree().nextSibling()) {
-        if (child->isLocalFrame())
-            toLocalFrame(child)->setView(nullptr);
-        else if (child->isRemoteFrame())
-            toRemoteFrame(child)->setView(nullptr);
-    }
-#endif
 }
 
 void FrameTree::setName(const AtomicString& name, const AtomicString& fallbackName)
@@ -70,6 +60,12 @@ void FrameTree::setName(const AtomicString& name, const AtomicString& fallbackNa
     }
     m_uniqueName = AtomicString(); // Remove our old frame name so it's not considered in uniqueChildName.
     m_uniqueName = parent()->tree().uniqueChildName(name.isEmpty() ? fallbackName : name);
+}
+
+void FrameTree::setNameForReplacementFrame(const AtomicString& name, const AtomicString& uniqueName)
+{
+    m_name = name;
+    m_uniqueName = uniqueName;
 }
 
 Frame* FrameTree::parent() const
@@ -266,13 +262,12 @@ Frame* FrameTree::find(const AtomicString& name) const
 
     // Search the entire tree of each of the other pages in this namespace.
     // FIXME: Is random order OK?
-    const WillBePersistentHeapHashSet<RawPtrWillBeWeakMember<Page>>& pages = Page::ordinaryPages();
-    for (const Page* otherPage : pages) {
-        if (otherPage != page) {
-            for (Frame* frame = otherPage->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-                if (frame->tree().name() == name)
-                    return frame;
-            }
+    for (const Page* otherPage : Page::ordinaryPages()) {
+        if (otherPage == page)
+            continue;
+        for (Frame* frame = otherPage->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+            if (frame->tree().name() == name)
+                return frame;
         }
     }
 

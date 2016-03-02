@@ -61,7 +61,7 @@ private:
     explicit HTMLTrackElement(Document&);
     ~HTMLTrackElement() override;
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
 
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
 
@@ -72,7 +72,6 @@ private:
     void newCuesAvailable(TextTrackLoader*) override;
     void cueLoadingCompleted(TextTrackLoader*, bool loadingFailed) override;
     void newRegionsAvailable(TextTrackLoader*) override;
-    String debugName() const override { return "HTMLTrackElement"; }
 
     void setReadyState(ReadyState);
 

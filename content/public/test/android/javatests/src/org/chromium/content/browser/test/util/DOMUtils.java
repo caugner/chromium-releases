@@ -68,11 +68,10 @@ public class DOMUtils {
      * Waits until the playback of the media with given {@code id} has started.
      * @param webContents The WebContents in which the media element lives.
      * @param id The element's id to check.
-     * @return Whether the playback has started.
      */
-    public static boolean waitForMediaPlay(final WebContents webContents, final String id)
+    public static void waitForMediaPlay(final WebContents webContents, final String id)
             throws InterruptedException {
-        return CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {
@@ -92,11 +91,10 @@ public class DOMUtils {
      * Waits until the playback of the media with given {@code id} has stopped.
      * @param webContents The WebContents in which the media element lives.
      * @param id The element's id to check.
-     * @return Whether the playback has paused.
      */
-    public static boolean waitForMediaPause(final WebContents webContents, final String id)
+    public static void waitForMediaPause(final WebContents webContents, final String id)
             throws InterruptedException {
-        return CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {
@@ -237,6 +235,8 @@ public class DOMUtils {
 
     /**
      * Long-press a DOM node by its id.
+     * <p>Note that content view should be located in the current position for a foreseeable
+     * amount of time because this involves sleep to simulate touch to long press transition.
      * @param activityTestCase The ActivityInstrumentationTestCase2 to instrument.
      * @param viewCore The ContentViewCore in which the node lives.
      * @param nodeId The id of the node.
@@ -308,12 +308,11 @@ public class DOMUtils {
      * Wait until a given node has non-zero bounds.
      * @param webContents The WebContents in which the node lives.
      * @param nodeId The id of the node.
-     * @return Whether the node started having non-zero bounds.
      */
-    public static boolean waitForNonZeroNodeBounds(final WebContents webContents,
+    public static void waitForNonZeroNodeBounds(final WebContents webContents,
             final String nodeId)
             throws InterruptedException {
-        return CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {

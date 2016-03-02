@@ -22,10 +22,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/AudioScheduledSourceNode.h"
-
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/CrossThreadTask.h"
 #include "core/dom/ExceptionCode.h"
@@ -268,4 +265,3 @@ void AudioScheduledSourceNode::setOnended(PassRefPtrWillBeRawPtr<EventListener> 
 
 } // namespace blink
 
-#endif // ENABLE(WEB_AUDIO)

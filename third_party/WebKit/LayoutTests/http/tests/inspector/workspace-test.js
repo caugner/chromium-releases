@@ -41,11 +41,13 @@ InspectorTest.createMockTarget = function(id, debuggerModelConstructor)
     {
         WebInspector.Target.call(this, InspectorTest.testTargetManager, name, WebInspector.Target.Type.Page, connection, null, callback);
         this.debuggerModel = debuggerModelConstructor ? new debuggerModelConstructor(this) : new WebInspector.DebuggerModel(this);
+        this._modelByConstructor.set(WebInspector.DebuggerModel, this.debuggerModel);
         this.networkManager = new WebInspector.NetworkManager(this);
         this.consoleModel = new WebInspector.ConsoleModel(this);
         this.resourceTreeModel = new WebInspector.ResourceTreeModel(this);
         this.resourceTreeModel._inspectedPageURL = InspectorTest.resourceTreeModel._inspectedPageURL;
         this.resourceTreeModel._cachedResourcesProcessed = true;
+        this.resourceTreeModel._frameAttached("42", 0);
         this.domModel = new WebInspector.DOMModel(this);
         this.cssModel = new WebInspector.CSSStyleModel(this);
         this.runtimeModel = new WebInspector.RuntimeModel(this);
@@ -60,7 +62,7 @@ InspectorTest.createMockTarget = function(id, debuggerModelConstructor)
         __proto__: WebInspector.Target.prototype
     }
 
-    var target = new MockTarget("mock-target-" + id, new InspectorBackendClass.StubConnection());
+    var target = new MockTarget("mock-target-" + id, new WebInspector.StubConnection());
     InspectorTest.testTargetManager.addTarget(target);
     return target;
 }
@@ -116,10 +118,10 @@ InspectorTest.addMockUISourceCodeToWorkspace = function(url, type, content)
     InspectorTest.testNetworkProject.addFileForURL(url, mockContentProvider);
 }
 
-InspectorTest.addMockUISourceCodeViaNetwork = function(url, type, content)
+InspectorTest.addMockUISourceCodeViaNetwork = function(url, type, content, target)
 {
     var mockContentProvider = new WebInspector.StaticContentProvider(type, content);
-    InspectorTest.testNetworkProject._addFile(url, mockContentProvider);
+    InspectorTest.testNetworkProject._createFile(url, mockContentProvider, target.resourceTreeModel.mainFrame, false, true);
 }
 
 InspectorTest._defaultWorkspaceEventHandler = function(event)
@@ -130,12 +132,12 @@ InspectorTest._defaultWorkspaceEventHandler = function(event)
         return;
     if (uiSourceCode.project().type() === WebInspector.projectTypes.Service)
         return;
-    InspectorTest.addResult("Workspace event: " + event.type + ": " + uiSourceCode.uri() + ".");
+    InspectorTest.addResult("Workspace event: " + event.type + ": " + uiSourceCode.url() + ".");
 }
 
 InspectorTest.uiSourceCodeURL = function(uiSourceCode)
 {
-    return uiSourceCode.originURL().replace(/.*LayoutTests/, "LayoutTests");
+    return uiSourceCode.url().replace(/.*LayoutTests/, "LayoutTests");
 }
 
 InspectorTest.dumpUISourceCode = function(uiSourceCode, callback)
@@ -147,7 +149,7 @@ InspectorTest.dumpUISourceCode = function(uiSourceCode, callback)
 
     function didRequestContent(content, contentEncoded)
     {
-        InspectorTest.addResult("Highlighter type: " + WebInspector.SourcesView.uiSourceCodeHighlighterType(uiSourceCode));
+        InspectorTest.addResult("Highlighter type: " + WebInspector.NetworkProject.uiSourceCodeMimeType(uiSourceCode));
         InspectorTest.addResult("UISourceCode content: " + content);
         callback();
     }

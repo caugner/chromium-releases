@@ -29,7 +29,6 @@
  *
  */
 
-#include "config.h"
 #include "core/events/EventTarget.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -53,6 +52,7 @@ namespace {
 void setDefaultEventListenerOptionsLegacy(EventListenerOptions& options, bool useCapture)
 {
     options.setCapture(useCapture);
+    options.setPassive(false);
 }
 
 void setDefaultEventListenerOptions(EventListenerOptions& options)
@@ -64,6 +64,8 @@ void setDefaultEventListenerOptions(EventListenerOptions& options)
     // capture is true; with the setting on capture is false.
     if (!options.hasCapture())
         options.setCapture(!RuntimeEnabledFeatures::eventListenerOptionsEnabled());
+    if (!options.hasPassive())
+        options.setPassive(false);
 }
 
 } // namespace
@@ -90,6 +92,11 @@ EventTarget::~EventTarget()
 }
 
 Node* EventTarget::toNode()
+{
+    return nullptr;
+}
+
+const LocalDOMWindow* EventTarget::toDOMWindow() const
 {
     return nullptr;
 }
@@ -244,10 +251,6 @@ bool EventTarget::clearAttributeEventListener(const AtomicString& eventType)
 
 bool EventTarget::dispatchEventForBindings(PassRefPtrWillBeRawPtr<Event> event, ExceptionState& exceptionState)
 {
-    if (!event) {
-        exceptionState.throwDOMException(InvalidStateError, "The event provided is null.");
-        return false;
-    }
     if (event->type().isEmpty()) {
         exceptionState.throwDOMException(InvalidStateError, "The event provided is uninitialized.");
         return false;
@@ -428,11 +431,15 @@ void EventTarget::fireEventListeners(Event* event, EventTargetData* d, EventList
         if (!context)
             break;
 
+        event->setHandlingPassive(registeredListener.passive);
+
         InspectorInstrumentationCookie cookie = InspectorInstrumentation::willHandleEvent(this, event, registeredListener.listener.get(), registeredListener.useCapture);
 
         // To match Mozilla, the AT_TARGET phase fires both capturing and bubbling
         // event listeners, even though that violates some versions of the DOM spec.
         registeredListener.listener->handleEvent(context, event);
+        event->setHandlingPassive(false);
+
         RELEASE_ASSERT(i <= size);
 
         InspectorInstrumentation::didHandleEvent(cookie);

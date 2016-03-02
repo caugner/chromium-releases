@@ -22,7 +22,6 @@
  *
  */
 
-#include "config.h"
 #include "core/layout/LayoutListMarker.h"
 
 #include "core/fetch/ImageResource.h"
@@ -41,9 +40,8 @@ LayoutListMarker::LayoutListMarker(LayoutListItem* item)
     : LayoutBox(nullptr)
     , m_listItem(item)
 {
-    // init LayoutObject attributes
-    setInline(true); // our object is Inline
-    setReplaced(true); // pretend to be replaced
+    setInline(true);
+    setIsAtomicInlineLevel(true);
 }
 
 LayoutListMarker::~LayoutListMarker()
@@ -65,15 +63,15 @@ LayoutListMarker* LayoutListMarker::createAnonymous(LayoutListItem* item)
     return layoutObject;
 }
 
-IntSize LayoutListMarker::imageBulletSize() const
+LayoutSize LayoutListMarker::imageBulletSize() const
 {
     ASSERT(isImage());
 
     // FIXME: This is a somewhat arbitrary default width. Generated images for markers really won't
     // become particularly useful until we support the CSS3 marker pseudoclass to allow control over
     // the width and height of the marker box.
-    int bulletWidth = style()->fontMetrics().ascent() / 2;
-    IntSize defaultBulletSize(bulletWidth, bulletWidth);
+    LayoutUnit bulletWidth = style()->fontMetrics().ascent() / LayoutUnit(2);
+    LayoutSize defaultBulletSize(bulletWidth, bulletWidth);
     return calculateImageIntrinsicDimensions(m_image.get(), defaultBulletSize, DoNotScaleByEffectiveZoom);
 }
 
@@ -164,7 +162,7 @@ void LayoutListMarker::imageChanged(WrappedImagePtr o, const IntRect*)
     if (o != m_image->data())
         return;
 
-    LayoutSize imageSize = isImage() ? LayoutSize(imageBulletSize()) : LayoutSize();
+    LayoutSize imageSize = isImage() ? imageBulletSize() : LayoutSize();
     if (size() != imageSize || m_image->errorOccurred())
         setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::ImageChanged);
     else
@@ -402,7 +400,7 @@ bool LayoutListMarker::isInside() const
 IntRect LayoutListMarker::getRelativeMarkerRect() const
 {
     if (isImage()) {
-        IntSize imageSize = imageBulletSize();
+        IntSize imageSize = flooredIntSize(imageBulletSize());
         return IntRect(0, 0, imageSize.width(), imageSize.height());
     }
 
@@ -450,7 +448,7 @@ LayoutRect LayoutListMarker::selectionRectForPaintInvalidation(const LayoutBoxMo
 
     RootInlineBox& root = inlineBoxWrapper()->root();
     LayoutRect rect(0, root.selectionTop() - location().y(), size().width(), root.selectionHeight());
-    mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
+    mapToVisibleRectInAncestorSpace(paintInvalidationContainer, rect, nullptr);
     // FIXME: groupedMapping() leaks the squashing abstraction.
     if (paintInvalidationContainer->layer()->groupedMapping())
         PaintLayer::mapRectToPaintBackingCoordinates(paintInvalidationContainer, rect);

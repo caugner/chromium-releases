@@ -2,23 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/renderer/media/webrtc_audio_renderer.h"
+
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "content/public/renderer/media_stream_audio_renderer.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/media/webrtc/mock_peer_connection_dependency_factory.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
-#include "content/renderer/media/webrtc_audio_renderer.h"
 #include "media/audio/audio_output_device.h"
 #include "media/audio/audio_output_ipc.h"
 #include "media/base/audio_bus.h"
 #include "media/base/mock_audio_renderer_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebMediaStream.h"
+#include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 #include "third_party/libjingle/source/talk/app/webrtc/mediastreaminterface.h"
 
 using testing::Return;
@@ -63,7 +69,7 @@ class FakeAudioOutputDevice
       scoped_ptr<media::AudioOutputIPC> ipc,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
       const std::string& device_id)
-      : AudioOutputDevice(ipc.Pass(),
+      : AudioOutputDevice(std::move(ipc),
                           io_task_runner,
                           0,
                           std::string(),
@@ -124,14 +130,17 @@ class WebRtcAudioRendererTest : public testing::Test,
   WebRtcAudioRendererTest()
       : message_loop_(new base::MessageLoopForIO),
         mock_ipc_(nullptr),
-        source_(new MockAudioRendererSource()),
-        stream_(new rtc::RefCountedObject<MockMediaStream>("label")) {}
+        source_(new MockAudioRendererSource()) {
+    blink::WebVector<blink::WebMediaStreamTrack> dummy_tracks;
+    stream_.initialize("new stream", dummy_tracks, dummy_tracks);
+  }
 
   void SetupRenderer(const std::string& device_id) {
     renderer_ = new WebRtcAudioRenderer(message_loop_->task_runner(), stream_,
                                         1, 1, device_id, url::Origin());
     EXPECT_CALL(*this, MockCreateOutputDevice(1, _, device_id, _));
     EXPECT_TRUE(renderer_->Initialize(source_.get()));
+
     renderer_proxy_ = renderer_->CreateSharedAudioRendererProxy(stream_);
   }
 
@@ -161,13 +170,22 @@ class WebRtcAudioRendererTest : public testing::Test,
     return fake_device;
   }
 
+  void TearDown() override {
+    renderer_proxy_ = nullptr;
+    renderer_ = nullptr;
+    stream_.reset();
+    source_.reset();
+    mock_output_device_ = nullptr;
+    blink::WebHeap::collectAllGarbageForTesting();
+  }
+
   // Used to construct |mock_output_device_|.
   scoped_ptr<base::MessageLoopForIO> message_loop_;
   MockAudioOutputIPC* mock_ipc_;  // Owned by AudioOuputDevice.
 
   scoped_refptr<FakeAudioOutputDevice> mock_output_device_;
   scoped_ptr<MockAudioRendererSource> source_;
-  scoped_refptr<webrtc::MediaStreamInterface> stream_;
+  blink::WebMediaStream stream_;
   scoped_refptr<WebRtcAudioRenderer> renderer_;
   scoped_refptr<MediaStreamAudioRenderer> renderer_proxy_;
 };

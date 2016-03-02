@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,7 +29,8 @@ class StyledLabelTest : public ViewsTestBase, public StyledLabelListener {
   ~StyledLabelTest() override {}
 
   // StyledLabelListener implementation.
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override {}
 
  protected:
@@ -335,7 +338,7 @@ TEST_F(StyledLabelTest, Color) {
   container->AddChildView(label);
   const SkColor kDefaultTextColor = label->enabled_color();
 
-  // Obtain the default text color for a link;
+  // Obtain the default text color for a link.
   Link* link = new Link(ASCIIToUTF16(text_link));
   container->AddChildView(link);
   const SkColor kDefaultLinkColor = link->enabled_color();

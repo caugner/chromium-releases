@@ -8,7 +8,6 @@ import collections
 import logging
 import os
 import re
-import sys
 import time
 
 from devil.android import device_errors
@@ -17,14 +16,14 @@ from pylib import flag_changer
 from pylib import valgrind_tools
 from pylib.base import base_test_result
 from pylib.base import base_test_runner
+from pylib.constants import host_paths
 from pylib.instrumentation import instrumentation_test_instance
 from pylib.instrumentation import json_perf_parser
 from pylib.instrumentation import test_result
 from pylib.local.device import local_device_instrumentation_test_run
 
-sys.path.append(os.path.join(constants.DIR_SOURCE_ROOT, 'build', 'util', 'lib',
-                             'common'))
-import perf_tests_results_helper # pylint: disable=F0401
+with host_paths.SysPath(host_paths.BUILD_COMMON_PATH):
+  import perf_tests_results_helper # pylint: disable=import-error
 
 
 _PERF_TEST_ANNOTATION = 'PerfTest'
@@ -97,7 +96,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
     """Sets up the test harness and device before all tests are run."""
     super(TestRunner, self).SetUp()
     if not self.device.HasRoot():
-      logging.warning('Unable to enable java asserts for %s, non rooted device',
+      logging.warning('Unable to enable java asserts for %s; run `adb root`.',
                       str(self.device))
     else:
       if self.device.SetJavaAsserts(self.options.set_asserts):
@@ -109,9 +108,11 @@ class TestRunner(base_test_runner.BaseTestRunner):
     # because it may have race condition when multiple processes are trying to
     # launch lighttpd with same port at same time.
     self.LaunchTestHttpServer(
-        os.path.join(constants.DIR_SOURCE_ROOT), self._lighttp_port)
+        os.path.join(host_paths.DIR_SOURCE_ROOT), self._lighttp_port)
     if self.flags:
       flags_to_add = ['--disable-fre', '--enable-test-intents']
+      if self.options.strict_mode and self.options.strict_mode != 'off':
+        flags_to_add.append('--strict-mode=' + self.options.strict_mode)
       if self.options.device_flags:
         with open(self.options.device_flags) as device_flags_file:
           stripped_flags = (l.strip() for l in device_flags_file)
@@ -229,7 +230,10 @@ class TestRunner(base_test_runner.BaseTestRunner):
         self.device.RunShellCommand(
             'rm -f %s' % self.coverage_device_file)
     elif self.package_info:
-      self.device.ClearApplicationState(self.package_info.package)
+      apk_under_test = self.test_pkg.GetApkUnderTest()
+      permissions = apk_under_test.GetPermissions() if apk_under_test else None
+      self.device.ClearApplicationState(
+          self.package_info.package, permissions=permissions)
 
   def TearDownPerfMonitoring(self, test):
     """Cleans up performance monitoring if the specified test required it.
@@ -288,7 +292,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
                                                     result['units'])
 
   def _SetupIndividualTestTimeoutScale(self, test):
-    timeout_scale = self._GetIndividualTestTimeoutScale(test)
+    timeout_scale = self.options.timeout_scale or 1
+    timeout_scale *= self._GetIndividualTestTimeoutScale(test)
     valgrind_tools.SetChromeTimeoutScale(self.device, timeout_scale)
 
   def _GetIndividualTestTimeoutScale(self, test):

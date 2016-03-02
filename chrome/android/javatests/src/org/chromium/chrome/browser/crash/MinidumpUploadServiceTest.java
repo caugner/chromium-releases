@@ -324,18 +324,17 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
         service.onHandleIntent(uploadIntent);
 
         // Verify asynchronously.
-        assertTrue("All callables should have a call-count of 1",
-                CriteriaHelper.pollForCriteria(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        for (CountedMinidumpUploadCallable callable : callables) {
-                            if (callable.mCalledCount != 1) {
-                                return false;
-                            }
-                        }
-                        return true;
+        CriteriaHelper.pollForCriteria(new Criteria("All callables should have a call-count of 1") {
+            @Override
+            public boolean isSatisfied() {
+                for (CountedMinidumpUploadCallable callable : callables) {
+                    if (callable.mCalledCount != 1) {
+                        return false;
                     }
-                }, MAX_TIMEOUT_MS, CHECK_INTERVAL_MS));
+                }
+                return true;
+            }
+        }, MAX_TIMEOUT_MS, CHECK_INTERVAL_MS);
     }
 
     /**
@@ -439,7 +438,7 @@ public class MinidumpUploadServiceTest extends CrashTestCase {
          */
         private CountedMinidumpUploadCallable(
                 String fileName, int result, boolean networkChange) {
-            super(new File(fileName), null, null, null, null);
+            super(new File(fileName), null, null, null);
             this.mResult = result;
             this.mTriggerNetworkChange = networkChange;
         }

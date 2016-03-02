@@ -5,8 +5,10 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/threading/platform_thread.h"
+#include "build/build_config.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/webrtc_ip_handling_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -16,11 +18,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace content {
-
-#define MAYBE_WebRtcBrowserPermissionDeniedTest \
-    DISABLED_WebRtcBrowserPermissionDeniedTest
-#define MAYBE_WebRtcBrowserMultipleRoutesDisabledTest \
-    DISABLED_WebRtcBrowserMultipleRoutesDisabledTest
 
 #if defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
 // Renderer crashes under Android ASAN: https://crbug.com/408496.
@@ -46,12 +43,7 @@ class MAYBE_WebRtcBrowserTest : public WebRtcContentBrowserTest {
   // Convenience function since most peerconnection-call.html tests just load
   // the page, kick off some javascript and wait for the title to change to OK.
   void MakeTypicalPeerConnectionCall(const std::string& javascript) {
-    ASSERT_TRUE(embedded_test_server()->Start());
-
-    GURL url(embedded_test_server()->GetURL("/media/peerconnection-call.html"));
-    NavigateToURL(shell(), url);
-
-    ExecuteJavascriptAndWaitForOk(javascript);
+    MakeTypicalCall(javascript, "/media/peerconnection-call.html");
   }
 
   // Convenience method for making calls that detect if audio os playing (which
@@ -159,8 +151,8 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 
 // This test makes a call between pc1 and pc2 where a video only stream is sent
 // from pc1 to pc2. The stream sent from pc1 to pc2 is cloned from the stream
-// received on pc2 to test that cloning of remote video tracks works as
-// intended and is sent back to pc1.
+// received on pc2 to test that cloning of remote video and audio tracks works
+// as intended and is sent back to pc1.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanForwardRemoteStream) {
 #if defined (OS_ANDROID)
   // This test fails on Nexus 5 devices.
@@ -170,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanForwardRemoteStream) {
       switches::kDisableWebRtcHWDecoding);
 #endif
   MakeTypicalPeerConnectionCall(
-      "callAndForwardRemoteStream({video: true, audio: false});");
+      "callAndForwardRemoteStream({video: true, audio: true});");
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
@@ -333,75 +325,6 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CreateOfferWithOfferOptions) {
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CallInsideIframe) {
   MakeTypicalPeerConnectionCall("callInsideIframe({video: true, audio:true});");
-}
-
-#if !defined(OS_ANDROID)
-// Test that when device permission is granted, we should have non-loopback
-// candidates.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       GatherLocalCandidatesWithIceServersUndefined) {
-  MakeTypicalPeerConnectionCall("callWithDevicePermissionGranted();");
-}
-#endif
-
-// This class tests the scenario when permission to access mic or camera is
-// denied. This inherits from MAYBE_WebRtcBrowserTest but doesn't use the super
-// class's SetUpCommandLine.
-class MAYBE_WebRtcBrowserPermissionDeniedTest : public MAYBE_WebRtcBrowserTest {
- public:
-  MAYBE_WebRtcBrowserPermissionDeniedTest() {}
-  ~MAYBE_WebRtcBrowserPermissionDeniedTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    WebRtcContentBrowserTest::SetUpCommandLine(command_line);
-  }
-};
-
-// Test that when device permission is denied, when passing empty array as
-// iceServers, no candidate will be gathered.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserPermissionDeniedTest,
-                       GatherLocalCandidatesWithEmptyArrayIceServers) {
-  // Disable this test on XP, crbug.com/542416.
-  if (OnWinXp()) return;
-  MakeTypicalPeerConnectionCall(
-      "callWithDevicePermissionDeniedAndEmptyIceServers();");
-}
-
-// Test that when device permission is denied, when iceServers is undefined,
-// only loopback candidate will be gathered.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserPermissionDeniedTest,
-                       GatherLocalCandidatesWithIceServersUndefined) {
-  // Disable this test on XP, crbug.com/542416.
-  if (OnWinXp()) return;
-  MakeTypicalPeerConnectionCall(
-      "callWithDevicePermissionDeniedAndUndefinedIceServers();");
-}
-
-// This class tests the scenario when multiple routes is not requested. This
-// inherits from MAYBE_WebRtcBrowserTest but doesn't use the super class's
-// SetUpCommandLine.
-class MAYBE_WebRtcBrowserMultipleRoutesDisabledTest
-    : public MAYBE_WebRtcBrowserTest {
- public:
-  MAYBE_WebRtcBrowserMultipleRoutesDisabledTest() {}
-  ~MAYBE_WebRtcBrowserMultipleRoutesDisabledTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    WebRtcContentBrowserTest::SetUpCommandLine(command_line);
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableWebRtcMultipleRoutes);
-  }
-};
-
-// Test that when device permission is granted, but multiple routes is not
-// requested, with undefined iceServers, only loopback candidate will be
-// gathered.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserMultipleRoutesDisabledTest,
-                       GatherLocalCandidatesWithIceServersUndefined) {
-  // Disable this test on XP, crbug.com/542416.
-  if (OnWinXp()) return;
-  MakeTypicalPeerConnectionCall(
-      "callWithMultipleRoutesDisabledAndUndefinedIceServers();");
 }
 
 }  // namespace content

@@ -4,9 +4,11 @@
 
 #include "components/resource_provider/resource_provider_app.h"
 
+#include <utility>
+
 #include "components/resource_provider/file_utils.h"
 #include "components/resource_provider/resource_provider_impl.h"
-#include "mojo/application/public/cpp/application_connection.h"
+#include "mojo/shell/public/cpp/application_connection.h"
 #include "url/gurl.h"
 
 namespace resource_provider {
@@ -20,6 +22,7 @@ ResourceProviderApp::~ResourceProviderApp() {
 }
 
 void ResourceProviderApp::Initialize(mojo::ApplicationImpl* app) {
+  tracing_.Initialize(app);
 }
 
 bool ResourceProviderApp::ConfigureIncomingConnection(
@@ -43,7 +46,7 @@ void ResourceProviderApp::Create(
   CHECK(!app_path.empty());
   bindings_.AddBinding(
       new ResourceProviderImpl(app_path, resource_provider_app_url_),
-      request.Pass());
+      std::move(request));
 }
 
 }  // namespace resource_provider

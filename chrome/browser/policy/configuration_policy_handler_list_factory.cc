@@ -4,18 +4,23 @@
 
 #include "chrome/browser/policy/configuration_policy_handler_list_factory.h"
 
-#include "base/basictypes.h"
+#include <limits.h>
+#include <stddef.h>
+#include <utility>
+
 #include "base/bind.h"
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/policy/managed_bookmarks_policy_handler.h"
 #include "chrome/browser/profiles/incognito_mode_policy_handler.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/policy/core/browser/autofill_policy_handler.h"
@@ -35,7 +40,7 @@
 #include "components/variations/pref_names.h"
 #include "policy/policy_constants.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/search/contextual_search_policy_handler_android.h"
 #endif
 
@@ -126,9 +131,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultPrinterSelection,
     prefs::kPrintPreviewDefaultDestinationSelectionRules,
     base::Value::TYPE_STRING },
-  { key::kMetricsReportingEnabled,
-    metrics::prefs::kMetricsReportingEnabled,
-    base::Value::TYPE_BOOLEAN },
   { key::kApplicationLocaleValue,
     prefs::kApplicationLocale,
     base::Value::TYPE_STRING },
@@ -168,6 +170,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultPopupsSetting,
     prefs::kManagedDefaultPopupsSetting,
     base::Value::TYPE_INTEGER },
+  { key::kDefaultKeygenSetting,
+    prefs::kManagedDefaultKeygenSetting,
+    base::Value::TYPE_INTEGER },
   { key::kAutoSelectCertificateForUrls,
     prefs::kManagedAutoSelectCertificateForUrls,
     base::Value::TYPE_LIST },
@@ -203,6 +208,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_LIST },
   { key::kPopupsBlockedForUrls,
     prefs::kManagedPopupsBlockedForUrls,
+    base::Value::TYPE_LIST },
+  { key::kKeygenAllowedForUrls,
+    prefs::kManagedKeygenAllowedForUrls,
+    base::Value::TYPE_LIST },
+  { key::kKeygenBlockedForUrls,
+    prefs::kManagedKeygenBlockedForUrls,
     base::Value::TYPE_LIST },
   { key::kNotificationsAllowedForUrls,
     prefs::kManagedNotificationsAllowedForUrls,
@@ -493,20 +504,31 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 
+// Metrics reporting is controlled by a platform specific policy for ChromeOS
+#if defined(OS_CHROMEOS)
+  { key::kDeviceMetricsReportingEnabled,
+    metrics::prefs::kMetricsReportingEnabled,
+    base::Value::TYPE_BOOLEAN },
+#else
+  { key::kMetricsReportingEnabled,
+    metrics::prefs::kMetricsReportingEnabled,
+    base::Value::TYPE_BOOLEAN },
+#endif
+
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
   { key::kBackgroundModeEnabled,
     prefs::kBackgroundModeEnabled,
     base::Value::TYPE_BOOLEAN },
 #endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   { key::kDataCompressionProxyEnabled,
-    data_reduction_proxy::prefs::kDataReductionProxyEnabled,
+    prefs::kDataSaverEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kAuthAndroidNegotiateAccountType,
     prefs::kAuthAndroidNegotiateAccountType,
     base::Value::TYPE_STRING },
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ANDROID_JAVA_UI)
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
   { key::kNativeMessagingUserLevelHosts,
@@ -614,7 +636,7 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(make_scoped_ptr(new ProxyPolicyHandler()));
   handlers->AddHandler(make_scoped_ptr(new URLBlacklistPolicyHandler()));
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   handlers->AddHandler(
       make_scoped_ptr(new ContextualSearchPolicyHandlerAndroid()));
 #endif
@@ -790,12 +812,12 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   // http://crbug.com/346229
   handlers->AddHandler(
       make_scoped_ptr(new LegacyPoliciesDeprecatingPolicyHandler(
-          power_management_idle_legacy_policies.Pass(),
+          std::move(power_management_idle_legacy_policies),
           make_scoped_ptr(
               new PowerManagementIdleSettingsPolicyHandler(chrome_schema)))));
   handlers->AddHandler(
       make_scoped_ptr(new LegacyPoliciesDeprecatingPolicyHandler(
-          screen_lock_legacy_policies.Pass(),
+          std::move(screen_lock_legacy_policies),
           make_scoped_ptr(new ScreenLockDelayPolicyHandler(chrome_schema)))));
   handlers->AddHandler(
       make_scoped_ptr(new ExternalDataPolicyHandler(key::kUserAvatarImage)));
@@ -809,7 +831,7 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       new chromeos::KeyPermissionsPolicyHandler(chrome_schema)));
 #endif  // defined(OS_CHROMEOS)
 
-  return handlers.Pass();
+  return handlers;
 }
 
 }  // namespace policy

@@ -4,7 +4,10 @@
 
 #include "components/scheduler/renderer/renderer_scheduler_impl.h"
 
+#include <utility>
+
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/test/ordered_simple_task_runner.h"
@@ -250,7 +253,7 @@ class RendererSchedulerImplTest : public testing::Test {
   }
 
   void Initialize(scoped_ptr<RendererSchedulerImplForTest> scheduler) {
-    scheduler_ = scheduler.Pass();
+    scheduler_ = std::move(scheduler);
     default_task_runner_ = scheduler_->DefaultTaskRunner();
     compositor_task_runner_ = scheduler_->CompositorTaskRunner();
     loading_task_runner_ = scheduler_->LoadingTaskRunner();
@@ -367,6 +370,24 @@ class RendererSchedulerImplTest : public testing::Test {
     scheduler_->DidHandleInputEventOnCompositorThread(
         FakeInputEvent(blink::WebInputEvent::GestureScrollBegin),
         RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+    scheduler_->DidHandleInputEventOnCompositorThread(
+        FakeInputEvent(blink::WebInputEvent::GestureScrollUpdate),
+        RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+  }
+
+  void SimulateMainThreadGestureWithCancelledScroll() {
+    scheduler_->DidHandleInputEventOnCompositorThread(
+        FakeInputEvent(blink::WebInputEvent::TouchStart),
+        RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+    scheduler_->DidHandleInputEventOnCompositorThread(
+        FakeInputEvent(blink::WebInputEvent::TouchMove),
+        RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+    scheduler_->DidHandleInputEventOnCompositorThread(
+        FakeInputEvent(blink::WebInputEvent::GestureScrollBegin),
+        RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+    scheduler_->DidHandleInputEventOnCompositorThread(
+        FakeInputEvent(blink::WebInputEvent::TouchMove),
+        RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
   }
 
   void SimulateMainThreadGestureStart(TouchEventPolicy touch_event_policy,
@@ -785,6 +806,22 @@ TEST_F(RendererSchedulerImplTest,
 }
 
 TEST_F(RendererSchedulerImplTest,
+       TestCompositorPolicy_MainThreadHandlesInput_WithCancelledScroll) {
+  std::vector<std::string> run_order;
+  PostTestTasks(&run_order, "L1 I1 D1 C1 D2 C2");
+
+  scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
+  EnableIdleTasks();
+  SimulateMainThreadGestureWithCancelledScroll();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("C1"), std::string("C2"),
+                                   std::string("L1"), std::string("D1"),
+                                   std::string("D2"), std::string("I1")));
+  EXPECT_EQ(RendererScheduler::UseCase::MAIN_THREAD_GESTURE, CurrentUseCase());
+}
+
+TEST_F(RendererSchedulerImplTest,
        TestCompositorPolicy_CompositorHandlesInput_LongGestureDuration) {
   scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
   EnableIdleTasks();
@@ -904,7 +941,7 @@ TEST_F(RendererSchedulerImplTest, Navigation_ResetsTaskCostEstimations) {
 }
 
 TEST_F(RendererSchedulerImplTest,
-       ExpensiveTimersDontRunWhenMainThreadScrolling_DISABLED) {
+       ExpensiveTimersDontRunWhenMainThreadScrolling) {
   std::vector<std::string> run_order;
 
   scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
@@ -937,9 +974,8 @@ TEST_F(RendererSchedulerImplTest,
   EXPECT_THAT(run_order, testing::ElementsAre(std::string("T1")));
 }
 
-TEST_F(
-    RendererSchedulerImplTest,
-    ExpensiveTimersDontRunWhenMainThreadScrolling_AndOnCriticalPath_DISABLED) {
+TEST_F(RendererSchedulerImplTest,
+       ExpensiveTimersDontRunWhenMainThreadScrolling_AndOnCriticalPath) {
   std::vector<std::string> run_order;
 
   scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
@@ -2117,7 +2153,7 @@ TEST_F(RendererSchedulerImplTest, TestRendererBackgroundedTimerSuspension) {
 }
 
 TEST_F(RendererSchedulerImplTest,
-       ExpensiveLoadingTasksNotBlockedTillFirstBeginMainFrame_DISABLED) {
+       ExpensiveLoadingTasksNotBlockedTillFirstBeginMainFrame) {
   std::vector<std::string> run_order;
 
   EnableTaskBlocking();
@@ -2171,7 +2207,7 @@ TEST_F(RendererSchedulerImplTest,
               testing::ElementsAre(std::string("L1"), std::string("D1")));
 }
 
-TEST_F(RendererSchedulerImplTest, ExpensiveTimerTaskBlocked_DISABLED) {
+TEST_F(RendererSchedulerImplTest, ExpensiveTimerTaskBlocked) {
   std::vector<std::string> run_order;
 
   EnableTaskBlocking();
@@ -2193,6 +2229,32 @@ TEST_F(RendererSchedulerImplTest, ExpensiveTimerTaskBlocked_DISABLED) {
   EXPECT_TRUE(TimerTasksSeemExpensive());
   EXPECT_TRUE(TouchStartExpectedSoon());
   EXPECT_THAT(run_order, testing::ElementsAre(std::string("D1")));
+}
+
+TEST_F(RendererSchedulerImplTest, ExpensiveTimerTaskNotBlockedIfDisallowed) {
+  std::vector<std::string> run_order;
+
+  EnableTaskBlocking();
+  scheduler_->SetExpensiveTaskBlockingAllowed(false);
+  scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
+  DoMainFrame();
+  SimulateExpensiveTasks(timer_task_runner_);
+  ForceTouchStartToBeExpectedSoon();
+
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureFlingStart),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  PostTestTasks(&run_order, "T1 D1");
+  RunUntilIdle();
+
+  EXPECT_EQ(UseCase::MAIN_THREAD_GESTURE,
+            ForceUpdatePolicyAndGetCurrentUseCase());
+  EXPECT_TRUE(HaveSeenABeginMainframe());
+  EXPECT_FALSE(LoadingTasksSeemExpensive());
+  EXPECT_TRUE(TimerTasksSeemExpensive());
+  EXPECT_TRUE(TouchStartExpectedSoon());
+  EXPECT_THAT(run_order, testing::ElementsAre(std::string("T1"),
+                                              std::string("D1")));
 }
 
 TEST_F(RendererSchedulerImplTest,
@@ -2221,7 +2283,7 @@ TEST_F(RendererSchedulerImplTest,
 }
 
 TEST_F(RendererSchedulerImplTest,
-       ExpensiveTimerTaskNotBlocked_IfBeginMainFrameNotExpectedSoon_DISABLED) {
+       ExpensiveTimerTaskNotBlocked_IfBeginMainFrameNotExpectedSoon) {
   std::vector<std::string> run_order;
 
   EnableTaskBlocking();
@@ -2248,7 +2310,7 @@ TEST_F(RendererSchedulerImplTest,
 }
 
 TEST_F(RendererSchedulerImplTest,
-       ExpensiveLoadingTasksNotBlockedIfNavigationExpected_DISABLED) {
+       ExpensiveLoadingTasksNotBlockedIfNavigationExpected) {
   std::vector<std::string> run_order;
 
   EnableTaskBlocking();
@@ -2287,7 +2349,7 @@ TEST_F(RendererSchedulerImplTest,
 
 TEST_F(
     RendererSchedulerImplTest,
-    ExpensiveLoadingTasksNotBlockedIfNavigationExpected_MultipleNavigations_DISABLED) {
+    ExpensiveLoadingTasksNotBlockedIfNavigationExpected_MultipleNavigations) {
   std::vector<std::string> run_order;
 
   EnableTaskBlocking();
@@ -2403,7 +2465,7 @@ TEST_F(RendererSchedulerImplTest, ModeratelyExpensiveTimer_NotBlocked) {
   }
 }
 
-TEST_F(RendererSchedulerImplTest, ExpensiveTimer_Blocked_DISABLED) {
+TEST_F(RendererSchedulerImplTest, ExpensiveTimer_Blocked) {
   EnableTaskBlocking();
   scheduler_->SetHasVisibleRenderWidgetWithTouchHandler(true);
   SimulateMainThreadGestureStart(TouchEventPolicy::SEND_TOUCH_START,

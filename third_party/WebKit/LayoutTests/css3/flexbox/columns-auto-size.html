@@ -18,7 +18,7 @@ body {
     width: 100%;
 }
 .vertical {
-    -webkit-writing-mode: vertical-rl;
+    writing-mode: vertical-rl;
     height: 50px;
 }
 .vertical div {
@@ -41,8 +41,11 @@ body {
     background-color: yellow;
 }
 </style>
-<script src="../../resources/check-layout.js"></script>
+<script src="../../resources/testharness.js"></script>
+<script src="../../resources/testharnessreport.js"></script>
+<script src="../../resources/check-layout-th.js"></script>
 <body onload="checkLayout('.flexbox')">
+<div id=log></div>
 <div class="flexbox column horizontal">
   <div data-expected-height="10" data-offset-y="0" style="flex: 1 0 10px;"></div>
   <div data-expected-height="10" data-offset-y="10" style="height: 10px;"></div>

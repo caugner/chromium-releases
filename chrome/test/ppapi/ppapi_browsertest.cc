@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/win/windows_version.h"
@@ -945,6 +948,8 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest,
   RUN_AUDIO_CONFIG_SUBTESTS;
 }
 
+TEST_PPAPI_NACL(AudioEncoder)
+
 // PPB_Audio tests.
 #define RUN_AUDIO_SUBTESTS \
   RunTestViaHTTP( \
@@ -1100,6 +1105,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest, MAYBE_PNACL_NONSFI(View)) {
   RunTest( \
       LIST_TEST(FlashMessageLoop_Basics) \
       LIST_TEST(FlashMessageLoop_RunWithoutQuit) \
+      LIST_TEST(FlashMessageLoop_SuspendScriptCallbackWhileRunning) \
   )
 
 #if defined(OS_LINUX)  // Disabled due to flakiness http://crbug.com/316925

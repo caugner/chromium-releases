@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/files/file.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
 #include "base/scoped_native_library.h"
 #include "base/threading/thread_restrictions.h"
@@ -47,8 +48,7 @@ void TouchPagesInRange(const void* base_addr, uint32_t length) {
 
 }  // namespace
 
-bool PreReadFile(const base::FilePath& file_path, int step_size) {
-  DCHECK_GT(step_size, 0);
+void PreReadFile(const base::FilePath& file_path) {
   base::ThreadRestrictions::AssertIOAllowed();
 
   if (base::win::GetVersion() > base::win::VERSION_XP) {
@@ -57,21 +57,22 @@ bool PreReadFile(const base::FilePath& file_path, int step_size) {
     base::File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
                                    base::File::FLAG_SEQUENTIAL_SCAN);
     if (!file.IsValid())
-      return false;
+      return;
 
-    char* buffer = reinterpret_cast<char*>(::VirtualAlloc(
-        nullptr, static_cast<DWORD>(step_size), MEM_COMMIT, PAGE_READWRITE));
+    const DWORD kStepSize = 1024 * 1024;
+    char* buffer = reinterpret_cast<char*>(
+        ::VirtualAlloc(nullptr, kStepSize, MEM_COMMIT, PAGE_READWRITE));
     if (!buffer)
-      return false;
+      return;
 
-    while (file.ReadAtCurrentPos(buffer, step_size) > 0) {}
+    while (file.ReadAtCurrentPos(buffer, kStepSize) > 0) {}
 
     ::VirtualFree(buffer, 0, MEM_RELEASE);
   } else {
     // WinXP branch. Here, reading the DLL from disk doesn't do what we want so
     // instead we pull the pages into memory and touch pages at a stride. We use
-    // the system's page size as the stride, ignoring the passed in |step_size|,
-    // to make sure each page in the range is touched.
+    // the system's page size as the stride, to make sure each page in the range
+    // is touched.
 
     // Don't show an error popup when |file_path| is not a valid PE file.
     UINT previous_error_mode = ::SetErrorMode(SEM_FAILCRITICALERRORS);
@@ -85,11 +86,11 @@ bool PreReadFile(const base::FilePath& file_path, int step_size) {
 
     // Pre-reading non-PE files is not supported on XP.
     if (!dll_module.is_valid())
-      return false;
+      return;
 
     base::win::PEImage pe_image(dll_module.get());
     if (!pe_image.VerifyMagic())
-      return false;
+      return;
 
     // We don't want to read past the end of the module (which could trigger
     // an access violation), so make sure to check the image size.
@@ -99,6 +100,29 @@ bool PreReadFile(const base::FilePath& file_path, int step_size) {
     // Page in the module.
     TouchPagesInRange(dll_module.get(), dll_module_length);
   }
+}
 
-  return true;
+void PreReadMemoryMappedFile(const base::MemoryMappedFile& memory_mapped_file,
+                             const base::FilePath& file_path) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  if (!memory_mapped_file.IsValid())
+    return;
+
+  // Load ::PrefetchVirtualMemory dynamically, because it is only available on
+  // Win8+.
+  using PrefetchVirtualMemoryPtr = decltype(::PrefetchVirtualMemory)*;
+  PrefetchVirtualMemoryPtr prefetch_virtual_memory =
+      reinterpret_cast<PrefetchVirtualMemoryPtr>(::GetProcAddress(
+          ::GetModuleHandle(L"kernel32.dll"), "PrefetchVirtualMemory"));
+  if (!prefetch_virtual_memory) {
+    // If ::PrefetchVirtualMemory is not available, fall back to PreReadFile.
+    PreReadFile(file_path);
+    return;
+  }
+
+  WIN32_MEMORY_RANGE_ENTRY memory_range;
+  memory_range.VirtualAddress = const_cast<void*>(
+      reinterpret_cast<const void*>(memory_mapped_file.data()));
+  memory_range.NumberOfBytes = memory_mapped_file.length();
+  prefetch_virtual_memory(::GetCurrentProcess(), 1U, &memory_range, 0);
 }

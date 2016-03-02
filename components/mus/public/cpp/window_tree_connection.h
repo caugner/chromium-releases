@@ -5,9 +5,13 @@
 #ifndef COMPONENTS_MUS_PUBLIC_CPP_WINDOW_TREE_CONNECTION_H_
 #define COMPONENTS_MUS_PUBLIC_CPP_WINDOW_TREE_CONNECTION_H_
 
-#include <string>
+#include <stdint.h>
 
-#include "components/mus/public/cpp/types.h"
+#include <map>
+#include <string>
+#include <vector>
+
+#include "components/mus/common/types.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 
@@ -15,6 +19,7 @@ namespace mus {
 
 class Window;
 class WindowManagerDelegate;
+class WindowTreeConnectionObserver;
 class WindowTreeDelegate;
 
 // Encapsulates a connection to a window tree. A unique connection is made
@@ -44,8 +49,12 @@ class WindowTreeConnection {
       CreateType create_type,
       WindowManagerDelegate* window_manager_delegate);
 
+  // Sets whether this is deleted when there are no roots. The default is to
+  // delete when there are no roots.
+  virtual void SetDeleteOnNoRoots(bool value) = 0;
+
   // Returns the root of this connection.
-  virtual Window* GetRoot() = 0;
+  virtual const std::set<Window*>& GetRoots() = 0;
 
   // Returns a Window known to this connection.
   virtual Window* GetWindowById(Id id) = 0;
@@ -56,13 +65,20 @@ class WindowTreeConnection {
 
   // Creates and returns a new Window (which is owned by the window server).
   // Windows are initially hidden, use SetVisible(true) to show.
-  virtual Window* NewWindow() = 0;
+  Window* NewWindow() { return NewWindow(nullptr); }
+  virtual Window* NewWindow(
+      const std::map<std::string, std::vector<uint8_t>>* properties) = 0;
+  virtual Window* NewTopLevelWindow(
+      const std::map<std::string, std::vector<uint8_t>>* properties) = 0;
 
   // Returns true if ACCESS_POLICY_EMBED_ROOT was specified.
   virtual bool IsEmbedRoot() = 0;
 
   // Returns the id for this connection.
   virtual ConnectionSpecificId GetConnectionId() = 0;
+
+  virtual void AddObserver(WindowTreeConnectionObserver* observer) = 0;
+  virtual void RemoveObserver(WindowTreeConnectionObserver* observer) = 0;
 };
 
 }  // namespace mus

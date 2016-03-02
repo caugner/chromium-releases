@@ -36,11 +36,9 @@ ContentSettingImageView::ContentSettingImageView(
     ContentSettingImageModel* image_model,
     LocationBarView* parent,
     const gfx::FontList& font_list,
-    SkColor text_color,
     SkColor parent_background_color)
     : IconLabelBubbleView(0,
                           font_list,
-                          text_color,
                           parent_background_color,
                           false),
       parent_(parent),
@@ -78,9 +76,7 @@ void ContentSettingImageView::Update(content::WebContents* web_contents) {
     return;
   }
 
-  SetImage(content_setting_image_model_->icon().AsImageSkia());
-  image()->SetTooltipText(
-      base::UTF8ToUTF16(content_setting_image_model_->get_tooltip()));
+  UpdateImage();
   SetVisible(true);
 
   // If the content usage or blockage should be indicated to the user, start the
@@ -174,6 +170,14 @@ void ContentSettingImageView::OnGestureEvent(ui::GestureEvent* event) {
     event->SetHandled();
 }
 
+void ContentSettingImageView::OnNativeThemeChanged(
+    const ui::NativeTheme* native_theme) {
+  if (ui::MaterialDesignController::IsModeMaterial())
+    UpdateImage();
+
+  IconLabelBubbleView::OnNativeThemeChanged(native_theme);
+}
+
 void ContentSettingImageView::OnWidgetDestroying(views::Widget* widget) {
   DCHECK_EQ(bubble_widget_, widget);
   bubble_widget_->RemoveObserver(this);
@@ -206,4 +210,9 @@ void ContentSettingImageView::OnClick() {
     bubble_widget_->AddObserver(this);
     bubble_widget_->Show();
   }
+}
+
+void ContentSettingImageView::UpdateImage() {
+  SetImage(content_setting_image_model_->GetIcon(GetTextColor()).AsImageSkia());
+  image()->SetTooltipText(content_setting_image_model_->get_tooltip());
 }

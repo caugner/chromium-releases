@@ -6,6 +6,8 @@
 
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 
+#include <utility>
+
 #include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
@@ -19,6 +21,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_api_frame_id_map.h"
 #include "extensions/common/event_filtering_info.h"
 #include "net/base/net_errors.h"
 #include "ui/base/page_transition_types.h"
@@ -50,25 +53,20 @@ void DispatchEvent(content::BrowserContext* browser_context,
   EventRouter* event_router = EventRouter::Get(profile);
   if (profile && event_router) {
     scoped_ptr<Event> event(
-        new Event(histogram_value, event_name, args.Pass()));
+        new Event(histogram_value, event_name, std::move(args)));
     event->restrict_to_browser_context = profile;
     event->filter_info = info;
-    event_router->BroadcastEvent(event.Pass());
+    event_router->BroadcastEvent(std::move(event));
   }
 }
 
 }  // namespace
 
 int GetFrameId(content::RenderFrameHost* frame_host) {
-  if (!frame_host)
-    return -1;
-  return !frame_host->GetParent() ? 0 : frame_host->GetRoutingID();
+  return ExtensionApiFrameIdMap::GetFrameId(frame_host);
 }
 
 // Constructs and dispatches an onBeforeNavigate event.
-// TODO(dcheng): Is the parent process ID needed here? http://crbug.com/393640
-// Collisions are probably possible... but maybe this won't ever happen because
-// of the SiteInstance grouping policies.
 void DispatchOnBeforeNavigate(content::WebContents* web_contents,
                               content::RenderFrameHost* frame_host,
                               const GURL& validated_url) {
@@ -85,7 +83,7 @@ void DispatchOnBeforeNavigate(content::WebContents* web_contents,
 
   DispatchEvent(web_contents->GetBrowserContext(),
                 events::WEB_NAVIGATION_ON_BEFORE_NAVIGATE,
-                web_navigation::OnBeforeNavigate::kEventName, args.Pass(),
+                web_navigation::OnBeforeNavigate::kEventName, std::move(args),
                 validated_url);
 }
 
@@ -125,7 +123,7 @@ void DispatchOnCommitted(events::HistogramValue histogram_value,
   args->Append(dict);
 
   DispatchEvent(web_contents->GetBrowserContext(), histogram_value, event_name,
-                args.Pass(), url);
+                std::move(args), url);
 }
 
 // Constructs and dispatches an onDOMContentLoaded event.
@@ -144,7 +142,7 @@ void DispatchOnDOMContentLoaded(content::WebContents* web_contents,
 
   DispatchEvent(web_contents->GetBrowserContext(),
                 events::WEB_NAVIGATION_ON_DOM_CONTENT_LOADED,
-                web_navigation::OnDOMContentLoaded::kEventName, args.Pass(),
+                web_navigation::OnDOMContentLoaded::kEventName, std::move(args),
                 url);
 }
 
@@ -164,7 +162,7 @@ void DispatchOnCompleted(content::WebContents* web_contents,
 
   DispatchEvent(web_contents->GetBrowserContext(),
                 events::WEB_NAVIGATION_ON_COMPLETED,
-                web_navigation::OnCompleted::kEventName, args.Pass(), url);
+                web_navigation::OnCompleted::kEventName, std::move(args), url);
 }
 
 // Constructs and dispatches an onCreatedNavigationTarget event.
@@ -197,7 +195,7 @@ void DispatchOnCreatedNavigationTarget(
   DispatchEvent(browser_context,
                 events::WEB_NAVIGATION_ON_CREATED_NAVIGATION_TARGET,
                 web_navigation::OnCreatedNavigationTarget::kEventName,
-                args.Pass(), target_url);
+                std::move(args), target_url);
 }
 
 // Constructs and dispatches an onErrorOccurred event.
@@ -218,7 +216,8 @@ void DispatchOnErrorOccurred(content::WebContents* web_contents,
 
   DispatchEvent(web_contents->GetBrowserContext(),
                 events::WEB_NAVIGATION_ON_ERROR_OCCURRED,
-                web_navigation::OnErrorOccurred::kEventName, args.Pass(), url);
+                web_navigation::OnErrorOccurred::kEventName, std::move(args),
+                url);
 }
 
 // Constructs and dispatches an onTabReplaced event.
@@ -237,7 +236,8 @@ void DispatchOnTabReplaced(
   args->Append(dict);
 
   DispatchEvent(browser_context, events::WEB_NAVIGATION_ON_TAB_REPLACED,
-                web_navigation::OnTabReplaced::kEventName, args.Pass(), GURL());
+                web_navigation::OnTabReplaced::kEventName, std::move(args),
+                GURL());
 }
 
 }  // namespace web_navigation_api_helpers

@@ -7,10 +7,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/ssl/security_state_model.h"
+#include "chrome/browser/ssl/chrome_security_state_model_client.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_delegate.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -19,6 +20,7 @@
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/security_state/security_state_model.h"
 #include "components/url_formatter/elide_url.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/cert_store.h"
@@ -40,6 +42,7 @@
 using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
+using security_state::SecurityStateModel;
 
 ToolbarModelImpl::ToolbarModelImpl(ToolbarModelDelegate* delegate)
     : delegate_(delegate) {
@@ -129,13 +132,13 @@ SecurityStateModel::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
   // initialization), assume no security style.
   if (!web_contents)
     return SecurityStateModel::NONE;
-  const SecurityStateModel* model =
-      SecurityStateModel::FromWebContents(web_contents);
+  const ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(web_contents);
 
   // When editing, assume no security style.
   return (input_in_progress() && !ignore_editing)
              ? SecurityStateModel::NONE
-             : model->GetSecurityInfo().security_level;
+             : model_client->GetSecurityInfo().security_level;
 }
 
 int ToolbarModelImpl::GetIcon() const {

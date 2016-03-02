@@ -4,6 +4,10 @@
 
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 
+#include <stddef.h>
+#include <stdint.h>
+#include <utility>
+
 #include "ash/audio/sounds.h"
 #include "ash/autoclick/autoclick_controller.h"
 #include "ash/high_contrast/high_contrast_controller.h"
@@ -16,6 +20,7 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
@@ -406,6 +411,7 @@ AccessibilityManager::AccessibilityManager()
       scoped_braille_observer_(this),
       braille_ime_current_(false),
       chromevox_panel_(nullptr),
+      extension_registry_observer_(this),
       weak_ptr_factory_(this) {
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
@@ -1048,8 +1054,9 @@ void AccessibilityManager::UpdateChromeOSAccessibilityHistograms() {
                         IsVirtualKeyboardEnabled());
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosStickyKeys", IsStickyKeysEnabled());
   if (MagnificationManager::Get()) {
-    uint32 type = MagnificationManager::Get()->IsMagnifierEnabled() ?
-                      MagnificationManager::Get()->GetMagnifierType() : 0;
+    uint32_t type = MagnificationManager::Get()->IsMagnifierEnabled()
+                        ? MagnificationManager::Get()->GetMagnifierType()
+                        : 0;
     // '0' means magnifier is disabled.
     UMA_HISTOGRAM_ENUMERATION("Accessibility.CrosScreenMagnifier",
                               type,
@@ -1155,6 +1162,22 @@ void AccessibilityManager::OnBrailleKeyEvent(const KeyEvent& event) {
   }
 }
 
+void AccessibilityManager::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UnloadedExtensionInfo::Reason reason) {
+  if (extension->id() == keyboard_listener_extension_id_) {
+    keyboard_listener_extension_id_ = std::string();
+    keyboard_listener_capture_ = false;
+    extension_registry_observer_.Remove(
+        extensions::ExtensionRegistry::Get(browser_context));
+  }
+}
+
+void AccessibilityManager::OnShutdown(extensions::ExtensionRegistry* registry) {
+  extension_registry_observer_.Remove(registry);
+}
+
 void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
   // Do any setup work needed immediately after ChromeVox actually loads.
   ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_ENABLED);
@@ -1170,9 +1193,9 @@ void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
         extensions::events::ACCESSIBILITY_PRIVATE_ON_INTRODUCE_CHROME_VOX,
         extensions::api::accessibility_private::OnIntroduceChromeVox::
             kEventName,
-        event_args.Pass()));
+        std::move(event_args)));
     event_router->DispatchEventWithLazyListener(
-        extension_misc::kChromeVoxExtensionId, event.Pass());
+        extension_misc::kChromeVoxExtensionId, std::move(event));
   }
 
   should_speak_chrome_vox_announcements_on_user_screen_ =
@@ -1203,6 +1226,17 @@ void AccessibilityManager::OnChromeVoxPanelClosing() {
 void AccessibilityManager::OnChromeVoxPanelDestroying() {
   chromevox_panel_widget_observer_.reset(nullptr);
   chromevox_panel_ = nullptr;
+}
+
+void AccessibilityManager::SetKeyboardListenerExtensionId(
+    const std::string& id,
+    content::BrowserContext* context) {
+  keyboard_listener_extension_id_ = id;
+
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(context);
+  if (!extension_registry_observer_.IsObserving(registry) && !id.empty())
+    extension_registry_observer_.Add(registry);
 }
 
 }  // namespace chromeos

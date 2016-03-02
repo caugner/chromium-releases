@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/settings/md_settings_ui.h"
 
+#include <stddef.h>
+
 #include <string>
 
 #include "chrome/browser/profiles/profile.h"
@@ -12,17 +14,23 @@
 #include "chrome/browser/ui/webui/settings/font_handler.h"
 #include "chrome/browser/ui/webui/settings/languages_handler.h"
 #include "chrome/browser/ui/webui/settings/md_settings_localized_strings_provider.h"
+#include "chrome/browser/ui/webui/settings/people_handler.h"
 #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
 #include "chrome/browser/ui/webui/settings/settings_clear_browsing_data_handler.h"
 #include "chrome/browser/ui/webui/settings/settings_default_browser_handler.h"
 #include "chrome/browser/ui/webui/settings/settings_startup_pages_handler.h"
-#include "chrome/browser/ui/webui/settings/sync_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/settings_resources.h"
 #include "grit/settings_resources_map.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/settings/chromeos/change_picture_handler.h"
+#else  // !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/settings/settings_manage_profile_handler.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace settings {
 
@@ -34,19 +42,26 @@ SettingsPageUIHandler::~SettingsPageUIHandler() {
 
 MdSettingsUI::MdSettingsUI(content::WebUI* web_ui)
     : content::WebUIController(web_ui) {
+  Profile* profile = Profile::FromWebUI(web_ui);
   AddSettingsPageUIHandler(new AppearanceHandler(web_ui));
   AddSettingsPageUIHandler(new ClearBrowsingDataHandler(web_ui));
   AddSettingsPageUIHandler(new DefaultBrowserHandler(web_ui));
   AddSettingsPageUIHandler(new DownloadsHandler());
   AddSettingsPageUIHandler(new FontHandler(web_ui));
   AddSettingsPageUIHandler(new LanguagesHandler(web_ui));
+  AddSettingsPageUIHandler(new PeopleHandler(profile));
   AddSettingsPageUIHandler(new StartupPagesHandler(web_ui));
-  AddSettingsPageUIHandler(new SyncHandler(Profile::FromWebUI(web_ui)));
+
+#if defined(OS_CHROMEOS)
+  AddSettingsPageUIHandler(new chromeos::settings::ChangePictureHandler());
+#else
+  AddSettingsPageUIHandler(new ManageProfileHandler(profile));
+#endif
 
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(chrome::kChromeUIMdSettingsHost);
 
-  AddSettingsPageUIHandler(new ResetSettingsHandler(html_source, web_ui));
+  AddSettingsPageUIHandler(ResetSettingsHandler::Create(html_source, profile));
 
   // Add all settings resources.
   for (size_t i = 0; i < kSettingsResourcesSize; ++i) {
@@ -54,7 +69,7 @@ MdSettingsUI::MdSettingsUI(content::WebUI* web_ui)
                                  kSettingsResources[i].value);
   }
 
-  AddLocalizedStrings(html_source, Profile::FromWebUI(web_ui));
+  AddLocalizedStrings(html_source, profile);
   html_source->SetDefaultResource(IDR_SETTINGS_SETTINGS_HTML);
 
   content::WebUIDataSource::Add(web_ui->GetWebContents()->GetBrowserContext(),

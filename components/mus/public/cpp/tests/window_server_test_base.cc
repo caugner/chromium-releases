@@ -11,7 +11,7 @@
 #include "components/mus/public/cpp/window.h"
 #include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/mus/public/cpp/window_tree_host_factory.h"
-#include "mojo/application/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 
 namespace mus {
 namespace {
@@ -63,8 +63,9 @@ bool WindowServerTestBase::QuitRunLoop() {
 void WindowServerTestBase::SetUp() {
   ApplicationTestBase::SetUp();
 
-  CreateSingleWindowTreeHost(application_impl(), this, &host_, nullptr,
-                             nullptr);
+  CreateSingleWindowTreeHost(application_impl(),
+                             mojom::WindowTreeHostClientPtr(), this, &host_,
+                             nullptr, nullptr);
 
   ASSERT_TRUE(DoRunLoopWithTimeout());  // RunLoop should be quit by OnEmbed().
   std::swap(window_manager_, most_recent_connection_);
@@ -87,6 +88,7 @@ bool WindowServerTestBase::ConfigureIncomingConnection(
 void WindowServerTestBase::OnEmbed(Window* root) {
   most_recent_connection_ = root->connection();
   EXPECT_TRUE(QuitRunLoop());
+  host_->AddActivationParent(root->id());
 }
 
 void WindowServerTestBase::OnConnectionLost(WindowTreeConnection* connection) {
@@ -97,7 +99,7 @@ void WindowServerTestBase::Create(
     mojo::ApplicationConnection* connection,
     mojo::InterfaceRequest<mojom::WindowTreeClient> request) {
   WindowTreeConnection::Create(
-      this, request.Pass(),
+      this, std::move(request),
       WindowTreeConnection::CreateType::DONT_WAIT_FOR_EMBED);
 }
 

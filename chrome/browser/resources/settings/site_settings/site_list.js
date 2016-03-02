@@ -47,12 +47,6 @@ Polymer({
     },
 
     /**
-     * The ID of the category this widget is displaying data for.
-     * See site_settings/constants.js for possible values.
-     */
-    category: Number,
-
-    /**
       * The type of category this widget is displaying data for. Normally
       * either ALLOW or BLOCK, representing which sites are allowed or blocked
       * respectively.
@@ -105,11 +99,46 @@ Polymer({
     },
   },
 
-  ready: function() {
+  observers: [
+    'initialize_(prefs.profile.content_settings.exceptions.*,' +
+        'category, categorySubtype)'
+  ],
+
+  /**
+   * One-time initialization routines for this class.
+   * @private
+   */
+  initialize_: function() {
     CrSettingsPrefs.initialized.then(function() {
       this.setUpActionMenu_();
-      this.populateList_();
+      this.ensureOpened_();
     }.bind(this));
+
+    this.populateList_();
+  },
+
+  /**
+   * Ensures the widget is |opened| when needed when displayed initially.
+   */
+  ensureOpened_: function() {
+    // Allowed list is always shown opened by default.
+    if (this.categorySubtype == settings.PermissionValues.ALLOW) {
+      this.$.category.opened = true;
+      return;
+    }
+
+    // Block list should only be shown opened if there is nothing to show in
+    // the allowed list.
+    var pref = this.getPref(
+        this.computeCategoryExceptionsPrefName(this.category));
+    var sites = pref.value;
+    for (var origin in sites) {
+      var site = /** @type {{setting: number}} */(sites[origin]);
+      if (site.setting == settings.PermissionValues.ALLOW)
+        return;
+    }
+
+    this.$.category.opened = true;
   },
 
   /**
@@ -143,7 +172,8 @@ Polymer({
         this.computeCategoryExceptionsPrefName(this.category));
     var sites = pref.value;
     for (var origin in sites) {
-      if (sites[origin].setting == this.categorySubtype) {
+      var site = /** @type {{setting: number}} */(sites[origin]);
+      if (site.setting == this.categorySubtype) {
         var tokens = origin.split(',');
         newList.push({url: tokens[0]});
       }
@@ -166,6 +196,7 @@ Polymer({
 
   /**
    * A handler for selecting a site (by clicking on the origin).
+   * @param {!{model: !{item: !{url: string}}}} event
    * @private
    */
   onOriginTap_: function(event) {
@@ -174,15 +205,26 @@ Polymer({
 
   /**
    * A handler for activating one of the menu action items.
+   * @param {!{model: !{item: !{url: string}},
+   *           target: !{selectedItems: !{textContent: string}}}} event
    * @private
    */
   onActionMenuIronSelect_: function(event) {
-    // TODO(finnur): Implement.
+    var origin = event.model.item.url;
+    var action = event.target.selectedItems[0].textContent;
+    if (action == this.i18n_.resetAction) {
+      this.resetCategoryPermissionForOrigin(origin, this.category);
+    } else {
+      var value = (action == this.i18n_.allowAction) ?
+          settings.PermissionValues.ALLOW :
+          settings.PermissionValues.BLOCK;
+      this.setCategoryPermissionForOrigin(origin, value, this.category);
+    }
   },
 
   /**
    * Returns the appropriate header value for display.
-   * @param {array<string>} siteList The list of all sites to display for this
+   * @param {Array<string>} siteList The list of all sites to display for this
    *     category subtype.
    * @param {boolean} toggleState The state of the global toggle for this
    *     category.
@@ -213,7 +255,7 @@ Polymer({
 
   /**
    * Returns whether to show the site list.
-   * @param {array} siteList The list of all sites to display for this category
+   * @param {Array} siteList The list of all sites to display for this category
    *     subtype.
    * @param {boolean} toggleState The state of the global toggle for this
    *     category.

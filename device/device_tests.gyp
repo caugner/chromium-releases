@@ -23,11 +23,13 @@
         'bluetooth/bluetooth.gyp:device_bluetooth',
         'bluetooth/bluetooth.gyp:device_bluetooth_mocks',
         'core/core.gyp:device_core',
+        'core/core.gyp:device_core_mocks',
         'devices_app/devices_app.gyp:devices_app_lib',
         'nfc/nfc.gyp:device_nfc',
         'usb/usb.gyp:device_usb',
         'usb/usb.gyp:device_usb_mocks',
         'hid/hid.gyp:device_hid',
+        'hid/hid.gyp:device_hid_mocks',
         'serial/serial.gyp:device_serial',
         'serial/serial.gyp:device_serial_test_util',
       ],
@@ -43,6 +45,7 @@
         'bluetooth/bluetooth_device_win_unittest.cc',
         'bluetooth/bluetooth_discovery_filter_unittest.cc',
         'bluetooth/bluetooth_gatt_characteristic_unittest.cc',
+        'bluetooth/bluetooth_gatt_descriptor_unittest.cc',
         'bluetooth/bluetooth_gatt_service_unittest.cc',
         'bluetooth/bluetooth_low_energy_win_unittest.cc',
         'bluetooth/bluetooth_service_record_win_unittest.cc',
@@ -77,7 +80,6 @@
         'test/test_device_client.cc',
         'test/test_device_client.h',
         'test/usb_test_gadget_impl.cc',
-        'usb/usb_context_unittest.cc',
         'usb/usb_descriptors_unittest.cc',
         'usb/usb_device_filter_unittest.cc',
         'usb/usb_device_handle_unittest.cc',
@@ -95,7 +97,7 @@
             'battery/battery_status_manager_linux_unittest.cc',
           ],
         }],
-        ['chromeos==1 or OS=="linux"', {
+        ['(chromeos==1 or OS=="linux") and use_dbus==1', {
           'dependencies': [
             '../build/linux/system.gyp:dbus',
             '../dbus/dbus.gyp:dbus',
@@ -111,11 +113,7 @@
         }],
         ['OS=="android"', {
           'dependencies!': [
-            '../tools/usb_gadget/usb_gadget.gyp:usb_gadget',
             'battery/battery.gyp:device_battery',
-            'devices_app/devices_app.gyp:devices_app_lib',
-            'usb/usb.gyp:device_usb',
-            'usb/usb.gyp:device_usb_mocks',
             'serial/serial.gyp:device_serial',
             'serial/serial.gyp:device_serial_test_util',
             'hid/hid.gyp:device_hid',
@@ -128,10 +126,10 @@
           'sources/': [
             ['exclude', '(^|/)hid'],
             ['exclude', '(^|/)serial'],
-            ['exclude', '(^|/)usb'],
           ],
           'sources!': [
             'battery/battery_status_service_unittest.cc',
+            'usb/usb_context_unittest.cc',
           ],
         }],
         ['OS=="mac"', {

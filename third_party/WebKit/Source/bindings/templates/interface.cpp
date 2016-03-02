@@ -55,7 +55,7 @@ static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCall
 
 {##############################################################################}
 {% block indexed_property_setter %}
-{% from 'conversions.cpp' import v8_value_to_local_cpp_value %}
+{% from 'utilities.cpp' import v8_value_to_local_cpp_value %}
 {% if indexed_property_setter and not indexed_property_setter.is_custom %}
 {% set setter = indexed_property_setter %}
 static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -223,7 +223,7 @@ static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::Prop
 
 {##############################################################################}
 {% block named_property_setter %}
-{% from 'conversions.cpp' import v8_value_to_local_cpp_value %}
+{% from 'utilities.cpp' import v8_value_to_local_cpp_value %}
 {% if named_property_setter and not named_property_setter.is_custom %}
 {% set setter = named_property_setter %}
 static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -450,13 +450,13 @@ static void {{cpp_class}}OriginSafeMethodSetter(v8::Local<v8::Name> name, v8::Lo
     {{cpp_class}}* impl = {{v8_class}}::toImpl(holder);
     v8::String::Utf8Value attributeName(name);
     ExceptionState exceptionState(ExceptionState::SetterContext, *attributeName, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessToFrame(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl->frame(), exceptionState)) {
+    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         exceptionState.throwIfNeeded();
         return;
     }
 
     {# The findInstanceInPrototypeChain() call above only returns a non-empty handle if info.This() is an Object. #}
-    V8HiddenValue::setHiddenValue(info.GetIsolate(), v8::Local<v8::Object>::Cast(info.This()), name.As<v8::String>(), v8Value);
+    V8HiddenValue::setHiddenValue(ScriptState::current(info.GetIsolate()), v8::Local<v8::Object>::Cast(info.This()), name.As<v8::String>(), v8Value);
 }
 
 static void {{cpp_class}}OriginSafeMethodSetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
@@ -535,7 +535,8 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
         {# Report full list of valid arities if gaps and above minimum #}
         {% if constructor_overloads.valid_arities %}
         if (info.Length() >= {{constructor_overloads.length}}) {
-            throwArityTypeError(exceptionState, "{{constructor_overloads.valid_arities}}", info.Length());
+            setArityTypeError(exceptionState, "{{constructor_overloads.valid_arities}}", info.Length());
+            exceptionState.throwIfNeeded();
             return;
         }
         {% endif %}
@@ -589,7 +590,7 @@ void {{v8_class}}::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>
 {
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     {% if measure_as %}
-    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{measure_as('Constructor')}});
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()), UseCounter::{{measure_as('Constructor')}});
     {% endif %}
     if (!info.IsConstructCall()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("{{interface_name}}"));
@@ -614,7 +615,7 @@ void {{v8_class}}::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>
 
 {##############################################################################}
 {% macro install_do_not_check_security_method(method, world_suffix, instance_template, prototype_template) %}
-{% from 'conversions.cpp' import property_location %}
+{% from 'utilities.cpp' import property_location %}
 {# Methods that are [DoNotCheckSecurity] are always readable, but if they are
    changed and then accessed from a different origin, we do not return the
    underlying value, but instead return a new copy of the original function.
@@ -624,11 +625,11 @@ void {{v8_class}}::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>
        (cpp_class, method.name, world_suffix) %}
 {% set setter_callback =
        '{0}V8Internal::{0}OriginSafeMethodSetterCallback'.format(cpp_class)
-       if not method.is_read_only else '0' %}
+       if not method.is_unforgeable else '0' %}
 {% if method.is_per_world_bindings %}
 {% set getter_callback_for_main_world = '%sForMainWorld' % getter_callback %}
 {% set setter_callback_for_main_world = '%sForMainWorld' % setter_callback
-       if not method.is_read_only else '0' %}
+       if not method.is_unforgeable else '0' %}
 {% else %}
 {% set getter_callback_for_main_world = '0' %}
 {% set setter_callback_for_main_world = '0' %}
@@ -877,8 +878,9 @@ void {{v8_class}}::installConditionallyEnabledProperties(v8::Local<v8::Object> i
 {% block prepare_prototype_and_interface_object %}
 {% from 'methods.cpp' import install_conditionally_enabled_methods with context %}
 {% if unscopeables or has_conditional_attributes_on_prototype or conditionally_enabled_methods %}
-void {{v8_class}}::preparePrototypeAndInterfaceObject(v8::Isolate* isolate, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
+void {{v8_class}}::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
+    v8::Isolate* isolate = context->GetIsolate();
 {% if unscopeables %}
     {{install_unscopeables() | indent}}
 {% endif %}
@@ -896,26 +898,25 @@ void {{v8_class}}::preparePrototypeAndInterfaceObject(v8::Isolate* isolate, v8::
 
 {##############################################################################}
 {% macro install_unscopeables() %}
-v8::Local<v8::Context> v8Context(prototypeObject->CreationContext());
 v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
 v8::Local<v8::Object> unscopeables;
-if (v8CallBoolean(prototypeObject->HasOwnProperty(v8Context, unscopablesSymbol)))
-    unscopeables = prototypeObject->Get(v8Context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
+if (v8CallBoolean(prototypeObject->HasOwnProperty(context, unscopablesSymbol)))
+    unscopeables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
 else
     unscopeables = v8::Object::New(isolate);
 {% for name, runtime_enabled_function in unscopeables %}
 {% filter runtime_enabled(runtime_enabled_function) %}
-unscopeables->CreateDataProperty(v8Context, v8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
+unscopeables->CreateDataProperty(context, v8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
 {% endfilter %}
 {% endfor %}
-prototypeObject->CreateDataProperty(v8Context, unscopablesSymbol, unscopeables).FromJust();
+prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopeables).FromJust();
 {% endmacro %}
 
 
 {##############################################################################}
 {% macro install_conditionally_enabled_attributes_on_prototype() %}
 {% from 'attributes.cpp' import attribute_configuration with context %}
-ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
+ExecutionContext* executionContext = toExecutionContext(context);
 v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
 {% for attribute in attributes if attribute.exposed_test and attribute.on_prototype %}
 {% filter exposed(attribute.exposed_test) %}

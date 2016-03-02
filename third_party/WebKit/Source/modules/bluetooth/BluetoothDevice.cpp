@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/bluetooth/BluetoothDevice.h"
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
@@ -68,11 +67,6 @@ unsigned BluetoothDevice::productVersion(bool& isNull)
 {
     isNull = false;
     return m_webDevice->productVersion;
-}
-
-bool BluetoothDevice::paired()
-{
-    return m_webDevice->paired;
 }
 
 Vector<String> BluetoothDevice::uuids()

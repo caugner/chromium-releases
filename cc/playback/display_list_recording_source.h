@@ -5,6 +5,9 @@
 #ifndef CC_PLAYBACK_DISPLAY_LIST_RECORDING_SOURCE_H_
 #define CC_PLAYBACK_DISPLAY_LIST_RECORDING_SOURCE_H_
 
+#include <stddef.h>
+
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/base/cc_export.h"
@@ -13,6 +16,11 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace cc {
+
+namespace proto {
+class DisplayListRecordingSource;
+}
+
 class ContentLayerClient;
 class DisplayItemList;
 class DisplayListRasterSource;
@@ -28,11 +36,15 @@ class CC_EXPORT DisplayListRecordingSource {
     RECORD_WITH_PAINTING_DISABLED,
     RECORD_WITH_CACHING_DISABLED,
     RECORD_WITH_CONSTRUCTION_DISABLED,
+    RECORD_WITH_SUBSEQUENCE_CACHING_DISABLED,
     RECORDING_MODE_COUNT,  // Must be the last entry.
   };
 
   DisplayListRecordingSource();
   virtual ~DisplayListRecordingSource();
+
+  void ToProtobuf(proto::DisplayListRecordingSource* proto) const;
+  void FromProtobuf(const proto::DisplayListRecordingSource& proto);
 
   bool UpdateAndExpandInvalidation(ContentLayerClient* painter,
                                    Region* invalidation,
@@ -52,13 +64,6 @@ class CC_EXPORT DisplayListRecordingSource {
       bool can_use_lcd_text) const;
   virtual bool IsSuitableForGpuRasterization() const;
 
-  // Returns true if the new recorded viewport exposes enough new area to be
-  // worth re-recording.
-  static bool ExposesEnoughNewArea(
-      const gfx::Rect& current_recorded_viewport,
-      const gfx::Rect& potential_new_recorded_viewport,
-      const gfx::Size& layer_size);
-
   gfx::Rect recorded_viewport() const { return recorded_viewport_; }
 
  protected:
@@ -73,12 +78,16 @@ class CC_EXPORT DisplayListRecordingSource {
   bool clear_canvas_with_debug_color_;
   SkColor solid_color_;
   SkColor background_color_;
-  int pixel_record_distance_;
 
   scoped_refptr<DisplayItemList> display_list_;
   size_t painter_reported_memory_usage_;
 
  private:
+  void UpdateInvalidationForNewViewport(const gfx::Rect& old_recorded_viewport,
+                                        const gfx::Rect& new_recorded_viewport,
+                                        Region* invalidation);
+  void FinishDisplayItemListUpdate();
+
   friend class DisplayListRasterSource;
 
   void DetermineIfSolidColor();

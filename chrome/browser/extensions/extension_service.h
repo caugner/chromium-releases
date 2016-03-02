@@ -13,6 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
@@ -24,7 +25,6 @@
 #include "extensions/browser/crx_file_info.h"
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/install_flag.h"
-#include "extensions/browser/management_policy.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
@@ -130,7 +130,11 @@ class ExtensionServiceInterface
   virtual void FinishDelayedInstallation(const std::string& extension_id) = 0;
 
   // Returns true if the extension with the given |extension_id| is enabled.
-  // This will return a valid answer even if the extension is not loaded yet.
+  // This will only return a valid answer for installed extensions (regardless
+  // of whether it is currently loaded or not).  Loaded extensions return true
+  // if they are currently loaded or terminated.  Unloaded extensions will
+  // return true if they are not blocked, disabled, blacklisted or uninstalled
+  // (for external extensions).
   virtual bool IsExtensionEnabled(const std::string& extension_id) const = 0;
 
   // Go through each extension and unload those that are not allowed to run by
@@ -336,13 +340,6 @@ class ExtensionService
   // Checks for delayed installation for all pending installs.
   void MaybeFinishDelayedInstallations();
 
-  // Promotes an ephemeral app to a regular installed app. Ephemeral apps
-  // are already installed in extension system (albiet transiently) and only
-  // need to be exposed in the UI. Set |is_from_sync| to true if the
-  // install was initiated via sync.
-  void PromoteEphemeralApp(
-      const extensions::Extension* extension, bool is_from_sync);
-
   // ExtensionHost of background page calls this method right after its render
   // view has been created.
   void DidCreateRenderViewForBackgroundPage(extensions::ExtensionHost* host);
@@ -447,7 +444,7 @@ class ExtensionService
   }
 
   void FinishInstallationForTest(const extensions::Extension* extension) {
-    FinishInstallation(extension, false /* not ephemeral */);
+    FinishInstallation(extension);
   }
 #endif
 
@@ -549,10 +546,8 @@ class ExtensionService
       const extensions::Extension* extension,
       extensions::UnloadedExtensionInfo::Reason reason);
 
-  // Common helper to finish installing the given extension. |was_ephemeral|
-  // should be true if the extension was previously installed and ephemeral.
-  void FinishInstallation(const extensions::Extension* extension,
-                          bool was_ephemeral);
+  // Common helper to finish installing the given extension.
+  void FinishInstallation(const extensions::Extension* extension);
 
   // Disables the extension if the privilege level has increased
   // (e.g., due to an upgrade).
@@ -730,8 +725,6 @@ class ExtensionService
 
   scoped_ptr<extensions::ExtensionActionStorageManager>
       extension_action_storage_manager_;
-  scoped_ptr<extensions::ManagementPolicy::Provider>
-      shared_module_policy_provider_;
 
   // The SharedModuleService used to check for import dependencies.
   scoped_ptr<extensions::SharedModuleService> shared_module_service_;

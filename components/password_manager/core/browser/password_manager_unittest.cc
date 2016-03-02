@@ -5,9 +5,11 @@
 #include "components/password_manager/core/browser/password_manager.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -18,6 +20,7 @@
 #include "components/password_manager/core/browser/statistics_table.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -45,14 +48,19 @@ class MockStoreResultFilter : public CredentialsFilter {
   ScopedVector<autofill::PasswordForm> FilterResults(
       ScopedVector<autofill::PasswordForm> results) const override {
     FilterResultsPtr(&results);
-    return results.Pass();
+    return results;
   }
 };
 
 class MockPasswordManagerClient : public StubPasswordManagerClient {
  public:
   MockPasswordManagerClient() {
-    ON_CALL(*this, GetStoreResultFilter()).WillByDefault(Return(&filter_));
+    EXPECT_CALL(*this, GetStoreResultFilter())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(&filter_));
+    EXPECT_CALL(*this, IsUpdatePasswordUIEnabled())
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(true));
     ON_CALL(filter_, ShouldSave(_)).WillByDefault(Return(true));
   }
 
@@ -66,6 +74,7 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   MOCK_METHOD0(AutomaticPasswordSaveIndicator, void());
   MOCK_METHOD0(GetPrefs, PrefService*());
   MOCK_METHOD0(GetDriver, PasswordManagerDriver*());
+  MOCK_CONST_METHOD0(IsUpdatePasswordUIEnabled, bool());
   MOCK_CONST_METHOD0(GetStoreResultFilter, const CredentialsFilter*());
 
   // Workaround for scoped_ptr<> lacking a copy constructor.
@@ -99,7 +108,7 @@ class MockPasswordManagerDriver : public StubPasswordManagerDriver {
 ACTION_P(InvokeConsumer, form) {
   ScopedVector<PasswordForm> result;
   result.push_back(make_scoped_ptr(new PasswordForm(form)));
-  arg0->OnGetPasswordStoreResults(result.Pass());
+  arg0->OnGetPasswordStoreResults(std::move(result));
 }
 
 ACTION(InvokeEmptyConsumerWithForms) {
@@ -135,7 +144,7 @@ class PasswordManagerTest : public testing::Test {
   }
 
   void TearDown() override {
-    store_->Shutdown();
+    store_->ShutdownOnUIThread();
     store_ = nullptr;
   }
 
@@ -158,6 +167,16 @@ class PasswordManagerTest : public testing::Test {
     form.new_password_element.swap(form.password_element);
     form.new_password_value.swap(form.password_value);
     return form;
+  }
+
+  PasswordForm MakeAndroidCredential() {
+    PasswordForm android_form;
+    android_form.origin = GURL("android://hash@google.com");
+    android_form.signon_realm = "android://hash@google.com";
+    android_form.username_value = ASCIIToUTF16("google");
+    android_form.password_value = ASCIIToUTF16("password");
+    android_form.is_affiliation_based_match = true;
+    return android_form;
   }
 
   // Reproduction of the form present on twitter's login page.
@@ -1214,8 +1233,12 @@ TEST_F(PasswordManagerTest, PasswordGenerationUsernameChanged) {
 }
 
 TEST_F(PasswordManagerTest, ForceSavingPasswords) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnablePasswordForceSaving);
+  // Add the enable-password-force-saving feature.
+  base::FeatureList::ClearInstanceForTesting();
+  scoped_ptr<base::FeatureList> feature_list(new base::FeatureList);
+  feature_list->InitializeFromCommandLine(
+      password_manager::features::kEnablePasswordForceSaving.name, "");
+  base::FeatureList::SetInstance(std::move(feature_list));
   PasswordForm form(MakeSimpleForm());
 
   std::vector<PasswordForm> observed;
@@ -1241,8 +1264,12 @@ TEST_F(PasswordManagerTest, ForceSavingPasswords) {
 
 // Forcing Chrome to save an empty passwords should fail without a crash.
 TEST_F(PasswordManagerTest, ForceSavingPasswords_Empty) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnablePasswordForceSaving);
+  // Add the enable-password-force-saving feature.
+  base::FeatureList::ClearInstanceForTesting();
+  scoped_ptr<base::FeatureList> feature_list(new base::FeatureList);
+  feature_list->InitializeFromCommandLine(
+      password_manager::features::kEnablePasswordForceSaving.name, "");
+  base::FeatureList::SetInstance(std::move(feature_list));
   PasswordForm empty_password_form;
 
   std::vector<PasswordForm> observed;
@@ -1279,24 +1306,18 @@ TEST_F(PasswordManagerTest, UpdateFormManagers) {
 }
 
 TEST_F(PasswordManagerTest, AutofillingOfAffiliatedCredentials) {
-  PasswordForm form(MakeSimpleForm());
-  std::vector<PasswordForm> observed;
-  observed.push_back(form);
-
-  PasswordForm android_form;
-  android_form.origin = GURL("android://hash@google.com");
-  android_form.signon_realm = "android://hash@google.com";
-  android_form.username_value = ASCIIToUTF16("google");
-  android_form.password_value = ASCIIToUTF16("password");
-  android_form.is_affiliation_based_match = true;
+  PasswordForm android_form(MakeAndroidCredential());
+  PasswordForm observed_form(MakeSimpleForm());
+  std::vector<PasswordForm> observed_forms;
+  observed_forms.push_back(observed_form);
 
   autofill::PasswordFormFillData form_data;
   EXPECT_CALL(driver_, FillPasswordForm(_)).WillOnce(SaveArg<0>(&form_data));
   EXPECT_CALL(*store_, GetLogins(_, _, _))
       .WillOnce(WithArg<2>(InvokeConsumer(android_form)));
-  manager()->OnPasswordFormsParsed(&driver_, observed);
-  observed.clear();
-  manager()->OnPasswordFormsRendered(&driver_, observed, true);
+  manager()->OnPasswordFormsParsed(&driver_, observed_forms);
+  observed_forms.clear();
+  manager()->OnPasswordFormsRendered(&driver_, observed_forms, true);
 
   EXPECT_EQ(android_form.username_value, form_data.username_field.value);
   EXPECT_EQ(android_form.password_value, form_data.password_field.value);
@@ -1306,18 +1327,68 @@ TEST_F(PasswordManagerTest, AutofillingOfAffiliatedCredentials) {
   EXPECT_CALL(client_, IsSavingAndFillingEnabledForCurrentPage())
       .WillRepeatedly(Return(true));
 
-  PasswordForm filled_form(form);
+  PasswordForm filled_form(observed_form);
   filled_form.username_value = android_form.username_value;
   filled_form.password_value = android_form.password_value;
   OnPasswordFormSubmitted(filled_form);
 
-  observed.clear();
-  EXPECT_CALL(*store_, UpdateLogin(_));
+  PasswordForm saved_form;
+  EXPECT_CALL(*store_, UpdateLogin(_)).WillOnce(SaveArg<0>(&saved_form));
   EXPECT_CALL(client_, PromptUserToSaveOrUpdatePasswordPtr(_, _)).Times(0);
   EXPECT_CALL(*store_, AddLogin(_)).Times(0);
   EXPECT_CALL(*store_, UpdateLoginWithPrimaryKey(_, _)).Times(0);
-  manager()->OnPasswordFormsParsed(&driver_, observed);
-  manager()->OnPasswordFormsRendered(&driver_, observed, true);
+
+  observed_forms.clear();
+  manager()->OnPasswordFormsParsed(&driver_, observed_forms);
+  manager()->OnPasswordFormsRendered(&driver_, observed_forms, true);
+  EXPECT_THAT(saved_form, FormMatches(android_form));
+}
+
+// If the manager fills a credential originally saved from an affiliated Android
+// application, and the user overwrites the password, they should be prompted if
+// they want to update.  If so, the Android credential itself should be updated.
+TEST_F(PasswordManagerTest, UpdatePasswordOfAffiliatedCredential) {
+  PasswordForm android_form(MakeAndroidCredential());
+  PasswordForm observed_form(MakeSimpleForm());
+  std::vector<PasswordForm> observed_forms;
+  observed_forms.push_back(observed_form);
+
+  autofill::PasswordFormFillData form_data;
+  EXPECT_CALL(driver_, FillPasswordForm(_)).WillOnce(SaveArg<0>(&form_data));
+  EXPECT_CALL(*store_, GetLogins(_, _, _))
+      .WillOnce(WithArg<2>(InvokeConsumer(android_form)));
+  manager()->OnPasswordFormsParsed(&driver_, observed_forms);
+  observed_forms.clear();
+  manager()->OnPasswordFormsRendered(&driver_, observed_forms, true);
+
+  EXPECT_CALL(client_, IsSavingAndFillingEnabledForCurrentPage())
+      .WillRepeatedly(Return(true));
+
+  PasswordForm filled_form(observed_form);
+  filled_form.username_value = android_form.username_value;
+  filled_form.password_value = ASCIIToUTF16("new_password");
+  OnPasswordFormSubmitted(filled_form);
+
+  scoped_ptr<PasswordFormManager> form_manager_to_save;
+  EXPECT_CALL(client_,
+              PromptUserToSaveOrUpdatePasswordPtr(
+                  _, CredentialSourceType::CREDENTIAL_SOURCE_PASSWORD_MANAGER))
+      .WillOnce(WithArg<0>(SaveToScopedPtr(&form_manager_to_save)));
+
+  observed_forms.clear();
+  manager()->OnPasswordFormsParsed(&driver_, observed_forms);
+  manager()->OnPasswordFormsRendered(&driver_, observed_forms, true);
+
+  PasswordForm saved_form;
+  EXPECT_CALL(*store_, AddLogin(_)).Times(0);
+  EXPECT_CALL(*store_, UpdateLoginWithPrimaryKey(_, _)).Times(0);
+  EXPECT_CALL(*store_, UpdateLogin(_)).WillOnce(SaveArg<0>(&saved_form));
+  ASSERT_TRUE(form_manager_to_save);
+  form_manager_to_save->Save();
+
+  PasswordForm expected_form(android_form);
+  expected_form.password_value = filled_form.password_value;
+  EXPECT_THAT(saved_form, FormMatches(expected_form));
 }
 
 }  // namespace password_manager

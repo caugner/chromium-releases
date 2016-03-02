@@ -102,6 +102,7 @@ class TestFileMetadataMatches(unittest.TestCase):
 
 class TestAndroidProfilingHelper(unittest.TestCase):
 
+  @decorators.Enabled('linux')
   def testGetRequiredLibrariesForPerfProfile(self):
     perf_output = os.path.join(
         util.GetUnittestDataDir(), 'sample_perf_report_output.txt')
@@ -164,13 +165,13 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
 
   def setUp(self):
     super(TestAndroidProfilingHelperTabTestCase, self).setUp()
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     browser_backend = self._browser._browser_backend
     self._device = browser_backend.device()
 
   @decorators.Enabled('android')
   def testCreateSymFs(self):
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     browser_pid = self._browser._browser_backend.pid
     pids = ([browser_pid] +
         self._browser._platform_backend.GetChildPids(browser_pid))

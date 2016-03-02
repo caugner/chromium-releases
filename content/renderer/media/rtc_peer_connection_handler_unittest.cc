@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include <string>
 #include <vector>
 
@@ -289,8 +291,7 @@ class RTCPeerConnectionHandlerTest : public ::testing::Test {
     blink::WebMediaStream local_stream;
     local_stream.initialize(base::UTF8ToUTF16(stream_label), audio_tracks,
                             video_tracks);
-    local_stream.setExtraData(
-        new MediaStream(local_stream));
+    local_stream.setExtraData(new MediaStream());
     return local_stream;
   }
 

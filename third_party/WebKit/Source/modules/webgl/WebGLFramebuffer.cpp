@@ -23,8 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "modules/webgl/WebGLFramebuffer.h"
 
 #include "modules/webgl/WebGLRenderbuffer.h"
@@ -48,8 +46,10 @@ private:
 
     GLsizei width() const override;
     GLsizei height() const override;
+    GLsizei depth() const override;
     GLenum format() const override;
     GLenum type() const override;
+    bool isCubeComplete() const override;
     WebGLSharedObject* object() const override;
     bool isSharedObject(WebGLSharedObject*) const override;
     bool valid() const override;
@@ -84,6 +84,11 @@ GLsizei WebGLRenderbufferAttachment::width() const
 GLsizei WebGLRenderbufferAttachment::height() const
 {
     return m_renderbuffer->height();
+}
+
+GLsizei WebGLRenderbufferAttachment::depth() const
+{
+    return 1;
 }
 
 GLenum WebGLRenderbufferAttachment::format() const
@@ -140,8 +145,13 @@ void WebGLRenderbufferAttachment::unattach(WebGraphicsContext3D* context, GLenum
 
 GLenum WebGLRenderbufferAttachment::type() const
 {
-    notImplemented();
-    return 0;
+    return WebGLTexture::getValidTypeForInternalFormat(m_renderbuffer->internalFormat());
+}
+
+bool WebGLRenderbufferAttachment::isCubeComplete() const
+{
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
 class WebGLTextureAttachment final : public WebGLFramebuffer::WebGLAttachment {
@@ -156,8 +166,10 @@ private:
 
     GLsizei width() const override;
     GLsizei height() const override;
+    GLsizei depth() const override;
     GLenum format() const override;
     GLenum type() const override;
+    bool isCubeComplete() const override;
     WebGLSharedObject* object() const override;
     bool isSharedObject(WebGLSharedObject*) const override;
     bool valid() const override;
@@ -198,6 +210,11 @@ GLsizei WebGLTextureAttachment::width() const
 GLsizei WebGLTextureAttachment::height() const
 {
     return m_texture->getHeight(m_target, m_level);
+}
+
+GLsizei WebGLTextureAttachment::depth() const
+{
+    return m_texture->getDepth(m_target, m_level);
 }
 
 GLenum WebGLTextureAttachment::format() const
@@ -255,7 +272,12 @@ GLenum WebGLTextureAttachment::type() const
     return m_texture->getType(m_target, m_level);
 }
 
-bool isColorRenderable(GLenum internalformat)
+bool WebGLTextureAttachment::isCubeComplete() const
+{
+    return m_texture->isCubeComplete();
+}
+
+bool isColorRenderable(GLenum internalformat, bool includesFloat)
 {
     switch (internalformat) {
     case GL_RGB:
@@ -290,6 +312,14 @@ bool isColorRenderable(GLenum internalformat)
     case GL_RGBA32UI:
     case GL_RGBA32I:
         return true;
+    case GL_R16F:
+    case GL_RG16F:
+    case GL_RGBA16F:
+    case GL_R32F:
+    case GL_RG32F:
+    case GL_RGBA32F:
+    case GL_R11F_G11F_B10F:
+        return includesFloat;
     default:
         return false;
     }
@@ -432,7 +462,7 @@ bool WebGLFramebuffer::isAttachmentComplete(WebGLAttachment* attachedObject, GLe
         break;
     default:
         ASSERT(attachment == GL_COLOR_ATTACHMENT0 || (attachment > GL_COLOR_ATTACHMENT0 && attachment < static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + context()->maxColorAttachments())));
-        if (!isColorRenderable(internalformat)) {
+        if (!isColorRenderable(internalformat, context()->extensionEnabled(EXTColorBufferFloatName))) {
             *reason = "the internalformat of the attached image is not color-renderable";
             return false;
         }
@@ -443,6 +473,12 @@ bool WebGLFramebuffer::isAttachmentComplete(WebGLAttachment* attachedObject, GLe
         *reason = "attachment has a 0 dimension";
         return false;
     }
+
+    if (attachedObject->object()->isTexture() && !attachedObject->isCubeComplete()) {
+        *reason = "attachment is not cube complete";
+        return false;
+    }
+
     return true;
 }
 
@@ -515,7 +551,7 @@ GLenum WebGLFramebuffer::colorBufferFormat() const
 GLenum WebGLFramebuffer::checkStatus(const char** reason) const
 {
     unsigned count = 0;
-    GLsizei width = 0, height = 0;
+    GLsizei width = 0, height = 0, depth = 0;
     WebGLAttachment* depthAttachment = nullptr;
     WebGLAttachment* stencilAttachment = nullptr;
     WebGLAttachment* depthStencilAttachment = nullptr;
@@ -543,15 +579,18 @@ GLenum WebGLFramebuffer::checkStatus(const char** reason) const
             depthStencilAttachment = attachment;
             break;
         }
-        if (!isWebGL2OrHigher) {
-            if (!count) {
-                width = attachment->width();
-                height = attachment->height();
-            } else {
-                if (width != attachment->width() || height != attachment->height()) {
-                    *reason = "attachments do not have the same dimensions";
-                    return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-                }
+        // Note: In GLES 3, images for a framebuffer need not to have the same dimensions to be framebuffer complete.
+        // However, in Direct3D 11, on top of which OpenGL ES 3 behavior is emulated in Windows, all render targets
+        // must have the same size in all dimensions. In order to have consistent WebGL 2 behaviors across platforms,
+        // we generate FRAMEBUFFER_INCOMPLETE_DIMENSIONS in this situation.
+        if (!count) {
+            width = attachment->width();
+            height = attachment->height();
+            depth = attachment->depth();
+        } else {
+            if (width != attachment->width() || height != attachment->height() || depth != attachment->depth()) {
+                *reason = "attachments do not have the same dimensions";
+                return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
             }
         }
         ++count;

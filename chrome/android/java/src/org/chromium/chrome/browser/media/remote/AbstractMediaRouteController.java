@@ -8,6 +8,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.support.v7.media.MediaControlIntent;
 import android.support.v7.media.MediaItemStatus;
 import android.support.v7.media.MediaRouteSelector;
@@ -94,6 +95,10 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
      * selected route.
      */
     private class DeviceSelectionCallback extends MediaRouter.Callback {
+        // Note that this doesn't use onRouteSelected, but instead casting is started directly
+        // by the selection dialog. It has to be done that way, since selecting the current route
+        // on a new video doesn't call onRouteSelected.
+
         private Runnable mConnectionFailureNotifier = new Runnable() {
                 @Override
             public void run() {
@@ -140,11 +145,6 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
         }
 
         @Override
-        public void onRouteSelected(MediaRouter router, RouteInfo route) {
-            onRouteSelectedEvent(router, route);
-        }
-
-        @Override
         public void onRouteUnselected(MediaRouter router, RouteInfo route) {
             onRouteUnselectedEvent(router, route);
             if (getCurrentRoute() != null && !getCurrentRoute().isDefault()
@@ -157,8 +157,8 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
     }
 
     /** Number of ms to wait for reconnection, after which we call the failure callbacks. */
-    protected static final int CONNECTION_FAILURE_NOTIFICATION_DELAY_MS = 10000;
-    private static final int END_OF_VIDEO_THRESHOLD_MS = 500;
+    protected static final long CONNECTION_FAILURE_NOTIFICATION_DELAY_MS = 10000L;
+    private static final long END_OF_VIDEO_THRESHOLD_MS = 500L;
     private static final String TAG = "AbstractMediaRouteController";
     private final Set<MediaStateListener> mAvailableRouteListeners;
     private final Context mContext;
@@ -184,6 +184,9 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
     private boolean mRoutesAvailable = false;
     private final Set<UiListener> mUiListeners;
     private boolean mWatchingRouteSelection = false;
+
+    private long mMediaElementAttachedTimestampMs = 0;
+    private long mMediaElementDetachedTimestampMs = 0;
 
     protected AbstractMediaRouteController() {
 
@@ -310,7 +313,7 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
         return mUiListeners;
     }
 
-    private final boolean isAtEndOfVideo(int positionMs, int videoLengthMs) {
+    private final boolean isAtEndOfVideo(long positionMs, long videoLengthMs) {
         return videoLengthMs - positionMs < END_OF_VIDEO_THRESHOLD_MS && videoLengthMs > 0;
     }
 
@@ -375,12 +378,21 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
 
     protected abstract void onRouteAddedEvent(MediaRouter router, RouteInfo route);
 
-    protected abstract void onRouteSelectedEvent(MediaRouter router, RouteInfo route);
+    // TODO: Merge with onRouteSelected(). Needs two sided patch for downstream implementations
+    protected void onRouteSelectedEvent(MediaRouter router, RouteInfo route) {
+    }
+
+    @Override
+    public void onRouteSelected(MediaStateListener player, MediaRouter router, RouteInfo route) {
+        if (mMediaStateListener != null) mMediaStateListener.onCastStopping();
+        setMediaStateListener(player);
+        onRouteSelectedEvent(router, route);
+    }
 
     protected abstract void onRouteUnselectedEvent(MediaRouter router, RouteInfo route);
 
     @Override
-    public void onSeek(int position) {
+    public void onSeek(long position) {
         seekTo(position);
     }
 
@@ -392,6 +404,33 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
     @Override
     public void prepareMediaRoute() {
         startWatchingRouteSelection();
+    }
+
+    @Override
+    public void release() {
+        recordEndOfSessionUMA();
+    }
+
+    private void recordEndOfSessionUMA() {
+        long remotePlaybackStoppedTimestampMs = SystemClock.uptimeMillis();
+
+        // There was no media element ever...
+        if (mMediaElementAttachedTimestampMs == 0) return;
+
+        long remotePlaybackIntervalMs =
+                remotePlaybackStoppedTimestampMs - mMediaElementAttachedTimestampMs;
+
+        if (mMediaElementDetachedTimestampMs == 0) {
+            mMediaElementDetachedTimestampMs = remotePlaybackStoppedTimestampMs;
+        }
+
+        int noElementRemotePlaybackTimePercentage =
+                (int) ((remotePlaybackStoppedTimestampMs - mMediaElementDetachedTimestampMs) * 100
+                        / remotePlaybackIntervalMs);
+        RecordCastAction.recordRemoteSessionTimeWithoutMediaElementPercentage(
+                noElementRemotePlaybackTimePercentage);
+        mMediaElementAttachedTimestampMs = 0;
+        mMediaElementDetachedTimestampMs = 0;
     }
 
     protected final void registerRoute(RouteInfo route) {
@@ -450,6 +489,17 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
 
     @Override
     public void setMediaStateListener(MediaStateListener mediaStateListener) {
+        if (mMediaStateListener != null && mediaStateListener == null
+                    && mMediaElementAttachedTimestampMs != 0) {
+            mMediaElementDetachedTimestampMs = SystemClock.uptimeMillis();
+        } else if (mMediaStateListener == null && mediaStateListener != null) {
+            // We're switching the videos so let's record the UMA for the previous one.
+            if (mMediaElementDetachedTimestampMs != 0) recordEndOfSessionUMA();
+
+            mMediaElementAttachedTimestampMs = SystemClock.uptimeMillis();
+            mMediaElementDetachedTimestampMs = 0;
+        }
+
         mMediaStateListener = mediaStateListener;
     }
 
@@ -620,17 +670,4 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
      * @param cookies
      */
     public void setDataSource(Uri uri, String cookies) {};
-
-    @Override
-    public boolean playerTakesOverCastDevice(MediaStateListener mediaStateListener) {
-        // Check if this MediaRouteControler is casting something.
-        if (!isBeingCast()) return false;
-        // Check if we want to cast the new video
-        if (!canCastMedia()) return false;
-        // Take over the cast device
-        if (mMediaStateListener != null) mMediaStateListener.onCastStopping();
-        mMediaStateListener = mediaStateListener;
-        startCastingVideo(mCurrentRoute);
-        return true;
-    }
 }

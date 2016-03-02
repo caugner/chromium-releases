@@ -5,6 +5,9 @@
 #ifndef MANDOLINE_UI_DESKTOP_UI_BROWSER_WINDOW_H_
 #define MANDOLINE_UI_DESKTOP_UI_BROWSER_WINDOW_H_
 
+#include <stdint.h>
+
+#include "base/macros.h"
 #include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/mus/public/cpp/window_tree_delegate.h"
 #include "components/mus/public/interfaces/window_tree_host.mojom.h"
@@ -13,8 +16,8 @@
 #include "mandoline/ui/desktop_ui/find_bar_delegate.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/omnibox.mojom.h"
 #include "mandoline/ui/desktop_ui/public/interfaces/view_embedder.mojom.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 #include "url/gurl.h"
 
 namespace mojo {

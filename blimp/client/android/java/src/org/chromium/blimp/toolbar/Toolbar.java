@@ -16,12 +16,13 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
 import org.chromium.blimp.R;
+import org.chromium.blimp.session.BlimpClientSession;
 
 /**
  * A {@link View} that visually represents the Blimp toolbar, which lets users issue navigation
  * commands and displays relevant navigation UI.
  */
-@JNINamespace("blimp")
+@JNINamespace("blimp::client")
 public class Toolbar extends LinearLayout implements UrlBar.UrlBarObserver,
         View.OnClickListener {
     private long mNativeToolbarPtr;
@@ -47,11 +48,13 @@ public class Toolbar extends LinearLayout implements UrlBar.UrlBarObserver,
     /**
      * To be called when the native library is loaded so that this class can initialize its native
      * components.
+     * @param blimpClientSession The {@link BlimpClientSession} that contains the content-lite
+     *                           features required by the native components of the Toolbar.
      */
-    public void initialize() {
+    public void initialize(BlimpClientSession blimpClientSession) {
         assert mNativeToolbarPtr == 0;
 
-        mNativeToolbarPtr = nativeInit();
+        mNativeToolbarPtr = nativeInit(blimpClientSession);
         sendUrlTextInternal(mUrlToLoad);
     }
 
@@ -83,6 +86,14 @@ public class Toolbar extends LinearLayout implements UrlBar.UrlBarObserver,
     public boolean onBackPressed() {
         if (mNativeToolbarPtr == 0) return false;
         return nativeOnBackPressed(mNativeToolbarPtr);
+    }
+
+    /**
+     * To be called when the user triggers a forward navigation action.
+     */
+    public void onForwardPressed() {
+        if (mNativeToolbarPtr == 0) return;
+        nativeOnForwardPressed(mNativeToolbarPtr);
     }
 
     // View overrides.
@@ -124,14 +135,29 @@ public class Toolbar extends LinearLayout implements UrlBar.UrlBarObserver,
 
     // Methods that are called by native via JNI.
     @CalledByNative
-    private void onNavigationStateChanged(String url, Bitmap favicon, String title) {
+    private void onEngineSentUrl(String url) {
         if (url != null) mUrlBar.setText(url);
-        // TODO(dtrainor): Add a UI for favicon and title data and tie it in here.
     }
 
-    private native long nativeInit();
+    @CalledByNative
+    private void onEngineSentFavicon(Bitmap favicon) {
+        // TODO(dtrainor): Add a UI for the favicon.
+    }
+
+    @CalledByNative
+    private void onEngineSentTitle(String title) {
+        // TODO(dtrainor): Add a UI for the title.
+    }
+
+    @CalledByNative
+    private void onEngineSentLoading(boolean loading) {
+        // TODO(dtrainor): Add a UI for the loading state.
+    }
+
+    private native long nativeInit(BlimpClientSession blimpClientSession);
     private native void nativeDestroy(long nativeToolbar);
     private native void nativeOnUrlTextEntered(long nativeToolbar, String text);
     private native void nativeOnReloadPressed(long nativeToolbar);
+    private native void nativeOnForwardPressed(long nativeToolbar);
     private native boolean nativeOnBackPressed(long nativeToolbar);
 }

@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/css/parser/CSSVariableParser.h"
 
 #include "core/css/CSSCustomPropertyDeclaration.h"
@@ -18,6 +17,11 @@ bool CSSVariableParser::isValidVariableName(const CSSParserToken& token)
 
     CSSParserString value = token.value();
     return value.length() >= 2 && value[0] == '-' && value[1] == '-';
+}
+
+bool CSSVariableParser::isValidVariableName(const String& string)
+{
+    return string.length() >= 2 && string[0] == '-' && string[1] == '-';
 }
 
 bool isValidVariableReference(CSSParserTokenRange);

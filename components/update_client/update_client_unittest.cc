@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -91,10 +94,10 @@ void OnDemandTester::CheckOnDemand(Events event, const std::string& id) {
 
 class FakePingManagerImpl : public PingManager {
  public:
-  explicit FakePingManagerImpl(const Configurator& config);
+  explicit FakePingManagerImpl(const scoped_refptr<Configurator>& config);
   ~FakePingManagerImpl() override;
 
-  void OnUpdateComplete(const CrxUpdateItem* item) override;
+  void SendPing(const CrxUpdateItem* item) override;
 
   const std::vector<CrxUpdateItem>& items() const;
 
@@ -103,14 +106,14 @@ class FakePingManagerImpl : public PingManager {
   DISALLOW_COPY_AND_ASSIGN(FakePingManagerImpl);
 };
 
-FakePingManagerImpl::FakePingManagerImpl(const Configurator& config)
-    : PingManager(config) {
-}
+FakePingManagerImpl::FakePingManagerImpl(
+    const scoped_refptr<Configurator>& config)
+    : PingManager(config) {}
 
 FakePingManagerImpl::~FakePingManagerImpl() {
 }
 
-void FakePingManagerImpl::OnUpdateComplete(const CrxUpdateItem* item) {
+void FakePingManagerImpl::SendPing(const CrxUpdateItem* item) {
   items_.push_back(*item);
 }
 
@@ -137,7 +140,6 @@ class UpdateClientTest : public testing::Test {
 
  protected:
   void RunThreads();
-  void StopWorkerPool();
 
   // Returns the full path to a test file.
   static base::FilePath TestFilePath(const char* file);
@@ -178,10 +180,6 @@ void UpdateClientTest::RunThreads() {
   runloop_.Run();
 }
 
-void UpdateClientTest::StopWorkerPool() {
-  worker_pool_->pool()->Shutdown();
-}
-
 base::FilePath UpdateClientTest::TestFilePath(const char* file) {
   base::FilePath path;
   PathService::Get(base::DIR_SOURCE_ROOT, &path);
@@ -218,7 +216,8 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -244,7 +243,7 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override { EXPECT_TRUE(false); }
@@ -252,14 +251,14 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override { EXPECT_TRUE(items().empty()); }
   };
 
-  scoped_ptr<PingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<PingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   // Verify that calling Update does not set ondemand.
@@ -287,8 +286,6 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the scenario where two CRXs are checked for updates. On CRX has
@@ -325,7 +322,8 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -382,7 +380,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -417,7 +415,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -430,9 +428,9 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
     }
   };
 
-  scoped_ptr<PingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<PingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -470,8 +468,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the update check for two CRXs scenario. Both CRXs have updates.
@@ -507,7 +503,8 @@ TEST_F(UpdateClientTest, TwoCrxUpdate) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -587,7 +584,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdate) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -642,7 +639,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdate) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -660,9 +657,9 @@ TEST_F(UpdateClientTest, TwoCrxUpdate) {
     }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -708,8 +705,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdate) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the scenario where there is a download timeout for the first
@@ -747,7 +742,8 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -827,7 +823,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -882,7 +878,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -900,9 +896,9 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
     }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -946,8 +942,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the differential update scenario for one CRX.
@@ -990,7 +984,8 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -1087,7 +1082,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -1142,7 +1137,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -1160,9 +1155,9 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
     }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -1212,8 +1207,6 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
   }
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the update scenario for one CRX where the CRX installer returns
@@ -1269,7 +1262,8 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -1326,7 +1320,7 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -1361,7 +1355,7 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -1374,9 +1368,9 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
     }
   };
 
-  scoped_ptr<PingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<PingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -1406,8 +1400,6 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the fallback from differential to full update scenario for one CRX.
@@ -1450,7 +1442,8 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -1547,7 +1540,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -1617,7 +1610,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -1636,9 +1629,9 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
     }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -1691,8 +1684,6 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
   }
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the queuing of update checks. In this scenario, two update checks are
@@ -1727,7 +1718,8 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -1753,7 +1745,7 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override { EXPECT_TRUE(false); }
@@ -1761,14 +1753,14 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override { EXPECT_TRUE(items().empty()); }
   };
 
-  scoped_ptr<PingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<PingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   MockObserver observer;
@@ -1797,8 +1789,6 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests the install of one CRX.
@@ -1827,7 +1817,8 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -1884,7 +1875,7 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override {
@@ -1923,7 +1914,7 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override {
       const auto& ping_items = items();
@@ -1936,9 +1927,9 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
     }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   // Verify that calling Install sets ondemand.
@@ -1970,8 +1961,6 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Tests that overlapping installs of the same CRX result in an error.
@@ -2011,7 +2000,8 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
 
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -2037,7 +2027,7 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override { EXPECT_TRUE(false); }
@@ -2045,14 +2035,14 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
 
   class FakePingManager : public FakePingManagerImpl {
    public:
-    explicit FakePingManager(const Configurator& config)
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
         : FakePingManagerImpl(config) {}
     ~FakePingManager() override { EXPECT_TRUE(items().empty()); }
   };
 
-  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(*config()));
+  scoped_ptr<FakePingManager> ping_manager(new FakePingManager(config()));
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), ping_manager.Pass(), &FakeUpdateChecker::Create,
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
       &FakeCrxDownloader::Create));
 
   // Verify that calling Install sets ondemand.
@@ -2084,8 +2074,6 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
   RunThreads();
 
   update_client->RemoveObserver(&observer);
-
-  StopWorkerPool();
 }
 
 // Make sure that we don't get any crashes when trying to update an empty list
@@ -2105,7 +2093,8 @@ TEST_F(UpdateClientTest, EmptyIdList) {
   };
   class FakeUpdateChecker : public UpdateChecker {
    public:
-    static scoped_ptr<UpdateChecker> Create(const Configurator& config) {
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
       return scoped_ptr<UpdateChecker>(new FakeUpdateChecker());
     }
 
@@ -2128,14 +2117,14 @@ TEST_F(UpdateClientTest, EmptyIdList) {
     }
 
    private:
-    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>().Pass()) {}
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
     ~FakeCrxDownloader() override {}
 
     void DoStartDownload(const GURL& url) override { EXPECT_TRUE(false); }
   };
 
   scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
-      config(), make_scoped_ptr(new FakePingManagerImpl(*config())),
+      config(), make_scoped_ptr(new FakePingManagerImpl(config())),
       &FakeUpdateChecker::Create, &FakeCrxDownloader::Create));
 
   std::vector<std::string> empty_id_list;
@@ -2144,8 +2133,62 @@ TEST_F(UpdateClientTest, EmptyIdList) {
       empty_id_list, base::Bind(&DataCallbackFake::Callback),
       base::Bind(&CompletionCallbackFake::Callback, runloop.QuitClosure()));
   runloop.Run();
+}
 
-  StopWorkerPool();
+TEST_F(UpdateClientTest, SendUninstallPing) {
+  class FakeUpdateChecker : public UpdateChecker {
+   public:
+    static scoped_ptr<UpdateChecker> Create(
+        const scoped_refptr<Configurator>& config) {
+      return nullptr;
+    }
+
+    bool CheckForUpdates(
+        const std::vector<CrxUpdateItem*>& items_to_check,
+        const std::string& additional_attributes,
+        const UpdateCheckCallback& update_check_callback) override {
+      return false;
+    }
+  };
+
+  class FakeCrxDownloader : public CrxDownloader {
+   public:
+    static scoped_ptr<CrxDownloader> Create(
+        bool is_background_download,
+        net::URLRequestContextGetter* context_getter,
+        const scoped_refptr<base::SequencedTaskRunner>&
+            url_fetcher_task_runner) {
+      return nullptr;
+    }
+
+   private:
+    FakeCrxDownloader() : CrxDownloader(scoped_ptr<CrxDownloader>()) {}
+    ~FakeCrxDownloader() override {}
+
+    void DoStartDownload(const GURL& url) override {}
+  };
+
+  class FakePingManager : public FakePingManagerImpl {
+   public:
+    explicit FakePingManager(const scoped_refptr<Configurator>& config)
+        : FakePingManagerImpl(config) {}
+    ~FakePingManager() override {
+      const auto& ping_items = items();
+      EXPECT_EQ(1U, ping_items.size());
+      EXPECT_EQ("jebgalgnebhfojomionfpkfelancnnkf", ping_items[0].id);
+      EXPECT_TRUE(base::Version("1.0").Equals(ping_items[0].previous_version));
+      EXPECT_TRUE(base::Version("0.0").Equals(ping_items[0].next_version));
+      EXPECT_EQ(10, ping_items[0].extra_code1);
+    }
+  };
+
+  scoped_ptr<PingManager> ping_manager(new FakePingManager(config()));
+  scoped_refptr<UpdateClient> update_client(new UpdateClientImpl(
+      config(), std::move(ping_manager), &FakeUpdateChecker::Create,
+      &FakeCrxDownloader::Create));
+
+  update_client->SendUninstallPing("jebgalgnebhfojomionfpkfelancnnkf",
+                                   base::Version("1.0"), 10);
 }
 
 }  // namespace update_client

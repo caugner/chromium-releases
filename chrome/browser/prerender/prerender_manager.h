@@ -5,10 +5,13 @@
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_MANAGER_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_MANAGER_H_
 
+#include <stdint.h>
+
 #include <list>
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
@@ -38,6 +41,10 @@ class DictionaryValue;
 
 namespace chrome {
 struct NavigateParams;
+}
+
+namespace chrome_browser_net {
+enum class NetworkPredictionStatus;
 }
 
 namespace content {
@@ -106,7 +113,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
       int process_id,
       int route_id,
       const GURL& url,
-      uint32 rel_types,
+      uint32_t rel_types,
       const content::Referrer& referrer,
       const gfx::Size& size);
 
@@ -268,14 +275,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Notification that a prerender has completed and its bytes should be
   // recorded.
-  void RecordNetworkBytes(Origin origin, bool used, int64 prerender_bytes);
-
-  // Returns whether prerendering is currently enabled for this manager.
-  bool IsEnabled() const;
+  void RecordNetworkBytes(Origin origin, bool used, int64_t prerender_bytes);
 
   // Add to the running tally of bytes transferred over the network for this
   // profile if prerendering is currently enabled.
-  void AddProfileNetworkBytesIfEnabled(int64 bytes);
+  void AddProfileNetworkBytesIfEnabled(int64_t bytes);
 
   // Registers a new ProcessHost performing a prerender. Called by
   // PrerenderContents.
@@ -379,6 +383,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   static const int kNavigationRecordWindowMs = 5000;
 
   void OnCancelPrerenderHandle(PrerenderData* prerender_data);
+
+  // Returns whether prerendering is currently enabled or the reason why it is
+  // disabled.
+  chrome_browser_net::NetworkPredictionStatus GetPredictionStatus() const;
 
   // Adds a prerender for |url| from |referrer|. The |origin| specifies how the
   // prerender was added. If |size| is empty, then
@@ -525,10 +533,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // The number of bytes transferred over the network for the profile this
   // PrerenderManager is attached to.
-  int64 profile_network_bytes_;
+  int64_t profile_network_bytes_;
 
   // The value of profile_network_bytes_ that was last recorded.
-  int64 last_recorded_profile_network_bytes_;
+  int64_t last_recorded_profile_network_bytes_;
 
   // Set of process hosts being prerendered.
   typedef std::set<content::RenderProcessHost*> PrerenderProcessSet;

@@ -19,19 +19,6 @@ function AudioPlayer(container) {
   this.metadataModel_ = MetadataModel.create(this.volumeManager_);
   this.selectedEntry_ = null;
   this.invalidTracks_ = {};
-
-  this.model_ = new AudioPlayerModel();
-  Object.observe(this.model_, function(changes) {
-    for (var i = 0; i < changes.length; i++) {
-      var change = changes[i];
-      if (change.name == 'expanded' &&
-          (change.type == 'add' || change.type == 'update')) {
-        this.onModelExpandedChanged(change.oldValue, change.object.expanded);
-        break;
-      }
-    }
-  }.bind(this));
-
   this.entries_ = [];
   this.currentTrackIndex_ = -1;
   this.playlistGeneration_ = 0;
@@ -48,10 +35,34 @@ function AudioPlayer(container) {
 
   this.player_ =
     /** @type {AudioPlayerElement} */ (document.querySelector('audio-player'));
-  // TODO(yoshiki): Move tracks into the model.
   this.player_.tracks = [];
-  this.model_.initialize(function() {
-    this.player_.model = this.model_;
+
+  // Restore the saved state from local storage, and update the local storage
+  // if the states are changed.
+  var STORAGE_PREFIX = 'audioplayer-';
+  var KEYS_TO_SAVE_STATES = ['shuffle', 'repeat', 'volume', 'expanded'];
+  var storageKeys = KEYS_TO_SAVE_STATES.map(a => STORAGE_PREFIX + a);
+  chrome.storage.local.get(storageKeys, function(results) {
+    // Update the UI by loaded state.
+    for (var storageKey in results) {
+      var key = storageKey.substr(STORAGE_PREFIX.length);
+      this.player_[key] = results[storageKey];
+    }
+    // Start listening to UI changes to write back the states to local storage.
+    for (var i = 0; i < KEYS_TO_SAVE_STATES.length; i++) {
+      this.player_.addEventListener(
+          KEYS_TO_SAVE_STATES[i] + '-changed',
+          function(storageKey, event) {
+            var objectToBeSaved = {};
+            objectToBeSaved[storageKey] = event.detail.value;
+            chrome.storage.local.set(objectToBeSaved);
+          }.bind(this, storageKeys[i]));
+    }
+  }.bind(this));
+
+  // Update the window size when UI's 'expanded' state is changed.
+  this.player_.addEventListener('expanded-changed', function(event) {
+    this.onExpandedChanged_(event.detail.value);
   }.bind(this));
 
   // Run asynchronously after an event of model change is delivered.
@@ -64,6 +75,20 @@ function AudioPlayer(container) {
       this.offlineString_ = strings['AUDIO_OFFLINE'];
       AudioPlayer.TrackInfo.DEFAULT_ARTIST =
           strings['AUDIO_PLAYER_DEFAULT_ARTIST'];
+      // Pass translated labels to the AudioPlayerElement.
+      this.player_.ariaLabels = {
+        shuffle: strings['AUDIO_PLAYER_SHUFFLE_BUTTON_LABEL'],
+        repeat: strings['AUDIO_PLAYER_REPEAT_BUTTON_LABEL'],
+        previous: strings['MEDIA_PLAYER_PREVIOUS_BUTTON_LABEL'],
+        play: strings['MEDIA_PLAYER_PLAY_BUTTON_LABEL'],
+        pause: strings['MEDIA_PLAYER_PAUSE_BUTTON_LABEL'],
+        next: strings['MEDIA_PLAYER_NEXT_BUTTON_LABEL'],
+        playList: strings['AUDIO_PLAYER_OPEN_PLAY_LIST_BUTTON_LABEL'],
+        seekSlider: strings['MEDIA_PLAYER_SEEK_SLIDER_LABEL'],
+        mute: strings['MEDIA_PLAYER_MUTE_BUTTON_LABEL'],
+        unmute: strings['MEDIA_PLAYER_UNMUTE_BUTTON_LABEL'],
+        volumeSlider: strings['MEDIA_PLAYER_VOLUME_SLIDER_LABEL']
+      };
     }.bind(this));
 
     this.volumeManager_.addEventListener('externally-unmounted',
@@ -183,6 +208,7 @@ AudioPlayer.prototype.loadMetadata_ = function(track) {
  */
 AudioPlayer.prototype.displayMetadata_ = function(track, metadata, opt_error) {
   this.player_.tracks[track].setMetadata(metadata, opt_error);
+  this.player_.notifyTrackMetadataUpdated(track);
 };
 
 /**
@@ -302,6 +328,10 @@ AudioPlayer.prototype.onResize_ = function(event) {
  */
 AudioPlayer.prototype.onKeyDown_ = function(event) {
   switch (util.getKeyModifiers(event) + event.keyIdentifier) {
+    case 'Ctrl-U+0057': // Ctrl+W => Close the player.
+      chrome.app.window.current().close();
+      break;
+
     // Handle debug shortcut keys.
     case 'Ctrl-Shift-U+0049': // Ctrl+Shift+I
       chrome.fileManagerPrivate.openInspector('normal');
@@ -328,18 +358,25 @@ AudioPlayer.prototype.onKeyDown_ = function(event) {
 AudioPlayer.HEADER_HEIGHT = 33;  // 32px + border 1px
 
 /**
+ * Top padding height of audio player in pixels.
+ * @type {number}
+ * @const
+ */
+AudioPlayer.TOP_PADDING_HEIGHT = 4;
+
+/**
  * Track height in pixels.
  * @type {number}
  * @const
  */
-AudioPlayer.TRACK_HEIGHT = 44;
+AudioPlayer.TRACK_HEIGHT = 48;
 
 /**
  * Controls bar height in pixels.
  * @type {number}
  * @const
  */
-AudioPlayer.CONTROLS_HEIGHT = 73;  // 72px + border 1px
+AudioPlayer.CONTROLS_HEIGHT = 96;
 
 /**
  * Default number of items in the expanded mode.
@@ -353,21 +390,22 @@ AudioPlayer.DEFAULT_EXPANDED_ITEMS = 5;
  * @type {number}
  * @const
  */
-AudioPlayer.EXPANDED_MODE_MIN_HEIGHT = AudioPlayer.CONTROLS_HEIGHT +
-                                       AudioPlayer.TRACK_HEIGHT * 2;
+AudioPlayer.EXPANDED_MODE_MIN_HEIGHT = AudioPlayer.TOP_PADDING_HEIGHT +
+                                       AudioPlayer.TRACK_HEIGHT * 2 +
+                                       AudioPlayer.CONTROLS_HEIGHT;
 
 /**
  * Invoked when the 'expanded' property in the model is changed.
- * @param {boolean} oldValue Old value.
  * @param {boolean} newValue New value.
+ * @private
  */
-AudioPlayer.prototype.onModelExpandedChanged = function(oldValue, newValue) {
+AudioPlayer.prototype.onExpandedChanged_ = function(newValue) {
   if (this.isExpanded_ !== null &&
       this.isExpanded_ === newValue)
     return;
 
   if (this.isExpanded_ && !newValue)
-    this.lastExpandedHeight_ = window.innerHeight;
+    this.lastExpandedInnerHeight_ = window.innerHeight;
 
   if (this.isExpanded_ !== newValue) {
     this.isExpanded_ = newValue;
@@ -383,26 +421,30 @@ AudioPlayer.prototype.onModelExpandedChanged = function(oldValue, newValue) {
  * @private
  */
 AudioPlayer.prototype.syncHeight_ = function() {
-  var targetHeight;
+  var targetInnerHeight;
 
   if (this.player_.expanded) {
     // Expanded.
-    if (!this.lastExpandedHeight_ ||
-        this.lastExpandedHeight_ < AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
+    if (!this.lastExpandedInnerHeight_ ||
+        this.lastExpandedInnerHeight_ < AudioPlayer.EXPANDED_MODE_MIN_HEIGHT) {
       var expandedListHeight =
           Math.min(this.entries_.length, AudioPlayer.DEFAULT_EXPANDED_ITEMS) *
               AudioPlayer.TRACK_HEIGHT;
-      targetHeight = AudioPlayer.CONTROLS_HEIGHT + expandedListHeight;
-      this.lastExpandedHeight_ = targetHeight;
+      targetInnerHeight = AudioPlayer.TOP_PADDING_HEIGHT +
+                          expandedListHeight +
+                          AudioPlayer.CONTROLS_HEIGHT;
+      this.lastExpandedInnerHeight_ = targetInnerHeight;
     } else {
-      targetHeight = this.lastExpandedHeight_;
+      targetInnerHeight = this.lastExpandedInnerHeight_;
     }
   } else {
     // Not expanded.
-    targetHeight = AudioPlayer.CONTROLS_HEIGHT + AudioPlayer.TRACK_HEIGHT;
+    targetInnerHeight = AudioPlayer.TOP_PADDING_HEIGHT +
+                        AudioPlayer.TRACK_HEIGHT +
+                        AudioPlayer.CONTROLS_HEIGHT;
   }
-
-  window.resizeTo(window.innerWidth, targetHeight + AudioPlayer.HEADER_HEIGHT);
+  window.resizeTo(window.outerWidth,
+                  AudioPlayer.HEADER_HEIGHT + targetInnerHeight);
 };
 
 /**

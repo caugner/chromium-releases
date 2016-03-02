@@ -161,6 +161,9 @@ CHAR-LIMIT guidelines:
       <message name="IDS_NO_THANKS" desc="Generic label to say no thanks for a feature. [CHAR-LIMIT=32]">
         No Thanks
       </message>
+      <message name="IDS_ENABLE" desc="Generic label to enable a feature. [CHAR-LIMIT=32]">
+        Enable
+      </message>
       <message name="IDS_NEXT" desc="Generic label for a button to advance to the next item. [CHAR-LIMIT=20]">
         Next
       </message>
@@ -410,7 +413,7 @@ To adjust your search term, long press to select. To refine your search, slide t
       <message name="IDS_DO_NOT_TRACK_DESCRIPTION" desc="Description for 'Do Not Track' preference">
         Enabling “Do Not Track” means that a request will be included with your browsing traffic. Any effect depends on whether a website responds to the request, and how the request is interpreted.
 
-For example, some websites may respond to this request by showing you ads that aren’t based on other websites you’ve visited. Many websites will still collect and use your browsing data - for example to improve security, to provide content, ads and recommendations on their websites, and to generate reporting statistics.
+For example, some websites may respond to this request by showing you ads that aren’t based on other websites you’ve visited. Many websites will still collect and use your browsing data — for example to improve security, to provide content, ads and recommendations, and to generate reporting statistics.
       </message>
       <message name="IDS_CLEAR_BROWSING_DATA_TITLE" desc="Button to Clear Browsing Data [CHAR-LIMIT=24]">
         Clear browsing data
@@ -492,6 +495,9 @@ Usage statistics include information such as preferences, button clicks, and mem
       </message>
       <message name="IDS_JAVASCRIPT_PERMISSION_TITLE" desc="Title of the permission to run javascript [CHAR-LIMIT=32]">
         JavaScript
+      </message>
+      <message name="IDS_KEYGEN_PERMISSION_TITLE" desc="Title of the permission to allow a form to perform client-side key generation [CHAR-LIMIT=32]">
+        Key generation
       </message>
       <message name="IDS_POPUP_PERMISSION_TITLE" desc="Title of the permission to display pop-up windows [CHAR-LIMIT=32]">
         Pop-ups
@@ -711,10 +717,16 @@ To obtain new licenses, connect to the internet and play your downloaded content
 
       <!-- Data Saver -->
       <message name="IDS_DATA_REDUCTION_LO_FI_SNACKBAR_MESSAGE" desc="Message shown when a page is opened in low fidelity mode when there is a slow unreliable connection.">
-        Slow connection detected.
+        Slow connection detected
       </message>
-      <message name="IDS_DATA_REDUCTION_LO_FI_SNACKBAR_ACTION" desc="Button to load images when page is opened in low fidelity mode when there is a slow unreliable connection.">
+      <message name="IDS_DATA_REDUCTION_LO_FI_SNACKBAR_ACTION" desc="Button to load original full-resolution images when a page is opened in low fidelity mode when there is a slow unreliable connection.">
         Load images
+      </message>
+      <message name="IDS_DATA_REDUCTION_LO_FI_PREVIEW_SNACKBAR_MESSAGE" desc="Message shown when a page is opened in preview mode when there is a slow unreliable connection.">
+        Slow connection
+      </message>
+      <message name="IDS_DATA_REDUCTION_LO_FI_PREVIEW_SNACKBAR_ACTION" desc="Button to load the original full-resolution website when a page is opened in preview mode.">
+        Load original
       </message>
       <message name="IDS_DATA_REDUCTION_TITLE" desc="Menu item for Data Saver, which allows users to save mobile data by compressing network traffic.">
         Data Saver
@@ -771,17 +783,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       </message>
       <message name="IDS_DATA_REDUCTION_ENABLED_TOAST" desc="Toast message displayed after the user enables Data Saver from the promo" >
         Data Saver is on. Manage it in Settings.
-      </message>
-
-      <!-- Data Use -->
-      <message name="IDS_DATA_USE_TRACKING_SNACKBAR_ACTION" desc="Button to learn more when data use tracking starts or ends.">
-        More
-      </message>
-      <message name="IDS_DATA_USE_TRACKING_ENDED_CHECKBOX_MESSAGE" desc="Message shown to opt out of seeing dialogs when data use tracking has ended.">
-        Don’t show this again
-      </message>
-      <message name="IDS_DATA_USE_TRACKING_ENDED_CONTINUE" desc="Continue button for the dialog shown when data use tracking has ended. When clicked, the page resumes loading.">
-        Continue
       </message>
 
       <!-- About Chrome preferences -->
@@ -843,8 +844,8 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_CONTENT_ALL" desc="Setting that permits child accounts to visit any websites.">
         Uncontrolled
       </message>
-      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_SAFE_SEARCH_TITLE" desc="Title of Google SafeSearch, which blocks inappropriate or explicit search results.">
-        SafeSearch
+      <message name="IDS_ACCOUNT_MANAGEMENT_CHILD_SAFE_SITES_TITLE" desc="Title of Google SafeSites, which blocks inappropriate or explicit websites.">
+        Google SafeSites filter
       </message>
       <message name="IDS_POWERED_BY_CHROME_MESSAGE" desc="A message indicating that the current page is running in Chrome.">
         Powered by Chrome
@@ -944,12 +945,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       </message>
       <message name="IDS_SIGNOUT_MANAGED_ACCOUNT_MESSAGE" desc="Message to display for sign out of Chrome dialog when the account has enterprise management, and all user data will be erased">
         You are signing out of an account managed by <ph name="DOMAIN_NAME">%1$s<ex>google.com</ex></ph>. This will delete the Chrome data stored on this device, but the data will remain in your Google Account.
-      </message>
-      <message name="IDS_FIRSTRUN_SIGNED_IN_TITLE" desc="Message informing the user that they are now signed in.">
-        You’re now signed in to Chrome.
-      </message>
-      <message name="IDS_FIRSTRUN_SIGNED_IN_DESCRIPTION" desc="Message informing the user what is being synced.">
-        Your open bookmarks, history, passwords, and more are being synced with your Google Account.
       </message>
 
       <!-- Sync strings -->
@@ -1171,10 +1166,10 @@ You are signing in with a managed account and giving its administrator control o
         Try again
       </message>
       <message name="IDS_TRANSLATE_OPTIONS_SOURCE_HINT" desc="Language drop down text for the source language. [CHAR-LIMIT=64]">
-        Page Language: <ph name="SOURCE_LANGUAGE">^1<ex>FRENCH</ex></ph>
+        Page Language:
       </message>
       <message name="IDS_TRANSLATE_OPTIONS_TARGET_HINT" desc="Language drop down text for the target language. [CHAR-LIMIT=64]">
-        Translation Language: <ph name="SOURCE_LANGUAGE">^1<ex>FRENCH</ex></ph>
+        Translation Language:
       </message>
       <message name="IDS_TRANSLATE_BUTTON_DONE" desc="Text to display on the translate infobar button to apply new languages. [CHAR-LIMIT=24]">
         Done
@@ -1281,19 +1276,11 @@ You are signing in with a managed account and giving its administrator control o
         Refreshing page
       </message>
 
-      <!-- Smartcard certificate support -->
-      <message name="IDS_SMARTCARD_DIALOG_TITLE" desc="Title of a dialog asking whether to use Android default keystore or a smartcard for certificate authentication.">
-        Choose certificate for authentication
-      </message>
-      <message name="IDS_SMARTCARD_CERTIFICATE_OPTION" desc="An option to use Smart Card when a dialog asking whether to use Android default keystore or a Smart Card for certificate authentication.">
-        Smart card
-      </message>
-
       <!-- App banner strings -->
-      <message name="IDS_APP_BANNER_INSTALLING" desc="Button text indicating that an application is being installed. [CHAR-LIMIT=15]">
+      <message name="IDS_APP_BANNER_INSTALLING" desc="Button text indicating that an application is being installed. [CHAR-LIMIT=25]">
         Installing…
       </message>
-      <message name="IDS_APP_BANNER_OPEN" desc="Text that indicates that clicking on the button will launch an application. [CHAR-LIMIT=15]">
+      <message name="IDS_APP_BANNER_OPEN" desc="Text that indicates that clicking on the button will launch an application. [CHAR-LIMIT=25]">
         Open
       </message>
 
@@ -1432,6 +1419,9 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_NOTIFICATION_SITE_SETTINGS_BUTTON" desc="Text of a button shown on notifications, that opens the Site Settings of the website that showed the notification. (If it isn't possible to fit within the char limit, the string will be ellipsized if 3 buttons are shown side by side, so try to ensure that the user can guess the meaning from the first 8 characters). [CHAR-LIMIT=9]">
         Settings
       </message>
+      <message name="IDS_NOTIFICATION_WORK_PROFILE_BADGE_CONTENT_DESCRIPTION" desc="Content description of the work profile badge in the notification.">
+        Work profile
+      </message>
 
       <!-- Fullscreen -->
       <message name="IDS_IMMERSIVE_FULLSCREEN_API_NOTIFICATION" desc="Notification message when a site has entered immersive fullscreen and the directions of how to exit.">
@@ -1443,11 +1433,14 @@ You are signing in with a managed account and giving its administrator control o
       </message>
 
       <!-- Download UI -->
+      <message name="IDS_DOWNLOAD_NOTIFICATION_COMPLETED" desc="Download notification to be displayed when a download completes.">
+        Download complete.
+      </message>
       <message name="IDS_DOWNLOAD_NOTIFICATION_FAILED" desc="Download notification to be displayed when a download fails.">
         Download failed.
       </message>
-      <message name="IDS_DOWNLOAD_NOTIFICATION_COMPLETED" desc="Download notification to be displayed when a download completes.">
-        Download complete.
+      <message name="IDS_DOWNLOAD_NOTIFICATION_PAUSED" desc="Download notification to be displayed when a download pauses.">
+        Download paused.
       </message>
       <message name="IDS_DOWNLOAD_FAILED_REASON_FILE_ALREADY_EXISTS" desc="Message to explain that the download failed because file already exists.">
         <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> download prevented because file already exists.
@@ -1468,7 +1461,7 @@ You are signing in with a managed account and giving its administrator control o
         <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> download failed due to missing SD Card.
       </message>
       <message name="IDS_DOWNLOAD_FAILED_REASON_UNKNOWN_ERROR" desc="Message to explain that the download failed because unkown error.">
-        <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> download failed due to an unknwon error.
+        <ph name="FILE_NAME">%1$s<ex>http://abc.com/test.pdf</ex></ph> download failed due to an unknown error.
       </message>
       <message name="IDS_DOWNLOAD_PENDING" desc="Message in the list of items which have received download requests telling their status. This message states that the download has not yet begun [CHAR LIMIT=30]">
         Downloading…
@@ -1683,6 +1676,12 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_NTP_BOOKMARKS" desc="Text for bookmarks button [CHAR-LIMIT=20]">
         Bookmarks
       </message>
+      <message name="IDS_NTP_INTERESTS" desc="Text for a button to display interests. Interests are topics that we think the user is interested in (eg. sports teams, hobbies, places). [CHAR-LIMIT=20]">
+        Interests
+      </message>
+      <message name="IDS_NTP_NO_INTERESTS_TOAST" desc="Toast notification displayed when interests retrieval fails">
+        Could not retrieve interests.
+      </message>
       <message name="IDS_RECENT_TABS" desc="Text for button to show 'Recent tabs', i.e. recently closed tabs and tabs that are open on other devices [CHAR-LIMIT=20]">
         Recent tabs
       </message>
@@ -1709,17 +1708,20 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_NTP_RECENT_TABS_SYNC_ENABLE_SYNC_BUTTON" desc="Text that displayed or button that allows the user to enable sync.">
         Enable sync
       </message>
-      <message name="IDS_NTP_RECENT_TABS_LAST_SYNCED_DAYS" desc="Text to show the time since the device last synced in days">
-        Last synced: <ph name="DAYS">%1$d<ex>3</ex></ph> days ago
+      <message name="IDS_NTP_RECENT_TABS_LAST_SYNCED" desc="Label for the time since a device was last synced">
+        Last synced: <ph name="WHEN">%1$s<ex>4 hours ago</ex></ph>
       </message>
-      <message name="IDS_NTP_RECENT_TABS_LAST_SYNCED_HOURS" desc="Text to show the time since the device last synced in hours">
-        Last synced: <ph name="HOURS">%1$d<ex>3</ex></ph> hours ago
+      <message name="IDS_N_MINUTES_AGO" desc="A number of minutes in the past. [ICU Syntax]">
+        {MINUTES, plural, =1 {# minute ago} other {# minutes ago}}
       </message>
-      <message name="IDS_NTP_RECENT_TABS_LAST_SYNCED_MINUTES" desc="Text to show the time since the device last synced in minutes">
-        Last synced: <ph name="MINUTES">%1$d<ex>50</ex></ph> minutes ago
+      <message name="IDS_N_HOURS_AGO" desc="A number of hours in the past. [ICU Syntax]">
+        {HOURS, plural, =1 {# hour ago} other {# hours ago}}
       </message>
-      <message name="IDS_NTP_RECENT_TABS_LAST_SYNCED_JUST_NOW" desc="Text to show that the device was recently synced">
-        Last synced: just now
+      <message name="IDS_N_DAYS_AGO" desc="A number of days in the past. [ICU Syntax]">
+        {DAYS, plural, =1 {# day ago} other {# days ago}}
+      </message>
+      <message name="IDS_JUST_NOW" desc="A time label for an event that happened just now. For example 'Last synced: just now'">
+        just now
       </message>
       <message name="IDS_NTP_RECENT_TABS_ACCESSIBILITY_COLLAPSED_GROUP" desc="Content description for collapsed state indicator for the group view." >
         Collapsed - Click to expand
@@ -1761,6 +1763,15 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
 
       <!-- Main menu items -->
+      <message name="IDS_MENU_UPDATE" desc="Menu item for updating chrome. [CHAR-LIMIT=24]">
+        Update Chrome
+      </message>
+      <message name="IDS_MENU_UPDATE_SUMMARY_DEFAULT" desc="Summary string for update menu item explaining that a newer version of Chrome is available. [CHAR-LIMIT=30]">
+        Newer version is available
+      </message>
+      <message name="IDS_MENU_UPDATE_SUMMARY_NEW_FEATURES" desc="Summary string for update menu item explaining that new features are available. [CHAR-LIMIT=30]">
+        Get the latest features
+      </message>
       <message name="IDS_MENU_NEW_TAB" desc="Menu item for opening a new tab. [CHAR-LIMIT=27]">
         New tab
       </message>
@@ -1826,10 +1837,10 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
 
       <!-- Enhanced bookmark strings -->
       <message name="IDS_ENHANCED_BOOKMARK_SIGN_IN_PROMO_TITLE" desc="Promo title encouraging the user to sign in to Chrome to improve their bookmarks experience. It means that after signing-in, bookmarks will become synced across devices and possible to search.">
-        Back up and sync your bookmarks
+        Sync your bookmarks
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_SIGN_IN_PROMO_DESCRIPTION" desc="Description for enhanced bookmark UI sign-in promotion.">
-        Sign in to Chrome to access your bookmarks from any device
+        To get your bookmarks on all your devices, sign in to Chrome
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_SIGN_IN_PROMO_NO_THANKS" desc="Text for the decline button in the enhanced bookmark UI">
         No, thanks
@@ -1839,6 +1850,9 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_PAGE_SAVED" desc="Message shown after user adds a new bookmark. [CHAR-LIMIT=32]">
         Bookmarked
+      </message>
+      <message name="IDS_ENHANCED_BOOKMARK_PAGE_SAVED_FOLDER" desc="Message shown after user adds a new bookmark. Also specifies in which folder the bookmark was added. [CHAR-LIMIT=32]">
+        Bookmarked to <ph name="FOLDER_NAME">%1$s<ex>Mobile bookmarks</ex></ph>
       </message>
       <message name="IDS_ENHANCED_BOOKMARK_DRAWER_ALL_ITEMS" desc="Menu item for showing all bookmark items in the enhanced bookmarks UI [CHAR-LIMIT=24]">
         All bookmarks
@@ -1938,6 +1952,9 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_OFFLINE_PAGES_PAGE_SAVED" desc="Message shown after user adds a new offline page.">
         Page saved offline
       </message>
+      <message name="IDS_OFFLINE_PAGES_PAGE_SAVED_FOLDER" desc="Message shown after user saves a new offline page. Also specifies in which folder the bookmark was added. [CHAR-LIMIT=32]">
+        Page saved offline to <ph name="FOLDER_NAME">%1$s<ex>Mobile bookmarks</ex></ph>
+      </message>
       <message name="IDS_OFFLINE_PAGES_PAGE_SKIPPED" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to that the page is not HTTP or HTTPS page.">
         Page saved
       </message>
@@ -1952,9 +1969,6 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
       <message name="IDS_OFFLINE_PAGES_SAVED_PAGES" desc="Title in recent tasks list for showing the list of web pages that have been saved.">
         Saved pages
-      </message>
-      <message name="IDS_OFFLINE_PAGES_SAVE_PAGE_OFFLINE" desc="Message shown after the user visited a page that was bookmarked, but didn't have an offline copy.">
-        Save this page offline?
       </message>
       <message name="IDS_OFFLINE_PAGES_STORAGE_SPACE_TITLE" desc="Title of the promo header for managing offline pages storage. [CHAR-LIMIT=32]">
         Storage space
@@ -1971,6 +1985,39 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_OFFLINE_PAGES_VIEW_BUTTON" desc="Label for a button to open a system settings page. [CHAR-LIMIT=20]">
         View
       </message>
+
+      <!-- Offline pages (Use 'bookmarks' name in UI strings) -->
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_OFFLINE_PAGE_SIZE" desc="Label specifying that given saved page has an offline copy of a specific size (Use 'bookmarks' name in UI strings).">
+        <ph name="PAGE_SIZE_STRING">%1$s<ex>1.32 MB</ex></ph> bookmark saved offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_OFFLINE_PAGE_VISIT" desc="Label specifying that given saved page does not have an offline copy, and user does not have that page open (Use 'bookmarks' name in UI strings).">
+        Visit bookmark to save offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_SAVED" desc="Message shown after user adds a new offline page (Use 'bookmarks' name in UI strings).">
+        Bookmark saved offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_SAVED_FOLDER" desc="Message shown after user saves a new offline page. Also specifies in which folder the bookmark was added (Use 'bookmarks' name in UI strings).">
+        Bookmark saved offline to <ph name="FOLDER_NAME">%1$s<ex>Mobile bookmarks</ex></ph>
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_SKIPPED" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to that the page is not HTTP or HTTPS page (Use 'bookmarks' name in UI strings).">
+        Bookmarked
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_SAVED_STORAGE_NEAR_FULL" desc="Message shown after user adds a new offline page and the storage is almost full (Use 'bookmarks' name in UI strings).">
+        Bookmark saved offline. Storage almost full.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_FAILED_TO_SAVE" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to problems other than storage (Use 'bookmarks' name in UI strings).">
+        Bookmark not available offline
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_PAGE_FAILED_TO_SAVE_STORAGE_NEAR_FULL" desc="Message shown after a page was saved as a bookmark, but an offline copy was not created due to storage problem (Use 'bookmarks' name in UI strings).">
+        Bookmark not available offline. Storage almost full.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_STORAGE_SPACE_MESSAGE" desc="Text explaining how much storage is currently used for offline copies of saved pages (Use 'bookmarks' name in UI strings).">
+        Bookmarks are currently taking up <ph name="TOTAL_OFFLINE_STORAGE_SIZE">%1$s<ex>780 MB</ex></ph>.
+      </message>
+      <message name="IDS_OFFLINE_PAGES_AS_BOOKMARKS_VIEWING_OFFLINE_PAGE" desc="Text explaining that the user is viewing an offline copy of a web page (Use 'bookmarks' name in UI strings).">
+        Viewing an offline copy of this bookmark
+      </message>
+
 
       <!-- Find in page -->
       <message name="IDS_HINT_FIND_IN_PAGE" desc="Hint text to show for the find in page search field when the search field is empty.">
@@ -2079,20 +2126,17 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       <message name="IDS_MENU_OPEN_IN_CHROME" desc="Context sensitive menu item for opening a link in Chrome. [CHAR-LIMIT=30]">
         Open in Chrome
       </message>
-      <message name="IDS_MENU_OPEN_IN_PRODUCT" desc="App menu item for opening link in Chrome. [CHAR-LIMIT=30]">
+      <message name="IDS_MENU_OPEN_IN_PRODUCT" desc="App menu item for opening link in the browser. [CHAR-LIMIT=30]">
         Open in <ph name="PRODUCT_NAME">%1$s<ex>Chrome</ex></ph>
+      </message>
+      <message name="IDS_MENU_OPEN_IN_PRODUCT_DEFAULT" desc="Default title for menu item for opening link in browser. [CHAR-LIMIT=30]">
+        Open in browser
       </message>
       <message name="IDS_READER_VIEW_TEXT" desc="Message shown on the reader mode button bar, to invite the user to tap to open a reader mode. Reader mode extracts content and removes clutter from a web page and puts the result in a panel making it easier to read.">
         Make page mobile-friendly
       </message>
       <message name="IDS_READER_MODE_EXPANDED_TITLE" desc="Message shown on the reader mode button bar when it is opened to show reader mode. Reader mode extracts content and removes clutter from a web page and puts the result in a panel making it easier to read.">
         Mobile-friendly view
-      </message>
-      <message name="IDS_UPDATE_AVAILABLE_INFOBAR" desc="Text to display when a new update is detected.">
-        Chrome is out of date. Important security improvements and new features are available in the latest version.
-      </message>
-      <message name="IDS_UPDATE_AVAILABLE_INFOBAR_BUTTON" desc="Open market button. [CHAR-LIMIT=32]">
-        Update
       </message>
       <message name="IDS_FRE_LABEL" desc="First Run Experience Strings">
         First Run Experience
@@ -2161,6 +2205,9 @@ Just open Chrome on your computer, go to the menu, and select “Sign in to Chro
       </message>
       <message name="IDS_ACCESSIBILITY_NTP_TOOLBAR_BTN_BOOKMARKS" desc="Content description for the bookmarks tab of the new tab page.">
         Bookmarks
+      </message>
+      <message name="IDS_ACCESSIBILITY_NTP_TOOLBAR_BTN_INTERESTS" desc="Content description for the interests section of the new tab page.">
+        Interests
       </message>
       <message name="IDS_ACCESSIBILITY_NTP_TOOLBAR_BTN_RECENT_TABS" desc="Content description for the recent tabs section of the new tab page.">
         Recent tabs
@@ -2274,58 +2321,6 @@ However, you aren’t invisible. Going incognito doesn’t hide your browsing fr
         Close tab
       </message>
 
-      <!-- Help and Feedback
-           These constants should be in sync with the context names on go/mobilehelprecs.
-           If the context ID cannot be found, the default help page will be shown to the user.-->
-      <message name="IDS_HELP_CONTEXT_NEW_TAB" translateable="false">
-        mobile_new_tab
-      </message>
-      <message name="IDS_HELP_CONTEXT_SEARCH_RESULTS" translateable="false">
-        mobile_search_results
-      </message>
-      <message name="IDS_HELP_CONTEXT_WEBPAGE" translateable="false">
-        mobile_webpage
-      </message>
-      <message name="IDS_HELP_CONTEXT_SETTINGS" translateable="false">
-        mobile_settings
-      </message>
-      <message name="IDS_HELP_CONTEXT_INCOGNITO" translateable="false">
-        mobile_incognito
-      </message>
-      <message name="IDS_HELP_CONTEXT_BOOKMARKS" translateable="false">
-        mobile_bookmarks
-      </message>
-      <message name="IDS_HELP_CONTEXT_HISTORY" translateable="false">
-        mobile_history
-      </message>
-      <message name="IDS_HELP_CONTEXT_ERROR" translateable="false">
-        mobile_error
-      </message>
-      <message name="IDS_HELP_CONTEXT_PRIVACY" translateable="false">
-        mobile_privacy
-      </message>
-      <message name="IDS_HELP_CONTEXT_TRANSLATE" translateable="false">
-        mobile_translate
-      </message>
-      <message name="IDS_HELP_CONTEXT_GENERAL" translateable="false">
-        mobile_general
-      </message>
-      <message name="IDS_HELP_CONTEXT_PROTECTED_CONTENT" translateable="false">
-        protected_content
-      </message>
-      <message name="IDS_HELP_CONTEXT_DATA_REDUCTION" translateable="false">
-        reduce_data_usage
-      </message>
-      <message name="IDS_HELP_CONTEXT_INCOGNITO_LEARN_MORE" translateable="false">
-        chrome_incognito
-      </message>
-      <message name="IDS_HELP_CONTEXT_USAGE_REPORTS" translateable="false">
-        send_crash_report
-      </message>
-      <message name="IDS_HELP_CONTEXT_SAD_TAB" translateable="false">
-        mobile_awsnap
-      </message>
-
       <!-- Client certificate selection failure strings. -->
       <message name="IDS_CLIENT_CERT_UNSUPPORTED_TITLE" desc="Title of a dialog box for when the operating system does not support client SSL certificate selection">
         Unable to select certificate.
@@ -2335,19 +2330,44 @@ However, you aren’t invisible. Going incognito doesn’t hide your browsing fr
       </message>
 
       <!-- Physical Web strings -->
+      <message name="IDS_PHYSICAL_WEB_PREF_TITLE" desc="Title for Physical Web preference.">
+        Physical Web
+      </message>
+      <message name="IDS_PHYSICAL_WEB_PREF_DESCRIPTION" desc="Description for Physical Web preference">
+        Discover web pages sent by nearby objects. Chrome gathers web pages associated with objects around you, sends them anonymously to a Google service to find the ones most useful to you, then displays them.
+
+You must have Bluetooth and Location turned on in order to use the Physical Web.
+      </message>
+      <message name="IDS_PHYSICAL_WEB_OPTIN_TITLE" desc="The title for a dialog inviting the user to opt-in to the Physical Web.">
+        Chrome + Physical Web
+      </message>
+      <message name="IDS_PHYSICAL_WEB_OPTIN_DESCRIPTION" desc="Description of the Physical Web displayed in the opt-in dialog">
+        Chrome can now find and show you nearby web pages using Bluetooth.
+
+Chrome will scan for nearby pages when your device is unlocked. These pages will go through a Google service to improve the quality of page results.
+
+You can control the Physical Web in Chrome privacy settings.
+      </message>
       <message name="IDS_PHYSICAL_WEB_LIST_URLS_ACTIVITY_TITLE" desc="The title for a dialog that shows a list of URLs broadcasted from nearby devices.">
         The Physical Web
       </message>
-      <message name="IDS_PHYSICAL_WEB_NOTIFICATION_TITLE" desc="Description of quantity of discovered URLs nearby.">
-        {NUM_URLS, plural,
-         =1 {1 Physical Web link nearby}
-         other {# Physical Web links nearby}}
+      <message name="IDS_PHYSICAL_WEB_NOTIFICATION_TITLE" desc="The message displayed in a notification when there are nearby URLs.">
+        Physical Web pages nearby
+      </message>
+      <message name="IDS_PHYSICAL_WEB_OPTIN_NOTIFICATION_TITLE" desc="The first line in a notification message informing the user there are nearby devices broadcasting URLs and Chrome can be used to browse the list of URLs.">
+        Physical Web pages are nearby
+      </message>
+      <message name="IDS_PHYSICAL_WEB_OPTIN_NOTIFICATION_TEXT" desc="The second line in a notification message informing the user there are nearby devices broadcasting URLs and Chrome can be used to browse the list of URLs.">
+        Use Chrome to browse them
       </message>
       <message name="IDS_PHYSICAL_WEB_EMPTY_LIST" desc="The message displayed in place of a list of nearby URLs when there are no URLs to display.">
-        There are no nearby web pages found
+        No nearby Physical Web pages found
       </message>
       <message name="IDS_PHYSICAL_WEB_EMPTY_LIST_SCANNING" desc="The message displayed in place of a list of nearby URLs while still scanning for nearby URLs.">
-        Looking for nearby web pages
+        Looking for nearby Physical Web pages
+      </message>
+      <message name="IDS_PHYSICAL_WEB_REFRESH" desc="The label for a button that initiates a scan for nearby URLs">
+        Refresh
       </message>
     </messages>
   </release>

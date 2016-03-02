@@ -12,6 +12,8 @@
 
 using media::MediaPlayerAndroid;
 
+static const int MAX_POSTER_BITMAP_SIZE = 1024 * 1024;
+
 namespace remote_media {
 
 RemoteMediaPlayerManager::RemoteMediaPlayerManager(
@@ -20,17 +22,18 @@ RemoteMediaPlayerManager::RemoteMediaPlayerManager(
       weak_ptr_factory_(this) {
 }
 
-RemoteMediaPlayerManager::~RemoteMediaPlayerManager() {}
+RemoteMediaPlayerManager::~RemoteMediaPlayerManager() {
+  for (MediaPlayerAndroid* player : alternative_players_)
+    player->DeleteOnCorrectThread();
+
+  alternative_players_.weak_clear();
+}
 
 void RemoteMediaPlayerManager::OnStart(int player_id) {
   RemoteMediaPlayerBridge* remote_player = GetRemotePlayer(player_id);
-  if (remote_player) {
-    if (IsPlayingRemotely(player_id)) {
-      remote_player->Start();
-    } else if (remote_player->TakesOverCastDevice()) {
-      return;
-    }
-  }
+  if (remote_player && IsPlayingRemotely(player_id))
+    remote_player->Start();
+
   BrowserMediaPlayerManager::OnStart(player_id);
 }
 
@@ -49,13 +52,14 @@ void RemoteMediaPlayerManager::OnDestroyPlayer(int player_id) {
   RemoteMediaPlayerBridge* player = GetRemotePlayer(player_id);
   if (player)
     player->OnPlayerDestroyed();
+  poster_urls_.erase(player_id);
   BrowserMediaPlayerManager::OnDestroyPlayer(player_id);
 }
 
-void RemoteMediaPlayerManager::OnReleaseResources(int player_id) {
+void RemoteMediaPlayerManager::OnSuspendAndReleaseResources(int player_id) {
   // We only want to release resources of local players.
   if (!IsPlayingRemotely(player_id))
-    BrowserMediaPlayerManager::OnReleaseResources(player_id);
+    BrowserMediaPlayerManager::OnSuspendAndReleaseResources(player_id);
 }
 
 void RemoteMediaPlayerManager::OnRequestRemotePlayback(int player_id) {
@@ -70,6 +74,10 @@ void RemoteMediaPlayerManager::OnRequestRemotePlaybackControl(int player_id) {
     player->RequestRemotePlaybackControl();
 }
 
+bool RemoteMediaPlayerManager::IsPlayingRemotely(int player_id) {
+  return players_playing_remotely_.count(player_id) != 0;
+}
+
 int RemoteMediaPlayerManager::GetTabId() {
   if (!web_contents())
     return -1;
@@ -81,27 +89,36 @@ int RemoteMediaPlayerManager::GetTabId() {
   return tab->GetAndroidId();
 }
 
-void RemoteMediaPlayerManager::OnSetPoster(int player_id, const GURL& url) {
+void RemoteMediaPlayerManager::FetchPosterBitmap(int player_id) {
   RemoteMediaPlayerBridge* player = GetRemotePlayer(player_id);
-
-  if (player && url.is_empty()) {
-    player->SetPosterBitmap(std::vector<SkBitmap>());
-  } else {
-    // TODO(aberent) OnSetPoster is called when the attributes of the video
-    // element are parsed, which may be before OnInitialize is called. We are
-    // here relying on the image fetch taking longer than the delay until
-    // OnInitialize is called, and hence the player is created. This is not
-    // guaranteed.
-    content::WebContents::ImageDownloadCallback callback = base::Bind(
-        &RemoteMediaPlayerManager::DidDownloadPoster,
-        weak_ptr_factory_.GetWeakPtr(), player_id);
-    web_contents()->DownloadImage(
-        url,
-        false,  // is_favicon, false so that cookies will be used.
-        0,  // max_bitmap_size, 0 means no limit.
-        false, // normal cache policy.
-        callback);
+  if (poster_urls_.count(player_id) == 0 ||
+      poster_urls_[player_id].is_empty()) {
+    if (player)
+      player->SetPosterBitmap(std::vector<SkBitmap>());
+    return;
   }
+  content::WebContents::ImageDownloadCallback callback =
+      base::Bind(&RemoteMediaPlayerManager::DidDownloadPoster,
+                 weak_ptr_factory_.GetWeakPtr(), player_id);
+  web_contents()->DownloadImage(
+      poster_urls_[player_id],
+      false,  // is_favicon, false so that cookies will be used.
+      MAX_POSTER_BITMAP_SIZE,  // max_bitmap_size, 0 means no limit.
+      false,                   // normal cache policy.
+      callback);
+}
+
+void RemoteMediaPlayerManager::OnSetPoster(int player_id, const GURL& url) {
+  // OnSetPoster is called when the attibutes of the video element are parsed,
+  // which may be before OnInitialize is called, so we can't assume that the
+  // players wil exist.
+  poster_urls_[player_id] = url;
+}
+
+void RemoteMediaPlayerManager::ReleaseResources(int player_id) {
+  if (IsPlayingRemotely(player_id))
+    return;
+  BrowserMediaPlayerManager::ReleaseResources(player_id);
 }
 
 void RemoteMediaPlayerManager::DidDownloadPoster(
@@ -160,6 +177,9 @@ void RemoteMediaPlayerManager::SwitchToRemotePlayer(
   Send(new MediaPlayerMsg_DidMediaPlayerPlay(RoutingID(), player_id));
   Send(new MediaPlayerMsg_ConnectedToRemoteDevice(RoutingID(), player_id,
                                                   casting_message));
+  // The remote player will want the poster bitmap, however, to avoid wasting
+  // memory we don't fetch it until we are likely to need it.
+  FetchPosterBitmap(player_id);
 }
 
 void RemoteMediaPlayerManager::SwitchToLocalPlayer(int player_id) {
@@ -262,9 +282,4 @@ void RemoteMediaPlayerManager::OnMediaMetadataChanged(int player_id,
                                                       width, height, success);
   }
 }
-
-bool RemoteMediaPlayerManager::IsPlayingRemotely(int player_id) {
-  return players_playing_remotely_.count(player_id) != 0;
-}
-
 } // namespace remote_media

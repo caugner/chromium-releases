@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "core/frame/VisualViewport.h"
 
 #include "core/dom/Document.h"
@@ -31,10 +29,10 @@
 #include "public/web/WebScriptSource.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebViewClient.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 
 #include <string>
 
@@ -459,7 +457,7 @@ TEST_P(ParameterizedVisualViewportTest, TestVisibleRect)
     visualViewport.setSize(size);
 
     // Scale the viewport to 2X; size should not change.
-    FloatRect expectedRect(FloatPoint(0, 0), size);
+    FloatRect expectedRect(FloatPoint(0, 0), FloatSize(size));
     expectedRect.scale(0.5);
     visualViewport.setScale(2);
     EXPECT_EQ(2, visualViewport.scale());
@@ -477,7 +475,7 @@ TEST_P(ParameterizedVisualViewportTest, TestVisibleRect)
 
     // Scale the viewport to 3X to introduce some non-int values.
     FloatPoint oldLocation = expectedRect.location();
-    expectedRect = FloatRect(FloatPoint(), size);
+    expectedRect = FloatRect(FloatPoint(), FloatSize(size));
     expectedRect.scale(1 / 3.0f);
     expectedRect.setLocation(oldLocation);
     visualViewport.setScale(3);
@@ -1113,6 +1111,64 @@ TEST_P(ParameterizedVisualViewportTest, TestClientNotifiedOfScrollEvents)
     webViewImpl()->mainFrameImpl()->setClient(oldClient);
 }
 
+// Tests that calling scroll into view on a visible element doesn cause
+// a scroll due to a fractional offset. Bug crbug.com/463356.
+TEST_P(ParameterizedVisualViewportTest, ScrollIntoViewFractionalOffset)
+{
+    initializeWithAndroidSettings();
+
+    webViewImpl()->resize(IntSize(1000, 1000));
+
+    registerMockedHttpURLLoad("scroll-into-view.html");
+    navigateTo(m_baseURL + "scroll-into-view.html");
+
+    FrameView& frameView = *webViewImpl()->mainFrameImpl()->frameView();
+    ScrollableArea* layoutViewportScrollableArea = frameView.layoutViewportScrollableArea();
+    VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
+    Element* inputBox = frame()->document()->getElementById("box");
+
+    webViewImpl()->setPageScaleFactor(2);
+
+    // The element is already in the view so the scrollIntoView shouldn't move
+    // the viewport at all.
+    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.25f, 100.25f));
+    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.75), ProgrammaticScroll);
+    inputBox->scrollIntoViewIfNeeded(false);
+
+    EXPECT_POINT_EQ(DoublePoint(0, 900.75), layoutViewportScrollableArea->scrollPositionDouble());
+    EXPECT_POINT_EQ(FloatPoint(250.25f, 100.25f), visualViewport.location());
+
+    // Change the fractional part of the frameview to one that would round down.
+    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.125), ProgrammaticScroll);
+    inputBox->scrollIntoViewIfNeeded(false);
+
+    EXPECT_POINT_EQ(DoublePoint(0, 900.125), layoutViewportScrollableArea->scrollPositionDouble());
+    EXPECT_POINT_EQ(FloatPoint(250.25f, 100.25f), visualViewport.location());
+
+    // Repeat both tests above with the visual viewport at a high fractional.
+    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.875f, 100.875f));
+    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.75), ProgrammaticScroll);
+    inputBox->scrollIntoViewIfNeeded(false);
+
+    EXPECT_POINT_EQ(DoublePoint(0, 900.75), layoutViewportScrollableArea->scrollPositionDouble());
+    EXPECT_POINT_EQ(FloatPoint(250.875f, 100.875f), visualViewport.location());
+
+    // Change the fractional part of the frameview to one that would round down.
+    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.125), ProgrammaticScroll);
+    inputBox->scrollIntoViewIfNeeded(false);
+
+    EXPECT_POINT_EQ(DoublePoint(0, 900.125), layoutViewportScrollableArea->scrollPositionDouble());
+    EXPECT_POINT_EQ(FloatPoint(250.875f, 100.875f), visualViewport.location());
+
+    // Both viewports with a 0.5 fraction.
+    webViewImpl()->setVisualViewportOffset(WebFloatPoint(250.5f, 100.5f));
+    layoutViewportScrollableArea->setScrollPosition(DoublePoint(0, 900.5), ProgrammaticScroll);
+    inputBox->scrollIntoViewIfNeeded(false);
+
+    EXPECT_POINT_EQ(DoublePoint(0, 900.5), layoutViewportScrollableArea->scrollPositionDouble());
+    EXPECT_POINT_EQ(FloatPoint(250.5f, 100.5f), visualViewport.location());
+}
+
 // Top controls can make an unscrollable page temporarily scrollable, causing
 // a scroll clamp when the page is resized. Make sure this bug is fixed.
 // crbug.com/437620
@@ -1398,11 +1454,93 @@ TEST_P(ParameterizedVisualViewportTest, ElementBoundsInViewportSpaceAccountsForV
     visualViewport.setScale(2);
     visualViewport.setLocation(scrollDelta);
 
-    IntRect boundsInViewport = inputElement->boundsInViewportSpace();
+    const IntRect boundsInViewport = inputElement->boundsInViewport();
+    IntRect expectedBounds = bounds;
+    expectedBounds.scale(2.f);
+    IntPoint expectedScrollDelta = scrollDelta;
+    expectedScrollDelta.scale(2.f, 2.f);
 
-    EXPECT_POINT_EQ(IntPoint(bounds.location() - scrollDelta),
+    EXPECT_POINT_EQ(IntPoint(expectedBounds.location() - expectedScrollDelta),
         boundsInViewport.location());
-    EXPECT_SIZE_EQ(bounds.size(), boundsInViewport.size());
+    EXPECT_SIZE_EQ(expectedBounds.size(), boundsInViewport.size());
+}
+
+// Test that the various window.scroll and document.body.scroll properties and
+// methods work unchanged from the pre-virtual viewport mode.
+TEST_P(ParameterizedVisualViewportTest, bodyAndWindowScrollPropertiesAccountForViewport)
+{
+    initializeWithAndroidSettings();
+
+    webViewImpl()->resize(IntSize(200, 300));
+
+    // Load page with no main frame scrolling.
+    registerMockedHttpURLLoad("200-by-300-viewport.html");
+    navigateTo(m_baseURL + "200-by-300-viewport.html");
+
+    VisualViewport& visualViewport = frame()->page()->frameHost().visualViewport();
+    visualViewport.setScale(2);
+
+    // Chrome's quirky behavior regarding viewport scrolling means we treat the
+    // body element as the viewport and don't apply scrolling to the HTML
+    // element.
+    RuntimeEnabledFeatures::setScrollTopLeftInteropEnabled(false);
+
+    LocalDOMWindow* window = webViewImpl()->mainFrameImpl()->frame()->localDOMWindow();
+    window->scrollTo(100, 150);
+    EXPECT_EQ(100, window->scrollX());
+    EXPECT_EQ(150, window->scrollY());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
+
+    HTMLElement* body = toHTMLBodyElement(window->document()->body());
+    body->setScrollLeft(50);
+    body->setScrollTop(130);
+    EXPECT_EQ(50, body->scrollLeft());
+    EXPECT_EQ(130, body->scrollTop());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(50, 130), visualViewport.location());
+
+    HTMLElement* documentElement = toHTMLElement(window->document()->documentElement());
+    documentElement->setScrollLeft(40);
+    documentElement->setScrollTop(50);
+    EXPECT_EQ(0, documentElement->scrollLeft());
+    EXPECT_EQ(0, documentElement->scrollTop());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(50, 130), visualViewport.location());
+
+    visualViewport.setLocation(FloatPoint(10, 20));
+    EXPECT_EQ(10, body->scrollLeft());
+    EXPECT_EQ(20, body->scrollTop());
+    EXPECT_EQ(0, documentElement->scrollLeft());
+    EXPECT_EQ(0, documentElement->scrollTop());
+    EXPECT_EQ(10, window->scrollX());
+    EXPECT_EQ(20, window->scrollY());
+
+    // Turning on the standards-compliant viewport scrolling impl should make
+    // the document element the viewport and not body.
+    RuntimeEnabledFeatures::setScrollTopLeftInteropEnabled(true);
+
+    window->scrollTo(100, 150);
+    EXPECT_EQ(100, window->scrollX());
+    EXPECT_EQ(150, window->scrollY());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
+
+    body->setScrollLeft(50);
+    body->setScrollTop(130);
+    EXPECT_EQ(0, body->scrollLeft());
+    EXPECT_EQ(0, body->scrollTop());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(100, 150), visualViewport.location());
+
+    documentElement->setScrollLeft(40);
+    documentElement->setScrollTop(50);
+    EXPECT_EQ(40, documentElement->scrollLeft());
+    EXPECT_EQ(50, documentElement->scrollTop());
+    EXPECT_FLOAT_POINT_EQ(FloatPoint(40, 50), visualViewport.location());
+
+    visualViewport.setLocation(FloatPoint(10, 20));
+    EXPECT_EQ(0, body->scrollLeft());
+    EXPECT_EQ(0, body->scrollTop());
+    EXPECT_EQ(10, documentElement->scrollLeft());
+    EXPECT_EQ(20, documentElement->scrollTop());
+    EXPECT_EQ(10, window->scrollX());
+    EXPECT_EQ(20, window->scrollY());
 }
 
 // Tests that when a new frame is created, it is created with the intended
@@ -1509,7 +1647,9 @@ TEST_P(ParameterizedVisualViewportTest, AccessibilityHitTestWhileZoomedIn)
     // Because of where the visual viewport is located, this should hit the bottom right
     // target (target 4).
     WebAXObject hitNode = webDoc.accessibilityObject().hitTest(WebPoint(154, 165));
-    EXPECT_EQ(std::string("Target4"), hitNode.title().utf8());
+    WebAXNameFrom nameFrom;
+    WebVector<WebAXObject> nameObjects;
+    EXPECT_EQ(std::string("Target4"), hitNode.name(nameFrom, nameObjects).utf8());
 }
 
 // Tests that the maximum scroll offset of the viewport can be fractional.
@@ -1581,15 +1721,9 @@ TEST_P(ParameterizedVisualViewportTest, WindowDimensionsOnLoadWideContent)
     EXPECT_EQ(std::string("2000x1500"), std::string(output->innerHTML().ascii().data()));
 }
 
-static void turnOnInvertedScrollOrder(WebSettings* settings)
-{
-    VisualViewportTest::configureSettings(settings);
-    settings->setInvertViewportScrollOrder(true);
-}
-
 TEST_P(ParameterizedVisualViewportTest, PinchZoomGestureScrollsVisualViewportOnly)
 {
-    initializeWithDesktopSettings(turnOnInvertedScrollOrder);
+    initializeWithDesktopSettings();
     webViewImpl()->resize(IntSize(100, 100));
 
     registerMockedHttpURLLoad("200-by-800-viewport.html");

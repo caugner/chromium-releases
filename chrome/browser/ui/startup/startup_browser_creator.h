@@ -8,9 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
@@ -132,6 +133,8 @@ class StartupBrowserCreator {
                            ReadingWasRestartedAfterRestart);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, UpdateWithTwoProfiles);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, LastUsedProfileActivated);
+  FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorWinTest,
+                           GetURLsFromCommandLineWithDesktopSearchURL);
 
   // Returns the list of URLs to open from the command line. The returned
   // vector is empty if the user didn't specify any URLs on the command line.

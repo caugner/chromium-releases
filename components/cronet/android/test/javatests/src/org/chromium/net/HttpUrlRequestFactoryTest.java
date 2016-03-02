@@ -8,6 +8,7 @@ import android.content.Context;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.net.CronetTestBase.OnlyRunNativeCronet;
 
 import java.io.File;
 import java.util.HashMap;
@@ -29,8 +30,10 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
         builder.addQuicHint("www.google.com", 443, 443);
         builder.addQuicHint("www.youtube.com", 443, 443);
         builder.setLibraryName("cronet_tests");
+        String[] commandLineArgs = {
+                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LibraryInitType.LEGACY};
         CronetTestFramework testFramework =
-                startCronetTestFrameworkWithUrlAndCronetEngineBuilder(URL, builder);
+                new CronetTestFramework(URL, commandLineArgs, getContext(), builder);
         HttpUrlRequestFactory factory = testFramework.mRequestFactory;
         assertNotNull("Factory should be created", factory);
         assertTrue("Factory should be Chromium/n.n.n.n@r but is "
@@ -41,6 +44,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
 
     @SmallTest
     @Feature({"Cronet"})
+    @OnlyRunNativeCronet
     public void testCreateLegacyFactory() {
         HttpUrlRequestFactoryConfig config = new HttpUrlRequestFactoryConfig();
         config.enableLegacyMode(true);
@@ -64,6 +68,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
 
     @SmallTest
     @Feature({"Cronet"})
+    @OnlyRunNativeCronet
     public void testCreateLegacyFactoryUsingUrlRequestContextConfig() {
         UrlRequestContextConfig config = new UrlRequestContextConfig();
         config.enableLegacyMode(true);
@@ -177,7 +182,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
             config.enableHttpCache(HttpUrlRequestFactoryConfig.HTTP_CACHE_IN_MEMORY, 0);
             fail("IllegalArgumentException must be thrown");
         } catch (IllegalArgumentException e) {
-            assertEquals("Storage path must be empty", e.getMessage());
+            assertEquals("Storage path must not be set", e.getMessage());
         }
         assertTrue(dir.delete());
     }

@@ -4,17 +4,19 @@
 
 #include "content/child/web_url_loader_impl.h"
 
+#include <stdint.h>
 #include <algorithm>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/mime_util/mime_util.h"
 #include "components/scheduler/child/web_task_runner_impl.h"
 #include "content/child/child_thread_impl.h"
@@ -33,7 +35,7 @@
 #include "content/common/ssl_status_serialization.h"
 #include "content/public/child/fixed_received_data.h"
 #include "content/public/child/request_peer.h"
-#include "content/public/common/content_switches.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "net/base/data_url.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
@@ -43,6 +45,7 @@
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/url_request/url_request_data_job.h"
 #include "third_party/WebKit/public/platform/WebHTTPLoadInfo.h"
+#include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebTraceLocation.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -272,7 +275,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   void SetWebTaskRunner(scoped_ptr<blink::WebTaskRunner> task_runner);
 
   // RequestPeer methods:
-  void OnUploadProgress(uint64 position, uint64 size) override;
+  void OnUploadProgress(uint64_t position, uint64_t size) override;
   bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
                           const ResourceResponseInfo& info) override;
   void OnReceivedResponse(const ResourceResponseInfo& info) override;
@@ -284,7 +287,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
                           bool stale_copy_in_cache,
                           const std::string& security_info,
                           const base::TimeTicks& completion_time,
-                          int64 total_transfer_size) override;
+                          int64_t total_transfer_size) override;
   void OnReceivedCompletedResponse(const ResourceResponseInfo& info,
                                    scoped_ptr<ReceivedData> data,
                                    int error_code,
@@ -292,7 +295,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
                                    bool stale_copy_in_cache,
                                    const std::string& security_info,
                                    const base::TimeTicks& completion_time,
-                                   int64 total_transfer_size) override;
+                                   int64_t total_transfer_size) override;
 
  private:
   friend class base::RefCounted<Context>;
@@ -339,11 +342,10 @@ WebURLLoaderImpl::Context::Context(
     : loader_(loader),
       client_(NULL),
       resource_dispatcher_(resource_dispatcher),
-      web_task_runner_(web_task_runner.Pass()),
+      web_task_runner_(std::move(web_task_runner)),
       referrer_policy_(blink::WebReferrerPolicyDefault),
       defers_loading_(NOT_DEFERRING),
-      request_id_(-1) {
-}
+      request_id_(-1) {}
 
 void WebURLLoaderImpl::Context::Cancel() {
   if (resource_dispatcher_ && // NULL in unittest.
@@ -421,8 +423,7 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   // contains the body of the response. The request has already been made by the
   // browser.
   if (stream_override_.get()) {
-    CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableBrowserSideNavigation));
+    CHECK(IsBrowserSideNavigationEnabled());
     DCHECK(!sync_load_response);
     DCHECK_NE(WebURLRequest::FrameTypeNone, request.frameType());
     DCHECK_EQ("GET", request.httpMethod().latin1());
@@ -450,9 +451,7 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   // the WebURLLoader are the ones created by CommitNavigation. Several browser
   // tests load HTML directly through a data url which will be handled by the
   // block above.
-  DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableBrowserSideNavigation) ||
-         stream_override_.get() ||
+  DCHECK(!IsBrowserSideNavigationEnabled() || stream_override_.get() ||
          request.frameType() == WebURLRequest::FrameTypeNone);
 
   GURL referrer_url(
@@ -469,6 +468,7 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   request_info.method = method;
   request_info.url = url;
   request_info.first_party_for_cookies = request.firstPartyForCookies();
+  request_info.request_initiator = request.requestorOrigin();
   referrer_policy_ = request.referrerPolicy();
   request_info.referrer = Referrer(referrer_url, referrer_policy_);
   request_info.headers = GetWebURLRequestHeaders(request);
@@ -521,10 +521,11 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
 
 void WebURLLoaderImpl::Context::SetWebTaskRunner(
     scoped_ptr<blink::WebTaskRunner> web_task_runner) {
-  web_task_runner_ = web_task_runner.Pass();
+  web_task_runner_ = std::move(web_task_runner);
 }
 
-void WebURLLoaderImpl::Context::OnUploadProgress(uint64 position, uint64 size) {
+void WebURLLoaderImpl::Context::OnUploadProgress(uint64_t position,
+                                                 uint64_t size) {
   if (client_)
     client_->didSendData(loader_, position, size);
 }
@@ -578,8 +579,7 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
   // PlzNavigate: during navigations, the ResourceResponse has already been
   // received on the browser side, and has been passed down to the renderer.
   if (stream_override_.get()) {
-    CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableBrowserSideNavigation));
+    CHECK(IsBrowserSideNavigationEnabled());
     info = stream_override_->response;
   }
 
@@ -701,7 +701,7 @@ void WebURLLoaderImpl::Context::OnReceivedData(scoped_ptr<ReceivedData> data) {
       // We don't support ftp_listening_delegate_ and multipart_delegate_ for
       // now.
       // TODO(yhirano): Support ftp listening and multipart.
-      body_stream_writer_->AddData(data.Pass());
+      body_stream_writer_->AddData(std::move(data));
     }
   }
 }
@@ -718,7 +718,7 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
     bool stale_copy_in_cache,
     const std::string& security_info,
     const base::TimeTicks& completion_time,
-    int64 total_transfer_size) {
+    int64_t total_transfer_size) {
   // The WebURLLoaderImpl may be deleted in any of the calls to the client or
   // the delegates below (As they also may call in to the client).  Keep |this|
   // alive in that case, to avoid a crash.  If that happens, the request will be
@@ -759,20 +759,20 @@ void WebURLLoaderImpl::Context::OnReceivedCompletedResponse(
     bool stale_copy_in_cache,
     const std::string& security_info,
     const base::TimeTicks& completion_time,
-    int64 total_transfer_size) {
+    int64_t total_transfer_size) {
   scoped_refptr<Context> protect(this);
 
   OnReceivedResponse(info);
   if (data)
-    OnReceivedData(data.Pass());
+    OnReceivedData(std::move(data));
   OnCompletedRequest(error_code, was_ignored_by_handler, stale_copy_in_cache,
                      security_info, completion_time, total_transfer_size);
 }
 
 WebURLLoaderImpl::Context::~Context() {
-  if (request_id_ >= 0) {
-    resource_dispatcher_->RemovePendingRequest(request_id_);
-  }
+  // We must be already cancelled at this point.
+  // TODO(kinuko): Replace this with DCHECK once we make sure this is safe.
+  CHECK_LT(request_id_, 0);
 }
 
 void WebURLLoaderImpl::Context::CancelBodyStreaming() {
@@ -825,8 +825,10 @@ bool WebURLLoaderImpl::Context::CanHandleDataURLRequestLocally() const {
 
 #if defined(OS_ANDROID)
   // For compatibility reasons on Android we need to expose top-level data://
-  // to the browser.
-  if (request_.frameType() == WebURLRequest::FrameTypeTopLevel)
+  // to the browser. In tests resource_dispatcher_ can be null, and test pages
+  // need to be loaded locally.
+  if (resource_dispatcher_ &&
+      request_.frameType() == WebURLRequest::FrameTypeTopLevel)
     return false;
 #endif
 
@@ -870,8 +872,8 @@ void WebURLLoaderImpl::Context::HandleDataURL() {
 WebURLLoaderImpl::WebURLLoaderImpl(
     ResourceDispatcher* resource_dispatcher,
     scoped_ptr<blink::WebTaskRunner> web_task_runner)
-    : context_(new Context(this, resource_dispatcher, web_task_runner.Pass())) {
-}
+    : context_(
+          new Context(this, resource_dispatcher, std::move(web_task_runner))) {}
 
 WebURLLoaderImpl::~WebURLLoaderImpl() {
   cancel();
@@ -887,6 +889,7 @@ void WebURLLoaderImpl::PopulateURLResponse(const GURL& url,
   response->setTextEncodingName(WebString::fromUTF8(info.charset));
   response->setExpectedContentLength(info.content_length);
   response->setSecurityInfo(info.security_info);
+  response->setHasMajorCertificateErrors(info.has_major_certificate_errors);
   response->setAppCacheID(info.appcache_id);
   response->setAppCacheManifestURL(info.appcache_manifest_url);
   response->setWasCached(!info.load_timing.request_start_time.is_null() &&

@@ -216,49 +216,6 @@ TEST_F('BackgroundTest', 'ContinuousRead', function() {
   });
 });
 
-TEST_F('BackgroundTest', 'LiveRegionAddElement', function() {
-  var mockFeedback = this.createMockFeedback();
-  this.runWithLoadedTree(
-    function() {/*!
-      <h1>Document with live region</h1>
-      <p id="live" aria-live="polite"></p>
-      <button id="go">Go</button>
-      <script>
-        document.getElementById('go').addEventListener('click', function() {
-          document.getElementById('live').innerHTML = 'Hello, world';
-        }, false);
-      </script>
-    */},
-    function(rootNode) {
-      var go = rootNode.find({ role: RoleType.button });
-      mockFeedback.call(go.doDefault.bind(go))
-          .expectSpeech('Hello, world');
-      mockFeedback.replay();
-    });
-});
-
-TEST_F('BackgroundTest', 'LiveRegionRemoveElement', function() {
-  var mockFeedback = this.createMockFeedback();
-  this.runWithLoadedTree(
-    function() {/*!
-      <h1>Document with live region</h1>
-      <p id="live" aria-live="polite" aria-relevant="removals">Hello, world</p>
-      <button id="go">Go</button>
-      <script>
-        document.getElementById('go').addEventListener('click', function() {
-          document.getElementById('live').innerHTML = '';
-        }, false);
-      </script>
-    */},
-    function(rootNode) {
-      var go = rootNode.find({ role: RoleType.button });
-      go.doDefault();
-      mockFeedback.expectSpeech('removed:')
-          .expectSpeech('Hello, world');
-      mockFeedback.replay();
-    });
-});
-
 TEST_F('BackgroundTest', 'InitialFocus', function() {
   var mockFeedback = this.createMockFeedback();
   this.runWithLoadedTree('<a href="a">a</a>',
@@ -509,4 +466,42 @@ TEST_F('BackgroundTest', 'ActiveOrInactive', function() {
       mockFeedback.replay();
     }
   );
+});
+
+TEST_F('BackgroundTest', 'ModeSwitching', function() {
+  this.runWithLoadedTree('<button></button>', function(root) {
+    // Tests default to force next mode.
+    assertEquals('force_next', global.backgroundObj.mode);
+
+    // Force next mode stays set regardless of where the range lands.
+    global.backgroundObj.refreshMode('http://google.com');
+    assertEquals('force_next', global.backgroundObj.mode);
+    // Empty urls occur before document load or when root is desktop.
+    global.backgroundObj.refreshMode('');
+    assertEquals('force_next', global.backgroundObj.mode);
+
+    // Verify compat -> classic switching.
+    global.backgroundObj.setMode('compat');
+    global.backgroundObj.refreshMode('http://google.com');
+    assertEquals('classic', global.backgroundObj.mode);
+
+    // Ensure we switch to compat if our current range has focused
+    // state set and is not in web content.
+    assertTrue(root.parent.state.focused);
+    global.backgroundObj.setCurrentRange(cursors.Range.fromNode(root.parent));
+    global.backgroundObj.refreshMode('');
+    assertEquals('compat', global.backgroundObj.mode);
+
+    // And back to classic.
+    global.backgroundObj.setCurrentRange(cursors.Range.fromNode(root));
+    global.backgroundObj.refreshMode('');
+    assertEquals('classic', global.backgroundObj.mode);
+
+    // Now, try refreshing mode (which we call after tab switching) with a range
+    // that's not actually focused.
+    assertEquals(undefined, root.parent.parent.state.focused);
+    global.backgroundObj.setCurrentRange(cursors.Range.fromNode(root.parent.parent));
+    global.backgroundObj.refreshMode('');
+    assertEquals('classic', global.backgroundObj.mode);
+  }.bind(this));
 });

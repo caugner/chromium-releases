@@ -26,8 +26,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "core/inspector/ContentSearchUtils.h"
 
 #include "bindings/core/v8/ScriptRegexp.h"
@@ -107,7 +105,7 @@ PassRefPtr<TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>> searchInTextB
     return result;
 }
 
-static String findMagicComment(const String& content, const String& name, MagicCommentType commentType, bool* deprecated = 0)
+static String findMagicComment(const String& content, const String& name, MagicCommentType commentType, bool* deprecated)
 {
     ASSERT(name.find("=") == kNotFound);
     if (deprecated)

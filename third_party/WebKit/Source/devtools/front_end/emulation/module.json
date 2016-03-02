@@ -24,6 +24,7 @@
             "iconClass": "emulation-toolbar-item",
             "title": "Toggle device mode",
             "condition": "can_dock",
+            "experiment": "!deviceMode",
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -34,6 +35,32 @@
                     "shortcut": "Shift+Meta+M"
                 }
             ]
+        },
+        {
+            "type": "@WebInspector.ActionDelegate",
+            "actionId": "emulation.toggle-device-mode",
+            "className": "WebInspector.DeviceModeView.ActionDelegate",
+            "condition": "can_dock",
+            "experiment": "deviceMode",
+            "title": "Toggle device mode",
+            "iconClass": "phone-toolbar-item",
+            "bindings": [
+                {
+                    "platform": "windows,linux",
+                    "shortcut": "Shift+Ctrl+M"
+                },
+                {
+                    "platform": "mac",
+                    "shortcut": "Shift+Meta+M"
+                }
+            ]
+        },
+        {
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "actionId": "emulation.toggle-device-mode",
+            "condition": "can_dock",
+            "location": "main-toolbar-left",
+            "order": 1
         },
         {
             "type": "@WebInspector.Revealer",

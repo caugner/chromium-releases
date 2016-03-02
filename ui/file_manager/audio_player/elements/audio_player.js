@@ -29,7 +29,7 @@ Polymer({
      */
     shuffle: {
       type: Boolean,
-      observer: 'shuffleChanged'
+      notify: true
     },
 
     /**
@@ -37,7 +37,7 @@ Polymer({
      */
     repeat: {
       type: Boolean,
-      observer: 'repeatChanged'
+      notify: true
     },
 
     /**
@@ -45,7 +45,7 @@ Polymer({
      */
     volume: {
       type: Number,
-      observer: 'volumeChanged'
+      notify: true
     },
 
     /**
@@ -53,7 +53,7 @@ Polymer({
      */
     expanded: {
       type: Boolean,
-      observer: 'expandedChanged'
+      notify: true
     },
 
     /**
@@ -62,16 +62,6 @@ Polymer({
     currentTrackIndex: {
       type: Number,
       observer: 'currentTrackIndexChanged'
-    },
-
-    /**
-     * Model object of the Audio Player.
-     * @type {AudioPlayerModel}
-     */
-    model: {
-      type: Object,
-      value: null,
-      observer: 'modelChanged'
     },
 
     /**
@@ -90,43 +80,18 @@ Polymer({
       type: Number,
       value: 0,
       reflectToAttribute: true
+    },
+
+    ariaLabels: {
+      type: Object
     }
   },
 
   /**
-   * Handles change event for shuffle mode.
-   * @param {boolean} shuffle
+   * The last playing state when user starts dragging the seek bar.
+   * @private {boolean}
    */
-  shuffleChanged: function(shuffle) {
-    if (this.model)
-      this.model.shuffle = shuffle;
-  },
-
-  /**
-   * Handles change event for repeat mode.
-   * @param {boolean} repeat
-   */
-  repeatChanged: function(repeat) {
-    if (this.model)
-      this.model.repeat = repeat;
-  },
-
-  /**
-   * Handles change event for audio volume.
-   * @param {number} volume
-   */
-  volumeChanged: function(volume) {
-    if (this.model)
-      this.model.volume = volume;
-  },
-
-  /**
-   * Handles change event for expanded state of track list.
-   */
-  expandedChanged: function(expanded) {
-    if (this.model)
-      this.model.expanded = expanded;
-  },
+  wasPlayingOnDragStart_: false,
 
   /**
    * Initializes an element. This method is called automatically when the
@@ -135,7 +100,9 @@ Polymer({
   ready: function() {
     this.addEventListener('keydown', this.onKeyDown_.bind(this));
 
-    this.$.audio.volume = 0;  // Temporary initial volume.
+    this.$.audioController.addEventListener('dragging-changed',
+        this.onDraggingChanged_.bind(this));
+
     this.$.audio.addEventListener('ended', this.onAudioEnded.bind(this));
     this.$.audio.addEventListener('error', this.onAudioError.bind(this));
 
@@ -202,21 +169,6 @@ Polymer({
   },
 
   /**
-   * Invoked when the model changed.
-   * @param {AudioPlayerModel} newModel New model.
-   * @param {AudioPlayerModel} oldModel Old model.
-   */
-  modelChanged: function(newModel, oldModel) {
-    // Setting up the UI
-    if (newModel !== oldModel && newModel) {
-      this.shuffle = newModel.shuffle;
-      this.repeat = newModel.repeat;
-      this.volume = newModel.volume;
-      this.expanded = newModel.expanded;
-    }
-  },
-
-  /**
    * Invoked when time is changed.
    * @param {number} newValue new time (in ms).
    * @param {number} oldValue old time (in ms).
@@ -275,6 +227,13 @@ Polymer({
   },
 
   /**
+   * Invoked when receivig a request to start playing the current music.
+   */
+  onPlayCurrentTrack: function() {
+    this.$.audio.play();
+  },
+
+  /**
    * Invoked when receiving a request to replay the current music from the track
    * list element.
    */
@@ -283,6 +242,7 @@ Polymer({
     // status (playing or paused).
     this.$.audio.currentTime = 0;
     this.time = 0;
+    this.$.audio.play();
   },
 
   /**
@@ -389,10 +349,43 @@ Polymer({
   },
 
   /**
+   * Notifis the track-list element that the metadata for specified track is
+   * updated.
+   * @param {number} index The index of the track whose metadata is updated.
+   */
+  notifyTrackMetadataUpdated: function(index) {
+    if (index < 0 || index >= this.tracks.length)
+      return;
+
+    this.$.trackList.notifyPath('tracks.' + index + '.title',
+        this.tracks[index].title);
+    this.$.trackList.notifyPath('tracks.' + index + '.artist',
+        this.tracks[index].artist);
+  },
+
+  /**
    * Invoked when the audio player is being unloaded.
    */
   onPageUnload: function() {
     this.$.audio.src = '';  // Hack to prevent crashing.
+  },
+
+  /**
+   * Invoked when dragging state of seek bar on control panel is changed.
+   * During the user is dragging it, audio playback is paused temporalily.
+   */
+  onDraggingChanged_: function() {
+    if (this.$.audioController.dragging) {
+      if (this.playing) {
+        this.wasPlayingOnDragStart_ = true;
+        this.$.audio.pause();
+      }
+    } else {
+      if (this.wasPlayingOnDragStart_) {
+        this.$.audio.play();
+        this.wasPlayingOnDragStart_ = false;
+      }
+    }
   },
 
   /**
@@ -401,22 +394,6 @@ Polymer({
    */
   onKeyDown_: function(event) {
     switch (event.keyIdentifier) {
-      case 'Up':
-        if (this.$.audioController.volumeSliderShown && this.model.volume < 100)
-          this.model.volume += 1;
-        break;
-      case 'Down':
-        if (this.$.audioController.volumeSliderShown && this.model.volume > 0)
-          this.model.volume -= 1;
-        break;
-      case 'PageUp':
-        if (this.$.audioController.volumeSliderShown && this.model.volume < 91)
-          this.model.volume += 10;
-        break;
-      case 'PageDown':
-        if (this.$.audioController.volumeSliderShown && this.model.volume > 9)
-          this.model.volume -= 10;
-        break;
       case 'MediaNextTrack':
         this.onControllerNextClicked();
         break;

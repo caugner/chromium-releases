@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/WebDevToolsAgentImpl.h"
 
 #include "bindings/core/v8/ScriptController.h"
@@ -254,8 +253,9 @@ public:
 
 class DebuggerTask : public InspectorTaskRunner::Task {
 public:
-    DebuggerTask(PassOwnPtr<WebDevToolsAgent::MessageDescriptor> descriptor)
-        : m_descriptor(descriptor)
+    DebuggerTask(int sessionId, PassOwnPtr<WebDevToolsAgent::MessageDescriptor> descriptor)
+        : m_sessionId(sessionId)
+        , m_descriptor(descriptor)
     {
     }
 
@@ -268,10 +268,11 @@ public:
 
         WebDevToolsAgentImpl* agentImpl = static_cast<WebDevToolsAgentImpl*>(webagent);
         if (agentImpl->m_attached)
-            agentImpl->dispatchMessageFromFrontend(m_descriptor->message());
+            agentImpl->dispatchMessageFromFrontend(m_sessionId, m_descriptor->message());
     }
 
 private:
+    int m_sessionId;
     OwnPtr<WebDevToolsAgent::MessageDescriptor> m_descriptor;
 };
 
@@ -294,7 +295,7 @@ PassOwnPtrWillBeRawPtr<WebDevToolsAgentImpl> WebDevToolsAgentImpl::create(WebLoc
     // remote->local transition we cannot access mainFrameImpl() yet, so we have to store the
     // frame which will become the main frame later.
     agent->registerAgent(InspectorRenderingAgent::create(frame));
-    agent->registerAgent(InspectorEmulationAgent::create(frame));
+    agent->registerAgent(InspectorEmulationAgent::create(frame, agent));
     // TODO(dgozman): migrate each of the following agents to frame once module is ready.
     agent->registerAgent(InspectorDatabaseAgent::create(view->page()));
     agent->registerAgent(DeviceOrientationInspectorAgent::create(view->page()));
@@ -320,7 +321,7 @@ WebDevToolsAgentImpl::WebDevToolsAgentImpl(
     , m_resourceContentLoader(InspectorResourceContentLoader::create(m_webLocalFrameImpl->frame()))
     , m_state(adoptPtrWillBeNoop(new InspectorCompositeState(this)))
     , m_overlay(overlay)
-    , m_inspectedFrames(adoptPtr(new InspectedFrames(m_webLocalFrameImpl->frame())))
+    , m_inspectedFrames(InspectedFrames::create(m_webLocalFrameImpl->frame()))
     , m_inspectorAgent(nullptr)
     , m_domAgent(nullptr)
     , m_pageAgent(nullptr)
@@ -331,6 +332,7 @@ WebDevToolsAgentImpl::WebDevToolsAgentImpl(
     , m_pageConsoleAgent(nullptr)
     , m_agents(m_instrumentingAgents.get(), m_state.get())
     , m_deferredAgentsInitialized(false)
+    , m_sessionId(0)
 {
     ASSERT(isMainThread());
     ASSERT(m_webLocalFrameImpl->frame());
@@ -413,6 +415,7 @@ DEFINE_TRACE(WebDevToolsAgentImpl)
     visitor->trace(m_resourceContentLoader);
     visitor->trace(m_state);
     visitor->trace(m_overlay);
+    visitor->trace(m_inspectedFrames);
     visitor->trace(m_inspectorAgent);
     visitor->trace(m_domAgent);
     visitor->trace(m_pageAgent);
@@ -497,13 +500,14 @@ void WebDevToolsAgentImpl::registerAgent(PassOwnPtrWillBeRawPtr<InspectorAgent> 
     m_agents.append(agent);
 }
 
-void WebDevToolsAgentImpl::attach(const WebString& hostId)
+void WebDevToolsAgentImpl::attach(const WebString& hostId, int sessionId)
 {
     if (m_attached)
         return;
 
     // Set the attached bit first so that sync notifications were delivered.
     m_attached = true;
+    m_sessionId = sessionId;
 
     initializeDeferredAgents();
     m_resourceAgent->setHostId(hostId);
@@ -522,12 +526,12 @@ void WebDevToolsAgentImpl::attach(const WebString& hostId)
     Platform::current()->currentThread()->addTaskObserver(this);
 }
 
-void WebDevToolsAgentImpl::reattach(const WebString& hostId, const WebString& savedState)
+void WebDevToolsAgentImpl::reattach(const WebString& hostId, int sessionId, const WebString& savedState)
 {
     if (m_attached)
         return;
 
-    attach(hostId);
+    attach(hostId, sessionId);
     m_state->loadFromCookie(savedState);
     m_agents.restore();
 }
@@ -554,6 +558,7 @@ void WebDevToolsAgentImpl::detach()
     InspectorInstrumentation::frontendDeleted();
     InspectorInstrumentation::unregisterInstrumentingAgents(m_instrumentingAgents.get());
 
+    m_sessionId = 0;
     m_attached = false;
 }
 
@@ -598,21 +603,26 @@ void WebDevToolsAgentImpl::disableTracing()
     m_client->disableTracing();
 }
 
-void WebDevToolsAgentImpl::dispatchOnInspectorBackend(const WebString& message)
+void WebDevToolsAgentImpl::setCPUThrottlingRate(double rate)
+{
+    m_client->setCPUThrottlingRate(rate);
+}
+
+void WebDevToolsAgentImpl::dispatchOnInspectorBackend(int sessionId, const WebString& message)
 {
     if (!m_attached)
         return;
     if (WebDevToolsAgent::shouldInterruptForMessage(message))
         MainThreadDebugger::instance()->taskRunner()->runPendingTasks();
     else
-        dispatchMessageFromFrontend(message);
+        dispatchMessageFromFrontend(sessionId, message);
 }
 
-void WebDevToolsAgentImpl::dispatchMessageFromFrontend(const String& message)
+void WebDevToolsAgentImpl::dispatchMessageFromFrontend(int sessionId, const String& message)
 {
     InspectorTaskRunner::IgnoreInterruptsScope scope(MainThreadDebugger::instance()->taskRunner());
     if (m_inspectorBackendDispatcher)
-        m_inspectorBackendDispatcher->dispatch(message);
+        m_inspectorBackendDispatcher->dispatch(sessionId, message);
 }
 
 void WebDevToolsAgentImpl::inspectElementAt(const WebPoint& pointInRootFrame)
@@ -632,12 +642,12 @@ void WebDevToolsAgentImpl::inspectElementAt(const WebPoint& pointInRootFrame)
     m_domAgent->inspect(node);
 }
 
-void WebDevToolsAgentImpl::sendProtocolResponse(int callId, PassRefPtr<JSONObject> message)
+void WebDevToolsAgentImpl::sendProtocolResponse(int sessionId, int callId, PassRefPtr<JSONObject> message)
 {
     if (!m_attached)
         return;
     flushPendingProtocolNotifications();
-    m_client->sendProtocolMessage(callId, message->toJSONString(), m_stateCookie);
+    m_client->sendProtocolMessage(sessionId, callId, message->toJSONString(), m_stateCookie);
     m_stateCookie = String();
 }
 
@@ -645,7 +655,7 @@ void WebDevToolsAgentImpl::sendProtocolNotification(PassRefPtr<JSONObject> messa
 {
     if (!m_attached)
         return;
-    m_notificationQueue.append(message);
+    m_notificationQueue.append(std::make_pair(m_sessionId, message));
 }
 
 void WebDevToolsAgentImpl::flush()
@@ -678,12 +688,11 @@ WebString WebDevToolsAgentImpl::evaluateInWebInspectorOverlay(const WebString& s
 
 void WebDevToolsAgentImpl::flushPendingProtocolNotifications()
 {
-    if (!m_attached)
-        return;
-
-    m_agents.flushPendingProtocolNotifications();
-    for (size_t i = 0; i < m_notificationQueue.size(); ++i)
-        m_client->sendProtocolMessage(0, m_notificationQueue[i]->toJSONString(), WebString());
+    if (m_attached) {
+        m_agents.flushPendingProtocolNotifications();
+        for (size_t i = 0; i < m_notificationQueue.size(); ++i)
+            m_client->sendProtocolMessage(m_notificationQueue[i].first, 0, m_notificationQueue[i].second->toJSONString(), WebString());
+    }
     m_notificationQueue.clear();
 }
 
@@ -704,11 +713,11 @@ void WebDevToolsAgentImpl::didProcessTask()
     flushPendingProtocolNotifications();
 }
 
-void WebDevToolsAgent::interruptAndDispatch(MessageDescriptor* rawDescriptor)
+void WebDevToolsAgent::interruptAndDispatch(int sessionId, MessageDescriptor* rawDescriptor)
 {
     // rawDescriptor can't be a PassOwnPtr because interruptAndDispatch is a WebKit API function.
     OwnPtr<MessageDescriptor> descriptor = adoptPtr(rawDescriptor);
-    OwnPtr<DebuggerTask> task = adoptPtr(new DebuggerTask(descriptor.release()));
+    OwnPtr<DebuggerTask> task = adoptPtr(new DebuggerTask(sessionId, descriptor.release()));
     MainThreadDebugger::interruptMainThreadAndRun(task.release());
 }
 

@@ -95,6 +95,9 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
             loadUrlAsync(containerViews[i].getAwContents(), "about:blank");
         }
 
+        for (int i = 0; i < containerViews.length; i++) {
+            containerViews[i] = null;
+        }
         containerViews = null;
         removeAllViews();
         gcAndCheckAllAwContentsDestroyed();
@@ -113,6 +116,9 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
             loadUrlAsync(containerViews[i].getAwContents(), "about:blank");
         }
 
+        for (int i = 0; i < containerViews.length; i++) {
+            containerViews[i] = null;
+        }
         containerViews = null;
         removeAllViews();
         gcAndCheckAllAwContentsDestroyed();
@@ -134,6 +140,9 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
             loadUrlAsync(containerViews[i].getAwContents(), "about:blank");
         }
 
+        for (int i = 0; i < containerViews.length; i++) {
+            containerViews[i] = null;
+        }
         containerViews = null;
         removeAllViews();
         gcAndCheckAllAwContentsDestroyed();
@@ -206,9 +215,10 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
         // catch this case.
         final long timeoutBetweenGcMs = scaleTimeout(1000);
         for (int i = 0; i < 15; ++i) {
-            if (CriteriaHelper.pollForCriteria(criteria, timeoutBetweenGcMs, CHECK_INTERVAL)) {
+            try {
+                CriteriaHelper.pollForCriteria(criteria, timeoutBetweenGcMs, CHECK_INTERVAL);
                 break;
-            } else {
+            } catch (AssertionError e) {
                 Runtime.getRuntime().gc();
             }
         }

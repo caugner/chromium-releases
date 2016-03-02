@@ -59,6 +59,7 @@ class Image;
 class IntSize;
 class Locale;
 class MutableStylePropertySet;
+class NodeIntersectionObserverData;
 class PropertySetCSSStyleDeclaration;
 class PseudoElement;
 class ScrollState;
@@ -211,7 +212,7 @@ public:
     void scrollTo(double x, double y);
     virtual void scrollTo(const ScrollToOptions&);
 
-    IntRect boundsInViewportSpace();
+    IntRect boundsInViewport() const;
 
     ClientRectList* getClientRects();
     ClientRect* getBoundingClientRect();
@@ -299,9 +300,8 @@ public:
     };
 
     // This method is called whenever an attribute is added, changed or removed.
-    virtual void attributeWillChange(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue) { }
-    virtual void attributeChanged(const QualifiedName&, const AtomicString&, AttributeModificationReason = ModifiedDirectly);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&);
+    virtual void attributeChanged(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue, AttributeModificationReason = ModifiedDirectly);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue);
 
     virtual bool hasLegalLinkAttribute(const QualifiedName&) const;
     virtual const QualifiedName& subResourceAttributeName() const;
@@ -354,6 +354,8 @@ public:
     ShadowRoot* userAgentShadowRoot() const;
 
     ShadowRoot* youngestShadowRoot() const;
+
+    ShadowRoot* shadowRootIfV1() const;
 
     ShadowRoot& ensureUserAgentShadowRoot();
     virtual void willAddFirstAuthorShadowRoot() { }
@@ -531,12 +533,29 @@ public:
     void setTabIndex(int);
     short tabIndex() const override;
 
-    void incrementProxyCount();
-    void decrementProxyCount();
+    // A compositor proxy is a very limited wrapper around an element. It
+    // exposes only those properties that are requested at the time the proxy is
+    // created. In order to know which properties are actually proxied, we
+    // maintain a count of the number of compositor proxies associated with each
+    // property.
+    bool hasCompositorProxy() const;
+    void incrementCompositorProxiedProperties(uint32_t mutableProperties);
+    void decrementCompositorProxiedProperties(uint32_t mutableProperties);
+    uint32_t compositorMutableProperties() const;
+
+    // Helpers for V8DOMActivityLogger::logEvent.  They call logEvent only if
+    // the element is inDocument() and the context is an isolated world.
+    void logAddElementIfIsolatedWorldAndInDocument(const char element[], const QualifiedName& attr1);
+    void logAddElementIfIsolatedWorldAndInDocument(const char element[], const QualifiedName& attr1, const QualifiedName& attr2);
+    void logAddElementIfIsolatedWorldAndInDocument(const char element[], const QualifiedName& attr1, const QualifiedName& attr2, const QualifiedName& attr3);
+    void logUpdateAttributeIfIsolatedWorldAndInDocument(const char element[], const QualifiedName& attributeName, const AtomicString& oldValue, const AtomicString& newValue);
 
     DECLARE_VIRTUAL_TRACE();
 
     SpellcheckAttributeState spellcheckAttributeState() const;
+
+    NodeIntersectionObserverData* intersectionObserverData() const;
+    NodeIntersectionObserverData& ensureIntersectionObserverData();
 
 protected:
     Element(const QualifiedName& tagName, Document*, ConstructionType);
@@ -547,6 +566,7 @@ protected:
     void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, CSSValueID identifier);
     void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, double value, CSSPrimitiveValue::UnitType);
     void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, const String& value);
+    void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, PassRefPtrWillBeRawPtr<CSSValue>);
 
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
     void removedFrom(ContainerNode*) override;

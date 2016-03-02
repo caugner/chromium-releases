@@ -61,7 +61,8 @@ class SharedBuffer;
 // from ResourceClient, to get the function calls in case the requested data has arrived.
 // This class also does the actual communication with the loader to obtain the resource from the network.
 class CORE_EXPORT Resource : public NoBaseWillBeGarbageCollectedFinalized<Resource> {
-    WTF_MAKE_NONCOPYABLE(Resource); USING_FAST_MALLOC_WILL_BE_REMOVED(Resource);
+    WTF_MAKE_NONCOPYABLE(Resource);
+    USING_FAST_MALLOC_WITH_TYPE_NAME_WILL_BE_REMOVED(blink::Resource);
     friend class InspectorResource;
 
 public:
@@ -76,10 +77,10 @@ public:
         XSLStyleSheet,
         LinkPrefetch,
         LinkSubresource,
-        LinkPreload,
         TextTrack,
         ImportResource,
-        Media // Audio or video file requested by a HTML5 media element
+        Media, // Audio or video file requested by a HTML5 media element
+        Manifest
     };
 
     enum Status {
@@ -107,7 +108,7 @@ public:
 
     virtual void setEncoding(const String&) { }
     virtual String encoding() const { return String(); }
-    virtual void appendData(const char*, unsigned);
+    virtual void appendData(const char*, size_t);
     virtual void error(Resource::Status);
     virtual void setCORSFailed() { }
 
@@ -175,7 +176,7 @@ public:
 
     virtual bool isImage() const { return false; }
     bool shouldBlockLoadEvent() const;
-    bool isNonBlockingResourceType() const;
+    bool isLoadEventBlockingResourceType() const;
 
     // Computes the status of an object after loading.
     // Updates the expire date on the cache entry file
@@ -264,6 +265,9 @@ public:
     virtual void onMemoryDump(WebMemoryDumpLevelOfDetail, WebProcessMemoryDump*) const;
 
     static const char* resourceTypeToString(Type, const FetchInitiatorInfo&);
+
+    // TODO(japhet): Remove once oilpan ships, it doesn't need the WeakPtr.
+    WeakPtrWillBeRawPtr<Resource> asWeakPtr();
 
 #ifdef ENABLE_RESOURCE_IS_DELETED_CHECK
     void assertAlive() const { RELEASE_ASSERT(!m_deleted); }
@@ -381,6 +385,10 @@ private:
     CachedMetadata* cachedMetadata(unsigned dataTypeID) const;
 
     String m_fragmentIdentifierForRequest;
+
+#if !ENABLE(OILPAN)
+    WeakPtrFactory<Resource> m_weakPtrFactory;
+#endif
 
     RefPtr<CachedMetadata> m_cachedMetadata;
     OwnPtrWillBeMember<CacheHandler> m_cacheHandler;

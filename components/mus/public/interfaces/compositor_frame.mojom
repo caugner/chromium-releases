@@ -24,6 +24,7 @@ enum CommandBufferNamespace {
   GPU_IO,
   IN_PROCESS,
   MOJO,
+  MOJO_LOCAL,
   OLD_SYNC_POINTS,
 
   NUM_COMMAND_BUFFER_NAMESPACES
@@ -33,6 +34,7 @@ enum CommandBufferNamespace {
 struct SyncToken {
   bool verified_flush;
   CommandBufferNamespace namespace_id;
+  int32 extra_data_field;
   uint64 command_buffer_id;
   uint64 release_count;
 };
@@ -69,8 +71,9 @@ struct TransferableResource {
   uint32 filter;
   mojo.Size size;
   MailboxHolder mailbox_holder;
-  bool is_repeated;
+  bool read_lock_fences_enabled;
   bool is_software;
+  bool is_overlay_candidate;
 };
 
 // See cc/output/compositor_frame_metadata.h.

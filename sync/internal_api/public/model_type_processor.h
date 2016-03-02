@@ -13,12 +13,12 @@ namespace syncer_v2 {
 class CommitQueue;
 
 // Interface used by sync backend to issue requests to a synced data type.
-class SYNC_EXPORT_PRIVATE ModelTypeProcessor {
+class SYNC_EXPORT ModelTypeProcessor {
  public:
   ModelTypeProcessor();
   virtual ~ModelTypeProcessor();
 
-  // Callback used to process the handshake response.
+  // Callback used to process the handshake response from the worker.
   virtual void OnConnect(scoped_ptr<CommitQueue> commit_queue) = 0;
 
   // Informs this object that some of its commit requests have been
@@ -35,6 +35,6 @@ class SYNC_EXPORT_PRIVATE ModelTypeProcessor {
       const UpdateResponseDataList& pending_updates) = 0;
 };
 
-}  // namespace syncer
+}  // namespace syncer_v2
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_MODEL_TYPE_PROCESSOR_H_

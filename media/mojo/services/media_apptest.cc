@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
@@ -12,13 +15,14 @@
 #include "media/base/test_helpers.h"
 #include "media/cdm/key_system_names.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
+#include "media/mojo/interfaces/decryptor.mojom.h"
 #include "media/mojo/interfaces/renderer.mojom.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
 #include "media/mojo/services/media_type_converters.h"
 #include "media/mojo/services/mojo_demuxer_stream_impl.h"
-#include "mojo/application/public/cpp/application_connection.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/application/public/cpp/application_test_base.h"
+#include "mojo/shell/public/cpp/application_connection.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/application_test_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::Exactly;
@@ -57,9 +61,7 @@ class MediaAppTest : public mojo::test::ApplicationTestBase {
   void SetUp() override {
     ApplicationTestBase::SetUp();
 
-    mojo::URLRequestPtr request = mojo::URLRequest::New();
-    request->url = "mojo:media";
-    connection_ = application_impl()->ConnectToApplication(request.Pass());
+    connection_ = application_impl()->ConnectToApplication("mojo:media");
     connection_->SetRemoteServiceProviderConnectionErrorHandler(
         base::Bind(&MediaAppTest::ConnectionClosed, base::Unretained(this)));
 
@@ -73,7 +75,9 @@ class MediaAppTest : public mojo::test::ApplicationTestBase {
   // MOCK_METHOD* doesn't support move only types. Work around this by having
   // an extra method.
   MOCK_METHOD2(OnCdmInitializedInternal, void(bool result, int cdm_id));
-  void OnCdmInitialized(interfaces::CdmPromiseResultPtr result, int cdm_id) {
+  void OnCdmInitialized(interfaces::CdmPromiseResultPtr result,
+                        int cdm_id,
+                        interfaces::DecryptorPtr decryptor) {
     OnCdmInitializedInternal(result->success, cdm_id);
   }
 
@@ -103,7 +107,8 @@ class MediaAppTest : public mojo::test::ApplicationTestBase {
     EXPECT_CALL(*this, OnRendererInitialized(expected_result))
         .Times(Exactly(1))
         .WillOnce(InvokeWithoutArgs(run_loop_.get(), &base::RunLoop::Quit));
-    renderer_->Initialize(client_ptr.Pass(), nullptr, video_stream.Pass(),
+    renderer_->Initialize(std::move(client_ptr), nullptr,
+                          std::move(video_stream),
                           base::Bind(&MediaAppTest::OnRendererInitialized,
                                      base::Unretained(this)));
   }

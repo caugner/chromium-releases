@@ -180,42 +180,6 @@ cache_test(function(cache) {
   }, 'Cache.put called twice with request URLs that differ only by a fragment');
 
 cache_test(function(cache) {
-    var entries = {
-      dark: {
-        url: 'http://darkhelmet:12345@example.com/spaceballs',
-        body: 'Moranis'
-      },
-
-      skroob: {
-        url: 'http://skroob:12345@example.com/spaceballs',
-        body: 'Brooks'
-      },
-
-      control: {
-        url: 'http://example.com/spaceballs',
-        body: 'v(o.o)v'
-      }
-    };
-
-    return Promise.all(Object.keys(entries).map(function(key) {
-        return cache.put(new Request(entries[key].url),
-                         new Response(entries[key].body));
-      }))
-      .then(function() {
-          return Promise.all(Object.keys(entries).map(function(key) {
-              return cache.match(entries[key].url)
-                .then(function(result) {
-                    return result.text();
-                  })
-                .then(function(body) {
-                    assert_equals(body, entries[key].body,
-                                  'Cache put should store response body.');
-                  });
-            }));
-        });
-  }, 'Cache.put with request URLs containing embedded credentials');
-
-cache_test(function(cache) {
     var url = 'http://example.com/foo';
     return cache.put(url, new Response('some body'))
       .then(function() { return cache.match(url); })
@@ -283,11 +247,14 @@ cache_test(function(cache) {
                  '[https://fetch.spec.whatwg.org/#dom-body-bodyused] ' +
                  'Response.bodyUsed should be initially false.');
     return response.text().then(function() {
-      assert_false(
+      assert_true(
         response.bodyUsed,
         '[https://fetch.spec.whatwg.org/#concept-body-consume-body] ' +
-          'The text() method should not set "body passed" flag.');
-      return cache.put(new Request(test_url), response);
+          'The text() method should make the body disturbed.');
+      var request = new Request(test_url);
+      return cache.put(request, response).then(() => {
+          assert_unreached('cache.put should be rejected');
+        }, () => {});
     });
   }, 'Cache.put with a used response body');
 
@@ -295,8 +262,26 @@ cache_test(function(cache) {
     var response = new Response(test_body);
     return cache.put(new Request(test_url), response)
       .then(function() {
-          return response.body.getReader().closed;
+          assert_throws(new TypeError(), () => response.body.getReader());
       });
   }, 'getReader() after Cache.put');
+
+cache_test(function(cache) {
+    return assert_promise_rejects(
+      cache.put(new Request(test_url),
+                new Response(test_body, { headers: { VARY: '*' }})),
+      new TypeError(),
+      'Cache.put should reject VARY:* Responses with a TypeError.');
+  }, 'Cache.put with a VARY:* Response');
+
+cache_test(function(cache) {
+    return assert_promise_rejects(
+      cache.put(new Request(test_url),
+                new Response(test_body,
+                             { headers: { VARY: 'Accept-Language,*' }})),
+      new TypeError(),
+      'Cache.put should reject Responses with an embedded VARY:* with a ' +
+      'TypeError.');
+  }, 'Cache.put with an embedded VARY:* Response');
 
 done();

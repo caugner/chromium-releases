@@ -4,6 +4,8 @@
 
 #include "chrome/browser/sessions/session_restore.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <list>
 #include <set>
@@ -14,6 +16,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/field_trial.h"
@@ -21,6 +24,7 @@
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -298,11 +302,9 @@ class SessionRestoreImpl : public content::NotificationObserver {
     }
 
     if (succeeded) {
-      if (SessionRestore::GetSmartRestoreMode() !=
-          SessionRestore::SMART_RESTORE_MODE_OFF) {
-        std::stable_sort(contents_created->begin(), contents_created->end());
-      }
-      // Start Loading tabs.
+      // Sort the tabs in the order they should be restored, and start loading
+      // them.
+      std::stable_sort(contents_created->begin(), contents_created->end());
       SessionRestoreDelegate::RestoreTabs(*contents_created, restore_started_);
     }
 
@@ -516,23 +518,21 @@ class SessionRestoreImpl : public content::NotificationObserver {
     base::TimeTicks now = base::TimeTicks::Now();
     base::TimeTicks highest_time = base::TimeTicks::UnixEpoch();
     if (initial_tab_count == 0) {
-      if (SessionRestore::GetSmartRestoreMode() ==
-          SessionRestore::SMART_RESTORE_MODE_MRU) {
-        // The last active time of a WebContents is initially set to the
-        // creation time of the tab, which is not necessarly the same as the
-        // loading time, so we have to restore the values. Also, since TimeTicks
-        // only make sense in their current session, these values have to be
-        // sanitized first. To do so, we need to first figure out the largest
-        // time. This will then be used to set the last active time of
-        // each tab where the most recent tab will have its time set to |now|
-        // and the rest of the tabs will have theirs set earlier by the same
-        // delta as they originally had.
-        for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
-          const sessions::SessionTab& tab = *(window.tabs[i]);
-          if (tab.last_active_time > highest_time)
-            highest_time = tab.last_active_time;
-        }
+      // The last active time of a WebContents is initially set to the
+      // creation time of the tab, which is not necessarly the same as the
+      // loading time, so we have to restore the values. Also, since TimeTicks
+      // only make sense in their current session, these values have to be
+      // sanitized first. To do so, we need to first figure out the largest
+      // time. This will then be used to set the last active time of
+      // each tab where the most recent tab will have its time set to |now|
+      // and the rest of the tabs will have theirs set earlier by the same
+      // delta as they originally had.
+      for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
+        const sessions::SessionTab& tab = *(window.tabs[i]);
+        if (tab.last_active_time > highest_time)
+          highest_time = tab.last_active_time;
       }
+
       for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
         const sessions::SessionTab& tab = *(window.tabs[i]);
 
@@ -546,11 +546,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
           continue;
 
         // Sanitize the last active time.
-        if (SessionRestore::GetSmartRestoreMode() ==
-            SessionRestore::SMART_RESTORE_MODE_MRU) {
-          base::TimeDelta delta = highest_time - tab.last_active_time;
-          contents->SetLastActiveTime(now - delta);
-        }
+        base::TimeDelta delta = highest_time - tab.last_active_time;
+        contents->SetLastActiveTime(now - delta);
 
         RestoredTab restored_tab(contents, is_selected_tab,
                                  tab.extension_app_id.empty(), tab.pinned);
@@ -577,11 +574,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
             RestoreTab(tab, tab_index_offset + i, browser, false);
         if (contents) {
           // Sanitize the last active time.
-          if (SessionRestore::GetSmartRestoreMode() ==
-              SessionRestore::SMART_RESTORE_MODE_MRU) {
-            base::TimeDelta delta = highest_time - tab.last_active_time;
-            contents->SetLastActiveTime(now - delta);
-          }
+          base::TimeDelta delta = highest_time - tab.last_active_time;
+          contents->SetLastActiveTime(now - delta);
           RestoredTab restored_tab(contents, false,
                                    tab.extension_app_id.empty(), tab.pinned);
           created_contents->push_back(restored_tab);
@@ -753,7 +747,7 @@ Browser* SessionRestore::RestoreSession(
     Profile* profile,
     Browser* browser,
     chrome::HostDesktopType host_desktop_type,
-    uint32 behavior,
+    uint32_t behavior,
     const std::vector<GURL>& urls_to_open) {
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesRecorder::Get()->AddLoginTimeMarker(
@@ -780,7 +774,7 @@ Browser* SessionRestore::RestoreSession(
 
 // static
 void SessionRestore::RestoreSessionAfterCrash(Browser* browser) {
-  uint32 behavior = 0;
+  uint32_t behavior = 0;
   if (browser->tab_strip_model()->count() == 1) {
     const content::WebContents* active_tab =
         browser->tab_strip_model()->GetWebContentsAt(0);
@@ -854,17 +848,6 @@ SessionRestore::CallbackSubscription
     SessionRestore::RegisterOnSessionRestoredCallback(
         const base::Callback<void(int)>& callback) {
   return on_session_restored_callbacks()->Add(callback);
-}
-
-// static
-SessionRestore::SmartRestoreMode SessionRestore::GetSmartRestoreMode() {
-  std::string prioritize_tabs = variations::GetVariationParamValue(
-      "IntelligentSessionRestore", "PrioritizeTabs");
-  if (prioritize_tabs == "mru")
-    return SMART_RESTORE_MODE_MRU;
-  if (prioritize_tabs == "simple")
-    return SMART_RESTORE_MODE_SIMPLE;
-  return SMART_RESTORE_MODE_OFF;
 }
 
 // static

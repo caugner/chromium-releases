@@ -5,8 +5,9 @@
 #include "third_party/mojo/src/mojo/edk/system/remote_consumer_data_pipe_impl.h"
 
 #include <string.h>
-
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -73,7 +74,7 @@ RemoteConsumerDataPipeImpl::RemoteConsumerDataPipeImpl(
     size_t start_index)
     : channel_endpoint_(channel_endpoint),
       consumer_num_bytes_(consumer_num_bytes),
-      buffer_(buffer.Pass()),
+      buffer_(std::move(buffer)),
       start_index_(start_index) {
   // Note: |buffer_| may be null (in which case it'll be lazily allocated).
 }
@@ -156,7 +157,7 @@ MojoResult RemoteConsumerDataPipeImpl::ProducerWriteData(
         MessageInTransit::Type::ENDPOINT_CLIENT,
         MessageInTransit::Subtype::ENDPOINT_CLIENT_DATA,
         static_cast<uint32_t>(message_num_bytes), elements.At(offset)));
-    if (!channel_endpoint_->EnqueueMessage(message.Pass())) {
+    if (!channel_endpoint_->EnqueueMessage(std::move(message))) {
       Disconnect();
       break;
     }
@@ -230,7 +231,7 @@ MojoResult RemoteConsumerDataPipeImpl::ProducerEndWriteData(
                              MessageInTransit::Subtype::ENDPOINT_CLIENT_DATA,
                              static_cast<uint32_t>(message_num_bytes),
                              buffer_.get() + start_index_ + offset));
-    if (!channel_endpoint_->EnqueueMessage(message.Pass())) {
+    if (!channel_endpoint_->EnqueueMessage(std::move(message))) {
       set_producer_two_phase_max_num_bytes_written(0);
       Disconnect();
       return MOJO_RESULT_OK;
@@ -284,7 +285,7 @@ bool RemoteConsumerDataPipeImpl::ProducerEndSerialize(
 
   if (!consumer_open()) {
     // Case 1: The consumer is closed.
-    s->consumer_num_bytes = static_cast<size_t>(-1);
+    s->consumer_num_bytes = static_cast<uint32_t>(-1);
     *actual_size = sizeof(SerializedDataPipeProducerDispatcher);
     return true;
   }
@@ -292,7 +293,8 @@ bool RemoteConsumerDataPipeImpl::ProducerEndSerialize(
   // Case 2: The consumer isn't closed. We pass |channel_endpoint| back to the
   // |Channel|. There's no reason for us to continue to exist afterwards.
 
-  s->consumer_num_bytes = consumer_num_bytes_;
+  DCHECK(consumer_num_bytes_ < std::numeric_limits<uint32_t>::max());
+  s->consumer_num_bytes = static_cast<uint32_t>(consumer_num_bytes_);
   // Note: We don't use |port|.
   scoped_refptr<ChannelEndpoint> channel_endpoint;
   channel_endpoint.swap(channel_endpoint_);

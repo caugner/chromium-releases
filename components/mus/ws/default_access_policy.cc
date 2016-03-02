@@ -22,14 +22,14 @@ bool DefaultAccessPolicy::CanRemoveWindowFromParent(
   if (!WasCreatedByThisConnection(window))
     return false;  // Can only unparent windows we created.
 
-  return delegate_->IsRootForAccessPolicy(window->parent()->id()) ||
+  return delegate_->HasRootForAccessPolicy(window->parent()) ||
          WasCreatedByThisConnection(window->parent());
 }
 
 bool DefaultAccessPolicy::CanAddWindow(const ServerWindow* parent,
                                        const ServerWindow* child) const {
   return WasCreatedByThisConnection(child) &&
-         (delegate_->IsRootForAccessPolicy(parent->id()) ||
+         (delegate_->HasRootForAccessPolicy(parent) ||
           (WasCreatedByThisConnection(parent) &&
            !delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(parent)));
 }
@@ -37,18 +37,18 @@ bool DefaultAccessPolicy::CanAddWindow(const ServerWindow* parent,
 bool DefaultAccessPolicy::CanAddTransientWindow(
     const ServerWindow* parent,
     const ServerWindow* child) const {
-  return WasCreatedByThisConnection(child) &&
-         (delegate_->IsRootForAccessPolicy(parent->id()) ||
+  return (delegate_->HasRootForAccessPolicy(child) ||
+          WasCreatedByThisConnection(child)) &&
+         (delegate_->HasRootForAccessPolicy(parent) ||
           WasCreatedByThisConnection(parent));
 }
 
 bool DefaultAccessPolicy::CanRemoveTransientWindowFromParent(
     const ServerWindow* window) const {
-  if (!WasCreatedByThisConnection(window))
-    return false;  // Can only unparent windows we created.
-
-  return delegate_->IsRootForAccessPolicy(window->transient_parent()->id()) ||
-         WasCreatedByThisConnection(window->transient_parent());
+  return (delegate_->HasRootForAccessPolicy(window) ||
+          WasCreatedByThisConnection(window)) &&
+         (delegate_->HasRootForAccessPolicy(window->transient_parent()) ||
+          WasCreatedByThisConnection(window->transient_parent()));
 }
 
 bool DefaultAccessPolicy::CanReorderWindow(
@@ -65,7 +65,7 @@ bool DefaultAccessPolicy::CanDeleteWindow(const ServerWindow* window) const {
 
 bool DefaultAccessPolicy::CanGetWindowTree(const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id()) ||
+         delegate_->HasRootForAccessPolicy(window) ||
          IsDescendantOfEmbedRoot(window);
 }
 
@@ -73,7 +73,7 @@ bool DefaultAccessPolicy::CanDescendIntoWindowForWindowTree(
     const ServerWindow* window) const {
   return (WasCreatedByThisConnection(window) &&
           !delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(window)) ||
-         delegate_->IsRootForAccessPolicy(window->id()) ||
+         delegate_->HasRootForAccessPolicy(window) ||
          delegate_->IsDescendantOfEmbedRoot(window);
 }
 
@@ -84,13 +84,13 @@ bool DefaultAccessPolicy::CanEmbed(const ServerWindow* window,
   return WasCreatedByThisConnection(window) ||
          (delegate_->IsWindowKnownForAccessPolicy(window) &&
           IsDescendantOfEmbedRoot(window) &&
-          !delegate_->IsRootForAccessPolicy(window->id()));
+          !delegate_->HasRootForAccessPolicy(window));
 }
 
 bool DefaultAccessPolicy::CanChangeWindowVisibility(
     const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id());
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::CanSetWindowSurface(
@@ -105,7 +105,7 @@ bool DefaultAccessPolicy::CanSetWindowSurface(
   if (delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(window))
     return false;
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id());
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::CanSetWindowBounds(const ServerWindow* window) const {
@@ -120,17 +120,23 @@ bool DefaultAccessPolicy::CanSetWindowProperties(
 bool DefaultAccessPolicy::CanSetWindowTextInputState(
     const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id());
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::CanSetFocus(const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id());
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::CanSetClientArea(const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->IsRootForAccessPolicy(window->id());
+         delegate_->HasRootForAccessPolicy(window);
+}
+
+bool DefaultAccessPolicy::CanSetCursorProperties(
+    const ServerWindow* window) const {
+  return WasCreatedByThisConnection(window) ||
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::ShouldNotifyOnHierarchyChange(
@@ -144,13 +150,13 @@ bool DefaultAccessPolicy::ShouldNotifyOnHierarchyChange(
   }
 
   if (*new_parent && !WasCreatedByThisConnection(*new_parent) &&
-      !delegate_->IsRootForAccessPolicy((*new_parent)->id()) &&
+      !delegate_->HasRootForAccessPolicy((*new_parent)) &&
       !delegate_->IsDescendantOfEmbedRoot(*new_parent)) {
     *new_parent = nullptr;
   }
 
   if (*old_parent && !WasCreatedByThisConnection(*old_parent) &&
-      !delegate_->IsRootForAccessPolicy((*old_parent)->id()) &&
+      !delegate_->HasRootForAccessPolicy((*old_parent)) &&
       !delegate_->IsDescendantOfEmbedRoot(*new_parent)) {
     *old_parent = nullptr;
   }
@@ -160,9 +166,13 @@ bool DefaultAccessPolicy::ShouldNotifyOnHierarchyChange(
 const ServerWindow* DefaultAccessPolicy::GetWindowForFocusChange(
     const ServerWindow* focused) {
   if (WasCreatedByThisConnection(focused) ||
-      delegate_->IsRootForAccessPolicy(focused->id()))
+      delegate_->HasRootForAccessPolicy(focused))
     return focused;
   return nullptr;
+}
+
+bool DefaultAccessPolicy::CanSetWindowManagerInternal() const {
+  return false;
 }
 
 bool DefaultAccessPolicy::WasCreatedByThisConnection(

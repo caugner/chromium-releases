@@ -32,6 +32,7 @@
 #define InvalidationSet_h
 
 #include "core/CoreExport.h"
+#include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
@@ -55,6 +56,7 @@ enum InvalidationType {
 // siblings and their descendants, need to have style recalculated.
 class CORE_EXPORT InvalidationSet : public RefCounted<InvalidationSet> {
     WTF_MAKE_NONCOPYABLE(InvalidationSet);
+    USING_FAST_MALLOC_WITH_TYPE_NAME(blink::InvalidationSet);
 public:
     bool isDescendantInvalidationSet() const { return m_type == InvalidateDescendants; }
     bool isSiblingInvalidationSet() const { return m_type == InvalidateSiblings; }
@@ -83,7 +85,7 @@ public:
     void setCustomPseudoInvalid() { m_customPseudoInvalid = true; }
     bool customPseudoInvalid() const { return m_customPseudoInvalid; }
 
-    bool isEmpty() const { return !m_classes && !m_ids && !m_tagNames && !m_attributes && !m_customPseudoInvalid; }
+    bool isEmpty() const { return !m_classes && !m_ids && !m_tagNames && !m_attributes && !m_customPseudoInvalid && !m_insertionPointCrossing; }
 
     void toTracedValue(TracedValue*) const;
 

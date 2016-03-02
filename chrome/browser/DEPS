@@ -11,6 +11,7 @@ include_rules = [
   "+chrome_elf/dll_hash",
   "+chromeos",
   "+components/app_modal",
+  "+components/arc",
   "+components/audio_modem/public",
   "+components/audio_modem/test",
   "+components/autofill/content/browser",
@@ -30,6 +31,7 @@ include_rules = [
   "+components/component_updater",
   "+components/compression",
   "+components/content_settings",
+  "+components/contextual_search/browser",
   "+components/copresence",
   "+components/crash",
   "+components/crx_file",
@@ -40,6 +42,7 @@ include_rules = [
   "+components/dom_distiller",
   "+components/domain_reliability",
   "+components/enhanced_bookmarks",
+  "+components/exo",
   "+components/favicon",
   "+components/favicon_base",
   "+components/feedback",
@@ -66,6 +69,7 @@ include_rules = [
   "+components/net_log",
   "+components/network_hints",
   "+components/network_time",
+  "+components/ntp_snippets",
   "+components/offline_pages",
   "+components/omnibox/browser",
   "+components/os_crypt",
@@ -90,6 +94,7 @@ include_rules = [
   "+components/search_engines",
   "+components/search_provider_logos",
   "+components/security_interstitials",
+  "+components/security_state",
   "+components/service_tab_launcher",
   "+components/session_manager",
   "+components/sessions",
@@ -97,6 +102,7 @@ include_rules = [
   "+components/ssl_config",
   "+components/ssl_errors",
   "+components/startup_metric_utils/browser",
+  "+components/startup_metric_utils/common",
   "+components/storage_monitor",
   "+components/strings",
   "+components/suggestions",
@@ -148,7 +154,7 @@ include_rules = [
   "+media/audio", # For media audio hang monitor.
   "+media/base",  # For media switches
   "+media/midi",  # For midi switches
-  "+mojo/application/public/cpp",
+  "+mojo/shell/public/cpp",
   "+mojo/converters",
   "+mojo/runner/child",
   "+policy",  # For generated headers and source
@@ -163,10 +169,12 @@ include_rules = [
   "+skia/ext",
   "+sync/api",  # Sync API files.
   "+sync/internal_api/public/attachments",  # Needed for tests.
+  "+sync/internal_api/public/base",
   "+sync/protocol",  # Sync protobuf files.
   "+sync/util",  # Sync utilities like GetSessionName.
   "+syzygy/kasko",
   "+third_party/cros_system_api",
+  "+third_party/kasko",
   "+win8/util",
 
   # chrome only needs switches from cc. All usage of the compositor is from

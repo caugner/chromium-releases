@@ -178,6 +178,8 @@
       'renderer/plugins/chrome_plugin_placeholder.h',
       'renderer/plugins/plugin_preroller.cc',
       'renderer/plugins/plugin_preroller.h',
+      'renderer/plugins/power_saver_info.cc',
+      'renderer/plugins/power_saver_info.h',
     ],
     # For safe_browsing==1 or safe_browsing==2.
     'chrome_renderer_basic_safe_browsing_sources': [
@@ -239,6 +241,7 @@
       'dependencies': [
         'common',
         'common_mojo_bindings',
+        'chrome_features.gyp:chrome_common_features',
         'chrome_resources.gyp:chrome_resources',
         'chrome_resources.gyp:chrome_strings',
         '../third_party/re2/re2.gyp:re2',
@@ -279,6 +282,7 @@
         ['OS != "ios"', {
           'dependencies': [
             'common_net',
+            '../components/components.gyp:contextual_search_renderer',
             '../components/components.gyp:dom_distiller_content_renderer',
             '../media/media.gyp:media',
           ],
@@ -365,11 +369,6 @@
             'renderer/spellchecker/hunspell_engine.h',
           ]
         }],
-        ['OS=="mac"', {
-          'dependencies': [
-            '../third_party/mach_override/mach_override.gyp:mach_override',
-          ],
-        }],
         ['enable_basic_printing==1 or enable_print_preview==1', {
           'dependencies': [
             '../components/components.gyp:printing_renderer',
@@ -390,16 +389,6 @@
           ],
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
-          ],
-          'conditions': [
-            ['win_use_allocator_shim==1', {
-              'dependencies': [
-                '<(allocator_target)',
-              ],
-              'export_dependent_settings': [
-                '<(allocator_target)',
-              ],
-            }],
           ],
         }],
       ],

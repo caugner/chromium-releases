@@ -7,10 +7,10 @@
 
 // A content settings provider that takes its settings out of the pref service.
 
+#include <map>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "base/containers/scoped_ptr_map.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "components/content_settings/core/browser/content_settings_observable_provider.h"
@@ -41,9 +41,10 @@ class PrefProvider : public ObservableProvider {
   ~PrefProvider() override;
 
   // ProviderInterface implementations.
-  RuleIterator* GetRuleIterator(ContentSettingsType content_type,
-                                const ResourceIdentifier& resource_identifier,
-                                bool incognito) const override;
+  scoped_ptr<RuleIterator> GetRuleIterator(
+      ContentSettingsType content_type,
+      const ResourceIdentifier& resource_identifier,
+      bool incognito) const override;
 
   bool SetWebsiteSetting(const ContentSettingsPattern& primary_pattern,
                          const ContentSettingsPattern& secondary_pattern,
@@ -90,7 +91,7 @@ class PrefProvider : public ObservableProvider {
 
   PrefChangeRegistrar pref_change_registrar_;
 
-  base::ScopedPtrMap<ContentSettingsType, scoped_ptr<ContentSettingsPref>>
+  std::map<ContentSettingsType, scoped_ptr<ContentSettingsPref>>
       content_settings_prefs_;
 
   base::ThreadChecker thread_checker_;

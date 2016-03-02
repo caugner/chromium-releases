@@ -7,12 +7,15 @@ import logging
 import os
 import sys
 
+from catapult_base.dependency_manager import exceptions as dm_exceptions
+
 from telemetry.core import exceptions
 from telemetry.core import platform as platform_module
 from telemetry.internal.backends.chrome import desktop_browser_backend
 from telemetry.internal.browser import browser
 from telemetry.internal.browser import possible_browser
 from telemetry.internal.platform import desktop_device
+from telemetry.internal.util import binary_manager
 # This is a workaround for https://goo.gl/1tGNgd
 from telemetry.internal.util import path as path_module
 
@@ -44,7 +47,7 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
 
     self._platform = platform_module.GetHostPlatform()
 
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     self._platform_backend = self._platform._platform_backend
 
   def Create(self, finder_options):
@@ -134,14 +137,12 @@ def FindAllAvailableBrowsers(finder_options, device):
       os.getenv('DISPLAY') == None):
     has_x11_display = False
 
-  flash_bin_dir = None
-  # Define flash_bin_dir when the standard chrome build locations is specified.
-  if finder_options.chrome_root:
-    flash_bin_dir = os.path.join(
-        finder_options.chrome_root, 'third_party', 'adobe', 'flash', 'binaries',
-        'ppapi')
-
-  if not flash_bin_dir:
+  os_name = platform_module.GetHostPlatform().GetOSName()
+  arch_name = platform_module.GetHostPlatform().GetArchName()
+  try:
+    flash_path = binary_manager.LocalPath('flash', arch_name, os_name)
+  except dm_exceptions.NoPathFoundError:
+    flash_path = None
     logging.warning(
         'Chrome build location is not specified. Browser will be run without '
         'Flash.')
@@ -151,43 +152,34 @@ def FindAllAvailableBrowsers(finder_options, device):
     chromium_app_names.append('Chromium.app/Contents/MacOS/Chromium')
     chromium_app_names.append('Google Chrome.app/Contents/MacOS/Google Chrome')
     content_shell_app_name = 'Content Shell.app/Contents/MacOS/Content Shell'
-    if flash_bin_dir:
-      flash_bin = 'PepperFlashPlayer.plugin'
-      flash_path = os.path.join(flash_bin_dir, 'mac', flash_bin)
-      flash_path_64 = os.path.join(flash_bin_dir, 'mac_64', flash_bin)
   elif sys.platform.startswith('linux'):
     chromium_app_names.append('chrome')
     content_shell_app_name = 'content_shell'
-    if flash_bin_dir:
-      flash_bin = 'libpepflashplayer.so'
-      flash_path = os.path.join(flash_bin_dir, 'linux', flash_bin)
-      flash_path_64 = os.path.join(flash_bin_dir, 'linux_x64', flash_bin)
   elif sys.platform.startswith('win'):
     chromium_app_names.append('chrome.exe')
     content_shell_app_name = 'content_shell.exe'
-    if flash_bin_dir:
-      flash_bin = 'pepflashplayer.dll'
-      flash_path = os.path.join(flash_bin_dir, 'win', flash_bin)
-      flash_path_64 = os.path.join(flash_bin_dir, 'win_x64', flash_bin)
   else:
     raise Exception('Platform not recognized')
 
   # Add the explicit browser executable if given and we can handle it.
   if (finder_options.browser_executable and
       CanPossiblyHandlePath(finder_options.browser_executable)):
-    app_name = os.path.basename(finder_options.browser_executable)
+    is_content_shell = finder_options.browser_executable.endswith(
+        content_shell_app_name)
+    is_chrome_or_chromium = len([x for x in chromium_app_names if
+        finder_options.browser_executable.endswith(x)]) != 0
 
     # It is okay if the executable name doesn't match any of known chrome
     # browser executables, since it may be of a different browser (say,
     # mandoline).
-    if app_name in chromium_app_names or app_name == content_shell_app_name:
+    if is_chrome_or_chromium or is_content_shell:
       normalized_executable = os.path.expanduser(
           finder_options.browser_executable)
       if path_module.IsExecutable(normalized_executable):
         browser_directory = os.path.dirname(finder_options.browser_executable)
         browsers.append(PossibleDesktopBrowser(
             'exact', finder_options, normalized_executable, flash_path,
-            app_name == content_shell_app_name,
+            is_content_shell,
             browser_directory))
       else:
         raise exceptions.PathMissingError(
@@ -202,10 +194,8 @@ def FindAllAvailableBrowsers(finder_options, device):
                                      build_dir, type_dir)
     app = os.path.join(browser_directory, app_name)
     if path_module.IsExecutable(app):
-      is_64 = browser_type.endswith('_x64')
       browsers.append(PossibleDesktopBrowser(
-          browser_type, finder_options, app,
-          flash_path_64 if is_64 else flash_path,
+          browser_type, finder_options, app, flash_path,
           content_shell, browser_directory, is_local_build=True))
       return True
     return False
@@ -218,11 +208,14 @@ def FindAllAvailableBrowsers(finder_options, device):
     AddIfFound('content-shell-' + build_type.lower(), build_dir, build_type,
                content_shell_app_name, True)
 
-  reference_build_root = None
-  if finder_options.chrome_root:
-    reference_build_root = os.path.join(
-        finder_options.chrome_root, 'chrome', 'tools', 'test',
-        'reference_build')
+  reference_build = None
+  if finder_options.browser_type == 'reference':
+    # Reference builds are only available in a Chromium checkout. We should not
+    # raise an error just because they don't exist.
+    os_name = platform_module.GetHostPlatform().GetOSName()
+    arch_name = platform_module.GetHostPlatform().GetArchName()
+    reference_build = binary_manager.FetchPath(
+        'reference_build', arch_name, os_name)
 
   # Mac-specific options.
   if sys.platform == 'darwin':
@@ -239,14 +232,13 @@ def FindAllAvailableBrowsers(finder_options, device):
       browsers.append(PossibleDesktopBrowser('system', finder_options,
                                              mac_system, None, False,
                                              mac_system_root))
-    if reference_build_root:
-      mac_reference_root = (
-          reference_build_root + '/chrome_mac/Google Chrome.app/')
-      mac_reference = mac_reference_root + 'Contents/MacOS/Google Chrome'
-      if path_module.IsExecutable(mac_reference):
-        browsers.append(PossibleDesktopBrowser('reference', finder_options,
-                                               mac_reference, None, False,
-                                               mac_reference_root))
+
+    if reference_build and path_module.IsExecutable(reference_build):
+      reference_root = os.path.dirname(os.path.dirname(os.path.dirname(
+          reference_build)))
+      browsers.append(PossibleDesktopBrowser('reference', finder_options,
+                                             reference_build, None, False,
+                                             reference_root))
 
   # Linux specific options.
   if sys.platform.startswith('linux'):
@@ -262,13 +254,11 @@ def FindAllAvailableBrowsers(finder_options, device):
       if path_module.IsExecutable(browser_path):
         browsers.append(PossibleDesktopBrowser(version, finder_options,
                                                browser_path, None, False, root))
-    if reference_build_root:
-      linux_reference_root = os.path.join(reference_build_root, 'chrome_linux')
-      linux_reference = os.path.join(linux_reference_root, 'chrome')
-      if path_module.IsExecutable(linux_reference):
-        browsers.append(PossibleDesktopBrowser('reference', finder_options,
-                                               linux_reference, None, False,
-                                               linux_reference_root))
+    if reference_build and path_module.IsExecutable(reference_build):
+      reference_root = os.path.dirname(reference_build)
+      browsers.append(PossibleDesktopBrowser('reference', finder_options,
+                                             reference_build, None, False,
+                                             reference_root))
 
   # Win32-specific options.
   if sys.platform.startswith('win'):
@@ -276,9 +266,9 @@ def FindAllAvailableBrowsers(finder_options, device):
         ('system', os.path.join('Google', 'Chrome', 'Application')),
         ('canary', os.path.join('Google', 'Chrome SxS', 'Application')),
     ]
-    if reference_build_root:
+    if reference_build:
       app_paths.append(
-          ('reference', os.path.join(reference_build_root, 'chrome_win')))
+          ('reference', os.path.dirname(reference_build)))
 
     for browser_name, app_path in app_paths:
       for chromium_app_name in chromium_app_names:

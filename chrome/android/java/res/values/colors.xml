@@ -16,10 +16,7 @@
     <color name="dark_action_bar_color">#263238</color>
 
     <!-- Infobar colors -->
-    <color name="infobar_background">#fff</color>
-    <color name="infobar_background_separator">#afafaf</color>
     <color name="infobar_accent_blue">#4285f4</color>
-    <color name="infobar_tertiary_button_text">#969696</color>
     <color name="infobar_descriptive_text_color">#646464</color>
 
     <!-- Snackbar colors -->
@@ -91,8 +88,6 @@
     <!-- NTP Colors. Used on the bookmarks and recent tabs pages. -->
     <color name="ntp_bg">#fff</color>
     <color name="ntp_bg_incognito">#222</color>
-    <color name="ntp_most_visited_text">#333</color>
-    <color name="ntp_most_visited_bg">#f2f2f2</color>
     <color name="ntp_list_item_text">#333</color>
     <color name="ntp_list_header_text">#333</color>
     <color name="ntp_list_header_subtext">#969696</color>
@@ -166,10 +161,12 @@
     <!-- Smart Lock for Passwords UI colors-->
     <color name="smart_lock_auto_signin_snackbar_background_color">#2196F3</color>
 
-    <!-- Physical Web Nearby URLs colors -->
-    <color name="nearby_urls_header_color">#444</color>
-    <color name="nearby_urls_subheader_color">#777</color>
-    <color name="nearby_urls_background_color">#fff</color>
-    <color name="physical_web_no_urls_text_color">#5a5a5a</color>
+    <!-- Physical Web colors -->
+    <color name="physical_web_header_color">#333</color>
+    <color name="physical_web_url_color">#969696</color>
+    <color name="physical_web_url_description_color">#646464</color>
+    <color name="physical_web_logo_gray_tint">#ccc</color>
 
+    <!-- Bottom bar colors -->
+    <color name="bottom_bar_shadow_color">#1d000000</color>
 </resources>

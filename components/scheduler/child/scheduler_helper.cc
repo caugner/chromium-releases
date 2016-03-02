@@ -96,11 +96,6 @@ SchedulerHelper::scheduler_tqm_delegate() const {
   return task_queue_manager_delegate_;
 }
 
-base::TimeTicks SchedulerHelper::NextPendingDelayedTaskRunTime() const {
-  CheckOnValidThread();
-  DCHECK(task_queue_manager_.get());
-  return task_queue_manager_->NextPendingDelayedTaskRunTime();
-}
 
 bool SchedulerHelper::GetAndClearSystemIsQuiescentBit() {
   CheckOnValidThread();
@@ -127,6 +122,24 @@ void SchedulerHelper::SetObserver(Observer* observer) {
   observer_ = observer;
   DCHECK(task_queue_manager_);
   task_queue_manager_->SetObserver(this);
+}
+
+RealTimeDomain* SchedulerHelper::real_time_domain() const {
+  CheckOnValidThread();
+  DCHECK(task_queue_manager_);
+  return task_queue_manager_->real_time_domain();
+}
+
+void SchedulerHelper::RegisterTimeDomain(TimeDomain* time_domain) {
+  CheckOnValidThread();
+  DCHECK(task_queue_manager_);
+  task_queue_manager_->RegisterTimeDomain(time_domain);
+}
+
+void SchedulerHelper::UnregisterTimeDomain(TimeDomain* time_domain) {
+  CheckOnValidThread();
+  if (task_queue_manager_)
+    task_queue_manager_->UnregisterTimeDomain(time_domain);
 }
 
 void SchedulerHelper::OnUnregisterTaskQueue(

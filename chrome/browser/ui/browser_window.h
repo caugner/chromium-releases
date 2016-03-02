@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 
 #include "base/callback_forward.h"
+#include "build/build_config.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
-#include "chrome/browser/ssl/security_state_model.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/security_state/security_state_model.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/translate/core/common/translate_errors.h"
 #include "ui/base/base_window.h"
@@ -55,6 +56,10 @@ class Extension;
 namespace gfx {
 class Rect;
 class Size;
+}
+
+namespace signin_metrics {
+enum class AccessPoint;
 }
 
 namespace web_modal {
@@ -129,19 +134,8 @@ class BrowserWindow : public ui::BaseWindow {
   // Called to force the zoom state to for the active tab to be recalculated.
   // |can_show_bubble| is true when a user presses the zoom up or down keyboard
   // shortcuts and will be false in other cases (e.g. switching tabs, "clicking"
-  // + or - in the wrench menu to change zoom).
+  // + or - in the app menu to change zoom).
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) = 0;
-
-  // Methods that change fullscreen state.
-  // On Mac, the tab strip and toolbar will be shown if |with_toolbar| is true,
-  // |with_toolbar| is ignored on other platforms.
-  virtual void EnterFullscreen(const GURL& url,
-                               ExclusiveAccessBubbleType bubble_type,
-                               bool with_toolbar) = 0;
-  virtual void ExitFullscreen() = 0;
-  virtual void UpdateExclusiveAccessExitBubbleContent(
-      const GURL& url,
-      ExclusiveAccessBubbleType bubble_type) = 0;
 
   // Windows and GTK remove the top controls in fullscreen, but Mac and Ash
   // keep the controls in a slide-down panel.
@@ -155,7 +149,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Currently only supported on Mac.
   virtual bool SupportsFullscreenWithToolbar() const = 0;
   virtual void UpdateFullscreenWithToolbar(bool with_toolbar) = 0;
+  virtual void ToggleFullscreenToolbar() = 0;
   virtual bool IsFullscreenWithToolbar() const = 0;
+  virtual bool ShouldHideFullscreenToolbar() const = 0;
 
 #if defined(OS_WIN)
   // Sets state for entering or exiting Win8 Metro snap mode.
@@ -266,11 +262,6 @@ class BrowserWindow : public ui::BaseWindow {
       translate::TranslateErrors::Type error_type,
       bool is_user_gesture) = 0;
 
-  // Shows the profile reset bubble on the platforms that support it.
-  virtual bool IsProfileResetBubbleSupported() const = 0;
-  virtual GlobalErrorBubbleViewBase* ShowProfileResetBubble(
-      const base::WeakPtr<ProfileResetGlobalError>& global_error) = 0;
-
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   enum OneClickSigninBubbleType {
     ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE,
@@ -320,7 +311,8 @@ class BrowserWindow : public ui::BaseWindow {
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& url,
-      const SecurityStateModel::SecurityInfo& security_info) = 0;
+      const security_state::SecurityStateModel::SecurityInfo&
+          security_info) = 0;
 
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
@@ -369,14 +361,10 @@ class BrowserWindow : public ui::BaseWindow {
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
 
-  // Returns a HostDesktopType that is compatible with the current Chrome window
-  // configuration. On Windows with Ash, this is always HOST_DESKTOP_TYPE_ASH
-  // while Chrome is running in Metro mode. Otherwise returns |desktop_type|.
-  static chrome::HostDesktopType AdjustHostDesktopType(
-      chrome::HostDesktopType desktop_type);
-
   // Shows the avatar bubble on the window frame off of the avatar button with
   // the given mode. The Service Type specified by GAIA is provided as well.
+  // |access_point| indicates the access point used to open the Gaia sign in
+  // page.
   enum AvatarBubbleMode {
     AVATAR_BUBBLE_MODE_DEFAULT,
     AVATAR_BUBBLE_MODE_ACCOUNT_MANAGEMENT,
@@ -387,8 +375,21 @@ class BrowserWindow : public ui::BaseWindow {
     AVATAR_BUBBLE_MODE_SHOW_ERROR,
     AVATAR_BUBBLE_MODE_FAST_USER_SWITCH,
   };
-  virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode,
-      const signin::ManageAccountsParams& manage_accounts_params) = 0;
+  virtual void ShowAvatarBubbleFromAvatarButton(
+      AvatarBubbleMode mode,
+      const signin::ManageAccountsParams& manage_accounts_params,
+      signin_metrics::AccessPoint access_point) = 0;
+
+  // Shows the signin flow for |mode| in a tab-modal dialog.
+  // |access_point| indicates the access point used to open the Gaia sign in
+  // page.
+  virtual void ShowModalSigninWindow(
+      AvatarBubbleMode mode,
+      signin_metrics::AccessPoint access_point) = 0;
+
+  // Closes the tab-modal signin flow opened with ShowModalSigninWindow, if it's
+  // open. Does nothing otherwise.
+  virtual void CloseModalSigninWindow() = 0;
 
   // Returns the height inset for RenderView when detached bookmark bar is
   // shown.  Invoked when a new RenderHostView is created for a non-NTP

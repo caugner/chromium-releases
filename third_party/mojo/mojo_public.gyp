@@ -69,6 +69,7 @@
         '../../mojo/public/c/system/message_pipe.h',
         '../../mojo/public/c/system/system_export.h',
         '../../mojo/public/c/system/types.h',
+        '../../mojo/public/c/system/wait_set.h',
       ],
     },
     {
@@ -97,6 +98,11 @@
       ],
       'sources': [
         '../../mojo/public/cpp/bindings/array.h',
+        '../../mojo/public/cpp/bindings/associated_binding.h',
+        '../../mojo/public/cpp/bindings/associated_group.h',
+        '../../mojo/public/cpp/bindings/associated_interface_ptr.h',
+        '../../mojo/public/cpp/bindings/associated_interface_ptr_info.h',
+        '../../mojo/public/cpp/bindings/associated_interface_request.h',
         '../../mojo/public/cpp/bindings/binding.h',
         '../../mojo/public/cpp/bindings/callback.h',
         '../../mojo/public/cpp/bindings/interface_ptr.h',
@@ -104,6 +110,9 @@
         '../../mojo/public/cpp/bindings/lib/array_internal.cc',
         '../../mojo/public/cpp/bindings/lib/array_internal.h',
         '../../mojo/public/cpp/bindings/lib/array_serialization.h',
+        '../../mojo/public/cpp/bindings/lib/associated_group.cc',
+        '../../mojo/public/cpp/bindings/lib/associated_interface_ptr_state.h',
+        '../../mojo/public/cpp/bindings/lib/binding_state.h',
         '../../mojo/public/cpp/bindings/lib/bindings_internal.h',
         '../../mojo/public/cpp/bindings/lib/bindings_serialization.cc',
         '../../mojo/public/cpp/bindings/lib/bindings_serialization.h',
@@ -120,8 +129,11 @@
         '../../mojo/public/cpp/bindings/lib/filter_chain.cc',
         '../../mojo/public/cpp/bindings/lib/filter_chain.h',
         '../../mojo/public/cpp/bindings/lib/fixed_buffer.cc',
+        '../../mojo/public/cpp/bindings/lib/interface_id.h',
         '../../mojo/public/cpp/bindings/lib/fixed_buffer.h',
-        '../../mojo/public/cpp/bindings/lib/interface_ptr_internal.h',
+        '../../mojo/public/cpp/bindings/lib/interface_endpoint_client.cc',
+        '../../mojo/public/cpp/bindings/lib/interface_endpoint_client.h',
+        '../../mojo/public/cpp/bindings/lib/interface_ptr_state.h',
         '../../mojo/public/cpp/bindings/lib/map_data_internal.h',
         '../../mojo/public/cpp/bindings/lib/map_internal.h',
         '../../mojo/public/cpp/bindings/lib/map_serialization.h',
@@ -132,16 +144,24 @@
         '../../mojo/public/cpp/bindings/lib/message_header_validator.cc',
         '../../mojo/public/cpp/bindings/lib/message_header_validator.h',
         '../../mojo/public/cpp/bindings/lib/message_internal.h',
+        '../../mojo/public/cpp/bindings/lib/multiplex_router.cc',
+        '../../mojo/public/cpp/bindings/lib/multiplex_router.h',
         '../../mojo/public/cpp/bindings/lib/no_interface.cc',
+        '../../mojo/public/cpp/bindings/lib/pickle_buffer.cc',
+        '../../mojo/public/cpp/bindings/lib/pickle_buffer.h',
+        '../../mojo/public/cpp/bindings/lib/pipe_control_message_handler.cc',
+        '../../mojo/public/cpp/bindings/lib/pipe_control_message_handler.h',
+        '../../mojo/public/cpp/bindings/lib/pipe_control_message_handler_delegate.h',
+        '../../mojo/public/cpp/bindings/lib/pipe_control_message_proxy.cc',
+        '../../mojo/public/cpp/bindings/lib/pipe_control_message_proxy.h',
         '../../mojo/public/cpp/bindings/lib/router.cc',
         '../../mojo/public/cpp/bindings/lib/router.h',
+        '../../mojo/public/cpp/bindings/lib/scoped_interface_endpoint_handle.cc',
+        '../../mojo/public/cpp/bindings/lib/scoped_interface_endpoint_handle.h',
         '../../mojo/public/cpp/bindings/lib/shared_data.h',
         '../../mojo/public/cpp/bindings/lib/shared_ptr.h',
         '../../mojo/public/cpp/bindings/lib/string_serialization.cc',
         '../../mojo/public/cpp/bindings/lib/string_serialization.h',
-        '../../mojo/public/cpp/bindings/lib/thread_checker.h',
-        '../../mojo/public/cpp/bindings/lib/thread_checker_posix.cc',
-        '../../mojo/public/cpp/bindings/lib/thread_checker_posix.h',
         '../../mojo/public/cpp/bindings/lib/validate_params.h',
         '../../mojo/public/cpp/bindings/lib/validation_errors.cc',
         '../../mojo/public/cpp/bindings/lib/validation_errors.h',
@@ -158,6 +178,7 @@
         '>@(mojom_generated_sources)',
       ],
       'dependencies': [
+        '../../base/base.gyp:base',
         'mojo_interface_bindings_cpp_sources',
       ],
     },
@@ -238,6 +259,7 @@
         'require_interface_bindings': 0,
         'mojom_files': [
           '../../mojo/public/interfaces/bindings/interface_control_messages.mojom',
+          '../../mojo/public/interfaces/bindings/pipe_control_messages.mojom',
         ],
       },
       'includes': [ 'mojom_bindings_generator_explicit.gypi' ],
@@ -338,11 +360,48 @@
           '../../mojo/public/interfaces/bindings/tests/sample_service.mojom',
           '../../mojo/public/interfaces/bindings/tests/scoping.mojom',
           '../../mojo/public/interfaces/bindings/tests/serialization_test_structs.mojom',
+          '../../mojo/public/interfaces/bindings/tests/test_constants.mojom',
+          '../../mojo/public/interfaces/bindings/tests/test_native_types.mojom',
           '../../mojo/public/interfaces/bindings/tests/test_structs.mojom',
+          '../../mojo/public/interfaces/bindings/tests/test_unions.mojom',
           '../../mojo/public/interfaces/bindings/tests/validation_test_interfaces.mojom',
         ],
       },
       'includes': [ 'mojom_bindings_generator_explicit.gypi' ],
+    },
+    {
+      'target_name': 'mojo_public_test_interfaces_mojom_blink',
+      'type': 'none',
+      'variables': {
+        'mojom_variant': 'blink',
+        'mojom_extra_generator_args': [
+          '--typemap', '<(DEPTH)/mojo/public/interfaces/bindings/tests/blink_test.typemap',
+        ],
+        'mojom_files': [
+          '../../mojo/public/interfaces/bindings/tests/test_native_types.mojom',
+        ],
+      },
+      'includes': [ 'mojom_bindings_generator_explicit.gypi' ],
+      'dependencies': [
+        'mojo_public_test_interfaces_mojom',
+      ],
+    },
+    {
+      'target_name': 'mojo_public_test_interfaces_mojom_chromium',
+      'type': 'none',
+      'variables': {
+        'mojom_variant': 'chromium',
+        'mojom_extra_generator_args': [
+          '--typemap', '<(DEPTH)/mojo/public/interfaces/bindings/tests/chromium_test.typemap',
+        ],
+        'mojom_files': [
+          '../../mojo/public/interfaces/bindings/tests/test_native_types.mojom',
+        ],
+      },
+      'includes': [ 'mojom_bindings_generator_explicit.gypi' ],
+      'dependencies': [
+        'mojo_public_test_interfaces_mojom',
+      ],
     },
     {
       # GN version: //mojo/public/interfaces/bindings/tests:test_interfaces
@@ -353,6 +412,56 @@
       ],
       'dependencies': [
         'mojo_public_test_interfaces_mojom',
+        'mojo_cpp_bindings',
+      ],
+    },
+    {
+      # GN version: //mojo/public/interfaces/bindings/tests:test_interfaces_blink
+      'target_name': 'mojo_public_test_interfaces_blink',
+      'type': 'static_library',
+      'export_dependent_settings': [
+        'mojo_cpp_bindings',
+      ],
+      'dependencies': [
+        'mojo_public_test_interfaces_mojom_blink',
+        'mojo_cpp_bindings',
+      ],
+    },
+    {
+      # GN version: //mojo/public/interfaces/bindings/tests:test_interfaces_chromium
+      'target_name': 'mojo_public_test_interfaces_chromium',
+      'type': 'static_library',
+      'export_dependent_settings': [
+        'mojo_cpp_bindings',
+      ],
+      'dependencies': [
+        'mojo_public_test_interfaces_mojom_chromium',
+        'mojo_cpp_bindings',
+      ],
+    },
+    {
+      'target_name': 'mojo_public_test_associated_interfaces_mojom',
+      'type': 'none',
+      'variables': {
+        # These files are not included in the mojo_public_test_interfaces_mojom
+        # target because associated interfaces are not supported by all bindings
+        # languages yet.
+        'mojom_files': [
+          '../../mojo/public/interfaces/bindings/tests/test_associated_interfaces.mojom',
+          '../../mojo/public/interfaces/bindings/tests/validation_test_associated_interfaces.mojom',
+        ],
+      },
+      'includes': [ 'mojom_bindings_generator_explicit.gypi' ],
+    },
+    {
+      # GN version: //mojo/public/interfaces/bindings/tests:test_associated_interfaces
+      'target_name': 'mojo_public_test_associated_interfaces',
+      'type': 'static_library',
+      'export_dependent_settings': [
+        'mojo_cpp_bindings',
+      ],
+      'dependencies': [
+        'mojo_public_test_associated_interfaces_mojom',
         'mojo_cpp_bindings',
       ],
     },
@@ -388,6 +497,7 @@
            'dependencies': [
              'mojo_interface_bindings_java_sources',
              'mojo_public_java',
+             '<(DEPTH)/base/base.gyp:base_java',
            ],
            'includes': [ '../../build/java.gypi' ],
         },

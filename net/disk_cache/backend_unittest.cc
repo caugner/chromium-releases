@@ -4,10 +4,10 @@
 
 #include <stdint.h>
 
-#include "base/basictypes.h"
 #include "base/files/file_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -65,7 +65,7 @@ scoped_ptr<disk_cache::BackendImpl> CreateExistingEntryCache(
     return scoped_ptr<disk_cache::BackendImpl>();
   entry->Close();
 
-  return cache.Pass();
+  return cache;
 }
 
 }  // namespace
@@ -521,7 +521,7 @@ TEST_F(DiskCacheBackendTest, ExternalFiles) {
 // Tests that we deal with file-level pending operations at destruction time.
 void DiskCacheBackendTest::BackendShutdownWithPendingFileIO(bool fast) {
   ASSERT_TRUE(CleanupCacheDir());
-  uint32 flags = disk_cache::kNoBuffering;
+  uint32_t flags = disk_cache::kNoBuffering;
   if (!fast)
     flags |= disk_cache::kNoRandom;
 
@@ -623,7 +623,7 @@ void DiskCacheBackendTest::BackendShutdownWithPendingIO(bool fast) {
     ASSERT_TRUE(cache_thread.StartWithOptions(
         base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
 
-    uint32 flags = disk_cache::kNoBuffering;
+    uint32_t flags = disk_cache::kNoBuffering;
     if (!fast)
       flags |= disk_cache::kNoRandom;
 
@@ -1774,7 +1774,7 @@ void DiskCacheBackendTest::BackendTransaction(const std::string& name,
   ASSERT_TRUE(CopyTestCache(name));
   DisableFirstCleanup();
 
-  uint32 mask;
+  uint32_t mask;
   if (load) {
     mask = 0xf;
     SetMaxSize(0x100000);
@@ -2867,6 +2867,44 @@ TEST_F(DiskCacheBackendTest, NewEvictionDisabledAPI) {
   BackendDisabledAPI();
 }
 
+// This overly specific looking test is a regression test aimed at
+// crbug.com/589186.
+TEST_F(DiskCacheBackendTest, MemoryOnlyUseAfterFree) {
+  SetMemoryOnlyMode();
+
+  const int kMaxSize = 200 * 1024;
+  const int kMaxEntryCount = 20;
+  const int kWriteSize = kMaxSize / kMaxEntryCount;
+
+  SetMaxSize(kMaxSize);
+  InitCache();
+
+  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kWriteSize));
+  CacheTestFillBuffer(buffer->data(), kWriteSize, false);
+
+  // Create an entry to be our sparse entry that gets written later.
+  disk_cache::Entry* entry;
+  ASSERT_EQ(net::OK, CreateEntry("first parent", &entry));
+  disk_cache::ScopedEntryPtr first_parent(entry);
+
+  // Create a ton of entries, and keep them open, to put the cache well above
+  // its eviction threshhold.
+  const int kTooManyEntriesCount = kMaxEntryCount * 2;
+  std::list<disk_cache::ScopedEntryPtr> open_entries;
+  std::string key_prefix("prefix");
+  for (int i = 0; i < kTooManyEntriesCount; ++i) {
+    ASSERT_EQ(net::OK, CreateEntry(key_prefix + base::IntToString(i), &entry));
+    EXPECT_EQ(kWriteSize,
+              WriteData(entry, 1, 0, buffer.get(), kWriteSize, false));
+    open_entries.push_back(disk_cache::ScopedEntryPtr(entry));
+  }
+  EXPECT_LT(kMaxSize, CalculateSizeOfAllEntries());
+
+  // Writing this sparse data should not crash.
+  EXPECT_EQ(1024, first_parent->WriteSparseData(32768, buffer.get(), 1024,
+                                                net::CompletionCallback()));
+}
+
 TEST_F(DiskCacheTest, Backend_UsageStatsTimer) {
   MessageLoopHelper helper;
 
@@ -3075,7 +3113,7 @@ TEST_F(DiskCacheTest, MultipleInstances) {
 // Test the six regions of the curve that determines the max cache size.
 TEST_F(DiskCacheTest, AutomaticMaxSize) {
   using disk_cache::kDefaultCacheSize;
-  int64 large_size = kDefaultCacheSize;
+  int64_t large_size = kDefaultCacheSize;
 
   // Region 1: expected = available * 0.8
   EXPECT_EQ((kDefaultCacheSize - 1) * 8 / 10,
@@ -3108,7 +3146,7 @@ TEST_F(DiskCacheTest, AutomaticMaxSize) {
             disk_cache::PreferredCacheSize(large_size * 250 - 1));
 
   // Region 5: expected = available * 0.1
-  int64 largest_size = kDefaultCacheSize * 4;
+  int64_t largest_size = kDefaultCacheSize * 4;
   EXPECT_EQ(kDefaultCacheSize * 25 / 10,
             disk_cache::PreferredCacheSize(large_size * 250));
   EXPECT_EQ(largest_size - 1,

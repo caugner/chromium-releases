@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/html/parser/HTMLTreeBuilder.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -36,6 +35,7 @@
 #include "core/XMLNames.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/parser/AtomicHTMLToken.h"
@@ -1468,6 +1468,8 @@ bool HTMLTreeBuilder::processBodyEndTagForInBody(AtomicHTMLToken* token)
 void HTMLTreeBuilder::processAnyOtherEndTagForInBody(AtomicHTMLToken* token)
 {
     ASSERT(token->type() == HTMLToken::EndTag);
+    if (token->name() == menuitemTag)
+        UseCounter::count(m_tree.currentNode()->document(), UseCounter::MenuItemCloseTag);
     HTMLElementStack::ElementRecord* record = m_tree.openElements()->topRecord();
     while (1) {
         RefPtrWillBeRawPtr<HTMLStackItem> item = record->stackItem();

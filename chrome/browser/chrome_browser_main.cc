@@ -4,8 +4,11 @@
 
 #include "chrome/browser/chrome_browser_main.h"
 
+#include <stddef.h>
+#include <stdint.h>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/at_exit.h"
@@ -63,7 +66,6 @@
 #include "chrome/browser/memory/tab_manager.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
 #include "chrome/browser/metrics/thread_watcher.h"
-#include "chrome/browser/mojo_runner_util.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
@@ -93,12 +95,12 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/common/features.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/pref_names.h"
@@ -124,10 +126,10 @@
 #include "components/translate/content/browser/browser_cld_utils.h"
 #include "components/translate/content/common/cld_data_source.h"
 #include "components/translate/core/browser/translate_download_manager.h"
-#include "components/variations/net/variations_http_header_provider.h"
 #include "components/variations/pref_names.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/variations/variations_http_header_provider.h"
 #include "components/variations/variations_switches.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -141,7 +143,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/platform_locale_settings.h"
-#include "media/audio/audio_manager.h"
 #include "net/base/net_module.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_network_layer.h"
@@ -152,12 +153,16 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/strings/grit/app_locale_settings.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/android/dev_tools_discovery_provider_android.h"
+#else
+#include "chrome/browser/devtools/chrome_devtools_discovery_provider.h"
+#endif
+
+#if defined(OS_ANDROID)
 #include "chrome/browser/metrics/thread_watcher_android.h"
 #include "ui/base/resource/resource_bundle_android.h"
 #else
-#include "chrome/browser/devtools/chrome_devtools_discovery_provider.h"
 #include "chrome/browser/feedback/feedback_profile_observer.h"
 #endif  // defined(OS_ANDROID)
 
@@ -178,7 +183,6 @@
 // progress and should not be taken as an indication of a real refactoring.
 
 #if defined(OS_WIN)
-#include "base/environment.h"  // For PreRead experiment.
 #include "base/trace_event/trace_event_etw_export_win.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_util_win.h"
@@ -188,10 +192,13 @@
 #include "chrome/browser/component_updater/sw_reporter_installer_win.h"
 #include "chrome/browser/first_run/try_chrome_dialog_view.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/gfx/win/dpi.h"
@@ -247,10 +254,6 @@
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
 #include "chrome/browser/chrome_webusb_browser_client.h"
 #include "components/webusb/webusb_detector.h"
-#endif
-
-#if defined(MOJO_RUNNER_CLIENT)
-#include "chrome/browser/mojo_runner_state.h"
 #endif
 
 using content::BrowserThread;
@@ -503,7 +506,7 @@ bool ProcessSingletonNotificationCallback(
   if (command_line.HasSwitch(switches::kOriginalProcessStartTime)) {
     std::string start_time_string =
         command_line.GetSwitchValueASCII(switches::kOriginalProcessStartTime);
-    int64 remote_start_time;
+    int64_t remote_start_time;
     if (base::StringToInt64(start_time_string, &remote_start_time)) {
       base::TimeDelta elapsed =
           base::Time::Now() - base::Time::FromInternalValue(remote_start_time);
@@ -538,9 +541,8 @@ void LaunchDevToolsHandlerIfNeeded(const base::CommandLine& command_line) {
     int port;
     if (base::StringToInt(port_str, &port) && port >= 0 && port < 65535) {
       g_browser_process->CreateDevToolsHttpProtocolHandler(
-          chrome::HOST_DESKTOP_TYPE_NATIVE,
-          "127.0.0.1",
-          static_cast<uint16>(port));
+          chrome::HOST_DESKTOP_TYPE_NATIVE, "127.0.0.1",
+          static_cast<uint16_t>(port));
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << port;
     }
@@ -562,6 +564,35 @@ class ScopedMainMessageLoopRunEvent {
 }  // namespace
 
 namespace chrome_browser {
+
+#if defined(OS_WIN)
+// Helper function to setup the pre-read field trial. This function is defined
+// outside of the anonymous namespace to allow it to be friend with
+// ChromeMetricsServiceAccessor.
+void SetupPreReadFieldTrial() {
+  const base::string16 registry_path =
+      BrowserDistribution::GetDistribution()->GetRegistryPath();
+
+  // Register a synthetic field trial with the PreRead group used during the
+  // current startup. This must be done before the first metric log
+  // (metrics::MetricLog) is created. Otherwise, UMA metrics generated during
+  // startup won't be correctly annotated. The current function is always called
+  // before the first metric log is created, as part of
+  // ChromeBrowserMainParts::PreMainMessageLoopRun().
+  startup_metric_utils::RegisterPreReadSyntheticFieldTrial(
+      registry_path,
+      base::Bind(&ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial));
+
+  // Initialize the PreRead options for the current process.
+  startup_metric_utils::InitializePreReadOptions(registry_path);
+
+  // After startup is complete, update the PreRead group in the registry. The
+  // group written in the registry will be used for the next startup.
+  BrowserThread::PostAfterStartupTask(
+      FROM_HERE, content::BrowserThread::GetBlockingPool(),
+      base::Bind(&startup_metric_utils::UpdatePreReadOptions, registry_path));
+}
+#endif  // defined(OS_WIN)
 
 // This error message is not localized because we failed to load the
 // localization data files.
@@ -692,7 +723,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   if (variations_service)
     variations_service->CreateTrialsFromSeed(feature_list.get());
 
-  base::FeatureList::SetInstance(feature_list.Pass());
+  base::FeatureList::SetInstance(std::move(feature_list));
 
   // This must be called after |local_state_| is initialized.
   browser_field_trials_.SetupFieldTrials();
@@ -714,14 +745,6 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 
   const version_info::Channel channel = chrome::GetChannel();
 
-  // TODO(dalecurtis): Remove these checks and enable for all channels once we
-  // track down the root causes of crbug.com/422522 and crbug.com/478932.
-  if (channel == version_info::Channel::UNKNOWN ||
-      channel == version_info::Channel::CANARY ||
-      channel == version_info::Channel::DEV) {
-    media::AudioManager::EnableHangMonitor();
-  }
-
   // Enable profiler instrumentation depending on the channel.
   switch (channel) {
     case version_info::Channel::UNKNOWN:
@@ -739,6 +762,10 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // Register a synthetic field trial for the sampling profiler configuration
   // that was already chosen.
   sampling_profiler_config_.RegisterSyntheticFieldTrial();
+
+#if defined(OS_WIN)
+  chrome_browser::SetupPreReadFieldTrial();
+#endif  // defined(OS_WIN)
 }
 
 // ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
@@ -768,7 +795,7 @@ void ChromeBrowserMainParts::RecordBrowserStartupTime() {
 
   // Record collected startup metrics.
   startup_metric_utils::RecordBrowserMainMessageLoopStart(
-      base::TimeTicks::Now(), is_first_run);
+      base::TimeTicks::Now(), is_first_run, g_browser_process->local_state());
 }
 
 // -----------------------------------------------------------------------------
@@ -920,7 +947,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
         g_browser_process->local_state());
     about_flags::ConvertFlagsToSwitches(&flags_storage_,
                                         base::CommandLine::ForCurrentProcess(),
-                                        about_flags::kAddSentinels);
+                                        flags_ui::kAddSentinels);
   }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -941,8 +968,8 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 
   // Reset the command line in the crash report details, since we may have
   // just changed it to include experiments.
-  crash_keys::SetSwitchesFromCommandLine(
-      base::CommandLine::ForCurrentProcess());
+  crash_keys::SetCrashKeysFromCommandLine(
+      *base::CommandLine::ForCurrentProcess());
 
   // Mac starts it earlier in |PreMainMessageLoopStart()| (because it is
   // needed when loading the MainMenu.nib and the language doesn't depend on
@@ -1137,11 +1164,11 @@ void ChromeBrowserMainParts::PreProfileInit() {
 void ChromeBrowserMainParts::PostProfileInit() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PostProfileInit");
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   DevToolsDiscoveryProviderAndroid::Install();
 #else
   ChromeDevToolsDiscoveryProvider::Install();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ANDROID_JAVA_UI)
 
   LaunchDevToolsHandlerIfNeeded(parsed_command_line());
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
@@ -1157,16 +1184,8 @@ void ChromeBrowserMainParts::PreBrowserStart() {
 
 // Start the tab manager here so that we give the most amount of time for the
 // other services to start up before we start adjusting the oom priority.
-//
-// On CrOS, it is always enabled. On other platforms, it's behind a flag for
-// now.
-#if defined(OS_CHROMEOS)
-  g_browser_process->GetTabManager()->Start(false);
-#elif defined(OS_WIN) || defined(OS_MACOSX)
-  if (base::FeatureList::IsEnabled(features::kAutomaticTabDiscarding)) {
-    // The default behavior is to only discard once (for now).
-    g_browser_process->GetTabManager()->Start(true);
-  }
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+  g_browser_process->GetTabManager()->Start();
 #endif
 }
 
@@ -1214,13 +1233,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   SCOPED_UMA_HISTOGRAM_LONG_TIMER("Startup.PreMainMessageLoopRunImplLongTime");
   const base::TimeTicks start_time_step1 = base::TimeTicks::Now();
-
-#if defined(MOJO_RUNNER_CLIENT)
-  if (IsRunningInMojoRunner()) {
-    mojo_runner_state_.reset(new MojoRunnerState);
-    mojo_runner_state_->WaitForConnection();
-  }
-#endif  // defined(MOJO_RUNNER_CLIENT)
 
 #if defined(OS_WIN)
   // Windows parental controls calls can be slow, so we do an early init here
@@ -1363,7 +1375,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     // Setup.exe has determined that we need to run a retention experiment
     // and has lauched chrome to show the experiment UI. It is guaranteed that
     // no other Chrome is currently running as the process singleton was
-    // sucessfully grabbed above.
+    // successfully grabbed above.
     int try_chrome_int;
     base::StringToInt(try_chrome, &try_chrome_int);
     TryChromeDialogView::Result answer = TryChromeDialogView::Show(

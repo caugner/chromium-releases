@@ -18,7 +18,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/svg/SVGTextContentElement.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -66,7 +65,7 @@ public:
 
 private:
     SVGAnimatedTextLength(SVGTextContentElement* contextElement)
-        : SVGAnimatedLength(contextElement, SVGNames::textLengthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths)
+        : SVGAnimatedLength(contextElement, SVGNames::textLengthAttr, SVGLength::create(SVGLengthMode::Width))
     {
     }
 };

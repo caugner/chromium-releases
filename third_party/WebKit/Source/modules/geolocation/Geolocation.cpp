@@ -25,7 +25,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/geolocation/Geolocation.h"
 
 #include "core/dom/Document.h"
@@ -158,8 +157,10 @@ void Geolocation::recordOriginTypeAccess() const
     String insecureOriginMsg;
     if (document->isSecureContext(insecureOriginMsg)) {
         UseCounter::count(document, UseCounter::GeolocationSecureOrigin);
+        UseCounter::countCrossOriginIframe(*document, UseCounter::GeolocationSecureOriginIframe);
     } else {
         UseCounter::countDeprecation(document, UseCounter::GeolocationInsecureOrigin);
+        UseCounter::countCrossOriginIframe(*document, UseCounter::GeolocationInsecureOriginIframe);
         OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::GeolocationInsecureOrigin);
     }
 }

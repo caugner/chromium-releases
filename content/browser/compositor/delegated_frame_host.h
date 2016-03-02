@@ -5,6 +5,8 @@
 #ifndef CONTENT_BROWSER_COMPOSITOR_DELEGATED_FRAME_HOST_H_
 #define CONTENT_BROWSER_COMPOSITOR_DELEGATED_FRAME_HOST_H_
 
+#include <stdint.h>
+
 #include <vector>
 
 #include "base/gtest_prod_util.h"
@@ -119,6 +121,7 @@ class CONTENT_EXPORT DelegatedFrameHost
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
+  void WillDrawSurface(cc::SurfaceId id, const gfx::Rect& damage_rect) override;
   void SetBeginFrameSource(cc::SurfaceId surface_id,
                            cc::BeginFrameSource* begin_frame_source) override;
 
@@ -126,13 +129,8 @@ class CONTENT_EXPORT DelegatedFrameHost
 
   // Public interface exposed to RenderWidgetHostView.
 
-  // Note: |satisfies_sequences| is cleared in calls to this function.
-  void SwapDelegatedFrame(
-      uint32 output_surface_id,
-      scoped_ptr<cc::DelegatedFrameData> frame_data,
-      float frame_device_scale_factor,
-      const std::vector<ui::LatencyInfo>& latency_info,
-      std::vector<uint32_t>* satisfies_sequences);
+  void SwapDelegatedFrame(uint32_t output_surface_id,
+                          scoped_ptr<cc::CompositorFrame> frame);
   void ClearDelegatedFrame();
   void WasHidden();
   void WasShown(const ui::LatencyInfo& latency_info);
@@ -163,6 +161,14 @@ class CONTENT_EXPORT DelegatedFrameHost
   // a compositor Surface.
   cc::SurfaceId SurfaceIdAtPoint(const gfx::Point& point,
                                  gfx::Point* transformed_point);
+
+  // Given the SurfaceID of a Surface that is contained within this class'
+  // Surface, find the relative transform between the Surfaces and apply it
+  // to a point. If a Surface has not yet been created this returns the
+  // same point with no transform applied.
+  void TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       cc::SurfaceId original_surface,
+                                       gfx::Point* transformed_point);
 
   // Exposed for tests.
   cc::DelegatedFrameProvider* FrameProviderForTesting() const {
@@ -245,13 +251,13 @@ class CONTENT_EXPORT DelegatedFrameHost
       scoped_refptr<OwnedMailbox> subscriber_texture,
       const gpu::SyncToken& sync_token);
 
-  void SendDelegatedFrameAck(uint32 output_surface_id);
-  void SurfaceDrawn(uint32 output_surface_id, cc::SurfaceDrawStatus drawn);
-  void SendReturnedDelegatedResources(uint32 output_surface_id);
+  void SendDelegatedFrameAck(uint32_t output_surface_id);
+  void SurfaceDrawn(uint32_t output_surface_id, cc::SurfaceDrawStatus drawn);
+  void SendReturnedDelegatedResources(uint32_t output_surface_id);
 
   // Called to consult the current |frame_subscriber_|, to determine and maybe
   // initiate a copy-into-video-frame request.
-  void DidReceiveFrameFromRenderer(const gfx::Rect& damage_rect);
+  void AttemptFrameSubscriberCapture(const gfx::Rect& damage_rect);
 
   DelegatedFrameHostClient* const client_;
   ui::Compositor* compositor_;
@@ -276,7 +282,7 @@ class CONTENT_EXPORT DelegatedFrameHost
   // With delegated renderer, this is the last output surface, used to
   // disambiguate resources with the same id coming from different output
   // surfaces.
-  uint32 last_output_surface_id_;
+  uint32_t last_output_surface_id_;
 
   // The number of delegated frame acks that are pending, to delay resource
   // returns until the acks are sent.

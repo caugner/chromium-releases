@@ -9,12 +9,13 @@
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "net/base/network_delegate_impl.h"
 
 #if !defined(OS_IOS)
@@ -166,7 +167,6 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
                           int64_t bytes_sent) override;
   void OnCompleted(net::URLRequest* request, bool started) override;
   void OnURLRequestDestroyed(net::URLRequest* request) override;
-  void OnURLRequestJobOrphaned(net::URLRequest* request) override;
   void OnPACScriptError(int line_number, const base::string16& error) override;
   net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       net::URLRequest* request,
@@ -184,6 +184,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
       const GURL& url,
       const GURL& first_party_for_cookies) const override;
   bool OnAreExperimentalCookieFeaturesEnabled() const override;
+  bool OnAreStrictSecureCookiesEnabled() const override;
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const net::URLRequest& request,
       const GURL& target_url,

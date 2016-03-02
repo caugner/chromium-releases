@@ -25,6 +25,7 @@
 @property(nonatomic, assign) CGPoint contentOffset;
 @property(nonatomic, assign) UIEdgeInsets contentInset;
 @property(nonatomic, readonly) BOOL isZooming;
+@property(nonatomic, readonly) CGFloat zoomScale;
 @property(nonatomic, assign) UIEdgeInsets scrollIndicatorInsets;
 @property(nonatomic, assign) CGSize contentSize;
 @property(nonatomic, readonly) CGRect frame;
@@ -33,12 +34,6 @@
 @property(nonatomic, readonly) UIPanGestureRecognizer* panGestureRecognizer;
 // Returns the scrollview's gesture recognizers.
 @property(nonatomic, readonly) NSArray* gestureRecognizers;
-
-// Returns YES if the UIScrollView is currently being updated through the proxy.
-// This can be used by CRWWebViewScrollViewObserver to differentiate renderer-
-// initiated updates from those caused by the proxy API.
-@property(nonatomic, readonly, getter=isUpdatingThroughProxy)
-    BOOL updatingThroughProxy;
 
 // Calls UIScrollView's implementation of setContentInset: directly. This
 // bypasses a very slow update path in UIWebView.

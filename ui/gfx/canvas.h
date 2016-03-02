@@ -5,9 +5,11 @@
 #ifndef UI_GFX_CANVAS_H_
 #define UI_GFX_CANVAS_H_
 
+#include <stdint.h>
+
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "skia/ext/platform_canvas.h"
@@ -179,8 +181,8 @@ class GFX_EXPORT Canvas {
   // at the specified alpha once Restore() is called.
   // |layer_bounds| are the bounds of the layer relative to the current
   // transform.
-  void SaveLayerAlpha(uint8 alpha);
-  void SaveLayerAlpha(uint8 alpha, const Rect& layer_bounds);
+  void SaveLayerAlpha(uint8_t alpha);
+  void SaveLayerAlpha(uint8_t alpha, const Rect& layer_bounds);
 
   // Restores the drawing state after a call to Save*(). It is an error to
   // call Restore() more times than Save*().
@@ -268,7 +270,7 @@ class GFX_EXPORT Canvas {
 
   // Helper for DrawImageInt(..., paint) that constructs a temporary paint and
   // calls paint.setAlpha(alpha).
-  void DrawImageInt(const ImageSkia&, int x, int y, uint8 alpha);
+  void DrawImageInt(const ImageSkia&, int x, int y, uint8_t alpha);
 
   // Draws an image with the origin at the specified location, using the
   // specified paint. The upper left corner of the bitmap is rendered at the
@@ -416,9 +418,9 @@ class GFX_EXPORT Canvas {
   bool IntersectsClipRectInt(int x, int y, int w, int h);
   bool IntersectsClipRect(const Rect& rect);
 
-  // Helper for the DrawImageInt functions declared above. The |pixel|
-  // parameter if true indicates that the bounds and the image are to
-  // be assumed to be in pixels, i.e. no scaling needs to be performed.
+  // Helper for the DrawImageInt functions declared above. The
+  // |remove_image_scale| parameter indicates if the scale of the |image_rep|
+  // should be removed when drawing the image, to avoid double-scaling it.
   void DrawImageIntHelper(const ImageSkiaRep& image_rep,
                           int src_x,
                           int src_y,
@@ -430,7 +432,7 @@ class GFX_EXPORT Canvas {
                           int dest_h,
                           bool filter,
                           const SkPaint& paint,
-                          bool pixel);
+                          bool remove_image_scale);
 
   // The device scale factor at which drawing on this canvas occurs.
   // An additional scale can be applied via Canvas::Scale(). However,

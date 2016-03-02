@@ -18,8 +18,9 @@ class DisplayItem;
 
 class DisplayItemProtoFactory {
  public:
-  static DisplayItem* AllocateAndConstruct(scoped_refptr<DisplayItemList> list,
-                                           const proto::DisplayItem& proto);
+  static void AllocateAndConstruct(const gfx::Rect& visual_rect,
+                                   DisplayItemList* list,
+                                   const proto::DisplayItem& proto);
 
  private:
   DisplayItemProtoFactory() {}

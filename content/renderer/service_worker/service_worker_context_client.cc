@@ -4,6 +4,8 @@
 
 #include "content/renderer/service_worker/service_worker_context_client.h"
 
+#include <utility>
+
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
@@ -25,6 +27,7 @@
 #include "content/child/thread_safe_sender.h"
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/devtools_messages.h"
+#include "content/common/geofencing_messages.h"
 #include "content/common/message_port_messages.h"
 #include "content/common/mojo/service_registry_impl.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
@@ -106,7 +109,7 @@ void SendPostMessageToClientOnMainThread(
     scoped_ptr<blink::WebMessagePortChannelArray> channels) {
   sender->Send(new ServiceWorkerHostMsg_PostMessageToClient(
       routing_id, uuid, message,
-      WebMessagePortChannelImpl::ExtractMessagePortIDs(channels.Pass())));
+      WebMessagePortChannelImpl::ExtractMessagePortIDs(std::move(channels))));
 }
 
 void SendCrossOriginMessageToClientOnMainThread(
@@ -116,7 +119,7 @@ void SendCrossOriginMessageToClientOnMainThread(
     scoped_ptr<blink::WebMessagePortChannelArray> channels) {
   sender->Send(new MessagePortHostMsg_PostMessage(
       message_port_id, MessagePortMessage(message),
-      WebMessagePortChannelImpl::ExtractMessagePortIDs(channels.Pass())));
+      WebMessagePortChannelImpl::ExtractMessagePortIDs(std::move(channels))));
 }
 
 blink::WebURLRequest::FetchRequestMode GetBlinkFetchRequestMode(
@@ -215,7 +218,7 @@ ServiceWorkerContextClient::ThreadSpecificInstance() {
 
 ServiceWorkerContextClient::ServiceWorkerContextClient(
     int embedded_worker_id,
-    int64 service_worker_version_id,
+    int64_t service_worker_version_id,
     const GURL& service_worker_scope,
     const GURL& script_url,
     int worker_devtools_agent_route_id)
@@ -279,8 +282,9 @@ void ServiceWorkerContextClient::OnMessageReceived(
 void ServiceWorkerContextClient::BindServiceRegistry(
     mojo::InterfaceRequest<mojo::ServiceProvider> services,
     mojo::ServiceProviderPtr exposed_services) {
-  context_->service_registry.Bind(services.Pass());
-  context_->service_registry.BindRemoteServiceProvider(exposed_services.Pass());
+  context_->service_registry.Bind(std::move(services));
+  context_->service_registry.BindRemoteServiceProvider(
+      std::move(exposed_services));
 }
 
 blink::WebURL ServiceWorkerContextClient::scope() const {
@@ -369,8 +373,8 @@ void ServiceWorkerContextClient::workerContextStarted(
   context_->service_registry.ServiceRegistry::AddService(
       base::Bind(&ServicePortDispatcherImpl::Create,
                  context_->proxy_weak_factory.GetWeakPtr()));
-  context_->service_registry.ServiceRegistry::AddService(base::Bind(
-      &BackgroundSyncClientImpl::Create, registration_info.registration_id));
+  context_->service_registry.ServiceRegistry::AddService(
+      base::Bind(&BackgroundSyncClientImpl::Create));
 
   SetRegistrationInServiceWorkerGlobalScope(registration_info, version_attrs);
 
@@ -468,12 +472,13 @@ void ServiceWorkerContextClient::reportConsoleMessage(
 }
 
 void ServiceWorkerContextClient::sendDevToolsMessage(
+    int session_id,
     int call_id,
     const blink::WebString& message,
     const blink::WebString& state_cookie) {
   DevToolsAgent::SendChunkedProtocolMessage(
-      sender_.get(), worker_devtools_agent_route_id_,
-      call_id, message.utf8(), state_cookie.utf8());
+      sender_.get(), worker_devtools_agent_route_id_, session_id, call_id,
+      message.utf8(), state_cookie.utf8());
 }
 
 void ServiceWorkerContextClient::didHandleActivateEvent(
@@ -561,8 +566,8 @@ ServiceWorkerContextClient::createServiceWorkerNetworkProvider(
   // and ownership is transferred to the DataSource.
   DataSourceExtraData* extra_data = new DataSourceExtraData();
   data_source->setExtraData(extra_data);
-  ServiceWorkerNetworkProvider::AttachToDocumentState(
-      extra_data, provider.Pass());
+  ServiceWorkerNetworkProvider::AttachToDocumentState(extra_data,
+                                                      std::move(provider));
 
   // Blink is responsible for deleting the returned object.
   return new WebServiceWorkerNetworkProviderImpl();
@@ -729,12 +734,14 @@ void ServiceWorkerContextClient::OnFetchEvent(
       blink::WebString::fromUTF8(request.referrer.url.spec()),
       request.referrer.policy);
   webRequest.setMode(GetBlinkFetchRequestMode(request.mode));
+  webRequest.setIsMainResourceLoad(request.is_main_resource_load);
   webRequest.setCredentialsMode(
       GetBlinkFetchCredentialsMode(request.credentials_mode));
   webRequest.setRedirectMode(GetBlinkFetchRedirectMode(request.redirect_mode));
   webRequest.setRequestContext(
       GetBlinkRequestContext(request.request_context_type));
   webRequest.setFrameType(GetBlinkFrameType(request.frame_type));
+  webRequest.setClientId(blink::WebString::fromUTF8(request.client_id));
   webRequest.setIsReload(request.is_reload);
   proxy_->dispatchFetchEvent(request_id, webRequest);
 }
@@ -769,8 +776,8 @@ void ServiceWorkerContextClient::OnGeofencingEvent(
                "ServiceWorkerContextClient::OnGeofencingEvent");
   proxy_->dispatchGeofencingEvent(
       request_id, event_type, blink::WebString::fromUTF8(region_id), region);
-  Send(new ServiceWorkerHostMsg_GeofencingEventFinished(GetRoutingID(),
-                                                        request_id));
+  Send(new ServiceWorkerHostMsg_GeofencingEventFinished(
+      GetRoutingID(), request_id, blink::WebServiceWorkerEventResultCompleted));
 }
 
 void ServiceWorkerContextClient::OnPostMessage(
@@ -865,7 +872,7 @@ void ServiceWorkerContextClient::OnOpenWindowError(
     return;
   }
   callbacks->onError(blink::WebServiceWorkerError(
-      blink::WebServiceWorkerError::ErrorTypeUnknown,
+      blink::WebServiceWorkerError::ErrorTypeNavigation,
       blink::WebString::fromUTF8(message)));
   context_->client_callbacks.Remove(request_id);
 }
@@ -928,7 +935,7 @@ void ServiceWorkerContextClient::OnNavigateClientError(int request_id,
   }
   std::string message = "Cannot navigate to URL: " + url.spec();
   callbacks->onError(blink::WebServiceWorkerError(
-      blink::WebServiceWorkerError::ErrorTypeUnknown,
+      blink::WebServiceWorkerError::ErrorTypeNavigation,
       blink::WebString::fromUTF8(message)));
   context_->client_callbacks.Remove(request_id);
 }

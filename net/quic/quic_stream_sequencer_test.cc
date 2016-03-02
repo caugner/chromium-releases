@@ -49,9 +49,7 @@ class MockStream : public ReliableQuicStream {
                void(QuicErrorCode error, const string& details));
   MOCK_METHOD1(Reset, void(QuicRstStreamErrorCode error));
   MOCK_METHOD0(OnCanWrite, void());
-  QuicPriority EffectivePriority() const override {
-    return QuicUtils::HighestPriority();
-  }
+  SpdyPriority Priority() const override { return kV3HighestPriority; }
   virtual bool IsFlowControlEnabled() const { return true; }
 };
 
@@ -147,7 +145,8 @@ class QuicStreamSequencerTest : public ::testing::TestWithParam<bool> {
     QuicStreamFrame frame;
     frame.stream_id = 1;
     frame.offset = byte_offset;
-    frame.data = StringPiece(data);
+    frame.frame_buffer = data;
+    frame.frame_length = strlen(data);
     frame.fin = true;
     sequencer_->OnStreamFrame(frame);
   }
@@ -156,7 +155,8 @@ class QuicStreamSequencerTest : public ::testing::TestWithParam<bool> {
     QuicStreamFrame frame;
     frame.stream_id = 1;
     frame.offset = byte_offset;
-    frame.data = StringPiece(data);
+    frame.frame_buffer = data;
+    frame.frame_length = strlen(data);
     frame.fin = false;
     sequencer_->OnStreamFrame(frame);
   }
@@ -407,9 +407,7 @@ class QuicSequencerRandomTest : public QuicStreamSequencerTest {
     }
   }
 
-  QuicSequencerRandomTest() {
-    CreateFrames();
-  }
+  QuicSequencerRandomTest() { CreateFrames(); }
 
   int OneToN(int n) { return base::RandInt(1, n); }
 

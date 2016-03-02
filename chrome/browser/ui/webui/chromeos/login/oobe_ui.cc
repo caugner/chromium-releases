@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 
+#include <stddef.h>
+
 #include "ash/shell_window_ids.h"
 #include "ash/wm/screen_dimmer.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -21,7 +24,6 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/settings/shutdown_policy_handler.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/extensions/signin/gaia_auth_extension_loader.h"
@@ -307,16 +309,11 @@ OobeUI::OobeUI(content::WebUI* web_ui, const GURL& url)
   user_image_view_ = user_image_screen_handler;
   AddScreenHandler(user_image_screen_handler);
 
-  policy::ConsumerManagementService* consumer_management =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos()->
-          GetConsumerManagementService();
-
   user_board_screen_handler_ = new UserBoardScreenHandler();
   AddScreenHandler(user_board_screen_handler_);
 
   gaia_screen_handler_ =
-      new GaiaScreenHandler(
-          core_handler_, network_state_informer_, consumer_management);
+      new GaiaScreenHandler(core_handler_, network_state_informer_);
   AddScreenHandler(gaia_screen_handler_);
 
   signin_screen_handler_ =

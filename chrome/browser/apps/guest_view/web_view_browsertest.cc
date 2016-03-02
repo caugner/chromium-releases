@@ -3,14 +3,17 @@
 // found in the LICENSE file.
 
 #include <queue>
+#include <utility>
 
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
@@ -413,8 +416,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
                           base::CompareCase::SENSITIVE))
       return scoped_ptr<net::test_server::HttpResponse>();
 
-    std::map<std::string, std::string>::const_iterator it =
-          request.headers.find("User-Agent");
+    auto it = request.headers.find("User-Agent");
     EXPECT_TRUE(it != request.headers.end());
     if (!base::StartsWith("foobar", it->second,
                           base::CompareCase::SENSITIVE))
@@ -424,7 +426,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
     http_response->AddCustomHeader("Location", redirect_target.spec());
-    return http_response.Pass();
+    return std::move(http_response);
   }
 
   // Handles |request| by serving a redirect response.
@@ -440,7 +442,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
     http_response->AddCustomHeader("Location", redirect_target.spec());
-    return http_response.Pass();
+    return std::move(http_response);
   }
 
   // Handles |request| by serving an empty response.
@@ -468,7 +470,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     http_response->AddCustomHeader("Cache-control", "max-age=3600");
     http_response->set_content_type("text/plain");
     http_response->set_content("dummy text");
-    return http_response.Pass();
+    return std::move(http_response);
   }
 
   // Shortcut to return the current MenuManager.
@@ -571,12 +573,9 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   // Helper to load interstitial page in a <webview>.
   void InterstitialTeardownTestHelper() {
     // Start a HTTPS server so we can load an interstitial page inside guest.
-    net::SpawnedTestServer::SSLOptions ssl_options;
-    ssl_options.server_certificate =
-        net::SpawnedTestServer::SSLOptions::CERT_MISMATCHED_NAME;
-    net::SpawnedTestServer https_server(
-        net::SpawnedTestServer::TYPE_HTTPS, ssl_options,
-        base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+    net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+    https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_MISMATCHED_NAME);
+    https_server.ServeFilesFromSourceDirectory("chrome/test/data");
     ASSERT_TRUE(https_server.Start());
 
     net::HostPortPair host_and_port = https_server.host_port_pair();
@@ -745,6 +744,70 @@ class WebViewDPITest : public WebViewTest {
 
   static float scale() { return 2.0f; }
 };
+
+class WebContentsAudioMutedObserver : public content::WebContentsObserver {
+ public:
+  explicit WebContentsAudioMutedObserver(content::WebContents* web_contents)
+      : WebContentsObserver(web_contents),
+        loop_runner_(new content::MessageLoopRunner),
+        muting_update_observed_(false) {}
+
+  // WebContentsObserver.
+  void DidUpdateAudioMutingState(bool muted) override {
+    muting_update_observed_ = true;
+    loop_runner_->Quit();
+  }
+
+  void WaitForUpdate() {
+    loop_runner_->Run();
+  }
+
+  bool muting_update_observed() { return muting_update_observed_; }
+
+ private:
+  scoped_refptr<content::MessageLoopRunner> loop_runner_;
+  bool muting_update_observed_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebContentsAudioMutedObserver);
+};
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, AudioMutesWhileAttached) {
+  LoadAppWithGuest("web_view/simple");
+
+  content::WebContents* embedder = GetEmbedderWebContents();
+  content::WebContents* guest = GetGuestWebContents();
+
+  EXPECT_FALSE(embedder->IsAudioMuted());
+  EXPECT_FALSE(guest->IsAudioMuted());
+
+  embedder->SetAudioMuted(true);
+  EXPECT_TRUE(embedder->IsAudioMuted());
+  EXPECT_TRUE(guest->IsAudioMuted());
+
+  embedder->SetAudioMuted(false);
+  EXPECT_FALSE(embedder->IsAudioMuted());
+  EXPECT_FALSE(guest->IsAudioMuted());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, AudioMutesOnAttach) {
+  LoadAndLaunchPlatformApp("web_view/app_creates_webview",
+                           "WebViewTest.LAUNCHED");
+  content::WebContents* embedder = GetEmbedderWebContents();
+  embedder->SetAudioMuted(true);
+  EXPECT_TRUE(embedder->IsAudioMuted());
+
+  SendMessageToEmbedder("create-guest");
+  content::WebContents* guest =
+      GetGuestViewManager()->WaitForSingleGuestCreated();
+
+  EXPECT_TRUE(embedder->IsAudioMuted());
+  WebContentsAudioMutedObserver observer(guest);
+  // If the guest hasn't attached yet, it may not have received the muting
+  // update, in which case we should wait until it does.
+  if (!guest->IsAudioMuted())
+    observer.WaitForUpdate();
+  EXPECT_TRUE(guest->IsAudioMuted());
+}
 
 // This test verifies that hiding the guest triggers WebContents::WasHidden().
 IN_PROC_BROWSER_TEST_F(WebViewVisibilityTest, GuestVisibilityChanged) {
@@ -1075,6 +1138,14 @@ IN_PROC_BROWSER_TEST_F(
     WebViewTest,
     Shim_TestExecuteScriptIsAbortedWhenWebViewSourceIsChanged) {
   TestHelper("testExecuteScriptIsAbortedWhenWebViewSourceIsChanged",
+             "web_view/shim",
+             NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    Shim_TestExecuteScriptIsAbortedWhenWebViewSourceIsInvalid) {
+  TestHelper("testExecuteScriptIsAbortedWhenWebViewSourceIsInvalid",
              "web_view/shim",
              NO_TEST_SERVER);
 }
@@ -2468,6 +2539,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, TestPlugin) {
 #define MAYBE_WebViewInBackgroundPage WebViewInBackgroundPage
 #endif
 IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_WebViewInBackgroundPage) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("platform_apps/web_view/background"))
       << message_;
 }
@@ -2799,38 +2871,6 @@ class WebViewFocusTest : public WebViewTest {
   scoped_refptr<content::FrameWatcher> frame_watcher_;
 };
 
-class FocusWaiter : public views::FocusChangeListener {
- public:
-  explicit FocusWaiter(views::View* view_to_wait_for)
-      : view_to_wait_for_(view_to_wait_for) {
-    view_to_wait_for_->GetFocusManager()->AddFocusChangeListener(this);
-  }
-  ~FocusWaiter() override {
-    view_to_wait_for_->GetFocusManager()->RemoveFocusChangeListener(this);
-  }
-
-  void Wait() {
-    if (view_to_wait_for_->HasFocus())
-      return;
-
-    base::MessageLoop::current()->Run();
-  }
-
-  // FocusChangeListener implementation.
-  void OnWillChangeFocus(views::View* focused_before,
-                         views::View* focused_now) override {}
-  void OnDidChangeFocus(views::View* focused_before,
-                        views::View* focused_now) override {
-    if (view_to_wait_for_ == focused_now)
-      base::MessageLoop::current()->QuitWhenIdle();
-  }
-
- private:
-  views::View* view_to_wait_for_;
-
-  DISALLOW_COPY_AND_ASSIGN(FocusWaiter);
-};
-
 // The following test verifies that a views::WebView hosting an embedder
 // gains focus on touchstart.
 IN_PROC_BROWSER_TEST_F(WebViewFocusTest, TouchFocusesEmbedder) {
@@ -2890,13 +2930,9 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusTest, TouchFocusesEmbedder) {
   guest_rect.Offset(-embedder_origin.x(), -embedder_origin.y());
 
   // Generate and send synthetic touch event.
-  FocusWaiter waiter(aura_webview);
   content::SimulateTouchPressAt(GetEmbedderWebContents(),
                                 guest_rect.CenterPoint());
-
-  // Wait for the TouchStart to propagate and restore focus. Test times out
-  // on failure.
-  waiter.Wait();
+  EXPECT_TRUE(aura_webview->HasFocus());
 }
 #endif
 

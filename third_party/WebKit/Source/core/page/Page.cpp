@@ -17,7 +17,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/page/Page.h"
 
 #include "core/css/resolver/ViewportStyleResolver.h"
@@ -55,17 +54,17 @@
 
 namespace blink {
 
-// static
-WillBePersistentHeapHashSet<RawPtrWillBeWeakMember<Page>>& Page::allPages()
+// Set of all live pages; includes internal Page objects that are
+// not observable from scripts.
+static Page::PageSet& allPages()
 {
-    DEFINE_STATIC_LOCAL(WillBePersistentHeapHashSet<RawPtrWillBeWeakMember<Page>>, allPages, ());
+    DEFINE_STATIC_LOCAL(Page::PageSet, allPages, ());
     return allPages;
 }
 
-// static
-WillBePersistentHeapHashSet<RawPtrWillBeWeakMember<Page>>& Page::ordinaryPages()
+Page::PageSet& Page::ordinaryPages()
 {
-    DEFINE_STATIC_LOCAL(WillBePersistentHeapHashSet<RawPtrWillBeWeakMember<Page>>, ordinaryPages, ());
+    DEFINE_STATIC_LOCAL(Page::PageSet, ordinaryPages, ());
     return ordinaryPages;
 }
 
@@ -83,10 +82,16 @@ void Page::networkStateChanged(bool online)
     }
 
     AtomicString eventName = online ? EventTypeNames::online : EventTypeNames::offline;
-    for (unsigned i = 0; i < frames.size(); i++) {
-        frames[i]->domWindow()->dispatchEvent(Event::create(eventName));
-        InspectorInstrumentation::networkStateChanged(frames[i].get(), online);
+    for (const auto& frame : frames) {
+        frame->domWindow()->dispatchEvent(Event::create(eventName));
+        InspectorInstrumentation::networkStateChanged(frame.get(), online);
     }
+}
+
+void Page::onMemoryPressure()
+{
+    for (Page* page : ordinaryPages())
+        page->memoryPurgeController().purgeMemory();
 }
 
 float deviceScaleFactor(LocalFrame* frame)
@@ -97,6 +102,14 @@ float deviceScaleFactor(LocalFrame* frame)
     if (!page)
         return 1;
     return page->deviceScaleFactor();
+}
+
+PassOwnPtrWillBeRawPtr<Page> Page::createOrdinary(PageClients& pageClients)
+{
+    OwnPtrWillBeRawPtr<Page> page = create(pageClients);
+    ordinaryPages().add(page.get());
+    page->memoryPurgeController().registerClient(page.get());
+    return page.release();
 }
 
 Page::Page(PageClients& pageClients)
@@ -117,7 +130,6 @@ Page::Page(PageClients& pageClients)
     , m_tabKeyCyclesThroughElements(true)
     , m_defersLoading(false)
     , m_deviceScaleFactor(1)
-    , m_timerAlignmentInterval(DOMTimer::visiblePageAlignmentInterval())
     , m_visibilityState(PageVisibilityStateVisible)
     , m_isCursorVisible(true)
 #if ENABLE(ASSERT)
@@ -129,22 +141,15 @@ Page::Page(PageClients& pageClients)
 
     ASSERT(!allPages().contains(this));
     allPages().add(this);
-    memoryPurgeController().registerClient(this);
 }
 
 Page::~Page()
 {
 #if !ENABLE(OILPAN)
-    memoryPurgeController().unregisterClient(this);
+    ASSERT(!ordinaryPages().contains(this));
 #endif
     // willBeDestroyed() must be called before Page destruction.
     ASSERT(!m_mainFrame);
-}
-
-void Page::makeOrdinary()
-{
-    ASSERT(!ordinaryPages().contains(this));
-    ordinaryPages().add(this);
 }
 
 ViewportDescription Page::viewportDescription() const
@@ -274,13 +279,6 @@ PluginData* Page::pluginData() const
     return m_pluginData.get();
 }
 
-static Frame* incrementFrame(Frame* curr, bool forward, bool wrapFlag)
-{
-    return forward
-        ? curr->tree().traverseNextWithWrap(wrapFlag)
-        : curr->tree().traversePreviousWithWrap(wrapFlag);
-}
-
 void Page::unmarkAllTextMatches()
 {
     if (!mainFrame())
@@ -290,7 +288,7 @@ void Page::unmarkAllTextMatches()
     do {
         if (frame->isLocalFrame())
             toLocalFrame(frame)->document()->markers().removeMarkers(DocumentMarker::TextMatch);
-        frame = incrementFrame(frame, true, false);
+        frame = frame->tree().traverseNextWithWrap(false);
     } while (frame);
 }
 
@@ -338,17 +336,17 @@ void Page::setDeviceColorProfile(const Vector<char>& profile)
     // FIXME: implement.
 }
 
-void Page::resetDeviceColorProfile()
+void Page::resetDeviceColorProfileForTesting()
 {
     RuntimeEnabledFeatures::setImageColorProfilesEnabled(false);
 }
 
-void Page::allVisitedStateChanged()
+void Page::allVisitedStateChanged(bool invalidateVisitedLinkHashes)
 {
     for (const Page* page : ordinaryPages()) {
         for (Frame* frame = page->m_mainFrame; frame; frame = frame->tree().traverseNext()) {
             if (frame->isLocalFrame())
-                toLocalFrame(frame)->document()->visitedLinkState().invalidateStyleForAllLinks();
+                toLocalFrame(frame)->document()->visitedLinkState().invalidateStyleForAllLinks(invalidateVisitedLinkHashes);
         }
     }
 }
@@ -363,44 +361,11 @@ void Page::visitedStateChanged(LinkHash linkHash)
     }
 }
 
-void Page::setTimerAlignmentInterval(double interval)
-{
-    if (interval == m_timerAlignmentInterval)
-        return;
-
-    m_timerAlignmentInterval = interval;
-    for (Frame* frame = mainFrame(); frame; frame = frame->tree().traverseNextWithWrap(false)) {
-        if (!frame->isLocalFrame())
-            continue;
-
-        if (Document* document = toLocalFrame(frame)->document()) {
-            if (DOMTimerCoordinator* timers = document->timers()) {
-                timers->didChangeTimerAlignmentInterval();
-            }
-        }
-    }
-}
-
-double Page::timerAlignmentInterval() const
-{
-    return m_timerAlignmentInterval;
-}
-
 void Page::setVisibilityState(PageVisibilityState visibilityState, bool isInitialState)
 {
     if (m_visibilityState == visibilityState)
         return;
     m_visibilityState = visibilityState;
-
-    // TODO(alexclarke): Move throttling of timers to chromium.
-    if (visibilityState == PageVisibilityStateVisible) {
-        setTimerAlignmentInterval(DOMTimer::visiblePageAlignmentInterval());
-        m_memoryPurgeController->pageBecameActive();
-    } else {
-        setTimerAlignmentInterval(DOMTimer::hiddenPageAlignmentInterval());
-        if (!isInitialState)
-            m_memoryPurgeController->pageBecameInactive();
-    }
 
     if (!isInitialState)
         notifyPageVisibilityChanged();
@@ -424,10 +389,13 @@ void Page::addMultisamplingChangedObserver(MultisamplingChangedObserver* observe
     m_multisamplingChangedObservers.add(observer);
 }
 
+// For Oilpan, unregistration is handled by the GC and weak references.
+#if !ENABLE(OILPAN)
 void Page::removeMultisamplingChangedObserver(MultisamplingChangedObserver* observer)
 {
     m_multisamplingChangedObservers.remove(observer);
 }
+#endif
 
 void Page::settingsChanged(SettingsDelegate::ChangeType changeType)
 {
@@ -544,16 +512,10 @@ void Page::acceptLanguagesChanged()
         frames[i]->localDOMWindow()->acceptLanguagesChanged();
 }
 
-void Page::purgeMemory(MemoryPurgeMode mode, DeviceKind deviceKind)
+void Page::purgeMemory(DeviceKind deviceKind)
 {
-    Frame* frame = mainFrame();
-    if (deviceKind != DeviceKind::LowEnd || !frame || !frame->isLocalFrame())
-        return;
-    if (mode == MemoryPurgeMode::InactiveTab) {
-        if (Document* document = toLocalFrame(frame)->document())
-            document->fetcher()->garbageCollectDocumentResources();
+    if (deviceKind == DeviceKind::LowEnd)
         memoryCache()->pruneAll();
-    }
 }
 
 DEFINE_TRACE(Page)
@@ -580,10 +542,21 @@ DEFINE_TRACE(Page)
     MemoryPurgeClient::trace(visitor);
 }
 
-void Page::willCloseLayerTreeView()
+void Page::layerTreeViewInitialized(WebLayerTreeView& layerTreeView)
+{
+    if (scrollingCoordinator())
+        scrollingCoordinator()->layerTreeViewInitialized(layerTreeView);
+}
+
+void Page::willCloseLayerTreeView(WebLayerTreeView& layerTreeView)
 {
     if (m_scrollingCoordinator)
-        m_scrollingCoordinator->willCloseLayerTreeView();
+        m_scrollingCoordinator->willCloseLayerTreeView(layerTreeView);
+}
+
+void Page::willBeClosed()
+{
+    ordinaryPages().remove(this);
 }
 
 void Page::willBeDestroyed()
@@ -592,16 +565,13 @@ void Page::willBeDestroyed()
 
     mainFrame->detach(FrameDetachType::Remove);
 
-    if (mainFrame->isLocalFrame()) {
-        toLocalFrame(mainFrame.get())->setView(nullptr);
-    } else {
-        ASSERT(m_mainFrame->isRemoteFrame());
-        toRemoteFrame(mainFrame.get())->setView(nullptr);
-    }
-
     ASSERT(allPages().contains(this));
     allPages().remove(this);
     ordinaryPages().remove(this);
+#if !ENABLE(OILPAN)
+    if (m_memoryPurgeController)
+        m_memoryPurgeController->unregisterClient(this);
+#endif
 
     if (m_scrollingCoordinator)
         m_scrollingCoordinator->willBeDestroyed();
@@ -611,7 +581,7 @@ void Page::willBeDestroyed()
         m_validationMessageClient->willBeDestroyed();
     m_mainFrame = nullptr;
 
-    Page::notifyContextDestroyed();
+    PageLifecycleNotifier::notifyContextDestroyed();
 }
 
 Page::PageClients::PageClients()

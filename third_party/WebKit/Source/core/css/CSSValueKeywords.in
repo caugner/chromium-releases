@@ -121,6 +121,15 @@ monospace
 -webkit-pictograph
 
 //
+// font-display
+//
+//auto
+//block
+swap
+fallback
+optional
+
+//
 //
 // *-color
 //
@@ -487,6 +496,8 @@ space-between
 space-around
 space-evenly
 // stretch
+unsafe
+safe
 
 // align-items / align-self
 // flex-start
@@ -505,6 +516,8 @@ space-evenly
 // space-around
 // space-evenly
 // stretch
+// unsafe
+// safe
 
 
 // flex-flow
@@ -939,8 +952,8 @@ self-end
 // flex-end
 // left
 // right
-true
-safe
+// unsafe
+// safe
 legacy
 
 // scroll-behavior
@@ -955,6 +968,7 @@ scroll-position
 // all
 // initial
 // inherit
+revert
 unset
 
 // background-image, etc.
@@ -1043,6 +1057,11 @@ calc
 mandatory
 proximity
 from-image
+
+// containment
+paint
+style
+layout
 
 var
 -internal-variable-value

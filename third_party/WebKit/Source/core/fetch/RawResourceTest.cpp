@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/fetch/RawResource.h"
 
 #include "core/fetch/ImageResourceClient.h"
@@ -42,8 +41,7 @@
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLResponse.h"
 #include "public/platform/WebUnitTestSupport.h"
-
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
@@ -72,7 +70,7 @@ public:
     }
     String debugName() const override { return "DummyClient"; }
 
-    void dataReceived(Resource*, const char* data, unsigned length) override
+    void dataReceived(Resource*, const char* data, size_t length) override
     {
         m_data.append(data, length);
     }

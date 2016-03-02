@@ -28,8 +28,8 @@ void SetWKWebViewTrialEligibility(bool eligible);
 // Whether the lru snapshot cache experiment is enabled.
 bool IsLRUSnapshotCacheEnabled();
 
-// Whether the app uses WKWebView instead of UIWebView.
-// The returned value will not change within a given session.
+// TODO(crbug.com/579697): This always returns true; cleanup codepaths that use
+// this.
 bool IsWKWebViewEnabled();
 
 // Whether the user would be put into a control group for the WKWebView
@@ -44,11 +44,18 @@ bool IsInWKWebViewExperimentControlGroup();
 // omnibox search requests.  The returned value contains a leading "&".
 std::string GetWKWebViewSearchParams();
 
-// Whether keyboard commands are supported.
-bool AreKeyboardCommandsEnabled();
-
 // Whether viewing and copying passwords is enabled.
 bool IsViewCopyPasswordsEnabled();
+
+// Whether password generation is enabled.
+bool IsPasswordGenerationEnabled();
+
+// Whether password generation fields are determined using local heuristics
+// only.
+bool UseOnlyLocalHeuristicsForPasswordGeneration();
+
+// Whether the Tab Switcher is enabled for iPad or not.
+bool IsTabSwitcherEnabled();
 
 }  // namespace experimental_flags
 

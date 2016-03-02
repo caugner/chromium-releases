@@ -6,9 +6,11 @@
 
 #include <dlfcn.h>
 #include <glib-object.h>
+#include <stddef.h>
 
 #include "base/debug/leak_annotations.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,6 +35,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/sessions/core/tab_restore_service.h"
+#include "grit/components_strings.h"
 #include "ui/base/accelerators/menu_label_accelerator_util_linux.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
@@ -206,11 +209,11 @@ GlobalMenuBarCommand history_menu[] = {
 
   { MENU_SEPARATOR, MENU_SEPARATOR },
 
-  { IDS_HISTORY_VISITED_LINUX, MENU_DISABLED_ID, TAG_MOST_VISITED_HEADER },
+  { IDS_HISTORY_CLOSED_LINUX, MENU_DISABLED_ID, TAG_RECENTLY_CLOSED_HEADER },
 
   { MENU_SEPARATOR, MENU_SEPARATOR },
 
-  { IDS_HISTORY_CLOSED_LINUX, MENU_DISABLED_ID, TAG_RECENTLY_CLOSED_HEADER },
+  { IDS_HISTORY_VISITED_LINUX, MENU_DISABLED_ID, TAG_MOST_VISITED_HEADER },
 
   { MENU_SEPARATOR, MENU_SEPARATOR },
 

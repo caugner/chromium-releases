@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 
+#include <stddef.h>
+
 #include <algorithm>   // For max().
 #include <set>
 
@@ -18,9 +20,12 @@
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_profile.h"
@@ -30,6 +35,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -92,6 +98,7 @@
 
 #if defined(OS_WIN)
 #include "chrome/browser/metrics/jumplist_metrics_win.h"
+#include "components/search_engines/desktop_search_win.h"
 #endif
 
 #if defined(ENABLE_PRINT_PREVIEW)
@@ -549,6 +556,28 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     // Allow it until this bug is fixed.
     //  http://code.google.com/p/chromium/issues/detail?id=60641
     GURL url = GURL(param.MaybeAsASCII());
+
+#if defined(OS_WIN)
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(profile);
+    DCHECK(template_url_service);
+    base::string16 search_terms;
+    if (DetectWindowsDesktopSearch(
+            url, template_url_service->search_terms_data(), &search_terms)) {
+      base::RecordAction(base::UserMetricsAction("DesktopSearch"));
+
+      if (ShouldRedirectWindowsDesktopSearchToDefaultSearchEngine(
+            profile->GetPrefs())) {
+        const GURL search_url(GetDefaultSearchURLForSearchTerms(
+            template_url_service, search_terms));
+        if (search_url.is_valid()) {
+          urls.push_back(search_url);
+          continue;
+        }
+      }
+    }
+#endif  // defined(OS_WIN)
+
     // http://crbug.com/371030: Only use URLFixerUpper if we don't have a valid
     // URL, otherwise we will look in the current directory for a file named
     // 'about' if the browser was started with a about:foo argument.

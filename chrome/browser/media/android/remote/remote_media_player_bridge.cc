@@ -4,6 +4,8 @@
 
 #include "chrome/browser/media/android/remote/remote_media_player_bridge.h"
 
+#include <utility>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "chrome/browser/media/android/remote/record_cast_action.h"
@@ -39,7 +41,6 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
     : MediaPlayerAndroid(local_player->player_id(), manager,
                          base::Bind(&DoNothing),
                          local_player->frame_url()),
-      start_position_millis_(0),
       local_player_(local_player),
       width_(0),
       height_(0),
@@ -49,8 +50,6 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
       first_party_for_cookies_(local_player->GetFirstPartyForCookies()),
       user_agent_(user_agent),
       weak_factory_(this) {
-  if (local_player->GetCurrentTime().InMilliseconds() > 0)
-    start_position_millis_ = local_player->GetCurrentTime().InMilliseconds();
   JNIEnv* env = base::android::AttachCurrentThread();
   CHECK(env);
   ScopedJavaLocalRef<jstring> j_url_string;
@@ -65,8 +64,8 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
         env, local_player->frame_url().spec());
   }
   java_bridge_.Reset(Java_RemoteMediaPlayerBridge_create(
-      env, reinterpret_cast<intptr_t>(this), start_position_millis_,
-      j_url_string.obj(), j_frame_url_string.obj(),
+      env, reinterpret_cast<intptr_t>(this), j_url_string.obj(),
+      j_frame_url_string.obj(),
       ConvertUTF8ToJavaString(env, user_agent).obj()));
 }
 
@@ -75,6 +74,16 @@ RemoteMediaPlayerBridge::~RemoteMediaPlayerBridge() {
   CHECK(env);
   Java_RemoteMediaPlayerBridge_destroy(env, java_bridge_.obj());
   Release();
+}
+
+bool RemoteMediaPlayerBridge::HasVideo() const {
+  NOTIMPLEMENTED();
+  return true;
+}
+
+bool RemoteMediaPlayerBridge::HasAudio() const {
+  NOTIMPLEMENTED();
+  return true;
 }
 
 int RemoteMediaPlayerBridge::GetVideoWidth() {
@@ -120,19 +129,23 @@ void RemoteMediaPlayerBridge::OnTimeUpdateTimerFired() {
       player_id(), GetCurrentTime(), base::TimeTicks::Now());
 }
 
-void RemoteMediaPlayerBridge::PauseLocal(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::PauseLocal(JNIEnv* env,
+                                         const JavaParamRef<jobject>& obj) {
   local_player_->Pause(true);
   static_cast<RemoteMediaPlayerManager*>(manager())->OnPaused(player_id());
 }
 
-jint RemoteMediaPlayerBridge::GetLocalPosition(JNIEnv* env, jobject obj) {
+jint RemoteMediaPlayerBridge::GetLocalPosition(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   base::TimeDelta time = local_player_->GetCurrentTime();
   return static_cast<jint>(time.InMilliseconds());
 }
 
-void RemoteMediaPlayerBridge::OnCastStarting(JNIEnv* env,
-                                             jobject obj,
-                                             jstring casting_message) {
+void RemoteMediaPlayerBridge::OnCastStarting(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& casting_message) {
   static_cast<RemoteMediaPlayerManager*>(manager())->SwitchToRemotePlayer(
       player_id(), ConvertJavaStringToUTF8(env, casting_message));
   if (!time_update_timer_.IsRunning()) {
@@ -143,9 +156,16 @@ void RemoteMediaPlayerBridge::OnCastStarting(JNIEnv* env,
   }
 }
 
-void RemoteMediaPlayerBridge::OnCastStopping(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::OnCastStopping(JNIEnv* env,
+                                             const JavaParamRef<jobject>& obj) {
   static_cast<RemoteMediaPlayerManager*>(manager())
       ->SwitchToLocalPlayer(player_id());
+}
+
+void RemoteMediaPlayerBridge::OnSeekCompleted(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  OnSeekComplete();
 }
 
 void RemoteMediaPlayerBridge::Pause(bool is_media_related_action) {
@@ -165,36 +185,44 @@ void RemoteMediaPlayerBridge::SetVideoSurface(gfx::ScopedJavaSurface surface) {
   // Since the remote player doesn't use it, we forward it to the local player
   // for the time when user disconnects and resumes local playback
   // (see crbug.com/420690).
-  local_player_->SetVideoSurface(surface.Pass());
+  local_player_->SetVideoSurface(std::move(surface));
 }
 
 base::android::ScopedJavaLocalRef<jstring> RemoteMediaPlayerBridge::GetFrameUrl(
-    JNIEnv* env, jobject obj) {
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   return ConvertUTF8ToJavaString(env, frame_url().spec());
 }
 
-void RemoteMediaPlayerBridge::OnPlaying(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::OnPlaying(JNIEnv* env,
+                                        const JavaParamRef<jobject>& obj) {
   static_cast<RemoteMediaPlayerManager *>(manager())->OnPlaying(player_id());
 }
 
-void RemoteMediaPlayerBridge::OnPaused(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::OnPaused(JNIEnv* env,
+                                       const JavaParamRef<jobject>& obj) {
   static_cast<RemoteMediaPlayerManager *>(manager())->OnPaused(player_id());
 }
 
-void RemoteMediaPlayerBridge::OnRouteUnselected(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::OnRouteUnselected(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   casting_message_.reset();
   static_cast<RemoteMediaPlayerManager *>(manager())->OnRemoteDeviceUnselected(
       player_id());
 }
 
-void RemoteMediaPlayerBridge::OnPlaybackFinished(JNIEnv* env, jobject obj) {
+void RemoteMediaPlayerBridge::OnPlaybackFinished(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   static_cast<RemoteMediaPlayerManager *>(manager())->OnRemotePlaybackFinished(
       player_id());
 }
 
-void RemoteMediaPlayerBridge::OnRouteAvailabilityChanged(JNIEnv* env,
-                                                         jobject obj,
-                                                         jboolean available) {
+void RemoteMediaPlayerBridge::OnRouteAvailabilityChanged(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jboolean available) {
   static_cast<RemoteMediaPlayerManager *>(manager())->
       OnRouteAvailabilityChanged(player_id(), available);
 }
@@ -211,7 +239,8 @@ void RemoteMediaPlayerBridge::RequestRemotePlayback() {
   CHECK(env);
 
   Java_RemoteMediaPlayerBridge_requestRemotePlayback(
-      env, java_bridge_.obj());
+      env, java_bridge_.obj(),
+      local_player_->GetCurrentTime().InMilliseconds());
 }
 
 void RemoteMediaPlayerBridge::RequestRemotePlaybackControl() {
@@ -370,7 +399,8 @@ void RemoteMediaPlayerBridge::Initialize() {
 }
 
 base::android::ScopedJavaLocalRef<jstring> RemoteMediaPlayerBridge::GetTitle(
-    JNIEnv* env, jobject obj) {
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   base::string16 title;
   content::ContentViewCore* core =
       static_cast<RemoteMediaPlayerManager*>(manager())->GetContentViewCore();
@@ -391,14 +421,6 @@ void RemoteMediaPlayerBridge::OnCookiesRetrieved(const std::string& cookies) {
   CHECK(env);
   Java_RemoteMediaPlayerBridge_setCookies(
       env, java_bridge_.obj(), ConvertUTF8ToJavaString(env, cookies).obj());
-}
-
-bool RemoteMediaPlayerBridge::TakesOverCastDevice() {
-  JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
-  jboolean result =
-      Java_RemoteMediaPlayerBridge_takesOverCastDevice(env, java_bridge_.obj());
-  return result;
 }
 
 }  // namespace remote_media

@@ -8,13 +8,13 @@
 
 goog.provide('DesktopAutomationHandler');
 
-goog.require('Background');
 goog.require('BaseAutomationHandler');
+goog.require('ChromeVoxState');
 
 goog.scope(function() {
 var AutomationEvent = chrome.automation.AutomationEvent;
 var AutomationNode = chrome.automation.AutomationNode;
-var Dir = AutomationUtil.Dir;
+var Dir = constants.Dir;
 var RoleType = chrome.automation.RoleType;
 
 /**
@@ -53,7 +53,7 @@ DesktopAutomationHandler.prototype = {
 
   /**
    * Provides all feedback once ChromeVox's focus changes.
-   * @param {Object} evt
+   * @param {!AutomationEvent} evt
    */
   onEventDefault: function(evt) {
     var node = evt.target;
@@ -61,32 +61,33 @@ DesktopAutomationHandler.prototype = {
     if (!node)
       return;
 
-    var prevRange = global.backgroundObj.currentRange;
+    var prevRange = ChromeVoxState.instance.currentRange;
 
-    global.backgroundObj.currentRange = cursors.Range.fromNode(node);
+    ChromeVoxState.instance.setCurrentRange(cursors.Range.fromNode(node));
 
     // Check to see if we've crossed roots. Continue if we've crossed roots or
     // are not within web content.
-    if (node.root.role == 'desktop' ||
+    if (node.root.role == RoleType.desktop ||
         !prevRange ||
         prevRange.start.node.root != node.root)
-      global.backgroundObj.refreshMode(node.root.docUrl || '');
+      ChromeVoxState.instance.refreshMode(node.root.docUrl || '');
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (node.root.role != RoleType.desktop &&
-        global.backgroundObj.mode === ChromeVoxMode.CLASSIC) {
-      chrome.accessibilityPrivate.setFocusRing([]);
+        ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC) {
+      if (cvox.ChromeVox.isChromeOS)
+        chrome.accessibilityPrivate.setFocusRing([]);
       return;
     }
 
     // Don't output if focused node hasn't changed.
     if (prevRange &&
         evt.type == 'focus' &&
-        global.backgroundObj.currentRange.equals(prevRange))
+        ChromeVoxState.instance.currentRange.equals(prevRange))
       return;
 
     new Output().withSpeechAndBraille(
-            global.backgroundObj.currentRange, prevRange, evt.type)
+            ChromeVoxState.instance.currentRange, prevRange, evt.type)
         .go();
   },
 
@@ -101,7 +102,7 @@ DesktopAutomationHandler.prototype = {
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (node.root.role != RoleType.desktop &&
-        global.backgroundObj.mode === ChromeVoxMode.CLASSIC) {
+        ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC) {
       return;
     }
 
@@ -128,7 +129,8 @@ DesktopAutomationHandler.prototype = {
     if (node.role == RoleType.rootWebArea) {
       // Discard focus events for root web areas when focus was previously
       // placed on a descendant.
-      if (global.backgroundObj.currentRange.start.node.root == node)
+      var currentRange = ChromeVoxState.instance.currentRange;
+      if (currentRange && currentRange.start.node.root == node)
         return;
 
       // Discard focused root nodes without focused state set.
@@ -139,10 +141,18 @@ DesktopAutomationHandler.prototype = {
       node = node.find({state: {focused: true}}) || node;
     }
 
-    if (evt.target.state.editable)
-      this.createEditableTextHandlerIfNeeded_(evt.target);
+    if (this.isEditable_(node))
+      this.createEditableTextHandlerIfNeeded_(node);
 
-    this.onEventDefault({target: node, type: 'focus'});
+    // Since we queue output mostly for live regions support and there isn't a
+    // reliable way to know if this focus event resulted from a user's explicit
+    // action, only flush when the focused node is not web content.
+    if (node.root.role == RoleType.desktop)
+      Output.flushNextSpeechUtterance();
+
+    this.onEventDefault(
+        /** @type {!AutomationEvent} */
+        ({target: node, type: chrome.automation.EventType.focus}));
   },
 
   /**
@@ -150,20 +160,20 @@ DesktopAutomationHandler.prototype = {
    * @param {Object} evt
    */
   onLoadComplete: function(evt) {
-    global.backgroundObj.refreshMode(evt.target.docUrl);
+    ChromeVoxState.instance.refreshMode(evt.target.docUrl);
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (evt.target.root.role != RoleType.desktop &&
-        global.backgroundObj.mode === ChromeVoxMode.CLASSIC)
+        ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC)
       return;
 
     // If initial focus was already placed on this page (e.g. if a user starts
     // tabbing before load complete), then don't move ChromeVox's position on
     // the page.
-    if (global.backgroundObj.currentRange &&
-        global.backgroundObj.currentRange.start.node.role !=
+    if (ChromeVoxState.instance.currentRange &&
+        ChromeVoxState.instance.currentRange.start.node.role !=
             RoleType.rootWebArea &&
-        global.backgroundObj.currentRange.start.node.root.docUrl ==
+        ChromeVoxState.instance.currentRange.start.node.root.docUrl ==
             evt.target.docUrl)
       return;
 
@@ -180,36 +190,34 @@ DesktopAutomationHandler.prototype = {
         AutomationPredicate.leaf);
 
     if (node)
-      global.backgroundObj.currentRange = cursors.Range.fromNode(node);
+      ChromeVoxState.instance.setCurrentRange(cursors.Range.fromNode(node));
 
-    if (global.backgroundObj.currentRange)
+    if (ChromeVoxState.instance.currentRange)
       new Output().withSpeechAndBraille(
-              global.backgroundObj.currentRange, null, evt.type)
+              ChromeVoxState.instance.currentRange, null, evt.type)
           .go();
   },
 
   /**
    * Provides all feedback once a text selection change event fires.
-   * @param {Object} evt
+   * @param {!AutomationEvent} evt
    */
   onTextOrTextSelectionChanged: function(evt) {
-    if (!evt.target.state.editable)
+    if (!this.isEditable_(evt.target))
       return;
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (evt.target.root.role != RoleType.desktop &&
-        global.backgroundObj.mode === ChromeVoxMode.CLASSIC)
+        ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC)
       return;
 
     if (!evt.target.state.focused)
       return;
 
-    if (evt.target.role != RoleType.textField)
-      return;
-
-    if (!global.backgroundObj.currentRange) {
+    if (!ChromeVoxState.instance.currentRange) {
       this.onEventDefault(evt);
-      global.backgroundObj.currentRange = cursors.Range.fromNode(evt.target);
+      ChromeVoxState.instance.setCurrentRange(
+          cursors.Range.fromNode(evt.target));
     }
 
     this.createEditableTextHandlerIfNeeded_(evt.target);
@@ -223,28 +231,37 @@ DesktopAutomationHandler.prototype = {
     this.editableTextHandler_.changed(textChangeEvent);
 
     new Output().withBraille(
-            global.backgroundObj.currentRange, null, evt.type)
+            ChromeVoxState.instance.currentRange, null, evt.type)
         .go();
   },
 
   /**
    * Provides all feedback once a value changed event fires.
-   * @param {Object} evt
+   * @param {!AutomationEvent} evt
    */
   onValueChanged: function(evt) {
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (evt.target.root.role != RoleType.desktop &&
-        global.backgroundObj.mode === ChromeVoxMode.CLASSIC)
+        ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC)
       return;
 
-    // Value change events fire on web text fields and text areas when pressing
-    // enter; suppress them.
-    if (!global.backgroundObj.currentRange ||
-        evt.target.role != RoleType.textField) {
+    // Value change events fire on web editables when typing. Suppress them.
+    if (!ChromeVoxState.instance.currentRange ||
+        !this.isEditable_(evt.target)) {
       var range = cursors.Range.fromNode(evt.target);
       new Output().withSpeechAndBraille(range, range, evt.type)
           .go();
     }
+  },
+
+  /**
+   * Handle updating the active indicator when the document scrolls.
+   * @override
+   */
+  onScrollPositionChanged: function(evt) {
+    var currentRange = ChromeVoxState.instance.currentRange;
+    if (currentRange)
+      new Output().withLocation(currentRange, null, evt.type).go();
   },
 
   /**
@@ -253,7 +270,7 @@ DesktopAutomationHandler.prototype = {
    */
   createEditableTextHandlerIfNeeded_: function(node) {
     if (!this.editableTextHandler_ ||
-        node != global.backgroundObj.currentRange.start.node) {
+        node != ChromeVoxState.instance.currentRange.start.node) {
       var start = node.textSelStart;
       var end = node.textSelEnd;
       if (start > end) {
@@ -270,6 +287,18 @@ DesktopAutomationHandler.prototype = {
               node.state.protected,
               cvox.ChromeVox.tts);
     }
+  },
+
+  /**
+   * Returns true if |node| is editable.
+   * @param {AutomationNode} node
+   * @return {boolean}
+   * @private
+   */
+  isEditable_: function(node) {
+    // Remove the check for role after m47 whereafter the editable state can be
+    // used to know when to create an editable text handler.
+    return node.role == RoleType.textField || node.state.editable;
   }
 };
 

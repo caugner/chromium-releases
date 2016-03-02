@@ -31,7 +31,9 @@
 #ifndef MediaConstraintsImpl_h
 #define MediaConstraintsImpl_h
 
+#include "modules/mediastream/MediaErrorState.h"
 #include "public/platform/WebMediaConstraints.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -42,8 +44,8 @@ class MediaTrackConstraintSet;
 namespace MediaConstraintsImpl {
 
 WebMediaConstraints create();
-WebMediaConstraints create(const Dictionary&, ExceptionState&);
-WebMediaConstraints create(const MediaTrackConstraintSet&, ExceptionState&);
+WebMediaConstraints create(const Dictionary&, MediaErrorState&);
+WebMediaConstraints create(const MediaTrackConstraintSet&, MediaErrorState&);
 
 }
 

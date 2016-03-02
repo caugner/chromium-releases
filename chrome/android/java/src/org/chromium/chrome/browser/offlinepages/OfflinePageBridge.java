@@ -12,11 +12,11 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.bookmark.BookmarksBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.components.offlinepages.DeletePageResult;
+import org.chromium.components.offlinepages.FeatureMode;
 import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.WebContents;
 
@@ -34,8 +34,8 @@ public final class OfflinePageBridge {
     private final ObserverList<OfflinePageModelObserver> mObservers =
             new ObserverList<OfflinePageModelObserver>();
 
-    /** Whether the offline pages feature is enabled. */
-    private static Boolean sIsEnabled;
+    /** Mode of the offline pages feature */
+    private static Integer sFeatureMode;
 
     /**
      * Callback used to saving an offline page.
@@ -106,7 +106,7 @@ public final class OfflinePageBridge {
             protected Void doInBackground(Void... params) {
                 int percentage = (int) (1.0 * OfflinePageUtils.getFreeSpaceInBytes()
                         / OfflinePageUtils.getTotalSpaceInBytes() * 100);
-                RecordHistogram.recordEnumeratedHistogram(percentageName, percentage, 101);
+                RecordHistogram.recordPercentageHistogram(percentageName, percentage);
                 int bytesInMB = (int) (OfflinePageUtils.getFreeSpaceInBytes() / (1024 * 1024));
                 RecordHistogram.recordCustomCountHistogram(bytesName, bytesInMB, 1, 500000, 50);
                 return null;
@@ -134,17 +134,17 @@ public final class OfflinePageBridge {
                 // How much of the total space the offline pages take.
                 int totalPageSizePercentage = (int) (1.0 * totalPageSizeAfter
                         / OfflinePageUtils.getTotalSpaceInBytes() * 100);
-                RecordHistogram.recordEnumeratedHistogram(
-                        "OfflinePages.TotalPageSizePercentage", totalPageSizePercentage, 101);
+                RecordHistogram.recordPercentageHistogram(
+                        "OfflinePages.TotalPageSizePercentage", totalPageSizePercentage);
                 if (totalPageSizeBefore > 0) {
                     // If the user is deleting the pages, perhaps they are running out of free
                     // space. Report the size before the operation, where a base for calculation
                     // of total free space includes space taken by offline pages.
                     int percentageOfFree = (int) (1.0 * totalPageSizeBefore
                             / (totalPageSizeBefore + OfflinePageUtils.getFreeSpaceInBytes()) * 100);
-                    RecordHistogram.recordEnumeratedHistogram(
+                    RecordHistogram.recordPercentageHistogram(
                             "OfflinePages.DeletePage.TotalPageSizeAsPercentageOfFreeSpace",
-                            percentageOfFree, 101);
+                            percentageOfFree);
                 }
                 return null;
             }
@@ -154,22 +154,27 @@ public final class OfflinePageBridge {
     /**
      * Creates offline pages bridge for a given profile.
      */
-    @VisibleForTesting
     public OfflinePageBridge(Profile profile) {
         mNativeOfflinePageBridge = nativeInit(profile);
     }
 
     /**
-     * Returns true if the offline pages feature is enabled.
+     * @return The mode of the offline pages feature. Uses
+     *     {@see org.chromium.components.offlinepages.FeatureMode} enum.
+     */
+    public static int getFeatureMode() {
+        ThreadUtils.assertOnUiThread();
+        if (sFeatureMode == null) sFeatureMode = nativeGetFeatureMode();
+        return sFeatureMode;
+    }
+
+    /**
+     * @return True if the offline pages feature is enabled, regardless whether bookmark or saved
+     *     page shown in UI strings.
      */
     public static boolean isEnabled() {
         ThreadUtils.assertOnUiThread();
-        if (sIsEnabled == null) {
-            // Enhanced bookmarks feature should also be enabled.
-            sIsEnabled = nativeIsOfflinePagesEnabled()
-                    && BookmarksBridge.isEnhancedBookmarksEnabled();
-        }
-        return sIsEnabled;
+        return getFeatureMode() != FeatureMode.DISABLED;
     }
 
     /**
@@ -194,7 +199,6 @@ public final class OfflinePageBridge {
      * Adds an observer to offline page model changes.
      * @param observer The observer to be added.
      */
-    @VisibleForTesting
     public void addObserver(OfflinePageModelObserver observer) {
         mObservers.addObserver(observer);
     }
@@ -203,7 +207,6 @@ public final class OfflinePageBridge {
      * Removes an observer to offline page model changes.
      * @param observer The observer to be removed.
      */
-    @VisibleForTesting
     public void removeObserver(OfflinePageModelObserver observer) {
         mObservers.removeObserver(observer);
     }
@@ -211,7 +214,6 @@ public final class OfflinePageBridge {
     /**
      * @return Gets all available offline pages. Requires that the model is already loaded.
      */
-    @VisibleForTesting
     public List<OfflinePageItem> getAllPages() {
         assert mIsNativeOfflinePageModelLoaded;
         List<OfflinePageItem> result = new ArrayList<OfflinePageItem>();
@@ -226,9 +228,18 @@ public final class OfflinePageBridge {
      * @return An {@link OfflinePageItem} matching the bookmark Id or <code>null</code> if none
      * exist.
      */
-    @VisibleForTesting
     public OfflinePageItem getPageByBookmarkId(BookmarkId bookmarkId) {
         return nativeGetPageByBookmarkId(mNativeOfflinePageBridge, bookmarkId.getId());
+    }
+
+    /**
+     * Gets an offline page associated with a provided online URL.
+     *
+     * @param onlineURL URL of the page.
+     * @return An {@link OfflinePageItem} matching the URL or <code>null</code> if none exist.
+     */
+    public OfflinePageItem getPageByOnlineURL(String onlineURL) {
+        return nativeGetPageByOnlineURL(mNativeOfflinePageBridge, onlineURL);
     }
 
     /**
@@ -239,11 +250,17 @@ public final class OfflinePageBridge {
      * @param callback Interface that contains a callback.
      * @see SavePageCallback
      */
-    @VisibleForTesting
     public void savePage(final WebContents webContents, final BookmarkId bookmarkId,
             final SavePageCallback callback) {
         assert mIsNativeOfflinePageModelLoaded;
         assert webContents != null;
+
+        if (webContents.isDestroyed()) {
+            callback.onSavePageDone(SavePageResult.CONTENT_UNAVAILABLE, null);
+            RecordHistogram.recordEnumeratedHistogram("OfflinePages.SavePageResult",
+                    SavePageResult.CONTENT_UNAVAILABLE, SavePageResult.RESULT_COUNT);
+            return;
+        }
 
         SavePageCallback callbackWrapper = new SavePageCallback() {
             @Override
@@ -279,7 +296,6 @@ public final class OfflinePageBridge {
      * @param callback Interface that contains a callback.
      * @see DeletePageCallback
      */
-    @VisibleForTesting
     public void deletePage(final BookmarkId bookmarkId, DeletePageCallback callback) {
         assert mIsNativeOfflinePageModelLoaded;
 
@@ -334,6 +350,28 @@ public final class OfflinePageBridge {
      */
     public void checkOfflinePageMetadata() {
         nativeCheckMetadataConsistency(mNativeOfflinePageBridge);
+    }
+
+    /**
+     * Gets the offline URL of an offline page of that is saved for the online URL.
+     * @param onlineUrl Online URL, which might have offline copy.
+     * @return URL pointing to the offline copy or <code>null</code> if none exists.
+     */
+    @VisibleForTesting
+    public String getOfflineUrlForOnlineUrl(String onlineUrl) {
+        assert mIsNativeOfflinePageModelLoaded;
+        return nativeGetOfflineUrlForOnlineUrl(mNativeOfflinePageBridge, onlineUrl);
+    }
+
+    /**
+     * Returns <code>true</code> if offline URL points to a local copy of an offline page.
+     * @param offlineUrl A URL potentially pointing to an offline copy of an offline page.
+     * @return Whether a provided url points to an offline copy of an offline page.
+     */
+    @VisibleForTesting
+    public boolean isOfflinePageUrl(String offlineUrl) {
+        assert mIsNativeOfflinePageModelLoaded;
+        return nativeIsOfflinePageUrl(mNativeOfflinePageBridge, offlineUrl);
     }
 
     private DeletePageCallback wrapCallbackWithHistogramReporting(
@@ -393,7 +431,7 @@ public final class OfflinePageBridge {
                 url, bookmarkId, offlineUrl, fileSize, creationTime, accessCount, lastAccessTimeMs);
     }
 
-    private static native boolean nativeIsOfflinePagesEnabled();
+    private static native int nativeGetFeatureMode();
     private static native boolean nativeCanSavePage(String url);
 
     private native long nativeInit(Profile profile);
@@ -402,6 +440,8 @@ public final class OfflinePageBridge {
             long nativeOfflinePageBridge, List<OfflinePageItem> offlinePages);
     private native OfflinePageItem nativeGetPageByBookmarkId(
             long nativeOfflinePageBridge, long bookmarkId);
+    private native OfflinePageItem nativeGetPageByOnlineURL(
+            long nativeOfflinePageBridge, String onlineURL);
     private native void nativeSavePage(long nativeOfflinePageBridge, SavePageCallback callback,
             WebContents webContents, long bookmarkId);
     private native void nativeMarkPageAccessed(long nativeOfflinePageBridge, long bookmarkId);
@@ -412,4 +452,7 @@ public final class OfflinePageBridge {
     private native void nativeGetPagesToCleanUp(
             long nativeOfflinePageBridge, List<OfflinePageItem> offlinePages);
     private native void nativeCheckMetadataConsistency(long nativeOfflinePageBridge);
+    private native String nativeGetOfflineUrlForOnlineUrl(
+            long nativeOfflinePageBridge, String onlineUrl);
+    private native boolean nativeIsOfflinePageUrl(long nativeOfflinePageBridge, String offlineUrl);
 }

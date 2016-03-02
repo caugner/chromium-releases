@@ -84,7 +84,6 @@ public:
     void takeFocus(WebFocusType) override {}
 
     void focusedNodeChanged(Node*, Node*) override {}
-    void focusedFrameChanged(LocalFrame*) override {}
     Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy, ShouldSetOpener) override { return nullptr; }
     void show(NavigationPolicy) override {}
 
@@ -129,7 +128,7 @@ public:
     IntRect windowResizerRect() const override { return IntRect(); }
 
     void invalidateRect(const IntRect&) override {}
-    void scheduleAnimation() override {}
+    void scheduleAnimation(Widget*) override {}
 
     IntRect viewportToScreen(const IntRect& r) const override { return r; }
     WebScreenInfo screenInfo() const override { return WebScreenInfo(); }
@@ -190,6 +189,7 @@ public:
     Frame* lastChild() const override { return 0; }
     void willBeDetached() override {}
     void detached(FrameDetachType) override {}
+    void frameFocused() const override {}
 
     void dispatchWillSendRequest(DocumentLoader*, unsigned long, ResourceRequest&, const ResourceResponse&) override {}
     void dispatchDidReceiveResponse(DocumentLoader*, unsigned long, const ResourceResponse&) override {}
@@ -234,6 +234,8 @@ public:
     void didRunInsecureContent(SecurityOrigin*, const KURL&) override {}
     void didDetectXSS(const KURL&, bool) override {}
     void didDispatchPingLoader(const KURL&) override {}
+    void didDisplayContentWithCertificateErrors(const KURL&, const CString&, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override {}
+    void didRunContentWithCertificateErrors(const KURL&, const CString&, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override {}
     void selectorMatchChanged(const Vector<String>&, const Vector<String>&) override {}
     PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const FrameLoadRequest&, const AtomicString&, HTMLFrameOwnerElement*) override;
     PassRefPtrWillBeRawPtr<Widget> createPlugin(HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool, DetachedPluginPolicy) override;
@@ -271,9 +273,7 @@ class CORE_EXPORT EmptyTextCheckerClient : public TextCheckerClient {
 public:
     ~EmptyTextCheckerClient() { }
 
-    bool shouldEraseMarkersAfterChangeSelection(TextCheckingType) const override { return true; }
     void checkSpellingOfString(const String&, int*, int*) override {}
-    String getAutoCorrectSuggestionForMisspelledWord(const String&) override { return String(); }
     void checkGrammarOfString(const String&, Vector<GrammarDetail>&, int*, int*) override {}
     void requestCheckingOfString(PassRefPtrWillBeRawPtr<TextCheckingRequest>) override;
 };
@@ -286,7 +286,6 @@ public:
 
     bool isContinuousSpellCheckingEnabled() override { return false; }
     void toggleContinuousSpellChecking() override {}
-    bool isGrammarCheckingEnabled() override { return false; }
 
     TextCheckerClient& textChecker() override { return m_textCheckerClient; }
 

@@ -104,6 +104,9 @@ const char kDisableNetworkPortalNotification[] =
 const char kEafeUrl[] = "eafe-url";
 const char kEafePath[] = "eafe-path";
 
+// Enables starting the ARC instance upon session start.
+const char kEnableArc[] = "enable-arc";
+
 // Enables consumer management, which allows user to enroll, remotely lock and
 // locate the device.
 const char kEnableConsumerManagement[] = "enable-consumer-management";
@@ -240,6 +243,10 @@ const char kOobeTimerInterval[] = "oobe-timer-interval";
 // Indicates that a guest session has been started before OOBE completion.
 const char kOobeGuestSession[] = "oobe-guest-session";
 
+// Indicates that if we should start bootstrapping Master/Slave OOBE.
+const char kOobeBootstrappingMaster[] = "oobe-bootstrapping-master";
+const char kOobeBootstrappingSlave[] = "oobe-bootstrapping-slave";
+
 // Specifies power stub behavior:
 //  'cycle=2' - Cycles power states every 2 seconds.
 // See FakeDBusThreadManager::ParsePowerCommandLineSwitch for full details.
@@ -320,6 +327,16 @@ const char kCrosRegionsModeHide[] = "hide";
 // Forces CrOS region value.
 const char kCrosRegion[] = "cros-region";
 
+// Enables IME menu
+const char kEnableImeMenu[] = "enable-ime-menu";
+
+// Controls CrOS GaiaId migration for tests:
+// ""        - default,
+// "started" - migration started (i.e. all stored user keys will be converted
+//             to GaiaId).
+const char kTestCrosGaiaIdMigration[] = "test-cros-gaia-id-migration";
+const char kTestCrosGaiaIdMigrationStarted[] = "started";
+
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
 }
@@ -364,6 +381,19 @@ GetMemoryPressureThresholds() {
     return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE;
 
   return MemoryPressureMonitor::THRESHOLD_DEFAULT;
+}
+
+bool IsImeMenuEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableImeMenu);
+}
+
+bool IsGaiaIdMigrationStarted() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (!command_line->HasSwitch(kTestCrosGaiaIdMigration))
+    return false;
+
+  return command_line->GetSwitchValueASCII(kTestCrosGaiaIdMigration) ==
+         kTestCrosGaiaIdMigrationStarted;
 }
 
 }  // namespace switches

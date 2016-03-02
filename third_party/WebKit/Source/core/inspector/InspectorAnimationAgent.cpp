@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "core/inspector/InspectorAnimationAgent.h"
 
 #include "core/animation/Animation.h"
@@ -34,6 +32,7 @@
 
 namespace AnimationAgentState {
 static const char animationAgentEnabled[] = "animationAgentEnabled";
+static const char animationAgentPlaybackRate[] = "animationAgentPlaybackRate";
 }
 
 namespace blink {
@@ -53,6 +52,8 @@ void InspectorAnimationAgent::restore()
     if (m_state->getBoolean(AnimationAgentState::animationAgentEnabled)) {
         ErrorString error;
         enable(&error);
+        double playbackRate = m_state->getDouble(AnimationAgentState::animationAgentPlaybackRate, 1);
+        setPlaybackRate(nullptr, playbackRate);
     }
 }
 
@@ -65,11 +66,14 @@ void InspectorAnimationAgent::enable(ErrorString*)
 void InspectorAnimationAgent::disable(ErrorString*)
 {
     setPlaybackRate(nullptr, 1);
+    for (const auto& clone : m_idToAnimationClone.values())
+        clone->cancel();
     m_state->setBoolean(AnimationAgentState::animationAgentEnabled, false);
     m_instrumentingAgents->setInspectorAnimationAgent(nullptr);
     m_idToAnimation.clear();
     m_idToAnimationType.clear();
     m_idToAnimationClone.clear();
+    m_clearedAnimations.clear();
 }
 
 void InspectorAnimationAgent::didCommitLoadForLocalFrame(LocalFrame* frame)
@@ -78,7 +82,10 @@ void InspectorAnimationAgent::didCommitLoadForLocalFrame(LocalFrame* frame)
         m_idToAnimation.clear();
         m_idToAnimationType.clear();
         m_idToAnimationClone.clear();
+        m_clearedAnimations.clear();
     }
+    double playbackRate = m_state->getDouble(AnimationAgentState::animationAgentPlaybackRate, 1);
+    setPlaybackRate(nullptr, playbackRate);
 }
 
 static PassRefPtr<TypeBuilder::Animation::AnimationEffect> buildObjectForAnimationEffect(KeyframeEffect* effect, bool isTransition)
@@ -197,6 +204,7 @@ void InspectorAnimationAgent::setPlaybackRate(ErrorString*, double playbackRate)
 {
     for (LocalFrame* frame : *m_inspectedFrames)
         frame->document()->timeline().setPlaybackRate(playbackRate);
+    m_state->setDouble(AnimationAgentState::animationAgentPlaybackRate, playbackRate);
 }
 
 void InspectorAnimationAgent::getCurrentTime(ErrorString* errorString, const String& id, double* currentTime)
@@ -227,6 +235,10 @@ void InspectorAnimationAgent::setPaused(ErrorString* errorString, const RefPtr<J
         if (!animation)
             return;
         Animation* clone = animationClone(animation);
+        if (!clone) {
+            *errorString = "Failed to clone detached animation";
+            return;
+        }
         if (paused && !clone->paused()) {
             // Ensure we restore a current time if the animation is limited.
             double currentTime = clone->timeline()->currentTime() - clone->startTime();
@@ -257,6 +269,8 @@ Animation* InspectorAnimationAgent::animationClone(Animation* animation)
             StringKeyframeEffectModel* newStringKeyframeModel = StringKeyframeEffectModel::create(newKeyframes);
             // TODO(samli): This shouldn't be required.
             Element* element = oldEffect->target();
+            if (!element)
+                return nullptr;
             newStringKeyframeModel->forceConversionsToAnimatableValues(*element, element->computedStyle());
             newModel = newStringKeyframeModel;
         } else if (oldModel->isAnimatableValueKeyframeEffectModel()) {
@@ -292,17 +306,42 @@ void InspectorAnimationAgent::seekAnimations(ErrorString* errorString, const Ref
         if (!animation)
             return;
         Animation* clone = animationClone(animation);
+        if (!clone) {
+            *errorString = "Failed to clone a detached animation.";
+            return;
+        }
         if (!clone->paused())
             clone->play();
         clone->setCurrentTime(currentTime);
     }
 }
 
+void InspectorAnimationAgent::releaseAnimations(ErrorString* errorString, const RefPtr<JSONArray>& animationIds)
+{
+    for (const auto& id : *animationIds) {
+        String animationId;
+        if (!(id->asString(&animationId))) {
+            *errorString = "Invalid argument type";
+            return;
+        }
+        Animation* clone = m_idToAnimationClone.get(animationId);
+        if (clone)
+            clone->cancel();
+        m_idToAnimationClone.remove(animationId);
+        m_idToAnimation.remove(animationId);
+        m_idToAnimationType.remove(animationId);
+        m_clearedAnimations.add(animationId);
+    }
+}
+
+
 void InspectorAnimationAgent::setTiming(ErrorString* errorString, const String& animationId, double duration, double delay)
 {
     Animation* animation = assertAnimation(errorString, animationId);
     if (!animation)
         return;
+
+    animation = animationClone(animation);
 
     AnimationType type = m_idToAnimationType.get(animationId);
     if (type == AnimationType::CSSTransition) {
@@ -323,7 +362,7 @@ void InspectorAnimationAgent::setTiming(ErrorString* errorString, const String& 
         UnrestrictedDoubleOrString unrestrictedDuration;
         unrestrictedDuration.setUnrestrictedDouble(duration + delay);
         timing->setDuration(unrestrictedDuration);
-    } else if (type == AnimationType::WebAnimation) {
+    } else {
         AnimationEffectTiming* timing = animation->effect()->timing();
         UnrestrictedDoubleOrString unrestrictedDuration;
         unrestrictedDuration.setUnrestrictedDouble(duration);
@@ -348,6 +387,8 @@ void InspectorAnimationAgent::resolveAnimation(ErrorString* errorString, const S
     }
 
     ScriptState* scriptState = ScriptState::forMainWorld(frame);
+    if (!scriptState)
+        return;
     InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(scriptState);
     if (injectedScript.isEmpty())
         return;
@@ -398,12 +439,12 @@ String InspectorAnimationAgent::createCSSId(Animation& animation)
     }
 
     Element* element = effect->target();
-    RefPtrWillBeRawPtr<CSSRuleList> ruleList = m_cssAgent->matchedRulesList(element);
+    WillBeHeapVector<RefPtrWillBeMember<CSSStyleDeclaration>> styles = m_cssAgent->matchingStyles(element);
     OwnPtr<WebCryptoDigestor> digestor = createDigestor(HashAlgorithmSha1);
     addStringToDigestor(digestor.get(), String::number(type));
     addStringToDigestor(digestor.get(), effect->name());
     for (CSSPropertyID property : cssProperties) {
-        RefPtrWillBeRawPtr<CSSStyleDeclaration> style = m_cssAgent->findEffectiveDeclaration(property, ruleList.get(), element->style());
+        RefPtrWillBeRawPtr<CSSStyleDeclaration> style = m_cssAgent->findEffectiveDeclaration(property, styles);
         // Ignore inline styles.
         if (!style || !style->parentStyleSheet() || !style->parentRule() || style->parentRule()->type() != CSSRule::STYLE_RULE)
             continue;
@@ -426,7 +467,7 @@ void InspectorAnimationAgent::didCreateAnimation(unsigned sequenceNumber)
 void InspectorAnimationAgent::animationPlayStateChanged(Animation* animation, Animation::AnimationPlayState oldPlayState, Animation::AnimationPlayState newPlayState)
 {
     const String& animationId = String::number(animation->sequenceNumber());
-    if (m_idToAnimation.get(animationId))
+    if (m_idToAnimation.get(animationId) || m_clearedAnimations.contains(animationId))
         return;
     if (newPlayState == Animation::Running || newPlayState == Animation::Finished)
         frontend()->animationStarted(buildObjectForAnimation(*animation));
@@ -467,6 +508,7 @@ double InspectorAnimationAgent::normalizedStartTime(Animation& animation)
 DEFINE_TRACE(InspectorAnimationAgent)
 {
 #if ENABLE(OILPAN)
+    visitor->trace(m_inspectedFrames);
     visitor->trace(m_domAgent);
     visitor->trace(m_cssAgent);
     visitor->trace(m_injectedScriptManager);

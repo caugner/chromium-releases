@@ -222,7 +222,7 @@ body.platform-linux {
     content: "";
     position: absolute;
     width: 8px;
-    border-right: 2px dotted rgba(255, 255, 255, 0.4);
+    border-bottom: 2px dotted rgba(255, 255, 255, 0.4);
     top: 2px;
     left: 4px;
 }
@@ -383,6 +383,7 @@ body.platform-linux {
     background-clip: padding-box;
     will-change: transform;
     text-rendering: optimizeLegibility;
+    pointer-events: none;
 }
 
 .element-info {
@@ -471,7 +472,9 @@ function _drawGrid(context, rulerAtRight, rulerAtBottom)
 
     context.save();
 
-    var pageFactor = pageZoomFactor;
+    var pageFactor = pageZoomFactor * pageScaleFactor;
+    var scrollX = window.scrollX * pageScaleFactor;
+    var scrollY = window.scrollY * pageScaleFactor;
     function zoom(x)
     {
         return Math.round(x * pageFactor);
@@ -597,29 +600,6 @@ function _drawGrid(context, rulerAtRight, rulerAtBottom)
     context.restore();
 }
 
-function drawViewSize(drawViewSizeWithGrid)
-{
-    var drawGridBoolean = drawViewSizeWithGrid === "true";
-    var text = viewportSize.width + "px \u00D7 " + viewportSize.height + "px";
-    context.save();
-    context.font = "20px ";
-    switch (platform) {
-    case "windows": context.font = "14px Consolas"; break;
-    case "mac": context.font = "14px Menlo"; break;
-    case "linux": context.font = "14px dejavu sans mono"; break;
-    }
-
-    var frameWidth = canvasWidth;
-    var textWidth = context.measureText(text).width;
-    context.fillStyle = gridBackgroundColor;
-    context.fillRect(frameWidth - textWidth - 12, drawGridBoolean ? 15 : 0, frameWidth, 25);
-    context.fillStyle = darkGridColor;
-    context.fillText(text, frameWidth - textWidth - 6, drawGridBoolean ? 33 : 18);
-    context.restore();
-    if (drawGridBoolean)
-        _drawGrid(context);
-}
-
 function resetCanvas(canvasElement)
 {
     canvasElement.width = deviceScaleFactor * viewportSize.width;
@@ -634,6 +614,7 @@ function reset(resetData)
 {
     window.viewportSize = resetData.viewportSize;
     window.deviceScaleFactor = resetData.deviceScaleFactor;
+    window.pageScaleFactor = resetData.pageScaleFactor;
     window.pageZoomFactor = resetData.pageZoomFactor;
     window.scrollX = Math.round(resetData.scrollX);
     window.scrollY = Math.round(resetData.scrollY);
@@ -1547,10 +1528,14 @@ LayoutEditor.prototype = {
     _onMouseWheel: function(event)
     {
         event.preventDefault();
-        if (event.wheelDelta > 0)
-            InspectorOverlayHost.previousSelector();
-        else
+        this._mouseWheelDelta = (this._mouseWheelDelta || 0) + event.wheelDelta;
+        if (this._mouseWheelDelta >= 120) {
             InspectorOverlayHost.nextSelector();
+            this._mouseWheelDelta = 0;
+        } else if (this._mouseWheelDelta <= -120) {
+            InspectorOverlayHost.previousSelector();
+            this._mouseWheelDelta = 0;
+        }
     },
 
     /**

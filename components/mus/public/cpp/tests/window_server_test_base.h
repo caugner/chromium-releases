@@ -5,13 +5,14 @@
 #ifndef COMPONENTS_MUS_PUBLIC_CPP_TESTS_WINDOW_SERVER_TEST_BASE_H_
 #define COMPONENTS_MUS_PUBLIC_CPP_TESTS_WINDOW_SERVER_TEST_BASE_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/mus/public/cpp/window_tree_delegate.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "components/mus/public/interfaces/window_tree_host.mojom.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/application_test_base.h"
-#include "mojo/application/public/cpp/interface_factory.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/application_test_base.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 
 namespace mus {
 
@@ -45,6 +46,7 @@ class WindowServerTestBase
   WindowTreeConnection* window_manager() { return window_manager_; }
 
  protected:
+  mojom::WindowTreeHost* host() { return host_.get(); }
   WindowTreeConnection* most_recent_connection() {
     return most_recent_connection_;
   }

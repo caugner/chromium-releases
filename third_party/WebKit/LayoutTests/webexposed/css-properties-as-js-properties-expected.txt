@@ -78,6 +78,7 @@ colorInterpolation
 colorInterpolationFilters
 colorRendering
 columnFill
+contain
 content
 counterIncrement
 counterReset
@@ -86,6 +87,7 @@ cssText
 cursor
 cx
 cy
+d
 direction
 display
 dominantBaseline
@@ -105,6 +107,7 @@ float
 floodColor
 floodOpacity
 font
+fontDisplay
 fontFamily
 fontFeatureSettings
 fontKerning

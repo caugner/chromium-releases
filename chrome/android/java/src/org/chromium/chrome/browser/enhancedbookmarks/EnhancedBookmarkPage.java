@@ -14,7 +14,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkDelegate.EnhancedBookmarkStateChangeListener;
-import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -29,6 +29,7 @@ public class EnhancedBookmarkPage implements NativePage, EnhancedBookmarkStateCh
     private final int mBackgroundColor;
     private final int mThemeColor;
     private EnhancedBookmarkManager mManager;
+    private String mCurrentUrl;
 
     /**
      * Create a new instance of an enhanced bookmark page.
@@ -45,8 +46,7 @@ public class EnhancedBookmarkPage implements NativePage, EnhancedBookmarkStateCh
     private EnhancedBookmarkPage(Activity activity, Tab tab) {
         mActivity = activity;
         mTab = tab;
-        mTitle = activity.getString(OfflinePageBridge.isEnabled()
-                ? R.string.offline_pages_saved_pages : R.string.bookmarks);
+        mTitle = activity.getString(OfflinePageUtils.getStringId(R.string.bookmarks));
         mBackgroundColor = ApiCompatibilityUtils.getColor(activity.getResources(),
                 R.color.default_primary_color);
         mThemeColor = ApiCompatibilityUtils.getColor(
@@ -97,6 +97,7 @@ public class EnhancedBookmarkPage implements NativePage, EnhancedBookmarkStateCh
 
     @Override
     public void updateForUrl(String url) {
+        mCurrentUrl = url;
         mManager.updateForUrl(url);
     }
 
@@ -108,6 +109,7 @@ public class EnhancedBookmarkPage implements NativePage, EnhancedBookmarkStateCh
 
     @Override
     public void onBookmarkUIStateChange(String url) {
+        if (url.equals(mCurrentUrl)) return;
         mTab.loadUrl(new LoadUrlParams(url));
     }
 }

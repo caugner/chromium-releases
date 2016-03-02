@@ -68,8 +68,9 @@ public:
         Finished
     };
 
-    ~Animation();
     static Animation* create(AnimationEffect*, AnimationTimeline*);
+    ~Animation();
+    void dispose();
 
     // Returns whether the animation is finished.
     bool update(TimingUpdateReason);
@@ -207,6 +208,7 @@ private:
     // WebCompositorAnimationDelegate implementation.
     void notifyAnimationStarted(double monotonicTime, int group) override;
     void notifyAnimationFinished(double monotonicTime, int group) override { }
+    void notifyAnimationAborted(double monotonicTime, int group) override { }
 
     double startClipInternal() const { return m_startClip; }
     double endClipInternal() const { return m_endClip; }
@@ -230,6 +232,7 @@ private:
 
     Member<AnimationEffect> m_content;
     Member<AnimationTimeline> m_timeline;
+
     // Reflects all pausing, including via pauseForTesting().
     bool m_paused;
     bool m_held;

@@ -33,6 +33,12 @@
 
 namespace blink {
 
+enum class ScriptIntegrityDisposition {
+    NotChecked = 0,
+    Failed,
+    Passed
+};
+
 class FetchRequest;
 class ScriptResource;
 
@@ -47,7 +53,7 @@ public:
 
 class CORE_EXPORT ScriptResource final : public TextResource {
 public:
-    typedef ScriptResourceClient ClientType;
+    using ClientType = ScriptResourceClient;
     static ResourcePtr<ScriptResource> fetch(FetchRequest&, ResourceFetcher*);
 
     // Public for testing
@@ -56,7 +62,7 @@ public:
     ~ScriptResource() override;
 
     void didAddClient(ResourceClient*) override;
-    void appendData(const char*, unsigned) override;
+    void appendData(const char*, size_t) override;
 
     void onMemoryDump(WebMemoryDumpLevelOfDetail, WebProcessMemoryDump*) const override;
 
@@ -70,8 +76,9 @@ public:
 
     void setIntegrityMetadata(const IntegrityMetadataSet& metadata) { m_integrityMetadata = metadata; }
     const IntegrityMetadataSet& integrityMetadata() const { return m_integrityMetadata; }
-    void setIntegrityAlreadyChecked(bool checked) { m_integrityChecked = checked; }
-    bool integrityAlreadyChecked() { return m_integrityChecked; }
+    // The argument must never be |NotChecked|.
+    void setIntegrityDisposition(ScriptIntegrityDisposition);
+    ScriptIntegrityDisposition integrityDisposition() { return m_integrityDisposition; }
     bool mustRefetchDueToIntegrityMetadata(const FetchRequest&) const override;
 
 private:
@@ -86,7 +93,7 @@ private:
         }
     };
 
-    bool m_integrityChecked;
+    ScriptIntegrityDisposition m_integrityDisposition;
     IntegrityMetadataSet m_integrityMetadata;
 
     AtomicString m_script;

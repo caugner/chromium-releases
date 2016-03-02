@@ -8,18 +8,20 @@
       "children": [
         {
           "bounds": [320, 340],
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "children": [
             {
               "bounds": [305, 325],
+              "shouldFlattenTransform": false,
               "children": [
                 {
-                  "bounds": [305, 1224],
-                  "shouldFlattenTransform": false
+                  "bounds": [305, 1224]
                 }
               ]
             },
             {
+              "bounds": [320, 340],
               "children": [
                 {
                   "position": [0, 325],

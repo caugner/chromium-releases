@@ -5,12 +5,14 @@
 #ifndef CC_LAYERS_PICTURE_LAYER_IMPL_H_
 #define CC_LAYERS_PICTURE_LAYER_IMPL_H_
 
+#include <stddef.h>
+
 #include <map>
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "cc/base/cc_export.h"
-#include "cc/base/scoped_ptr_vector.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/tiles/picture_layer_tiling.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
@@ -69,7 +71,7 @@ class CC_EXPORT PictureLayerImpl
   void UpdateRasterSource(scoped_refptr<DisplayListRasterSource> raster_source,
                           Region* new_invalidation,
                           const PictureLayerTilingSet* pending_set);
-  bool UpdateTiles(bool resourceless_software_draw);
+  bool UpdateTiles();
   void UpdateCanUseLCDTextAfterCommit();
   bool RasterSourceUsesLCDText() const;
   WhichTree GetTree() const;
@@ -148,22 +150,15 @@ class CC_EXPORT PictureLayerImpl
   float raster_contents_scale_;
   float low_res_raster_contents_scale_;
 
-  bool raster_source_scale_is_fixed_;
   bool was_screen_space_transform_animating_;
   bool only_used_low_res_last_append_quads_;
   const bool is_mask_;
 
   bool nearest_neighbor_;
 
-  // Any draw properties derived from |transform|, |viewport|, and |clip|
-  // parameters in LayerTreeHostImpl::SetExternalDrawConstraints are not valid
-  // for prioritizing tiles during resourceless software draws. This is because
-  // resourceless software draws can have wildly different transforms/viewports
-  // from regular draws. Save a copy of the required draw properties of the last
-  // frame that has a valid viewport for prioritizing tiles.
-  gfx::Rect visible_rect_for_tile_priority_;
+  // Use this instead of |visible_layer_rect()| for tiling calculations. This
+  // takes external viewport and transform for tile priority into account.
   gfx::Rect viewport_rect_for_tile_priority_in_content_space_;
-  gfx::Transform screen_space_transform_for_tile_priority_;
 
   gfx::Size gpu_raster_max_texture_size_;
 

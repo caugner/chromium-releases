@@ -4,6 +4,8 @@
 
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
 
+#include <stddef.h>
+
 #include <vector>
 
 #include "base/bind.h"
@@ -17,6 +19,7 @@
 #include "base/rand_util.h"
 #include "base/strings/string16.h"
 #include "base/threading/platform_thread.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_brand.h"
@@ -28,6 +31,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
+#include "chrome/common/features.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/drive_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
@@ -48,7 +52,7 @@
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/metrics/android_metrics_provider.h"
 #endif
 
@@ -113,7 +117,7 @@ bool IsCellularLogicEnabled() {
 // This should happen only once as the used preference will be initialized
 // afterwards in |UmaSessionStats.java|.
 bool ShouldClearSavedMetrics() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   PrefService* local_state = g_browser_process->local_state();
   return !local_state->HasPrefPath(metrics::prefs::kMetricsReportingEnabled) &&
          variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
@@ -162,7 +166,7 @@ scoped_ptr<ChromeMetricsServiceClient> ChromeMetricsServiceClient::Create(
       new ChromeMetricsServiceClient(state_manager));
   client->Initialize();
 
-  return client.Pass();
+  return client;
 }
 
 // static
@@ -170,9 +174,9 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
   metrics::MetricsService::RegisterPrefs(registry);
   metrics::StabilityMetricsHelper::RegisterPrefs(registry);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   AndroidMetricsProvider::RegisterPrefs(registry);
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ANDROID_JAVA_UI)
 
 #if defined(ENABLE_PLUGINS)
   PluginMetricsProvider::RegisterPrefs(registry);
@@ -196,7 +200,7 @@ bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
   return chrome::IsOffTheRecordSessionActive();
 }
 
-int32 ChromeMetricsServiceClient::GetProduct() {
+int32_t ChromeMetricsServiceClient::GetProduct() {
   return metrics::ChromeUserMetricsExtension::CHROME;
 }
 
@@ -343,11 +347,11 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(
           new metrics::CallStackProfileMetricsProvider));
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
           new AndroidMetricsProvider(g_browser_process->local_state())));
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ANDROID_JAVA_UI)
 
 #if defined(OS_WIN)
   google_update_metrics_provider_ = new GoogleUpdateMetricsProviderWin;

@@ -5,6 +5,9 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_AVDA_CODEC_IMAGE_H_
 #define CONTENT_COMMON_GPU_MEDIA_AVDA_CODEC_IMAGE_H_
 
+#include <stdint.h>
+
+#include "base/macros.h"
 #include "content/common/gpu/media/avda_shared_state.h"
 #include "ui/gl/gl_image.h"
 
@@ -59,8 +62,7 @@ class AVDACodecImage : public gl::GLImage {
 
  private:
   // Make sure that the surface texture's front buffer is current.
-  // Returns true if the ST's texture was bound to the active unit.
-  bool UpdateSurfaceTexture();
+  void UpdateSurfaceTexture();
 
   // Attach the surface texture to our GL context, with a texture that we
   // create for it.

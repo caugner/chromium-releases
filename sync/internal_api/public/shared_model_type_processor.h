@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SYNC_INTERNAL_API_PUBLIC_MODEL_TYPE_SYNC_PROXY_IMPL_H_
-#define SYNC_INTERNAL_API_PUBLIC_MODEL_TYPE_SYNC_PROXY_IMPL_H_
+#ifndef SYNC_INTERNAL_API_PUBLIC_SHARED_MODEL_TYPE_PROCESSOR_H_
+#define SYNC_INTERNAL_API_PUBLIC_SHARED_MODEL_TYPE_PROCESSOR_H_
 
-#include "base/containers/scoped_ptr_map.h"
+#include <map>
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "sync/api/metadata_change_list.h"
 #include "sync/api/model_type_change_processor.h"
+#include "sync/api/model_type_service.h"
 #include "sync/api/sync_error.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -21,17 +25,14 @@ namespace syncer_v2 {
 struct ActivationContext;
 class CommitQueue;
 class ModelTypeEntity;
-class ModelTypeStore;
 
 // A sync component embedded on the synced type's thread that helps to handle
 // communication between sync and model type threads.
-class SYNC_EXPORT_PRIVATE SharedModelTypeProcessor
-    : public ModelTypeProcessor,
-      public ModelTypeChangeProcessor,
-      base::NonThreadSafe {
+class SYNC_EXPORT SharedModelTypeProcessor : public ModelTypeProcessor,
+                                             public ModelTypeChangeProcessor,
+                                             base::NonThreadSafe {
  public:
-  SharedModelTypeProcessor(syncer::ModelType type,
-                           base::WeakPtr<ModelTypeStore> store);
+  SharedModelTypeProcessor(syncer::ModelType type, ModelTypeService* service);
   ~SharedModelTypeProcessor() override;
 
   typedef base::Callback<void(syncer::SyncError, scoped_ptr<ActivationContext>)>
@@ -60,29 +61,15 @@ class SYNC_EXPORT_PRIVATE SharedModelTypeProcessor
   // Another call to Enable() can be used to re-establish this connection.
   void Disable();
 
-  // Callback used to process the handshake response from the sync thread.
-  void OnConnect(scoped_ptr<CommitQueue> worker) override;
-
   // Returns true if the handshake with sync thread is complete.
   bool IsConnected() const;
 
-  // Requests that an item be stored in sync.
-  void Put(const std::string& client_tag,
-           const sync_pb::EntitySpecifics& specifics);
-
-  // Deletes an item from sync.
-  void Delete(const std::string& client_tag);
-
-  // Informs this object that some of its commit requests have been
-  // successfully serviced.
-  void OnCommitCompleted(const DataTypeState& type_state,
-                         const CommitResponseDataList& response_list) override;
-
-  // Informs this object that there are some incoming updates is should
-  // handle.
-  void OnUpdateReceived(const DataTypeState& type_state,
-                        const UpdateResponseDataList& response_list,
-                        const UpdateResponseDataList& pending_updates) override;
+  // ModelTypeChangeProcessor implementation.
+  void Put(const std::string& client_key,
+           scoped_ptr<EntityData> entity_data,
+           MetadataChangeList* metadata_change_list) override;
+  void Delete(const std::string& client_key,
+              MetadataChangeList* metadata_change_list) override;
 
   // Returns the list of pending updates.
   //
@@ -96,11 +83,17 @@ class SYNC_EXPORT_PRIVATE SharedModelTypeProcessor
   // ProfileSyncService.
   base::WeakPtr<SharedModelTypeProcessor> AsWeakPtrForUI();
 
+  // ModelTypeProcessor implementation.
+  void OnConnect(scoped_ptr<CommitQueue> worker) override;
+  void OnCommitCompleted(const DataTypeState& type_state,
+                         const CommitResponseDataList& response_list) override;
+  void OnUpdateReceived(const DataTypeState& type_state,
+                        const UpdateResponseDataList& response_list,
+                        const UpdateResponseDataList& pending_updates) override;
+
  private:
-  typedef base::ScopedPtrMap<std::string, scoped_ptr<ModelTypeEntity>>
-      EntityMap;
-  typedef base::ScopedPtrMap<std::string, scoped_ptr<UpdateResponseData>>
-      UpdateMap;
+  using EntityMap = std::map<std::string, scoped_ptr<ModelTypeEntity>>;
+  using UpdateMap = std::map<std::string, scoped_ptr<UpdateResponseData>>;
 
   // Sends all commit requests that are due to be sent to the sync thread.
   void FlushPendingCommitRequests();
@@ -139,10 +132,10 @@ class SYNC_EXPORT_PRIVATE SharedModelTypeProcessor
   // them across restarts, and keep them in sync with our progress markers.
   UpdateMap pending_updates_map_;
 
-  // Store is supplied by model type implementation. SharedModelTypeProcessor
-  // uses store for persisting sync related data (entity state and data type
-  // state).
-  base::WeakPtr<ModelTypeStore> store_;
+  // ModelTypeService linked to this processor.
+  // The service owns this processor instance so the pointer should never
+  // become invalid.
+  ModelTypeService* const service_;
 
   // We use two different WeakPtrFactories because we want the pointers they
   // issue to have different lifetimes.  When asked to disconnect from the sync
@@ -155,4 +148,4 @@ class SYNC_EXPORT_PRIVATE SharedModelTypeProcessor
 
 }  // namespace syncer_v2
 
-#endif  // SYNC_INTERNAL_API_PUBLIC_MODEL_TYPE_SYNC_PROXY_IMPL_H_
+#endif  // SYNC_INTERNAL_API_PUBLIC_SHARED_MODEL_TYPE_PROCESSOR_H_

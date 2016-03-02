@@ -4,7 +4,10 @@
 
 #include "components/guest_view/browser/guest_view_base.h"
 
+#include <utility>
+
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/guest_view/browser/guest_view_manager.h"
@@ -106,6 +109,13 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
       return;
 
     guest_->web_contents()->SetPageScale(page_scale_factor);
+  }
+
+  void DidUpdateAudioMutingState(bool muted) override {
+    if (destroyed_)
+      return;
+
+    guest_->web_contents()->SetAudioMuted(muted);
   }
 
  private:
@@ -255,7 +265,7 @@ void GuestViewBase::DispatchOnResizeEvent(const gfx::Size& old_size,
   args->SetInteger(kOldHeight, old_size.height());
   args->SetInteger(kNewWidth, new_size.width());
   args->SetInteger(kNewHeight, new_size.height());
-  DispatchEventToGuestProxy(new GuestViewEvent(kEventResize, args.Pass()));
+  DispatchEventToGuestProxy(new GuestViewEvent(kEventResize, std::move(args)));
 }
 
 gfx::Size GuestViewBase::GetDefaultSize() const {
@@ -398,6 +408,9 @@ void GuestViewBase::DidAttach(int guest_proxy_routing_id) {
 
   SetUpSizing(*attach_params());
 
+  // The guest should have the same muting state as the owner.
+  web_contents()->SetAudioMuted(owner_web_contents()->IsAudioMuted());
+
   // Give the derived class an opportunity to perform some actions.
   DidAttachToEmbedder();
 
@@ -415,6 +428,8 @@ void GuestViewBase::DidDetach() {
   owner_web_contents()->Send(new GuestViewMsg_GuestDetached(
       element_instance_id_));
   element_instance_id_ = kInstanceIDNone;
+  if (!CanRunInDetachedState())
+    Destroy();
 }
 
 bool GuestViewBase::HandleFindForEmbedder(
@@ -603,12 +618,13 @@ void GuestViewBase::ActivateContents(WebContents* web_contents) {
 
 void GuestViewBase::ContentsMouseEvent(WebContents* source,
                                        const gfx::Point& location,
-                                       bool motion) {
+                                       bool motion,
+                                       bool exited) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return;
 
   embedder_web_contents()->GetDelegate()->ContentsMouseEvent(
-      embedder_web_contents(), location, motion);
+      embedder_web_contents(), location, motion, exited);
 }
 
 void GuestViewBase::ContentsZoomChange(bool zoom_in) {

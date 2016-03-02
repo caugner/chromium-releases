@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "net/quic/quic_client_session_base.h"
 #include "net/quic/quic_crypto_client_stream.h"
 #include "net/quic/quic_protocol.h"
@@ -23,6 +23,10 @@ class ReliableQuicStream;
 
 namespace tools {
 
+// The maximum time a promises stream can be reserved without being
+// claimed by a client request.
+const int64_t kPushPromiseTimeoutSecs = 60;
+
 class QuicClientSession : public QuicClientSessionBase {
  public:
   QuicClientSession(const QuicConfig& config,
@@ -34,7 +38,8 @@ class QuicClientSession : public QuicClientSessionBase {
   void Initialize() override;
 
   // QuicSession methods:
-  QuicSpdyClientStream* CreateOutgoingDynamicStream() override;
+  QuicSpdyClientStream* CreateOutgoingDynamicStream(
+      SpdyPriority priority) override;
   QuicCryptoClientStreamBase* GetCryptoStream() override;
 
   // QuicClientSessionBase methods:
@@ -71,6 +76,7 @@ class QuicClientSession : public QuicClientSessionBase {
   QuicCryptoClientConfig* crypto_config() { return crypto_config_; }
 
  private:
+  bool ShouldCreateIncomingDynamicStream(QuicStreamId id);
   scoped_ptr<QuicCryptoClientStreamBase> crypto_stream_;
   QuicServerId server_id_;
   QuicCryptoClientConfig* crypto_config_;

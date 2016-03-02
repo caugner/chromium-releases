@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "content/browser/media/webrtc_internals.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
@@ -601,16 +604,9 @@ IN_PROC_BROWSER_TEST_F(
       "VideoCaptureDeviceClient");
 }
 
-// Test fails under MSan, http://crbug.com/445745
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_TestGetUserMediaAspectRatio4To3 \
-  DISABLED_TestGetUserMediaAspectRatio4To3
-#else
-#define MAYBE_TestGetUserMediaAspectRatio4To3 TestGetUserMediaAspectRatio4To3
-#endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_TestGetUserMediaAspectRatio4To3) {
+                       TestGetUserMediaAspectRatio4To3) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
@@ -623,16 +619,9 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
             ExecuteJavascriptAndReturnResult(constraints_4_3));
 }
 
-// Test fails under MSan, http://crbug.com/445745
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_TestGetUserMediaAspectRatio16To9 \
-  DISABLED_TestGetUserMediaAspectRatio16To9
-#else
-#define MAYBE_TestGetUserMediaAspectRatio16To9 TestGetUserMediaAspectRatio16To9
-#endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_TestGetUserMediaAspectRatio16To9) {
+                       TestGetUserMediaAspectRatio16To9) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
@@ -645,16 +634,9 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
             ExecuteJavascriptAndReturnResult(constraints_16_9));
 }
 
-// Test fails under MSan, http://crbug.com/445745
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_TestGetUserMediaAspectRatio1To1 \
-  DISABLED_TestGetUserMediaAspectRatio1To1
-#else
-#define MAYBE_TestGetUserMediaAspectRatio1To1 TestGetUserMediaAspectRatio1To1
-#endif
 // This test calls getUserMedia and checks for aspect ratio behavior.
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_TestGetUserMediaAspectRatio1To1) {
+                       TestGetUserMediaAspectRatio1To1) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));

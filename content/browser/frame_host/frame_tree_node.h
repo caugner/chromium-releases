@@ -5,10 +5,12 @@
 #ifndef CONTENT_BROWSER_FRAME_HOST_FRAME_TREE_NODE_H_
 #define CONTENT_BROWSER_FRAME_HOST_FRAME_TREE_NODE_H_
 
+#include <stddef.h>
+
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -43,7 +45,7 @@ class CONTENT_EXPORT FrameTreeNode {
     virtual ~Observer() {}
   };
 
-  static const int kFrameTreeNodeInvalidID = -1;
+  static const int kFrameTreeNodeInvalidId = -1;
 
   // Returns the FrameTreeNode with the given global |frame_tree_node_id|,
   // regardless of which FrameTree it is in.
@@ -67,9 +69,9 @@ class CONTENT_EXPORT FrameTreeNode {
 
   bool IsMainFrame() const;
 
-  void AddChild(scoped_ptr<FrameTreeNode> child,
-                int process_id,
-                int frame_routing_id);
+  FrameTreeNode* AddChild(scoped_ptr<FrameTreeNode> child,
+                          int process_id,
+                          int frame_routing_id);
   void RemoveChild(FrameTreeNode* child);
 
   // Clears process specific-state in this node to prepare for a new process.
@@ -94,6 +96,8 @@ class CONTENT_EXPORT FrameTreeNode {
   const std::string& frame_name() const {
     return replication_state_.name;
   }
+
+  const url::Origin& frame_origin() const { return replication_state_.origin; }
 
   size_t child_count() const {
     return children_.size();
@@ -136,6 +140,10 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name);
+
+  // Sets the current enforcement of strict mixed content checking and
+  // notifies proxies about the update.
+  void SetEnforceStrictMixedContentChecking(bool should_enforce);
 
   blink::WebSandboxFlags effective_sandbox_flags() {
     return effective_sandbox_flags_;

@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/translate/translate_bubble_view.h"
 
+#include <stddef.h>
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/i18n/string_compare.h"
@@ -25,6 +27,7 @@
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/simple_combobox_model.h"
@@ -114,11 +117,9 @@ void TranslateBubbleView::ShowBubble(
           source_language,
           target_language));
   scoped_ptr<TranslateBubbleModel> model(
-      new TranslateBubbleModelImpl(step, ui_delegate.Pass()));
-  TranslateBubbleView* view = new TranslateBubbleView(anchor_view,
-                                                      model.Pass(),
-                                                      error_type,
-                                                      web_contents);
+      new TranslateBubbleModelImpl(step, std::move(ui_delegate)));
+  TranslateBubbleView* view = new TranslateBubbleView(
+      anchor_view, std::move(model), error_type, web_contents);
   views::BubbleDelegateView::CreateBubble(view);
   view->ShowForReason(reason);
 }
@@ -258,7 +259,7 @@ TranslateBubbleView::TranslateBubbleView(
       always_translate_checkbox_(NULL),
       advanced_cancel_button_(NULL),
       advanced_done_button_(NULL),
-      model_(model.Pass()),
+      model_(std::move(model)),
       error_type_(error_type),
       is_in_incognito_window_(
           web_contents ? web_contents->GetBrowserContext()->IsOffTheRecord()

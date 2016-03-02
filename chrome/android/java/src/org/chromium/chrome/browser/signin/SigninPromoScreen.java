@@ -13,6 +13,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.LinearLayout;
 
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.firstrun.AccountFirstRunView;
 import org.chromium.chrome.browser.firstrun.ProfileDataCache;
@@ -23,6 +24,7 @@ import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.SigninManager.SignInFlowObserver;
+import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.sync.ui.SyncCustomizationFragment;
 import org.chromium.chrome.browser.widget.AlwaysDismissedDialog;
 import org.chromium.sync.signin.AccountManagerHelper;
@@ -59,6 +61,7 @@ public class SigninPromoScreen
 
         SigninPromoScreen promoScreen = new SigninPromoScreen(activity);
         promoScreen.show();
+        SigninManager.logSigninStartAccessPoint(SigninAccessPoint.SIGNIN_PROMO);
         preferenceManager.setSigninPromoShown();
         return true;
     }
@@ -88,6 +91,7 @@ public class SigninPromoScreen
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SigninPromoUma.recordAction(SigninPromoUma.SIGNIN_PROMO_SHOWN);
+        RecordUserAction.record("Signin_Impression_FromSigninPromo");
     }
 
     @Override
@@ -107,6 +111,7 @@ public class SigninPromoScreen
                 mAccountFirstRunView.switchToSignedMode();
                 SigninManager.get(getOwnerActivity()).logInSignedInUser();
                 SigninPromoUma.recordAction(SigninPromoUma.SIGNIN_PROMO_ACCEPTED);
+                RecordUserAction.record("Signin_Signin_Succeed");
             }
 
             @Override
@@ -115,9 +120,10 @@ public class SigninPromoScreen
                 dismiss();
             }
         };
-        SigninManager.get(getOwnerActivity().getApplicationContext()).signInToSelectedAccount(
-                getOwnerActivity(), account, SigninManager.SIGNIN_TYPE_INTERACTIVE,
-                SigninManager.SIGNIN_SYNC_IMMEDIATELY, false, signInCallback);
+        RecordUserAction.record("Signin_Signin_FromSigninPromo");
+        SigninManager.get(getOwnerActivity().getApplicationContext())
+                .signInToSelectedAccount(getOwnerActivity(), account,
+                        SigninManager.SIGNIN_TYPE_INTERACTIVE, signInCallback);
     }
 
     @Override
@@ -138,12 +144,14 @@ public class SigninPromoScreen
 
     @Override
     public void onSettingsButtonClicked(String accountName) {
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(getContext(),
-                SyncCustomizationFragment.class.getName());
-        Bundle args = new Bundle();
-        args.putString(SyncCustomizationFragment.ARGUMENT_ACCOUNT, accountName);
-        intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, args);
-        getContext().startActivity(intent);
+        if (ProfileSyncService.get() != null) {
+            Intent intent = PreferencesLauncher.createIntentForSettingsPage(getContext(),
+                    SyncCustomizationFragment.class.getName());
+            Bundle args = new Bundle();
+            args.putString(SyncCustomizationFragment.ARGUMENT_ACCOUNT, accountName);
+            intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, args);
+            getContext().startActivity(intent);
+        }
 
         SigninPromoUma.recordAction(SigninPromoUma.SIGNIN_PROMO_ACCEPTED_WITH_ADVANCED);
         dismiss();

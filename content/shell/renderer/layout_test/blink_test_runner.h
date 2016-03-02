@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/test_runner/test_preferences.h"
 #include "components/test_runner/web_test_delegate.h"
@@ -98,6 +99,7 @@ class BlinkTestRunner : public RenderViewObserver,
                                     int action_index) override;
   void SetDeviceScaleFactor(float factor) override;
   void SetDeviceColorProfile(const std::string& name) override;
+  void EnableUseZoomForDSF() override;
   void SetBluetoothMockDataSet(const std::string& name) override;
   void SetBluetoothManualChooser() override;
   void GetBluetoothManualChooserEvents(
@@ -133,7 +135,10 @@ class BlinkTestRunner : public RenderViewObserver,
                      const GURL& origin,
                      const GURL& embedding_origin) override;
   void ResetPermissions() override;
-  bool AddMediaStreamSourceAndTrack(blink::WebMediaStream* stream) override;
+  bool AddMediaStreamVideoSourceAndTrack(
+      blink::WebMediaStream* stream) override;
+  bool AddMediaStreamAudioSourceAndTrack(
+      blink::WebMediaStream* stream) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void DispatchBeforeInstallPromptEvent(
       int request_id,
@@ -146,6 +151,8 @@ class BlinkTestRunner : public RenderViewObserver,
     blink::WebLocalFrame* frame,
     const blink::WebPluginParams& params) override;
   void OnWebTestProxyBaseDestroy(test_runner::WebTestProxyBase* proxy) override;
+  blink::WebPoint ConvertDIPToNative(
+      const blink::WebPoint& point_in_dip) const override;
 
   void Reset();
 

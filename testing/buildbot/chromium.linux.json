@@ -1,9 +1,12 @@
 {
   "Android GN": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ],
     "gtest_tests": [
+      {
+        "test": "android_webview_unittests"
+      },
       {
         "test": "base_unittests"
       },
@@ -14,7 +17,13 @@
         "test": "cc_unittests"
       },
       {
+        "test": "components_browsertests"
+      },
+      {
         "test": "components_unittests"
+      },
+      {
+        "test": "content_browsertests"
       },
       {
         "test": "content_unittests"
@@ -125,7 +134,7 @@
   },
   "Android GN (dbg)": {
     "additional_compile_targets": [
-      "gn_all"
+      "all"
     ]
   },
   "Android Tests": {
@@ -187,7 +196,8 @@
           "--enable-local-file-accesses",
           "--enable-cma-media-pipeline",
           "--ozone-platform=cast",
-          "--no-sandbox"
+          "--no-sandbox",
+          "--test-launcher-jobs=1"
         ],
         "test": "cast_shell_browser_test"
       },
@@ -196,7 +206,7 @@
       },
       {
         "args": [
-          "--gtest_filter=-OutOfProcessPPAPITest.TrueTypeFont:OutOfProcessPPAPITest.BrowserFont"
+          "--test-launcher-filter-file=src/testing/buildbot/filters/cast-linux.content_browsertests.filter"
         ],
         "swarming": {
           "can_use_on_swarming_builders": true
@@ -294,9 +304,10 @@
   },
   "Linux Builder": {
     "additional_compile_targets": [
+      "battor_agent",
       "blimp",
-      "components/mus/example:all",
       "mandoline:all",
+      "mash:all",
       "remoting_all"
     ]
   },
@@ -459,6 +470,12 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "gin_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "gn_unittests"
       },
       {
@@ -496,6 +513,9 @@
           "can_use_on_swarming_builders": true
         },
         "test": "jingle_unittests"
+      },
+      {
+        "test": "mash_unittests"
       },
       {
         "swarming": {
@@ -562,9 +582,6 @@
       },
       {
         "test": "mojo_view_manager_lib_unittests"
-      },
-      {
-        "test": "mustash_unittests"
       },
       {
         "swarming": {
@@ -667,6 +684,9 @@
       {
         "isolate_name": "telemetry_gpu_unittests",
         "name": "telemetry_gpu_unittests",
+        "override_compile_targets": [
+          "telemetry_gpu_unittests_run"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
@@ -674,6 +694,19 @@
       {
         "isolate_name": "telemetry_perf_unittests",
         "name": "telemetry_perf_unittests",
+        "override_compile_targets": [
+          "telemetry_perf_unittests_run"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
+      {
+        "isolate_name": "telemetry_unittests",
+        "name": "telemetry_unittests",
+        "override_compile_targets": [
+          "telemetry_unittests_run"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
@@ -691,10 +724,6 @@
       {
         "name": "checkperms",
         "script": "checkperms.py"
-      },
-      {
-        "name": "telemetry_unittests",
-        "script": "telemetry_unittests.py"
       },
       {
         "name": "nacl_integration",
@@ -1039,6 +1068,9 @@
       {
         "isolate_name": "telemetry_gpu_unittests",
         "name": "telemetry_gpu_unittests",
+        "override_compile_targets": [
+          "telemetry_gpu_unittests_run"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
@@ -1046,16 +1078,25 @@
       {
         "isolate_name": "telemetry_perf_unittests",
         "name": "telemetry_perf_unittests",
+        "override_compile_targets": [
+          "telemetry_perf_unittests_run"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
+      {
+        "isolate_name": "telemetry_unittests",
+        "name": "telemetry_unittests",
+        "override_compile_targets": [
+          "telemetry_unittests_run"
+        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
       }
     ],
     "scripts": [
-      {
-        "name": "telemetry_unittests",
-        "script": "telemetry_unittests.py"
-      },
       {
         "name": "nacl_integration",
         "script": "nacl_integration.py"

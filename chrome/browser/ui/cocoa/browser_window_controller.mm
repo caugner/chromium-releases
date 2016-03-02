@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <numeric>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/mac/bundle_locations.h"
@@ -79,6 +80,7 @@
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/command.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
@@ -98,6 +100,7 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
 #include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
+#include "ui/gfx/screen.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -384,12 +387,12 @@ void SetUpBrowserWindowCommandHandler(NSWindow* window) {
 
     [self layoutSubviews];
 
-    // For a popup window, |desiredContentRect| contains the desired height of
-    // the content, not of the whole window.  Now that all the views are laid
-    // out, measure the current content area size and grow if needed.  The
-    // window has not been placed onscreen yet, so this extra resize will not
-    // cause visible jank.
-    if (browser_->is_type_popup()) {
+    // For non-trusted, non-app popup windows, |desiredContentRect| contains the
+    // desired height of the content, not of the whole window.  Now that all the
+    // views are laid out, measure the current content area size and grow if
+    // needed. The window has not been placed onscreen yet, so this extra resize
+    // will not cause visible jank.
+    if (chrome::SavedBoundsAreContentBounds(browser_.get())) {
       CGFloat deltaH = desiredContentRect.height() -
                        NSHeight([[self tabContentArea] frame]);
       // Do not shrink the window, as that may break minimum size invariants.
@@ -430,6 +433,10 @@ void SetUpBrowserWindowCommandHandler(NSWindow* window) {
             [self window],
             extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS,
             windowShim_.get()));
+
+    PrefService* prefs = browser_->profile()->GetPrefs();
+    shouldHideFullscreenToolbar_ =
+        prefs->GetBoolean(prefs::kHideFullscreenToolbar);
 
     blockLayoutSubviews_ = NO;
 
@@ -617,7 +624,7 @@ void SetUpBrowserWindowCommandHandler(NSWindow* window) {
 
 // Called right after our window became the main window.
 - (void)windowDidBecomeMain:(NSNotification*)notification {
-  if (chrome::GetLastActiveBrowser() != browser_) {
+  if (chrome::GetLastActiveBrowser() != browser_.get()) {
     BrowserList::SetLastActive(browser_.get());
   }
   // Always saveWindowPositionIfNeeded when becoming main, not just
@@ -1556,8 +1563,8 @@ void SetUpBrowserWindowCommandHandler(NSWindow* window) {
   }];
 }
 
-- (ui::ThemeProvider*)themeProvider {
-  return ThemeServiceFactory::GetForProfile(browser_->profile());
+- (const ui::ThemeProvider*)themeProvider {
+  return &ThemeService::GetThemeProviderForProfile(browser_->profile());
 }
 
 - (ThemedWindowStyle)themedWindowStyle {
@@ -1674,11 +1681,11 @@ void SetUpBrowserWindowCommandHandler(NSWindow* window) {
           sourceLanguage,
           targetLanguage));
   scoped_ptr<TranslateBubbleModel> model(
-      new TranslateBubbleModelImpl(step, uiDelegate.Pass()));
-  translateBubbleController_ = [[TranslateBubbleController alloc]
-                                 initWithParentWindow:self
-                                                model:model.Pass()
-                                          webContents:contents];
+      new TranslateBubbleModelImpl(step, std::move(uiDelegate)));
+  translateBubbleController_ =
+      [[TranslateBubbleController alloc] initWithParentWindow:self
+                                                        model:std::move(model)
+                                                  webContents:contents];
   [translateBubbleController_ showWindow:nil];
 
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
@@ -1902,10 +1909,23 @@ willAnimateFromState:(BookmarkBar::State)oldState
   return [[toolbarView superview] convertRect:anchorRect toView:nil];
 }
 
+- (BOOL)isLayoutSubviewsBlocked {
+  return blockLayoutSubviews_;
+}
+
+- (BOOL)isActiveTabContentsControllerResizeBlocked {
+  return
+      [[tabStripController_ activeTabContentsController] blockFullscreenResize];
+}
+
 - (void)sheetDidEnd:(NSWindow*)sheet
          returnCode:(NSInteger)code
             context:(void*)context {
   [sheet orderOut:self];
+}
+
+- (PresentationModeController*)presentationModeController {
+  return presentationModeController_.get();
 }
 
 - (void)executeExtensionCommand:(const std::string&)extension_id
@@ -1915,6 +1935,15 @@ willAnimateFromState:(BookmarkBar::State)oldState
   DCHECK(!command.global());
   extension_keybinding_registry_->ExecuteCommand(extension_id,
                                                  command.accelerator());
+}
+
+- (void)setMediaState:(TabMediaState)mediaState {
+  static_cast<BrowserWindowCocoa*>([self browserWindow])
+      ->UpdateMediaState(mediaState);
+}
+
+- (TabMediaState)mediaState {
+  return static_cast<BrowserWindowCocoa*>([self browserWindow])->media_state();
 }
 
 @end  // @implementation BrowserWindowController
@@ -1957,6 +1986,16 @@ willAnimateFromState:(BookmarkBar::State)oldState
   [self showFullscreenExitBubbleIfNecessary];
 }
 
+- (void)setFullscreenToolbarHidden:(BOOL)shouldHide {
+  if (shouldHideFullscreenToolbar_ == shouldHide)
+    return;
+
+  [presentationModeController_ setToolbarFraction:0.0];
+  shouldHideFullscreenToolbar_ = shouldHide;
+  if ([self isInAppKitFullscreen])
+    [self updateFullscreenWithToolbar:!shouldHideFullscreenToolbar_];
+}
+
 - (BOOL)isInAnyFullscreenMode {
   return [self isInImmersiveFullscreen] || [self isInAppKitFullscreen];
 }
@@ -1988,11 +2027,18 @@ willAnimateFromState:(BookmarkBar::State)oldState
 - (void)enterWebContentFullscreenForURL:(const GURL&)url
                              bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   // HTML5 Fullscreen should only use AppKit fullscreen in 10.10+.
+  // However, if the user is using multiple monitors and turned off
+  // "Separate Space in Each Display", use Immersive Fullscreen so
+  // that the other monitors won't blank out.
+  gfx::Screen* screen = gfx::Screen::GetScreenFor([[self window] contentView]);
+  BOOL hasMultipleMonitors = screen && screen->GetNumDisplays() > 1;
   if (chrome::mac::SupportsSystemFullscreen() &&
-      base::mac::IsOSYosemiteOrLater())
+      base::mac::IsOSYosemiteOrLater() &&
+      !(hasMultipleMonitors && ![NSScreen screensHaveSeparateSpaces])) {
     [self enterAppKitFullscreen];
-  else
+  } else {
     [self enterImmersiveFullscreen];
+  }
 
   if (!url.is_empty())
     [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];
@@ -2012,6 +2058,10 @@ willAnimateFromState:(BookmarkBar::State)oldState
          [presentationModeController_ inPresentationMode] &&
          presentationModeController_.get().slidingStyle ==
              fullscreen_mac::OMNIBOX_TABS_HIDDEN;
+}
+
+- (BOOL)shouldHideFullscreenToolbar {
+  return shouldHideFullscreenToolbar_;
 }
 
 - (void)resizeFullscreenWindow {

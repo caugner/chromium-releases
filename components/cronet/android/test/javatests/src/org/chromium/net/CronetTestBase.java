@@ -22,11 +22,15 @@ public class CronetTestBase extends AndroidTestCase {
     private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "cronet_test";
 
     private CronetTestFramework mCronetTestFramework;
+    // {@code true} when test is being run against system HttpURLConnection implementation.
+    private boolean mTestingSystemHttpURLConnection;
+    private boolean mTestingJavaImpl = false;
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, getContext());
+        CronetTestFramework.prepareTestStorage(getContext());
     }
 
     /**
@@ -64,42 +68,111 @@ public class CronetTestBase extends AndroidTestCase {
         return mCronetTestFramework;
     }
 
-    // Helper method to tell the framework to skip factory init during construction.
-    protected CronetTestFramework startCronetTestFrameworkAndSkipFactoryInit() {
+    // Helper method to tell the framework to skip library init during construction.
+    protected CronetTestFramework startCronetTestFrameworkAndSkipLibraryInit() {
         String[] commandLineArgs = {
-                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LIBRARY_INIT_SKIP};
+                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LibraryInitType.NONE};
         mCronetTestFramework =
                 startCronetTestFrameworkWithUrlAndCommandLineArgs(null, commandLineArgs);
         return mCronetTestFramework;
     }
 
+    /**
+     * Starts the CronetTest framework for the legacy API.
+     * @param url if non-null, a request will be made with that url.
+     */
+    protected CronetTestFramework startCronetTestFrameworkForLegacyApi(String url) {
+        String[] commandLineArgs = {
+                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LibraryInitType.LEGACY};
+        mCronetTestFramework =
+                startCronetTestFrameworkWithUrlAndCommandLineArgs(url, commandLineArgs);
+        return mCronetTestFramework;
+    }
+
+    /**
+     * Returns {@code true} when test is being run against system HttpURLConnection implementation.
+     */
+    protected boolean testingSystemHttpURLConnection() {
+        return mTestingSystemHttpURLConnection;
+    }
+
+    /**
+     * Returns {@code true} when test is being run against the java implementation of CronetEngine.
+     */
+    protected boolean testingJavaImpl() {
+        return mTestingJavaImpl;
+    }
+
     @Override
     protected void runTest() throws Throwable {
-        if (!getClass().getPackage().getName().equals(
-                "org.chromium.net.urlconnection")) {
-            super.runTest();
-            return;
-        }
-        try {
-            Method method = getClass().getMethod(getName(), (Class[]) null);
-            if (method.isAnnotationPresent(CompareDefaultWithCronet.class)) {
-                // Run with the default HttpURLConnection implementation first.
-                super.runTest();
-                // Use Cronet's implementation, and run the same test.
-                URL.setURLStreamHandlerFactory(mCronetTestFramework.mStreamHandlerFactory);
-                super.runTest();
-            } else if (method.isAnnotationPresent(
-                    OnlyRunCronetHttpURLConnection.class)) {
-                // Run only with Cronet's implementation.
-                URL.setURLStreamHandlerFactory(mCronetTestFramework.mStreamHandlerFactory);
-                super.runTest();
-            } else {
-                // For all other tests.
-                super.runTest();
+        mTestingSystemHttpURLConnection = false;
+        mTestingJavaImpl = false;
+        String packageName = getClass().getPackage().getName();
+        if (packageName.equals("org.chromium.net.urlconnection")) {
+            try {
+                Method method = getClass().getMethod(getName(), (Class[]) null);
+                if (method.isAnnotationPresent(CompareDefaultWithCronet.class)) {
+                    // Run with the default HttpURLConnection implementation first.
+                    mTestingSystemHttpURLConnection = true;
+                    super.runTest();
+                    // Use Cronet's implementation, and run the same test.
+                    mTestingSystemHttpURLConnection = false;
+                    URL.setURLStreamHandlerFactory(mCronetTestFramework.mStreamHandlerFactory);
+                    super.runTest();
+                } else if (method.isAnnotationPresent(OnlyRunCronetHttpURLConnection.class)) {
+                    // Run only with Cronet's implementation.
+                    URL.setURLStreamHandlerFactory(mCronetTestFramework.mStreamHandlerFactory);
+                    super.runTest();
+                } else {
+                    // For all other tests.
+                    super.runTest();
+                }
+            } catch (Throwable e) {
+                throw new Throwable("CronetTestBase#runTest failed.", e);
             }
-        } catch (Throwable e) {
-            throw new Throwable("CronetTestBase#runTest failed.", e);
+        } else if (packageName.equals("org.chromium.net")) {
+            try {
+                Method method = getClass().getMethod(getName(), (Class[]) null);
+                super.runTest();
+                if (!method.isAnnotationPresent(OnlyRunNativeCronet.class)) {
+                    if (mCronetTestFramework != null) {
+                        mCronetTestFramework.mCronetEngine =
+                                new JavaCronetEngine(UserAgent.from(getContext()));
+                    }
+                    mTestingJavaImpl = true;
+                    super.runTest();
+                }
+            } catch (Throwable e) {
+                throw new Throwable("CronetTestBase#runTest failed.", e);
+            }
+        } else {
+            super.runTest();
         }
+    }
+
+    /**
+     * Registers test host resolver for testing with the new API.
+     */
+    protected void registerHostResolver(CronetTestFramework framework) {
+        registerHostResolver(framework, false);
+    }
+
+    /**
+     * Registers test host resolver.
+     *
+     * @param isLegacyAPI true if the test should use the legacy API.
+     */
+    protected void registerHostResolver(CronetTestFramework framework, boolean isLegacyAPI) {
+        long urlRequestContextAdapter;
+        if (isLegacyAPI) {
+            urlRequestContextAdapter = ((ChromiumUrlRequestFactory) framework.mRequestFactory)
+                                               .getRequestContext()
+                                               .getUrlRequestContextAdapter();
+        } else {
+            urlRequestContextAdapter = ((CronetUrlRequestContext) framework.mCronetEngine)
+                                               .getUrlRequestContextAdapter();
+        }
+        NativeTestServer.registerHostResolverProc(urlRequestContextAdapter, isLegacyAPI);
     }
 
     @Target(ElementType.METHOD)
@@ -112,4 +185,7 @@ public class CronetTestBase extends AndroidTestCase {
     public @interface OnlyRunCronetHttpURLConnection {
     }
 
+    @Target(ElementType.METHOD)
+    @Retention(RetentionPolicy.RUNTIME)
+    public @interface OnlyRunNativeCronet {}
 }

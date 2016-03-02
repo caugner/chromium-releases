@@ -4,7 +4,10 @@
 
 #import "chrome/browser/ui/cocoa/website_settings/website_settings_bubble_controller.h"
 
+#include <stddef.h>
+
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest_mac.h"
@@ -213,7 +216,7 @@ class WebsiteSettingsBubbleControllerTest : public CocoaTest {
     // possible settings:
     // - [allow, block, ask] by default
     // - [block, allow] * [by user, by policy, by extension]
-    PermissionInfoList list;
+    PermissionInfoList permission_info_list;
     WebsiteSettingsUI::PermissionInfo info;
     for (size_t i = 0; i < arraysize(kTestPermissionTypes); ++i) {
       info.type = kTestPermissionTypes[i];
@@ -221,9 +224,11 @@ class WebsiteSettingsBubbleControllerTest : public CocoaTest {
       if (info.setting == CONTENT_SETTING_DEFAULT)
         info.default_setting = kTestDefaultSettings[i];
       info.source = kTestSettingSources[i];
-      list.push_back(info);
+      info.is_incognito = false;
+      permission_info_list.push_back(info);
     }
-    bridge_->SetPermissionInfo(list);
+    ChosenObjectInfoList chosen_object_info_list;
+    bridge_->SetPermissionInfo(permission_info_list, chosen_object_info_list);
   }
 
   WebsiteSettingsBubbleControllerForTesting* controller_;  // Weak, owns self.

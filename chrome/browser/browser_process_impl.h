@@ -10,15 +10,18 @@
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
 
+#include <stdint.h>
+
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/debug/stack_trace.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 
 class ChromeChildProcessWatcher;
@@ -109,7 +112,7 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateDevToolsHttpProtocolHandler(
       chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
-      uint16 port) override;
+      uint16_t port) override;
   unsigned int AddRefModule() override;
   unsigned int ReleaseModule() override;
   bool IsShuttingDown() override;
@@ -247,6 +250,8 @@ class BrowserProcessImpl : public BrowserProcess,
   unsigned int module_ref_count_;
   bool did_start_;
 
+  bool tearing_down_;
+
   // Ensures that all the print jobs are finished before closing the browser.
   scoped_ptr<printing::PrintJobManager> print_job_manager_;
 
@@ -319,9 +324,7 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<ChromeChildProcessWatcher> child_process_watcher_;
 
-#if !defined(OS_ANDROID)
   scoped_ptr<ChromeDeviceClient> device_client_;
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   // Any change to this #ifdef must be reflected as well in

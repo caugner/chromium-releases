@@ -13,6 +13,7 @@
 
 namespace blink {
 
+class CSSParserTokenRange;
 class CSSVariableReferenceValue;
 class StyleResolverState;
 class StyleVariableData;
@@ -22,16 +23,32 @@ public:
     static void resolveVariableDefinitions(StyleVariableData*);
     static void resolveAndApplyVariableReferences(StyleResolverState&, CSSPropertyID, const CSSVariableReferenceValue&);
 
+    // Shorthand properties are not supported.
+    static PassRefPtrWillBeRawPtr<CSSValue> resolveVariableReferences(StyleVariableData*, CSSPropertyID, const CSSVariableReferenceValue&);
+
 private:
     CSSVariableResolver(StyleVariableData*);
     CSSVariableResolver(StyleVariableData*, AtomicString& variable);
 
-    unsigned resolveVariableTokensRecursive(Vector<CSSParserToken>&, unsigned startOffset);
-    void resolveVariableReferencesFromTokens(Vector<CSSParserToken>& tokens);
+    struct ResolutionState {
+        bool success;
+        // Resolution doesn't finish when a cycle is detected. Fallbacks still
+        // need to be tracked for additional cycles, and invalidation only
+        // applies back to cycle starts. This context member tracks all
+        // detected cycle start points.
+        HashSet<AtomicString> cycleStartPoints;
+
+        ResolutionState()
+            : success(true)
+        { };
+    };
+
+    void resolveFallback(CSSParserTokenRange, Vector<CSSParserToken>& result, ResolutionState& context);
+    void resolveVariableTokensRecursive(CSSParserTokenRange, Vector<CSSParserToken>& result, ResolutionState& context);
+    void resolveVariableReferencesFromTokens(CSSParserTokenRange tokens, Vector<CSSParserToken>& result, ResolutionState& context);
 
     StyleVariableData* m_styleVariableData;
     HashSet<AtomicString> m_variablesSeen;
-    bool m_cycleDetected;
 };
 
 } // namespace blink

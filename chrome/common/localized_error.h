@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "components/error_page/common/offline_page_types.h"
@@ -15,10 +15,6 @@
 
 namespace base {
 class DictionaryValue;
-}
-
-namespace blink {
-struct WebURLError;
 }
 
 namespace error_page {
@@ -42,7 +38,8 @@ class LocalizedError {
                          base::DictionaryValue* strings);
 
   // Returns a description of the encountered error.
-  static base::string16 GetErrorDetails(const blink::WebURLError& error,
+  static base::string16 GetErrorDetails(const std::string& error_domain,
+                                        int error_code,
                                         bool is_post);
 
   // Returns true if an error page exists for the specified parameters.

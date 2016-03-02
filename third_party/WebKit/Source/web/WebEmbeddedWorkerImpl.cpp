@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/WebEmbeddedWorkerImpl.h"
 
 #include "core/dom/CrossThreadTask.h"
@@ -108,6 +107,11 @@ WebEmbeddedWorkerImpl::~WebEmbeddedWorkerImpl()
     // Detach the client before closing the view to avoid getting called back.
     m_mainFrame->setClient(0);
 
+    if (m_workerGlobalScopeProxy) {
+        m_workerGlobalScopeProxy->detach();
+        m_workerGlobalScopeProxy.clear();
+    }
+
     m_webView->close();
     m_mainFrame->close();
     if (m_loaderProxy)
@@ -152,18 +156,18 @@ void WebEmbeddedWorkerImpl::terminateWorkerContext()
     m_workerInspectorProxy->workerThreadTerminated();
 }
 
-void WebEmbeddedWorkerImpl::attachDevTools(const WebString& hostId)
+void WebEmbeddedWorkerImpl::attachDevTools(const WebString& hostId, int sessionId)
 {
     WebDevToolsAgent* devtoolsAgent = m_mainFrame->devToolsAgent();
     if (devtoolsAgent)
-        devtoolsAgent->attach(hostId);
+        devtoolsAgent->attach(hostId, sessionId);
 }
 
-void WebEmbeddedWorkerImpl::reattachDevTools(const WebString& hostId, const WebString& savedState)
+void WebEmbeddedWorkerImpl::reattachDevTools(const WebString& hostId, int sessionId, const WebString& savedState)
 {
     WebDevToolsAgent* devtoolsAgent = m_mainFrame->devToolsAgent();
     if (devtoolsAgent)
-        devtoolsAgent->reattach(hostId, savedState);
+        devtoolsAgent->reattach(hostId, sessionId, savedState);
     resumeStartup();
 }
 
@@ -174,13 +178,13 @@ void WebEmbeddedWorkerImpl::detachDevTools()
         devtoolsAgent->detach();
 }
 
-void WebEmbeddedWorkerImpl::dispatchDevToolsMessage(const WebString& message)
+void WebEmbeddedWorkerImpl::dispatchDevToolsMessage(int sessionId, const WebString& message)
 {
     if (m_askedToTerminate)
         return;
     WebDevToolsAgent* devtoolsAgent = m_mainFrame->devToolsAgent();
     if (devtoolsAgent)
-        devtoolsAgent->dispatchOnInspectorBackend(message);
+        devtoolsAgent->dispatchOnInspectorBackend(sessionId, message);
 }
 
 void WebEmbeddedWorkerImpl::postMessageToPageInspector(const String& message)
@@ -244,8 +248,7 @@ void WebEmbeddedWorkerImpl::loadShadowPage()
     // Construct substitute data source for the 'shadow page'. We only need it
     // to have same origin as the worker so the loading checks work correctly.
     CString content("");
-    int length = static_cast<int>(content.length());
-    RefPtr<SharedBuffer> buffer(SharedBuffer::create(content.data(), length));
+    RefPtr<SharedBuffer> buffer(SharedBuffer::create(content.data(), content.length()));
     m_loadingShadowPage = true;
     m_mainFrame->frame()->loader().load(FrameLoadRequest(0, ResourceRequest(m_workerStartData.scriptURL), SubstituteData(buffer, "text/html", "UTF-8", KURL())));
 }
@@ -280,9 +283,9 @@ void WebEmbeddedWorkerImpl::didFinishDocumentLoad(WebLocalFrame* frame, bool)
     // invoked and |this| might have been deleted at this point.
 }
 
-void WebEmbeddedWorkerImpl::sendProtocolMessage(int callId, const WebString& message, const WebString& state)
+void WebEmbeddedWorkerImpl::sendProtocolMessage(int sessionId, int callId, const WebString& message, const WebString& state)
 {
-    m_workerContextClient->sendDevToolsMessage(callId, message, state);
+    m_workerContextClient->sendDevToolsMessage(sessionId, callId, message, state);
 }
 
 void WebEmbeddedWorkerImpl::resumeStartup()

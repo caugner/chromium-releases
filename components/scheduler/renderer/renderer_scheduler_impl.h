@@ -6,6 +6,7 @@
 #define COMPONENTS_SCHEDULER_RENDERER_RENDERER_SCHEDULER_IMPL_H_
 
 #include "base/atomicops.h"
+#include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "components/scheduler/base/pollable_thread_safe_flag.h"
 #include "components/scheduler/child/idle_helper.h"
@@ -15,6 +16,7 @@
 #include "components/scheduler/renderer/render_widget_signals.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "components/scheduler/renderer/task_cost_estimator.h"
+#include "components/scheduler/renderer/throttling_helper.h"
 #include "components/scheduler/renderer/user_model.h"
 #include "components/scheduler/scheduler_export.h"
 
@@ -26,6 +28,7 @@ class ConvertableToTraceFormat;
 
 namespace scheduler {
 class RenderWidgetSchedulingState;
+class ThrottlingHelper;
 
 class SCHEDULER_EXPORT RendererSchedulerImpl
     : public RendererScheduler,
@@ -38,7 +41,7 @@ class SCHEDULER_EXPORT RendererSchedulerImpl
 
   // RendererScheduler implementation:
   scoped_ptr<blink::WebThread> CreateMainThread() override;
-  scoped_refptr<TaskQueue> DefaultTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
@@ -82,12 +85,28 @@ class SCHEDULER_EXPORT RendererSchedulerImpl
   // TaskQueueManager::Observer implementation:
   void OnUnregisterTaskQueue(const scoped_refptr<TaskQueue>& queue) override;
 
+  // Returns a task runner where tasks run at the highest possible priority.
+  scoped_refptr<TaskQueue> ControlTaskRunner();
+
+  void RegisterTimeDomain(TimeDomain* time_domain);
+  void UnregisterTimeDomain(TimeDomain* time_domain);
+
+  void SetExpensiveTaskBlockingAllowed(bool allowed);
+
   // Test helpers.
   SchedulerHelper* GetSchedulerHelperForTesting();
   TaskCostEstimator* GetLoadingTaskCostEstimatorForTesting();
   TaskCostEstimator* GetTimerTaskCostEstimatorForTesting();
   IdleTimeEstimator* GetIdleTimeEstimatorForTesting();
   base::TimeTicks CurrentIdleTaskDeadlineForTesting() const;
+
+  base::TickClock* tick_clock() const;
+
+  RealTimeDomain* real_time_domain() const {
+    return helper_.real_time_domain();
+  }
+
+  ThrottlingHelper* throttling_helper() { return &throttling_helper_; }
 
  private:
   friend class RendererSchedulerImplTest;
@@ -233,6 +252,7 @@ class SCHEDULER_EXPORT RendererSchedulerImpl
 
   SchedulerHelper helper_;
   IdleHelper idle_helper_;
+  ThrottlingHelper throttling_helper_;
   RenderWidgetSignals render_widget_scheduler_signals_;
 
   const scoped_refptr<TaskQueue> control_task_runner_;
@@ -276,6 +296,8 @@ class SCHEDULER_EXPORT RendererSchedulerImpl
     bool touchstart_expected_soon;
     bool have_seen_a_begin_main_frame;
     bool has_visible_render_widget_with_touch_handler;
+    bool begin_frame_not_expected_soon;
+    bool expensive_task_blocking_allowed;
   };
 
   struct AnyThread {

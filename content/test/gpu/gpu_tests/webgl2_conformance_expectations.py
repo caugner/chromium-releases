@@ -77,22 +77,127 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('deqp/functional/gles3/uniformbuffers.html', bug=483282)
     self.Skip('deqp/functional/gles3/vertexarrays.html', bug=483282)
 
-    self.Fail('conformance2/buffers/uniform-buffers.html', bug=483282)
     self.Fail('conformance2/glsl3/array-complex-indexing.html', bug=483282)
-    self.Fail('conformance2/glsl3/invalid-default-precision.html', bug=483282)
-    self.Fail('conformance2/glsl3/sequence-operator-returns-non-constant.html',
-        bug=483282)
-    self.Fail('conformance2/glsl3/ternary-operator-on-arrays-glsl3.html',
-        bug=483282)
-    self.Fail('conformance2/reading/read-pixels-into-pixel-pack-buffer.html',
-        bug=483282)
-    self.Fail('conformance2/renderbuffers/framebuffer-test.html', bug=483282)
-    self.Fail('conformance2/renderbuffers/invalidate-framebuffer.html',
+    self.Fail('conformance2/glsl3/forbidden-operators.html', bug=483282)
+    self.Fail('conformance2/extensions/promoted-extensions-in-shaders.html',
+        bug=295792)
+    self.Skip('conformance2/reading/read-pixels-pack-parameters.html',
         bug=483282)
     self.Fail('conformance2/samplers/sampler-drawing-test.html', bug=483282)
-    self.Skip('conformance2/textures/webgl_canvas/*', bug=483282)
-    self.Fail('conformance2/textures/misc/tex-mipmap-levels.html', bug=483282)
-    self.Fail('conformance2/textures/misc/tex-storage-2d.html', bug=483282)
+    self.Fail('conformance2/state/gl-object-get-calls.html', bug=483282)
+    # Note that this test fails on ['win', 'intel'] with bug=483282
+    self.Fail('conformance2/buffers/uniform-buffers.html', bug=577368)
+
+    # Windows and Mac.
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-r8-red-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rg8-rg-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgb8-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgb565-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgb565-rgb-unsigned_short_5_6_5.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgb5_a1-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgb5_a1-rgba-unsigned_short_5_5_5_1.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgba4-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgba4-rgba-unsigned_short_4_4_4_4.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-r8-red-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rg8-rg-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgb8-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgb565-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgb565-rgb-unsigned_short_5_6_5.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgb5_a1-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgb5_a1-rgba-unsigned_short_5_5_5_1.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgba4-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgba4-rgba-unsigned_short_4_4_4_4.html',
+        ['win', 'mac'], bug=483282)
+
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-r8-red-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rg8-rg-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgb8-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgb565-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgb565-rgb-unsigned_short_5_6_5.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgb5_a1-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgb5_a1-rgba-unsigned_short_5_5_5_1.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgba4-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgba4-rgba-unsigned_short_4_4_4_4.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-r8-red-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rg8-rg-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgb8-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgb565-rgb-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgb565-rgb-unsigned_short_5_6_5.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgb5_a1-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgb5_a1-rgba-unsigned_short_5_5_5_1.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgba4-rgba-unsigned_byte.html',
+        ['win', 'mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgba4-rgba-unsigned_short_4_4_4_4.html',
+        ['win', 'mac'], bug=483282)
 
     # Windows only.
     self.Skip('deqp/functional/gles3/readpixel.html', ['win'], bug=483282)
@@ -100,25 +205,21 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['win'], bug=483282)
     self.Fail('conformance2/glsl3/array-in-complex-expression.html',
         ['win'], bug=483282)
-    self.Fail('conformance2/glsl3/frag-depth.html',
-        ['win'], bug=483282)
-    self.Fail('conformance2/glsl3/short-circuiting-in-loop-condition.html',
-        ['win'], bug=483282)
     self.Fail('conformance2/reading/read-pixels-from-fbo-test.html',
         ['win'], bug=483282)
-    self.Fail('conformance2/renderbuffers/framebuffer-object-attachment.html',
-        ['win'], bug=1082) # angle bug ID
-    self.Fail('conformance2/rendering/draw-buffers.html',
-        ['win'], bug=483282)
-    self.Fail('conformance2/state/gl-object-get-calls.html',
-        ['win'], bug=483282)
-    self.Fail('conformance2/textures/canvas/*', ['win'], bug=483282)
     self.Fail('conformance2/textures/misc/gl-get-tex-parameter.html',
         ['win'], bug=483282)
     self.Fail('conformance2/textures/misc/tex-input-validation.html',
         ['win'], bug=483282)
+    self.Skip('conformance2/textures/misc/tex-mipmap-levels.html',
+        ['win'], bug=483282)
     self.Skip('conformance2/transform_feedback/transform_feedback.html',
         ['win'], bug=483282)
+    self.Fail('conformance2/glsl3/const-array-init.html',
+        ['win'], bug=1198) # angle bug ID
+    self.Skip('conformance2/reading/read-pixels-into-pixel-pack-buffer.html',
+        ['win', 'debug'], bug=1266) # angle bug ID
+
     # Windows 8 only.
     self.Fail('conformance2/textures/image_data/tex-image-and-sub-image-2d' +
         '-with-image-data-rgb565-rgb-unsigned_byte.html',
@@ -144,6 +245,31 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('conformance2/textures/video/tex-image-and-sub-image-2d' +
         '-with-video-rgb5_a1-rgba-unsigned_byte.html',
         ['win8'], bug=483282)
+    self.Fail('conformance2/textures/video/tex-image-and-sub-image-3d' +
+        '-with-video-rgb5_a1-rgba-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/video/tex-image-and-sub-image-3d' +
+        '-with-video-rgb565-rgb-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/image_data/tex-image-and-sub-image-3d' +
+        '-with-image-data-rgb565-rgb-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/image_data/tex-image-and-sub-image-3d' +
+        '-with-image-data-rgb5_a1-rgba-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/image/tex-image-and-sub-image-3d' +
+        '-with-image-rgb5_a1-rgba-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/image/tex-image-and-sub-image-3d' +
+        '-with-image-rgb565-rgb-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/svg_image/tex-image-and-sub-image-3d' +
+        '-with-svg-image-rgb565-rgb-unsigned_byte.html',
+        ['win8'], bug=560555)
+    self.Fail('conformance2/textures/svg_image/tex-image-and-sub-image-3d' +
+        '-with-svg-image-rgb5_a1-rgba-unsigned_byte.html',
+        ['win8'], bug=560555)
+
     # Windows Debug. Causing assertions in the GPU process which raise
     # a dialog box, so have to skip them rather than mark them as
     # failing.
@@ -166,8 +292,8 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac'], bug=483282)
     self.Skip('deqp/functional/gles3/shaderswitch.html',
         ['mavericks'], bug=483282)
-    self.Fail('conformance2/attribs/gl-vertex-attrib-i-render.html',
-        ['mac'], bug=483282)
+    self.Fail('deqp/functional/gles3/rbostatequery.html',
+        ['mac'], bug=569808)
     self.Fail('conformance2/buffers/buffer-overflow-test.html',
         ['mac'], bug=483282)
     self.Fail('conformance2/buffers/buffer-type-restrictions.html',
@@ -175,19 +301,32 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('conformance2/renderbuffers/' +
         'multisampled-renderbuffer-initialization.html',
         ['mac'], bug=483282)
-    self.Fail('conformance2/rendering/instanced-arrays.html',
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-2d' +
+        '-with-canvas-rgba8-rgba-unsigned_byte.html',
         ['mac'], bug=483282)
-    self.Fail('conformance2/samplers/samplers.html',
+    self.Fail('conformance2/textures/canvas/tex-image-and-sub-image-3d' +
+        '-with-canvas-rgba8-rgba-unsigned_byte.html',
         ['mac'], bug=483282)
-    self.Fail('conformance2/state/gl-object-get-calls.html',
-        ['mac'], bug=483282)
-    self.Fail('conformance2/textures/canvas/*', ['mac'], bug=483282)
     self.Fail('conformance2/textures/video/*', ['mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-2d' +
+        '-with-webgl-canvas-rgba8-rgba-unsigned_byte.html',
+        ['mac'], bug=483282)
+    self.Fail('conformance2/textures/webgl_canvas/tex-image-and-sub-image-3d' +
+        '-with-webgl-canvas-rgba8-rgba-unsigned_byte.html',
+        ['mac'], bug=483282)
     self.Fail('conformance2/textures/misc/gl-get-tex-parameter.html',
         ['mac'], bug=483282)
-    self.Fail('conformance2/textures/misc/tex-storage-compressed-formats.html',
-        ['mac'], bug=483282)
     self.Fail('conformance2/textures/misc/texture-npot.html',
+        ['mac'], bug=483282)
+    self.Fail('conformance2/textures/misc/tex-storage-compressed-formats.html',
+        ['mac'], bug=295792)
+    self.Fail('conformance2/renderbuffers/invalidate-framebuffer.html',
+        ['mac'], bug=483282)
+    self.Fail('conformance2/renderbuffers/framebuffer-test.html',
+        ['mac'], bug=483282)
+    self.Fail('conformance2/textures/misc/compressed-tex-image.html',
+        ['mac'], bug=565438)
+    self.Fail('conformance2/textures/misc/tex-mipmap-levels.html',
         ['mac'], bug=483282)
 
     # Linux only.
@@ -197,7 +336,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux'], bug=483282)
     self.Fail('conformance2/rendering/draw-buffers.html',
         ['linux'], bug=483282)
-    self.Fail('conformance2/samplers/samplers.html',
+    self.Fail('conformance2/textures/misc/tex-mipmap-levels.html',
         ['linux'], bug=483282)
 
     # Linux AMD only.
@@ -208,16 +347,17 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'amd'], bug=483282)
     self.Skip('deqp/functional/gles3/texturestatequery.html',
         ['linux', 'amd'], bug=483282)
-    self.Fail('conformance2/attribs/gl-vertex-attrib-i-render.html',
-        ['linux', 'amd'], bug=483282)
-    self.Fail('conformance2/attribs/gl-vertexattribipointer-offsets.html',
-        ['linux', 'amd'], bug=483282)
     self.Fail('conformance2/buffers/buffer-type-restrictions.html',
         ['linux', 'amd'], bug=483282)
     self.Fail('conformance2/buffers/buffer-overflow-test.html',
         ['linux', 'amd'], bug=483282)
+    self.Fail('conformance2/renderbuffers/framebuffer-texture-layer.html',
+        ['linux', 'amd'], bug=295792)
     self.Fail('conformance2/textures/misc/tex-storage-compressed-formats.html',
-        ['linux', 'amd'], bug=483282)
+        ['linux', 'amd'], bug=295792)
+
+    # Linux Intel: driver is GL 3.0 and doesn't support features needed for ES3.
+    self.Skip('*', ['linux', 'intel'], bug=540543)
 
     # Conflicting expectations to test that the
     # "Expectations Have No collisions" unittest works.

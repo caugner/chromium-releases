@@ -28,13 +28,25 @@ Polymer({
     },
 
     /**
+     * The text for the join button.
+     * @private {string}
+     */
+    joinButtonText_: {
+      type: String,
+      readOnly: true,
+      value: loadTimeData.getString('joinButton'),
+    },
+
+    /**
      * The text for the stop casting button.
      * @private {string}
      */
     stopCastingButtonText_: {
       type: String,
       readOnly: true,
-      value: loadTimeData.getString('stopCastingButton'),
+      value: function() {
+        return loadTimeData.getString('stopCastingButton');
+      },
     },
 
     /**
@@ -57,6 +69,16 @@ Polymer({
    */
   closeRoute_: function() {
     this.fire('close-route-click', {route: this.route});
+  },
+
+  /**
+   * Fires a join-route-click event. This is called when the button to join
+   * the current route is clicked.
+   *
+   * @private
+   */
+  joinRoute_: function() {
+    this.fire('join-route-click', {route: this.route});
   },
 
   /**

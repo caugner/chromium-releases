@@ -764,9 +764,7 @@ bool MediaCodecDecoder::EnqueueInputBuffer() {
              << " subsamples size:" << unit->subsamples.size();
 
     status = media_codec_bridge_->QueueSecureInputBuffer(
-        index, memory, unit->data.size(),
-        reinterpret_cast<const uint8_t*>(&unit->key_id[0]), unit->key_id.size(),
-        reinterpret_cast<const uint8_t*>(&unit->iv[0]), unit->iv.size(),
+        index, memory, unit->data.size(), unit->key_id, unit->iv,
         unit->subsamples.empty() ? nullptr : &unit->subsamples[0],
         unit->subsamples.size(), unit->timestamp);
   }

@@ -7,6 +7,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
+#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/android/banners/app_banner_data_fetcher_android.h"
 #include "chrome/browser/banners/app_banner_debug_log.h"
@@ -29,24 +30,27 @@ class AppBannerManagerAndroid : public AppBannerManager {
   ~AppBannerManagerAndroid() override;
 
   // Destroys the AppBannerManagerAndroid.
-  void Destroy(JNIEnv* env, jobject obj);
+  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
   // Observes a new WebContents, if necessary.
-  void ReplaceWebContents(JNIEnv* env,
-                          jobject obj,
-                          jobject jweb_contents);
+  void ReplaceWebContents(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& jweb_contents);
 
   // Return whether a BitmapFetcher is active.
-  bool IsFetcherActive(JNIEnv* env, jobject jobj);
+  bool IsFetcherActive(JNIEnv* env,
+                       const base::android::JavaParamRef<jobject>& jobj);
 
   // Called when the Java-side has retrieved information for the app.
   // Returns |false| if an icon fetch couldn't be kicked off.
-  bool OnAppDetailsRetrieved(JNIEnv* env,
-                             jobject obj,
-                             jobject japp_data,
-                             jstring japp_title,
-                             jstring japp_package,
-                             jstring jicon_url);
+  bool OnAppDetailsRetrieved(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& japp_data,
+      const base::android::JavaParamRef<jstring>& japp_title,
+      const base::android::JavaParamRef<jstring>& japp_package,
+      const base::android::JavaParamRef<jstring>& jicon_url);
 
  protected:
   AppBannerDataFetcher* CreateAppBannerDataFetcher(

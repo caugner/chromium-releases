@@ -15,6 +15,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/exclusive_access_bubble_window_controller.h"
@@ -157,6 +158,9 @@ class Command;
   // and |customWindowsToExitFullScreenForWindow:| are called and did not
   // return nil.
   BOOL isUsingCustomAnimation_;
+
+  // True if the toolbar needs to be hidden in fullscreen.
+  BOOL shouldHideFullscreenToolbar_;
 
   // The size of the original (non-fullscreen) window.  This is saved just
   // before entering fullscreen mode and is only valid when |-isFullscreen|
@@ -352,7 +356,7 @@ class Command;
 - (void)updateDevToolsForContents:(content::WebContents*)contents;
 
 // Gets the current theme provider.
-- (ui::ThemeProvider*)themeProvider;
+- (const ui::ThemeProvider*)themeProvider;
 
 // Gets the window style.
 - (ThemedWindowStyle)themedWindowStyle;
@@ -379,6 +383,13 @@ class Command;
 // Executes the command registered by the extension that has the given id.
 - (void)executeExtensionCommand:(const std::string&)extension_id
                         command:(const extensions::Command&)command;
+
+// To set whether the window has a tab playing audio or muted audio playing.
+- (void)setMediaState:(TabMediaState)mediaState;
+
+// Returns current media state, determined by the media state of tabs, set by
+// UpdateMediaState.
+- (TabMediaState)mediaState;
 
 @end  // @interface BrowserWindowController
 
@@ -524,6 +535,11 @@ class Command;
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
                            bubbleType:(ExclusiveAccessBubbleType)bubbleType;
 
+// Toggles and updates the toolbar's visibility in fullscreen mode. This
+// function toggles between the sliding styles: OMNIBOX_TABS_PRESENT and
+// OMNIBOX_TABS_HIDDEN.
+- (void)setFullscreenToolbarHidden:(BOOL)isHidden;
+
 // Returns YES if the browser window is in or entering any fullscreen mode.
 - (BOOL)isInAnyFullscreenMode;
 
@@ -549,6 +565,9 @@ class Command;
 // Whether the system is in the very specific fullscreen mode: Presentation
 // Mode.
 - (BOOL)inPresentationMode;
+
+// Whether if the toolbar should be hidden in fullscreen.
+- (BOOL)shouldHideFullscreenToolbar;
 
 // Resizes the fullscreen window to fit the screen it's currently on.  Called by
 // the PresentationModeController when there is a change in monitor placement or
@@ -618,6 +637,15 @@ class Command;
 // Gets the rect, in window base coordinates, that the omnibox popup should be
 // positioned relative to.
 - (NSRect)omniboxPopupAnchorRect;
+
+// Returns the flag |blockLayoutSubviews_|.
+- (BOOL)isLayoutSubviewsBlocked;
+
+// Returns the active tab contents controller's |blockFullscreenResize_| flag.
+- (BOOL)isActiveTabContentsControllerResizeBlocked;
+
+// Returns the presentation mode controller.
+- (PresentationModeController*)presentationModeController;
 
 @end  // @interface BrowserWindowController (TestingAPI)
 

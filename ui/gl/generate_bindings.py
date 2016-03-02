@@ -79,15 +79,30 @@ GL_FUNCTIONS = [
   'arguments': 'GLenum target, GLuint index, GLuint buffer, GLintptr offset, '
                'GLsizeiptr size', },
 { 'return_type': 'void',
-  'names': ['glBindFragDataLocation'],
+  'versions': [{ 'name': 'glBindFragDataLocation',
+                 'extensions': ['GL_ARB_blend_func_extended'] },
+               { 'name': 'glBindFragDataLocationEXT',
+                 'extensions': ['GL_EXT_blend_func_extended'] }],
   'arguments': 'GLuint program, GLuint colorNumber, const char* name', },
 { 'return_type': 'void',
-  'names': ['glBindFragDataLocationIndexed'],
+  'versions': [{ 'name': 'glBindFragDataLocationIndexed',
+                 'extensions': ['GL_ARB_blend_func_extended'] },
+               { 'name': 'glBindFragDataLocationIndexedEXT',
+                 'extensions': ['GL_EXT_blend_func_extended'] }],
   'arguments':
-      'GLuint program, GLuint colorNumber, GLuint index, const char* name', },
+      'GLuint program, GLuint colorNumber, GLuint index, const char* name',
+},
 { 'return_type': 'void',
   'names': ['glBindFramebufferEXT', 'glBindFramebuffer'],
   'arguments': 'GLenum target, GLuint framebuffer', },
+{ 'return_type': 'void',
+  'known_as': 'glBindImageTextureEXT',
+  'versions': [{ 'name': 'glBindImageTexture',
+                 'extensions': ['GL_ARB_shader_image_load_store'] },
+               { 'name': 'glBindImageTextureEXT',
+                 'extensions': ['GL_EXT_shader_image_load_store'] }],
+  'arguments': 'GLuint index, GLuint texture, GLint level, GLboolean layered,'
+               'GLint layer, GLenum access, GLint format', },
 { 'return_type': 'void',
   'names': ['glBindRenderbufferEXT', 'glBindRenderbuffer'],
   'arguments': 'GLenum target, GLuint renderbuffer', },
@@ -244,6 +259,9 @@ GL_FUNCTIONS = [
   'arguments':
       'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
       'GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height', },
+{ 'return_type': 'void',
+  'names': ['glCoverageModulationNV'],
+  'arguments': 'GLenum components'},
 { 'return_type': 'void',
   'names': ['glCoverFillPathInstancedNV'],
   'arguments': 'GLsizei numPaths, GLenum pathNameType, const void* paths, '
@@ -543,6 +561,12 @@ GL_FUNCTIONS = [
   'names': ['glGetFloatv'],
   'arguments': 'GLenum pname, GLfloat* params', },
 { 'return_type': 'GLint',
+  'versions': [{'name': 'glGetFragDataIndex',
+                'extensions': ['GL_ARB_blend_func_extended']},
+               {'name': 'glGetFragDataIndexEXT',
+                'extensions': ['GL_EXT_blend_func_extended']}],
+  'arguments': 'GLuint program, const char* name', },
+{ 'return_type': 'GLint',
   'versions': [{ 'name': 'glGetFragDataLocation' }],
   'arguments': 'GLuint program, const char* name', },
 { 'return_type': 'void',
@@ -820,6 +844,13 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_EXT_direct_state_access',
                                 'GL_NV_path_rendering'] },],
   'arguments': 'GLenum matrixMode' },
+{ 'return_type': 'void',
+  'known_as': 'glMemoryBarrierEXT',
+  'versions': [{ 'name': 'glMemoryBarrier',
+                 'extensions': ['GL_ARB_shader_image_load_store'] },
+               { 'name': 'glMemoryBarrierEXT',
+                 'extensions': ['GL_EXT_shader_image_load_store'] }],
+  'arguments': 'GLbitfield barriers', },
 { 'return_type': 'void',
   'names': ['glPathCommandsNV'],
   'arguments': 'GLuint path, GLsizei numCommands, const GLubyte* commands, '
@@ -2382,7 +2413,7 @@ def GenerateEnumUtils(out_file, input_filenames):
   out_file.write(LICENSE_AND_HEADER)
   out_file.write("static const GLEnums::EnumToString "
                  "enum_to_string_table[] = {\n")
-  for value in dict:
+  for value in sorted(dict):
     out_file.write('  { %s, "%s", },\n' % (value, dict[value]))
   out_file.write("""};
 

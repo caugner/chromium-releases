@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/tab_capture/offscreen_tab.h"
@@ -154,7 +155,7 @@ const char* const kChromecastExtensionIds[] = {
 };
 
 const char* const kMediaRouterExtensionIds[] = {
-    "fjhoaacokmgbjemoflkofnenfaiekifl",  // Stable
+    "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Stable
     "ekpaaapppgpmolpcldedioblbkmijaca",  // Beta
 };
 

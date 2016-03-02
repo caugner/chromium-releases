@@ -8,7 +8,7 @@
 #include <jni.h>
 
 #include "base/android/jni_weak_ref.h"
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/process/kill.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -27,7 +27,7 @@ class WebContentsObserverProxy : public WebContentsObserver {
   WebContentsObserverProxy(JNIEnv* env, jobject obj, WebContents* web_contents);
   ~WebContentsObserverProxy() override;
 
-  void Destroy(JNIEnv* env, jobject obj);
+  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
  private:
   void RenderViewReady() override;

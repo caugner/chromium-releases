@@ -5,11 +5,13 @@
 #ifndef COMPONENTS_MUS_WS_TEST_CHANGE_TRACKER_H_
 #define COMPONENTS_MUS_WS_TEST_CHANGE_TRACKER_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "components/mus/public/cpp/types.h"
+#include "base/macros.h"
+#include "components/mus/common/types.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "mojo/public/cpp/bindings/array.h"
 #include "ui/mojo/geometry/geometry.mojom.h"
@@ -34,8 +36,10 @@ enum ChangeType {
   CHANGE_TYPE_NODE_DELETED,
   CHANGE_TYPE_INPUT_EVENT,
   CHANGE_TYPE_PROPERTY_CHANGED,
-  CHANGE_TYPE_DELEGATE_EMBED,
   CHANGE_TYPE_FOCUSED,
+  CHANGE_TYPE_CURSOR_CHANGED,
+  CHANGE_TYPE_ON_CHANGE_COMPLETED,
+  CHANGE_TYPE_ON_TOP_LEVEL_CREATED,
 };
 
 // TODO(sky): consider nuking and converting directly to WindowData.
@@ -76,6 +80,8 @@ struct Change {
   bool bool_value;
   std::string property_key;
   std::string property_value;
+  int32_t cursor_id;
+  uint32_t change_id;
 };
 
 // Converts Changes to string descriptions.
@@ -123,7 +129,7 @@ class TestChangeTracker {
   // WindowTreeClient function.
   void OnEmbed(ConnectionSpecificId connection_id, mojom::WindowDataPtr root);
   void OnEmbeddedAppDisconnected(Id window_id);
-  void OnUnembed();
+  void OnUnembed(Id window_id);
   void OnTransientWindowAdded(Id window_id, Id transient_window_id);
   void OnTransientWindowRemoved(Id window_id, Id transient_window_id);
   void OnWindowBoundsChanged(Id window_id,
@@ -146,7 +152,9 @@ class TestChangeTracker {
                                      mojo::String name,
                                      mojo::Array<uint8_t> data);
   void OnWindowFocused(Id window_id);
-  void DelegateEmbed(const mojo::String& url);
+  void OnWindowPredefinedCursorChanged(Id window_id, mojom::Cursor cursor_id);
+  void OnChangeCompleted(uint32_t change_id, bool success);
+  void OnTopLevelCreated(uint32_t change_id, mojom::WindowDataPtr window_data);
 
  private:
   void AddChange(const Change& change);

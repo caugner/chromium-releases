@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/filesystem/InspectorFileSystemAgent.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -765,6 +764,7 @@ ExecutionContext* InspectorFileSystemAgent::assertExecutionContextForOrigin(Erro
 
 DEFINE_TRACE(InspectorFileSystemAgent)
 {
+    visitor->trace(m_inspectedFrames);
     InspectorBaseAgent::trace(visitor);
 }
 

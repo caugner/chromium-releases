@@ -4,7 +4,7 @@
 
 /**
  * @fileoverview
- * 'site-settings-category' is the settings page for showing a certain
+ * 'site-settings-category' is the polymer element for showing a certain
  * category under Site Settings.
  *
  * Example:
@@ -35,37 +35,33 @@ Polymer({
      * example, the Location category can be set to Block/Ask so false, in that
      * case, represents Block and true represents Ask.
      */
-    categoryEnabled: {
-      type: Boolean,
-    },
-
-    /**
-     * The ID of the category this widget is displaying data for.
-     */
-    category: {
-      type: Number,
-    },
+    categoryEnabled: Boolean,
 
     /**
      * The origin that was selected by the user in the dropdown list.
      */
     selectedOrigin: {
       type: String,
-      observer: 'onSelectedOriginChanged_',
+      notify: true,
+    },
+
+    /**
+     * Whether to show the '(recommended)' label prefix for permissions.
+     */
+    showRecommendation: {
+      type: Boolean,
+      value: true,
     },
   },
 
   observers: [
-    'categoryPrefChanged_(prefs.profile.default_content_setting_values.*)',
+    'onCategoryChanged_(prefs.profile.default_content_setting_values.*, ' +
+        'category)',
   ],
 
   ready: function() {
     this.$.blockList.categorySubtype = settings.PermissionValues.BLOCK;
     this.$.allowList.categorySubtype = settings.PermissionValues.ALLOW;
-
-    CrSettingsPrefs.initialized.then(function() {
-      this.categoryEnabled = this.isCategoryAllowed(this.category);
-    }.bind(this));
   },
 
   /**
@@ -73,8 +69,6 @@ Polymer({
    * @private
    */
   onToggleChange_: function(event) {
-    assert(CrSettingsPrefs.isInitialized);
-
     switch (this.category) {
       case settings.ContentSettingsTypes.COOKIES:
       case settings.ContentSettingsTypes.JAVASCRIPT:
@@ -85,7 +79,7 @@ Polymer({
                               settings.PermissionValues.ALLOW :
                               settings.PermissionValues.BLOCK);
         break;
-      case settings.ContentSettingsTypes.NOTIFICATION:
+      case settings.ContentSettingsTypes.NOTIFICATIONS:
       case settings.ContentSettingsTypes.GEOLOCATION:
       case settings.ContentSettingsTypes.CAMERA:
       case settings.ContentSettingsTypes.MIC:
@@ -107,15 +101,11 @@ Polymer({
     }
   },
 
-  onSelectedOriginChanged_: function() {
-    this.$.pages.setSubpageChain(['site-details']);
-  },
-
   /**
-   * Handles when the global toggle changes.
+   * Handles changes to the category pref and the |category| member variable.
    * @private
    */
-  categoryPrefChanged_: function() {
+  onCategoryChanged_: function() {
     this.categoryEnabled = this.isCategoryAllowed(this.category);
   },
 });

@@ -63,6 +63,7 @@ class WebData;
 class WebDataSource;
 class WebDocument;
 class WebElement;
+class WebFrameImplBase;
 class WebLayer;
 class WebLocalFrame;
 class WebPerformance;
@@ -173,6 +174,9 @@ public:
     // this frame's sandbox flags.  The flags won't take effect until the next
     // navigation.
     BLINK_EXPORT void setFrameOwnerSandboxFlags(WebSandboxFlags);
+
+    // Returns true if the frame is enforcing strict mixed content checking.
+    BLINK_EXPORT bool shouldEnforceStrictMixedContentChecking() const;
 
     // Geometry -----------------------------------------------------------
 
@@ -431,9 +435,6 @@ public:
 
     // Editing -------------------------------------------------------------
 
-    // Replaces the selection with the given text.
-    virtual void replaceSelection(const WebString& text) = 0;
-
     virtual void insertText(const WebString& text) = 0;
 
     virtual void setMarkedText(const WebString& text, unsigned location, unsigned length) = 0;
@@ -461,7 +462,6 @@ public:
     virtual void enableContinuousSpellChecking(bool) = 0;
     virtual bool isContinuousSpellCheckingEnabled() const = 0;
     virtual void requestTextChecking(const WebElement&) = 0;
-    virtual void replaceMisspelledRange(const WebString&) = 0;
     virtual void removeSpellingMarkers() = 0;
 
     // Selection -----------------------------------------------------------
@@ -683,6 +683,13 @@ public:
     // text form. This is used only by layout tests.
     virtual WebString layerTreeAsText(bool showDebugInfo = false) const = 0;
 
+    virtual WebFrameImplBase* toImplBase() = 0;
+    // TODO(dcheng): Fix const-correctness issues and remove this overload.
+    virtual const WebFrameImplBase* toImplBase() const
+    {
+        return const_cast<WebFrame*>(this)->toImplBase();
+    }
+
     // Returns the frame inside a given frame or iframe element. Returns 0 if
     // the given element is not a frame, iframe or if the frame is empty.
     BLINK_EXPORT static WebFrame* fromFrameOwnerElement(const WebElement&);
@@ -739,10 +746,6 @@ private:
     WebFrame* m_opener;
     WebPrivateOwnPtr<OpenedFrameTracker> m_openedFrameTracker;
 };
-
-#if BLINK_IMPLEMENTATION
-Frame* toCoreFrame(const WebFrame*);
-#endif
 
 } // namespace blink
 

@@ -33,6 +33,7 @@
 
 #include "../platform/WebColor.h"
 #include "../platform/WebDisplayMode.h"
+#include "../platform/WebFocusType.h"
 #include "../platform/WebPageVisibilityState.h"
 #include "../platform/WebString.h"
 #include "../platform/WebVector.h"
@@ -50,9 +51,11 @@ class WebCredentialManagerClient;
 class WebDragData;
 class WebFrame;
 class WebHitTestResult;
+class WebLocalFrame;
 class WebPageImportanceSignals;
 class WebPageOverlay;
 class WebPrerendererClient;
+class WebRemoteFrame;
 class WebSettings;
 class WebSpellCheckClient;
 class WebString;
@@ -191,6 +194,11 @@ public:
     // previous element in the tab sequence (if reverse is true).
     virtual void advanceFocus(bool reverse) { }
 
+    // Advance the focus from the frame |from| to the next in sequence
+    // (determined by WebFocusType) focusable element in frame |to|. Used when
+    // focus needs to advance to/from a cross-process frame.
+    virtual void advanceFocusAcrossFrames(WebFocusType, WebRemoteFrame* from, WebLocalFrame* to) { }
+
     // Animate a scale into the specified rect where multiple targets were
     // found from previous tap gesture.
     // Returns false if it doesn't do any zooming.
@@ -278,9 +286,6 @@ public:
     // Sets the display mode of the web app.
     virtual void setDisplayMode(WebDisplayMode) = 0;
 
-    // The ratio of the current device's screen DPI to the target device's screen DPI.
-    virtual float deviceScaleFactor() const = 0;
-
     // Sets the ratio as computed by computePageScaleConstraints.
     // TODO(oshima): Remove this once the device scale factor implementation is fully
     // migrated to use zooming mechanism.
@@ -292,7 +297,7 @@ public:
 
     // Set and reset the device color profile.
     virtual void setDeviceColorProfile(const WebVector<char>&) = 0;
-    virtual void resetDeviceColorProfile() = 0;
+    virtual void resetDeviceColorProfileForTesting() = 0;
 
     // Auto-Resize -----------------------------------------------------------
 
@@ -391,6 +396,9 @@ public:
     // Shows a context menu for the currently focused element.
     virtual void showContextMenu() = 0;
 
+    // Notify that context menu has been closed.
+    virtual void didCloseContextMenu() = 0;
+
 
     // SmartClip support ---------------------------------------------------
     virtual void extractSmartClipData(WebRect initRect, WebString& text, WebString& html, WebRect& resultRect) = 0;
@@ -412,8 +420,10 @@ public:
     BLINK_EXPORT static void updateVisitedLinkState(unsigned long long hash);
 
     // Tells all WebView instances to update the visited state for all
-    // their links.
-    BLINK_EXPORT static void resetVisitedLinkState();
+    // their links. Use invalidateVisitedLinkHashes to inform that the visitedlink
+    // table was changed and the salt was changed too. And all cached visitedlink
+    // hashes need to be recalculated.
+    BLINK_EXPORT static void resetVisitedLinkState(bool invalidateVisitedLinkHashes);
 
 
     // Custom colors -------------------------------------------------------

@@ -10,6 +10,8 @@
 #include "base/auto_reset.h"
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -1687,11 +1689,14 @@ gfx::Rect TabDragController::CalculateDraggedBrowserBounds(
       break; // Nothing to do for DETACH_ABOVE_OR_BELOW.
   }
 
-  // To account for the extra vertical on restored windows that is absent on
-  // maximized windows, add an additional vertical offset extracted from the tab
-  // strip.
-  if (source->GetWidget()->IsMaximized())
-    new_bounds.Offset(0, -source->kNewTabButtonVerticalOffset);
+  // Account for the extra space above the tabstrip on restored windows versus
+  // maximized windows.
+  if (source->GetWidget()->IsMaximized()) {
+    const auto* frame_view = static_cast<BrowserNonClientFrameView*>(
+        source->GetWidget()->non_client_view()->frame_view());
+    new_bounds.Offset(
+        0, frame_view->GetTopInset(false) - frame_view->GetTopInset(true));
+  }
   return new_bounds;
 }
 
@@ -1795,10 +1800,12 @@ gfx::NativeWindow TabDragController::GetLocalProcessWindow(
     const gfx::Point& screen_point,
     bool exclude_dragged_view) {
   std::set<gfx::NativeWindow> exclude;
-  gfx::NativeWindow dragged_window =
-      attached_tabstrip_->GetWidget()->GetNativeWindow();
-  if (exclude_dragged_view && dragged_window)
-    exclude.insert(dragged_window);
+  if (exclude_dragged_view) {
+    gfx::NativeWindow dragged_window =
+        attached_tabstrip_->GetWidget()->GetNativeWindow();
+    if (dragged_window)
+      exclude.insert(dragged_window);
+  }
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Exclude windows which are pending deletion via Browser::TabStripEmpty().
   // These windows can be returned in the Linux Aura port because the browser
@@ -1813,6 +1820,8 @@ gfx::NativeWindow TabDragController::GetLocalProcessWindow(
       exclude.insert((*it)->window()->GetNativeWindow());
   }
 #endif
-  return GetLocalProcessWindowAtPoint(host_desktop_type_, screen_point, exclude,
-                                      dragged_window);
+  return GetLocalProcessWindowAtPoint(host_desktop_type_,
+                                      screen_point,
+                                      exclude);
+
 }

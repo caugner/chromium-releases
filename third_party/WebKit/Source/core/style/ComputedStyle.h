@@ -78,6 +78,7 @@
 #include "platform/text/UnicodeBidi.h"
 #include "platform/transforms/TransformOperations.h"
 #include "wtf/Forward.h"
+#include "wtf/LeakAnnotations.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/StdLibExtras.h"
@@ -114,6 +115,7 @@ class ScaleTransformOperation;
 class ShadowList;
 class StyleImage;
 class StyleInheritedData;
+class StylePath;
 class StyleResolver;
 class TransformationMatrix;
 class TranslateTransformOperation;
@@ -271,6 +273,7 @@ protected:
         unsigned styleType : 6; // PseudoId
         unsigned pseudoBits : 8;
         unsigned explicitInheritance : 1; // Explicitly inherits a non-inherited property
+        unsigned variableReference : 1; // A non-inherited property references a variable.
         unsigned unique : 1; // Style can not be shared.
 
         unsigned emptyState : 1;
@@ -284,7 +287,7 @@ protected:
 
         mutable unsigned hasRemUnits : 1;
         // If you add more style bits here, you will also need to update ComputedStyle::copyNonInheritedFromCached()
-        // 63 bits
+        // 62 bits
     } noninherited_flags;
 
 // !END SYNC!
@@ -326,6 +329,7 @@ protected:
         noninherited_flags.styleType = NOPSEUDO;
         noninherited_flags.pseudoBits = 0;
         noninherited_flags.explicitInheritance = false;
+        noninherited_flags.variableReference = false;
         noninherited_flags.unique = false;
         noninherited_flags.emptyState = false;
         noninherited_flags.hasViewportUnits = false;
@@ -349,6 +353,7 @@ private:
     static PassRefPtr<ComputedStyle> createInitialStyle();
     static inline ComputedStyle* initialStyle()
     {
+        LEAK_SANITIZER_DISABLED_SCOPE;
         DEFINE_STATIC_REF(ComputedStyle, s_initialStyle, (ComputedStyle::createInitialStyle()));
         return s_initialStyle;
     }
@@ -361,6 +366,7 @@ public:
     // Computes how the style change should be propagated down the tree.
     static StyleRecalcChange stylePropagationDiff(const ComputedStyle* oldStyle, const ComputedStyle* newStyle);
 
+    const StyleSelfAlignmentData resolvedAlignment(const ComputedStyle& parentStyle, ItemPosition resolvedAutoPositionForLayoutObject) const;
     static ItemPosition resolveAlignment(const ComputedStyle& parentStyle, const ComputedStyle& childStyle, ItemPosition resolvedAutoPositionForLayoutObject);
     static ItemPosition resolveJustification(const ComputedStyle& parentStyle, const ComputedStyle& childStyle, ItemPosition resolvedAutoPositionForLayoutObject);
 
@@ -662,7 +668,8 @@ public:
 
     bool breakWords() const
     {
-        return wordBreak() == BreakWordBreak || overflowWrap() == BreakOverflowWrap;
+        return (wordBreak() == BreakWordBreak || overflowWrap() == BreakOverflowWrap)
+            && whiteSpace() != PRE && whiteSpace() != NOWRAP;
     }
 
     EFillBox backgroundClip() const { return static_cast<EFillBox>(m_background->background().clip()); }
@@ -820,6 +827,9 @@ public:
     // through their self-painting layers. So the layout code doesn't account for them.
     bool hasVisualOverflowingEffect() const { return boxShadow() || hasBorderImageOutsets() || hasOutline(); }
 
+    Containment contain() const { return static_cast<Containment>(rareNonInheritedData->m_contain); }
+    bool containsPaint() const { return rareNonInheritedData->m_contain & ContainsPaint; }
+
     EBoxSizing boxSizing() const { return m_box->boxSizing(); }
     EUserModify userModify() const { return static_cast<EUserModify>(rareInheritedData->userModify); }
     EUserDrag userDrag() const { return static_cast<EUserDrag>(rareNonInheritedData->userDrag); }
@@ -832,7 +842,7 @@ public:
     LineBreak lineBreak() const { return static_cast<LineBreak>(rareInheritedData->lineBreak); }
     const AtomicString& highlight() const { return rareInheritedData->highlight; }
     const AtomicString& hyphenationString() const { return rareInheritedData->hyphenationString; }
-    const AtomicString& locale() const { return rareInheritedData->locale; }
+    const AtomicString& locale() const { return fontDescription().locale(false); }
     EResize resize() const { return static_cast<EResize>(rareNonInheritedData->m_resize); }
     bool hasInlinePaginationAxis() const
     {
@@ -1303,6 +1313,7 @@ public:
     void setBoxShadow(PassRefPtr<ShadowList>);
     void setBoxReflect(PassRefPtr<StyleReflection> reflect) { if (rareNonInheritedData->m_boxReflect != reflect) rareNonInheritedData.access()->m_boxReflect = reflect; }
     void setBoxSizing(EBoxSizing s) { SET_VAR(m_box, m_boxSizing, s); }
+    void setContain(Containment contain) { SET_VAR(rareNonInheritedData, m_contain, contain); }
     void setFlexGrow(float f) { SET_VAR(rareNonInheritedData.access()->m_flexibleBox, m_flexGrow, f); }
     void setFlexShrink(float f) { SET_VAR(rareNonInheritedData.access()->m_flexibleBox, m_flexShrink, f); }
     void setFlexBasis(const Length& length) { SET_VAR(rareNonInheritedData.access()->m_flexibleBox, m_flexBasis, length); }
@@ -1363,7 +1374,6 @@ public:
     void setLineBreak(LineBreak b) { SET_VAR(rareInheritedData, lineBreak, b); }
     void setHighlight(const AtomicString& h) { SET_VAR(rareInheritedData, highlight, h); }
     void setHyphenationString(const AtomicString& h) { SET_VAR(rareInheritedData, hyphenationString, h); }
-    void setLocale(const AtomicString& locale) { SET_VAR(rareInheritedData, locale, locale); }
     void setResize(EResize r) { SET_VAR(rareNonInheritedData, m_resize, r); }
     void setColumnWidth(float f) { SET_VAR(rareNonInheritedData.access()->m_multiCol, m_autoWidth, false); SET_VAR(rareNonInheritedData.access()->m_multiCol, m_width, f); }
     void setHasAutoColumnWidth() { SET_VAR(rareNonInheritedData.access()->m_multiCol, m_autoWidth, true); SET_VAR(rareNonInheritedData.access()->m_multiCol, m_width, 0); }
@@ -1490,6 +1500,7 @@ public:
     float strokeMiterLimit() const { return svgStyle().strokeMiterLimit(); }
     void setStrokeMiterLimit(float f) { accessSVGStyle().setStrokeMiterLimit(f); }
 
+    void setD(PassRefPtr<StylePath> d) { accessSVGStyle().setD(d); }
     void setCx(const Length& cx) { accessSVGStyle().setCx(cx); }
     void setCy(const Length& cy) { accessSVGStyle().setCy(cy); }
     void setX(const Length& x) { accessSVGStyle().setX(x); }
@@ -1601,6 +1612,9 @@ public:
     void setHasExplicitlyInheritedProperties() { noninherited_flags.explicitInheritance = true; }
     bool hasExplicitlyInheritedProperties() const { return noninherited_flags.explicitInheritance; }
 
+    void setHasVariableReferenceFromNonInheritedProperty() { noninherited_flags.variableReference = true; }
+    bool hasVariableReferenceFromNonInheritedProperty() const { return noninherited_flags.variableReference; }
+
     bool hasChildDependentFlags() const { return emptyState() || hasExplicitlyInheritedProperties(); }
     void copyChildDependentFlagsFrom(const ComputedStyle&);
 
@@ -1623,6 +1637,7 @@ public:
     static ECaptionSide initialCaptionSide() { return CAPTOP; }
     static EClear initialClear() { return CNONE; }
     static LengthBox initialClip() { return LengthBox(); }
+    static Containment initialContain() { return ContainsNone; }
     static TextDirection initialDirection() { return LTR; }
     static WritingMode initialWritingMode() { return TopToBottomWritingMode; }
     static TextCombine initialTextCombine() { return TextCombineNone; }
@@ -1705,7 +1720,6 @@ public:
     static const AtomicString& initialHighlight() { return nullAtom; }
     static ESpeak initialSpeak() { return SpeakNormal; }
     static const AtomicString& initialHyphenationString() { return nullAtom; }
-    static const AtomicString& initialLocale() { return nullAtom; }
     static EResize initialResize() { return RESIZE_NONE; }
     static ControlPart initialAppearance() { return NoControlPart; }
     static Order initialRTLOrdering() { return LogicalOrder; }
@@ -1713,7 +1727,7 @@ public:
     static unsigned short initialColumnCount() { return 1; }
     static ColumnFill initialColumnFill() { return ColumnFillBalance; }
     static ColumnSpan initialColumnSpan() { return ColumnSpanNone; }
-    static const TransformOperations& initialTransform() { DEFINE_STATIC_LOCAL(TransformOperations, ops, ()); return ops; }
+    static EmptyTransformOperations initialTransform() { return EmptyTransformOperations(); }
     static PassRefPtr<TranslateTransformOperation> initialTranslate() { return TranslateTransformOperation::create(Length(0, Fixed), Length(0, Fixed), 0, TransformOperation::Translate3D); }
     static PassRefPtr<RotateTransformOperation> initialRotate() { return RotateTransformOperation::create(0, 0, 1, 0, TransformOperation::Rotate3D); }
     static PassRefPtr<ScaleTransformOperation> initialScale() { return ScaleTransformOperation::create(1, 1, 1, TransformOperation::Scale3D); }

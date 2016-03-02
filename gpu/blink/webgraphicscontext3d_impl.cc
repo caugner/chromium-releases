@@ -4,9 +4,12 @@
 
 #include "gpu/blink/webgraphicscontext3d_impl.h"
 
+#include <stdint.h>
+
 #include "base/atomicops.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
@@ -223,7 +226,21 @@ bool WebGraphicsContext3DImpl::insertSyncPoint(WGC3Dbyte* sync_token) {
   return true;
 }
 
-DELEGATE_TO_GL_3(reshapeWithScaleFactor, ResizeCHROMIUM, int, int, float)
+DELEGATE_TO_GL_R(insertFenceSyncCHROMIUM, InsertFenceSyncCHROMIUM, WGC3Duint64)
+
+bool WebGraphicsContext3DImpl::genSyncTokenCHROMIUM(WGC3Duint64 fenceSync,
+                                                    WGC3Dbyte* syncToken) {
+  gl_->GenSyncTokenCHROMIUM(fenceSync, syncToken);
+  return true;
+}
+
+DELEGATE_TO_GL_1(waitSyncTokenCHROMIUM, WaitSyncTokenCHROMIUM, const WGC3Dbyte*)
+
+void WebGraphicsContext3DImpl::reshapeWithScaleFactor(int width,
+                                                      int height,
+                                                      float scale) {
+  gl_->ResizeCHROMIUM(width, height, scale, true);
+}
 
 DELEGATE_TO_GL_4R(mapBufferSubDataCHROMIUM, MapBufferSubDataCHROMIUM, WGC3Denum,
                   WGC3Dintptr, WGC3Dsizeiptr, WGC3Denum, void*)
@@ -573,6 +590,15 @@ blink::WebString WebGraphicsContext3DImpl::getString(
       reinterpret_cast<const char*>(gl_->GetString(name)));
 }
 
+void WebGraphicsContext3DImpl::getSynciv(blink::WGC3Dsync sync,
+                                         blink::WGC3Denum pname,
+                                         blink::WGC3Dsizei bufSize,
+                                         blink::WGC3Dsizei *length,
+                                         blink::WGC3Dint *params) {
+  return gl_->GetSynciv(
+      reinterpret_cast<GLsync>(sync), pname, bufSize, length, params);
+}
+
 DELEGATE_TO_GL_3(getTexParameterfv, GetTexParameterfv,
                  WGC3Denum, WGC3Denum, WGC3Dfloat*)
 
@@ -849,9 +875,8 @@ DELEGATE_TO_GL_3(getQueryObjectui64vEXT,
                  WGC3Denum,
                  WGC3Duint64*)
 
-DELEGATE_TO_GL_8(copyTextureCHROMIUM,
+DELEGATE_TO_GL_7(copyTextureCHROMIUM,
                  CopyTextureCHROMIUM,
-                 WGC3Denum,
                  WebGLId,
                  WebGLId,
                  WGC3Denum,
@@ -860,9 +885,8 @@ DELEGATE_TO_GL_8(copyTextureCHROMIUM,
                  WGC3Dboolean,
                  WGC3Dboolean);
 
-DELEGATE_TO_GL_12(copySubTextureCHROMIUM,
+DELEGATE_TO_GL_11(copySubTextureCHROMIUM,
                   CopySubTextureCHROMIUM,
-                  WGC3Denum,
                   WebGLId,
                   WebGLId,
                   WGC3Dint,
@@ -887,8 +911,6 @@ void WebGraphicsContext3DImpl::shallowFinishCHROMIUM() {
   flush_id_ = GenFlushID();
   gl_->ShallowFinishCHROMIUM();
 }
-
-DELEGATE_TO_GL_1(waitSyncToken, WaitSyncTokenCHROMIUM, const WGC3Dbyte*)
 
 void WebGraphicsContext3DImpl::loseContextCHROMIUM(
     WGC3Denum current, WGC3Denum other) {

@@ -5,6 +5,9 @@
 #ifndef COMPONENTS_SCHEDULER_CHILD_SCHEDULER_HELPER_H_
 #define COMPONENTS_SCHEDULER_CHILD_SCHEDULER_HELPER_H_
 
+#include <stddef.h>
+
+#include "base/macros.h"
 #include "base/time/tick_clock.h"
 #include "components/scheduler/base/task_queue_manager.h"
 #include "components/scheduler/base/task_queue_selector.h"
@@ -83,8 +86,10 @@ class SCHEDULER_EXPORT SchedulerHelper : public TaskQueueManager::Observer {
   void SetObserver(Observer* observer);
 
   // Accessor methods.
+  RealTimeDomain* real_time_domain() const;
+  void RegisterTimeDomain(TimeDomain* time_domain);
+  void UnregisterTimeDomain(TimeDomain* time_domain);
   const scoped_refptr<SchedulerTqmDelegate>& scheduler_tqm_delegate() const;
-  base::TimeTicks NextPendingDelayedTaskRunTime() const;
   bool GetAndClearSystemIsQuiescentBit();
 
   // Test helpers.

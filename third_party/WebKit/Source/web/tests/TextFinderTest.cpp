@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "web/TextFinder.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -14,14 +13,15 @@
 #include "core/html/HTMLElement.h"
 #include "core/layout/TextAutosizer.h"
 #include "core/page/Page.h"
+#include "platform/testing/TestingPlatformSupport.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/web/WebDocument.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "web/FindInPageCoordinates.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
 #include "wtf/OwnPtr.h"
-#include <gtest/gtest.h>
 
 using blink::testing::runPendingTasks;
 
@@ -29,7 +29,15 @@ namespace blink {
 
 class TextFinderTest : public ::testing::Test {
 protected:
-    void SetUp() override;
+    TextFinderTest()
+    {
+        m_webViewHelper.initialize();
+        WebLocalFrameImpl& frameImpl = *m_webViewHelper.webViewImpl()->mainFrameImpl();
+        frameImpl.viewImpl()->resize(WebSize(640, 480));
+        frameImpl.viewImpl()->updateAllLifecyclePhases();
+        m_document = PassRefPtrWillBeRawPtr<Document>(frameImpl.document());
+        m_textFinder = &frameImpl.ensureTextFinder();
+    }
 
     Document& document() const;
     TextFinder& textFinder() const;
@@ -41,16 +49,6 @@ private:
     RefPtrWillBePersistent<Document> m_document;
     RawPtrWillBePersistent<TextFinder> m_textFinder;
 };
-
-void TextFinderTest::SetUp()
-{
-    m_webViewHelper.initialize();
-    WebLocalFrameImpl& frameImpl = *m_webViewHelper.webViewImpl()->mainFrameImpl();
-    frameImpl.viewImpl()->resize(WebSize(640, 480));
-    frameImpl.viewImpl()->updateAllLifecyclePhases();
-    m_document = PassRefPtrWillBeRawPtr<Document>(frameImpl.document());
-    m_textFinder = &frameImpl.ensureTextFinder();
-}
 
 Document& TextFinderTest::document() const
 {
@@ -398,41 +396,19 @@ TEST_F(TextFinderTest, SequentialMatches)
 
 class TextFinderFakeTimerTest : public TextFinderTest {
 protected:
-    void SetUp() override;
-    void TearDown() override;
-
     // A simple platform that mocks out the clock.
-    class TimeProxyPlatform : public Platform {
+    class TimeProxyPlatform : public TestingPlatformSupport {
     public:
         TimeProxyPlatform()
-            : m_timeCounter(0.)
-            , m_fallbackPlatform(0)
-        { }
-
-        void install()
+            : m_timeCounter(m_oldPlatform->currentTimeSeconds())
         {
-            // Check that the proxy wasn't installed yet.
-            ASSERT_NE(Platform::current(), this);
-            m_fallbackPlatform = Platform::current();
-            m_timeCounter = m_fallbackPlatform->currentTimeSeconds();
-            Platform::initialize(this);
-            ASSERT_EQ(Platform::current(), this);
-        }
-
-        void remove()
-        {
-            // Check that the proxy was installed.
-            ASSERT_EQ(Platform::current(), this);
-            Platform::initialize(m_fallbackPlatform);
-            ASSERT_EQ(Platform::current(), m_fallbackPlatform);
-            m_fallbackPlatform = 0;
         }
 
     private:
         Platform& ensureFallback()
         {
-            ASSERT(m_fallbackPlatform);
-            return *m_fallbackPlatform;
+            ASSERT(m_oldPlatform);
+            return *m_oldPlatform;
         }
 
         // From blink::Platform:
@@ -441,46 +417,21 @@ protected:
             return ++m_timeCounter;
         }
 
-        // These blink::Platform methods must be overriden to make a usable object.
-        void cryptographicallyRandomValues(unsigned char* buffer, size_t length) override
-        {
-            ensureFallback().cryptographicallyRandomValues(buffer, length);
-        }
-
-        const unsigned char* getTraceCategoryEnabledFlag(const char* categoryName) override
-        {
-            return ensureFallback().getTraceCategoryEnabledFlag(categoryName);
-        }
-
         // These two methods allow timers to work correctly.
         double monotonicallyIncreasingTimeSeconds() override
         {
             return ensureFallback().monotonicallyIncreasingTimeSeconds();
         }
 
-        WebThread* currentThread() override { return ensureFallback().currentThread(); }
         WebUnitTestSupport* unitTestSupport() override { return ensureFallback().unitTestSupport(); }
         WebString defaultLocale() override { return ensureFallback().defaultLocale(); }
         WebCompositorSupport* compositorSupport() override { return ensureFallback().compositorSupport(); }
 
         double m_timeCounter;
-        Platform* m_fallbackPlatform;
     };
 
     TimeProxyPlatform m_proxyTimePlatform;
 };
-
-void TextFinderFakeTimerTest::SetUp()
-{
-    TextFinderTest::SetUp();
-    m_proxyTimePlatform.install();
-}
-
-void TextFinderFakeTimerTest::TearDown()
-{
-    m_proxyTimePlatform.remove();
-    TextFinderTest::TearDown();
-}
 
 TEST_F(TextFinderFakeTimerTest, ScopeWithTimeouts)
 {

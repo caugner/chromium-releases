@@ -5,9 +5,11 @@
 #include "chrome/browser/search/most_visited_iframe_source.h"
 
 #include "base/command_line.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "chrome/browser/search/local_files_ntp_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -50,14 +52,14 @@ void MostVisitedIframeSource::StartDataRequest(
   GURL url(chrome::kChromeSearchMostVisitedUrl + path_and_query);
   std::string path(url.path());
 
-#if !defined(GOOGLE_CHROME_BUILD)
+#if !defined(GOOGLE_CHROME_BUILD) && !defined(OS_IOS)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kLocalNtpReload)) {
     std::string rel_path = "most_visited_" + path.substr(1);
     if (path == kSingleJSPath) {
       std::string origin;
       if (!GetOrigin(render_process_id, render_frame_id, &origin)) {
-        callback.Run(NULL);
+        callback.Run(nullptr);
         return;
       }
       local_ntp::SendLocalFileResourceWithOrigin(rel_path, origin, callback);

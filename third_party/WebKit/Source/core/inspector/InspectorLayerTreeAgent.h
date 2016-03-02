@@ -72,7 +72,7 @@ public:
 
     // Called from InspectorInstrumentation
     void layerTreeDidChange();
-    void didPaint(LayoutObject*, const GraphicsLayer*, GraphicsContext*, const LayoutRect&);
+    void didPaint(LayoutObject*, const GraphicsLayer*, GraphicsContext&, const LayoutRect&);
 
     // Called from the front-end.
     void enable(ErrorString*) override;
@@ -103,7 +103,7 @@ private:
     void gatherGraphicsLayers(GraphicsLayer*, HashMap<int, int>& layerIdToNodeIdMap, RefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::Layer> >&);
     int idForNode(Node*);
 
-    InspectedFrames* m_inspectedFrames;
+    RawPtrWillBeMember<InspectedFrames> m_inspectedFrames;
     Vector<int, 2> m_pageOverlayLayerIds;
 
     typedef HashMap<String, RefPtr<PictureSnapshot> > SnapshotById;

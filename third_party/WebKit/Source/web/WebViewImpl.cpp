@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/WebViewImpl.h"
 
 #include "core/CSSValueKeywords.h"
@@ -323,6 +322,69 @@ private:
     WebColor m_color;
 };
 
+#if OS(ANDROID)
+// Array used to convert canonical encoding method name to index to be
+// uploaded to UMA for the experiment on text encoding auto detection.
+// The listed order should be in sync with the enum definition 'EncodingMethod'
+// in tools/metrics/histograms/histograms.xml.
+static const char* kEncodingNames[] = {
+    "UNKNOWN",
+    "Big5",
+    "EUC-JP",
+    "EUC-KR",
+    "GBK",
+    "IBM866",
+    "ISO-2022-JP",
+    "ISO-8859-10",
+    "ISO-8859-13",
+    "ISO-8859-14",
+    "ISO-8859-15",
+    "ISO-8859-16",
+    "ISO-8859-2",
+    "ISO-8859-3",
+    "ISO-8859-4",
+    "ISO-8859-5",
+    "ISO-8859-6",
+    "ISO-8859-7",
+    "ISO-8859-8",
+    "ISO-8859-8-I",
+    "KOI8-R",
+    "KOI8-U",
+    "Shift_JIS",
+    "UTF-16LE",
+    "UTF-8",
+    "gb18030",
+    "macintosh",
+    "windows-1250",
+    "windows-1251",
+    "windows-1252",
+    "windows-1253",
+    "windows-1254",
+    "windows-1255",
+    "windows-1256",
+    "windows-1257",
+    "windows-1258",
+    "windows-874"
+};
+
+// Returns the index of the entry in the array that matches
+// the given encoding method.
+static int encodingToUmaId(const WTF::TextEncoding& encoding)
+{
+    const char* encodingName = encoding.name();
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(kEncodingNames); ++i) {
+        if (!strcasecmp(kEncodingNames[i], encodingName))
+            return i;
+    }
+    return 0;
+}
+
+static bool isInternalURL(const KURL& url)
+{
+    const String& protocol = url.protocol();
+    return protocol == "chrome" || protocol == "chrome-native" || protocol == "swappedout";
+}
+#endif
 } // namespace
 
 // WebView ----------------------------------------------------------------
@@ -349,9 +411,9 @@ void WebView::updateVisitedLinkState(unsigned long long linkHash)
     Page::visitedStateChanged(linkHash);
 }
 
-void WebView::resetVisitedLinkState()
+void WebView::resetVisitedLinkState(bool invalidateVisitedLinkHashes)
 {
-    Page::allVisitedStateChanged();
+    Page::allVisitedStateChanged(invalidateVisitedLinkHashes);
 }
 
 void WebView::willEnterModalLoop()
@@ -367,12 +429,7 @@ void WebView::didExitModalLoop()
 
 void WebViewImpl::setMainFrame(WebFrame* frame)
 {
-    if (frame->isWebLocalFrame()) {
-        WebLocalFrameImpl* localFrame = toWebLocalFrameImpl(frame);
-        localFrame->initializeCoreFrame(&page()->frameHost(), 0, nullAtom, nullAtom);
-    } else {
-        toWebRemoteFrameImpl(frame)->initializeCoreFrame(&page()->frameHost(), 0, nullAtom);
-    }
+    frame->toImplBase()->initializeCoreFrame(&page()->frameHost(), 0, nullAtom, nullAtom);
 }
 
 void WebViewImpl::setCredentialManagerClient(WebCredentialManagerClient* webCredentialManagerClient)
@@ -433,10 +490,8 @@ WebViewImpl::WebViewImpl(WebViewClient* client)
     , m_layerTreeView(nullptr)
     , m_rootLayer(nullptr)
     , m_rootGraphicsLayer(nullptr)
-    , m_rootTransformLayer(nullptr)
     , m_graphicsLayerFactory(adoptPtr(new GraphicsLayerFactoryChromium(this)))
     , m_matchesHeuristicsForGpuRasterization(false)
-    , m_recreatingGraphicsContext(false)
     , m_flingModifier(0)
     , m_flingSourceDevice(WebGestureDeviceUninitialized)
     , m_fullscreenController(FullscreenController::create(this))
@@ -459,7 +514,7 @@ WebViewImpl::WebViewImpl(WebViewClient* client)
     pageClients.dragClient = &m_dragClientImpl;
     pageClients.spellCheckerClient = &m_spellCheckerClientImpl;
 
-    m_page = adoptPtrWillBeNoop(new Page(pageClients));
+    m_page = Page::createOrdinary(pageClients);
     MediaKeysController::provideMediaKeysTo(*m_page, &m_mediaKeysClientImpl);
     provideSpeechRecognitionTo(*m_page, SpeechRecognitionClientProxy::create(client ? client->speechRecognizer() : nullptr));
     provideContextFeaturesTo(*m_page, ContextFeaturesClientImpl::create());
@@ -470,10 +525,7 @@ WebViewImpl::WebViewImpl(WebViewClient* client)
     provideWorkerGlobalScopeProxyProviderTo(*m_page, WorkerGlobalScopeProxyProviderImpl::create());
     StorageNamespaceController::provideStorageNamespaceTo(*m_page, &m_storageClientImpl);
 
-    m_page->makeOrdinary();
-
     if (m_client) {
-        setDeviceScaleFactor(m_client->screenInfo().deviceScaleFactor);
         setVisibilityState(m_client->visibilityState(), true);
     }
 
@@ -489,6 +541,11 @@ WebViewImpl::WebViewImpl(WebViewClient* client)
 WebViewImpl::~WebViewImpl()
 {
     ASSERT(!m_page);
+
+    // Each highlight uses m_owningWebViewImpl->m_linkHighlightsTimeline
+    // in destructor. m_linkHighlightsTimeline might be destroyed earlier
+    // than m_linkHighlights.
+    ASSERT(m_linkHighlights.isEmpty());
 }
 
 WebDevToolsAgentImpl* WebViewImpl::mainFrameDevToolsAgentImpl()
@@ -638,7 +695,7 @@ void WebViewImpl::handleMouseUp(LocalFrame& mainFrame, const WebMouseEvent& even
     }
 }
 
-bool WebViewImpl::handleMouseWheel(LocalFrame& mainFrame, const WebMouseWheelEvent& event)
+WebInputEventResult WebViewImpl::handleMouseWheel(LocalFrame& mainFrame, const WebMouseWheelEvent& event)
 {
     hidePopups();
     return PageWidgetEventHandler::handleMouseWheel(mainFrame, event);
@@ -651,6 +708,8 @@ bool WebViewImpl::scrollBy(const WebFloatSize& delta, const WebFloatSize& veloci
         WebMouseWheelEvent syntheticWheel;
         const float tickDivisor = WheelEvent::TickMultiplier;
 
+        syntheticWheel.type = WebInputEvent::MouseWheel;
+        syntheticWheel.timeStampSeconds = WTF::monotonicallyIncreasingTime();
         syntheticWheel.deltaX = delta.width;
         syntheticWheel.deltaY = delta.height;
         syntheticWheel.wheelTicksX = delta.width / tickDivisor;
@@ -663,11 +722,12 @@ bool WebViewImpl::scrollBy(const WebFloatSize& delta, const WebFloatSize& veloci
         syntheticWheel.modifiers = m_flingModifier;
 
         if (m_page && m_page->mainFrame() && m_page->mainFrame()->isLocalFrame() && m_page->deprecatedLocalMainFrame()->view())
-            return handleMouseWheel(*m_page->deprecatedLocalMainFrame(), syntheticWheel);
+            return handleMouseWheel(*m_page->deprecatedLocalMainFrame(), syntheticWheel) != WebInputEventResult::NotHandled;
     } else {
         WebGestureEvent syntheticGestureEvent;
 
         syntheticGestureEvent.type = WebInputEvent::GestureScrollUpdate;
+        syntheticGestureEvent.timeStampSeconds = WTF::monotonicallyIncreasingTime();
         syntheticGestureEvent.data.scrollUpdate.preventPropagation = true;
         syntheticGestureEvent.data.scrollUpdate.deltaX = delta.width;
         syntheticGestureEvent.data.scrollUpdate.deltaY = delta.height;
@@ -682,17 +742,17 @@ bool WebViewImpl::scrollBy(const WebFloatSize& delta, const WebFloatSize& veloci
         syntheticGestureEvent.data.scrollUpdate.inertial = true;
 
         if (m_page && m_page->mainFrame() && m_page->mainFrame()->isLocalFrame() && m_page->deprecatedLocalMainFrame()->view())
-            return handleGestureEvent(syntheticGestureEvent);
+            return handleGestureEvent(syntheticGestureEvent) != WebInputEventResult::NotHandled;
     }
     return false;
 }
 
-bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
+WebInputEventResult WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
 {
     if (!m_client)
-        return false;
+        return WebInputEventResult::NotHandled;
 
-    bool eventSwallowed = false;
+    WebInputEventResult eventResult = WebInputEventResult::NotHandled;
     bool eventCancelled = false; // for disambiguation
 
     // Special handling for slow-path fling gestures.
@@ -711,23 +771,24 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
         ASSERT(flingCurve);
         m_gestureAnimation = WebActiveGestureAnimation::createAtAnimationStart(flingCurve.release(), this);
         scheduleAnimation();
-        eventSwallowed = true;
+        eventResult = WebInputEventResult::HandledSystem;
 
         // Plugins may need to see GestureFlingStart to balance
         // GestureScrollBegin (since the former replaces GestureScrollEnd when
         // transitioning to a fling).
         PlatformGestureEventBuilder platformEvent(mainFrameImpl()->frameView(), event);
+        // TODO(dtapuska): Why isn't the response used?
         mainFrameImpl()->frame()->eventHandler().handleGestureScrollEvent(platformEvent);
 
         m_client->didHandleGestureEvent(event, eventCancelled);
-        return eventSwallowed;
+        return WebInputEventResult::HandledSystem;
     }
     case WebInputEvent::GestureFlingCancel:
         if (endActiveFlingAnimation())
-            eventSwallowed = true;
+            eventResult = WebInputEventResult::HandledSuppressed;
 
         m_client->didHandleGestureEvent(event, eventCancelled);
-        return eventSwallowed;
+        return eventResult;
     default:
         break;
     }
@@ -744,9 +805,9 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
         }
         // GestureDoubleTap is currently only used by Android for zooming. For WebCore,
         // GestureTap with tap count = 2 is used instead. So we drop GestureDoubleTap here.
-        eventSwallowed = true;
+        eventResult = WebInputEventResult::HandledSystem;
         m_client->didHandleGestureEvent(event, eventCancelled);
-        return eventSwallowed;
+        return eventResult;
     case WebInputEvent::GestureScrollBegin:
         m_client->cancelScheduledContentIntents();
     case WebInputEvent::GestureScrollEnd:
@@ -756,13 +817,13 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
         // the chain, doing a single-frame hit-test per frame. This matches handleWheelEvent.
         // Perhaps we could simplify things by rewriting scroll handling to work inner frame
         // out, and then unify with other gesture events.
-        eventSwallowed = mainFrameImpl()->frame()->eventHandler().handleGestureScrollEvent(platformEvent);
+        eventResult = mainFrameImpl()->frame()->eventHandler().handleGestureScrollEvent(platformEvent);
         m_client->didHandleGestureEvent(event, eventCancelled);
-        return eventSwallowed;
+        return eventResult;
     case WebInputEvent::GesturePinchBegin:
     case WebInputEvent::GesturePinchEnd:
     case WebInputEvent::GesturePinchUpdate:
-        return false;
+        return WebInputEventResult::NotHandled;
     default:
         break;
     }
@@ -799,7 +860,7 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
 
         m_client->cancelScheduledContentIntents();
         if (detectContentOnTouch(targetedEvent)) {
-            eventSwallowed = true;
+            eventResult = WebInputEventResult::HandledSystem;
             break;
         }
 
@@ -833,14 +894,14 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
                     enableTapHighlights(highlightNodes);
                     for (size_t i = 0; i < m_linkHighlights.size(); ++i)
                         m_linkHighlights[i]->startHighlightAnimationIfNeeded();
-                    eventSwallowed = true;
+                    eventResult = WebInputEventResult::HandledSystem;
                     eventCancelled = true;
                     break;
                 }
             }
         }
 
-        eventSwallowed = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
+        eventResult = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
 
         if (m_pagePopup && pagePopup && m_pagePopup->hasSamePopupClient(pagePopup.get())) {
             // The tap triggered a page popup that is the same as the one we just closed.
@@ -859,7 +920,7 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
         m_page->contextMenuController().clearContextMenu();
         {
             ContextMenuAllowedScope scope;
-            eventSwallowed = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
+            eventResult = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
         }
 
         break;
@@ -869,17 +930,17 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
     case WebInputEvent::GestureTapDown:
     case WebInputEvent::GestureTapCancel:
     case WebInputEvent::GestureTapUnconfirmed: {
-        eventSwallowed = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
+        eventResult = mainFrameImpl()->frame()->eventHandler().handleGestureEvent(targetedEvent);
         break;
     }
     default:
         ASSERT_NOT_REACHED();
     }
     m_client->didHandleGestureEvent(event, eventCancelled);
-    return eventSwallowed;
+    return eventResult;
 }
 
-bool WebViewImpl::handleSyntheticWheelFromTouchpadPinchEvent(const WebGestureEvent& pinchEvent)
+WebInputEventResult WebViewImpl::handleSyntheticWheelFromTouchpadPinchEvent(const WebGestureEvent& pinchEvent)
 {
     ASSERT(pinchEvent.type == WebInputEvent::GesturePinchUpdate);
 
@@ -1028,7 +1089,7 @@ void WebViewImpl::acceptLanguagesChanged()
     page()->acceptLanguagesChanged();
 }
 
-bool WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
+WebInputEventResult WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
 {
     ASSERT((event.type == WebInputEvent::RawKeyDown)
         || (event.type == WebInputEvent::KeyDown)
@@ -1056,24 +1117,25 @@ bool WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
         // enter when selecting an item in the popup will go to the page.
         if (WebInputEvent::RawKeyDown == event.type)
             m_suppressNextKeypressEvent = true;
-        return true;
+        return WebInputEventResult::HandledSystem;
     }
 
     RefPtrWillBeRawPtr<Frame> focusedFrame = focusedCoreFrame();
     if (focusedFrame && focusedFrame->isRemoteFrame()) {
         WebRemoteFrameImpl* webFrame = WebRemoteFrameImpl::fromFrame(*toRemoteFrame(focusedFrame.get()));
         webFrame->client()->forwardInputEvent(&event);
-        return true;
+        return WebInputEventResult::HandledSystem;
     }
 
     if (!focusedFrame || !focusedFrame->isLocalFrame())
-        return false;
+        return WebInputEventResult::NotHandled;
 
     LocalFrame* frame = toLocalFrame(focusedFrame.get());
 
     PlatformKeyboardEventBuilder evt(event);
 
-    if (frame->eventHandler().keyEvent(evt)) {
+    WebInputEventResult result = frame->eventHandler().keyEvent(evt);
+    if (result != WebInputEventResult::NotHandled) {
         if (WebInputEvent::RawKeyDown == event.type) {
             // Suppress the next keypress event unless the focused node is a plugin node.
             // (Flash needs these keypress events to handle non-US keyboards.)
@@ -1092,7 +1154,7 @@ bool WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
                 m_suppressNextKeypressEvent = true;
             }
         }
-        return true;
+        return result;
     }
 
 #if !OS(MACOSX)
@@ -1107,14 +1169,16 @@ bool WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
     bool isShiftF10 = event.modifiers == WebInputEvent::ShiftKey && event.windowsKeyCode == VKEY_F10;
     if ((isUnmodifiedMenuKey || isShiftF10) && event.type == contextMenuTriggeringEventType) {
         sendContextMenuEvent(event);
-        return true;
+        return WebInputEventResult::HandledSystem;
     }
 #endif // !OS(MACOSX)
 
-    return keyEventDefault(event);
+    if (keyEventDefault(event))
+        return WebInputEventResult::HandledSystem;
+    return WebInputEventResult::NotHandled;
 }
 
-bool WebViewImpl::handleCharEvent(const WebKeyboardEvent& event)
+WebInputEventResult WebViewImpl::handleCharEvent(const WebKeyboardEvent& event)
 {
     ASSERT(event.type == WebInputEvent::Char);
     TRACE_EVENT1("input", "WebViewImpl::handleCharEvent",
@@ -1135,29 +1199,35 @@ bool WebViewImpl::handleCharEvent(const WebKeyboardEvent& event)
 
     LocalFrame* frame = toLocalFrame(focusedCoreFrame());
     if (!frame)
-        return suppress;
+        return suppress ? WebInputEventResult::HandledSuppressed : WebInputEventResult::NotHandled;
 
     EventHandler& handler = frame->eventHandler();
 
     PlatformKeyboardEventBuilder evt(event);
     if (!evt.isCharacterKey())
-        return true;
+        return WebInputEventResult::HandledSuppressed;
 
     // Accesskeys are triggered by char events and can't be suppressed.
     if (handler.handleAccessKey(evt))
-        return true;
+        return WebInputEventResult::HandledSystem;
 
     // Safari 3.1 does not pass off windows system key messages (WM_SYSCHAR) to
     // the eventHandler::keyEvent. We mimic this behavior on all platforms since
     // for now we are converting other platform's key events to windows key
     // events.
     if (evt.isSystemKey())
-        return false;
+        return WebInputEventResult::NotHandled;
 
-    if (!suppress && !handler.keyEvent(evt))
-        return keyEventDefault(event);
+    if (suppress)
+        return WebInputEventResult::HandledSuppressed;
 
-    return true;
+    WebInputEventResult result = handler.keyEvent(evt);
+    if (result != WebInputEventResult::NotHandled)
+        return result;
+    if (keyEventDefault(event))
+        return WebInputEventResult::HandledSystem;
+
+    return WebInputEventResult::NotHandled;
 }
 
 WebRect WebViewImpl::computeBlockBound(const WebPoint& pointInRootFrame, bool ignoreClipping)
@@ -1379,9 +1449,6 @@ void WebViewImpl::enableTapHighlights(WillBeHeapVector<RawPtrWillBeMember<Node>>
     // don't get a new target to highlight.
     m_linkHighlights.clear();
 
-    // LinkHighlight reads out layout and compositing state, so we need to make sure that's all up to date.
-    updateAllLifecyclePhases();
-
     for (size_t i = 0; i < highlightNodes.size(); ++i) {
         Node* node = highlightNodes[i];
 
@@ -1397,6 +1464,8 @@ void WebViewImpl::enableTapHighlights(WillBeHeapVector<RawPtrWillBeMember<Node>>
 
         m_linkHighlights.append(LinkHighlightImpl::create(node, this));
     }
+
+    updateAllLifecyclePhases();
 }
 
 void WebViewImpl::animateDoubleTapZoom(const IntPoint& pointInRootFrame)
@@ -1485,7 +1554,7 @@ bool WebViewImpl::hasTouchEventHandlersAt(const WebPoint& point)
 
 #if !OS(MACOSX)
 // Mac has no way to open a context menu based on a keyboard event.
-bool WebViewImpl::sendContextMenuEvent(const WebKeyboardEvent& event)
+WebInputEventResult WebViewImpl::sendContextMenuEvent(const WebKeyboardEvent& event)
 {
     // The contextMenuController() holds onto the last context menu that was
     // popped up on the page until a new one is created. We need to clear
@@ -1495,15 +1564,13 @@ bool WebViewImpl::sendContextMenuEvent(const WebKeyboardEvent& event)
     // not run.
     page()->contextMenuController().clearContextMenu();
 
-    bool handled;
     {
         ContextMenuAllowedScope scope;
         Frame* focusedFrame = page()->focusController().focusedOrMainFrame();
         if (!focusedFrame->isLocalFrame())
-            return false;
-        handled = toLocalFrame(focusedFrame)->eventHandler().sendContextMenuEventForKey(nullptr);
+            return WebInputEventResult::NotHandled;
+        return toLocalFrame(focusedFrame)->eventHandler().sendContextMenuEventForKey(nullptr);
     }
-    return handled;
 }
 #endif
 
@@ -1668,6 +1735,11 @@ void WebViewImpl::closePagePopup(PagePopup* popup)
     if (m_pagePopup.get() != popupImpl)
         return;
     m_pagePopup->closePopup();
+    cleanupPagePopup();
+}
+
+void WebViewImpl::cleanupPagePopup()
+{
     m_pagePopup = nullptr;
     disablePopupMouseWheelEventListener();
 }
@@ -1680,6 +1752,15 @@ void WebViewImpl::cancelPagePopup()
 
 void WebViewImpl::enablePopupMouseWheelEventListener()
 {
+    // TODO(kenrb): Popup coordination for out-of-process iframes needs to be
+    // added. Because of the early return here (and also the one in
+    // ScrollingCoordinator::updateHaveWheelEventHandlers) a select element
+    // popup can remain visible even when the element underneath it is
+    // scrolled to a new position. This is part of a larger set of issues with
+    // popups.
+    // See https://crbug.com/566130
+    if (!mainFrameImpl() || !mainFrameImpl()->frame()->isLocalFrame())
+        return;
     ASSERT(!m_popupMouseWheelEventListener);
     Document* document = mainFrameImpl()->frame()->document();
     ASSERT(document);
@@ -1691,6 +1772,10 @@ void WebViewImpl::enablePopupMouseWheelEventListener()
 
 void WebViewImpl::disablePopupMouseWheelEventListener()
 {
+    // TODO(kenrb): Concerns the same as in enablePopupMouseWheelEventListener.
+    // See https://crbug.com/566130
+    if (!mainFrameImpl() || !mainFrameImpl()->frame()->isLocalFrame())
+        return;
     ASSERT(m_popupMouseWheelEventListener);
     Document* document = mainFrameImpl()->frame()->document();
     ASSERT(document);
@@ -1766,16 +1851,6 @@ void WebViewImpl::performResize()
         if (!mainFrameImpl()->frameView()->needsLayout())
             postLayoutResize(mainFrameImpl());
     }
-
-    // When device emulation is enabled, device size values may change - they are
-    // usually set equal to the view size. These values are not considered viewport-dependent
-    // (see MediaQueryExp::isViewportDependent), since they are only viewport-dependent in emulation mode,
-    // and thus will not be invalidated in |FrameView::performPreLayoutTasks|.
-    // Therefore we should force explicit media queries invalidation here.
-    if (m_devToolsEmulator->deviceEmulationEnabled()) {
-        if (Document* document = mainFrameImpl()->frame()->document())
-            document->mediaQueryAffectingValueChanged();
-    }
 }
 
 void WebViewImpl::setTopControlsHeight(float height, bool topControlsShrinkLayoutSize)
@@ -1820,26 +1895,36 @@ TopControls& WebViewImpl::topControls()
 
 void WebViewImpl::resizeViewWhileAnchored(FrameView* view)
 {
-    // FIXME: TextAutosizer does not yet support out-of-process frames.
-    if (mainFrameImpl() && mainFrameImpl()->frame()->isLocalFrame()) {
+    ASSERT(mainFrameImpl() && mainFrameImpl()->frame()->isLocalFrame());
+
+    {
         // Avoids unnecessary invalidations while various bits of state in TextAutosizer are updated.
         TextAutosizer::DeferUpdatePageInfo deferUpdatePageInfo(page());
-        performResize();
-    } else {
         performResize();
     }
 
     m_fullscreenController->updateSize();
 
-    // Relayout immediately to recalculate the minimum scale limit for rotation anchoring.
-    if (view->needsLayout())
-        view->layout();
+    // Update lifecyle phases immediately to recalculate the minimum scale limit for rotation anchoring,
+    // and to make sure that no lifecycle states are stale if this WebView is embedded in another one.
+    updateAllLifecyclePhases();
 }
 
 void WebViewImpl::resize(const WebSize& newSize)
 {
     if (m_shouldAutoResize || m_size == newSize)
         return;
+
+    if (page()->mainFrame() && !page()->mainFrame()->isLocalFrame()) {
+        // Viewport resize for a remote main frame does not require any
+        // particular action, but the state needs to reflect the correct size
+        // so that it can be used for initalization if the main frame gets
+        // swapped to a LocalFrame at a later time.
+        m_size = newSize;
+        pageScaleConstraintsSet().didChangeViewSize(m_size);
+        page()->frameHost().visualViewport().setSize(m_size);
+        return;
+    }
 
     WebLocalFrameImpl* mainFrame = mainFrameImpl();
     if (!mainFrame)
@@ -1917,14 +2002,21 @@ void WebViewImpl::updateAllLifecyclePhases()
     if (!mainFrameImpl())
         return;
 
-    PageWidgetDelegate::updateLifecycleToCompositingCleanPlusScrolling(*m_page, *mainFrameImpl()->frame());
-
     updateLayerTreeBackgroundColor();
 
-    // TODO(wangxianzhu): Refactor overlay and link highlights updating and painting to make clearer
-    // dependency between web/ and core/ in synchronized painting mode.
-    if (InspectorOverlay* overlay = inspectorOverlay())
-        overlay->layout();
+    PageWidgetDelegate::updateAllLifecyclePhases(*m_page, *mainFrameImpl()->frame());
+
+    if (InspectorOverlay* overlay = inspectorOverlay()) {
+        overlay->updateAllLifecyclePhases();
+        // TODO(chrishtr): integrate paint into the overlay's lifecycle.
+        if (overlay->pageOverlay() && overlay->pageOverlay()->graphicsLayer())
+            overlay->pageOverlay()->graphicsLayer()->paint(nullptr);
+    }
+    if (m_pageColorOverlay)
+        m_pageColorOverlay->graphicsLayer()->paint(nullptr);
+
+    // TODO(chrishtr): link highlights don't currently paint themselves, it's still driven by cc.
+    // Fix this.
     for (size_t i = 0; i < m_linkHighlights.size(); ++i)
         m_linkHighlights[i]->updateGeometry();
 
@@ -1948,8 +2040,6 @@ void WebViewImpl::updateAllLifecyclePhases()
             client()->didMeaningfulLayout(WebMeaningfulLayout::FinishedLoading);
         }
     }
-
-    PageWidgetDelegate::updateAllLifecyclePhases(*m_page, *mainFrameImpl()->frame());
 }
 
 void WebViewImpl::paint(WebCanvas* canvas, const WebRect& rect)
@@ -2034,13 +2124,13 @@ bool WebViewImpl::hasVerticalScrollbar()
 
 const WebInputEvent* WebViewImpl::m_currentInputEvent = nullptr;
 
-bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
+WebInputEventResult WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
 {
     // TODO(dcheng): The fact that this is getting called when there is no local
     // main frame is problematic and probably indicates a bug in the input event
     // routing code.
     if (!mainFrameImpl())
-        return false;
+        return WebInputEventResult::NotHandled;
 
     WebAutofillClient* autofillClient = mainFrameImpl()->autofillClient();
     UserGestureNotifier notifier(autofillClient, &m_userGestureObserved);
@@ -2062,14 +2152,14 @@ bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
     // If we've started a drag and drop operation, ignore input events until
     // we're done.
     if (m_doingDragAndDrop)
-        return true;
+        return WebInputEventResult::HandledSuppressed;
 
     if (m_devToolsEmulator->handleInputEvent(inputEvent))
-        return true;
+        return WebInputEventResult::HandledSuppressed;
 
     if (InspectorOverlay* overlay = inspectorOverlay()) {
         if (overlay->handleInputEvent(inputEvent))
-            return true;
+            return WebInputEventResult::HandledSuppressed;
     }
 
     if (inputEvent.modifiers & WebInputEvent::IsTouchAccessibility
@@ -2097,14 +2187,14 @@ bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
 
     // Report the event to be NOT processed by WebKit, so that the browser can handle it appropriately.
     if (m_ignoreInputEvents)
-        return false;
+        return WebInputEventResult::NotHandled;
 
     TemporaryChange<const WebInputEvent*> currentEventChange(m_currentInputEvent, &inputEvent);
     UIEventWithKeyState::clearNewTabModifierSetFromIsolatedWorld();
 
     if (isPointerLocked() && WebInputEvent::isMouseEventType(inputEvent.type)) {
         pointerLockMouseEvent(inputEvent);
-        return true;
+        return WebInputEventResult::HandledSystem;
     }
 
     if (m_mouseCaptureNode && WebInputEvent::isMouseEventType(inputEvent.type)) {
@@ -2142,29 +2232,31 @@ bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
         node->dispatchMouseEvent(
             PlatformMouseEventBuilder(mainFrameImpl()->frameView(), static_cast<const WebMouseEvent&>(inputEvent)),
             eventType, static_cast<const WebMouseEvent&>(inputEvent).clickCount);
-        return true;
+        return WebInputEventResult::HandledSystem;
     }
 
     // FIXME: This should take in the intended frame, not the local frame root.
-    if (PageWidgetDelegate::handleInputEvent(*this, inputEvent, mainFrameImpl()->frame()))
-        return true;
+    WebInputEventResult result = PageWidgetDelegate::handleInputEvent(*this, inputEvent, mainFrameImpl()->frame());
+    if (result != WebInputEventResult::NotHandled)
+        return result;
 
     // Unhandled touchpad gesture pinch events synthesize mouse wheel events.
     if (inputEvent.type == WebInputEvent::GesturePinchUpdate) {
         const WebGestureEvent& pinchEvent = static_cast<const WebGestureEvent&>(inputEvent);
 
         // First, synthesize a Windows-like wheel event to send to any handlers that may exist.
-        if (handleSyntheticWheelFromTouchpadPinchEvent(pinchEvent))
-            return true;
+        result = handleSyntheticWheelFromTouchpadPinchEvent(pinchEvent);
+        if (result != WebInputEventResult::NotHandled)
+            return result;
 
         if (pinchEvent.data.pinchUpdate.zoomDisabled)
-            return false;
+            return WebInputEventResult::NotHandled;
 
         if (page()->frameHost().visualViewport().magnifyScaleAroundAnchor(pinchEvent.data.pinchUpdate.scale, FloatPoint(pinchEvent.x, pinchEvent.y)))
-            return true;
+            return WebInputEventResult::HandledSystem;
     }
 
-    return false;
+    return WebInputEventResult::NotHandled;
 }
 
 void WebViewImpl::setCursorVisibilityState(bool isVisible)
@@ -2671,6 +2763,11 @@ void WebViewImpl::setTextDirection(WebTextDirection direction)
 
 bool WebViewImpl::isAcceleratedCompositingActive() const
 {
+    // For SPv2, accelerated compositing is managed by the
+    // PaintArtifactCompositor.
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+        return m_paintArtifactCompositor.rootLayer();
+
     return m_rootLayer;
 }
 
@@ -2682,10 +2779,14 @@ void WebViewImpl::willCloseLayerTreeView()
         m_linkHighlightsTimeline.clear();
     }
 
-    if (page())
-        page()->willCloseLayerTreeView();
+    if (m_layerTreeView)
+        page()->willCloseLayerTreeView(*m_layerTreeView);
 
-    setRootGraphicsLayer(nullptr);
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+        detachPaintArtifactCompositor();
+    else
+        setRootGraphicsLayer(nullptr);
+
     m_layerTreeView = nullptr;
 }
 
@@ -2806,7 +2907,11 @@ void WebViewImpl::setFocusedFrame(WebFrame* frame)
 
 void WebViewImpl::focusDocumentView(WebFrame* frame)
 {
-    page()->focusController().focusDocumentView(toCoreFrame(frame));
+    // This is currently only used when replicating focus changes for
+    // cross-process frames, and |notifyEmbedder| is disabled to avoid sending
+    // duplicate frameFocused updates from FocusController to the browser
+    // process, which already knows the latest focused frame.
+    page()->focusController().focusDocumentView(frame->toImplBase()->frame(), false /* notifyEmbedder */);
 }
 
 void WebViewImpl::setInitialFocus(bool reverse)
@@ -2930,7 +3035,7 @@ void WebViewImpl::computeScaleAndScrollForFocusedNode(Node* focusedNode, bool zo
     if (!needAnimation)
         return;
 
-    FloatSize targetViewportSize = visualViewport.size();
+    FloatSize targetViewportSize(visualViewport.size());
     targetViewportSize.scale(1 / newScale);
 
     if (textboxRectInDocument.width() <= targetViewportSize.width()) {
@@ -2960,6 +3065,13 @@ void WebViewImpl::advanceFocus(bool reverse)
     page()->focusController().advanceFocus(reverse ? WebFocusTypeBackward : WebFocusTypeForward);
 }
 
+void WebViewImpl::advanceFocusAcrossFrames(WebFocusType type, WebRemoteFrame* from, WebLocalFrame* to)
+{
+    // TODO(alexmos): Pass in proper with sourceCapabilities.
+    page()->focusController().advanceFocusAcrossFrames(
+        type, toWebRemoteFrameImpl(from)->frame(), toWebLocalFrameImpl(to)->frame());
+}
+
 double WebViewImpl::zoomLevel()
 {
     return m_zoomLevel;
@@ -2973,6 +3085,11 @@ double WebViewImpl::setZoomLevel(double zoomLevel)
         m_zoomLevel = m_maximumZoomLevel;
     else
         m_zoomLevel = zoomLevel;
+
+    // TODO(nasko): Setting zoom level needs to be refactored to support
+    // out-of-process iframes. See https://crbug.com/528407.
+    if (mainFrame()->isWebRemoteFrame())
+        return m_zoomLevel;
 
     LocalFrame* frame = mainFrameImpl()->frame();
     if (!WebLocalFrameImpl::pluginContainerFromFrame(frame)) {
@@ -3094,14 +3211,6 @@ void WebViewImpl::setPageScaleFactor(float scaleFactor)
     page()->frameHost().visualViewport().setScale(scaleFactor);
 }
 
-float WebViewImpl::deviceScaleFactor() const
-{
-    if (!page())
-        return 1;
-
-    return page()->deviceScaleFactor();
-}
-
 void WebViewImpl::setDeviceScaleFactor(float scaleFactor)
 {
     if (!page())
@@ -3132,12 +3241,12 @@ void WebViewImpl::setDeviceColorProfile(const WebVector<char>& colorProfile)
     page()->setDeviceColorProfile(deviceProfile);
 }
 
-void WebViewImpl::resetDeviceColorProfile()
+void WebViewImpl::resetDeviceColorProfileForTesting()
 {
     if (!page())
         return;
 
-    page()->resetDeviceColorProfile();
+    page()->resetDeviceColorProfileForTesting();
 }
 
 void WebViewImpl::enableAutoResizeMode(const WebSize& minSize, const WebSize& maxSize)
@@ -3514,7 +3623,7 @@ void WebViewImpl::dragSourceEndedAt(
     WebDragOperation operation)
 {
     PlatformMouseEvent pme(clientPoint, screenPoint, LeftButton, PlatformEvent::MouseMoved,
-        0, PlatformEvent::NoModifiers, PlatformMouseEvent::RealOrIndistinguishable, 0);
+        0, PlatformEvent::NoModifiers, PlatformMouseEvent::RealOrIndistinguishable, WTF::monotonicallyIncreasingTime());
     m_page->deprecatedLocalMainFrame()->eventHandler().dragSourceEndedAt(pme,
         static_cast<DragOperation>(operation));
 }
@@ -3763,6 +3872,13 @@ void WebViewImpl::showContextMenu()
     }
 }
 
+void WebViewImpl::didCloseContextMenu()
+{
+    LocalFrame* frame = m_page->focusController().focusedFrame();
+    if (frame)
+        frame->selection().setCaretBlinkingSuspended(false);
+}
+
 void WebViewImpl::extractSmartClipData(WebRect rectInViewport, WebString& clipText, WebString& clipHtml, WebRect& clipRectInViewport)
 {
     LocalFrame* localFrame = toLocalFrame(focusedCoreFrame());
@@ -3819,8 +3935,6 @@ bool WebViewImpl::isTransparent() const
 
 void WebViewImpl::setBaseBackgroundColor(WebColor color)
 {
-    updateAllLifecyclePhases();
-
     if (m_baseBackgroundColor == color)
         return;
 
@@ -3829,7 +3943,7 @@ void WebViewImpl::setBaseBackgroundColor(WebColor color)
     if (m_page->mainFrame() && m_page->mainFrame()->isLocalFrame())
         m_page->deprecatedLocalMainFrame()->view()->setBaseBackgroundColor(color);
 
-    updateLayerTreeBackgroundColor();
+    updateAllLifecyclePhases();
 }
 
 void WebViewImpl::setIsActive(bool active)
@@ -3922,6 +4036,18 @@ void WebViewImpl::didFinishDocumentLoad(WebLocalFrameImpl* webframe)
     if (webframe != mainFrameImpl())
         return;
     resumeTreeViewCommitsIfRenderingReady();
+#if OS(ANDROID)
+    if (!isInternalURL(webframe->frame()->document()->baseURL()) && page()->settings().usesEncodingDetector()) {
+        const Document& document = *webframe->frame()->document();
+
+        // "AutodetectEncoding.Attempted" is of boolean type - either 0 or 1. Use 2 for the boundary value.
+        Platform::current()->histogramEnumeration("AutodetectEncoding.Attempted", document.attemptedToDetermineEncodingFromContentSniffing(), 2);
+        if (document.encodingWasDetectedFromContentSniffing()) {
+            int encodingId = encodingToUmaId(document.encoding());
+            Platform::current()->histogramEnumeration("AutodetectEncoding.Detected", encodingId, WTF_ARRAY_LENGTH(kEncodingNames) + 1);
+        }
+    }
+#endif
 }
 
 void WebViewImpl::didRemoveAllPendingStylesheet(WebLocalFrameImpl* webframe)
@@ -4135,12 +4261,15 @@ void WebViewImpl::setRootGraphicsLayer(GraphicsLayer* layer)
     if (!m_layerTreeView)
         return;
 
+    // In SPv2, we attach layers via PaintArtifactCompositor, rather than
+    // supplying a root GraphicsLayer from PaintLayerCompositor.
+    ASSERT(!RuntimeEnabledFeatures::slimmingPaintV2Enabled());
+
     VisualViewport& visualViewport = page()->frameHost().visualViewport();
     visualViewport.attachToLayerTree(layer, graphicsLayerFactory());
     if (layer) {
         m_rootGraphicsLayer = visualViewport.rootGraphicsLayer();
         m_rootLayer = m_rootGraphicsLayer->platformLayer();
-        m_rootTransformLayer = m_rootGraphicsLayer;
         updateRootLayerTransform();
         m_layerTreeView->setRootLayer(*m_rootLayer);
         // We register viewport layers here since there may not be a layer
@@ -4156,7 +4285,6 @@ void WebViewImpl::setRootGraphicsLayer(GraphicsLayer* layer)
     } else {
         m_rootGraphicsLayer = nullptr;
         m_rootLayer = nullptr;
-        m_rootTransformLayer = nullptr;
         // This means that we're transitioning to a new page. Suppress
         // commits until Blink generates invalidations so we don't
         // attempt to paint too early in the next page load.
@@ -4236,6 +4364,8 @@ void WebViewImpl::initializeLayerTreeView()
         devTools->layerTreeViewChanged(m_layerTreeView);
 
     m_page->settings().setAcceleratedCompositingEnabled(m_layerTreeView);
+    if (m_layerTreeView)
+        m_page->layerTreeViewInitialized(*m_layerTreeView);
 
     // FIXME: only unittests, click to play, Android printing, and printing (for headers and footers)
     // make this assert necessary. We should make them not hit this code and then delete allowsBrokenNullLayerTreeView.
@@ -4246,6 +4376,9 @@ void WebViewImpl::initializeLayerTreeView()
         m_linkHighlightsTimeline = adoptPtr(Platform::current()->compositorSupport()->createAnimationTimeline());
         attachCompositorAnimationTimeline(m_linkHighlightsTimeline.get());
     }
+
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+        attachPaintArtifactCompositor();
 }
 
 void WebViewImpl::applyViewportDeltas(
@@ -4335,16 +4468,11 @@ void WebViewImpl::updateLayerTreeDeviceScaleFactor()
 
 void WebViewImpl::updateRootLayerTransform()
 {
-    // If we don't have a root graphics layer, we won't bother trying to find
-    // or update the transform layer.
-    if (!m_rootGraphicsLayer)
-        return;
-
-    if (m_rootTransformLayer) {
+    if (m_rootGraphicsLayer) {
         TransformationMatrix transform;
         transform.translate(m_rootLayerOffset.width, m_rootLayerOffset.height);
         transform = transform.scale(m_rootLayerScale);
-        m_rootTransformLayer->setTransform(transform);
+        m_rootGraphicsLayer->setTransform(transform);
     }
 }
 
@@ -4465,6 +4593,48 @@ void WebViewImpl::updatePageOverlays()
         if (inspectorPageOverlay)
             inspectorPageOverlay->update();
     }
+}
+
+void WebViewImpl::attachPaintArtifactCompositor()
+{
+    if (!m_layerTreeView)
+        return;
+
+    // Otherwise, PaintLayerCompositor is expected to supply a root
+    // GraphicsLayer via setRootGraphicsLayer.
+    ASSERT(RuntimeEnabledFeatures::slimmingPaintV2Enabled());
+
+    // TODO(jbroman): This should probably have hookups for overlays, visual
+    // viewport, etc.
+
+    m_paintArtifactCompositor.initializeIfNeeded();
+    WebLayer* rootLayer = m_paintArtifactCompositor.webLayer();
+    ASSERT(rootLayer);
+    m_layerTreeView->setRootLayer(*rootLayer);
+
+    // TODO(jbroman): This is cargo-culted from setRootGraphicsLayer. Is it
+    // necessary?
+    bool visible = page()->visibilityState() == PageVisibilityStateVisible;
+    m_layerTreeView->setVisible(visible);
+}
+
+void WebViewImpl::detachPaintArtifactCompositor()
+{
+    if (!m_layerTreeView)
+        return;
+
+    m_layerTreeView->setDeferCommits(true);
+    m_layerTreeView->clearRootLayer();
+}
+
+float WebViewImpl::deviceScaleFactor() const
+{
+    // TODO(oshima): Investigate if this should return the ScreenInfo's scale factor rather than
+    // page's scale factor, which can be 1 in use-zoom-for-dsf mode.
+    if (!page())
+        return 1;
+
+    return page()->deviceScaleFactor();
 }
 
 } // namespace blink

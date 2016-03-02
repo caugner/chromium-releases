@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
@@ -209,9 +210,10 @@ IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetContentSettingRules,
 
 // Tells the renderer to create a FieldTrial, and by using a 100% probability
 // for the FieldTrial, forces the FieldTrial to have assigned group name.
-IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
+IPC_MESSAGE_CONTROL3(ChromeViewMsg_SetFieldTrialGroup,
                      std::string /* field trial name */,
-                     std::string /* group name that was assigned. */)
+                     std::string /* group name that was assigned. */,
+                     base::ProcessId /* for debugging, the sender process id */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetPageSequenceNumber,
                     int /* page_seq_no */)
@@ -224,8 +226,6 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
 IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFocusChanged,
                     OmniboxFocusState /* new_focus_state */,
                     OmniboxFocusChangeReason /* reason */)
-
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxMarginChange, int /* start */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
                     std::vector<InstantMostVisitedItem> /* items */)
@@ -436,10 +436,6 @@ IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_OpenAboutPlugins)
 // Tells the browser that there was an error loading a plugin.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_CouldNotLoadPlugin,
                     base::FilePath /* plugin_path */)
-
-// Tells the browser that we blocked a plugin because NPAPI is not supported.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_NPAPINotSupported,
-                    std::string /* identifer */)
 
 // Asks the renderer whether an app banner should be shown. It will reply with
 // ChromeViewHostMsg_AppBannerPromptReply.

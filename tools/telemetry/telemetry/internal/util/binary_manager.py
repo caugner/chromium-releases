@@ -10,6 +10,7 @@ import os
 from catapult_base import dependency_manager
 from telemetry.core import exceptions
 from telemetry.core import util
+from devil import devil_env
 
 
 TELEMETRY_PROJECT_CONFIG = os.path.join(
@@ -34,6 +35,8 @@ def InitDependencyManager(environment_config):
     configs.insert(0, dependency_manager.BaseConfig(environment_config))
   _dependency_manager = dependency_manager.DependencyManager(configs)
 
+  devil_env.config.Initialize()
+
 
 def FetchPath(binary_name, arch, platform):
   """ Return a path to the appropriate executable for <binary_name>, downloading
@@ -45,7 +48,7 @@ def FetchPath(binary_name, arch, platform):
     raise exceptions.InitializationError(
         'Called FetchPath with uninitialized binary manager.')
   return _dependency_manager.FetchPath(
-      binary_name, '%s_%s' % (platform, arch), try_support_binaries=True)
+      binary_name, '%s_%s' % (platform, arch))
 
 
 def LocalPath(binary_name, arch, platform):
@@ -58,4 +61,4 @@ def LocalPath(binary_name, arch, platform):
     raise exceptions.InitializationError(
         'Called LocalPath with uninitialized binary manager.')
   return _dependency_manager.LocalPath(
-      binary_name, '%s_%s' % (platform, arch), try_support_binaries=True)
+      binary_name, '%s_%s' % (platform, arch))

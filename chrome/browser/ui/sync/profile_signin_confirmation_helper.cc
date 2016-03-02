@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
+#include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -43,10 +44,10 @@ bool HasBookmarks(Profile* profile) {
 
 namespace ui {
 
-SkColor GetSigninConfirmationPromptBarColor(SkAlpha alpha) {
+SkColor GetSigninConfirmationPromptBarColor(ui::NativeTheme* theme,
+                                            SkAlpha alpha) {
   static const SkColor kBackgroundColor =
-      ui::NativeTheme::instance()->GetSystemColor(
-          ui::NativeTheme::kColorId_DialogBackground);
+      theme->GetSystemColor(ui::NativeTheme::kColorId_DialogBackground);
   return color_utils::BlendTowardOppositeLuminance(kBackgroundColor, alpha);
 }
 

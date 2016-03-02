@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
 #include "content/public/common/content_switches.h"
 
 namespace switches {
@@ -52,6 +53,11 @@ const char kBrowserCrashTest[]              = "crash-test";
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 
+// Causes the implementations of guests (inner WebContents) to use
+// out-of-process iframes.
+const char kUseCrossProcessFramesForGuests[]   =
+    "use-cross-process-frames-for-guests";
+
 // Dumps extra logging about plugin loading to the log file.
 const char kDebugPluginLoading[] = "debug-plugin-loading";
 
@@ -89,6 +95,10 @@ const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
 // Applied after kEnableBlinkFeatures, and after other flags that change these
 // features.
 const char kDisableBlinkFeatures[]          = "disable-blink-features";
+
+// Disables new cc/animation system (Project Heaviside). crbug.com/394772
+const char kDisableCompositorAnimationTimelines[] =
+    "disable-compositor-animation-timelines";
 
 // Disables HTML5 DB support.
 const char kDisableDatabases[]              = "disable-databases";
@@ -264,9 +274,6 @@ const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
 // Disables the Web Speech API.
 const char kDisableSpeechAPI[]              = "disable-speech-api";
 
-// Disables SVG 1.1 DOM.
-const char kDisableSVG1DOM[]                = "disable-svg1dom";
-
 // Disable multithreaded GPU compositing of web content.
 const char kDisableThreadedCompositing[]     = "disable-threaded-compositing";
 
@@ -300,10 +307,6 @@ const char kEnable2dCanvasClipAntialiasing[] = "enable-2d-canvas-clip-aa";
 const char kDisableAcceleratedJpegDecoding[] =
     "disable-accelerated-jpeg-decoding";
 
-// Enables new cc/animation system (Project Heaviside). crbug.com/394772
-const char kEnableCompositorAnimationTimelines[] =
-    "enable-compositor-animation-timelines";
-
 // Enables LCD text.
 const char kEnableLCDText[]                 = "enable-lcd-text";
 
@@ -334,9 +337,6 @@ const char kEnableBrowserSideNavigation[]   = "enable-browser-side-navigation";
 const char kEnableDisplayList2dCanvas[]     = "enable-display-list-2d-canvas";
 const char kForceDisplayList2dCanvas[]      = "force-display-list-2d-canvas";
 const char kDisableDisplayList2dCanvas[]    = "disable-display-list-2d-canvas";
-
-// Enables restarting interrupted downloads.
-const char kEnableDownloadResumption[]      = "enable-download-resumption";
 
 // Disables (unprefixed) Encrypted Media Extensions.
 const char kDisableEncryptedMedia[] = "disable-encrypted-media";
@@ -385,8 +385,16 @@ const char kEnableLogging[]                 = "enable-logging";
 // Enables the memory benchmarking extension
 const char kEnableMemoryBenchmarking[]      = "enable-memory-benchmarking";
 
+// Enable the Mojo shell connection in renderers.
+const char kEnableMojoShellConnection[] = "enable-mojo-shell-connection";
+
 // Enables the network information API.
 const char kEnableNetworkInformation[]      = "enable-network-information";
+
+// Enables non-validating reload on reload-to-refresh-content (e.g. pull-
+// to-refresh).
+const char kEnableNonValidatingReloadOnRefreshContent[] =
+    "enable-non-validating-reload-on-refresh-content";
 
 // Enables partial raster. Enabling this switch also enables the use of
 // persistent gpu memory buffers.
@@ -404,9 +412,6 @@ const char kEnablePluginPlaceholderTesting[] =
 // still available, but it is bucketized and updated less frequently. This flag
 // also applys to workers.
 const char kEnablePreciseMemoryInfo[] = "enable-precise-memory-info";
-
-// Enables payloads for received push messages when using the W3C Push API.
-const char kEnablePushMessagePayload[] = "enable-push-message-payload";
 
 // Enables RGBA_4444 textures.
 const char kEnableRGBA4444Textures[] = "enable-rgba-4444-textures";
@@ -426,11 +431,6 @@ const char kV8SnapshotPassedByFD[] = "v8-snapshot-passed-by-fd";
 // is denied by the sandbox.
 const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
 
-// Enables seccomp-bpf support for Android. Requires experimental kernel
-// support. <http://crbug.com/166704>
-const char kEnableSeccompFilterSandbox[] =
-    "enable-seccomp-filter-sandbox";
-
 // Enables the Skia benchmarking extension
 const char kEnableSkiaBenchmarking[]        = "enable-skia-benchmarking";
 
@@ -442,6 +442,11 @@ const char kEnableSmoothScrolling[]         = "enable-smooth-scrolling";
 
 // Enable spatial navigation
 const char kEnableSpatialNavigation[]       = "enable-spatial-navigation";
+
+// Enables implementation of the Cache-Control: stale-while-revalidate directive
+// which permits servers to allow the use of stale resources while revalidation
+// proceeds in the background.
+const char kEnableStaleWhileRevalidate[]    = "enable-stale-while-revalidate";
 
 // Enables StatsTable, logging statistics to a global named shared memory table.
 const char kEnableStatsTable[]              = "enable-stats-table";
@@ -522,6 +527,12 @@ const char kForceOverlayFullscreenVideo[]   = "force-overlay-fullscreen-video";
 // overrides this if present.
 const char kForceRendererAccessibility[]    = "force-renderer-accessibility";
 
+// For development / testing only. When running content_browsertests,
+// saves output of failing accessibility tests to their expectations files in
+// content/test/data/accessibility/, overwriting existing file content.
+const char kGenerateAccessibilityTestExpectations[] =
+    "generate-accessibility-test-expectations";
+
 // Passes gpu device_id from browser process to GPU process.
 const char kGpuDeviceID[]                   = "gpu-device-id";
 
@@ -561,6 +572,9 @@ const char kIgnoreCertificateErrors[]       = "ignore-certificate-errors";
 
 // Ignores GPU blacklist.
 const char kIgnoreGpuBlacklist[]            = "ignore-gpu-blacklist";
+
+// Makes all APIs reflect the layout viewport.
+const char kInertVisualViewport[]           = "inert-visual-viewport";
 
 // Run the GPU process as a thread in the browser process.
 const char kInProcessGPU[]                  = "in-process-gpu";
@@ -791,6 +805,9 @@ const char kUIPrioritizeInGpuProcess[] = "ui-prioritize-in-gpu-process";
 // streams (e.g. WebRTC). Works with --use-fake-device-for-media-stream.
 const char kUseFakeUIForMediaStream[]     = "use-fake-ui-for-media-stream";
 
+// Use the Mandoline UI Service in the Chrome render process.
+const char kUseMusInRenderer[] = "use-mus-in-renderer";
+
 // Enable native GPU memory buffer support when available.
 const char kEnableNativeGpuMemoryBuffers[] = "enable-native-gpu-memory-buffers";
 
@@ -808,6 +825,9 @@ const char kUseMobileUserAgent[] = "use-mobile-user-agent";
 const char kUseNormalPriorityForTileTaskWorkerThreads[] =
     "use-normal-priority-for-tile-task-worker-threads";
 
+// Use remote compositor for the renderer.
+const char kUseRemoteCompositing[] = "use-remote-compositing";
+
 // Use the new surfaces system to handle compositor delegation.
 const char kUseSurfaces[] = "use-surfaces";
 
@@ -824,9 +844,6 @@ const char kUtilityProcess[]                = "utility";
 // The utility process is sandboxed, with access to one directory. This flag
 // specifies the directory that can be accessed.
 const char kUtilityProcessAllowedDir[]      = "utility-allowed-dir";
-
-// Allows MDns to access network in sandboxed process.
-const char kUtilityProcessEnableMDns[]      = "utility-enable-mdns";
 
 const char kUtilityProcessRunningElevated[] = "utility-run-elevated";
 
@@ -855,11 +872,6 @@ const char kDisableWebRtcEncryption[]      = "disable-webrtc-encryption";
 // Disables HW encode acceleration for WebRTC.
 const char kDisableWebRtcHWEncoding[]       = "disable-webrtc-hw-encoding";
 
-// Disables Multiple routes option for WebRTC. The default behavior is always
-// requesting multiple routes. This is for test cases to mimic the behavior when
-// multiple routes is disabled from user preferences.
-const char kDisableWebRtcMultipleRoutes[] = "disable-webrtc-multiple-routes";
-
 // Enables negotiation of DTLS 1.2 for WebRTC.
 const char kEnableWebRtcDtls12[]            = "enable-webrtc-dtls12";
 
@@ -874,6 +886,10 @@ const char kEnableWebRtcStunOrigin[]        = "enable-webrtc-stun-origin";
 const char kEnforceWebRtcIPPermissionCheck[] =
     "enforce-webrtc-ip-permission-check";
 
+// Override WebRTC IP handling policy to mimic the behavior when WebRTC IP
+// handling policy is specified in Preferences.
+const char kForceWebRtcIPHandlingPolicy[] = "force-webrtc-ip-handling-policy";
+
 // Renderer process parameter for WebRTC Stun probe trial to determine the
 // interval. Please see SetupStunProbeTrial in
 // chrome_browser_field_trials_desktop.cc for more detail.
@@ -885,6 +901,11 @@ const char kWebRtcMaxCaptureFramerate[]     = "max-gum-fps";
 #endif
 
 #if defined(OS_ANDROID)
+// Disable external animation system for Android compositor.
+// See also kDisableCompositorAnimationTimelines for renderer compositors.
+const char kDisableAndroidCompositorAnimationTimelines[] =
+    "disable-android-compositor-animation-timelines";
+
 // Disable overscroll edge effects like those found in Android views.
 const char kDisableOverscrollEdgeEffect[]   = "disable-overscroll-edge-effect";
 
@@ -898,11 +919,6 @@ const char kDisableScreenOrientationLock[]  = "disable-screen-orientation-lock";
 // viewport boundaries.
 const char kEnableAdaptiveSelectionHandleOrientation[] =
     "enable-adaptive-selection-handle-orientation";
-
-// Enable external animation system for Android compositor.
-// See also kEnableCompositorAnimationTimelines for renderer compositors.
-const char kEnableAndroidCompositorAnimationTimelines[] =
-    "enable-android-compositor-animation-timelines";
 
 // Enable drag manipulation of longpress-triggered text selections.
 const char kEnableLongpressDragSelection[]  = "enable-longpress-drag-selection";
@@ -952,6 +968,30 @@ const char kDisableCoreAnimationPlugins[] =
 #endif
 
 #if defined(OS_WIN)
+// /prefetch:# arguments to use when launching various process types. It has
+// been observed that when file reads are consistent for 3 process launches with
+// the same /prefetch:# argument, the Windows prefetcher starts issuing reads in
+// batch at process launch. Because reads depend on the process type, the
+// prefetcher wouldn't be able to observe consistent reads if no /prefetch:#
+// arguments were used. Note that the browser process has no /prefetch:#
+// argument; as such all other processes must have one in order to avoid
+// polluting its profile. Note: # must always be in [1, 8]; otherwise it is
+// ignored by the Windows prefetcher.
+const char kPrefetchArgumentRenderer[] = "/prefetch:1";
+const char kPrefetchArgumentGpu[] = "/prefetch:2";
+const char kPrefetchArgumentPpapi[] = "/prefetch:3";
+const char kPrefetchArgumentPpapiBroker[] = "/prefetch:4";
+// /prefetch:5, /prefetch:6 and /prefetch:7 are reserved for content embedders
+// and are not to be used by content itself.
+
+// /prefetch:# argument shared by all process types that don't have their own.
+// It is likely that the prefetcher won't work for these process types as it
+// won't be able to observe consistent file reads across launches. However,
+// having a valid prefetch argument for these process types is required to
+// prevent them from interfering with the prefetch profile of the browser
+// process.
+const char kPrefetchArgumentOther[] = "/prefetch:8";
+
 // Device scale factor passed to certain processes like renderers, etc.
 const char kDeviceScaleFactor[]     = "device-scale-factor";
 

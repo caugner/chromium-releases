@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
 
 source_set("sync_driver") {
@@ -57,9 +58,6 @@ source_set("sync_driver") {
     "glue/sync_backend_host_impl.h",
     "glue/sync_backend_registrar.cc",
     "glue/sync_backend_registrar.h",
-    "glue/synced_session.cc",
-    "glue/synced_session.h",
-    "glue/synced_window_delegate.h",
     "glue/ui_model_worker.cc",
     "glue/ui_model_worker.h",
     "invalidation_adapter.cc",
@@ -74,12 +72,8 @@ source_set("sync_driver") {
     "model_associator.h",
     "non_blocking_data_type_controller.cc",
     "non_blocking_data_type_controller.h",
-    "non_frontend_data_type_controller.cc",
-    "non_frontend_data_type_controller.h",
     "non_ui_data_type_controller.cc",
     "non_ui_data_type_controller.h",
-    "open_tabs_ui_delegate.cc",
-    "open_tabs_ui_delegate.h",
     "pref_names.cc",
     "pref_names.h",
     "profile_sync_auth_provider.cc",
@@ -88,8 +82,6 @@ source_set("sync_driver") {
     "protocol_event_observer.h",
     "proxy_data_type_controller.cc",
     "proxy_data_type_controller.h",
-    "sessions/synced_window_delegates_getter.cc",
-    "sessions/synced_window_delegates_getter.h",
     "shared_change_processor.cc",
     "shared_change_processor.h",
     "shared_change_processor_ref.cc",
@@ -122,13 +114,14 @@ source_set("sync_driver") {
     "sync_util.h",
     "system_encryptor.cc",
     "system_encryptor.h",
-    "tab_node_pool.cc",
-    "tab_node_pool.h",
     "ui_data_type_controller.cc",
     "ui_data_type_controller.h",
     "user_selectable_sync_type.h",
   ]
 
+  public_deps = [
+    ":features",
+  ]
   deps = [
     "//base",
     "//base:prefs",
@@ -137,14 +130,12 @@ source_set("sync_driver") {
     "//components/invalidation/public",
     "//components/os_crypt",
     "//components/pref_registry",
-    "//components/sessions",
     "//components/signin/core/browser",
     "//components/version_info",
     "//google_apis",
     "//net",
     "//sync",
     "//third_party/cacheinvalidation",
-    "//ui/gfx",
   ]
 
   if (enable_configuration_policy) {
@@ -186,8 +177,6 @@ source_set("test_support") {
     "local_device_info_provider_mock.h",
     "model_associator_mock.cc",
     "model_associator_mock.h",
-    "non_frontend_data_type_controller_mock.cc",
-    "non_frontend_data_type_controller_mock.h",
     "non_ui_data_type_controller_mock.cc",
     "non_ui_data_type_controller_mock.h",
     "sync_api_component_factory_mock.cc",
@@ -201,9 +190,6 @@ source_set("test_support") {
 
   deps = [
     "//base",
-    "//components/autofill/core/browser",
-    "//components/password_manager/core/browser",
-    "//components/sessions",
     "//components/version_info",
     "//google_apis",
     "//sync:test_support_sync_internal_api",
@@ -216,6 +202,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "about_sync_util_unittest.cc",
+    "backend_migrator_unittest.cc",
     "backup_rollback_controller_unittest.cc",
     "data_type_manager_impl_unittest.cc",
     "device_info_data_type_controller_unittest.cc",
@@ -224,19 +211,20 @@ source_set("unit_tests") {
     "frontend_data_type_controller_unittest.cc",
     "generic_change_processor_unittest.cc",
     "glue/browser_thread_model_worker_unittest.cc",
+    "glue/sync_backend_host_impl_unittest.cc",
     "glue/sync_backend_registrar_unittest.cc",
     "glue/ui_model_worker_unittest.cc",
     "local_device_info_provider_unittest.cc",
     "model_association_manager_unittest.cc",
     "non_blocking_data_type_controller_unittest.cc",
-    "non_frontend_data_type_controller_unittest.cc",
     "non_ui_data_type_controller_unittest.cc",
+    "profile_sync_auth_provider_unittest.cc",
     "shared_change_processor_unittest.cc",
+    "startup_controller_unittest.cc",
     "sync_prefs_unittest.cc",
     "sync_stopped_reporter_unittest.cc",
     "sync_util_unittest.cc",
     "system_encryptor_unittest.cc",
-    "tab_node_pool_unittest.cc",
     "ui_data_type_controller_unittest.cc",
   ]
   deps = [
@@ -244,12 +232,16 @@ source_set("unit_tests") {
     "//base",
     "//base:prefs_test_support",
     "//base/test:test_support",
+    "//components/invalidation/impl",
     "//components/os_crypt",
     "//components/pref_registry:test_support",
+    "//components/signin/core/browser:test_support",
+    "//components/syncable_prefs",
+    "//components/syncable_prefs:test_support",
     "//components/version_info",
     "//net:test_support",
-    "//sync:test_support_sync_internal_api",
     "//sync:test_support_sync_api",
+    "//sync:test_support_sync_internal_api",
     "//testing/gmock",
     "//testing/gtest",
     "//url",
@@ -262,4 +254,13 @@ source_set("unit_tests") {
       "//components/policy:policy_component",
     ]
   }
+}
+
+buildflag_header("features") {
+  header = "sync_driver_features.h"
+
+  # Whether to back up data before sync.
+  enable_pre_sync_backup = is_win || is_mac || (is_linux && !is_chromeos)
+
+  flags = [ "ENABLE_PRE_SYNC_BACKUP=$enable_pre_sync_backup" ]
 }

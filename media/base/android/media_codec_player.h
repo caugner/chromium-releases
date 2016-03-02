@@ -6,6 +6,7 @@
 #define MEDIA_BASE_ANDROID_MEDIA_CODEC_PLAYER_H_
 
 #include "base/android/scoped_java_ref.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
@@ -204,6 +205,8 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   void SeekTo(base::TimeDelta timestamp) override;
   void Release() override;
   void SetVolume(double volume) override;
+  bool HasVideo() const override;
+  bool HasAudio() const override;
   int GetVideoWidth() override;
   int GetVideoHeight() override;
   base::TimeDelta GetCurrentTime() override;
@@ -266,10 +269,12 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
 
   // MediaPlayerAndroid implementation.
 
-  // This method requests playback permission from the manager on UI thread,
-  // passing total duration as an argiment. The duration must be known by the
-  // time of the call. The method posts the result to the media thread.
-  void RequestPermissionAndPostResult(base::TimeDelta duration) override;
+  // This method requests playback permission from the manager on UI
+  // thread, passing total duration and whether the media has audio
+  // track as arguments. The method posts the result to the media
+  // thread.
+  void RequestPermissionAndPostResult(base::TimeDelta duration,
+                                      bool has_audio) override;
 
   // This method caches the data and calls manager's OnMediaMetadataChanged().
   void OnMediaMetadataChanged(base::TimeDelta duration,
@@ -310,8 +315,6 @@ class MEDIA_EXPORT MediaCodecPlayer : public MediaPlayerAndroid,
   bool HasPendingStart() const;
   void SetPendingSeek(base::TimeDelta timestamp);
   base::TimeDelta GetPendingSeek() const;
-  bool HasVideo() const;
-  bool HasAudio() const;
   void SetDemuxerConfigs(const DemuxerConfigs& configs);
   void RequestPlayPermission();
   void StartPrefetchDecoders();

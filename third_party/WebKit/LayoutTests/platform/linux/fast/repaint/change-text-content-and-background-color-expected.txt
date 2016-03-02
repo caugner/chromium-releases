@@ -6,16 +6,17 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "repaintRects": [
-        [30, 30, 200, 23],
+        [30, 30, 200, 24],
         [30, 30, 45, 23],
         [30, 30, 41, 23],
         [8, 8, 244, 68]
       ],
       "paintInvalidationClients": [
-        "InlineTextBox ''",
         "RootInlineBox",
+        "InlineTextBox ''",
         "LayoutTextControl (positioned) INPUT id='input'",
         "LayoutBlockFlow DIV id='inner-editor'",
+        "RootInlineBox",
         "LayoutText #text",
         "InlineTextBox 'NEW'"
       ]

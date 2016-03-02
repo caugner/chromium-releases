@@ -4,6 +4,8 @@
 
 #include "mojo/edk/embedder/simple_platform_shared_buffer.h"
 
+#include <stddef.h>
+
 #include <limits>
 
 #include "base/memory/ref_counted.h"
@@ -134,7 +136,8 @@ TEST(SimplePlatformSharedBufferTest, TooBig) {
   // If |size_t| is 32-bit, it's quite possible/likely that |Create()| succeeds
   // (since it only involves creating a 4 GB file).
   size_t max_size = std::numeric_limits<size_t>::max();
-  if (max_size > static_cast<size_t>(base::SysInfo::AmountOfVirtualMemory()))
+  if (base::SysInfo::AmountOfVirtualMemory() &&
+      max_size > static_cast<size_t>(base::SysInfo::AmountOfVirtualMemory()))
     max_size = static_cast<size_t>(base::SysInfo::AmountOfVirtualMemory());
   scoped_refptr<SimplePlatformSharedBuffer> buffer(
       SimplePlatformSharedBuffer::Create(max_size));
@@ -178,8 +181,8 @@ TEST(SimplePlatformSharedBufferTest, MappingsOutliveBuffer) {
   {
     scoped_refptr<SimplePlatformSharedBuffer> buffer(
         SimplePlatformSharedBuffer::Create(100));
-    mapping1 = buffer->Map(0, 100).Pass();
-    mapping2 = buffer->Map(50, 50).Pass();
+    mapping1 = buffer->Map(0, 100);
+    mapping2 = buffer->Map(50, 50);
     static_cast<char*>(mapping1->GetBase())[50] = 'x';
   }
 

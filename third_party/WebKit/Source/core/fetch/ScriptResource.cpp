@@ -24,7 +24,6 @@
     pages from the web. It has a memory cache for these objects.
 */
 
-#include "config.h"
 #include "core/fetch/ScriptResource.h"
 
 #include "core/fetch/FetchRequest.h"
@@ -49,7 +48,7 @@ ResourcePtr<ScriptResource> ScriptResource::fetch(FetchRequest& request, Resourc
 }
 
 ScriptResource::ScriptResource(const ResourceRequest& resourceRequest, const String& charset)
-    : TextResource(resourceRequest, Script, "application/javascript", charset), m_integrityChecked(false)
+    : TextResource(resourceRequest, Script, "application/javascript", charset), m_integrityDisposition(ScriptIntegrityDisposition::NotChecked)
 {
     DEFINE_STATIC_LOCAL(const AtomicString, acceptScript, ("*/*", AtomicString::ConstructFromLiteral));
 
@@ -69,7 +68,7 @@ void ScriptResource::didAddClient(ResourceClient* client)
     Resource::didAddClient(client);
 }
 
-void ScriptResource::appendData(const char* data, unsigned length)
+void ScriptResource::appendData(const char* data, size_t length)
 {
     Resource::appendData(data, length);
     ResourceClientWalker<ScriptResourceClient> walker(m_clients);
@@ -88,7 +87,7 @@ void ScriptResource::onMemoryDump(WebMemoryDumpLevelOfDetail levelOfDetail, WebP
 
 AtomicString ScriptResource::mimeType() const
 {
-    return extractMIMETypeFromMediaType(m_response.httpHeaderField("Content-Type")).lower();
+    return extractMIMETypeFromMediaType(m_response.httpHeaderField(HTTPNames::Content_Type)).lower();
 }
 
 const String& ScriptResource::script()
@@ -116,9 +115,14 @@ void ScriptResource::destroyDecodedDataForFailedRevalidation()
 
 bool ScriptResource::mimeTypeAllowedByNosniff() const
 {
-    return parseContentTypeOptionsHeader(m_response.httpHeaderField("X-Content-Type-Options")) != ContentTypeOptionsNosniff || MIMETypeRegistry::isSupportedJavaScriptMIMEType(mimeType());
+    return parseContentTypeOptionsHeader(m_response.httpHeaderField(HTTPNames::X_Content_Type_Options)) != ContentTypeOptionsNosniff || MIMETypeRegistry::isSupportedJavaScriptMIMEType(mimeType());
 }
 
+void ScriptResource::setIntegrityDisposition(ScriptIntegrityDisposition disposition)
+{
+    ASSERT(disposition != ScriptIntegrityDisposition::NotChecked);
+    m_integrityDisposition = disposition;
+}
 bool ScriptResource::mustRefetchDueToIntegrityMetadata(const FetchRequest& request) const
 {
     if (request.integrityMetadata().isEmpty())

@@ -385,6 +385,14 @@ class ContextualSearchPolicy {
         return false;
     }
 
+    /**
+     * @return Whether Contextual Search should enable its JavaScript API in the overlay panel.
+     */
+    boolean isContextualSearchJsApiEnabled() {
+        // Quick answers requires the JS API.
+        return ContextualSearchFieldTrial.isQuickAnswersEnabled();
+    }
+
     // --------------------------------------------------------------------------------------------
     // Testing support.
     // --------------------------------------------------------------------------------------------
@@ -476,9 +484,7 @@ class ContextualSearchPolicy {
      * @return Whether any translation feature for Contextual Search is enabled.
      */
     boolean isTranslationEnabled() {
-        // For M-48 CS translation features are completely disabled except for testing.
-        // TODO(donnd): fallback onto non-testing flags when ready.
-        return ContextualSearchFieldTrial.isTranslationForTestingEnabled();
+        return ContextualSearchFieldTrial.isTranslationEnabled();
     }
 
     /**

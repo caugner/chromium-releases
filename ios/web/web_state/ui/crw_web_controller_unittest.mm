@@ -7,7 +7,11 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
+#include <utility>
+
+#include "base/callback_helpers.h"
 #include "base/ios/ios_util.h"
+#import "base/mac/bind_objc_block.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -115,7 +119,7 @@ using web::NavigationManagerImpl;
 @synthesize recoverable = _recoverable;
 @synthesize shouldContinueCallback = _shouldContinueCallback;
 
-typedef void (^webPageOrderedOpenBlankBlockType)(const web::Referrer&, BOOL);
+typedef void (^webPageOrderedOpenBlankBlockType)();
 typedef void (^webPageOrderedOpenBlockType)(const GURL&,
                                             const web::Referrer&,
                                             NSString*,
@@ -129,11 +133,8 @@ typedef void (^webPageOrderedOpenBlockType)(const GURL&,
   return self;
 }
 
-- (CRWWebController*)webPageOrderedOpenBlankWithReferrer:
-    (const web::Referrer&)referrer
-                                            inBackground:(BOOL)inBackground {
-  static_cast<webPageOrderedOpenBlankBlockType>([self blockForSelector:_cmd])(
-      referrer, inBackground);
+- (CRWWebController*)webPageOrderedOpen {
+  static_cast<webPageOrderedOpenBlankBlockType>([self blockForSelector:_cmd])();
   return _childWebController;
 }
 
@@ -334,6 +335,14 @@ class WebControllerTest : public WebTestT {
     WebTestT::TearDown();
   }
 
+  // The value for web view OCMock objects to expect for |-setFrame:|.
+  CGRect ExpectedWebViewFrame() const {
+    CGSize containerViewSize = [UIScreen mainScreen].bounds.size;
+    containerViewSize.height -=
+        CGRectGetHeight([UIApplication sharedApplication].statusBarFrame);
+    return {CGPointZero, containerViewSize};
+  }
+
   // Creates WebView mock.
   virtual UIView* CreateMockWebView() const = 0;
 
@@ -353,6 +362,7 @@ class CRWUIWebViewWebControllerTest
     id result = [[OCMockObject mockForClass:[UIWebView class]] retain];
     [[[result stub] andReturn:nil] request];
     [[result stub] setDelegate:OCMOCK_ANY];  // Called by resetInjectedWebView
+    [[result stub] setFrame:ExpectedWebViewFrame()];
     // Stub out the injection process.
     [[[result stub] andReturn:@"object"]
         stringByEvaluatingJavaScriptFromString:
@@ -387,6 +397,7 @@ class CRWWKWebViewWebControllerTest
     [[[result stub] andReturn:[NSURL URLWithString:kTestURLString]] URL];
     [[result stub] setNavigationDelegate:OCMOCK_ANY];
     [[result stub] setUIDelegate:OCMOCK_ANY];
+    [[result stub] setFrame:ExpectedWebViewFrame()];
     [[result stub] addObserver:webController_
                     forKeyPath:OCMOCK_ANY
                        options:0
@@ -879,8 +890,6 @@ WEB_TEST_F(CRWUIWebViewWebControllerTest,
   }
 }
 
-// This test requires iOS net stack.
-#if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 // Tests that presentSSLError:forSSLStatus:recoverable:callback: is called with
 // correct arguments if WKWebView fails to load a page with bad SSL cert.
 TEST_F(CRWWKWebViewWebControllerTest, SSLCertError) {
@@ -917,7 +926,6 @@ TEST_F(CRWWKWebViewWebControllerTest, SSLCertError) {
   EXPECT_FALSE([mockDelegate_ recoverable]);
   EXPECT_TRUE([mockDelegate_ shouldContinueCallback]);
 }
-#endif  // !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 
 // None of the |CRWUIWebViewWebControllerTest| setup is needed;
 typedef web::WebTestWithUIWebViewWebController
@@ -1119,7 +1127,7 @@ TEST_F(CRWUIWebViewWebControllerTest, POSTRequestCache) {
   item->SetTransitionType(ui::PAGE_TRANSITION_FORM_SUBMIT);
   item->set_is_renderer_initiated(true);
   base::scoped_nsobject<CRWSessionEntry> currentEntry(
-      [[CRWSessionEntry alloc] initWithNavigationItem:item.Pass()]);
+      [[CRWSessionEntry alloc] initWithNavigationItem:std::move(item)]);
   base::scoped_nsobject<NSMutableURLRequest> request(
       [[NSMutableURLRequest alloc] initWithURL:net::NSURLWithGURL(url)]);
   [request setHTTPMethod:@"POST"];
@@ -1267,6 +1275,15 @@ TEST_F(WebControllerKeyboardTest, DismissKeyboard) {
       [webController_ containerView].webViewContentView.webView);
   EXPECT_TRUE(webView);
 
+  // Due to a bug in iOS ( http://www.openradar.me/22364739 ) the keyWindow
+  // needs to be manually restored, up to iOS 9.2.
+  UIWindow* keyWindow = [UIApplication sharedApplication].keyWindow;
+  base::ScopedClosureRunner runner(base::BindBlock(^{
+    if (!base::ios::IsRunningOnOrLater(9, 2, 0)) {
+      [keyWindow makeKeyAndVisible];
+    }
+  }));
+
   // Create the window and add the webview.
   base::scoped_nsobject<UIWindow> window(
       [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]]);
@@ -1300,9 +1317,7 @@ TEST_F(CRWWKWebViewWebControllerTest, WebURLWithTrustLevel) {
   CR_TEST_REQUIRES_WK_WEB_VIEW();
 
   [[[mockWebView_ stub] andReturn:[NSURL URLWithString:kTestURLString]] URL];
-#if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
   [[[mockWebView_ stub] andReturnBool:NO] hasOnlySecureContent];
-#endif
 
   // Stub out the injection process.
   [[mockWebView_ stub] evaluateJavaScript:OCMOCK_ANY
@@ -1428,12 +1443,9 @@ TEST_F(CRWWKWebControllerWindowOpenTest, NoDelegate) {
 TEST_F(CRWWKWebControllerWindowOpenTest, OpenWithUserGesture) {
   CR_TEST_REQUIRES_WK_WEB_VIEW();
 
-  SEL selector = @selector(webPageOrderedOpenBlankWithReferrer:inBackground:);
+  SEL selector = @selector(webPageOrderedOpen);
   [delegate_ onSelector:selector
-      callBlockExpectation:^(const web::Referrer& referrer,
-                             BOOL in_background) {
-        EXPECT_EQ("", referrer.url.spec());
-        EXPECT_FALSE(in_background);
+      callBlockExpectation:^(){
       }];
 
   [webController_ touched:YES];
@@ -1477,12 +1489,9 @@ TEST_F(CRWWKWebControllerWindowOpenTest, DontBlockPopup) {
   CR_TEST_REQUIRES_WK_WEB_VIEW();
 
   [delegate_ setBlockPopups:NO];
-  SEL selector = @selector(webPageOrderedOpenBlankWithReferrer:inBackground:);
+  SEL selector = @selector(webPageOrderedOpen);
   [delegate_ onSelector:selector
-      callBlockExpectation:^(const web::Referrer& referrer,
-                             BOOL in_background) {
-        EXPECT_EQ("", referrer.url.spec());
-        EXPECT_FALSE(in_background);
+      callBlockExpectation:^(){
       }];
 
   EXPECT_NSEQ(@"[object Window]", OpenWindowByDOM());

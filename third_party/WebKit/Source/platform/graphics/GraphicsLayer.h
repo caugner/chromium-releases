@@ -27,6 +27,7 @@
 #ifndef GraphicsLayer_h
 #define GraphicsLayer_h
 
+#include "cc/layers/layer_client.h"
 #include "platform/PlatformExport.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatPoint3D.h"
@@ -34,6 +35,7 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/ContentLayerDelegate.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/GraphicsLayerDebugInfo.h"
 #include "platform/graphics/ImageOrientation.h"
@@ -47,7 +49,6 @@
 #include "public/platform/WebCompositorAnimationDelegate.h"
 #include "public/platform/WebContentLayer.h"
 #include "public/platform/WebImageLayer.h"
-#include "public/platform/WebLayerClient.h"
 #include "public/platform/WebLayerScrollClient.h"
 #include "public/platform/WebScrollBlocksOn.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -58,8 +59,6 @@
 namespace blink {
 
 class FloatRect;
-class GraphicsContext;
-class GraphicsLayer;
 class GraphicsLayerFactory;
 class GraphicsLayerFactoryChromium;
 class Image;
@@ -75,7 +74,7 @@ typedef Vector<GraphicsLayer*, 64> GraphicsLayerVector;
 // GraphicsLayer is an abstraction for a rendering surface with backing store,
 // which may have associated transformation and animations.
 
-class PLATFORM_EXPORT GraphicsLayer : public GraphicsContextPainter, public WebCompositorAnimationDelegate, public WebLayerScrollClient, public WebLayerClient {
+class PLATFORM_EXPORT GraphicsLayer : public WebCompositorAnimationDelegate, public WebLayerScrollClient, public cc::LayerClient, public DisplayItemClient {
     WTF_MAKE_NONCOPYABLE(GraphicsLayer); USING_FAST_MALLOC(GraphicsLayer);
 public:
     static PassOwnPtr<GraphicsLayer> create(GraphicsLayerFactory*, GraphicsLayerClient*);
@@ -83,9 +82,6 @@ public:
     ~GraphicsLayer() override;
 
     GraphicsLayerClient* client() const { return m_client; }
-
-    // WebLayerClient implementation.
-    WebGraphicsLayerDebugInfo* takeDebugInfoFor(WebLayer*) override;
 
     GraphicsLayerDebugInfo& debugInfo();
 
@@ -193,10 +189,7 @@ public:
 
     void setContentsNeedsDisplay();
 
-    // If |visualRect| is not nullptr, it contains all pixels within the GraphicsLayer which might be painted into by
-    // the display item client, in coordinate space of the GraphicsLayer.
-    // |visualRect| can be nullptr if we know it's unchanged and PaintController has cached the previous value.
-    void invalidateDisplayItemClient(const DisplayItemClientWrapper&, PaintInvalidationReason, const IntRect* visualRect);
+    void invalidateDisplayItemClient(const DisplayItemClient&, PaintInvalidationReason);
 
     // Set that the position/size of the contents (image or video).
     void setContentsRect(const IntRect&);
@@ -207,6 +200,7 @@ public:
     bool addAnimation(PassOwnPtr<WebCompositorAnimation>);
     void pauseAnimation(int animationId, double /*timeOffset*/);
     void removeAnimation(int animationId);
+    void abortAnimation(int animationId);
 
     // Layer contents
     void setContentsToImage(Image*, RespectImageOrientationEnum = DoNotRespectImageOrientation);
@@ -245,39 +239,51 @@ public:
     static void registerContentsLayer(WebLayer*);
     static void unregisterContentsLayer(WebLayer*);
 
-    // GraphicsContextPainter implementation.
-    void paint(GraphicsContext&, const IntRect* clip) override;
+    IntRect interestRect();
+    void paint(const IntRect* interestRect, GraphicsContext::DisabledMode = GraphicsContext::NothingDisabled);
 
     // WebCompositorAnimationDelegate implementation.
     void notifyAnimationStarted(double monotonicTime, int group) override;
     void notifyAnimationFinished(double monotonicTime, int group) override;
+    void notifyAnimationAborted(double monotonicTime, int group) override;
 
     // WebLayerScrollClient implementation.
     void didScroll() override;
 
-    PaintController* paintController() override;
+    // cc::LayerClient implementation.
+    scoped_refptr<base::trace_event::ConvertableToTraceFormat> TakeDebugInfo(cc::Layer*) override;
+
+    PaintController& paintController();
 
     // Exposed for tests.
     WebLayer* contentsLayer() const { return m_contentsLayer; }
 
+    void setElementId(uint64_t);
+    void setCompositorMutableProperties(uint32_t);
+
     static void setDrawDebugRedFillForTesting(bool);
     ContentLayerDelegate* contentLayerDelegateForTesting() const { return m_contentLayerDelegate.get(); }
 
-#ifndef NDEBUG
-    DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
-    String debugName() const { return m_client->debugName(this) + " debug red fill"; }
-#endif
+    // DisplayItemClient methods
+    String debugName() const final { return m_client->debugName(this); }
+    IntRect visualRect() const override;
 
 protected:
-    String debugName(WebLayer*) const;
+    String debugName(cc::Layer*) const;
+    bool shouldFlattenTransform() const { return m_shouldFlattenTransform; }
 
     explicit GraphicsLayer(GraphicsLayerClient*);
     // GraphicsLayerFactoryChromium that wants to create a GraphicsLayer need to be friends.
     friend class GraphicsLayerFactoryChromium;
     // for testing
+    friend class CompositedLayerMappingTest;
     friend class FakeGraphicsLayerFactory;
+    friend class PaintControllerPaintTestBase;
 
 private:
+    // Returns true if PaintController::paintArtifact() changed and needs commit.
+    bool paintWithoutCommit(const IntRect* interestRect, GraphicsContext::DisabledMode = GraphicsContext::NothingDisabled);
+
     // Adds a child without calling updateChildList(), so that adding children
     // can be batched before updating.
     void addChildInternal(GraphicsLayer*);
@@ -368,12 +374,13 @@ private:
 
     OwnPtr<ContentLayerDelegate> m_contentLayerDelegate;
 
-    GC_PLUGIN_IGNORE("509911")
-    ScrollableArea* m_scrollableArea;
+    RawPtrWillBeWeakPersistent<ScrollableArea> m_scrollableArea;
     GraphicsLayerDebugInfo m_debugInfo;
     int m_3dRenderingContext;
 
     OwnPtr<PaintController> m_paintController;
+
+    IntRect m_previousInterestRect;
 };
 
 } // namespace blink

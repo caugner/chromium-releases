@@ -4,6 +4,8 @@
 
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 
+#include <utility>
+
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -66,17 +68,16 @@ scoped_ptr<KeyedService> BookmarkModelFactory::BuildServiceInstanceFor(
       BookmarkClientFactory::GetForBrowserState(browser_state);
   scoped_ptr<bookmarks::BookmarkModel> bookmark_model(
       new bookmarks::BookmarkModel(bookmark_client));
-  bookmark_client->Init(bookmark_model.get());
   bookmark_model->Load(
       browser_state->GetPrefs(),
-      browser_state->GetPrefs()->GetString(ios::prefs::kAcceptLanguages),
+      browser_state->GetPrefs()->GetString(prefs::kAcceptLanguages),
       browser_state->GetStatePath(),
       ios::StartupTaskRunnerServiceFactory::GetForBrowserState(browser_state)
           ->GetBookmarkTaskRunner(),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI));
   ios::BookmarkUndoServiceFactory::GetForBrowserState(browser_state)
       ->Start(bookmark_model.get());
-  return bookmark_model.Pass();
+  return std::move(bookmark_model);
 }
 
 web::BrowserState* BookmarkModelFactory::GetBrowserStateToUse(

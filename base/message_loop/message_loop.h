@@ -9,10 +9,11 @@
 #include <string>
 
 #include "base/base_export.h"
-#include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/debug/task_annotator.h"
+#include "base/gtest_prod_util.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/incoming_task_queue.h"
@@ -25,6 +26,7 @@
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "base/tracking_info.h"
+#include "build/build_config.h"
 
 // TODO(sky): these includes should not be necessary. Nuke them.
 #if defined(OS_WIN)
@@ -402,6 +404,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   friend class internal::IncomingTaskQueue;
   friend class ScheduleWorkTest;
   friend class Thread;
+  FRIEND_TEST_ALL_PREFIXES(MessageLoopTest, DeleteUnboundLoop);
 
   using MessagePumpFactoryCallback = Callback<scoped_ptr<MessagePump>()>;
 
@@ -601,8 +604,8 @@ class BASE_EXPORT MessageLoopForUI : public MessageLoop {
 // Do not add any member variables to MessageLoopForUI!  This is important b/c
 // MessageLoopForUI is often allocated via MessageLoop(TYPE_UI).  Any extra
 // data that you need should be stored on the MessageLoop's pump_ instance.
-COMPILE_ASSERT(sizeof(MessageLoop) == sizeof(MessageLoopForUI),
-               MessageLoopForUI_should_not_have_extra_member_variables);
+static_assert(sizeof(MessageLoop) == sizeof(MessageLoopForUI),
+              "MessageLoopForUI should not have extra member variables");
 
 #endif  // !defined(OS_NACL)
 
@@ -682,8 +685,8 @@ class BASE_EXPORT MessageLoopForIO : public MessageLoop {
 // Do not add any member variables to MessageLoopForIO!  This is important b/c
 // MessageLoopForIO is often allocated via MessageLoop(TYPE_IO).  Any extra
 // data that you need should be stored on the MessageLoop's pump_ instance.
-COMPILE_ASSERT(sizeof(MessageLoop) == sizeof(MessageLoopForIO),
-               MessageLoopForIO_should_not_have_extra_member_variables);
+static_assert(sizeof(MessageLoop) == sizeof(MessageLoopForIO),
+              "MessageLoopForIO should not have extra member variables");
 
 }  // namespace base
 

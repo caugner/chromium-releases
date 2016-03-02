@@ -5,7 +5,9 @@
 #ifndef COMPONENTS_MUS_WS_WINDOW_MANAGER_ACCESS_POLICY_H_
 #define COMPONENTS_MUS_WS_WINDOW_MANAGER_ACCESS_POLICY_H_
 
-#include "base/basictypes.h"
+#include <stdint.h>
+
+#include "base/macros.h"
 #include "components/mus/ws/access_policy.h"
 
 namespace mus {
@@ -45,12 +47,14 @@ class WindowManagerAccessPolicy : public AccessPolicy {
   bool CanSetWindowTextInputState(const ServerWindow* window) const override;
   bool CanSetFocus(const ServerWindow* window) const override;
   bool CanSetClientArea(const ServerWindow* window) const override;
+  bool CanSetCursorProperties(const ServerWindow* window) const override;
   bool ShouldNotifyOnHierarchyChange(
       const ServerWindow* window,
       const ServerWindow** new_parent,
       const ServerWindow** old_parent) const override;
   const ServerWindow* GetWindowForFocusChange(
       const ServerWindow* focused) override;
+  bool CanSetWindowManagerInternal() const override;
 
  private:
   bool IsWindowKnown(const ServerWindow* window) const;

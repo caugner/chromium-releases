@@ -282,7 +282,7 @@ void WebUIScreenLocker::Signout() {
   chromeos::ScreenLocker::default_screen_locker()->Signout();
 }
 
-bool WebUIScreenLocker::IsUserWhitelisted(const std::string& user_id) {
+bool WebUIScreenLocker::IsUserWhitelisted(const AccountId& account_id) {
   NOTREACHED();
   return true;
 }
@@ -347,7 +347,7 @@ void WebUIScreenLocker::SuspendDone(const base::TimeDelta& sleep_duration) {
 void WebUIScreenLocker::RenderProcessGone(base::TerminationStatus status) {
   if (browser_shutdown::GetShutdownType() == browser_shutdown::NOT_VALID &&
       status != base::TERMINATION_STATUS_NORMAL_TERMINATION) {
-    LOG(ERROR) << "Renderer crash on lock screen";
+    LOG(ERROR) << "Renderer crash on lock screen; signing out";
     Signout();
   }
 }

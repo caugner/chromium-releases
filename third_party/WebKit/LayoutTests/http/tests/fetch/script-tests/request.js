@@ -60,6 +60,10 @@ test(function() {
      new Request(URL, {mode: ' cors'}),
      new Request(URL, {mode: 'co rs'}),
      new Request(URL, {mode: 'CORS'}),
+     new Request(URL, {mode: 'navigate\0'}),
+     new Request(URL, {mode: ' navigate'}),
+     new Request(URL, {mode: 'navi gate'}),
+     new Request(URL, {mode: 'NAVIGATE'}),
      new Request(URL, {mode: '\0'.repeat(100000)}),
      new Request(URL, {mode: 'x'.repeat(100000)}),
      new Request(URL, {credentials: null}),
@@ -294,6 +298,15 @@ test(function() {
   }, 'Request method name throw test');
 
 test(function() {
+    assert_throws(
+      {name: 'TypeError'},
+      function() {
+        var request = new Request(URL, {mode: 'navigate'});
+      },
+      'new Request with a navigate mode should throw');
+  }, 'Request mode throw test');
+
+test(function() {
     var url = 'http://example.com';
     TO_BE_NORMALIZED_METHOD_NAMES.forEach(
       function(method) {
@@ -318,15 +331,23 @@ test(function() {
   }, 'Request: valid method names and normalize test');
 
 test(function() {
+    assert_throws(new TypeError(),
+                  function() { new Request('http://user@localhost/'); },
+                  'Request with a URL with username must throw.');
+    assert_throws(new TypeError(),
+                  function() { new Request('http://user:pass@localhost/'); },
+                  'Request with a URL with username and password must throw.');
+  }, 'Request construction with URLs with credentials.');
+
+test(function() {
     var req = new Request(URL);
     assert_false(req.bodyUsed,
                  'Request should not be flagged as used if it has not been ' +
                  'consumed.');
-    // See https://crbug.com/501195.
     var req2 = new Request(req);
-    assert_true(req.bodyUsed,
-                'Request should be flagged as used if it does not have' +
-                'body.');
+    assert_false(req.bodyUsed,
+                 'Request should not be flagged as used if it does not ' +
+                 'have body.');
     assert_false(req2.bodyUsed,
                  'Request should not be flagged as used if it has not been ' +
                  'consumed.');
@@ -466,6 +487,13 @@ promise_test(function() {
       });
   }, 'Request of GET/HEAD method cannot have RequestInit body.');
 
+test(() => {
+    var req = new Request(URL, {method: 'POST', body: 'hello'});
+    req.text();
+    assert_true(req.bodyUsed);
+    assert_throws({name: 'TypeError'}, () => { req.clone(); });
+  }, 'Used => clone');
+
 promise_test(function() {
     var headers = new Headers;
     headers.set('Content-Language', 'ja');
@@ -475,6 +503,8 @@ promise_test(function() {
         body: new Blob(['Test Blob'], {type: 'test/type'})
       });
     var req2 = req.clone();
+    assert_false(req.bodyUsed);
+    assert_false(req2.bodyUsed);
     // Change headers and of original request.
     req.headers.set('Content-Language', 'en');
     assert_equals(req2.headers.get('Content-Language'), 'ja',
@@ -486,13 +516,6 @@ promise_test(function() {
         return req2.text();
       }).then(function(text) {
         assert_equals(text, 'Test Blob', 'Cloned request body should match.');
-        return Promise.all([req.text(), req2.text()]);
-      }).then(function(texts) {
-        assert_equals(texts[0], '', 'The body is consumed.');
-        assert_equals(texts[1], '', 'The body is consumed.');
-        return req.clone().text();
-      }).then(function(text) {
-        assert_equals(text, '', 'The body was consumed before cloned.');
       });
   }, 'Test clone behavior with loading content from Request.');
 
@@ -582,6 +605,15 @@ async_test(function(t) {
             'Creating a Request with FormData body should success.');
         })
       .then(function() {
+          var params = new URLSearchParams();
+          params.append('sample string', '1234567890');
+          request = new Request(URL, {method: 'POST', body: params});
+          return request.text();
+        })
+      .then(function(result) {
+          assert_equals(result, "sample+string=1234567890");
+        })
+      .then(function() {
           t.done();
         })
       .catch(unreached_rejection(t));
@@ -649,9 +681,6 @@ promise_test(function(t) {
       .then(function(blob) {
           assert_equals(blob.type, 'text/plain');
           assert_equals(req.headers.get('Content-Type'), 'text/plain');
-          return new Request(req).blob();
-        }).then(function(blob) {
-          assert_equals(blob.type, 'text/plain');
         });
   }, 'MIME type for Blob with non-empty type');
 
@@ -718,18 +747,5 @@ promise_test(function(t) {
           assert_equals(req.headers.get('Content-Type'), 'Text/Html');
         });
   }, 'Extract a MIME type (1)');
-
-promise_test(function(t) {
-    var req = new Request('http://localhost/', {method: 'POST', body: 'hello'});
-    return req.text().then(function(text) {
-        assert_equals(text, 'hello');
-        var req2 = new Request(req);
-        assert_true(req.bodyUsed);
-        assert_false(req2.bodyUsed);
-        return req2.text();
-      }).then(function(text) {
-        assert_equals(text, '');
-      });
-  }, 'Consume and pass');
 
 done();

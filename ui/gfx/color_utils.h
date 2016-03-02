@@ -5,7 +5,6 @@
 #ifndef UI_GFX_COLOR_UTILS_H_
 #define UI_GFX_COLOR_UTILS_H_
 
-#include "base/basictypes.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/gfx_export.h"
 
@@ -87,6 +86,9 @@ GFX_EXPORT double CalculateBoringScore(const SkBitmap& bitmap);
 // be partially transparent.
 GFX_EXPORT SkColor AlphaBlend(SkColor foreground, SkColor background,
                               SkAlpha alpha);
+
+// Returns true if the luminance of |color| is closer to black than white.
+GFX_EXPORT bool IsDark(SkColor color);
 
 // Makes a dark color lighter or a light color darker by blending |color| with
 // white or black depending on its current luminance.  |alpha| controls the

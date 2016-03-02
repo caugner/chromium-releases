@@ -4,19 +4,21 @@
 
 #include "components/history/core/browser/history_backend.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_base.h"
@@ -29,6 +31,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "components/favicon_base/favicon_usage_data.h"
 #include "components/history/core/browser/history_backend_client.h"
 #include "components/history/core/browser/history_constants.h"
@@ -87,7 +90,7 @@ void SimulateNotificationURLVisited(history::HistoryServiceObserver* observer,
 
   base::Time visit_time;
   history::RedirectList redirects;
-  for (const auto& row : rows) {
+  for (const history::URLRow& row : rows) {
     observer->OnURLVisited(nullptr, ui::PAGE_TRANSITION_LINK, row, redirects,
                            visit_time);
   }
@@ -288,7 +291,7 @@ class HistoryBackendTestBase : public testing::Test {
 
 void HistoryBackendTestDelegate::SetInMemoryBackend(
     scoped_ptr<InMemoryHistoryBackend> backend) {
-  test_->SetInMemoryBackend(backend.Pass());
+  test_->SetInMemoryBackend(std::move(backend));
 }
 
 void HistoryBackendTestDelegate::NotifyFaviconsChanged(
@@ -3170,7 +3173,7 @@ TEST_F(HistoryBackendTest, TopHosts) {
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("http://cnn.com/intl"));
   urls.push_back(GURL("http://dogtopia.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3185,7 +3188,7 @@ TEST_F(HistoryBackendTest, TopHosts_ElidePortAndScheme) {
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("https://cnn.com/intl"));
   urls.push_back(GURL("http://cnn.com:567/sports"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3198,7 +3201,7 @@ TEST_F(HistoryBackendTest, TopHosts_ElideWWW) {
   urls.push_back(GURL("http://www.cnn.com/us"));
   urls.push_back(GURL("http://cnn.com/intl"));
   urls.push_back(GURL("http://www.dogtopia.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3213,7 +3216,7 @@ TEST_F(HistoryBackendTest, TopHosts_OnlyLast30Days) {
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("http://cnn.com/intl"));
   urls.push_back(GURL("http://dogtopia.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3234,7 +3237,7 @@ TEST_F(HistoryBackendTest, TopHosts_MaxNumHosts) {
   urls.push_back(GURL("http://dogtopia.com/"));
   urls.push_back(GURL("http://dogtopia.com/webcam"));
   urls.push_back(GURL("http://www.gardenweb.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3255,7 +3258,7 @@ TEST_F(HistoryBackendTest, TopHosts_IgnoreUnusualURLs) {
   urls.push_back(GURL("data:text/plain,Hello%20world%21"));
   urls.push_back(GURL("chrome://memory"));
   urls.push_back(GURL("about:mammon"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3268,7 +3271,7 @@ TEST_F(HistoryBackendTest, HostRankIfAvailable) {
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("http://cnn.com/intl"));
   urls.push_back(GURL("http://dogtopia.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3292,7 +3295,7 @@ TEST_F(HistoryBackendTest, RecordTopHostsMetrics) {
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("http://cnn.com/intl"));
   urls.push_back(GURL("http://dogtopia.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
                            history::SOURCE_BROWSED);
   }
@@ -3306,7 +3309,7 @@ TEST_F(HistoryBackendTest, RecordTopHostsMetrics) {
   urls.clear();
   urls.push_back(GURL("http://cnn.com/us"));
   urls.push_back(GURL("http://www.unipresse.com/"));
-  for (const auto& url : urls) {
+  for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0,
                            ui::PAGE_TRANSITION_CHAIN_END,
                            history::SOURCE_BROWSED);
@@ -3314,6 +3317,35 @@ TEST_F(HistoryBackendTest, RecordTopHostsMetrics) {
 
   EXPECT_THAT(histogram.GetAllSamples("History.TopHostsVisitsByRank"),
               ElementsAre(base::Bucket(1, 1), base::Bucket(51, 1)));
+}
+
+TEST_F(HistoryBackendTest, GetCountsForOrigins) {
+  std::vector<GURL> urls;
+  urls.push_back(GURL("http://cnn.com/us"));
+  urls.push_back(GURL("http://cnn.com/intl"));
+  urls.push_back(GURL("https://cnn.com/intl"));
+  urls.push_back(GURL("http://cnn.com:8080/path"));
+  urls.push_back(GURL("http://dogtopia.com/pups?q=poods"));
+  for (const GURL& url : urls) {
+    backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
+                           history::SOURCE_BROWSED);
+  }
+
+  std::set<GURL> origins;
+  origins.insert(GURL("http://cnn.com/"));
+  EXPECT_THAT(backend_->GetCountsForOrigins(origins),
+              ElementsAre(std::make_pair(GURL("http://cnn.com/"), 2)));
+
+  origins.insert(GURL("http://dogtopia.com/"));
+  origins.insert(GURL("http://cnn.com:8080/"));
+  origins.insert(GURL("https://cnn.com/"));
+  origins.insert(GURL("http://notpresent.com/"));
+  EXPECT_THAT(backend_->GetCountsForOrigins(origins),
+              ElementsAre(std::make_pair(GURL("http://cnn.com/"), 2),
+                          std::make_pair(GURL("http://cnn.com:8080/"), 1),
+                          std::make_pair(GURL("http://dogtopia.com/"), 1),
+                          std::make_pair(GURL("http://notpresent.com/"), 0),
+                          std::make_pair(GURL("https://cnn.com/"), 1)));
 }
 
 TEST_F(HistoryBackendTest, UpdateVisitDuration) {

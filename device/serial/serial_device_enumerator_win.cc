@@ -8,6 +8,7 @@
 
 #include <devguid.h>
 #include <setupapi.h>
+#include <stdint.h>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/sparse_histogram.h"
@@ -16,7 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
-#include "third_party/re2/re2/re2.h"
+#include "third_party/re2/src/re2/re2.h"
 
 namespace device {
 
@@ -92,7 +93,7 @@ mojo::Array<serial::DeviceInfoPtr> GetDevicesNew() {
   HDEVINFO dev_info =
       SetupDiGetClassDevs(&GUID_DEVCLASS_PORTS, 0, 0, DIGCF_PRESENT);
   if (dev_info == INVALID_HANDLE_VALUE)
-    return devices.Pass();
+    return devices;
 
   SP_DEVINFO_DATA dev_info_data;
   dev_info_data.cbSize = sizeof(SP_DEVINFO_DATA);
@@ -127,11 +128,11 @@ mojo::Array<serial::DeviceInfoPtr> GetDevicesNew() {
       }
     }
 
-    devices.push_back(info.Pass());
+    devices.push_back(std::move(info));
   }
 
   SetupDiDestroyDeviceInfoList(dev_info);
-  return devices.Pass();
+  return devices;
 }
 
 // Returns an array of devices as retrieved through the old method of
@@ -144,9 +145,9 @@ mojo::Array<serial::DeviceInfoPtr> GetDevicesOld() {
   for (; iter_key.Valid(); ++iter_key) {
     serial::DeviceInfoPtr info(serial::DeviceInfo::New());
     info->path = base::UTF16ToASCII(iter_key.Value());
-    devices.push_back(info.Pass());
+    devices.push_back(std::move(info));
   }
-  return devices.Pass();
+  return devices;
 }
 
 }  // namespace
@@ -185,7 +186,7 @@ mojo::Array<serial::DeviceInfoPtr> SerialDeviceEnumeratorWin::GetDevices() {
   mojo::Array<serial::DeviceInfoPtr> devices;
   deviceMap.DecomposeMapTo(&paths, &devices);
 
-  return devices.Pass();
+  return devices;
 }
 
 }  // namespace device

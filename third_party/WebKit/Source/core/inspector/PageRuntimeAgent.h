@@ -66,10 +66,8 @@ private:
     void reportExecutionContextCreation();
     void reportExecutionContext(ScriptState*, bool isPageContext, const String& origin, const String& frameId);
 
-    InspectedFrames* m_inspectedFrames;
+    RawPtrWillBeMember<InspectedFrames> m_inspectedFrames;
     bool m_mainWorldContextCreated;
-    typedef HashMap<RefPtr<ScriptState>, int> ScriptStateToId;
-    ScriptStateToId m_scriptStateToId;
 };
 
 } // namespace blink

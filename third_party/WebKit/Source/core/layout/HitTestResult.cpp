@@ -19,7 +19,6 @@
  *
 */
 
-#include "config.h"
 #include "core/layout/HitTestResult.h"
 
 #include "core/HTMLNames.h"
@@ -317,7 +316,7 @@ Image* HitTestResult::image() const
     if (layoutObject && layoutObject->isImage()) {
         LayoutImage* image = toLayoutImage(layoutObject);
         if (image->cachedImage() && !image->cachedImage()->errorOccurred())
-            return image->cachedImage()->imageForLayoutObject(image);
+            return image->cachedImage()->image();
     }
 
     return nullptr;

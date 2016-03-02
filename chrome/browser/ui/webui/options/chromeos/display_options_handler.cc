@@ -4,9 +4,12 @@
 
 #include "chrome/browser/ui/webui/options/chromeos/display_options_handler.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <string>
 
-#include "ash/display/display_configurator_animation.h"
+#include "ash/display/display_animator.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/resolution_notification_controller.h"
 #include "ash/display/window_tree_host_manager.h"
@@ -38,7 +41,7 @@ DisplayManager* GetDisplayManager() {
   return ash::Shell::GetInstance()->display_manager();
 }
 
-int64 GetDisplayId(const base::ListValue* args) {
+int64_t GetDisplayId(const base::ListValue* args) {
   // Assumes the display ID is specified as the first argument.
   std::string id_value;
   if (!args->GetString(0, &id_value)) {
@@ -46,7 +49,7 @@ int64 GetDisplayId(const base::ListValue* args) {
     return gfx::Display::kInvalidDisplayID;
   }
 
-  int64 display_id = gfx::Display::kInvalidDisplayID;
+  int64_t display_id = gfx::Display::kInvalidDisplayID;
   if (!base::StringToInt64(id_value, &display_id)) {
     LOG(ERROR) << "Invalid display id: " << id_value;
     return gfx::Display::kInvalidDisplayID;
@@ -122,7 +125,7 @@ bool ConvertValueToDisplayMode(const base::DictionaryValue* dict,
   return true;
 }
 
-base::DictionaryValue* ConvertDisplayModeToValue(int64 display_id,
+base::DictionaryValue* ConvertDisplayModeToValue(int64_t display_id,
                                                  const ash::DisplayMode& mode) {
   bool is_internal = gfx::Display::HasInternalDisplay() &&
                      gfx::Display::InternalDisplayId() == display_id;
@@ -273,7 +276,7 @@ void DisplayOptionsHandler::SendDisplayInfo(
       (display_manager->IsInUnifiedMode() ? DisplayManager::UNIFIED :
        DisplayManager::EXTENDED));
 
-  int64 primary_id = ash::Shell::GetScreen()->GetPrimaryDisplay().id();
+  int64_t primary_id = ash::Shell::GetScreen()->GetPrimaryDisplay().id();
   base::ListValue js_displays;
   for (const gfx::Display& display : displays) {
     const ash::DisplayInfo& display_info =
@@ -347,8 +350,7 @@ void DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished(
     int position, int offset) {
   SetCurrentDisplayLayout(
       ash::DisplayLayout::FromInts(position, offset));
-  ash::Shell::GetInstance()->display_configurator_animation()->
-      StartFadeInAnimation();
+  ash::Shell::GetInstance()->display_animator()->StartFadeInAnimation();
 }
 
 void DisplayOptionsHandler::HandleDisplayInfo(
@@ -362,16 +364,14 @@ void DisplayOptionsHandler::HandleMirroring(const base::ListValue* args) {
       base::UserMetricsAction("Options_DisplayToggleMirroring"));
   bool is_mirroring = false;
   args->GetBoolean(0, &is_mirroring);
-  ash::Shell::GetInstance()->display_configurator_animation()->
-      StartFadeOutAnimation(base::Bind(
-          &DisplayOptionsHandler::OnFadeOutForMirroringFinished,
-          base::Unretained(this),
-          is_mirroring));
+  ash::Shell::GetInstance()->display_animator()->StartFadeOutAnimation(
+      base::Bind(&DisplayOptionsHandler::OnFadeOutForMirroringFinished,
+                 base::Unretained(this), is_mirroring));
 }
 
 void DisplayOptionsHandler::HandleSetPrimary(const base::ListValue* args) {
   DCHECK(!args->empty());
-  int64 display_id = GetDisplayId(args);
+  int64_t display_id = GetDisplayId(args);
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
@@ -391,18 +391,16 @@ void DisplayOptionsHandler::HandleDisplayLayout(const base::ListValue* args) {
   DCHECK_LE(ash::DisplayLayout::TOP, layout);
   DCHECK_GE(ash::DisplayLayout::LEFT, layout);
   content::RecordAction(base::UserMetricsAction("Options_DisplayRearrange"));
-  ash::Shell::GetInstance()->display_configurator_animation()->
-      StartFadeOutAnimation(base::Bind(
-          &DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished,
-          base::Unretained(this),
-          static_cast<int>(layout),
-          static_cast<int>(offset)));
+  ash::Shell::GetInstance()->display_animator()->StartFadeOutAnimation(
+      base::Bind(&DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished,
+                 base::Unretained(this), static_cast<int>(layout),
+                 static_cast<int>(offset)));
 }
 
 void DisplayOptionsHandler::HandleSetDisplayMode(const base::ListValue* args) {
   DCHECK(!args->empty());
 
-  int64 display_id = GetDisplayId(args);
+  int64_t display_id = GetDisplayId(args);
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
@@ -432,7 +430,7 @@ void DisplayOptionsHandler::HandleSetDisplayMode(const base::ListValue* args) {
 void DisplayOptionsHandler::HandleSetOrientation(const base::ListValue* args) {
   DCHECK(!args->empty());
 
-  int64 display_id = GetDisplayId(args);
+  int64_t display_id = GetDisplayId(args);
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
@@ -459,7 +457,7 @@ void DisplayOptionsHandler::HandleSetOrientation(const base::ListValue* args) {
 
 void DisplayOptionsHandler::HandleSetColorProfile(const base::ListValue* args) {
   DCHECK(!args->empty());
-  int64 display_id = GetDisplayId(args);
+  int64_t display_id = GetDisplayId(args);
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 

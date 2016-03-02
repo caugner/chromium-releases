@@ -5,15 +5,18 @@
 #ifndef CC_RESOURCES_RESOURCE_PROVIDER_H_
 #define CC_RESOURCES_RESOURCE_PROVIDER_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <deque>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
+#include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -76,6 +79,7 @@ class CC_EXPORT ResourceProvider
         TEXTURE_HINT_IMMUTABLE | TEXTURE_HINT_FRAMEBUFFER
   };
   enum ResourceType {
+    RESOURCE_TYPE_GPU_MEMORY_BUFFER,
     RESOURCE_TYPE_GL_TEXTURE,
     RESOURCE_TYPE_BITMAP,
   };
@@ -126,9 +130,9 @@ class CC_EXPORT ResourceProvider
 
   // Creates a resource for a particular texture target (the distinction between
   // texture targets has no effect in software mode).
-  ResourceId CreateResourceWithImageTextureTarget(const gfx::Size& size,
-                                                  TextureHint hint,
-                                                  ResourceFormat format);
+  ResourceId CreateGpuMemoryBufferResource(const gfx::Size& size,
+                                           TextureHint hint,
+                                           ResourceFormat format);
 
   // Wraps an IOSurface into a GL resource.
   ResourceId CreateResourceFromIOSurface(const gfx::Size& size,
@@ -447,6 +451,7 @@ class CC_EXPORT ResourceProvider
              GLenum target,
              GLenum filter,
              TextureHint hint,
+             ResourceType type,
              ResourceFormat format);
     Resource(uint8_t* pixels,
              SharedBitmap* bitmap,
@@ -516,8 +521,8 @@ class CC_EXPORT ResourceProvider
   }
 
   ResourceId CreateGLTexture(const gfx::Size& size,
-                             GLenum target,
                              TextureHint hint,
+                             ResourceType type,
                              ResourceFormat format);
   ResourceId CreateBitmap(const gfx::Size& size);
   Resource* InsertResource(ResourceId id, const Resource& resource);

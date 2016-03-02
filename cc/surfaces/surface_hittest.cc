@@ -10,15 +10,16 @@
 #include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
 #include "cc/surfaces/surface.h"
+#include "cc/surfaces/surface_hittest_delegate.h"
 #include "cc/surfaces/surface_manager.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
-namespace {
-}
 
-SurfaceHittest::SurfaceHittest(SurfaceManager* manager) : manager_(manager) {}
+SurfaceHittest::SurfaceHittest(SurfaceHittestDelegate* delegate,
+                               SurfaceManager* manager)
+    : delegate_(delegate), manager_(manager) {}
 
 SurfaceHittest::~SurfaceHittest() {}
 
@@ -94,6 +95,11 @@ bool SurfaceHittest::GetTargetSurfaceAtPointInternal(
       // We've hit a SurfaceDrawQuad, we need to recurse into this
       // Surface.
       const SurfaceDrawQuad* surface_quad = SurfaceDrawQuad::MaterialCast(quad);
+
+      if (delegate_ &&
+          delegate_->RejectHitTarget(surface_quad, point_in_quad_space)) {
+        continue;
+      }
 
       gfx::Transform transform_to_child_space;
       if (GetTargetSurfaceAtPointInternal(
@@ -231,11 +237,11 @@ const RenderPass* SurfaceHittest::GetRenderPassForSurfaceById(
     return nullptr;
 
   if (!render_pass_id.IsValid())
-    return frame_data->render_pass_list.back();
+    return frame_data->render_pass_list.back().get();
 
-  for (const auto* render_pass : frame_data->render_pass_list) {
+  for (const auto& render_pass : frame_data->render_pass_list) {
     if (render_pass->id == render_pass_id)
-      return render_pass;
+      return render_pass.get();
   }
 
   return nullptr;

@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/filesystem/DOMFileSystemBase.h"
 
 #include "core/fileapi/File.h"
-#include "public/platform/Platform.h"
-#include "public/platform/WebUnitTestSupport.h"
-#include <gtest/gtest.h>
+#include "platform/testing/UnitTestHelpers.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 
 namespace blink {
@@ -17,7 +15,7 @@ class DOMFileSystemBaseTest : public ::testing::Test {
 public:
     DOMFileSystemBaseTest()
     {
-        m_filePath = Platform::current()->unitTestSupport()->webKitRootDir();
+        m_filePath = testing::blinkRootDir();
         m_filePath.append("/Source/modules/filesystem/DOMFileSystemBaseTest.cpp");
         getFileMetadata(m_filePath, m_fileMetadata);
         m_fileMetadata.platformPath = m_filePath;

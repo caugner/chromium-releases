@@ -39,6 +39,7 @@ TestHostClient::TestHostClient(ThreadInstance thread_instance)
     : host_(AnimationHost::Create(thread_instance)),
       mutators_need_commit_(false) {
   host_->SetMutatorHostClient(this);
+  host_->SetSupportsScrollAnimations(true);
 }
 
 TestHostClient::~TestHostClient() {
@@ -197,9 +198,11 @@ AnimationTimelinesTest::AnimationTimelinesTest()
       host_impl_(nullptr),
       timeline_id_(AnimationIdProvider::NextTimelineId()),
       player_id_(AnimationIdProvider::NextPlayerId()),
-      layer_id_(1) {
+      next_test_layer_id_(0) {
   host_ = client_.host();
   host_impl_ = client_impl_.host();
+
+  layer_id_ = NextTestLayerId();
 }
 
 AnimationTimelinesTest::~AnimationTimelinesTest() {
@@ -232,16 +235,16 @@ void AnimationTimelinesTest::ReleaseRefPtrs() {
 void AnimationTimelinesTest::AnimateLayersTransferEvents(
     base::TimeTicks time,
     unsigned expect_events) {
-  scoped_ptr<AnimationEventsVector> events =
+  scoped_ptr<AnimationEvents> events =
       host_->animation_registrar()->CreateEvents();
 
   host_impl_->animation_registrar()->AnimateLayers(time);
   host_impl_->animation_registrar()->UpdateAnimationState(true, events.get());
-  EXPECT_EQ(expect_events, events->size());
+  EXPECT_EQ(expect_events, events->events_.size());
 
   host_->animation_registrar()->AnimateLayers(time);
   host_->animation_registrar()->UpdateAnimationState(true, nullptr);
-  host_->animation_registrar()->SetAnimationEvents(events.Pass());
+  host_->animation_registrar()->SetAnimationEvents(std::move(events));
 }
 
 AnimationPlayer* AnimationTimelinesTest::GetPlayerForLayerId(int layer_id) {
@@ -256,6 +259,11 @@ AnimationPlayer* AnimationTimelinesTest::GetImplPlayerForLayerId(int layer_id) {
       host_impl_->GetElementAnimationsForLayerId(layer_id);
   return element_animations ? element_animations->players_list().head()->value()
                             : nullptr;
+}
+
+int AnimationTimelinesTest::NextTestLayerId() {
+  next_test_layer_id_++;
+  return next_test_layer_id_;
 }
 
 }  // namespace cc

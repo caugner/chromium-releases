@@ -31,9 +31,11 @@ public class AdapterInputConnectionTest extends ContentShellTestBase {
     public void setUp() throws Exception {
         super.setUp();
         launchContentShellWithUrl("about:blank");
-        assertTrue("Page failed to load", waitForActiveShellToBeDoneLoading());
+        waitForActiveShellToBeDoneLoading();
         mWrapper = new TestInputMethodManagerWrapper(getActivity());
-        mImeAdapter = new TestImeAdapter(mWrapper, new TestImeAdapterDelegate());
+        TestImeAdapterDelegate imeAdapterDelegate =
+                new TestImeAdapterDelegate(getContentViewCore().getContainerView());
+        mImeAdapter = new TestImeAdapter(mWrapper, imeAdapterDelegate);
         mConnection = new AdapterInputConnection(
                 getContentViewCore().getContainerView(), mImeAdapter, 0, 0, new EditorInfo());
     }

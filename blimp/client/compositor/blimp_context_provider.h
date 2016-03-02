@@ -5,6 +5,8 @@
 #ifndef BLIMP_CLIENT_COMPOSITOR_BLIMP_CONTEXT_PROVIDER_H_
 #define BLIMP_CLIENT_COMPOSITOR_BLIMP_CONTEXT_PROVIDER_H_
 
+#include <stdint.h>
+
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
@@ -15,6 +17,7 @@
 #include "ui/gl/gl_surface.h"
 
 namespace blimp {
+namespace client {
 
 // Helper class to provide a graphics context for the compositor.
 class BlimpContextProvider : public cc::ContextProvider {
@@ -57,6 +60,7 @@ class BlimpContextProvider : public cc::ContextProvider {
   DISALLOW_COPY_AND_ASSIGN(BlimpContextProvider);
 };
 
+}  // namespace client
 }  // namespace blimp
 
 #endif  // BLIMP_CLIENT_COMPOSITOR_BLIMP_CONTEXT_PROVIDER_H_

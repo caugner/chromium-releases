@@ -6,6 +6,7 @@
 
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/strings/string_number_conversions.h"
@@ -35,7 +36,7 @@ namespace {
 // 4: approximately 64ms of content in 60 fps movies.
 const size_t kAccessUnitSizeForMediaSource = 4;
 
-const uint8 kVorbisPadding[] = { 0xff, 0xff, 0xff, 0xff };
+const uint8_t kVorbisPadding[] = {0xff, 0xff, 0xff, 0xff};
 
 }  // namespace
 
@@ -152,6 +153,12 @@ void MediaSourceDelegate::InitializeMediaSource(
     const base::Closure& waiting_for_decryption_key_cb) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DCHECK(!media_source_opened_cb.is_null());
+  DCHECK(!encrypted_media_init_data_cb.is_null());
+  DCHECK(!set_cdm_ready_cb.is_null());
+  DCHECK(!update_network_state_cb.is_null());
+  DCHECK(!duration_change_cb.is_null());
+  DCHECK(!waiting_for_decryption_key_cb.is_null());
+
   media_source_opened_cb_ = media_source_opened_cb;
   encrypted_media_init_data_cb_ = encrypted_media_init_data_cb;
   set_cdm_ready_cb_ = media::BindToCurrentLoop(set_cdm_ready_cb);
@@ -306,9 +313,9 @@ void MediaSourceDelegate::SeekInternal(const base::TimeDelta& seek_time) {
       media_weak_factory_.GetWeakPtr()));
 }
 
-void MediaSourceDelegate::AddBufferedTimeRange(base::TimeDelta start,
-                                               base::TimeDelta end) {
-  buffered_time_ranges_.Add(start, end);
+void MediaSourceDelegate::OnBufferedTimeRangesChanged(
+    const media::Ranges<base::TimeDelta>& ranges) {
+  buffered_time_ranges_ = ranges;
 }
 
 void MediaSourceDelegate::SetDuration(base::TimeDelta duration) {
@@ -342,7 +349,7 @@ void MediaSourceDelegate::OnReadFromDemuxer(media::DemuxerStream::Type type) {
   scoped_ptr<DemuxerData> data(new DemuxerData());
   data->type = type;
   data->access_units.resize(access_unit_size_);
-  ReadFromDemuxerStream(type, data.Pass(), 0);
+  ReadFromDemuxerStream(type, std::move(data), 0);
 }
 
 void MediaSourceDelegate::ReadFromDemuxerStream(media::DemuxerStream::Type type,
@@ -449,7 +456,7 @@ void MediaSourceDelegate::OnBufferReady(
             buffer->decrypt_config()->subsamples();
       }
       if (++index < data->access_units.size()) {
-        ReadFromDemuxerStream(type, data.Pass(), index);
+        ReadFromDemuxerStream(type, std::move(data), index);
         return;
       }
       break;
@@ -495,16 +502,14 @@ void MediaSourceDelegate::OnDemuxerInitDone(media::PipelineStatus status) {
   audio_stream_ = chunk_demuxer_->GetStream(DemuxerStream::AUDIO);
   video_stream_ = chunk_demuxer_->GetStream(DemuxerStream::VIDEO);
 
-  if (audio_stream_ && audio_stream_->audio_decoder_config().is_encrypted() &&
-      !set_cdm_ready_cb_.is_null()) {
+  if (audio_stream_ && audio_stream_->audio_decoder_config().is_encrypted()) {
     InitAudioDecryptingDemuxerStream();
     // InitVideoDecryptingDemuxerStream() will be called in
     // OnAudioDecryptingDemuxerStreamInitDone().
     return;
   }
 
-  if (video_stream_ && video_stream_->video_decoder_config().is_encrypted() &&
-      !set_cdm_ready_cb_.is_null()) {
+  if (video_stream_ && video_stream_->video_decoder_config().is_encrypted()) {
     InitVideoDecryptingDemuxerStream();
     return;
   }
@@ -518,12 +523,10 @@ void MediaSourceDelegate::InitAudioDecryptingDemuxerStream() {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " : " << demuxer_client_id_;
   DCHECK(!set_cdm_ready_cb_.is_null());
-
   audio_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
-      media_task_runner_, media_log_, set_cdm_ready_cb_,
-      waiting_for_decryption_key_cb_));
+      media_task_runner_, media_log_, waiting_for_decryption_key_cb_));
   audio_decrypting_demuxer_stream_->Initialize(
-      audio_stream_,
+      audio_stream_, set_cdm_ready_cb_,
       base::Bind(&MediaSourceDelegate::OnAudioDecryptingDemuxerStreamInitDone,
                  media_weak_factory_.GetWeakPtr()));
 }
@@ -534,10 +537,9 @@ void MediaSourceDelegate::InitVideoDecryptingDemuxerStream() {
   DCHECK(!set_cdm_ready_cb_.is_null());
 
   video_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
-      media_task_runner_, media_log_, set_cdm_ready_cb_,
-      waiting_for_decryption_key_cb_));
+      media_task_runner_, media_log_, waiting_for_decryption_key_cb_));
   video_decrypting_demuxer_stream_->Initialize(
-      video_stream_,
+      video_stream_, set_cdm_ready_cb_,
       base::Bind(&MediaSourceDelegate::OnVideoDecryptingDemuxerStreamInitDone,
                  media_weak_factory_.GetWeakPtr()));
 }
@@ -548,10 +550,22 @@ void MediaSourceDelegate::OnAudioDecryptingDemuxerStreamInitDone(
   DVLOG(1) << __FUNCTION__ << "(" << status << ") : " << demuxer_client_id_;
   DCHECK(chunk_demuxer_);
 
-  if (status != media::PIPELINE_OK)
+  if (status != media::PIPELINE_OK) {
     audio_decrypting_demuxer_stream_.reset();
-  else
-    audio_stream_ = audio_decrypting_demuxer_stream_.get();
+    // Different CDMs are supported differently. For CDMs that support a
+    // Decryptor, we'll try to use DecryptingDemuxerStream in the render side.
+    // Otherwise, we'll try to use the CDMs in the browser side. Therefore, if
+    // DecryptingDemuxerStream initialization failed, it's still possible that
+    // we can handle the audio with a CDM in the browser. Declare demuxer ready
+    // now to try that path. Note there's no need to try DecryptingDemuxerStream
+    // for video here since it is impossible to handle audio in the browser and
+    // handle video in the render process.
+    is_demuxer_ready_ = true;
+    NotifyDemuxerReady();
+    return;
+  }
+
+  audio_stream_ = audio_decrypting_demuxer_stream_.get();
 
   if (video_stream_ && video_stream_->video_decoder_config().is_encrypted()) {
     InitVideoDecryptingDemuxerStream();
@@ -670,7 +684,7 @@ void MediaSourceDelegate::OnDemuxerOpened() {
 
 void MediaSourceDelegate::OnEncryptedMediaInitData(
     media::EmeInitDataType init_data_type,
-    const std::vector<uint8>& init_data) {
+    const std::vector<uint8_t>& init_data) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   if (encrypted_media_init_data_cb_.is_null())
     return;

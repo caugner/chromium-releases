@@ -9,11 +9,11 @@ import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.os.Looper;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chromoting.CapabilityManager;
-import org.chromium.chromoting.R;
 import org.chromium.chromoting.SessionAuthenticator;
 
 import java.nio.ByteBuffer;
@@ -35,80 +35,6 @@ public class JniInterface {
 
     /** Used for authentication-related UX during connection. Accessed on the UI thread. */
     private static SessionAuthenticator sAuthenticator;
-
-    /** Interface used for connection state notifications. */
-    public interface ConnectionListener {
-        /**
-         * This enum must match the C++ enumeration remoting::protocol::ConnectionToHost::State.
-         */
-        public enum State {
-            INITIALIZING(0),
-            CONNECTING(1),
-            AUTHENTICATED(2),
-            CONNECTED(3),
-            FAILED(4),
-            CLOSED(5);
-
-            private final int mValue;
-
-            State(int value) {
-                mValue = value;
-            }
-
-            public int value() {
-                return mValue;
-            }
-
-            public static State fromValue(int value) {
-                return values()[value];
-            }
-        }
-
-        /**
-         * This enum must match the C++ enumeration remoting::protocol::ErrorCode.
-         */
-        public enum Error {
-            OK(0, 0),
-            PEER_IS_OFFLINE(1, R.string.error_host_is_offline),
-            SESSION_REJECTED(2, R.string.error_invalid_access_code),
-            INCOMPATIBLE_PROTOCOL(3, R.string.error_incompatible_protocol),
-            AUTHENTICATION_FAILED(4, R.string.error_invalid_access_code),
-            CHANNEL_CONNECTION_ERROR(5, R.string.error_p2p_failure),
-            SIGNALING_ERROR(6, R.string.error_p2p_failure),
-            SIGNALING_TIMEOUT(7, R.string.error_p2p_failure),
-            HOST_OVERLOAD(8, R.string.error_host_overload),
-            MAX_SESSION_LENGTH(9, R.string.error_max_session_length),
-            HOST_CONFIGURATION_ERROR(10, R.string.error_host_configuration_error),
-            UNKNOWN_ERROR(11, R.string.error_unexpected);
-
-            private final int mValue;
-            private final int mMessage;
-
-            Error(int value, int message) {
-                mValue = value;
-                mMessage = message;
-            }
-
-            public int value() {
-                return mValue;
-            }
-
-            public int message() {
-                return mMessage;
-            }
-
-            public static Error fromValue(int value) {
-                return values()[value];
-            }
-        }
-
-        /**
-         * Notified on connection state change.
-         * @param state The new connection state.
-         * @param error The error code, if state is STATE_FAILED.
-         */
-        void onConnectionState(State state, Error error);
-    }
 
     /*
      * Connection-initiating state machine.
@@ -141,21 +67,21 @@ public class JniInterface {
     private static CapabilityManager sCapabilityManager = CapabilityManager.getInstance();
 
     /**
-     * To be called once from the main Activity. Any subsequent calls will update the application
-     * context, but not reload the library. This is useful e.g. when the activity is closed and the
-     * user later wants to return to the application. Called on the UI thread.
+     * To be called once from the main Activity. Loads and initializes the native code.
+     * Called on the UI thread.
      */
     public static void loadLibrary(Context context) {
         if (sLoaded) return;
 
         System.loadLibrary("remoting_client_jni");
 
-        nativeLoadNative(context);
+        ContextUtils.initApplicationContext(context.getApplicationContext());
+        nativeLoadNative();
         sLoaded = true;
     }
 
     /** Performs the native portion of the initialization. */
-    private static native void nativeLoadNative(Context context);
+    private static native void nativeLoadNative();
 
     /*
      * API/OAuth2 keys access.
@@ -209,6 +135,7 @@ public class JniInterface {
         nativeDisconnect();
         sConnectionListener = null;
         sConnected = false;
+        sCapabilityManager.onHostDisconnect();
 
         // Drop the reference to free the Bitmap for GC.
         synchronized (sFrameLock) {

@@ -53,7 +53,7 @@ public:
     void layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
     void compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback*) override;
     void themeChanged() override;
-    bool handleInputEvent(const WebInputEvent&) override;
+    WebInputEventResult handleInputEvent(const WebInputEvent&) override;
     void setCursorVisibilityState(bool isVisible) override;
     bool hasTouchEventHandlersAt(const WebPoint&) override;
     void applyViewportDeltas(
@@ -95,6 +95,7 @@ public:
     void updateTopControlsState(WebTopControlsState constraints, WebTopControlsState current, bool animate) override;
     void setVisibilityState(WebPageVisibilityState, bool isInitialState) override;
     bool forSubframe() const { return false; }
+    void scheduleAnimation() override;
 
 private:
     WebWidgetClient* m_client;

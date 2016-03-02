@@ -40,11 +40,9 @@
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/ThreadSpecific.h"
 #include "wtf/Threading.h"
 #include "wtf/ThreadingPrimitives.h"
-#include "wtf/text/WTFString.h"
 
 namespace v8 {
 class Isolate;
@@ -54,10 +52,10 @@ namespace blink {
 
 class BasePage;
 class CallbackStack;
-class CrossThreadPersistentRegion;
 struct GCInfo;
 class GarbageCollectedMixinConstructorMarker;
 class HeapObjectHeader;
+class PersistentNode;
 class PersistentRegion;
 class BaseHeap;
 class SafePointAwareMutexLocker;
@@ -93,7 +91,7 @@ class Visitor;
 // public:
 //     Foo()
 //     {
-//         ThreadState::current()->registerPreFinalizer(this, dispose);
+//         ThreadState::current()->registerPreFinalizer(dispose);
 //     }
 // private:
 //     void dispose()
@@ -112,7 +110,7 @@ static bool invokePreFinalizer(void* object)        \
     self->Class::preFinalizer();                    \
     return true;                                    \
 }                                                   \
-using UsingPreFinazlizerMacroNeedsTrailingSemiColon = char
+using UsingPreFinalizerMacroNeedsTrailingSemiColon = char
 
 #if ENABLE(OILPAN)
 #define WILL_BE_USING_PRE_FINALIZER(Class, method) USING_PRE_FINALIZER(Class, method)
@@ -369,7 +367,6 @@ public:
     // A region of PersistentNodes allocated on the given thread.
     PersistentRegion* persistentRegion() const { return m_persistentRegion.get(); }
     // A region of PersistentNodes not owned by any particular thread.
-    static CrossThreadPersistentRegion& crossThreadPersistentRegion();
 
     // Visit local thread stack and trace all pointers conservatively.
     void visitStack(Visitor*);
@@ -508,6 +505,14 @@ public:
 
 #if OS(WIN) && COMPILER(MSVC)
     size_t threadStackSize();
+#endif
+
+#if defined(LEAK_SANITIZER)
+    void registerStaticPersistentNode(PersistentNode*);
+    void releaseStaticPersistentNodes();
+
+    void enterStaticReferenceRegistrationDisabledScope();
+    void leaveStaticReferenceRegistrationDisabledScope();
 #endif
 
 private:
@@ -650,6 +655,15 @@ private:
 
 #if defined(ADDRESS_SANITIZER)
     void* m_asanFakeStack;
+#endif
+
+#if defined(LEAK_SANITIZER)
+    // PersistentNodes that are stored in static references;
+    // references we have to clear before initiating LSan's leak detection.
+    HashSet<PersistentNode*> m_staticPersistents;
+
+    // Count that controls scoped disabling of persistent registration.
+    size_t m_disabledStaticPersistentsRegistration;
 #endif
 
     // Ideally we want to allocate an array of size |gcInfoTableMax| but it will

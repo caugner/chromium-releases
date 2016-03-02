@@ -6,6 +6,7 @@
 
 #include "base/callback.h"
 #include "base/json/json_reader.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/values.h"
@@ -346,7 +347,7 @@ TEST(PinnedLauncherAppsPolicyHandler, PrefTranslation) {
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, list.DeepCopy(),
                  nullptr);
   handler.ApplyPolicySettings(policy_map, &prefs);
-  EXPECT_TRUE(prefs.GetValue(prefs::kPinnedLauncherApps, &value));
+  EXPECT_TRUE(prefs.GetValue(prefs::kPolicyPinnedLauncherApps, &value));
   EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
 
   base::StringValue entry1("abcdefghijklmnopabcdefghijklmnop");
@@ -359,7 +360,7 @@ TEST(PinnedLauncherAppsPolicyHandler, PrefTranslation) {
                  nullptr);
   prefs.Clear();
   handler.ApplyPolicySettings(policy_map, &prefs);
-  EXPECT_TRUE(prefs.GetValue(prefs::kPinnedLauncherApps, &value));
+  EXPECT_TRUE(prefs.GetValue(prefs::kPolicyPinnedLauncherApps, &value));
   EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
 }
 

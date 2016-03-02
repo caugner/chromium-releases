@@ -46,6 +46,9 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
+interface CountQueuingStrategy
+    method constructor
+    method size
 interface CrossOriginServiceWorkerClient : EventTarget
     getter origin
     getter targetUrl
@@ -181,6 +184,7 @@ interface ExtendableEvent : Event
     method constructor
     method waitUntil
 interface FetchEvent : ExtendableEvent
+    getter clientId
     getter isReload
     getter request
     method constructor
@@ -450,6 +454,12 @@ interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
     method constructor
+interface OffScreenCanvas
+    getter height
+    getter width
+    method constructor
+    setter height
+    setter width
 interface PerformanceObserverEntryList
     method constructor
     method getEntries
@@ -495,9 +505,11 @@ interface ReadableByteStream
     method constructor
     method getReader
 interface ReadableStream
+    getter locked
     method cancel
     method constructor
     method getReader
+    method tee
 interface Request
     getter bodyUsed
     getter credentials
@@ -629,6 +641,19 @@ interface URL
     setter protocol
     setter search
     setter username
+interface URLSearchParams
+    method append
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method set
+    method toString
+    method values
 interface WebSocket : EventTarget
     attribute CLOSED
     attribute CLOSING

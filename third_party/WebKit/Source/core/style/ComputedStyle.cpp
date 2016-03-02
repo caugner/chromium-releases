@@ -20,7 +20,6 @@
  *
  */
 
-#include "config.h"
 #include "core/style/ComputedStyle.h"
 
 #include "core/css/resolver/StyleResolver.h"
@@ -183,8 +182,7 @@ StyleRecalcChange ComputedStyle::stylePropagationDiff(const ComputedStyle* oldSt
         || oldStyle->hasPseudoStyle(FIRST_LETTER) != newStyle->hasPseudoStyle(FIRST_LETTER)
         || !oldStyle->contentDataEquivalent(newStyle)
         || oldStyle->hasTextCombine() != newStyle->hasTextCombine()
-        || oldStyle->justifyItems() != newStyle->justifyItems()
-        || oldStyle->alignItems() != newStyle->alignItems())
+        || oldStyle->justifyItems() != newStyle->justifyItems()) // TODO (lajava): We must avoid this Reattach.
         return Reattach;
 
     if (oldStyle->inheritedNotEqual(*newStyle))
@@ -205,6 +203,17 @@ ItemPosition ComputedStyle::resolveAlignment(const ComputedStyle& parentStyle, c
     if (childStyle.alignSelfPosition() == ItemPositionAuto)
         return (parentStyle.alignItemsPosition() == ItemPositionAuto) ? resolvedAutoPositionForLayoutObject : parentStyle.alignItemsPosition();
     return childStyle.alignSelfPosition();
+}
+
+const StyleSelfAlignmentData ComputedStyle::resolvedAlignment(const ComputedStyle& parentStyle, ItemPosition resolvedAutoPositionForLayoutObject) const
+{
+    // The auto keyword computes to the parent's align-items computed value, or to "stretch", if not set or "auto".
+    if (alignSelfPosition() == ItemPositionAuto) {
+        if (parentStyle.alignItemsPosition() == ItemPositionAuto)
+            return {resolvedAutoPositionForLayoutObject, OverflowAlignmentDefault};
+        return parentStyle.alignItems();
+    }
+    return alignSelf();
 }
 
 ItemPosition ComputedStyle::resolveJustification(const ComputedStyle& parentStyle, const ComputedStyle& childStyle, ItemPosition resolvedAutoPositionForLayoutObject)
@@ -265,6 +274,10 @@ void ComputedStyle::copyNonInheritedFromCached(const ComputedStyle& other)
 
     // unique() styles are not cacheable.
     ASSERT(!other.noninherited_flags.unique);
+
+    // styles with non inherited properties that reference variables are not
+    // cacheable.
+    ASSERT(!other.noninherited_flags.variableReference);
 
     // The following flags are set during matching before we decide that we get a
     // match in the MatchedPropertiesCache which in turn calls this method. The
@@ -531,7 +544,6 @@ bool ComputedStyle::diffNeedsFullLayoutAndPaintInvalidation(const ComputedStyle&
             || rareInheritedData->hyphenationLimitAfter != other.rareInheritedData->hyphenationLimitAfter
             || rareInheritedData->hyphenationString != other.rareInheritedData->hyphenationString
             || rareInheritedData->m_respectImageOrientation != other.rareInheritedData->m_respectImageOrientation
-            || rareInheritedData->locale != other.rareInheritedData->locale
             || rareInheritedData->m_rubyPosition != other.rareInheritedData->m_rubyPosition
             || rareInheritedData->textEmphasisMark != other.rareInheritedData->textEmphasisMark
             || rareInheritedData->textEmphasisPosition != other.rareInheritedData->textEmphasisPosition
@@ -1004,8 +1016,8 @@ void ComputedStyle::applyMotionPathTransform(float originX, float originY, Trans
 
     FloatPoint point;
     float angle;
-    if (!motionPath.path().pointAndNormalAtLength(computedDistance, point, angle))
-        return;
+    motionPath.path().pointAndNormalAtLength(computedDistance, point, angle);
+
     if (motionData.m_rotationType == MotionRotationFixed)
         angle = 0;
 
@@ -1026,14 +1038,14 @@ void ComputedStyle::setBoxShadow(PassRefPtr<ShadowList> s)
 static FloatRoundedRect::Radii calcRadiiFor(const BorderData& border, LayoutSize size)
 {
     return FloatRoundedRect::Radii(
-        IntSize(valueForLength(border.topLeft().width(), size.width()),
-            valueForLength(border.topLeft().height(), size.height())),
-        IntSize(valueForLength(border.topRight().width(), size.width()),
-            valueForLength(border.topRight().height(), size.height())),
-        IntSize(valueForLength(border.bottomLeft().width(), size.width()),
-            valueForLength(border.bottomLeft().height(), size.height())),
-        IntSize(valueForLength(border.bottomRight().width(), size.width()),
-            valueForLength(border.bottomRight().height(), size.height())));
+        FloatSize(floatValueForLength(border.topLeft().width(), size.width().toFloat()),
+            floatValueForLength(border.topLeft().height(), size.height().toFloat())),
+        FloatSize(floatValueForLength(border.topRight().width(), size.width().toFloat()),
+            floatValueForLength(border.topRight().height(), size.height().toFloat())),
+        FloatSize(floatValueForLength(border.bottomLeft().width(), size.width().toFloat()),
+            floatValueForLength(border.bottomLeft().height(), size.height().toFloat())),
+        FloatSize(floatValueForLength(border.bottomRight().width(), size.width().toFloat()),
+            floatValueForLength(border.bottomRight().height(), size.height().toFloat())));
 }
 
 StyleImage* ComputedStyle::listStyleImage() const { return rareInheritedData->listStyleImage.get(); }
@@ -1339,7 +1351,7 @@ int ComputedStyle::computedLineHeight() const
         return fontMetrics().lineSpacing();
 
     if (lh.hasPercent())
-        return minimumValueForLength(lh, fontSize());
+        return minimumValueForLength(lh, computedFontSize());
 
     return std::min(lh.value(), LayoutUnit::max().toFloat());
 }

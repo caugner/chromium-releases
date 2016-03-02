@@ -6,6 +6,8 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
+assert(use_ash)
+
 gypi_values = exec_script("//build/gypi_to_gn.py",
                           [ rebase_path("ash.gyp") ],
                           "scope",
@@ -27,10 +29,10 @@ component("ash") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//components/device_event_log",
+    "//components/onc",
     "//components/signin/core/account_id",
     "//components/user_manager",
     "//components/wallpaper",
-    "//content/public/browser",
     "//media",
     "//net",
     "//skia",
@@ -48,13 +50,10 @@ component("ash") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
-    "//ui/keyboard:keyboard_with_content",
     "//ui/message_center",
     "//ui/resources",
     "//ui/strings",
     "//ui/views",
-    "//ui/views/controls/webview",
-    "//ui/web_dialogs",
     "//ui/wm",
     "//url",
   ]
@@ -96,15 +95,15 @@ component("ash") {
 
   if (is_chromeos) {
     deps += [
-      "//device/bluetooth",
-      "//ui/display",
-      "//ui/display/util",
       "//chromeos",
       "//chromeos:power_manager_proto",
+      "//device/bluetooth",
       "//third_party/qcms",
+      "//ui/chromeos:ui_chromeos",
       "//ui/chromeos/resources",
       "//ui/chromeos/strings",
-      "//ui/chromeos:ui_chromeos",
+      "//ui/display",
+      "//ui/display/util",
     ]
   } else {
     sources -= [
@@ -114,8 +113,8 @@ component("ash") {
       "accelerators/magnifier_key_scroller.h",
       "accelerators/spoken_feedback_toggler.cc",
       "accelerators/spoken_feedback_toggler.h",
-      "display/display_configurator_animation.cc",
-      "display/display_configurator_animation.h",
+      "display/display_animator.cc",
+      "display/display_animator.h",
       "display/resolution_notification_controller.cc",
       "display/resolution_notification_controller.h",
       "system/tray/media_security/media_capture_observer.h",
@@ -196,6 +195,10 @@ source_set("test_support") {
   if (is_win) {
     deps += [ "//ui/platform_window/win" ]
   }
+
+  if (is_chromeos) {
+    deps += [ "//ui/display" ]
+  }
 }
 
 source_set("test_support_with_content") {
@@ -241,7 +244,6 @@ static_library("ash_shell_lib") {
     "//ash/strings",
     "//base",
     "//base:i18n",
-
     "//net",
     "//skia",
     "//third_party/icu",
@@ -270,10 +272,10 @@ static_library("ash_shell_lib_with_content") {
   sources = gypi_values.ash_shell_with_content_lib_sources
 
   deps = [
-    #"//chrome:packed_resources",  TODO(GYP)
+    ":ash_shell_lib",
+    "//chrome:packed_resources",
     "//content",
     "//content/shell:content_shell_lib",
-    ":ash_shell_lib",
     "//skia",
   ]
 }
@@ -302,14 +304,14 @@ test("ash_unittests") {
     "//ui/aura",
     "//ui/aura:test_support",
     "//ui/base",
-    "//ui/base/ime",
     "//ui/base:test_support",
+    "//ui/base/ime",
     "//ui/compositor",
     "//ui/compositor:test_support",
     "//ui/events",
-    "//ui/events/devices",
-    "//ui/events:test_support",
     "//ui/events:gesture_detection",
+    "//ui/events:test_support",
+    "//ui/events/devices",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
@@ -357,13 +359,13 @@ test("ash_unittests") {
   if (is_chromeos) {
     sources += [ "first_run/first_run_helper_unittest.cc" ]
     deps += [
+      "//chromeos:power_manager_proto",
+      "//chromeos:test_support_without_gmock",
       "//device/bluetooth",
       "//ui/display",
       "//ui/display:test_support",
       "//ui/display:test_util",
       "//ui/display/types",
-      "//chromeos:power_manager_proto",
-      "//chromeos:test_support_without_gmock",
     ]
   } else {
     sources -= [

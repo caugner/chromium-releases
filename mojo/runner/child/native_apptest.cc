@@ -4,10 +4,10 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/application/public/cpp/application_test_base.h"
 #include "mojo/converters/network/network_type_converters.h"
 #include "mojo/runner/child/test_native_service.mojom.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/application_test_base.h"
 
 namespace mojo {
 namespace runner {
@@ -22,9 +22,7 @@ using NativeAppTest = mojo::test::ApplicationTestBase;
 TEST_F(NativeAppTest, Connect) {
   test::TestNativeServicePtr native_service;
   application_impl()->ConnectToService(
-      mojo::URLRequest::From(
-          std::string("exe:mojo_runner_child_apptest_native_target")),
-      &native_service);
+      "exe:mojo_runner_child_apptest_native_target", &native_service);
 
   bool result = false;
   native_service->Invert(

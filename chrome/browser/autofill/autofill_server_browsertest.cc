@@ -7,7 +7,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,12 +18,11 @@
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
-#include "components/autofill/core/common/autofill_pref_names.h"
-#include "components/compression/compression_utils.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/zlib/google/compression_utils.h"
 
 namespace autofill {
 namespace {
@@ -108,18 +106,6 @@ class AutofillServerTest : public InProcessBrowserTest  {
     command_line->AppendSwitchASCII(
         ::switches::kForceFieldTrials, "AutofillFieldMetadata/Enabled/");
   }
-
-  void SetUpOnMainThread() override {
-    // Disable interactions with the Mac Keychain.
-    PrefService* pref_service = browser()->profile()->GetPrefs();
-    test::DisableSystemServices(pref_service);
-
-    // Enable uploads, and load a new tab to force the AutofillDownloadManager
-    // to update its cached view of the prefs.
-    pref_service->SetDouble(prefs::kAutofillPositiveUploadRate, 1.0);
-    pref_service->SetDouble(prefs::kAutofillNegativeUploadRate, 1.0);
-    AddBlankTabAndShow(browser());
-  }
 };
 
 // Regression test for http://crbug.com/177419
@@ -149,14 +135,14 @@ IN_PROC_BROWSER_TEST_F(AutofillServerTest,
       "  };"
       "</script>";
   const char kQueryRequest[] =
-      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<?xml version=\"1.0\"?>\n"
       "<autofillquery clientversion=\"6.1.1715.1442/en (GGLL)\">"
       "<form signature=\"15916856893790176210\">"
       "<field signature=\"2594484045\" name=\"one\" type=\"text\"/>"
       "<field signature=\"2750915947\" name=\"two\" type=\"text\"/>"
       "<field signature=\"3494787134\" name=\"three\" type=\"text\"/>"
       "<field signature=\"1236501728\" name=\"four\" type=\"text\"/></form>"
-      "</autofillquery>";
+      "</autofillquery>\n";
   WindowedNetworkObserver query_network_observer(Compress(kQueryRequest));
   ui_test_utils::NavigateToURL(
       browser(), GURL(std::string(kDataURIPrefix) + kFormHtml));
@@ -166,8 +152,9 @@ IN_PROC_BROWSER_TEST_F(AutofillServerTest,
   // triggered by user gestures are ignored. Expect an upload request upon form
   // submission, with form fields matching those from the query request.
   const char kUploadRequest[] =
-      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-      "<autofillupload clientversion=\"6.1.1715.1442/en (GGLL)\""
+      "<?xml version=\"1.0\"?>\n"
+      "<autofillupload submission=\"true\""
+      " clientversion=\"6.1.1715.1442/en (GGLL)\""
       " formsignature=\"15916856893790176210\""
       " autofillused=\"false\""
       " datapresent=\"1f7e0003780000080004\""
@@ -180,7 +167,7 @@ IN_PROC_BROWSER_TEST_F(AutofillServerTest,
       " autofilltype=\"2\"/>"
       "<field signature=\"1236501728\" name=\"four\" type=\"text\""
       " autocomplete=\"off\" autofilltype=\"2\"/>"
-      "</autofillupload>";
+      "</autofillupload>\n";
 
   WindowedNetworkObserver upload_network_observer(Compress(kUploadRequest));
   content::WebContents* web_contents =
@@ -204,13 +191,13 @@ IN_PROC_BROWSER_TEST_F(AutofillServerTest,
       "  <input type='submit'>"
       "</form>";
   const char kQueryRequest[] =
-      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<?xml version=\"1.0\"?>\n"
       "<autofillquery clientversion=\"6.1.1715.1442/en (GGLL)\">"
       "<form signature=\"8900697631820480876\">"
       "<field signature=\"2594484045\" name=\"one\" type=\"text\"/>"
       "<field signature=\"2750915947\" name=\"two\" type=\"text\"/>"
       "<field signature=\"116843943\" name=\"three\" type=\"password\"/>"
-      "</form></autofillquery>";
+      "</form></autofillquery>\n";
   WindowedNetworkObserver query_network_observer(Compress(kQueryRequest));
   ui_test_utils::NavigateToURL(
       browser(), GURL(std::string(kDataURIPrefix) + kFormHtml));

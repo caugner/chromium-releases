@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ssl/cert_report_helper.h"
 
+#include <utility>
+
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
@@ -11,10 +13,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_context.h"
@@ -37,7 +41,7 @@ CertReportHelper::CertReportHelper(
     certificate_reporting::ErrorReport::InterstitialReason interstitial_reason,
     bool overridable,
     security_interstitials::MetricsHelper* metrics_helper)
-    : ssl_cert_reporter_(ssl_cert_reporter.Pass()),
+    : ssl_cert_reporter_(std::move(ssl_cert_reporter)),
       web_contents_(web_contents),
       request_url_(request_url),
       ssl_info_(ssl_info),
@@ -55,21 +59,21 @@ void CertReportHelper::PopulateExtendedReportingOption(
   // by policy.
   const bool show = ShouldShowCertificateReporterCheckbox();
 
-  load_time_data->SetBoolean(interstitials::kDisplayCheckBox, show);
+  load_time_data->SetBoolean(security_interstitials::kDisplayCheckBox, show);
   if (!show)
     return;
 
   load_time_data->SetBoolean(
-      interstitials::kBoxChecked,
+      security_interstitials::kBoxChecked,
       IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled));
 
   const std::string privacy_link = base::StringPrintf(
-      interstitials::kPrivacyLinkHtml,
-      SecurityInterstitialPage::CMD_OPEN_REPORTING_PRIVACY,
+      security_interstitials::kPrivacyLinkHtml,
+      security_interstitials::CMD_OPEN_REPORTING_PRIVACY,
       l10n_util::GetStringUTF8(IDS_SAFE_BROWSING_PRIVACY_POLICY_PAGE).c_str());
 
   load_time_data->SetString(
-      interstitials::kOptInLink,
+      security_interstitials::kOptInLink,
       l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MALWARE_REPORTING_AGREE,
                                  base::UTF8ToUTF16(privacy_link)));
 }
@@ -109,7 +113,7 @@ void CertReportHelper::FinishCertCollection(
 
 void CertReportHelper::SetSSLCertReporterForTesting(
     scoped_ptr<SSLCertReporter> ssl_cert_reporter) {
-  ssl_cert_reporter_ = ssl_cert_reporter.Pass();
+  ssl_cert_reporter_ = std::move(ssl_cert_reporter);
 }
 
 bool CertReportHelper::ShouldShowCertificateReporterCheckbox() {

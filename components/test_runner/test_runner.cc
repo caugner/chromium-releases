@@ -4,9 +4,14 @@
 
 #include "components/test_runner/test_runner.h"
 
+#include <stddef.h>
 #include <limits>
+#include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "components/test_runner/mock_credential_manager_client.h"
@@ -53,6 +58,7 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/switches.h"
 
 #if defined(__linux__) || defined(ANDROID)
 #include "third_party/WebKit/public/web/linux/WebFontRendering.h"
@@ -69,6 +75,18 @@ WebString V8StringToWebString(v8::Local<v8::String> v8_str) {
   scoped_ptr<char[]> chars(new char[length]);
   v8_str->WriteUtf8(chars.get(), length);
   return WebString::fromUTF8(chars.get());
+}
+
+double GetDefaultDeviceScaleFactor() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kForceDeviceScaleFactor)) {
+    double scale;
+    std::string value =
+        command_line->GetSwitchValueASCII(switches::kForceDeviceScaleFactor);
+    if (base::StringToDouble(value, &scale))
+      return scale;
+  }
+  return 1.f;
 }
 
 class HostMethodTask : public WebMethodTask<TestRunner> {
@@ -272,6 +290,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetWindowIsKey(bool value);
   std::string PathToLocalResource(const std::string& path);
   void SetBackingScaleFactor(double value, v8::Local<v8::Function> callback);
+  void EnableUseZoomForDSF(v8::Local<v8::Function> callback);
   void SetColorProfile(const std::string& name,
                        v8::Local<v8::Function> callback);
   void SetPOSIXLocale(const std::string& locale);
@@ -545,6 +564,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::PathToLocalResource)
       .SetMethod("setBackingScaleFactor",
                  &TestRunnerBindings::SetBackingScaleFactor)
+      .SetMethod("enableUseZoomForDSF",
+                 &TestRunnerBindings::EnableUseZoomForDSF)
       .SetMethod("setColorProfile", &TestRunnerBindings::SetColorProfile)
       .SetMethod("setPOSIXLocale", &TestRunnerBindings::SetPOSIXLocale)
       .SetMethod("setMIDIAccessorResult",
@@ -1347,6 +1368,12 @@ void TestRunnerBindings::SetBackingScaleFactor(
     runner_->SetBackingScaleFactor(value, callback);
 }
 
+void TestRunnerBindings::EnableUseZoomForDSF(
+    v8::Local<v8::Function> callback) {
+  if (runner_)
+    runner_->EnableUseZoomForDSF(callback);
+}
+
 void TestRunnerBindings::SetColorProfile(
     const std::string& name, v8::Local<v8::Function> callback) {
   if (runner_)
@@ -1689,7 +1716,7 @@ void TestRunner::Reset() {
     // Reset the default quota for each origin to 5MB
     delegate_->SetDatabaseQuota(5 * 1024 * 1024);
     delegate_->SetDeviceColorProfile("reset");
-    delegate_->SetDeviceScaleFactor(1);
+    delegate_->SetDeviceScaleFactor(GetDefaultDeviceScaleFactor());
     delegate_->SetAcceptAllCookies(false);
     delegate_->SetLocale("");
     delegate_->UseUnfortunateSynchronousResizeMode(false);
@@ -2582,14 +2609,10 @@ void TestRunner::OverridePreference(const std::string& key,
     prefs->loads_images_automatically = value->BooleanValue();
   } else if (key == "WebKitPluginsEnabled") {
     prefs->plugins_enabled = value->BooleanValue();
-  } else if (key == "WebKitOfflineWebApplicationCacheEnabled") {
-    prefs->offline_web_application_cache_enabled = value->BooleanValue();
   } else if (key == "WebKitTabToLinksPreferenceKey") {
     prefs->tabs_to_links = value->BooleanValue();
   } else if (key == "WebKitWebGLEnabled") {
     prefs->experimental_webgl_enabled = value->BooleanValue();
-  } else if (key == "WebKitCSSRegionsEnabled") {
-    prefs->experimental_css_regions_enabled = value->BooleanValue();
   } else if (key == "WebKitCSSGridLayoutEnabled") {
     prefs->experimental_css_grid_layout_enabled = value->BooleanValue();
   } else if (key == "WebKitHyperlinkAuditingEnabled") {
@@ -2608,8 +2631,6 @@ void TestRunner::OverridePreference(const std::string& key,
     prefs->strict_powerful_feature_restrictions = value->BooleanValue();
   } else if (key == "WebKitShouldRespectImageOrientation") {
     prefs->should_respect_image_orientation = value->BooleanValue();
-  } else if (key == "WebKitWebAudioEnabled") {
-    DCHECK(value->BooleanValue());
   } else if (key == "WebKitWebSecurityEnabled") {
     prefs->web_security_enabled = value->BooleanValue();
   } else {
@@ -2859,6 +2880,11 @@ void TestRunner::SetBackingScaleFactor(double value,
   delegate_->PostTask(new InvokeCallbackTask(this, callback));
 }
 
+void TestRunner::EnableUseZoomForDSF(v8::Local<v8::Function> callback) {
+  delegate_->EnableUseZoomForDSF();
+  delegate_->PostTask(new InvokeCallbackTask(this, callback));
+}
+
 void TestRunner::SetColorProfile(const std::string& name,
                                  v8::Local<v8::Function> callback) {
   delegate_->SetDeviceColorProfile(name);
@@ -3027,7 +3053,7 @@ void TestRunner::CopyImageAtAndCapturePixelsAsyncThen(
 void TestRunner::GetManifestCallback(scoped_ptr<InvokeCallbackTask> task,
                                      const blink::WebURLResponse& response,
                                      const std::string& data) {
-  InvokeCallback(task.Pass());
+  InvokeCallback(std::move(task));
 }
 
 void TestRunner::CapturePixelsCallback(scoped_ptr<InvokeCallbackTask> task,
@@ -3071,7 +3097,7 @@ void TestRunner::CapturePixelsCallback(scoped_ptr<InvokeCallbackTask> task,
       &buffer, context->Global(), isolate);
 
   task->SetArguments(3, argv);
-  InvokeCallback(task.Pass());
+  InvokeCallback(std::move(task));
 }
 
 void TestRunner::DispatchBeforeInstallPromptCallback(
@@ -3090,7 +3116,7 @@ void TestRunner::DispatchBeforeInstallPromptCallback(
   argv[0] = v8::Boolean::New(isolate, canceled);
 
   task->SetArguments(1, argv);
-  InvokeCallback(task.Pass());
+  InvokeCallback(std::move(task));
 }
 
 void TestRunner::GetBluetoothManualChooserEventsCallback(
@@ -3112,7 +3138,7 @@ void TestRunner::GetBluetoothManualChooserEventsCallback(
 
   // Call the callback.
   task->SetArguments(1, arg);
-  InvokeCallback(task.Pass());
+  InvokeCallback(std::move(task));
 }
 
 void TestRunner::LocationChangeDone() {

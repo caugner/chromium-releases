@@ -4,8 +4,6 @@
 // found in the LICENSE file.
 //
 
-#include "config.h"
-
 #include "core/inspector/InspectorTracingAgent.h"
 
 #include "core/frame/LocalFrame.h"
@@ -38,6 +36,7 @@ InspectorTracingAgent::InspectorTracingAgent(Client* client, InspectorWorkerAgen
 DEFINE_TRACE(InspectorTracingAgent)
 {
     visitor->trace(m_workerAgent);
+    visitor->trace(m_inspectedFrames);
     InspectorBaseAgent::trace(visitor);
 }
 

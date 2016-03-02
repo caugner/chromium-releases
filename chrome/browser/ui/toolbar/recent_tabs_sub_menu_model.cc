@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -25,8 +28,8 @@
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/sessions/core/tab_restore_service.h"
-#include "components/sync_driver/glue/synced_session.h"
-#include "components/sync_driver/open_tabs_ui_delegate.h"
+#include "components/sync_sessions/open_tabs_ui_delegate.h"
+#include "components/sync_sessions/synced_session.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/browser_resources.h"
 #include "grit/theme_resources.h"

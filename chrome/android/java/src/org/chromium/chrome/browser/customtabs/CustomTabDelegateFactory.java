@@ -4,13 +4,10 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import android.app.Application;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
-import android.graphics.Rect;
-import android.os.IBinder;
-import android.os.SystemClock;
 import android.os.TransactionTooLargeException;
+import android.text.TextUtils;
 
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
@@ -25,9 +22,8 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabContextMenuItemDelegate;
 import org.chromium.chrome.browser.tab.TabDelegateFactory;
 import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
+import org.chromium.chrome.browser.tab.TopControlsVisibilityDelegate;
 import org.chromium.chrome.browser.util.UrlUtilities;
-import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.WebContents;
 
 /**
  * A {@link TabDelegateFactory} class to be used in all {@link Tab} owned
@@ -39,13 +35,15 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
      */
     static class CustomTabNavigationDelegate extends ExternalNavigationDelegateImpl {
         private static final String TAG = "customtabs";
+        private final String mClientPackageName;
         private boolean mHasActivityStarted;
 
         /**
          * Constructs a new instance of {@link CustomTabNavigationDelegate}.
          */
-        public CustomTabNavigationDelegate(ChromeActivity activity) {
+        public CustomTabNavigationDelegate(ChromeActivity activity, String clientPackageName) {
             super(activity);
+            mClientPackageName = clientPackageName;
         }
 
         @Override
@@ -59,8 +57,15 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
             boolean isExternalProtocol = !UrlUtilities.isAcceptedScheme(intent.getDataString());
             boolean hasDefaultHandler = hasDefaultHandler(intent);
             try {
-                // For a url chrome can handle and there is no default set, handle it ourselves.
-                if (!hasDefaultHandler && !isExternalProtocol) return false;
+                // For a URL chrome can handle and there is no default set, handle it ourselves.
+                if (!hasDefaultHandler) {
+                    if (!TextUtils.isEmpty(mClientPackageName) && isPackageSpecializedHandler(
+                            getActivity(), mClientPackageName, intent)) {
+                        intent.setPackage(mClientPackageName);
+                    } else if (!isExternalProtocol) {
+                        return false;
+                    }
+                }
                 // If android fails to find a handler, handle it ourselves.
                 if (!getActivity().startActivityIfNeeded(intent, -1)) return false;
 
@@ -112,8 +117,6 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
     }
 
     private static class CustomTabWebContentsDelegate extends TabWebContentsDelegateAndroid {
-        private String mTargetUrl;
-
         /**
          * See {@link TabWebContentsDelegateAndroid}.
          */
@@ -127,40 +130,30 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
         }
 
         @Override
-        public void webContentsCreated(WebContents sourceWebContents, long openerRenderFrameId,
-                String frameName, String targetUrl, WebContents newWebContents) {
-            super.webContentsCreated(
-                    sourceWebContents, openerRenderFrameId, frameName, targetUrl,
-                    newWebContents);
-            mTargetUrl = targetUrl;
-        }
-
-        @Override
-        public boolean addNewContents(WebContents sourceWebContents, WebContents webContents,
-                int disposition, Rect initialPosition, boolean userGesture) {
-            assert mTargetUrl != null;
-            ((CustomTabActivity) mActivity).loadUrlInCurrentTab(
-                    new LoadUrlParams(mTargetUrl), SystemClock.elapsedRealtime());
-            mTargetUrl = null;
-            return false;
-        }
-
-        @Override
         protected void bringActivityToForeground() {
             // No-op here. If client's task is in background Chrome is unable to foreground it.
         }
     }
 
-    private final Application mApplication;
-    private final IBinder mSession;
     private CustomTabNavigationDelegate mNavigationDelegate;
     private ExternalNavigationHandler mNavigationHandler;
-    private CustomTabObserver mTabObserver;
+    private boolean mShouldHideTopControls;
 
-    public CustomTabDelegateFactory(Application application, IBinder session) {
-        super();
-        mApplication = application;
-        mSession = session;
+    /**
+     * @param shouldHideTopControls Whether or not the top controls may auto-hide.
+     */
+    public CustomTabDelegateFactory(boolean shouldHideTopControls) {
+        mShouldHideTopControls = shouldHideTopControls;
+    }
+
+    @Override
+    public TopControlsVisibilityDelegate createTopControlsVisibilityDelegate(Tab tab) {
+        return new TopControlsVisibilityDelegate(tab) {
+            @Override
+            public boolean isHidingTopControlsEnabled() {
+                return mShouldHideTopControls && super.isHidingTopControlsEnabled();
+            }
+        };
     }
 
     @Override
@@ -173,7 +166,7 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
     @Override
     public InterceptNavigationDelegateImpl createInterceptNavigationDelegate(Tab tab,
             ChromeActivity activity) {
-        mNavigationDelegate = new CustomTabNavigationDelegate(activity);
+        mNavigationDelegate = new CustomTabNavigationDelegate(activity, tab.getAppAssociatedWith());
         mNavigationHandler = new ExternalNavigationHandler(mNavigationDelegate);
         return new InterceptNavigationDelegateImpl(mNavigationHandler, activity, tab);
     }

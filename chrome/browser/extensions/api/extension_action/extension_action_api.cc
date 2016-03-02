@@ -4,8 +4,12 @@
 
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 
+#include <stddef.h>
+#include <utility>
+
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -228,8 +232,18 @@ bool ExtensionActionAPI::ShowExtensionActionPopup(
     return browser->window()->GetLocationBar()->ShowPageActionPopup(
         extension, grant_active_tab_permissions);
   }
-  return browser->window()->GetToolbarActionsBar()->ShowToolbarActionPopup(
-      extension->id(), grant_active_tab_permissions);
+
+  // Don't support showing action popups in a popup window.
+  if (!browser->SupportsWindowFeature(Browser::FEATURE_TOOLBAR))
+    return false;
+
+  ToolbarActionsBar* toolbar_actions_bar =
+      browser->window()->GetToolbarActionsBar();
+  // ToolbarActionsBar could be null if, e.g., this is a popup window with no
+  // toolbar.
+  return toolbar_actions_bar &&
+         toolbar_actions_bar->ShowToolbarActionPopup(
+             extension->id(), grant_active_tab_permissions);
 }
 
 bool ExtensionActionAPI::ExtensionWantsToRun(
@@ -304,11 +318,11 @@ void ExtensionActionAPI::DispatchEventToExtension(
     return;
 
   scoped_ptr<Event> event(
-      new Event(histogram_value, event_name, event_args.Pass()));
+      new Event(histogram_value, event_name, std::move(event_args)));
   event->restrict_to_browser_context = context;
   event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
   EventRouter::Get(context)
-      ->DispatchEventToExtension(extension_id, event.Pass());
+      ->DispatchEventToExtension(extension_id, std::move(event));
 }
 
 void ExtensionActionAPI::ExtensionActionExecuted(
@@ -339,7 +353,7 @@ void ExtensionActionAPI::ExtensionActionExecuted(
 
     DispatchEventToExtension(web_contents->GetBrowserContext(),
                              extension_action.extension_id(), histogram_value,
-                             event_name, args.Pass());
+                             event_name, std::move(args));
   }
 }
 
@@ -501,6 +515,11 @@ bool ExtensionActionSetIconFunction::RunExtensionAction() {
 
     EXTENSION_FUNCTION_VALIDATE(
         ExtensionAction::ParseIconFromCanvasDictionary(*canvas_set, &icon));
+
+    if (icon.isNull()) {
+      error_ = "Icon invalid.";
+      return false;
+    }
 
     extension_action_->SetIcon(tab_id_, gfx::Image(icon));
   } else if (details_->GetInteger("iconIndex", &icon_index)) {

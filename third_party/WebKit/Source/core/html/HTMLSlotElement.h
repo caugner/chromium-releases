@@ -39,15 +39,46 @@ namespace blink {
 class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<HTMLSlotElement> create(Document&);
-    ~HTMLSlotElement() override;
+    DECLARE_NODE_FACTORY(HTMLSlotElement);
+
+    const WillBeHeapVector<RefPtrWillBeMember<Node>>& getAssignedNodes() const { ASSERT(!needsDistributionRecalc()); return m_assignedNodes; }
+    const WillBeHeapVector<RefPtrWillBeMember<Node>>& getDistributedNodes() const { ASSERT(!needsDistributionRecalc()); return m_distributedNodes; }
+
+    const WillBeHeapVector<RefPtrWillBeMember<Node>> getAssignedNodesForBinding() { updateDistribution(); return m_assignedNodes; }
+    const WillBeHeapVector<RefPtrWillBeMember<Node>> getDistributedNodesForBinding() { updateDistribution(); return m_distributedNodes; }
+
+    Node* firstDistributedNode() const { return m_distributedNodes.isEmpty() ? nullptr : m_distributedNodes.first().get(); }
+    Node* lastDistributedNode() const { return m_distributedNodes.isEmpty() ? nullptr : m_distributedNodes.last().get(); }
+
+    // TODO(hayato): This takes O(N). Make it O(1) with node-to-index hash table.
+    Node* distributedNodeNextTo(const Node&) const;
+    Node* distributedNodePreviousTo(const Node&) const;
+
+    void appendAssignedNode(Node&);
+    void appendDistributedNode(Node&);
+    void appendDistributedNodesFrom(const HTMLSlotElement& other);
+    void clearDistribution();
+
+    void updateDistributedNodesWithFallback();
+
+    void attach(const AttachContext& = AttachContext()) override;
+    void detach(const AttachContext& = AttachContext()) override;
+
+    void attributeChanged(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue, AttributeModificationReason = ModifiedDirectly) override;
 
     DECLARE_VIRTUAL_TRACE();
+
+protected:
+    void childrenChanged(const ChildrenChange&) override;
+    InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    void removedFrom(ContainerNode*) override;
 
 private:
     HTMLSlotElement(Document&);
 
-    AtomicString m_name;
+    WillBeHeapVector<RefPtrWillBeMember<Node>> m_assignedNodes;
+    // TODO(hayato): Share code with DistributedNode class
+    WillBeHeapVector<RefPtrWillBeMember<Node>> m_distributedNodes;
 };
 
 } // namespace blink

@@ -256,24 +256,6 @@ class WebContents(object):
   def timeline_model(self):
     return self._inspector_backend.timeline_model
 
-  def StartTimelineRecording(self):
-    """Starts timeline recording.
-
-    Raises:
-      exceptions.TimeoutException
-      exceptions.DevtoolsTargetCrashException
-    """
-    self._inspector_backend.StartTimelineRecording()
-
-  def StopTimelineRecording(self):
-    """Stops timeline recording.
-
-    Raises:
-      exceptions.TimeoutException
-      exceptions.DevtoolsTargetCrashException
-    """
-    self._inspector_backend.StopTimelineRecording()
-
   def IsAlive(self):
     """Whether the WebContents is still operating normally.
 
@@ -300,7 +282,8 @@ class WebContents(object):
                               xOverscroll=None, yOverscroll=None,
                               preventFling=True, speed=None,
                               gestureSourceType=None, repeatCount=None,
-                              repeatDelayMs=None, interactionMarkerName=None):
+                              repeatDelayMs=None, interactionMarkerName=None,
+                              timeout=60):
     """Runs an inspector command that causes a repeatable browser driven scroll.
 
     Args:
@@ -327,4 +310,5 @@ class WebContents(object):
         preventFling=preventFling, speed=speed,
         gestureSourceType=gestureSourceType, repeatCount=repeatCount,
         repeatDelayMs=repeatDelayMs,
-        interactionMarkerName=interactionMarkerName)
+        interactionMarkerName=interactionMarkerName,
+        timeout=timeout)

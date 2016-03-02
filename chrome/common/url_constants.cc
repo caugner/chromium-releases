@@ -6,7 +6,9 @@
 
 #include <algorithm>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
+#include "build/build_config.h"
+#include "chrome/common/features.h"
 #include "content/public/common/url_constants.h"
 #include "url/url_util.h"
 
@@ -87,7 +89,7 @@ const char kChromeUIUberFrameURL[] = "chrome://uber-frame/";
 const char kChromeUIUserActionsURL[] = "chrome://user-actions/";
 const char kChromeUIVersionURL[] = "chrome://version/";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 const char kChromeUIContextualSearchPromoURL[] =
     "chrome://contextual-search-promo";
 const char kChromeUINativeScheme[] = "chrome-native";
@@ -104,14 +106,12 @@ const char kChromeUIChooseMobileNetworkURL[] =
     "chrome://choose-mobile-network/";
 const char kChromeUIDeviceEmulatorURL[] = "chrome://device-emulator/";
 const char kChromeUIFirstRunURL[] = "chrome://first-run/";
-const char kChromeUIImageBurnerURL[] = "chrome://imageburner/";
 const char kChromeUIKeyboardOverlayURL[] = "chrome://keyboardoverlay/";
 const char kChromeUIMobileSetupURL[] = "chrome://mobilesetup/";
 const char kChromeUINfcDebugURL[] = "chrome://nfc-debug/";
 const char kChromeUIOobeURL[] = "chrome://oobe/";
 const char kChromeUIOSCreditsURL[] = "chrome://os-credits/";
 const char kChromeUIProxySettingsURL[] = "chrome://proxy-settings/";
-const char kChromeUISalsaURL[] = "chrome://salsa/";
 const char kChromeUIScreenlockIconURL[] = "chrome://screenlock-icon/";
 const char kChromeUISetTimeURL[] = "chrome://set-time/";
 const char kChromeUISimUnlockURL[] = "chrome://sim-unlock/";
@@ -123,11 +123,6 @@ const char kChromeUIUserImageURL[] = "chrome://userimage/";
 
 #if defined(OS_WIN)
 const char kChromeUIMetroFlowURL[] = "chrome://make-metro/";
-#endif
-
-#if defined(USE_AURA)
-const char kChromeUIGestureConfigURL[] = "chrome://gesture/";
-const char kChromeUIGestureConfigHost[] = "gesture";
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -251,8 +246,6 @@ const char kChromeUIUberFrameHost[] = "uber-frame";
 const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIUserActionsHost[] = "user-actions";
 const char kChromeUIVersionHost[] = "version";
-const char kChromeUIWebRTCDeviceProviderHost[] =
-    "webrtc-device-provider";
 const char kChromeUIWorkersHost[] = "workers";
 
 const char kChromeUIThemePath[] = "theme";
@@ -280,7 +273,6 @@ const char kChromeUIChooseMobileNetworkHost[] = "choose-mobile-network";
 const char kChromeUICryptohomeHost[] = "cryptohome";
 const char kChromeUIDeviceEmulatorHost[] = "device-emulator";
 const char kChromeUIFirstRunHost[] = "first-run";
-const char kChromeUIImageBurnerHost[] = "imageburner";
 const char kChromeUIKeyboardOverlayHost[] = "keyboardoverlay";
 const char kChromeUILoginContainerHost[] = "login-container";
 const char kChromeUILoginHost[] = "login";
@@ -292,7 +284,6 @@ const char kChromeUIOSCreditsHost[] = "os-credits";
 const char kChromeUIPowerHost[] = "power";
 const char kChromeUIProxySettingsHost[] = "proxy-settings";
 const char kChromeUIRotateHost[] = "rotate";
-const char kChromeUISalsaHost[] = "salsa";
 const char kChromeUIScreenlockIconHost[] = "screenlock-icon";
 const char kChromeUISetTimeHost[] = "set-time";
 const char kChromeUISimUnlockHost[] = "sim-unlock";
@@ -347,6 +338,7 @@ const char kImportDataSubPage[] = "importData";
 const char kLanguageOptionsSubPage[] = "languages";
 const char kManageProfileSubPage[] = "manageProfile";
 const char kPasswordManagerSubPage[] = "passwords";
+const char kPowerOptionsSubPage[] = "power-overlay";
 const char kResetProfileSettingsSubPage[] = "resetProfileSettings";
 const char kSearchEnginesSubPage[] = "searchEngines";
 const char kSearchSubPage[] = "search";
@@ -379,9 +371,6 @@ const char kPasswordManagerLearnMoreURL[] =
 const char kUpgradeHelpCenterBaseURL[] =
     "http://support.google.com/installer/?product="
     "{8A69D345-D564-463c-AFF1-A69D9E530F96}&error=";
-
-const char kPasswordManagerAccountDashboardURL[] =
-    "https://passwords.google.com/settings/passwords";
 
 const char kSmartLockHelpPage[] =
     "https://support.google.com/accounts/answer/6197437";
@@ -606,6 +595,7 @@ const char* const kChromeHostURLs[] = {
   kChromeUIDeviceLogHost,
   kChromeUIDNSHost,
   kChromeUIFlagsHost,
+  kChromeUIGCMInternalsHost,
   kChromeUIHistoryHost,
   kChromeUIInvalidationsHost,
   kChromeUILocalStateHost,
@@ -632,6 +622,8 @@ const char* const kChromeHostURLs[] = {
   content::kChromeUIHistogramHost,
   content::kChromeUIIndexedDBInternalsHost,
   content::kChromeUIMediaInternalsHost,
+  content::kChromeUINetworkErrorHost,
+  content::kChromeUINetworkErrorsListingHost,
   content::kChromeUINetworkViewCacheHost,
   content::kChromeUIServiceWorkerInternalsHost,
   content::kChromeUITracingHost,
@@ -643,7 +635,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUIBookmarksHost,
   kChromeUIDownloadsHost,
   kChromeUIFlashHost,
-  kChromeUIGCMInternalsHost,
   kChromeUIHelpHost,
   kChromeUIInspectHost,
   kChromeUIPluginsHost,
@@ -663,7 +654,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUICryptohomeHost,
   kChromeUIDriveInternalsHost,
   kChromeUIFirstRunHost,
-  kChromeUIImageBurnerHost,
   kChromeUIKeyboardOverlayHost,
   kChromeUILoginHost,
   kChromeUINetworkHost,

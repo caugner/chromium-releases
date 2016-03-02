@@ -5,6 +5,9 @@
 #ifndef NET_CERT_CT_TEST_UTIL_H_
 #define NET_CERT_CT_TEST_UTIL_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
@@ -66,7 +69,15 @@ std::string GetDerEncodedFakeOCSPResponseCert();
 std::string GetDerEncodedFakeOCSPResponseIssuerCert();
 
 // A sample, valid STH.
-void GetSampleSignedTreeHead(SignedTreeHead* sth);
+bool GetSampleSignedTreeHead(SignedTreeHead* sth);
+
+// A valid STH for the empty tree.
+bool GetSampleEmptySignedTreeHead(SignedTreeHead* sth);
+
+// An STH for an empty tree where the root hash is not the hash of the empty
+// string, but the signature over the STH is valid. Such an STH is not valid
+// according to RFC6962.
+bool GetBadEmptySignedTreeHead(SignedTreeHead* sth);
 
 // The SHA256 root hash for the sample STH.
 std::string GetSampleSTHSHA256RootHash();
@@ -75,7 +86,7 @@ std::string GetSampleSTHSHA256RootHash();
 std::string GetSampleSTHTreeHeadSignature();
 
 // The same signature as GetSampleSTHTreeHeadSignature, decoded.
-void GetSampleSTHTreeHeadDecodedSignature(DigitallySigned* signature);
+bool GetSampleSTHTreeHeadDecodedSignature(DigitallySigned* signature);
 
 // The sample STH in JSON form.
 std::string GetSampleSTHAsJson();

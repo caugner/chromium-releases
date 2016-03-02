@@ -96,6 +96,8 @@
         'label_pattern.cc',
         'label_pattern.h',
         'label_ptr.h',
+        'lib_file.cc',
+        'lib_file.h',
         'loader.cc',
         'loader.h',
         'location.cc',
@@ -265,16 +267,6 @@
         '../../testing/gtest.gyp:gtest',
       ],
     },
-    {
-      'target_name': 'generate_test_gn_data',
-      'type': 'executable',
-      'sources': [
-        'generate_test_gn_data.cc',
-      ],
-      'dependencies': [
-        '../../base/base.gyp:base',
-      ],
-    }
   ],
   'conditions': [
     ['test_isolation_mode != "noop"', {

@@ -8,15 +8,15 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/chrome_style.h"
+#import "chrome/browser/ui/cocoa/passwords/passwords_bubble_utils.h"
 #import "chrome/browser/ui/cocoa/passwords/passwords_list_view_controller.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
+#include "grit/components_strings.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #include "ui/base/l10n/l10n_util.h"
-
-using namespace password_manager::mac::ui;
 
 @implementation NoPasswordsView
 - (id)initWithWidth:(CGFloat)width {
@@ -112,9 +112,7 @@ using namespace password_manager::mac::ui;
   base::scoped_nsobject<HyperlinkButtonCell> cell([[HyperlinkButtonCell alloc]
       initTextCell:base::SysUTF16ToNSString(model_->manage_link())]);
   [cell setControlSize:NSSmallControlSize];
-  [cell setShouldUnderline:NO];
-  [cell setUnderlineOnHover:NO];
-  [cell setTextColor:gfx::SkColorToCalibratedNSColor(
+  [cell setTextColor:skia::SkColorToCalibratedNSColor(
       chrome_style::GetLinkColor())];
   [manageButton_ setCell:cell.get()];
   [manageButton_ sizeToFit];

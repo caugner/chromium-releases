@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "base/at_exit.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
@@ -14,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/value_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -205,7 +210,7 @@ class DownloadTargetDeterminerTest : public ChromeRenderViewHostTestHarness {
 
   // Creates MockDownloadItem and sets up default expectations.
   content::MockDownloadItem* CreateActiveDownloadItem(
-      int32 id,
+      int32_t id,
       const DownloadTestCase& test_case);
 
   // Sets the AutoOpenBasedOnExtension user preference for |path|.
@@ -286,7 +291,7 @@ void DownloadTargetDeterminerTest::TearDown() {
 
 content::MockDownloadItem*
 DownloadTargetDeterminerTest::CreateActiveDownloadItem(
-    int32 id,
+    int32_t id,
     const DownloadTestCase& test_case) {
   content::MockDownloadItem* item =
       new ::testing::NiceMock<content::MockDownloadItem>();
@@ -398,7 +403,7 @@ DownloadTargetDeterminerTest::RunDownloadTargetDeterminer(
                  &target_info));
   run_loop.Run();
   ::testing::Mock::VerifyAndClearExpectations(delegate());
-  return target_info.Pass();
+  return target_info;
 }
 
 void DownloadTargetDeterminerTest::RunTestCasesWithActiveItem(
@@ -1704,10 +1709,19 @@ TEST_F(DownloadTargetDeterminerTest,
         FILE_PATH_LITERAL("foo.notarealext"),
         DownloadItem::TARGET_DISPOSITION_OVERWRITE,
 
-        EXPECT_CRDOWNLOAD
-      },
-      ""
-    },
+        EXPECT_CRDOWNLOAD},
+       ""},
+      {{// 5: x-x509-user-cert mime-type.
+        AUTOMATIC, content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+        download_util::NOT_DANGEROUS, "http://example.com/foo.notarealext",
+        "application/x-x509-user-cert", FILE_PATH_LITERAL(""),
+
+        FILE_PATH_LITERAL("user.crt"),
+        DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+
+        EXPECT_CRDOWNLOAD},
+       ""},
+
   };
 
   ON_CALL(*delegate(), GetFileMimeType(

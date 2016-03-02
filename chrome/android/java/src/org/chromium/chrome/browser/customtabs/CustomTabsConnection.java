@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Process;
+import android.os.StrictMode;
 import android.support.customtabs.CustomTabsIntent;
 import android.support.customtabs.CustomTabsService;
 import android.support.customtabs.ICustomTabsCallback;
@@ -33,6 +34,8 @@ import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeApplication;
@@ -65,7 +68,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * accessible from {@link ChromeApplication}.
  */
 public class CustomTabsConnection extends ICustomTabsService.Stub {
-    private static final String TAG = "cr.ChromeConnection";
+    private static final String TAG = "ChromeConnection";
     private static final String LOG_SERVICE_REQUESTS = "custom-tabs-log-service-requests";
     @VisibleForTesting
     static final String NO_PRERENDERING_KEY =
@@ -157,10 +160,20 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
 
     /** Warmup activities that should only happen once. */
     @SuppressFBWarnings("DM_EXIT")
-    private static void initializeBrowser(final ChromeApplication app) {
+    private static void initializeBrowser(final Application app) {
         ThreadUtils.assertOnUiThread();
         try {
-            app.startBrowserProcessesAndLoadLibrariesSync(true);
+            // Loading the native library may spuriously trigger StrictMode violations when
+            // running instrumentation tests. This does not happen if full Chrome has
+            // started before reaching this point.
+            // crbug.com/574532
+            if (!LibraryLoader.isInitialized()) {
+                StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+                LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER)
+                        .ensureInitialized(app.getApplicationContext());
+                StrictMode.setThreadPolicy(oldPolicy);
+            }
+            ChromeBrowserInitializer.getInstance(app).handleSynchronousStartup();
         } catch (ProcessInitException e) {
             Log.e(TAG, "ProcessInitException while starting the browser process.");
             // Cannot do anything without the native library, and cannot show a
@@ -202,7 +215,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (!initialized) initializeBrowser((ChromeApplication) mApplication);
+                if (!initialized) initializeBrowser(mApplication);
                 if (mayCreateSpareWebContents && mPrerender == null && !SysUtils.isLowEndDevice()) {
                     createSpareWebContents();
                 }
@@ -227,6 +240,17 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         if (mSpareWebContents != null) {
             mSpareWebContents.getNavigationController().loadUrl(new LoadUrlParams("about:blank"));
         }
+    }
+
+    /** @return the URL converted to string, or null if it's invalid. */
+    private static String checkAndConvertUri(Uri uri) {
+        if (uri == null) return null;
+        // Don't do anything for unknown schemes. Not having a scheme is allowed, as we allow
+        // "www.example.com".
+        String scheme = uri.normalizeScheme().getScheme();
+        boolean allowedScheme = scheme == null || scheme.equals("http") || scheme.equals("https");
+        if (!allowedScheme) return null;
+        return uri.toString();
     }
 
     /**
@@ -259,20 +283,33 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
      * - Preconnects to the ordered list of URLs.
      * - Makes sure that there is a spare renderer.
      */
-    private void lowConfidenceMayLaunchUrl(List<Bundle> likelyBundles) {
+    @VisibleForTesting
+    boolean lowConfidenceMayLaunchUrl(List<Bundle> likelyBundles) {
         ThreadUtils.assertOnUiThread();
-        preconnectUrls(likelyBundles);
+        if (!preconnectUrls(likelyBundles)) return false;
         createSpareWebContents();
+        return true;
     }
 
-    private void preconnectUrls(List<Bundle> likelyBundles) {
-        if (likelyBundles == null) return;
+    private boolean preconnectUrls(List<Bundle> likelyBundles) {
+        boolean atLeastOneUrl = false;
+        if (likelyBundles == null) return false;
         WarmupManager warmupManager = WarmupManager.getInstance();
         Profile profile = Profile.getLastUsedProfile();
         for (Bundle bundle : likelyBundles) {
-            String url = bundle.getString(CustomTabsService.KEY_URL);
-            if (url != null) warmupManager.maybePreconnectUrlAndSubResources(profile, url);
+            Uri uri;
+            try {
+                uri = IntentUtils.safeGetParcelable(bundle, CustomTabsService.KEY_URL);
+            } catch (ClassCastException e) {
+                continue;
+            }
+            String url = checkAndConvertUri(uri);
+            if (url != null) {
+                warmupManager.maybePreconnectUrlAndSubResources(profile, url);
+                atLeastOneUrl = true;
+            }
         }
+        return atLeastOneUrl;
     }
 
     @Override
@@ -285,11 +322,11 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
 
     private boolean mayLaunchUrlInternal(ICustomTabsCallback callback, Uri url, final Bundle extras,
             final List<Bundle> otherLikelyBundles) {
-        // Don't do anything for unknown schemes. Not having a scheme is
-        // allowed, as we allow "www.example.com".
-        String scheme = url == null ? null : url.normalizeScheme().getScheme();
-        boolean allowedScheme = scheme == null || scheme.equals("http") || scheme.equals("https");
-        if (!allowedScheme) return false;
+        final boolean lowConfidence =
+                (url == null || TextUtils.isEmpty(url.toString())) && otherLikelyBundles != null;
+        final String urlString = checkAndConvertUri(url);
+        if (url != null && urlString == null && !lowConfidence) return false;
+
         // Things below need the browser process to be initialized.
 
         // Forbids warmup() from creating a spare renderer, as prerendering wouldn't reuse
@@ -298,9 +335,7 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         if (!warmupInternal(false)) return false; // Also does the foreground check.
 
         final IBinder session = callback.asBinder();
-        final String urlString = url == null ? null : url.toString();
         final int uid = Binder.getCallingUid();
-        final boolean lowConfidence = TextUtils.isEmpty(urlString) && otherLikelyBundles != null;
         // TODO(lizeb): Also throttle low-confidence mode.
         if (!lowConfidence
                 && !mClientManager.updateStatsAndReturnWhetherAllowed(session, uid, urlString)) {
@@ -351,18 +386,18 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         final Bundle actionButtonBundle = IntentUtils.safeGetBundle(bundle,
                 CustomTabsIntent.EXTRA_ACTION_BUTTON_BUNDLE);
         if (actionButtonBundle == null) return false;
-
-        final Bitmap bitmap = ActionButtonParams.tryParseBitmapFromBundle(mApplication,
-                actionButtonBundle);
-        final String description = ActionButtonParams
-                .tryParseDescriptionFromBundle(actionButtonBundle);
+        final int id = actionButtonBundle.getInt(CustomTabsIntent.KEY_ID,
+                CustomTabsIntent.TOOLBAR_ACTION_BUTTON_ID);
+        final Bitmap bitmap = CustomButtonParams.parseBitmapFromBundle(actionButtonBundle);
+        final String description = CustomButtonParams
+                .parseDescriptionFromBundle(actionButtonBundle);
         if (bitmap == null || description == null) return false;
 
         try {
             return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
                 @Override
                 public Boolean call() throws Exception {
-                    return CustomTabActivity.updateActionButton(callback.asBinder(), bitmap,
+                    return CustomTabActivity.updateCustomButton(callback.asBinder(), id, bitmap,
                             description);
                 }
             });
@@ -495,6 +530,9 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
         // cgroups a process is part of can be queried by reading
         // /proc/<pid>/cgroup, which is world-readable.
         String cgroupFilename = "/proc/" + pid + "/cgroup";
+        // Reading from /proc does not cause disk IO, but strict mode doesn't like it.
+        // crbug.com/567143
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
             FileReader fileReader = new FileReader(cgroupFilename);
             BufferedReader reader = new BufferedReader(fileReader);
@@ -510,6 +548,8 @@ public class CustomTabsConnection extends ICustomTabsService.Stub {
             }
         } catch (IOException e) {
             return null;
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
         }
         return null;
     }

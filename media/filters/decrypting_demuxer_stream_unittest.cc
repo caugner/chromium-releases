@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
@@ -26,8 +29,8 @@ using ::testing::StrictMock;
 namespace media {
 
 static const int kFakeBufferSize = 16;
-static const uint8 kFakeKeyId[] = { 0x4b, 0x65, 0x79, 0x20, 0x49, 0x44 };
-static const uint8 kFakeIv[DecryptConfig::kDecryptionKeySize] = { 0 };
+static const uint8_t kFakeKeyId[] = {0x4b, 0x65, 0x79, 0x20, 0x49, 0x44};
+static const uint8_t kFakeIv[DecryptConfig::kDecryptionKeySize] = {0};
 
 // Create a fake non-empty buffer in an encrypted stream. When |is_clear| is
 // true, the buffer is not encrypted (signaled by an empty IV).
@@ -63,8 +66,6 @@ class DecryptingDemuxerStreamTest : public testing::Test {
       : demuxer_stream_(new DecryptingDemuxerStream(
             message_loop_.task_runner(),
             new MediaLog(),
-            base::Bind(&DecryptingDemuxerStreamTest::RequestCdmNotification,
-                       base::Unretained(this)),
             base::Bind(&DecryptingDemuxerStreamTest::OnWaitingForDecryptionKey,
                        base::Unretained(this)))),
         cdm_context_(new StrictMock<MockCdmContext>()),
@@ -88,16 +89,22 @@ class DecryptingDemuxerStreamTest : public testing::Test {
   void InitializeAudioAndExpectStatus(const AudioDecoderConfig& config,
                                       PipelineStatus status) {
     input_audio_stream_->set_audio_decoder_config(config);
-    demuxer_stream_->Initialize(input_audio_stream_.get(),
-                                NewExpectedStatusCB(status));
+    demuxer_stream_->Initialize(
+        input_audio_stream_.get(),
+        base::Bind(&DecryptingDemuxerStreamTest::RequestCdmNotification,
+                   base::Unretained(this)),
+        NewExpectedStatusCB(status));
     message_loop_.RunUntilIdle();
   }
 
   void InitializeVideoAndExpectStatus(const VideoDecoderConfig& config,
                                       PipelineStatus status) {
     input_video_stream_->set_video_decoder_config(config);
-    demuxer_stream_->Initialize(input_video_stream_.get(),
-                                NewExpectedStatusCB(status));
+    demuxer_stream_->Initialize(
+        input_video_stream_.get(),
+        base::Bind(&DecryptingDemuxerStreamTest::RequestCdmNotification,
+                   base::Unretained(this)),
+        NewExpectedStatusCB(status));
     message_loop_.RunUntilIdle();
   }
 

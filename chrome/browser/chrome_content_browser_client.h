@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_
 #define CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_
 
+#include <stddef.h>
+
 #include <set>
 #include <string>
 #include <utility>
@@ -13,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 
 class ChromeContentBrowserClientParts;
@@ -143,7 +146,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                       content::ResourceContext* context,
                       int render_process_id,
                       int render_frame_id,
-                      net::CookieOptions* options) override;
+                      const net::CookieOptions& options) override;
   bool AllowSaveLocalState(content::ResourceContext* context) override;
   bool AllowWorkerDatabase(
       const GURL& url,
@@ -169,6 +172,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                                 content::ResourceContext* context) override;
 #endif  // defined(ENABLE_WEBRTC)
 
+  bool AllowKeygen(const GURL& url, content::ResourceContext* context) override;
+
   net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url,
       content::ResourceContext* context) override;
@@ -176,8 +181,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   scoped_ptr<storage::QuotaEvictionPolicy> GetTemporaryStorageEvictionPolicy(
       content::BrowserContext* context) override;
   void AllowCertificateError(
-      int render_process_id,
-      int render_frame_id,
+      content::WebContents* web_contents,
       int cert_error,
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
@@ -275,6 +279,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool PreSpawnRenderer(sandbox::TargetPolicy* policy) override;
   base::string16 GetAppContainerSidForSandboxType(
       int sandbox_type) const override;
+  bool IsWin32kLockdownEnabledForMimeType(
+      const std::string& mime_type) const override;
+  bool ShouldUseWindowsPrefetchArgument() const override;
 #endif
   void RegisterFrameMojoShellServices(
       content::ServiceRegistry* registry,

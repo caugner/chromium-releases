@@ -38,7 +38,8 @@ UmaSessionStats::UmaSessionStats()
 UmaSessionStats::~UmaSessionStats() {
 }
 
-void UmaSessionStats::UmaResumeSession(JNIEnv* env, jobject obj) {
+void UmaSessionStats::UmaResumeSession(JNIEnv* env,
+                                       const JavaParamRef<jobject>& obj) {
   DCHECK(g_browser_process);
 
   if (active_session_count_ == 0) {
@@ -53,7 +54,8 @@ void UmaSessionStats::UmaResumeSession(JNIEnv* env, jobject obj) {
   ++active_session_count_;
 }
 
-void UmaSessionStats::UmaEndSession(JNIEnv* env, jobject obj) {
+void UmaSessionStats::UmaEndSession(JNIEnv* env,
+                                    const JavaParamRef<jobject>& obj) {
   --active_session_count_;
   DCHECK_GE(active_session_count_, 0);
 
@@ -131,7 +133,7 @@ static void RegisterExternalExperiment(JNIEnv* env,
   const std::string group_name_utf8 = base::IntToString(experiment_id);
 
   variations::ActiveGroupId active_group;
-  active_group.name = static_cast<uint32>(study_id);
+  active_group.name = static_cast<uint32_t>(study_id);
   active_group.group = metrics::HashName(group_name_utf8);
   variations::AssociateGoogleVariationIDForceHashes(
       variations::GOOGLE_WEB_PROPERTIES, active_group,

@@ -28,8 +28,9 @@ class KeyPair;
 // and decryption of incoming messages.
 class GCMEncryptionProvider {
  public:
-  // Callback to be invoked when the public encryption key is available.
-  using PublicKeyCallback = base::Callback<void(const std::string&)>;
+  // Callback to be invoked when the public key and auth secret are available.
+  using EncryptionInfoCallback = base::Callback<void(const std::string&,
+                                                     const std::string&)>;
 
   // Callback to be invoked when a message has been decrypted.
   using MessageDecryptedCallback = base::Callback<void(const IncomingMessage&)>;
@@ -41,11 +42,14 @@ class GCMEncryptionProvider {
     // The contents of the Encryption HTTP header could not be parsed.
     DECRYPTION_FAILURE_INVALID_ENCRYPTION_HEADER,
 
-    // The contents of the Encryption-Key HTTP header could not be parsed.
-    DECRYPTION_FAILURE_INVALID_ENCRYPTION_KEY_HEADER,
+    // The contents of the Crypto-Key HTTP header could not be parsed.
+    DECRYPTION_FAILURE_INVALID_CRYPTO_KEY_HEADER,
 
     // No public/private key-pair was associated with the app_id.
     DECRYPTION_FAILURE_NO_KEYS,
+
+    // The public key provided in the Crypto-Key header is invalid.
+    DECRYPTION_FAILURE_INVALID_PUBLIC_KEY,
 
     // The payload could not be decrypted as AES-128-GCM.
     DECRYPTION_FAILURE_INVALID_PAYLOAD
@@ -64,10 +68,10 @@ class GCMEncryptionProvider {
       const base::FilePath& store_path,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
 
-  // Retrieves the public encryption key belonging to |app_id|. If no keys have
-  // been associated with |app_id| yet, they will be created.
-  void GetPublicKey(const std::string& app_id,
-                    const PublicKeyCallback& callback);
+  // Retrieves the public key and authentication secret associated with the
+  // |app_id|. If none have been associated yet, they will be created.
+  void GetEncryptionInfo(const std::string& app_id,
+                         const EncryptionInfoCallback& callback);
 
   // Determines whether |message| contains encrypted content.
   bool IsEncryptedMessage(const IncomingMessage& message) const;
@@ -84,12 +88,14 @@ class GCMEncryptionProvider {
  private:
   FRIEND_TEST_ALL_PREFIXES(GCMEncryptionProviderTest, EncryptionRoundTrip);
 
-  void DidGetPublicKey(const std::string& app_id,
-                       const PublicKeyCallback& callback,
-                       const KeyPair& pair);
+  void DidGetEncryptionInfo(const std::string& app_id,
+                            const EncryptionInfoCallback& callback,
+                            const KeyPair& pair,
+                            const std::string& auth_secret);
 
-  void DidCreatePublicKey(const PublicKeyCallback& callback,
-                          const KeyPair& pair);
+  void DidCreateEncryptionInfo(const EncryptionInfoCallback& callback,
+                               const KeyPair& pair,
+                               const std::string& auth_secret);
 
   void DecryptMessageWithKey(const IncomingMessage& message,
                              const MessageDecryptedCallback& success_callback,
@@ -97,7 +103,8 @@ class GCMEncryptionProvider {
                              const std::string& salt,
                              const std::string& dh,
                              uint64_t rs,
-                             const KeyPair& pair);
+                             const KeyPair& pair,
+                             const std::string& auth_secret);
 
   scoped_ptr<GCMKeyStore> key_store_;
 

@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
+#include <stddef.h>
+
 #include "ash/content/gpu_support_impl.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -24,7 +27,6 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -100,13 +102,6 @@ bool ChromeShellDelegate::IsIncognitoAllowed() const {
 
 bool ChromeShellDelegate::IsRunningInForcedAppMode() const {
   return chrome::IsRunningInForcedAppMode();
-}
-
-bool ChromeShellDelegate::IsMultiAccountEnabled() const {
-#if defined(OS_CHROMEOS)
-  return switches::IsEnableAccountConsistency();
-#endif
-  return false;
 }
 
 bool ChromeShellDelegate::CanShowWindowForUser(aura::Window* window) const {

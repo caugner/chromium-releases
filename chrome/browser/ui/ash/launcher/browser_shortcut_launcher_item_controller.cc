@@ -237,7 +237,7 @@ BrowserShortcutLauncherItemController::GetApplicationList(int event_flags) {
   // enforce the creation of a new browser.
   if (!found_tabbed_browser)
     items.clear();
-  return items.Pass();
+  return items;
 }
 
 ash::ShelfItemDelegate::PerformedAction
@@ -273,7 +273,11 @@ BrowserShortcutLauncherItemController::CreateApplicationMenu(int event_flags) {
 }
 
 bool BrowserShortcutLauncherItemController::IsDraggable() {
-  return launcher_controller()->CanPin() ? true : false;
+  return true;
+}
+
+bool BrowserShortcutLauncherItemController::CanPin() const {
+  return true;
 }
 
 bool BrowserShortcutLauncherItemController::ShouldShowTooltip() {

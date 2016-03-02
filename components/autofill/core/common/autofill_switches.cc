@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
 #include "components/autofill/core/common/autofill_switches.h"
 
 namespace autofill {
@@ -31,6 +32,10 @@ const char kDisableOfferUploadCreditCards[] =
 // Disables password generation when we detect that the user is going through
 // account creation.
 const char kDisablePasswordGeneration[]     = "disable-password-generation";
+
+// Disables showing bubble instead of infobar for save credit card prompt.
+const char kDisableSaveCardBubble[] =
+    "disable-autofill-save-card-bubble";
 
 // The "disable" flag for kEnableSingleClickAutofill.
 const char kDisableSingleClickAutofill[]    = "disable-single-click-autofill";
@@ -64,16 +69,16 @@ const char kEnableOfferUploadCreditCards[] = "enable-offer-upload-credit-cards";
 // account creation.
 const char kEnablePasswordGeneration[]      = "enable-password-generation";
 
+// Enables showing bubble instead of infobar for save credit card prompt.
+const char kEnableSaveCardBubble[] =
+    "enable-autofill-save-card-bubble";
+
 // Enables/disables suggestions without typing anything (on first click).
 const char kEnableSingleClickAutofill[]     = "enable-single-click-autofill";
 
 // Enables suggestions with substring matching instead of prefix matching.
 const char kEnableSuggestionsWithSubstringMatch[] =
     "enable-suggestions-with-substring-match";
-
-// Enables syncing usage counts and last use dates of Wallet addresses and
-// cards.
-const char kEnableWalletMetadataSync[]      = "enable-wallet-metadata-sync";
 
 // Ignores autocomplete="off" for Autofill data (profiles + credit cards).
 const char kIgnoreAutocompleteOffForAutofill[] =

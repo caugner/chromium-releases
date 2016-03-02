@@ -106,7 +106,7 @@ class ActionRunner(object):
 
   def Navigate(self, url, script_to_evaluate_on_commit=None,
                timeout_in_seconds=60):
-    """Navigates to url.
+    """Navigates to |url|.
 
     If |script_to_evaluate_on_commit| is given, the script source string will be
     evaluated when the navigation is committed. This is after the context of
@@ -125,7 +125,7 @@ class ActionRunner(object):
     self._tab.WaitForNavigate(timeout_in_seconds_seconds)
 
     time_left_in_seconds = (start_time + timeout_in_seconds_seconds
-        - time.time())
+                            - time.time())
     time_left_in_seconds = max(0, time_left_in_seconds)
     self._tab.WaitForDocumentReadyStateToBeInteractiveOrBetter(
         time_left_in_seconds)
@@ -362,7 +362,8 @@ class ActionRunner(object):
   def RepeatableBrowserDrivenScroll(self, x_scroll_distance_ratio=0.0,
                                     y_scroll_distance_ratio=0.5,
                                     repeat_count=0,
-                                    repeat_delay_ms=250):
+                                    repeat_delay_ms=250,
+                                    timeout=60):
     """Perform a browser driven repeatable scroll gesture.
 
     The scroll gesture is driven from the browser, this is useful because the
@@ -370,9 +371,9 @@ class ActionRunner(object):
     delay between the scroll gestures should be consistent.
 
     Args:
-      x_scroll_distance_ratio: The horizontal lenght of the scroll as a fraction
+      x_scroll_distance_ratio: The horizontal length of the scroll as a fraction
           of the screen width.
-      y_scroll_distance_ratio: The vertical lenght of the scroll as a fraction
+      y_scroll_distance_ratio: The vertical length of the scroll as a fraction
           of the screen height.
       repeat_count: The number of additional times to repeat the gesture.
       repeat_delay_ms: The delay in milliseconds between each scroll gesture.
@@ -381,7 +382,7 @@ class ActionRunner(object):
         x_scroll_distance_ratio=x_scroll_distance_ratio,
         y_scroll_distance_ratio=y_scroll_distance_ratio,
         repeat_count=repeat_count,
-        repeat_delay_ms=repeat_delay_ms))
+        repeat_delay_ms=repeat_delay_ms, timeout=timeout))
 
   def ScrollElement(self, selector=None, text=None, element_function=None,
                     left_start_ratio=0.5, top_start_ratio=0.5,
@@ -460,11 +461,12 @@ class ActionRunner(object):
         overscroll=overscroll, repeat_count=repeat_count,
         speed_in_pixels_per_second=speed_in_pixels_per_second))
 
-  def ScrollBounceElement(self, selector=None, text=None, element_function=None,
-                          left_start_ratio=0.5, top_start_ratio=0.5,
-                          direction='down', distance=100,
-                          overscroll=10, repeat_count=10,
-                          speed_in_pixels_per_second=400):
+  def ScrollBounceElement(
+      self, selector=None, text=None, element_function=None,
+      left_start_ratio=0.5, top_start_ratio=0.5,
+      direction='down', distance=100,
+      overscroll=10, repeat_count=10,
+      speed_in_pixels_per_second=400):
     """Perform scroll bounce gesture on the element.
 
     This gesture scrolls on the element by the number of pixels specified in
@@ -488,7 +490,7 @@ class ActionRunner(object):
           'up', 'down', 'upleft', 'upright', 'downleft', or 'downright'
       distance: The distance to scroll (in pixel).
       overscroll: The number of additional pixels to scroll back, in
-          addition to the givendistance.
+          addition to the given distance.
       repeat_count: How often we want to repeat the full gesture.
       speed_in_pixels_per_second: The speed of the gesture (in pixels/s).
     """
@@ -655,6 +657,14 @@ class ActionRunner(object):
     """Forces JavaScript garbage collection on the page."""
     self._tab.CollectGarbage()
 
+  def SimulateMemoryPressureNotification(self, pressure_level):
+    """Simulate memory pressure notification.
+
+    Args:
+      pressure_level: 'moderate' or 'critical'.
+    """
+    self._tab.browser.SimulateMemoryPressureNotification(pressure_level)
+
   def PauseInteractive(self):
     """Pause the page execution and wait for terminal interaction.
 
@@ -673,6 +683,7 @@ class ActionRunner(object):
     RAFs were fired."""
     self._RunAction(RepaintContinuouslyAction(
         seconds=0 if self._skip_waits else seconds))
+
 
 class Interaction(object):
 
@@ -701,13 +712,15 @@ class Interaction(object):
   def Begin(self):
     assert not self._started
     self._started = True
-    self._action_runner.ExecuteJavaScript('console.time("%s");' %
+    self._action_runner.ExecuteJavaScript(
+        'console.time("%s");' %
         timeline_interaction_record.GetJavaScriptMarker(
-            self._label, self._flags))
+        self._label, self._flags))
 
   def End(self):
     assert self._started
     self._started = False
-    self._action_runner.ExecuteJavaScript('console.timeEnd("%s");' %
+    self._action_runner.ExecuteJavaScript(
+        'console.timeEnd("%s");' %
         timeline_interaction_record.GetJavaScriptMarker(
-            self._label, self._flags))
+        self._label, self._flags))

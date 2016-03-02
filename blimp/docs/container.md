@@ -31,8 +31,9 @@ installation instructions](https://docs.docker.com/installation/ubuntulinux/).
 
 ## Bundle Engine
 
-The `blimp/engine:bundle_blimp_engine` build target will bundle the engine and
+The `blimp/engine:blimp_engine_bundle` build target will bundle the engine and
 its dependencies into a tarfile, which can be used to build a Docker image.
+This target is always built as part of the top-level `blimp/blimp` meta-target.
 
 ### Update Engine Dependencies
 
@@ -74,3 +75,15 @@ docker run blimp_engine --with-my-flags
 
 See the [blimp engine `Dockerfile`](../engine/Dockerfile) to find out what flags
 are passed by default.
+
+### Mapping Volumes into the Docker Container
+
+If you need to map a directory into the Docker container (eg. for necessary
+files):
+
+```bash
+docker run -v /path/to/srcdir:/path/to/docker/destdir blimp_engine
+```
+
+NB: The permissions of the directory and the files outside of the Docker
+container will be carried over into the container.

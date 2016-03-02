@@ -36,6 +36,10 @@ const char* ValidationErrorToString(ValidationError error) {
       return "VALIDATION_ERROR_ILLEGAL_POINTER";
     case VALIDATION_ERROR_UNEXPECTED_NULL_POINTER:
       return "VALIDATION_ERROR_UNEXPECTED_NULL_POINTER";
+    case VALIDATION_ERROR_ILLEGAL_INTERFACE_ID:
+      return "VALIDATION_ERROR_ILLEGAL_INTERFACE_ID";
+    case VALIDATION_ERROR_UNEXPECTED_INVALID_INTERFACE_ID:
+      return "VALIDATION_ERROR_UNEXPECTED_INVALID_INTERFACE_ID";
     case VALIDATION_ERROR_MESSAGE_HEADER_INVALID_FLAGS:
       return "VALIDATION_ERROR_MESSAGE_HEADER_INVALID_FLAGS";
     case VALIDATION_ERROR_MESSAGE_HEADER_MISSING_REQUEST_ID:
@@ -62,8 +66,9 @@ void ReportValidationError(ValidationError error, const char* description) {
   }
 }
 
-ValidationErrorObserverForTesting::ValidationErrorObserverForTesting()
-    : last_error_(VALIDATION_ERROR_NONE) {
+ValidationErrorObserverForTesting::ValidationErrorObserverForTesting(
+    const Callback<void()>& callback)
+    : last_error_(VALIDATION_ERROR_NONE), callback_(callback) {
   MOJO_DCHECK(!g_validation_error_observer);
   g_validation_error_observer = this;
 }

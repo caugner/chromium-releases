@@ -5,10 +5,13 @@
 #ifndef CONTENT_CHILD_BLUETOOTH_BLUETOOTH_DISPATCHER_H_
 #define CONTENT_CHILD_BLUETOOTH_BLUETOOTH_DISPATCHER_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <queue>
 
 #include "base/id_map.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/bluetooth/bluetooth_device.h"
 #include "content/public/child/worker_thread.h"
@@ -61,32 +64,41 @@ class BluetoothDispatcher : public WorkerThread::Observer {
   void requestDevice(int frame_routing_id,
                      const blink::WebRequestDeviceOptions& options,
                      blink::WebBluetoothRequestDeviceCallbacks* callbacks);
-  void connectGATT(const blink::WebString& device_id,
+  void connectGATT(int frame_routing_id,
+                   const blink::WebString& device_id,
                    blink::WebBluetoothConnectGATTCallbacks* callbacks);
   void getPrimaryService(
+      int frame_routing_id,
       const blink::WebString& device_id,
       const blink::WebString& service_uuid,
       blink::WebBluetoothGetPrimaryServiceCallbacks* callbacks);
 
   void getCharacteristic(
+      int frame_routing_id,
       const blink::WebString& service_instance_id,
       const blink::WebString& characteristic_uuid,
       blink::WebBluetoothGetCharacteristicCallbacks* callbacks);
-  void readValue(const blink::WebString& characteristic_instance_id,
+  void readValue(int frame_routing_id,
+                 const blink::WebString& characteristic_instance_id,
                  blink::WebBluetoothReadValueCallbacks* callbacks);
-  void writeValue(const blink::WebString& characteristic_instance_id,
+  void writeValue(int frame_routing_id,
+                  const blink::WebString& characteristic_instance_id,
                   const blink::WebVector<uint8_t>& value,
                   blink::WebBluetoothWriteValueCallbacks*);
-  void startNotifications(const blink::WebString& characteristic_instance_id,
+  void startNotifications(int frame_routing_id,
+                          const blink::WebString& characteristic_instance_id,
                           blink::WebBluetoothGATTCharacteristic* delegate,
                           blink::WebBluetoothNotificationsCallbacks*);
-  void stopNotifications(const blink::WebString& characteristic_instance_id,
+  void stopNotifications(int frame_routing_id,
+                         const blink::WebString& characteristic_instance_id,
                          blink::WebBluetoothGATTCharacteristic* delegate,
                          blink::WebBluetoothNotificationsCallbacks*);
   void characteristicObjectRemoved(
+      int frame_routing_id,
       const blink::WebString& characteristic_instance_id,
       blink::WebBluetoothGATTCharacteristic* delegate);
   void registerCharacteristicObject(
+      int frame_routing_id,
       const blink::WebString& characteristic_instance_id,
       blink::WebBluetoothGATTCharacteristic* characteristic);
 
@@ -110,6 +122,7 @@ class BluetoothDispatcher : public WorkerThread::Observer {
 
   // Creates a notification request and queues it.
   int QueueNotificationRequest(
+      int frame_routing_id,
       const std::string& characteristic_instance_id,
       blink::WebBluetoothGATTCharacteristic* characteristic,
       blink::WebBluetoothNotificationsCallbacks* callbacks,
@@ -154,6 +167,7 @@ class BluetoothDispatcher : public WorkerThread::Observer {
   // receiving notifications.
   // https://crbug.com/541388
   void UnregisterCharacteristicObject(
+      int frame_routing_id,
       const blink::WebString& characteristic_instance_id);
 
   // IPC Handlers, see definitions in bluetooth_messages.h.
@@ -178,7 +192,7 @@ class BluetoothDispatcher : public WorkerThread::Observer {
   void OnGetCharacteristicSuccess(int thread_id,
                                   int request_id,
                                   const std::string& characteristic_instance_id,
-                                  uint32 characteristic_properties);
+                                  uint32_t characteristic_properties);
   void OnGetCharacteristicError(int thread_id,
                                 int request_id,
                                 blink::WebBluetoothError error);

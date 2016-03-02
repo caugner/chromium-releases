@@ -19,6 +19,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user_manager.h"
 
@@ -58,7 +59,7 @@ class DeviceIDTest : public OobeBaseTest,
   }
 
   std::string GetDeviceId(const AccountId& account_id) {
-    return user_manager::UserManager::Get()->GetKnownUserDeviceId(account_id);
+    return user_manager::known_user::GetDeviceId(account_id);
   }
 
   std::string GetDeviceIdFromSigninClient(const AccountId& account_id) {
@@ -129,9 +130,9 @@ class DeviceIDTest : public OobeBaseTest,
 
  private:
   // user_manager::RemoveUserDelegate:
-  void OnBeforeUserRemoved(const std::string& username) override {}
+  void OnBeforeUserRemoved(const AccountId& account_id) override {}
 
-  void OnUserRemoved(const std::string& username) override {
+  void OnUserRemoved(const AccountId& account_id) override {
     user_removal_loop_.Quit();
   }
 
@@ -253,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(DeviceIDTest, PRE_Migration) {
 
   // Can't use SetKnownUserDeviceId here, because it forbids changing a device
   // ID.
-  user_manager::UserManager::Get()->SetKnownUserStringPref(
+  user_manager::known_user::SetStringPref(
       AccountId::FromUserEmail(kFakeUserEmail), "device_id", std::string());
 }
 
@@ -280,7 +281,7 @@ IN_PROC_BROWSER_TEST_F(DeviceIDTest, PRE_LegacyUsers) {
 
   // Can't use SetKnownUserDeviceId here, because it forbids changing a device
   // ID.
-  user_manager::UserManager::Get()->SetKnownUserStringPref(
+  user_manager::known_user::SetStringPref(
       AccountId::FromUserEmail(kFakeUserEmail), "device_id", std::string());
 }
 
