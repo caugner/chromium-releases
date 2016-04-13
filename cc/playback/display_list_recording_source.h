@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/base/cc_export.h"
+#include "cc/base/invalidation_region.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -19,11 +20,12 @@ namespace cc {
 
 namespace proto {
 class DisplayListRecordingSource;
-}
+}  // namespace proto
 
 class ContentLayerClient;
 class DisplayItemList;
 class DisplayListRasterSource;
+class ImageSerializationProcessor;
 class Region;
 
 class CC_EXPORT DisplayListRecordingSource {
@@ -43,8 +45,11 @@ class CC_EXPORT DisplayListRecordingSource {
   DisplayListRecordingSource();
   virtual ~DisplayListRecordingSource();
 
-  void ToProtobuf(proto::DisplayListRecordingSource* proto) const;
-  void FromProtobuf(const proto::DisplayListRecordingSource& proto);
+  void ToProtobuf(
+      proto::DisplayListRecordingSource* proto,
+      ImageSerializationProcessor* image_serialization_processor) const;
+  void FromProtobuf(const proto::DisplayListRecordingSource& proto,
+                    ImageSerializationProcessor* image_serialization_processor);
 
   bool UpdateAndExpandInvalidation(ContentLayerClient* painter,
                                    Region* invalidation,
@@ -58,6 +63,8 @@ class CC_EXPORT DisplayListRecordingSource {
   void SetGenerateDiscardableImagesMetadata(bool generate_metadata);
   void SetBackgroundColor(SkColor background_color);
   void SetRequiresClear(bool requires_clear);
+
+  void SetNeedsDisplayRect(const gfx::Rect& layer_rect);
 
   // These functions are virtual for testing.
   virtual scoped_refptr<DisplayListRasterSource> CreateRasterSource(
@@ -91,6 +98,8 @@ class CC_EXPORT DisplayListRecordingSource {
   friend class DisplayListRasterSource;
 
   void DetermineIfSolidColor();
+
+  InvalidationRegion invalidation_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayListRecordingSource);
 };

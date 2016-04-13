@@ -14,7 +14,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -43,6 +42,7 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
@@ -51,10 +51,6 @@
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/notification_types.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if defined(OS_WIN)
-#include "ui/aura/remote_window_tree_host_win.h"
-#endif
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -798,11 +794,6 @@ void BookmarksIOFunction::ShowSelectFileDialog(
   gfx::NativeWindow owning_window = web_contents ?
       platform_util::GetTopLevel(web_contents->GetNativeView())
           : NULL;
-#if defined(OS_WIN)
-  if (!owning_window &&
-      chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH)
-    owning_window = aura::RemoteWindowTreeHostWin::Instance()->GetAshWindow();
-#endif
   // |web_contents| can be NULL (for background pages), which is fine. In such
   // a case if file-selection dialogs are forbidden by policy, we will not
   // show an InfoBar, which is better than letting one appear out of the blue.

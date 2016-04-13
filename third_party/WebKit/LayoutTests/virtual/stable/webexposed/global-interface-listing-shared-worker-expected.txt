@@ -216,6 +216,15 @@ Starting worker: resources/global-interface-listing.js
 [Worker] interface FormData
 [Worker]     method append
 [Worker]     method constructor
+[Worker]     method delete
+[Worker]     method entries
+[Worker]     method forEach
+[Worker]     method get
+[Worker]     method getAll
+[Worker]     method has
+[Worker]     method keys
+[Worker]     method set
+[Worker]     method values
 [Worker] interface Headers
 [Worker]     method append
 [Worker]     method constructor
@@ -345,6 +354,10 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter newVersion
 [Worker]     getter oldVersion
 [Worker]     method constructor
+[Worker] interface ImageBitmap
+[Worker]     getter height
+[Worker]     getter width
+[Worker]     method constructor
 [Worker] interface ImageData
 [Worker]     getter height
 [Worker]     getter width
@@ -380,9 +393,11 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter onclose
 [Worker]     getter onerror
 [Worker]     getter onshow
+[Worker]     getter renotify
 [Worker]     getter requireInteraction
 [Worker]     getter silent
 [Worker]     getter tag
+[Worker]     getter timestamp
 [Worker]     getter title
 [Worker]     method close
 [Worker]     method constructor
@@ -460,6 +475,8 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method update
 [Worker]     setter onupdatefound
 [Worker] interface SharedWorkerGlobalScope : WorkerGlobalScope
+[Worker]     attribute PERSISTENT
+[Worker]     attribute TEMPORARY
 [Worker]     method constructor
 [Worker] interface SubtleCrypto
 [Worker]     method constructor
@@ -548,8 +565,6 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     setter onmessage
 [Worker]     setter onopen
 [Worker] interface WorkerGlobalScope : EventTarget
-[Worker]     attribute PERSISTENT
-[Worker]     attribute TEMPORARY
 [Worker]     getter console
 [Worker]     getter crypto
 [Worker]     getter indexedDB
@@ -567,14 +582,11 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method clearTimeout
 [Worker]     method close
 [Worker]     method constructor
+[Worker]     method createImageBitmap
 [Worker]     method fetch
 [Worker]     method importScripts
 [Worker]     method setInterval
 [Worker]     method setTimeout
-[Worker]     method webkitRequestFileSystem
-[Worker]     method webkitRequestFileSystemSync
-[Worker]     method webkitResolveLocalFileSystemSyncURL
-[Worker]     method webkitResolveLocalFileSystemURL
 [Worker]     setter console
 [Worker]     setter onerror
 [Worker]     setter onrejectionhandled
@@ -757,6 +769,10 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter name
 [Worker]     getter onconnect
 [Worker]     method gc
+[Worker]     method webkitRequestFileSystem
+[Worker]     method webkitRequestFileSystemSync
+[Worker]     method webkitResolveLocalFileSystemSyncURL
+[Worker]     method webkitResolveLocalFileSystemURL
 [Worker]     setter onconnect
 PASS successfullyParsed is true
 

@@ -1,3 +1,4 @@
+CONSOLE WARNING: 'SVGZoomEvent' is deprecated and will be removed in M52, around July 2016. See https://www.chromestatus.com/features/5760883808534528 for more details.
 This tests that document.createEvent is hooked up for all Event interfaces (and alternatives) and creates the right instance.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -105,10 +106,6 @@ PASS document.createEvent('WheelEvent') instanceof window.MouseEvent is true
 PASS document.createEvent('WheelEvent') instanceof window.UIEvent is true
 PASS document.createEvent('WheelEvent') instanceof window.Event is true
 PASS document.createEvent('WheelEvent').constructor === window.WheelEvent is true
-PASS document.createEvent('XMLHttpRequestProgressEvent') instanceof window.XMLHttpRequestProgressEvent is true
-PASS document.createEvent('XMLHttpRequestProgressEvent') instanceof window.ProgressEvent is true
-PASS document.createEvent('XMLHttpRequestProgressEvent') instanceof window.Event is true
-PASS document.createEvent('XMLHttpRequestProgressEvent').constructor === window.XMLHttpRequestProgressEvent is true
 PASS document.createEvent('StorageEvent') instanceof window.StorageEvent is true
 PASS document.createEvent('StorageEvent') instanceof window.Event is true
 PASS document.createEvent('StorageEvent').constructor === window.StorageEvent is true

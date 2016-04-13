@@ -70,7 +70,7 @@ prepopulated_cache_test(simple_entries, function(cache, entries) {
             'search parameters of request.');
         });
   },
-  'Cache.matchAll with ignoreSearch option (request with search parameter)');
+  'Cache.matchAll with ignoreSearch option (request with search parameters)');
 
 prepopulated_cache_test(simple_entries, function(cache, entries) {
     return cache.matchAll(entries.cat.request.url + '#mouse')
@@ -93,6 +93,29 @@ prepopulated_cache_test(simple_entries, function(cache, entries) {
             'just a string fragment.');
         });
   }, 'Cache.matchAll with string fragment "http" as query');
+
+prepopulated_cache_test(simple_entries, function(cache, entries) {
+    return cache.matchAll()
+      .then(function(result) {
+          assert_response_array_equivalent(
+            result,
+            [
+              entries.a.response,
+              entries.b.response,
+              entries.a_with_query.response,
+              entries.A.response,
+              entries.a_https.response,
+              entries.a_org.response,
+              entries.cat.response,
+              entries.catmandu.response,
+              entries.cat_num_lives.response,
+              entries.cat_in_the_hat.response,
+              entries.non_2xx_response.response,
+              entries.error_response.response
+            ],
+            'Cache.matchAll without parameters should match all entries.');
+        });
+  }, 'Cache.matchAll without parameters');
 
 prepopulated_cache_test(vary_entries, function(cache, entries) {
     return cache.matchAll('http://example.com/c')

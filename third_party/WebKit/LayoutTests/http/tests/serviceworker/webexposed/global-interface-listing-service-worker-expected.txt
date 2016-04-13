@@ -39,6 +39,7 @@ interface Client
 interface Clients
     method claim
     method constructor
+    method get
     method matchAll
     method openWindow
 interface CloseEvent : Event
@@ -149,11 +150,13 @@ interface Event
     getter eventPhase
     getter path
     getter returnValue
+    getter scoped
     getter srcElement
     getter target
     getter timeStamp
     getter type
     method constructor
+    method deepPath
     method initEvent
     method preventDefault
     method stopImmediatePropagation
@@ -183,6 +186,13 @@ interface EventTarget
 interface ExtendableEvent : Event
     method constructor
     method waitUntil
+interface ExtendableMessageEvent : ExtendableEvent
+    getter data
+    getter lastEventId
+    getter origin
+    getter ports
+    getter source
+    method constructor
 interface FetchEvent : ExtendableEvent
     getter clientId
     getter isReload
@@ -391,6 +401,11 @@ interface IDBVersionChangeEvent : Event
     getter newVersion
     getter oldVersion
     method constructor
+interface ImageBitmap
+    getter height
+    getter width
+    method close
+    method constructor
 interface ImageData
     getter height
     getter width
@@ -439,9 +454,11 @@ interface Notification : EventTarget
     getter onclose
     getter onerror
     getter onshow
+    getter renotify
     getter requireInteraction
     getter silent
     getter tag
+    getter timestamp
     getter title
     getter vibrate
     method close
@@ -454,7 +471,7 @@ interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
     method constructor
-interface OffScreenCanvas
+interface OffscreenCanvas
     getter height
     getter width
     method constructor
@@ -684,8 +701,6 @@ interface WindowClient : Client
     method focus
     method navigate
 interface WorkerGlobalScope : EventTarget
-    attribute PERSISTENT
-    attribute TEMPORARY
     getter console
     getter crypto
     getter indexedDB
@@ -708,10 +723,6 @@ interface WorkerGlobalScope : EventTarget
     method importScripts
     method setInterval
     method setTimeout
-    method webkitRequestFileSystem
-    method webkitRequestFileSystemSync
-    method webkitResolveLocalFileSystemSyncURL
-    method webkitResolveLocalFileSystemURL
     setter console
     setter onerror
     setter onrejectionhandled
@@ -854,11 +865,13 @@ global object
     getter onactivate
     getter oncrossoriginmessage
     getter onfetch
+    getter onforeignfetch
     getter ongeofenceenter
     getter ongeofenceleave
     getter oninstall
     getter onmessage
     getter onnotificationclick
+    getter onnotificationclose
     getter onpush
     getter onsync
     getter registration
@@ -869,11 +882,13 @@ global object
     setter onactivate
     setter oncrossoriginmessage
     setter onfetch
+    setter onforeignfetch
     setter ongeofenceenter
     setter ongeofenceleave
     setter oninstall
     setter onmessage
     setter onnotificationclick
+    setter onnotificationclose
     setter onpush
     setter onsync
 This is a testharness.js-based test.

@@ -104,8 +104,6 @@ bool BrowserPlugin::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(BrowserPlugin, message)
     IPC_MESSAGE_HANDLER(BrowserPluginMsg_AdvanceFocus, OnAdvanceFocus)
-    IPC_MESSAGE_HANDLER_GENERIC(BrowserPluginMsg_CompositorFrameSwapped,
-                                OnCompositorFrameSwapped(message))
     IPC_MESSAGE_HANDLER(BrowserPluginMsg_GuestGone, OnGuestGone)
     IPC_MESSAGE_HANDLER(BrowserPluginMsg_SetCursor, OnSetCursor)
     IPC_MESSAGE_HANDLER(BrowserPluginMsg_SetMouseLock, OnSetMouseLock)
@@ -129,7 +127,6 @@ void BrowserPlugin::OnSetChildFrameSurface(
 
   EnableCompositing(true);
   DCHECK(compositing_helper_.get());
-
   compositing_helper_->OnSetSurface(surface_id, frame_size, scale_factor,
                                     sequence);
 }
@@ -189,8 +186,6 @@ void BrowserPlugin::Detach() {
 }
 
 void BrowserPlugin::DidCommitCompositorFrame() {
-  if (compositing_helper_.get())
-    compositing_helper_->DidCommitCompositorFrame();
 }
 
 void BrowserPlugin::OnAdvanceFocus(int browser_plugin_instance_id,
@@ -200,28 +195,6 @@ void BrowserPlugin::OnAdvanceFocus(int browser_plugin_instance_id,
   if (!render_view)
     return;
   render_view->GetWebView()->advanceFocus(reverse);
-}
-
-void BrowserPlugin::OnCompositorFrameSwapped(const IPC::Message& message) {
-  if (!attached())
-    return;
-
-  BrowserPluginMsg_CompositorFrameSwapped::Param param;
-  if (!BrowserPluginMsg_CompositorFrameSwapped::Read(&message, &param))
-    return;
-  // Note that there is no need to send ACK for this message.
-  // If the guest has updated pixels then it is no longer crashed.
-  guest_crashed_ = false;
-
-  scoped_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
-  base::get<1>(param).frame.AssignTo(frame.get());
-
-  EnableCompositing(true);
-  compositing_helper_->OnCompositorFrameSwapped(
-      std::move(frame), base::get<1>(param).producing_route_id,
-      base::get<1>(param).output_surface_id,
-      base::get<1>(param).producing_host_id,
-      base::get<1>(param).shared_memory_handle);
 }
 
 void BrowserPlugin::OnGuestGone(int browser_plugin_instance_id) {
@@ -434,13 +407,17 @@ bool BrowserPlugin::ShouldForwardToBrowserPlugin(
   return IPC_MESSAGE_CLASS(message) == BrowserPluginMsgStart;
 }
 
-void BrowserPlugin::updateGeometry(const WebRect& window_rect,
+void BrowserPlugin::updateGeometry(const WebRect& plugin_rect_in_viewport,
                                    const WebRect& clip_rect,
                                    const WebRect& unobscured_rect,
                                    const WebVector<WebRect>& cut_outs_rects,
                                    bool is_visible) {
   gfx::Rect old_view_rect = view_rect_;
-  view_rect_ = window_rect;
+  // Convert the plugin_rect_in_viewport to window coordinates, which is css.
+  WebRect rect_in_css(plugin_rect_in_viewport);
+  blink::WebView* webview = container()->element().document().frame()->view();
+  RenderView::FromWebView(webview)->convertViewportToWindow(&rect_in_css);
+  view_rect_ = rect_in_css;
 
   if (!ready_) {
     if (delegate_)
@@ -521,7 +498,6 @@ blink::WebInputEventResult BrowserPlugin::handleInputEvent(
 
   BrowserPluginManager::Get()->Send(
       new BrowserPluginHostMsg_HandleInputEvent(browser_plugin_instance_id_,
-                                                view_rect_,
                                                 &event));
   GetWebCursorInfo(cursor_, &cursor_info);
 
@@ -646,7 +622,6 @@ bool BrowserPlugin::HandleMouseLockedInputEvent(
     const blink::WebMouseEvent& event) {
   BrowserPluginManager::Get()->Send(
       new BrowserPluginHostMsg_HandleInputEvent(browser_plugin_instance_id_,
-                                                view_rect_,
                                                 &event));
   return true;
 }

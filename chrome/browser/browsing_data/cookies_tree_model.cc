@@ -175,6 +175,8 @@ LocalDataContainer* GetLocalDataContainerForNode(CookieTreeNode* node) {
 
 CookieTreeNode::DetailedInfo::DetailedInfo() : node_type(TYPE_NONE) {}
 
+CookieTreeNode::DetailedInfo::DetailedInfo(const DetailedInfo& other) = default;
+
 CookieTreeNode::DetailedInfo::~DetailedInfo() {}
 
 CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::Init(
@@ -992,12 +994,12 @@ CookiesTreeModel::~CookiesTreeModel() {
 // static
 int CookiesTreeModel::GetSendForMessageID(const net::CanonicalCookie& cookie) {
   if (cookie.IsSecure()) {
-    if (cookie.IsFirstPartyOnly())
-      return IDS_COOKIES_COOKIE_SENDFOR_SECURE_FIRSTPARTY;
+    if (cookie.IsSameSite())
+      return IDS_COOKIES_COOKIE_SENDFOR_SECURE_SAME_SITE;
     return IDS_COOKIES_COOKIE_SENDFOR_SECURE;
   }
-  if (cookie.IsFirstPartyOnly())
-    return IDS_COOKIES_COOKIE_SENDFOR_FIRSTPARTY;
+  if (cookie.IsSameSite())
+    return IDS_COOKIES_COOKIE_SENDFOR_SAME_SITE;
   return IDS_COOKIES_COOKIE_SENDFOR_ANY;
 }
 
@@ -1224,8 +1226,6 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
   for (CookieList::iterator it = container->cookie_list_.begin();
        it != container->cookie_list_.end(); ++it) {
     GURL source = CanonicalizeCookieSource(*it);
-    if (!source.SchemeIsHTTPOrHTTPS())
-      continue;
     if (source.is_empty() || !group_by_cookie_source_) {
       std::string domain = it->Domain();
       if (domain.length() > 1 && domain[0] == '.')
@@ -1235,6 +1235,8 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
       source = GURL(std::string(url::kHttpScheme) +
                     url::kStandardSchemeSeparator + domain + "/");
     }
+    if (!source.SchemeIsHTTPOrHTTPS())
+      continue;
 
     if (filter.empty() || (CookieTreeHostNode::TitleForUrl(source)
                                .find(filter) != base::string16::npos)) {

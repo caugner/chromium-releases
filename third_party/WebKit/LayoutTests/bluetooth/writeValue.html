@@ -10,8 +10,9 @@ test(t => { assert_exists(window, 'testRunner'); t.done(); },
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => service.getCharacteristic('gap.device_name'))
     .then(characteristic => {
@@ -26,8 +27,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => service.getCharacteristic('gap.device_name'))
     .then(characteristic => {
@@ -42,8 +44,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => service.getCharacteristic('gap.device_name'))
     .then(characteristic => {
@@ -60,7 +63,7 @@ gatt_errors_tests.forEach(testSpec => {
   promise_test(() => {
     testRunner.setBluetoothMockDataSet('FailingGATTOperationsAdapter');
     return requestDeviceWithKeyDown({filters: [{services: [errorUUID(0xA0)]}]})
-      .then(device => device.connectGATT())
+      .then(device => device.gatt.connect())
       .then(gattServer => gattServer.getPrimaryService(errorUUID(0xA0)))
       .then(service => service.getCharacteristic(testSpec.uuid))
       .then(characteristic => {
@@ -74,8 +77,9 @@ gatt_errors_tests.forEach(testSpec => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => service.getCharacteristic('gap.device_name'))
     .then(characteristic => {
@@ -89,8 +93,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => service.getCharacteristic('gap.device_name'))
     .then(characteristic => Promise.all(
@@ -98,4 +103,21 @@ promise_test(() => {
        characteristic.writeValue(new ArrayBuffer(1 /* length */)),
        characteristic.writeValue(new DataView(new ArrayBuffer(1 /* length */)))]));
 }, 'A regular write request to a writable characteristic should succeed.');
+
+promise_test(() => {
+  testRunner.setBluetoothMockDataSet('HeartRateAdapter');
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
+    .then(gattServer => gattServer.getPrimaryService('generic_access'))
+    .then(service => service.getCharacteristic('gap.device_name'))
+    .then(characteristic => {
+      assert_equals(characteristic.value, null);
+      let textEncoder = new TextEncoder();
+      let newValue = textEncoder.encode('foo');
+      return characteristic.writeValue(newValue).then(() => {
+        assert_array_equals(characteristic.value.buffer, newValue.buffer);
+      });
+    });
+}, 'A regular write request to a writable characteristic should update value.');
 </script>

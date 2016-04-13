@@ -1,3 +1,5 @@
+if (window.GCController)
+    GCController.collectAll();
 var initialize_InspectorTest = function() {
 
 var results = [];
@@ -953,7 +955,6 @@ WebInspector.targetManager.observeTargets({
         InspectorTest.PageAgent = target.pageAgent();
         InspectorTest.ProfilerAgent = target.profilerAgent();
         InspectorTest.RuntimeAgent = target.runtimeAgent();
-        InspectorTest.ScreenOrientationAgent = target.screenOrientationAgent();
         InspectorTest.WorkerAgent = target.workerAgent();
 
         InspectorTest.consoleModel = target.consoleModel;

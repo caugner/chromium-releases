@@ -26,13 +26,14 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_common_utils.h"
 #include "chrome/browser/sessions/session_data_deleter.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service_utils.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
-#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -264,12 +265,10 @@ void SessionService::WindowClosing(const SessionID& window_id) {
     if (g_browser_process) {
       ProfileManager* profile_manager = g_browser_process->profile_manager();
       if (profile_manager) {
-        ProfileInfoCache& profile_info =
-            profile_manager->GetProfileInfoCache();
-        size_t profile_index = profile_info.GetIndexOfProfileWithPath(
-            profile()->GetPath());
-        use_pending_close = profile_index != std::string::npos &&
-            profile_info.ProfileIsSigninRequiredAtIndex(profile_index);
+        ProfileAttributesEntry* entry;
+        bool has_entry = profile_manager->GetProfileAttributesStorage().
+            GetProfileAttributesWithPath(profile()->GetPath(), &entry);
+        use_pending_close = has_entry && entry->IsSigninRequired();
       }
     }
   }
@@ -584,7 +583,6 @@ bool SessionService::RestoreIfNecessary(const std::vector<GURL>& urls_to_open,
     if (pref.type == SessionStartupPref::LAST) {
       SessionRestore::RestoreSession(
           profile(), browser,
-          browser ? browser->host_desktop_type() : chrome::GetActiveDesktop(),
           browser ? 0 : SessionRestore::ALWAYS_CREATE_TABBED_BROWSER,
           urls_to_open);
       return true;
@@ -839,8 +837,7 @@ void SessionService::BuildCommandsForBrowser(
 void SessionService::BuildCommandsFromBrowsers(
     IdToRange* tab_to_available_range,
     std::set<SessionID::id_type>* windows_to_track) {
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    Browser* browser = *it;
+  for (auto* browser : *BrowserList::GetInstance()) {
     // Make sure the browser has tabs and a window. Browser's destructor
     // removes itself from the BrowserList. When a browser is closed the
     // destructor is not necessarily run immediately. This means it's possible
@@ -910,8 +907,7 @@ bool SessionService::IsOnlyOneTabLeft() const {
   }
 
   int window_count = 0;
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    Browser* browser = *it;
+  for (auto* browser : *BrowserList::GetInstance()) {
     const SessionID::id_type window_id = browser->session_id().id();
     if (ShouldTrackBrowser(browser) &&
         window_closing_ids_.find(window_id) == window_closing_ids_.end()) {
@@ -933,8 +929,7 @@ bool SessionService::HasOpenTrackableBrowsers(
     return true;
   }
 
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    Browser* browser = *it;
+  for (auto* browser : *BrowserList::GetInstance()) {
     const SessionID::id_type browser_id = browser->session_id().id();
     if (browser_id != window_id.id() &&
         window_closing_ids_.find(browser_id) == window_closing_ids_.end() &&
@@ -1110,8 +1105,8 @@ void SessionService::MaybeDeleteSessionOnlyData() {
   }
 
   // Check for any open windows for the current profile that we aren't tracking.
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if ((*it)->profile() == profile())
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile() == profile())
       return;
   }
   DeleteSessionOnlyData(profile());

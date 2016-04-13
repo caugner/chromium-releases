@@ -38,7 +38,7 @@ function initialize_testReloadInjectsCodeWithMessage()
 {
     InspectorTest.lastMessageScriptId = function(callback)
     {
-        var consoleView = WebInspector.ConsolePanel._view();
+        var consoleView = WebInspector.ConsoleView.instance();
         if (consoleView._needsFullUpdate)
             consoleView._updateMessageList();
         var viewMessages = consoleView._visibleViewMessages;
@@ -46,9 +46,9 @@ function initialize_testReloadInjectsCodeWithMessage()
             callback(null);
         var uiMessage = viewMessages[viewMessages.length - 1];
         var message = uiMessage.consoleMessage();
-        if (message.stackTrace.length < 1)
+        if (!message.stackTrace)
             callback(null);
-        callback(message.stackTrace[0].scriptId);
+        callback(message.stackTrace.callFrames[0].scriptId);
     }
     InspectorTest.getScriptSource = function(scriptId, callback)
     {

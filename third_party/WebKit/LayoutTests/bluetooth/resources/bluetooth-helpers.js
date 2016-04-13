@@ -1,5 +1,12 @@
 'use strict';
 
+// Bluetooth UUID constants:
+// Services:
+var blacklist_test_service_uuid = "611c954a-263b-4f4a-aab6-01ddb953f985";
+// Characteristics:
+var blacklist_exclude_reads_characteristic_uuid =
+  "bad1c9a2-9a5b-4015-8b60-1579bbbf2135";
+
 // Sometimes we need to test that using either the name, alias, or UUID
 // produces the same result. The following objects help us do that.
 var generic_access = {
@@ -21,6 +28,11 @@ var heart_rate = {
   alias: 0x180d,
   name: 'heart_rate',
   uuid: '0000180d-0000-1000-8000-00805f9b34fb'
+};
+var body_sensor_location = {
+  alias: 0x2a38,
+  name: 'body_sensor_location',
+  uuid: '00002a38-0000-1000-8000-00805f9b34fb'
 };
 var glucose = {
   alias: 0x1808,
@@ -275,3 +287,36 @@ function generate_string(size, char) {
   // has size n - 1.
   return char.repeat(size);
 }
+
+class EventCatcher {
+  constructor(object, event) {
+    this.eventFired = false;
+    let event_listener = e => {
+      object.removeEventListener(event, event_listener);
+      this.eventFired = true;
+    }
+    object.addEventListener(event, event_listener);
+  }
+}
+
+// Bluetooth tests sometimes have left-over state that could leak into the
+// next test. add_result_callback which is exposed by testharness.js allows us
+// to clean up this state after each test. In the future we will split tests
+// into separate files so that we don't have to add this callback ourselves.
+// TODO(ortuno): Split tests into separate files.
+// https://crbug.com/554240
+add_result_callback(() => {
+  // At the end of each test we clean up all the leftover data in the browser,
+  // including revoking permissions. This happens before the test document is
+  // detached. Once the document is detached any device that connected tries
+  // to disconnect but by then the document no longer has permission to
+  // interact with the device. So before we clean up the browser data
+  // we change the visibility which results in all devices disconnecing.
+  // TODO(ortuno): Remove setPageVisibility hack. In the future, the browser
+  // will notify the renderer that the device disconnected so we won't need
+  // this hack.
+  // https://crbug.com/581855
+  testRunner.setPageVisibility('hidden');
+  testRunner.setPageVisibility('visible');
+  testRunner.setBluetoothMockDataSet('');
+});

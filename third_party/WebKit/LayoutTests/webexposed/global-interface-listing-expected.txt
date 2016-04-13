@@ -305,12 +305,14 @@ interface BluetoothCharacteristicProperties
     getter write
     getter writeWithoutResponse
     method constructor
-interface BluetoothDevice
+interface BluetoothDevice : EventTarget
     getter adData
     getter deviceClass
+    getter gatt
     getter id
     getter instanceID
     getter name
+    getter ongattserverdisconnected
     getter productID
     getter productVersion
     getter uuids
@@ -318,7 +320,8 @@ interface BluetoothDevice
     getter vendorIDSource
     method connectGATT
     method constructor
-interface BluetoothGATTCharacteristic : EventTarget
+    setter ongattserverdisconnected
+interface BluetoothRemoteGATTCharacteristic : EventTarget
     getter oncharacteristicvaluechanged
     getter properties
     getter uuid
@@ -329,15 +332,19 @@ interface BluetoothGATTCharacteristic : EventTarget
     method stopNotifications
     method writeValue
     setter oncharacteristicvaluechanged
-interface BluetoothGATTRemoteServer
+interface BluetoothRemoteGATTServer
     getter connected
+    getter device
+    method connect
     method constructor
+    method disconnect
     method getPrimaryService
-interface BluetoothGATTService
+interface BluetoothRemoteGATTService
     getter isPrimary
     getter uuid
     method constructor
     method getCharacteristic
+    method getCharacteristics
 interface BluetoothUUID
     static method canonicalUUID
     static method getCharacteristic
@@ -468,6 +475,23 @@ interface CacheStorage
     method keys
     method match
     method open
+interface CalcLength : LengthValue
+    getter ch
+    getter cm
+    getter em
+    getter ex
+    getter in
+    getter mm
+    getter pc
+    getter percent
+    getter pt
+    getter px
+    getter rem
+    getter vh
+    getter vmax
+    getter vmin
+    getter vw
+    method constructor
 interface CanvasCaptureMediaStreamTrack : MediaStreamTrack
     getter canvas
     method constructor
@@ -575,7 +599,6 @@ interface ChannelMergerNode : AudioNode
 interface ChannelSplitterNode : AudioNode
     method constructor
 interface CharacterData : Node
-    getter assignedSlot
     getter data
     getter length
     getter nextElementSibling
@@ -840,10 +863,6 @@ interface DOMRectReadOnly
     getter x
     getter y
     method constructor
-interface DOMSettableTokenList : DOMTokenList
-    getter value
-    method constructor
-    setter value
 interface DOMStringList
     getter length
     method constructor
@@ -853,6 +872,7 @@ interface DOMStringMap
     method constructor
 interface DOMTokenList
     getter length
+    getter value
     method add
     method constructor
     method contains
@@ -865,6 +885,7 @@ interface DOMTokenList
     method toString
     method toggle
     method values
+    setter value
 interface DataTransfer
     getter dropEffect
     getter effectAllowed
@@ -946,7 +967,6 @@ interface Document : Node
     getter contentType
     getter cookie
     getter currentScript
-    getter defaultCharset
     getter defaultView
     getter designMode
     getter dir
@@ -1325,6 +1345,7 @@ interface Element : Node
     method webkitMatchesSelector
     method webkitRequestFullScreen
     method webkitRequestFullscreen
+    setter classList
     setter className
     setter id
     setter innerHTML
@@ -1379,11 +1400,13 @@ interface Event
     getter eventPhase
     getter path
     getter returnValue
+    getter scoped
     getter srcElement
     getter target
     getter timeStamp
     getter type
     method constructor
+    method deepPath
     method initEvent
     method preventDefault
     method stopImmediatePropagation
@@ -1590,6 +1613,7 @@ interface HTMLAreaElement : HTMLElement
     getter ping
     getter port
     getter protocol
+    getter referrerpolicy
     getter search
     getter shape
     getter target
@@ -1608,6 +1632,7 @@ interface HTMLAreaElement : HTMLElement
     setter ping
     setter port
     setter protocol
+    setter referrerpolicy
     setter search
     setter shape
     setter target
@@ -2342,6 +2367,7 @@ interface HTMLLinkElement : HTMLElement
     setter integrity
     setter media
     setter rel
+    setter relList
     setter rev
     setter sizes
     setter target
@@ -2405,10 +2431,6 @@ interface HTMLMediaElement : HTMLElement
     getter muted
     getter networkState
     getter onencrypted
-    getter onwebkitkeyadded
-    getter onwebkitkeyerror
-    getter onwebkitkeymessage
-    getter onwebkitneedkey
     getter paused
     getter playbackRate
     getter played
@@ -2425,15 +2447,13 @@ interface HTMLMediaElement : HTMLElement
     getter webkitVideoDecodedByteCount
     method addTextTrack
     method canPlayType
+    method captureStream
     method constructor
     method load
     method pause
     method play
     method setMediaKeys
     method setSinkId
-    method webkitAddKey
-    method webkitCancelKeyRequest
-    method webkitGenerateKeyRequest
     setter autoplay
     setter controls
     setter crossOrigin
@@ -2444,10 +2464,6 @@ interface HTMLMediaElement : HTMLElement
     setter loop
     setter muted
     setter onencrypted
-    setter onwebkitkeyadded
-    setter onwebkitkeyerror
-    setter onwebkitkeymessage
-    setter onwebkitneedkey
     setter playbackRate
     setter preload
     setter src
@@ -2708,7 +2724,6 @@ interface HTMLSlotElement : HTMLElement
     getter name
     method constructor
     method getAssignedNodes
-    method getDistributedNodes
     setter name
 interface HTMLSourceElement : HTMLElement
     getter media
@@ -3111,7 +3126,12 @@ interface Image
 interface ImageBitmap
     getter height
     getter width
+    method close
     method constructor
+interface ImageBitmapRenderingContext
+    getter canvas
+    method constructor
+    method transferImageBitmap
 interface ImageData
     getter height
     getter width
@@ -3119,7 +3139,12 @@ interface ImageData
 interface InputDeviceCapabilities
     getter firesTouchEvents
     method constructor
+interface InputEvent : UIEvent
+    method constructor
 interface IntersectionObserver
+    getter root
+    getter rootMargin
+    getter thresholds
     method constructor
     method disconnect
     method observe
@@ -3144,7 +3169,6 @@ interface KeyboardEvent : UIEvent
     getter key
     getter keyCode
     getter keyIdentifier
-    getter keyLocation
     getter location
     getter metaKey
     getter repeat
@@ -3159,6 +3183,7 @@ interface KeywordValue : StyleValue
     getter keywordValue
     method constructor
 interface LengthValue : StyleValue
+    static method fromDictionary
     static method fromValue
     method add
     method constructor
@@ -3219,7 +3244,7 @@ interface MIDIPort : EventTarget
     method constructor
     method open
     setter onstatechange
-interface MatrixTransformComponent : TransformComponent
+interface Matrix : TransformComponent
     getter a
     getter b
     getter c
@@ -3260,25 +3285,6 @@ interface MediaError
     attribute MEDIA_ERR_NETWORK
     attribute MEDIA_ERR_SRC_NOT_SUPPORTED
     getter code
-    method constructor
-interface MediaKeyError
-    attribute MEDIA_KEYERR_CLIENT
-    attribute MEDIA_KEYERR_DOMAIN
-    attribute MEDIA_KEYERR_HARDWARECHANGE
-    attribute MEDIA_KEYERR_OUTPUT
-    attribute MEDIA_KEYERR_SERVICE
-    attribute MEDIA_KEYERR_UNKNOWN
-    getter code
-    getter systemCode
-    method constructor
-interface MediaKeyEvent : Event
-    getter defaultURL
-    getter errorCode
-    getter initData
-    getter keySystem
-    getter message
-    getter sessionId
-    getter systemCode
     method constructor
 interface MediaKeyMessageEvent : Event
     getter message
@@ -3335,6 +3341,7 @@ interface MediaQueryListEvent : Event
     method constructor
 interface MediaRecorder : EventTarget
     static method isTypeSupported
+    getter audioBitsPerSecond
     getter ignoreMutedMedia
     getter mimeType
     getter ondataavailable
@@ -3345,6 +3352,7 @@ interface MediaRecorder : EventTarget
     getter onstop
     getter state
     getter stream
+    getter videoBitsPerSecond
     method constructor
     method pause
     method requestData
@@ -3587,6 +3595,7 @@ interface Node : EventTarget
     getter parentNode
     getter previousSibling
     getter textContent
+    getter treeRoot
     method appendChild
     method cloneNode
     method compareDocumentPosition
@@ -3655,9 +3664,11 @@ interface Notification : EventTarget
     getter onclose
     getter onerror
     getter onshow
+    getter renotify
     getter requireInteraction
     getter silent
     getter tag
+    getter timestamp
     getter title
     getter vibrate
     method close
@@ -3669,13 +3680,6 @@ interface Notification : EventTarget
 interface NumberValue : StyleValue
     getter value
     method constructor
-    setter value
-interface OffScreenCanvas
-    getter height
-    getter width
-    method constructor
-    setter height
-    setter width
 interface OfflineAudioCompletionEvent : Event
     getter renderedBuffer
     method constructor
@@ -3686,6 +3690,12 @@ interface OfflineAudioContext : AudioContext
     method startRendering
     method suspend
     setter oncomplete
+interface OffscreenCanvas
+    getter height
+    getter width
+    method constructor
+    setter height
+    setter width
 interface Option
     method constructor
 interface OscillatorNode : AudioSourceNode
@@ -3833,6 +3843,9 @@ interface Permissions
     method request
     method requestAll
     method revoke
+interface Perspective : TransformComponent
+    getter length
+    method constructor
 interface Plugin
     getter description
     getter filename
@@ -3855,6 +3868,10 @@ interface PositionSensorVRDevice : VRDevice
     method getImmediateState
     method getState
     method resetSensor
+interface PositionValue : StyleValue
+    getter x
+    getter y
+    method constructor
 interface Presentation
     getter defaultRequest
     getter receiver
@@ -3868,18 +3885,28 @@ interface PresentationAvailability : EventTarget
 interface PresentationConnection : EventTarget
     getter binaryType
     getter id
+    getter onclose
+    getter onconnect
     getter onmessage
     getter onstatechange
+    getter onterminate
     getter state
     method close
     method constructor
     method send
     method terminate
     setter binaryType
+    setter onclose
+    setter onconnect
     setter onmessage
     setter onstatechange
+    setter onterminate
 interface PresentationConnectionAvailableEvent : Event
     getter connection
+    method constructor
+interface PresentationConnectionCloseEvent : Event
+    getter message
+    getter reason
     method constructor
 interface PresentationReceiver : EventTarget
     getter onconnectionavailable
@@ -4024,6 +4051,12 @@ interface Response
     method constructor
     method json
     method text
+interface Rotation : TransformComponent
+    getter angle
+    getter x
+    getter y
+    getter z
+    method constructor
 interface SVGAElement : SVGGraphicsElement
     getter href
     getter target
@@ -4161,11 +4194,6 @@ interface SVGDiscardElement : SVGElement
     method constructor
 interface SVGElement : Element
     getter className
-    getter offsetHeight
-    getter offsetLeft
-    getter offsetParent
-    getter offsetTop
-    getter offsetWidth
     getter onabort
     getter onautocomplete
     getter onautocompleteerror
@@ -4980,9 +5008,9 @@ interface SVGTransformList
     method removeItem
     method replaceItem
 interface SVGUnitTypes
-    static attribute SVG_UNIT_TYPE_OBJECTBOUNDINGBOX
-    static attribute SVG_UNIT_TYPE_UNKNOWN
-    static attribute SVG_UNIT_TYPE_USERSPACEONUSE
+    attribute SVG_UNIT_TYPE_OBJECTBOUNDINGBOX
+    attribute SVG_UNIT_TYPE_UNKNOWN
+    attribute SVG_UNIT_TYPE_USERSPACEONUSE
     method constructor
 interface SVGUseElement : SVGGraphicsElement
     getter height
@@ -5002,9 +5030,9 @@ interface SVGViewElement : SVGElement
     method constructor
     setter zoomAndPan
 interface SVGViewSpec
-    static attribute SVG_ZOOMANDPAN_DISABLE
-    static attribute SVG_ZOOMANDPAN_MAGNIFY
-    static attribute SVG_ZOOMANDPAN_UNKNOWN
+    attribute SVG_ZOOMANDPAN_DISABLE
+    attribute SVG_ZOOMANDPAN_MAGNIFY
+    attribute SVG_ZOOMANDPAN_UNKNOWN
     getter preserveAspectRatio
     getter preserveAspectRatioString
     getter transform
@@ -5023,7 +5051,7 @@ interface SVGZoomEvent : UIEvent
     getter previousTranslate
     getter zoomRectScreen
     method constructor
-interface ScaleTransformComponent : TransformComponent
+interface Scale : TransformComponent
     getter x
     getter y
     getter z
@@ -5172,6 +5200,31 @@ interface SimpleLength : LengthValue
     getter value
     method constructor
     setter value
+interface Skew : TransformComponent
+    getter ax
+    getter ay
+    method constructor
+interface SourceBuffer : EventTarget
+    getter appendWindowEnd
+    getter appendWindowStart
+    getter buffered
+    getter mode
+    getter timestampOffset
+    getter trackDefaults
+    getter updating
+    method abort
+    method appendBuffer
+    method appendStream
+    method constructor
+    method remove
+    setter appendWindowEnd
+    setter appendWindowStart
+    setter mode
+    setter timestampOffset
+    setter trackDefaults
+interface SourceBufferList : EventTarget
+    getter length
+    method constructor
 interface SpeechSynthesisEvent : Event
     getter charIndex
     getter elapsedTime
@@ -5229,6 +5282,19 @@ interface StorageManager
 interface Stream
     getter type
     method constructor
+interface StylePropertyMap
+    method append
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method getProperties
+    method has
+    method keys
+    method set
+    method values
 interface StyleSheet
     getter disabled
     getter href
@@ -5266,6 +5332,7 @@ interface SyncManager
     method getTags
     method register
 interface Text : CharacterData
+    getter assignedSlot
     getter wholeText
     method constructor
     method getDestinationInsertionPoints
@@ -5393,15 +5460,25 @@ interface TrackEvent : Event
     method constructor
 interface TransformComponent
     getter cssString
+    method asMatrix
     method constructor
     method is2DComponent
 interface TransformValue : StyleValue
     method constructor
+    method entries
+    method forEach
     method is2D
+    method keys
+    method values
 interface TransitionEvent : Event
     getter elapsedTime
     getter propertyName
     getter pseudoElement
+    method constructor
+interface Translation : TransformComponent
+    getter x
+    getter y
+    getter z
     method constructor
 interface TreeWalker
     getter currentNode
@@ -5503,6 +5580,8 @@ interface USBDevice
     method controlTransferIn
     method controlTransferOut
     method getConfiguration
+    method isochronousTransferIn
+    method isochronousTransferOut
     method open
     method releaseInterface
     method reset
@@ -5523,6 +5602,21 @@ interface USBInTransferResult
 interface USBInterface
     getter alternates
     getter interfaceNumber
+    method constructor
+interface USBIsochronousInTransferPacket
+    getter data
+    getter status
+    method constructor
+interface USBIsochronousInTransferResult
+    getter data
+    getter packets
+    method constructor
+interface USBIsochronousOutTransferPacket
+    getter bytesWritten
+    getter status
+    method constructor
+interface USBIsochronousOutTransferResult
+    getter packets
     method constructor
 interface USBOutTransferResult
     getter bytesWritten
@@ -6221,7 +6315,6 @@ interface Window : EventTarget
     attribute PERSISTENT
     attribute TEMPORARY
     method constructor
-    method toString
 interface Worker : EventTarget
     getter onerror
     getter onmessage
@@ -6230,6 +6323,9 @@ interface Worker : EventTarget
     method terminate
     setter onerror
     setter onmessage
+interface Worklet
+    method constructor
+    method import
 interface XMLDocument : Document
     method constructor
 interface XMLHttpRequest : XMLHttpRequestEventTarget
@@ -6278,10 +6374,6 @@ interface XMLHttpRequestEventTarget : EventTarget
     setter onloadstart
     setter onprogress
     setter ontimeout
-interface XMLHttpRequestProgressEvent : ProgressEvent
-    getter position
-    getter totalSize
-    method constructor
 interface XMLHttpRequestUpload : XMLHttpRequestEventTarget
     method constructor
 interface XMLSerializer
@@ -6644,6 +6736,7 @@ interface webkitURL
     attribute location
     attribute locationbar
     attribute menubar
+    attribute mojo
     attribute name
     attribute navigator
     attribute offscreenBuffering
@@ -6747,6 +6840,7 @@ interface webkitURL
     attribute performance
     attribute personalbar
     attribute propertyNamesInGlobal
+    attribute renderWorklet
     attribute screen
     attribute screenLeft
     attribute screenTop

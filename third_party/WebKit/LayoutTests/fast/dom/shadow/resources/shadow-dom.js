@@ -124,7 +124,7 @@ function isIframeElement(element)
 
 // You can spefify youngerShadowRoot by consecutive slashes.
 // See LayoutTests/fast/dom/shadow/get-element-by-id-in-shadow-root.html for actual usages.
-function getNodeInTreeOfTrees(path)
+function getNodeInComposedTree(path)
 {
     var ids = path.split('/');
     var node = document.getElementById(ids[0]);
@@ -195,7 +195,7 @@ function innermostActiveElement(element)
 
 function isInnermostActiveElement(id)
 {
-    var element = getNodeInTreeOfTrees(id);
+    var element = getNodeInComposedTree(id);
     if (!element) {
         debug('FAIL: There is no such element with id: '+ from);
         return false;
@@ -209,7 +209,7 @@ function isInnermostActiveElement(id)
 function shouldNavigateFocus(from, to, direction)
 {
     debug('Should move from ' + from + ' to ' + to + ' in ' + direction);
-    var fromElement = getNodeInTreeOfTrees(from);
+    var fromElement = getNodeInComposedTree(from);
     if (!fromElement) {
       debug('FAIL: There is no such element with id: '+ from);
       return;
@@ -251,70 +251,70 @@ function testFocusNavigationBackward(elements)
         shouldNavigateFocus(elements[i], elements[i + 1], 'backward');
 }
 
-function dumpComposedShadowTree(node, indent)
+function dumpFlatTree(node, indent)
 {
     indent = indent || "";
     var output = indent + dumpNode(node) + "\n";
     var child;
-    for (child = internals.firstChildInComposedTree(node); child; child = internals.nextSiblingInComposedTree(child))
-         output += dumpComposedShadowTree(child, indent + "\t");
+    for (child = internals.firstChildInFlatTree(node); child; child = internals.nextSiblingInFlatTree(child))
+         output += dumpFlatTree(child, indent + "\t");
     return output;
 }
 
-function lastNodeInComposedTree(root)
+function lastNodeInFlatTree(root)
 {
     var lastNode = root;
-    while (internals.lastChildInComposedTree(lastNode))
-        lastNode = internals.lastChildInComposedTree(lastNode);
+    while (internals.lastChildInFlatTree(lastNode))
+        lastNode = internals.lastChildInFlatTree(lastNode);
     return lastNode;
 }
 
-function showComposedShadowTreeByTraversingInForward(root)
+function showFlatTreeByTraversingInForward(root)
 {
     var node = root;
-    var last = lastNodeInComposedTree(root);
+    var last = lastNodeInFlatTree(root);
     while (node) {
         debug(dumpNode(node));
         if (node == last)
             break;
-        node = internals.nextInComposedTree(node);
+        node = internals.nextInFlatTree(node);
     }
 }
 
-function showComposedShadowTreeByTraversingInBackward(root)
+function showFlatTreeByTraversingInBackward(root)
 {
-    var node = lastNodeInComposedTree(root);
+    var node = lastNodeInFlatTree(root);
     while (node) {
         debug(dumpNode(node));
         if (node == root)
             break;
-        node = internals.previousInComposedTree(node);
+        node = internals.previousInFlatTree(node);
     }
 }
 
-function showComposedShadowTree(node)
+function showFlatTree(node)
 {
-    debug('Composed Shadow Tree:');
-    debug(dumpComposedShadowTree(node));
+    debug('Flat Tree:');
+    debug(dumpFlatTree(node));
 
     debug('Traverse in forward.');
-    showComposedShadowTreeByTraversingInForward(node);
+    showFlatTreeByTraversingInForward(node);
 
     debug('Traverse in backward.');
-    showComposedShadowTreeByTraversingInBackward(node);
+    showFlatTreeByTraversingInBackward(node);
 
     debug('');
 }
 
 function showNextNode(node)
 {
-    var next = internals.nextInComposedTree(node);
+    var next = internals.nextInFlatTree(node);
     debug('Next node of [' + dumpNode(node) + '] is [' + dumpNode(next) + ']');
 }
 
 function backgroundColorOf(selector)
 {
-    return window.getComputedStyle(getNodeInTreeOfTrees(selector)).backgroundColor;
+    return window.getComputedStyle(getNodeInComposedTree(selector)).backgroundColor;
 }
 
 function backgroundColorShouldBe(selector, expected)

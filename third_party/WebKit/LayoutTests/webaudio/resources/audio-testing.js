@@ -438,7 +438,10 @@ var Should = (function () {
     };
 
     ShouldModel.prototype._isArray = function (arg) {
-        return arg instanceof Array || arg instanceof Float32Array;
+      return arg instanceof Array || arg instanceof Float32Array || arg instanceof Uint8Array ||
+        arg instanceof Uint16Array || arg instanceof Uint32Array || arg instanceof Int8Array ||
+        arg instanceof Int16Array || arg instanceof Int32Array || arg instanceof Uint8ClampedArray ||
+        arg instanceof Float64Array;
     };
 
     ShouldModel.prototype._assert = function (expression, reason, value) {
@@ -554,6 +557,27 @@ var Should = (function () {
         return this._success;
     }
 
+    // Check if |target| is greater than |value|.
+    //
+    // Example:
+    // Should("SNR", snr).beGreaterThan(100);
+    // Result:
+    // "PASS SNR is greater than 100"
+    // "FAIL SNR (n) is not greater than 100"
+    ShouldModel.prototype.beGreaterThan = function (value) {
+        var type = typeof value;
+        this._assert(type === 'number' || type === 'string',
+            'value should be number or string for', value);
+
+        this._checkNaN(value, 'EXPECTED');
+
+        if (this.target > value)
+            this._testPassed("is greater than " + value);
+        else
+            this._testFailed("(" + this.target + ") is not greater than " + value);
+        return this._success;
+    }
+
     // Check if |target| is lest than or equal to |value|.
     //
     // Example:
@@ -588,7 +612,7 @@ var Should = (function () {
     // Result:
     // "PASS One is 1 within a relative error of 0.1."
     // "FAIL One is not 1 within a relative error of 0.1: 2"
-    ShouldModel.prototype.beCloseTo = function (value, errorThreshold, precision) {
+    ShouldModel.prototype.beCloseTo = function (value, errorThreshold) {
         var type = typeof value;
         this._assert(type === 'number', 'value should be number for', value);
 
@@ -597,12 +621,12 @@ var Should = (function () {
         if (value) {
             var relativeError = Math.abs(this.target - value) / Math.abs(value);
             if (relativeError <= errorThreshold) {
-                this._testPassed("is " + value.toPrecision(precision) +
+                this._testPassed("is " + value.toPrecision(this.PRINT_PRECISION) +
                     " within a relative error of " + errorThreshold);
             } else {
                 // Include actual relative error so the failed test case can be updated with the actual
                 // relative error, if appropriate.
-                this._testFailed("is not " + value.toPrecision(precision) +
+                this._testFailed("is not " + value.toPrecision(this.PRINT_PRECISION) +
                     " within a relative error of " + errorThreshold +
                     ": " + this.target + " with relative error " + relativeError
                 );
@@ -610,12 +634,12 @@ var Should = (function () {
         } else {
             var absoluteError = Math.abs(this.target - value);
             if (absoluteError <= errorThreshold) {
-                this._testPassed("is " + value.toPrecision(precision) +
+                this._testPassed("is " + value.toPrecision(this.PRINT_PRECISION) +
                     " within an absolute error of " + errorThreshold);
             } else {
                 // Include actual absolute error so the failed test case can be updated with the
                 // actual error, if appropriate.
-                this._testFailed("is not " + value.toPrecision(precision) +
+                this._testFailed("is not " + value.toPrecision(this.PRINT_PRECISION) +
                     " within an absolute error of " + errorThreshold +
                     ": " + this.target + " with absolute error " + absoluteError
                 );
@@ -727,16 +751,24 @@ var Should = (function () {
         }
 
         var numberOfmismatches = Object.keys(mismatches).length;
-        var arrStr = (array.length > this.NUM_ARRAY_LOG) ?
-        array.slice(0, this.NUM_ARRAY_LOG).toString() + '...' : array.toString();
+        var arrSlice = array.slice(0, this.NUM_ARRAY_LOG);
+        var arrStr = arrSlice[0].toPrecision(this.PRINT_PRECISION);
+        for (var k = 1; k < arrSlice.length; ++k)
+            arrStr += ',' + arrSlice[k].toPrecision(this.PRINT_PRECISION);
+        if (array.length > this.NUM_ARRAY_LOG)
+            arrStr += ',...';
 
         if (numberOfmismatches === 0) {
             this._testPassed('is identical to the array [' + arrStr + ']');
         } else {
             var counter = 0;
             var failureMessage = 'is not equal to the array [' + arrStr + ']';
+            if (this.verbose)
+                failureMessage += '\nindex\tActual\t\tExpected';
             for (var index in mismatches) {
                 failureMessage += '\n[' + index + '] : ' + mismatches[index];
+                if (this.verbose)
+                    failureMessage += '\t' + array[index];
                 if (++counter >= this.NUM_ERRORS_LOG) {
                     failureMessage += '\nand ' + (numberOfmismatches - counter) +
                     ' more differences...';
