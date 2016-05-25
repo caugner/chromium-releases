@@ -24,7 +24,7 @@ function test()
     function fileSystemCreated()
     {
         InspectorTest.addResult("Loading raw css with mapping...");
-        InspectorTest.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, styleSheetAdded);
+        InspectorTest.cssModel.addEventListener(WebInspector.CSSModel.Events.StyleSheetAdded, styleSheetAdded);
         InspectorTest.evaluateInPage("loadCSS()");
     }
 
@@ -35,8 +35,8 @@ function test()
         InspectorTest.addResult("Stylesheet was added, dumping location:");
         var header = event.data;
         var cssLocation = new WebInspector.CSSLocation(header, 0, 1);
-        liveLocation = WebInspector.cssWorkspaceBinding.createLiveLocation(cssLocation, function() {});
-        InspectorTest.addSniffer(WebInspector.CSSWorkspaceBinding.prototype, "pushSourceMapping", afterBind);
+        liveLocation = WebInspector.cssWorkspaceBinding.createLiveLocation(cssLocation, function() {}, new WebInspector.LiveLocationPool());
+        InspectorTest.cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapAttached, afterBind);
         dumpLiveLocation();
     }
 

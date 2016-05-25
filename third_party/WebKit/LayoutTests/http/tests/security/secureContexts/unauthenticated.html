@@ -28,11 +28,11 @@
                 }), false);
 
                 var i1 = document.createElement("iframe");
-                i1.src = get_host_info().UNAUTHENTICATED_ORIGIN + "/security/secureContexts/resources/post-securecontext-status.html";
+                i1.src = get_host_info().HTTP_REMOTE_ORIGIN + "/security/secureContexts/resources/post-securecontext-status.html";
                 document.body.appendChild(i1);
 
                 var i2 = document.createElement("iframe");
-                i2.src = get_host_info().AUTHENTICATED_ORIGIN + "/security/secureContexts/resources/post-securecontext-status.html";
+                i2.src = get_host_info().HTTPS_REMOTE_ORIGIN + "/security/secureContexts/resources/post-securecontext-status.html";
                 document.body.appendChild(i2);
             }, "Frames are insecure");
         }

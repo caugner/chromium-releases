@@ -4,7 +4,7 @@ Heading
 Division
 Paragraph
 
-éŸ“åœ‹í•œêµ­
+韓國한국
 Coffee
 - black hot drink
 Milk
@@ -33,7 +33,6 @@ Written by Julie
 Visit us at:www.chromium.org
 January This is an open dialog window
 
- 
 Caption
 Cell1	Cell2
 
@@ -64,11 +63,11 @@ AXRole: AXWebArea
     AXRole: AXGroup
         AXRole: AXRuby
             AXRole: AXAnnotation
-                AXRole: AXStaticText "í•œêµ­"
-                    AXRole: AXInlineTextBox "í•œêµ­"
+                AXRole: AXStaticText "한국"
+                    AXRole: AXInlineTextBox "한국"
             AXRole: AXGroup
-                AXRole: AXStaticText "éŸ“åœ‹"
-                    AXRole: AXInlineTextBox "éŸ“åœ‹"
+                AXRole: AXStaticText "韓國"
+                    AXRole: AXInlineTextBox "韓國"
     AXRole: AXDescriptionList
         AXRole: AXDescriptionListTerm
             AXRole: AXStaticText "Coffee"
@@ -168,11 +167,6 @@ element
         AXRole: AXDialog
             AXRole: AXStaticText "This is an open dialog window"
                 AXRole: AXInlineTextBox "This is an open dialog window"
-    AXRole: AXGroup
-        AXRole: AXUnknown
-            AXRole: AXWebArea
-        AXRole: AXUnknown
-            AXRole: AXWebArea
     AXRole: AXTable "Caption"
         AXRole: AXCaption
             AXRole: AXStaticText "Caption"

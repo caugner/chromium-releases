@@ -1,2 +1,6 @@
-ALERT: function testCallback() { [native code] }
+CONSOLE MESSAGE: Blink Test Plugin: initializing
+PASS msg.data is "loaded"
+PASS successfullyParsed is true
+
+TEST COMPLETE
 

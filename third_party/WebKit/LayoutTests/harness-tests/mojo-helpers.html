@@ -11,8 +11,25 @@ mojo_test(mojo => {
   assert_true(mojo instanceof Object);
   assert_true(mojo.core instanceof Object);
   assert_true(mojo.router instanceof Object);
+  assert_true(mojo.frameServiceRegistry instanceof Object);
   assert_true(mojo.serviceRegistry instanceof Object);
 }, 'Mojo system APIs should be available to layout tests.');
+
+mojo_test(mojo => {
+  return new Promise(resolve => {
+    let calls = 0;
+    // Complete the test as soon as two requests come in for a Frobinator service.
+    mojo.frameServiceRegistry.addServiceOverrideForTesting('Frobinator', () => {
+      if (++calls == 2)
+        resolve();
+    });
+
+    // Try to connect to the browser's Frobinator service. This should be
+    // intercepted by the above override.
+    mojo.frameServiceRegistry.connectToService('Frobinator');
+    mojo.frameServiceRegistry.connectToService('Frobinator');
+  });
+}, 'Frame service registry overrides should be properly intercepted.');
 
 mojo_test(mojo => {
   return new Promise(resolve => {
@@ -84,4 +101,33 @@ mojo_test(() => {
 
   });
 }, 'Generated mojo bindings can be loaded in tests');
+
+mojo_test(() => {
+  return new Promise(resolve => {
+    let iframe = document.createElement('iframe');
+    let listener = result => {
+      document.body.removeChild(iframe);
+      window.removeEventListener('message', listener);
+      assert_true(result.data);
+      resolve();
+    }
+    window.addEventListener('message', listener);
+    iframe.setAttribute('src', 'resources/mojo-helpers-inner.html');
+    document.body.appendChild(iframe);
+  });
+}, 'Mojo bindings are accessible from iframes');
+
+mojo_test(() => {
+  return new Promise(resolve => {
+    let popup;
+    let listener = result => {
+      popup.close();
+      window.removeEventListener('message', listener);
+      assert_true(result.data);
+      resolve();
+    }
+    window.addEventListener('message', listener);
+    popup = window.open('resources/mojo-helpers-inner.html');
+  });
+}, 'Mojo bindings are accessible from popups');
 </script>

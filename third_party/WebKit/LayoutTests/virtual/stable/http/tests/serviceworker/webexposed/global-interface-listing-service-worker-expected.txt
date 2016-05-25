@@ -28,6 +28,7 @@ interface Client
 interface Clients
     method claim
     method constructor
+    method get
     method matchAll
     method openWindow
 interface CloseEvent : Event
@@ -164,6 +165,13 @@ interface EventTarget
 interface ExtendableEvent : Event
     method constructor
     method waitUntil
+interface ExtendableMessageEvent : ExtendableEvent
+    getter data
+    getter lastEventId
+    getter origin
+    getter ports
+    getter source
+    method constructor
 interface FetchEvent : ExtendableEvent
     getter clientId
     getter isReload
@@ -553,6 +561,7 @@ interface URL
     getter port
     getter protocol
     getter search
+    getter searchParams
     getter username
     method constructor
     method toString

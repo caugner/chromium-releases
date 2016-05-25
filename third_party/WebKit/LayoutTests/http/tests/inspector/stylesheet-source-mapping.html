@@ -10,7 +10,7 @@ function test()
     var contentReceived;
     var finalMappedLocation;
     var target = InspectorTest.createWorkspaceWithTarget();
-    var cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+    var cssModel = WebInspector.CSSModel.fromTarget(target);
     WebInspector.cssWorkspaceBinding = InspectorTest.testCSSWorkspaceBinding;
 
     InspectorTest.waitForWorkspaceUISourceCodeAddedEvent(cssUISourceCodeAdded);
@@ -31,7 +31,6 @@ function test()
         finalMappedLocation = networkURL + ":" + uiLocation.lineNumber + ":" + uiLocation.columnNumber;
         join();
     }
-
 
     function createMockStyleSheetHeader(url, sourceMapURL)
     {
@@ -66,20 +65,15 @@ function test()
         InspectorTest.waitForWorkspaceUISourceCodeAddedEvent(scssUISourceCodeAdded);
     }
 
-    function scssUISourceCodeAdded(uiSourceCode)
-    {
-        InspectorTest.addResult("Added SCSS uiSourceCode: " + uiSourceCode.url());
-        setImmediate(afterStyleSheetAdded);
-    }
-
     function rawLocationToUILocation(line, column)
     {
         var header = cssModel.styleSheetHeaderForId(styleSheetId);
         return InspectorTest.testCSSWorkspaceBinding.rawLocationToUILocation(new WebInspector.CSSLocation(header, line, column));
     }
 
-    function afterStyleSheetAdded()
+    function scssUISourceCodeAdded(uiSourceCode)
     {
+        InspectorTest.addResult("Added SCSS uiSourceCode: " + uiSourceCode.url());
         var cssUISourceCode = InspectorTest.testWorkspace.uiSourceCodeForURL(styleSheetURL);
         var scssUISourceCode = InspectorTest.testWorkspace.uiSourceCodeForURL("http://localhost:8000/inspector/resources/example.scss");
 

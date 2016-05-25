@@ -250,9 +250,6 @@ InspectorTest.waitUntilPausedAndPerformSteppingActions = function(actions, callb
         case "Resume":
             InspectorTest.togglePause();
             break;
-        case "StepIntoAsync":
-            InspectorTest.DebuggerAgent.stepIntoAsync();
-            break;
         default:
             InspectorTest.addResult("FAIL: Unknown action: " + action);
             callback();
@@ -272,15 +269,15 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
 {
     var results = [];
     options = options || {};
-
-    function printCallFrames(callFrames)
+    function printCallFrames(callFrames, locationFunction, returnValueFunction)
     {
         var printed = 0;
         for (var i = 0; i < callFrames.length; i++) {
             var frame = callFrames[i];
-            var script = frame.location().script();
-            var uiLocation = WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(frame.location());
-            var isFramework = WebInspector.blackboxManager.isBlackboxedRawLocation(frame.location());
+            var location = locationFunction.call(frame);
+            var script = location.script();
+            var uiLocation = WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(location);
+            var isFramework = WebInspector.blackboxManager.isBlackboxedRawLocation(location);
             if (options.dropFrameworkCallFrames && isFramework)
                 continue;
             var url;
@@ -290,12 +287,12 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
                 lineNumber = uiLocation.lineNumber + 1;
             } else {
                 url = WebInspector.displayNameForURL(script.sourceURL);
-                lineNumber = frame.location().lineNumber + 1;
+                lineNumber = location.lineNumber + 1;
             }
             var s = (isFramework ? "  * " : "    ") + (printed++) + ") " + frame.functionName + " (" + url + (options.dropLineNumbers ? "" : ":" + lineNumber) + ")";
             results.push(s);
-            if (options.printReturnValue && frame.returnValue())
-                results.push("       <return>: " + frame.returnValue().description);
+            if (options.printReturnValue && returnValueFunction && returnValueFunction.call(frame))
+                results.push("       <return>: " + returnValueFunction.call(frame).description);
             if (frame.functionName === "scheduleTestFunction") {
                 var remainingFrames = callFrames.length - 1 - i;
                 if (remainingFrames)
@@ -306,16 +303,22 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
         return printed;
     }
 
-    results.push("Call stack:");
-    printCallFrames(callFrames);
+    function runtimeCallFramePosition()
+    {
+        var lineNumber = this.lineNumber ? this.lineNumber - 1 : 0;
+        var columnNumber = this.columnNumber ? this.columnNumber - 1 : 0;
+        return new WebInspector.DebuggerModel.Location(debuggerModel, this.scriptId, lineNumber, columnNumber);
+    }
 
+    results.push("Call stack:");
+    printCallFrames(callFrames, WebInspector.DebuggerModel.CallFrame.prototype.location, WebInspector.DebuggerModel.CallFrame.prototype.returnValue);
     while (asyncStackTrace) {
         results.push("    [" + (asyncStackTrace.description || "Async Call") + "]");
         var debuggerModel = WebInspector.DebuggerModel.fromTarget(WebInspector.targetManager.mainTarget());
-        var printed = printCallFrames(WebInspector.DebuggerModel.CallFrame.fromPayloadArray(debuggerModel, asyncStackTrace.callFrames));
+        var printed = printCallFrames(asyncStackTrace.callFrames, runtimeCallFramePosition);
         if (!printed)
             results.pop();
-        asyncStackTrace = asyncStackTrace.asyncStackTrace;
+        asyncStackTrace = asyncStackTrace.parent;
     }
     return results.join("\n");
 };
@@ -508,11 +511,11 @@ InspectorTest.createScriptMock = function(url, startLine, startColumn, isContent
     target = target || WebInspector.targetManager.mainTarget();
     var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
     var scriptId = ++InspectorTest._lastScriptId + "";
-    var lineCount = source.lineEndings().length;
+    var lineCount = source.computeLineEndings().length;
     var endLine = startLine + lineCount - 1;
-    var endColumn = lineCount === 1 ? startColumn + source.length : source.length - source.lineEndings()[lineCount - 2];
+    var endColumn = lineCount === 1 ? startColumn + source.length : source.length - source.computeLineEndings()[lineCount - 2];
     var hasSourceURL = !!source.match(/\/\/#\ssourceURL=\s*(\S*?)\s*$/m) || !!source.match(/\/\/@\ssourceURL=\s*(\S*?)\s*$/m);
-    var script = new WebInspector.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, 0, isContentScript, false, false, undefined, hasSourceURL);
+    var script = new WebInspector.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, 0, "", isContentScript, false, false, undefined, hasSourceURL);
     script.requestContent = function()
     {
         var trimmedSource = WebInspector.Script._trimSourceURLComment(source);
@@ -572,6 +575,11 @@ InspectorTest.selectThread = function(target)
     var threadsPane = WebInspector.panels.sources.sidebarPanes.threads;
     var listItem = threadsPane._debuggerModelToListItems.get(WebInspector.DebuggerModel.fromTarget(target));
     threadsPane._onListItemClick(listItem);
+}
+
+InspectorTest.evaluateOnCurrentCallFrame = function(code)
+{
+    return new Promise(succ => InspectorTest.debuggerModel.evaluateOnSelectedCallFrame(code, "console", false, true, false, false, InspectorTest.safeWrap(succ)));
 }
 
 };

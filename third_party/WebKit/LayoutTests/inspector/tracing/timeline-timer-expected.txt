@@ -86,6 +86,7 @@ FunctionCall Properties:
 {
     data : {
         frame : <string>
+        functionName : "intervalTimerWork"
         scriptId : <string>
         scriptLine : <number>
         scriptName : <string>
@@ -99,19 +100,7 @@ FunctionCall Properties:
 {
     data : {
         frame : <string>
-        scriptId : <string>
-        scriptLine : <number>
-        scriptName : <string>
-    }
-    endTime : <number>
-    frameId : <string>
-    startTime : <number>
-    type : "FunctionCall"
-}
-FunctionCall Properties:
-{
-    data : {
-        frame : <string>
+        functionName : "intervalTimerWork"
         scriptId : <string>
         scriptLine : <number>
         scriptName : <string>

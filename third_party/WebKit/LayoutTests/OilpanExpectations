@@ -1,6 +1,0 @@
-# This file is used by the Oilpan bots (and anyone building in that config)
-# to track Oilpan-specific failures.
-
-# TODO(haraken): Remove this file once we finish shipping Oilpan.
-# Before removing this file, we need to remove the --additional-expectations
-# flag from the recipes of all oilpan bots.

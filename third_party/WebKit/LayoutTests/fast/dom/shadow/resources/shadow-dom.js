@@ -1,3 +1,37 @@
+// TODO(yuzus): These two functions below need cleaning up. They are currently
+// from js-test.js.
+function getOrCreateTestElement(id, tagName)
+{
+    var element = document.getElementById(id);
+    if (element)
+        return element;
+
+    element = document.createElement(tagName);
+    element.id = id;
+    var refNode;
+    var parent = document.body || document.documentElement;
+    if (id == "description")
+        refNode = getOrCreateTestElement("console", "div");
+    else
+        refNode = parent.firstChild;
+
+    parent.insertBefore(element, refNode);
+    return element;
+}
+
+function debug(msg)
+{
+    if (self._lazyTestResults) {
+        self._lazyTestResults.push(msg);
+    } else {
+        var span = document.createElement("span");
+        // insert it first so XHTML knows the namespace;
+        getOrCreateTestElement("console", "div").appendChild(span);
+        span.innerHTML = msg + '<br />';
+    };
+}
+
+
 function createShadowRoot()
 {
     var children = Array.prototype.slice.call(arguments);
@@ -66,47 +100,6 @@ function createDOM(tagName, attributes)
     return element;
 }
 
-function removeWhiteSpaceOnlyTextNodes(node)
-{
-    for (var i = 0; i < node.childNodes.length; i++) {
-        var child = node.childNodes[i];
-        if (child.nodeType === Node.TEXT_NODE && child.nodeValue.trim().length == 0) {
-            node.removeChild(child);
-            i--;
-        } else if (child.nodeType === Node.ELEMENT_NODE || child.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-            removeWhiteSpaceOnlyTextNodes(child);
-        }
-    }
-    if (node.shadowRoot) {
-        removeWhiteSpaceOnlyTextNodes(node.shadowRoot);
-    }
-}
-
-function convertTemplatesToShadowRootsWithin(node) {
-    var nodes = node.querySelectorAll("template");
-    for (var i = 0; i < nodes.length; ++i) {
-        var template = nodes[i];
-        var mode = template.getAttribute("data-mode");
-        var parent = template.parentNode;
-        parent.removeChild(template);
-        var shadowRoot;
-        if (!mode || mode == 'v0'){
-            shadowRoot = parent.createShadowRoot();
-        } else {
-            shadowRoot = parent.attachShadow({'mode': mode});
-        }
-        var expose = template.getAttribute("data-expose-as");
-        if (expose)
-            window[expose] = shadowRoot;
-        if (template.id)
-            shadowRoot.id = template.id;
-        var fragments = document.importNode(template.content, true);
-        shadowRoot.appendChild(fragments);
-
-        convertTemplatesToShadowRootsWithin(shadowRoot);
-    }
-}
-
 function isShadowHost(node)
 {
     return window.internals.oldestShadowRoot(node);
@@ -122,7 +115,7 @@ function isIframeElement(element)
     return element && element.nodeName == 'IFRAME';
 }
 
-// You can spefify youngerShadowRoot by consecutive slashes.
+// You can specify youngerShadowRoot by consecutive slashes.
 // See LayoutTests/fast/dom/shadow/get-element-by-id-in-shadow-root.html for actual usages.
 function getNodeInComposedTree(path)
 {
@@ -197,7 +190,7 @@ function isInnermostActiveElement(id)
 {
     var element = getNodeInComposedTree(id);
     if (!element) {
-        debug('FAIL: There is no such element with id: '+ from);
+        debug('FAIL: There is no such element with id: '+ id);
         return false;
     }
     if (element == innermostActiveElement())
@@ -227,6 +220,7 @@ function shouldNavigateFocus(from, to, direction)
         debug('PASS');
     else
         debug('FAIL');
+    return isInnermostActiveElement(to);
 }
 
 function navigateFocusForward()
