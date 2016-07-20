@@ -5,29 +5,65 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [295, 102, 15, 400],
-        [18, 170, 269, 332],
-        [18, 150, 269, 352],
-        [18, 130, 269, 40],
-        [18, 130, 269, 20],
-        [18, 130, 235, 39],
-        [18, 130, 77, 19],
-        [10, 102, 285, 400]
-      ],
-      "paintInvalidationClients": [
-        "InlineTextBox 'To be changed: findme (Manual testing:'",
-        "InlineTextBox 'Find-in-page 'findme', then click here)'",
-        "LayoutText #text",
-        "RootInlineBox",
-        "RootInlineBox",
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow DIV id='to-be-changed'",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'After change'",
-        "LayoutBlockFlow DIV",
-        "VerticalScrollbar"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [10, 102, 285, 400],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [18, 150, 269, 352],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='to-be-changed'",
+          "rect": [18, 130, 269, 40],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [18, 130, 235, 39],
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [18, 130, 77, 19],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [295, 102, 15, 400],
+          "reason": "scroll"
+        },
+        {
+          "object": "InlineTextBox 'After change'",
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "InlineTextBox 'Find-in-page 'findme', then click here)'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'To be changed: findme (Manual testing:'",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "VerticalScrollbar",
+          "reason": "scroll"
+        }
       ]
     }
   ]

@@ -216,23 +216,6 @@ function stringify(v)
     else return "" + v;
 }
 
-// Stringifies a DOM object.  This function stringifies not only own properties
-// but also DOM attributes which are on a prototype chain.  Note that
-// JSON.stringify only stringifies own properties.
-function stringifyDOMObject(object)
-{
-    function deepCopy(src) {
-        if (typeof src != "object")
-            return src;
-        var dst = Array.isArray(src) ? [] : {};
-        for (var property in src) {
-            dst[property] = deepCopy(src[property]);
-        }
-        return dst;
-    }
-    return JSON.stringify(deepCopy(object));
-}
-
 function evalAndLog(_a, _quiet)
 {
   if (typeof _a != "string")
@@ -765,9 +748,16 @@ function shouldHaveHadError(message)
 // that something is dead need to use this asynchronous collectGarbage
 // function.
 function asyncGC(callback) {
+    var documentsBefore = window.internals.numberOfLiveDocuments();
     GCController.collectAll();
     // FIXME: we need a better way of waiting for chromium events to happen
-    setTimeout(callback, 0);
+    setTimeout(function () {
+        var documentsAfter = window.internals.numberOfLiveDocuments();
+        if (documentsAfter < documentsBefore)
+            asyncGC(callback);
+        else
+            callback();
+    }, 0);
 }
 
 function gc() {

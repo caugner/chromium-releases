@@ -5,24 +5,61 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [10, 63, 307, 377],
-        [10, 63, 307, 377]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineFlowBox",
-        "InlineTextBox 'PA'",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "InlineTextBox 'PASS'",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "InlineTextBox 'PASS'",
-        "LayoutSVGText text",
-        "RootInlineBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'PASS'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [10, 63, 307, 377],
+          "reason": "full"
+        },
+        {
+          "object": "LayoutSVGText text",
+          "rect": [10, 63, 307, 377],
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'PA'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'PASS'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'PASS'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'PASS'",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

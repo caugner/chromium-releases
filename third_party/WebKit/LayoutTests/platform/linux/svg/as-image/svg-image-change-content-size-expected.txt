@@ -5,15 +5,24 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 52, 602, 425],
-        [8, 52, 422, 425]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineBox",
-        "LayoutBlockFlow div id='contentBox'",
-        "RootInlineBox"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow div id='contentBox'",
+          "rect": [8, 52, 602, 422],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "InlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

@@ -2,89 +2,80 @@ Tests ServiceWorkersView on resources panel.
 
 Select ServiceWorkers tree element.
 Register ServiceWorker for scope1
-==== ServiceWorkersView ====
-127.0.0.1/inspector/service-workers/resources/scope1/
-State
-activated
-Worker
-running
-inspect
-Script URL
-/inspector/service-workers/resources/service-worker-empty.js
-Updated
-RESPONSE-TIME
-Last-Modified
-LAST-MODIFIED
-Recent messages
-LAST-MODIFIED
-RESPONSE-TIME
-
-============================
+http://127.0.0.1:8000/inspector/service-workers/resources/scope1/
+Update
+Push
+Unregister
+Source
+service-worker-empty.js
+Received
+Status
+#N activated and is running
+stop
+Clients
+Errors
+0
+details
+clear
 Register ServiceWorker for scope2
-==== ServiceWorkersView ====
-127.0.0.1/inspector/service-workers/resources/scope2/
-State
-activated
-Worker
-running
-inspect
-Script URL
-/inspector/service-workers/resources/service-worker-empty.js
-Updated
-RESPONSE-TIME
-Last-Modified
-LAST-MODIFIED
-Recent messages
-LAST-MODIFIED
-RESPONSE-TIME
-State
-activated
-Worker
-running
-inspect
-Script URL
-/inspector/service-workers/resources/service-worker-empty.js
-Updated
-RESPONSE-TIME
-Last-Modified
-LAST-MODIFIED
-Recent messages
-LAST-MODIFIED
-RESPONSE-TIME
-
-============================
+http://127.0.0.1:8000/inspector/service-workers/resources/scope1/
+Update
+Push
+Unregister
+Source
+service-worker-empty.js
+Received
+Status
+#N activated and is running
+stop
+Clients
+Errors
+0
+details
+clear
+http://127.0.0.1:8000/inspector/service-workers/resources/scope2/
+Update
+Push
+Unregister
+Source
+service-worker-empty.js
+Received
+Status
+#N activated and is running
+stop
+Clients
+Errors
+0
+details
+clear
 Unegister ServiceWorker for scope1
-==== ServiceWorkersView ====
-127.0.0.1/inspector/service-workers/resources/scope1/ - deleted
-State
-redundant
-Worker
-running
-inspect
-Script URL
-/inspector/service-workers/resources/service-worker-empty.js
-Updated
-RESPONSE-TIME
-Last-Modified
-LAST-MODIFIED
-Recent messages
-LAST-MODIFIED
-RESPONSE-TIME
-State
-activated
-Worker
-running
-inspect
-Script URL
-/inspector/service-workers/resources/service-worker-empty.js
-Updated
-RESPONSE-TIME
-Last-Modified
-LAST-MODIFIED
-Recent messages
-LAST-MODIFIED
-RESPONSE-TIME
-
-============================
+http://127.0.0.1:8000/inspector/service-workers/resources/scope1/ - deleted
+Update
+Push
+Unregister
+Source
+service-worker-empty.js
+Received
+Status
+Clients
+Errors
+0
+details
+clear
+http://127.0.0.1:8000/inspector/service-workers/resources/scope2/
+Update
+Push
+Unregister
+Source
+service-worker-empty.js
+Received
+Status
+#N activated and is running
+stop
+Clients
+Errors
+0
+details
+clear
 Unegister ServiceWorker for scope1
 

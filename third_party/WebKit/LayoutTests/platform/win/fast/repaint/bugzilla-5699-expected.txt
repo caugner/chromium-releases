@@ -5,34 +5,86 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [43, 178, 1, 17],
-        [43, 148, 1, 17],
-        [8, 178, 36, 17],
-        [8, 166, 784, 30],
-        [8, 148, 36, 17],
-        [8, 145, 4, 17],
-        [8, 145, 4, 17],
-        [8, 130, 784, 65],
-        [8, 130, 4, 17]
-      ],
-      "paintInvalidationClients": [
-        "InlineTextBox ''",
-        "InlineTextBox '\n'",
-        "RootInlineBox",
-        "LayoutBlockFlow P",
-        "LayoutBlockFlow P",
-        "RootInlineBox",
-        "LayoutInline SPAN id='d'",
-        "InlineFlowBox",
-        "LayoutText #text",
-        "InlineTextBox '\u00A0'",
-        "LayoutBR BR",
-        "InlineTextBox '\n'",
-        "LayoutText #text",
-        "InlineTextBox 'Hello'",
-        "LayoutBR BR",
-        "InlineTextBox '\n'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow P",
+          "rect": [8, 130, 784, 65],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "LayoutBlockFlow P",
+          "rect": [8, 166, 784, 30],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 178, 36, 17],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 148, 36, 17],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutInline SPAN id='d'",
+          "rect": [8, 145, 4, 17],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 145, 4, 17],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 130, 4, 17],
+          "reason": "style change"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Hello'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox '\u00A0'",
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBR BR",
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBR BR",
+          "reason": "bounds change"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

@@ -2,15 +2,6 @@ var initialize_SassTest = function() {
 
 InspectorTest.preloadModule("sass");
 
-var cssParserService = null;
-
-InspectorTest.cssParserService = function()
-{
-    if (!cssParserService)
-        cssParserService = new WebInspector.CSSParserService();
-    return cssParserService;
-}
-
 var sassSourceMapFactory = null;
 InspectorTest.sassSourceMapFactory = function()
 {
@@ -19,21 +10,11 @@ InspectorTest.sassSourceMapFactory = function()
     return sassSourceMapFactory;
 }
 
-InspectorTest.parseCSS = function(url, text)
-{
-    return WebInspector.SASSSupport.parseCSS(InspectorTest.cssParserService(), url, text);
-}
-
 InspectorTest.parseSCSS = function(url, text)
 {
-    return self.runtime.instancePromise(WebInspector.TokenizerFactory)
-        .then(onTokenizer);
-
-    function onTokenizer(tokenizer)
-    {
-        return WebInspector.SASSSupport.parseSCSS(tokenizer, url, text);
-    }
+    return WebInspector.SASSSupport.parseSCSS(url, text);
 }
+InspectorTest.parseCSS = InspectorTest.parseSCSS;
 
 InspectorTest.loadASTMapping = function(header, callback)
 {
@@ -52,7 +33,7 @@ InspectorTest.dumpAST = function(ast)
     var lines = [String.sprintf("=== AST === %s", ast.document.url)];
     for (var i = 0; i < ast.rules.length; ++i) {
         var rule = ast.rules[i];
-        lines.push(String.sprintf("rule %d: \"%s\"", i, rule.selector));
+        lines.push(String.sprintf("rule %d", i));
         var ruleLines = dumpRule(rule);
         lines = lines.concat(indent(ruleLines));
     }
@@ -63,6 +44,12 @@ InspectorTest.dumpAST = function(ast)
     function dumpRule(rule)
     {
         var lines = [];
+        for (var i = 0; i < rule.selectors.length; ++i) {
+            var selector = rule.selectors[i];
+            lines.push(`selector ${i}: "${selector.text}"`);
+            var selectorLines = dumpTextNode(selector);
+            lines = lines.concat(indent(selectorLines));
+        }
         for (var i = 0; i < rule.properties.length; ++i) {
             var property = rule.properties[i];
             lines.push("property " + i);
@@ -141,7 +128,8 @@ InspectorTest.dumpASTDiff = function(diff)
                 break;
             }
         }
-        InspectorTest.addResult("Changes for rule: " + rule.selector);
+        var selectorText = rule.selectors.map(selector => selector.text).join(",");
+        InspectorTest.addResult("Changes for rule: " + selectorText);
         names = indent(names);
         for (var i = 0; i < names.length; ++i)
             InspectorTest.addResult(names[i] + ": " + values[i]);
@@ -311,7 +299,7 @@ InspectorTest.createEdit = function(source, pattern, newText, matchNumber)
     if (!match)
         return null;
     var sourceRange = new WebInspector.SourceRange(match.index, match[0].length);
-    var textRange = sourceRange.toTextRange(new WebInspector.Text(source));
+    var textRange = new WebInspector.Text(source).toTextRange(sourceRange);
     return new WebInspector.SourceEdit("", textRange, newText);
 }
 

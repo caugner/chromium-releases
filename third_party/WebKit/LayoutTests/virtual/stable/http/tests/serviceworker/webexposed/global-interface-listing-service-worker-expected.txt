@@ -3,6 +3,9 @@ interface Blob
     getter type
     method constructor
     method slice
+interface ByteLengthQueuingStrategy
+    method constructor
+    method size
 interface Cache
     method add
     method addAll
@@ -36,6 +39,9 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
+interface CountQueuingStrategy
+    method constructor
+    method size
 interface Crypto
     getter subtle
     method constructor
@@ -318,6 +324,7 @@ interface IDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface IDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -378,6 +385,7 @@ interface IDBVersionChangeEvent : Event
 interface ImageBitmap
     getter height
     getter width
+    method close
     method constructor
 interface ImageData
     getter height
@@ -430,6 +438,11 @@ interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
     method constructor
+interface PerformanceObserverEntryList
+    method constructor
+    method getEntries
+    method getEntriesByName
+    method getEntriesByType
 interface PermissionStatus : EventTarget
     getter onchange
     getter state
@@ -462,14 +475,12 @@ interface PushSubscription
     method getKey
     method toJSON
     method unsubscribe
-interface ReadableByteStream
-    method cancel
-    method constructor
-    method getReader
 interface ReadableStream
+    getter locked
     method cancel
     method constructor
     method getReader
+    method tee
 interface Request
     getter bodyUsed
     getter credentials
@@ -479,6 +490,7 @@ interface Request
     getter mode
     getter redirect
     getter referrer
+    getter referrerPolicy
     getter url
     method arrayBuffer
     method blob
@@ -549,8 +561,6 @@ interface TextEncoder
     method constructor
     method encode
 interface URL
-    static method createObjectURL
-    static method revokeObjectURL
     getter hash
     getter host
     getter hostname
@@ -618,7 +628,6 @@ interface WindowClient : Client
     method focus
     method navigate
 interface WorkerGlobalScope : EventTarget
-    getter console
     getter crypto
     getter indexedDB
     getter location
@@ -633,14 +642,12 @@ interface WorkerGlobalScope : EventTarget
     method btoa
     method clearInterval
     method clearTimeout
-    method close
     method constructor
     method createImageBitmap
     method fetch
     method importScripts
     method setInterval
     method setTimeout
-    setter console
     setter onerror
     setter onrejectionhandled
     setter onunhandledrejection
@@ -724,6 +731,7 @@ interface webkitIDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface webkitIDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -770,6 +778,8 @@ interface webkitIDBTransaction : EventTarget
     setter oncomplete
     setter onerror
 global object
+    attribute console
+    attribute internals
     getter caches
     getter clients
     getter onactivate
@@ -781,7 +791,6 @@ global object
     getter onpush
     getter onsync
     getter registration
-    method close
     method fetch
     method gc
     method skipWaiting
@@ -793,7 +802,8 @@ global object
     setter onnotificationclose
     setter onpush
     setter onsync
-This is a testharness.js-based test.
-PASS Verify the interface of ServiceWorkerGlobalScope 
-Harness: the test ran to completion.
+PASS Verify the interface of ServiceWorkerGlobalScope
+PASS successfullyParsed is true
+
+TEST COMPLETE
 

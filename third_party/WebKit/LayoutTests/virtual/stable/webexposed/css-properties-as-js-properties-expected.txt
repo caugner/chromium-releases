@@ -89,6 +89,7 @@ columnRuleWidth
 columnSpan
 columnWidth
 columns
+contain
 content
 counterIncrement
 counterReset
@@ -97,6 +98,7 @@ cssText
 cursor
 cx
 cy
+d
 direction
 display
 dominantBaseline
@@ -123,7 +125,9 @@ fontSize
 fontStretch
 fontStyle
 fontVariant
+fontVariantCaps
 fontVariantLigatures
+fontVariantNumeric
 fontWeight
 getPropertyPriority
 getPropertyValue

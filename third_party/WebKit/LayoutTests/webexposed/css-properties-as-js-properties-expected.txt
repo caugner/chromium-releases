@@ -128,7 +128,9 @@ fontSizeAdjust
 fontStretch
 fontStyle
 fontVariant
+fontVariantCaps
 fontVariantLigatures
+fontVariantNumeric
 fontWeight
 getPropertyPriority
 getPropertyValue
@@ -151,6 +153,7 @@ gridTemplateAreas
 gridTemplateColumns
 gridTemplateRows
 height
+hyphens
 imageOrientation
 imageRendering
 isolation

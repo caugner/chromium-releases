@@ -5,23 +5,48 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [18, 18, 284, 18],
-        [18, 18, 284, 18],
-        [18, 18, 23, 17],
-        [8, 184, 784, 18],
-        [8, 184, 23, 17]
-      ],
-      "paintInvalidationClients": [
-        "InlineTextBox 'abc'",
-        "LayoutText #text",
-        "RootInlineBox",
-        "LayoutBlockFlow DIV id='inner-target'",
-        "LayoutBlockFlow BODY",
-        "LayoutBlockFlow DIV id='inner-target'",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'abc'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow DIV id='inner-target'",
+          "rect": [8, 184, 784, 18],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "rect": [18, 18, 284, 18],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='inner-target'",
+          "rect": [18, 18, 284, 18],
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [18, 18, 23, 17],
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 184, 23, 17],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "InlineTextBox 'abc'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'abc'",
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

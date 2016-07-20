@@ -15,12 +15,6 @@ function runRepaintTest()
         return;
     }
 
-    // TODO(enne): this is a workaround for multiple svg onload events.
-    // See: http://crbug.com/372946
-    if (window.hasRunRepaintTest)
-        return;
-    window.hasRunRepaintTest = true;
-
     if (window.enablePixelTesting)
         testRunner.dumpAsTextWithPixelResults();
     else
@@ -68,8 +62,7 @@ function finishRepaintTest()
     // Force a style recalc.
     forceStyleRecalc();
 
-    var flags = window.internals.LAYER_TREE_INCLUDES_REPAINT_RECTS |
-        window.internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATION_OBJECTS;
+    var flags = window.internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS;
 
     if (window.layerTreeAsTextAdditionalFlags)
         flags |= window.layerTreeAsTextAdditionalFlags;

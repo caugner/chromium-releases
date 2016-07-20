@@ -18,8 +18,41 @@ lorem ipsumlorem ipsumlorem ipsum
               "position": [15, 35],
               "bounds": [100, 210],
               "drawsContent": true,
-              "repaintRects": [
-                [0, 80, 38, 39]
+              "paintInvalidations": [
+                {
+                  "object": "LayoutText #text",
+                  "rect": [0, 80, 38, 39],
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutText #text",
+                  "rect": [36, 80, 2, 39],
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow (positioned) DIV id='item1' class='item'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow DIV class='inline-block'",
+                  "reason": "selection"
+                }
               ]
             }
           ]
@@ -47,9 +80,75 @@ lorem ipsumlorem ipsumlorem ipsum
               "position": [15, 35],
               "bounds": [100, 210],
               "drawsContent": true,
-              "repaintRects": [
-                [0, 160, 38, 39],
-                [0, 80, 39, 39]
+              "paintInvalidations": [
+                {
+                  "object": "LayoutText #text",
+                  "rect": [0, 80, 39, 39],
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutText #text",
+                  "rect": [0, 160, 38, 39],
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutText #text",
+                  "rect": [36, 80, 3, 39],
+                  "reason": "incremental"
+                },
+                {
+                  "object": "LayoutText #text",
+                  "rect": [36, 160, 2, 39],
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "InlineTextBox 'ipsum'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "incremental"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "InlineTextBox 'lorem'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow (positioned) DIV id='item1' class='item'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow (positioned) DIV id='item2' class='item'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow DIV class='inline-block'",
+                  "reason": "selection"
+                },
+                {
+                  "object": "LayoutBlockFlow DIV class='inline-block'",
+                  "reason": "selection"
+                }
               ]
             }
           ]

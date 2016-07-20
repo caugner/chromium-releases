@@ -160,7 +160,9 @@ font-size-adjust: none
 font-stretch: normal
 font-style: normal
 font-variant: normal
+font-variant-caps: normal
 font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 grid-auto-columns: auto
 grid-auto-flow: row
@@ -175,6 +177,7 @@ grid-template-areas: none
 grid-template-columns: none
 grid-template-rows: none
 height: auto
+hyphens: manual
 image-orientation: 0deg
 image-rendering: auto
 isolation: auto
@@ -210,7 +213,7 @@ object-fit: fill
 object-position: 50% 50%
 opacity: 1
 order: 0
-orphans: auto
+orphans: 2
 outline-color: rgb(0, 0, 0)
 outline-offset: 0px
 outline-style: none
@@ -288,7 +291,7 @@ vector-effect: none
 vertical-align: baseline
 visibility: visible
 white-space: normal
-widows: 1
+widows: 2
 width: auto
 will-change: auto
 word-break: normal

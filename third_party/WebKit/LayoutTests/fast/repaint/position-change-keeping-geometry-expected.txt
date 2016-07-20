@@ -5,9 +5,15 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "paintInvalidationClients": [
-        "LayoutBlockFlow (positioned) DIV id='target2'",
-        "LayoutBlockFlow (positioned) DIV id='target3'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='target2'",
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='target3'",
+          "reason": "style change"
+        }
       ]
     }
   ]

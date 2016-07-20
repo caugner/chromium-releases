@@ -5,17 +5,31 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [762, 8, 15, 300],
-        [8, 8, 769, 300],
-        [8, 8, 300, 300],
-        [8, 8, 300, 300]
-      ],
-      "paintInvalidationClients": [
-        "LayoutBlockFlow DIV id='innerDiv'",
-        "VerticalScrollbar",
-        "LayoutBlockFlow DIV",
-        "LayoutBlockFlow DIV"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow DIV id='innerDiv'",
+          "rect": [8, 8, 769, 300],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [8, 8, 300, 300],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [8, 8, 300, 300],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='innerDiv'",
+          "rect": [762, 8, 15, 300],
+          "reason": "scroll"
+        },
+        {
+          "object": "VerticalScrollbar",
+          "reason": "scroll"
+        }
       ]
     }
   ]

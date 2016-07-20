@@ -5,16 +5,45 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 8, 48, 32]
-      ],
-      "paintInvalidationClients": [
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow BODY",
-        "LayoutBlockFlow DIV id='container'",
-        "LayoutText #text",
-        "InlineTextBox 'xx'",
-        "InlineTextBox 'y'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 8, 48, 32],
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [40, 8, 16, 33],
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'xx'",
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'xx'",
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'y'",
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'y'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='container'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow HTML",
+          "reason": "selection"
+        }
       ]
     }
   ]

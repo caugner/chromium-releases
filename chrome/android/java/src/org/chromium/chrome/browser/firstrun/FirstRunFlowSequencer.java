@@ -15,7 +15,6 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.FieldTrialList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.services.AndroidEduAndChildAccountHelper;
@@ -36,6 +35,13 @@ public abstract class FirstRunFlowSequencer  {
     private final Bundle mLaunchProperties;
 
     /**
+     * Determines if the metrics reporting checkbox is initially checked when shown to the user. If
+     * reporting is opt-in, then it won't be checked.
+     */
+    @VisibleForTesting
+    protected boolean mIsMetricsReportingOptIn;
+
+    /**
      * Callback that is called once the flow is determined.
      * If the properties is null, the First Run experience needs to finish and
      * restart the original intent if necessary.
@@ -43,9 +49,11 @@ public abstract class FirstRunFlowSequencer  {
      */
     public abstract void onFlowIsKnown(Bundle freProperties);
 
-    public FirstRunFlowSequencer(Activity activity, Bundle launcherProvidedProperties) {
+    public FirstRunFlowSequencer(
+            Activity activity, Bundle launcherProvidedProperties, boolean isMetricsReportingOptIn) {
         mActivity = activity;
         mLaunchProperties = launcherProvidedProperties;
+        mIsMetricsReportingOptIn = isMetricsReportingOptIn;
     }
 
     /**
@@ -53,7 +61,8 @@ public abstract class FirstRunFlowSequencer  {
      * Once finished, calls onFlowIsKnown().
      */
     public void start() {
-        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)) {
+        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
+                || ApiCompatibilityUtils.isDemoUser(mActivity)) {
             onFlowIsKnown(null);
             return;
         }
@@ -103,11 +112,6 @@ public abstract class FirstRunFlowSequencer  {
     }
 
     @VisibleForTesting
-    protected boolean isStableBuild() {
-        return ChromeVersionInfo.isStableBuild();
-    }
-
-    @VisibleForTesting
     protected boolean isFirstRunEulaAccepted() {
         return PrefServiceBridge.getInstance().isFirstRunEulaAccepted();
     }
@@ -154,7 +158,7 @@ public abstract class FirstRunFlowSequencer  {
         // Enable reporting by default on non-Stable releases.
         // The user can turn it off on the Welcome page.
         // This is controlled by the administrator via a policy on EDU devices.
-        if (!isStableBuild()) {
+        if (!mIsMetricsReportingOptIn) {
             enableCrashUpload();
         }
 
@@ -215,7 +219,8 @@ public abstract class FirstRunFlowSequencer  {
      */
     public static Intent checkIfFirstRunIsNecessary(Context context, boolean fromChromeIcon) {
         // If FRE is disabled (e.g. in tests), proceed directly to the intent handling.
-        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)) {
+        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
+                || ApiCompatibilityUtils.isDemoUser(context)) {
             return null;
         }
 

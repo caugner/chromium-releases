@@ -5,12 +5,20 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [185, 100, 15, 200]
-      ],
-      "paintInvalidationClients": [
-        "VerticalScrollbar",
-        "LayoutBlockFlow (positioned) DIV"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow (positioned) DIV",
+          "rect": [185, 100, 15, 200],
+          "reason": "scroll"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV",
+          "reason": "scroll"
+        },
+        {
+          "object": "VerticalScrollbar",
+          "reason": "full"
+        }
       ]
     }
   ]

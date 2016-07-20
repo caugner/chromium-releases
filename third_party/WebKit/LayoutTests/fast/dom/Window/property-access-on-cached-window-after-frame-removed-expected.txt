@@ -1,6 +1,6 @@
-CONSOLE WARNING: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
-CONSOLE WARNING: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
-CONSOLE WARNING: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
+CONSOLE WARNING: line 98: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 98: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
+CONSOLE WARNING: line 98: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
 Tests property access on a cached DOMWindow after the associated frame is no longer in a web page. Test should not crash and properties should be set to sane defaults.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -51,6 +51,7 @@ PASS childWindow.navigator.doNotTrack is null
 PASS childWindow.navigator.hardwareConcurrency is window.navigator.hardwareConcurrency
 PASS childWindow.navigator.language is window.navigator.language
 PASS childWindow.navigator.maxTouchPoints is 0
+PASS childWindow.navigator.mediaDevices.ondevicechange is null
 PASS childWindow.navigator.onLine is window.navigator.onLine
 PASS childWindow.navigator.platform is window.navigator.platform
 FAIL childWindow.navigator.presentation.defaultRequest should be null. Threw exception TypeError: Cannot read property 'defaultRequest' of null
@@ -69,8 +70,6 @@ PASS childWindow.onabort is null
 PASS childWindow.onanimationend is null
 PASS childWindow.onanimationiteration is null
 PASS childWindow.onanimationstart is null
-PASS childWindow.onautocomplete is null
-PASS childWindow.onautocompleteerror is null
 PASS childWindow.onbeforeunload is null
 PASS childWindow.onblur is null
 PASS childWindow.oncancel is null

@@ -25,9 +25,7 @@
                 testRunner.dumpAsText();
 
             // DOM objects with custom toString() functions
-            test(document.createElement('a'), "HTMLAnchorElement");
             test(window.location, "Location");
-            test(window.getSelection(), "Selection");
 
             // Other DOM objects
             test(document.createElement('div'), "HTMLDivElement");

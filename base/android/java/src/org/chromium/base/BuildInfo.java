@@ -4,7 +4,6 @@
 
 package org.chromium.base;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -90,7 +89,10 @@ public class BuildInfo {
         try {
             PackageManager pm = context.getPackageManager();
             PackageInfo pi = pm.getPackageInfo(context.getPackageName(), 0);
-            msg = pi.versionName;
+            msg = "";
+            if (pi.versionName != null) {
+                msg = pi.versionName;
+            }
         } catch (NameNotFoundException e) {
             Log.d(TAG, msg);
         }
@@ -131,20 +133,10 @@ public class BuildInfo {
         return splitName.length() == 9 && splitName.startsWith("config.");
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    @CalledByNative
-    public static boolean hasLanguageApkSplits(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return false;
-        }
-        PackageInfo packageInfo = PackageUtils.getOwnPackageInfo(context);
-        if (packageInfo.splitNames != null) {
-            for (int i = 0; i < packageInfo.splitNames.length; ++i) {
-                if (isLanguageSplit(packageInfo.splitNames[i])) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    /**
+     * @return Whether the current build version is greater than Android N.
+     */
+    public static boolean isGreaterThanN() {
+        return Build.VERSION.SDK_INT > 24 || Build.VERSION.CODENAME.equals("NMR1");
     }
 }

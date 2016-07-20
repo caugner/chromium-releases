@@ -5,93 +5,340 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 57, 47, 185]
-      ],
-      "paintInvalidationClients": [
-        "LayoutText #text",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'",
-        "InlineTextBox '  Text'",
-        "InlineTextBox '\n'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 57, 47, 185],
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '\n'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox '  Text'",
+          "reason": "style change"
+        }
       ]
     }
   ]

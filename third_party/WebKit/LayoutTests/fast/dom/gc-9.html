@@ -105,6 +105,7 @@ function test()
 
 var objectsToTest = [
     [ "document.implementation", "allow custom" ], // DOMImplementation
+    [ "document.fonts", "allow custom" ], // FontFaceSet
     [ "document", "allow custom" ],
     [ "document.body", "allow custom" ],
     [ "document.body.attributes", "allow custom" ], // NamedNodeMap
@@ -113,7 +114,15 @@ var objectsToTest = [
     [ "document.getElementsByTagName('canvas')[0].getContext('2d').createLinearGradient(0, 0, 0, 0)" ], // CanvasGradient
     [ "document.getElementsByTagName('canvas')[0].getContext('2d').createPattern(document.getElementsByTagName('canvas')[0], 'no-repeat')" ], // CanvasPattern
     [ "document.getElementsByTagName('select')[0].options", "allow custom" ],
-    [ "document.body.childNodes", "allow custom" ],
+    [ "document.body.childNodes", "allow custom" ], // NodeList
+    [ "document.body.dataset", "allow custom" ], // DatasetDOMStringMap (DOMStringMap)
+
+    [ "document.body.classList", "allow custom" ], // ClassList (DOMTokenList)
+    [ "document.getElementsByTagName('link')[0].relList", "allow custom" ], // ClassList (DOMTokenList)
+    [ "document.getElementsByTagName('link')[0].sizes", "allow custom" ], // ClassList (DOMTokenList)
+    [ "document.getElementsByTagName('output')[0].htmlFor", "allow custom" ], // ClassList (DOMTokenList)
+    [ "document.getElementsByTagName('output')[0].labels", "allow custom" ], // NodeList
+    [ "document.getElementsByTagName('iframe')[0].sandbox", "allow custom" ], // ClassList (DOMTokenList)
 
     [ "document.all", "allow custom" ],
     [ "document.images", "allow custom" ],
@@ -133,10 +142,12 @@ var objectsToTest = [
     [ "document.getElementsByTagName('map')[0].areas", "allow custom" ],
 
     [ "document.body.style", "allow custom" ],
-    [ "document.styleSheets", "allow custom" ],
+    [ "document.styleSheets", "allow custom" ], // StyleSheetList
     [ "document.styleSheets[0]", "allow custom" ],
     [ "document.styleSheets[0].cssRules", "allow custom"],
     [ "document.styleSheets[0].cssRules[0]", "allow custom" ],
+    [ "document.getElementsByTagName('style')[0].sheet", "allow custom" ],
+    [ "document.getElementsByTagName('svg')[0].firstChild.sheet", "allow custom" ],
 
     [ "new XPathEvaluator()" ], // XPathEvaluator
     [ "new XPathEvaluator().evaluate('/', document, null, 0, null)" ], // XPathResult
@@ -196,6 +207,10 @@ function testPropertiesAgain()
     <form></form>
     <table><tbody><tr></tr></tbody></table>
     <map></map>
+    <link></link>
+    <output></output>
+    <iframe></iframe>
+    <svg><style></style></svg>
 </div>
 
 </body>

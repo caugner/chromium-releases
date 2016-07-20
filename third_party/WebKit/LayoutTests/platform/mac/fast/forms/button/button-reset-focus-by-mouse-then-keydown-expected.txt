@@ -5,17 +5,30 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [16, 11, 30, 13],
-        [16, 11, 30, 13],
-        [3, 4, 56, 29]
-      ],
-      "paintInvalidationClients": [
-        "LayoutButton BUTTON",
-        "LayoutBlockFlow (anonymous)",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'Reset'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutButton BUTTON",
+          "rect": [3, 4, 56, 29],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (anonymous)",
+          "rect": [16, 11, 30, 13],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [16, 11, 30, 13],
+          "reason": "subtree"
+        },
+        {
+          "object": "InlineTextBox 'Reset'",
+          "reason": "subtree"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

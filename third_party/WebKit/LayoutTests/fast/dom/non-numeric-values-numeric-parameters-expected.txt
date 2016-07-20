@@ -1,4 +1,4 @@
-CONSOLE WARNING: Calling CSSStyleSheet.insertRule() with one argument is deprecated. Please pass the index argument as well: insertRule(x, 0).
+CONSOLE WARNING: line 1: Calling CSSStyleSheet.insertRule() with one argument is deprecated. Please pass the index argument as well: insertRule(x, 0).
 This tests the behavior of non-numeric values in contexts where the DOM has a numeric parameter.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -56,7 +56,7 @@ PASS nonNumericPolicy('document.createRange().comparePoint(document, x)') is 'an
 PASS nonNumericPolicy('document.createRange().isPointInRange(document, x)') is 'any type allowed (but not omitted)'
 PASS nonNumericPolicy('getSelection().collapse(document, x)') is 'any type allowed'
 PASS nonNumericPolicy('getSelection().setBaseAndExtent(document, x, document, 0)') is 'any type allowed'
-PASS nonNumericPolicy('getSelection().setBaseAndExtent(document, 0, document, x)') is 'any type allowed'
+PASS nonNumericPolicy('getSelection().setBaseAndExtent(document, 0, document, x)') is 'any type allowed (but not omitted)'
 PASS nonNumericPolicy('getSelection().collapse(document, x)') is 'any type allowed'
 PASS nonNumericPolicy('getSelection().extend(document, x)') is 'any type allowed'
 PASS nonNumericPolicy('getSelection().getRangeAt(x)') is 'any type allowed (but not omitted)'

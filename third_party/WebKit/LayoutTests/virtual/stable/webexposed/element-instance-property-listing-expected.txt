@@ -1,4 +1,4 @@
-CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
+CONSOLE WARNING: line 18: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -210,6 +210,7 @@ namespace http://www.w3.org/1999/xhtml
     property tagName
     property textContent
     property title
+    property toString
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -231,7 +232,7 @@ html element a
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property rel
     property rev
     property search
@@ -258,7 +259,7 @@ html element area
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property search
     property shape
     property target
@@ -308,6 +309,7 @@ html element audio
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property volume
     property webkitAudioDecodedByteCount
@@ -523,7 +525,7 @@ html element iframe
     property marginHeight
     property marginWidth
     property name
-    property referrerpolicy
+    property referrerPolicy
     property sandbox
     property scrolling
     property src
@@ -545,7 +547,7 @@ html element img
     property name
     property naturalHeight
     property naturalWidth
-    property referrerpolicy
+    property referrerPolicy
     property sizes
     property src
     property srcset
@@ -1032,6 +1034,7 @@ html element video
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoHeight
     property videoWidth
@@ -1256,6 +1259,7 @@ namespace http://www.w3.org/2000/svg
     property tagName
     property textContent
     property title
+    property toString
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -1277,7 +1281,7 @@ svg element a
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property rel
     property rev
     property search

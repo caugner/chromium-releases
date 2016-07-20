@@ -5,14 +5,21 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [7, 5, 786, 590],
-        [7, 5, 786, 590]
-      ],
-      "paintInvalidationClients": [
-        "LayoutSVGRoot svg",
-        "LayoutSVGRect rect",
-        "LayoutSVGHiddenContainer defs"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGRect rect",
+          "rect": [7, 5, 786, 590],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutSVGRoot svg",
+          "rect": [7, 5, 786, 590],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutSVGHiddenContainer defs",
+          "reason": "style change"
+        }
       ]
     }
   ]

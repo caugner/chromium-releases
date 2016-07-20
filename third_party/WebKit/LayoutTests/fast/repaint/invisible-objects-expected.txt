@@ -5,11 +5,23 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "paintInvalidationClients": [
-        "InlineTextBox ''",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'is invisible'"
+      "paintInvalidations": [
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'is invisible'",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutText #text",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

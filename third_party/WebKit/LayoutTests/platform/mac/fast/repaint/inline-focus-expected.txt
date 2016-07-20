@@ -5,30 +5,50 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [0, 34, 800, 18],
-        [0, 0, 800, 232],
-        [0, 0, 800, 52],
-        [0, 0, 800, 18],
-        [-5, -5, 810, 242],
-        [-5, -5, 805, 237],
-        [-5, -5, 805, 57],
-        [-5, -5, 805, 28]
-      ],
-      "paintInvalidationClients": [
-        "InlineFlowBox",
-        "InlineTextBox 'Home'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'crbug.com/424078: ensure inline elements get their outline painted'",
-        "RootInlineBox",
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow BODY",
-        "LayoutBlockFlow (anonymous)",
-        "RootInlineBox",
-        "LayoutInline A id='link'",
-        "InlineFlowBox",
-        "LayoutBlockFlow P"
+      "paintInvalidations": [
+        {
+          "object": "LayoutInline A id='link'",
+          "rect": [-5, -5, 810, 242],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBlockFlow (anonymous)",
+          "rect": [-5, -5, 805, 28],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "LayoutBlockFlow P",
+          "rect": [0, 34, 800, 18],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox 'Home'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'crbug.com/424078: ensure inline elements get their outline painted'",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

@@ -1,4 +1,4 @@
-CONSOLE WARNING: 'SVGZoomEvent' is deprecated and will be removed in M52, around July 2016. See https://www.chromestatus.com/features/5760883808534528 for more details.
+CONSOLE WARNING: line 1: 'SVGZoomEvent' is deprecated and will be removed in M52, around July 2016. See https://www.chromestatus.com/features/5760883808534528 for more details.
 This tests that document.createEvent is hooked up for all Event interfaces (and alternatives) and creates the right instance.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -123,9 +123,6 @@ PASS document.createEvent('CloseEvent').constructor === window.CloseEvent is tru
 PASS document.createEvent('TouchEvent') instanceof window.TouchEvent is true
 PASS document.createEvent('TouchEvent') instanceof window.Event is true
 PASS document.createEvent('TouchEvent').constructor === window.TouchEvent is true
-PASS document.createEvent('AutocompleteErrorEvent') instanceof window.AutocompleteErrorEvent is true
-PASS document.createEvent('AutocompleteErrorEvent') instanceof window.Event is true
-PASS document.createEvent('AutocompleteErrorEvent').constructor === window.AutocompleteErrorEvent is true
 PASS allEventInterfacesCreateEvents is true
 PASS successfullyParsed is true
 

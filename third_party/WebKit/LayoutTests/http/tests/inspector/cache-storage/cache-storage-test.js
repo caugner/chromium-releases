@@ -20,13 +20,12 @@ InspectorTest.dumpCacheTree = function()
                 return resolve();
             }
 
-            WebInspector.panels.resources.cacheStorageListTreeElement._refreshCaches();
             queryView(0);
 
             function queryView(i)
             {
                 var cacheTreeElement = cachesTreeElement.childAt(i);
-                InspectorTest.addResult("    cache: " + cacheTreeElement.titleText);
+                InspectorTest.addResult("    cache: " + cacheTreeElement.title);
                 var view = cacheTreeElement._view;
                 InspectorTest.addSniffer(WebInspector.ServiceWorkerCacheView.prototype, "_updateDataCallback", addDataResult, false);
                 if (!view)
@@ -89,7 +88,7 @@ InspectorTest.deleteCacheFromInspector = function(cacheName, optionalEntry)
                 }
                 for (var i = 0; i < cachesTreeElement.childCount(); i++) {
                     var cacheTreeElement = cachesTreeElement.childAt(i);
-                    var title = cacheTreeElement.titleText;
+                    var title = cacheTreeElement.title;
                     var elementCacheName = title.substring(0, title.lastIndexOf(" - "));
                     if (elementCacheName != cacheName)
                         continue;

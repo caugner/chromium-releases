@@ -5,22 +5,53 @@
       "bounds": [808, 621],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [208, 13, 161, 19],
-        [208, 13, 161, 19],
-        [208, 13, 161, 19],
-        [18, 193, 161, 19],
-        [18, 193, 161, 19],
-        [18, 193, 161, 19]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineTextBox 'Passes, if text is at 200x20'",
-        "LayoutSVGRoot svg:svg",
-        "LayoutSVGText text id='ttt'",
-        "RootInlineBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'Passes, if text is at 200x20'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [208, 13, 161, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGRoot svg:svg",
+          "rect": [208, 13, 161, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGText text id='ttt'",
+          "rect": [208, 13, 161, 19],
+          "reason": "full"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [18, 193, 161, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGRoot svg:svg",
+          "rect": [18, 193, 161, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGText text id='ttt'",
+          "rect": [18, 193, 161, 19],
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Passes, if text is at 200x20'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Passes, if text is at 200x20'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]
