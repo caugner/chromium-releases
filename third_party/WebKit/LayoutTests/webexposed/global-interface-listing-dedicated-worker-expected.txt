@@ -21,6 +21,14 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method close
 [Worker]     method constructor
 [Worker]     method slice
+[Worker] interface BroadcastChannel : EventTarget
+[Worker]     attribute @@toStringTag
+[Worker]     getter name
+[Worker]     getter onmessage
+[Worker]     method close
+[Worker]     method constructor
+[Worker]     method postMessage
+[Worker]     setter onmessage
 [Worker] interface ByteLengthQueuingStrategy
 [Worker]     method constructor
 [Worker]     method size
@@ -159,19 +167,18 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter bubbles
 [Worker]     getter cancelBubble
 [Worker]     getter cancelable
+[Worker]     getter composed
 [Worker]     getter currentTarget
 [Worker]     getter defaultPrevented
 [Worker]     getter eventPhase
 [Worker]     getter path
-[Worker]     getter relatedTargetScoped
 [Worker]     getter returnValue
-[Worker]     getter scoped
 [Worker]     getter srcElement
 [Worker]     getter target
 [Worker]     getter timeStamp
 [Worker]     getter type
+[Worker]     method composedPath
 [Worker]     method constructor
-[Worker]     method deepPath
 [Worker]     method initEvent
 [Worker]     method preventDefault
 [Worker]     method stopImmediatePropagation
@@ -379,6 +386,16 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
 [Worker]     method put
+[Worker] interface IDBObserver
+[Worker]     attribute @@toStringTag
+[Worker]     method constructor
+[Worker]     method observe
+[Worker] interface IDBObserverChangesRecord
+[Worker]     attribute @@toStringTag
+[Worker]     getter key
+[Worker]     getter type
+[Worker]     getter value
+[Worker]     method constructor
 [Worker] interface IDBOpenDBRequest : IDBRequest
 [Worker]     attribute @@toStringTag
 [Worker]     getter onblocked
@@ -519,6 +536,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method beginPath
 [Worker]     method bezierCurveTo
 [Worker]     method clearRect
+[Worker]     method clip
 [Worker]     method closePath
 [Worker]     method constructor
 [Worker]     method createImageData

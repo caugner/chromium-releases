@@ -10,13 +10,14 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "chrome/browser/net/sth_distributor_provider.h"
 #include "components/component_updater/component_updater_paths.h"
-#include "components/safe_json/safe_json_parser.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/sha2.h"
 #include "net/cert/ct_log_response_parser.h"
@@ -49,8 +50,8 @@ const uint8_t kPublicKeySHA256[32] = {
 const char kSTHSetFetcherManifestName[] = "Signed Tree Heads";
 
 STHSetComponentInstallerTraits::STHSetComponentInstallerTraits(
-    std::unique_ptr<net::ct::STHObserver> sth_observer)
-    : sth_observer_(std::move(sth_observer)) {}
+    net::ct::STHObserver* sth_observer)
+    : sth_observer_(sth_observer), weak_ptr_factory_(this) {}
 
 STHSetComponentInstallerTraits::~STHSetComponentInstallerTraits() {}
 
@@ -73,13 +74,12 @@ void STHSetComponentInstallerTraits::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
     std::unique_ptr<base::DictionaryValue> manifest) {
-  if (!content::BrowserThread::PostBlockingPoolTask(
-          FROM_HERE,
-          base::Bind(&STHSetComponentInstallerTraits::LoadSTHsFromDisk,
-                     base::Unretained(this), GetInstalledPath(install_dir),
-                     version))) {
-    NOTREACHED();
-  }
+  const base::Closure load_sths_closure = base::Bind(
+      &STHSetComponentInstallerTraits::LoadSTHsFromDisk,
+      weak_ptr_factory_.GetWeakPtr(), GetInstalledPath(install_dir), version);
+
+  content::BrowserThread::PostAfterStartupTask(
+      FROM_HERE, content::BrowserThread::GetBlockingPool(), load_sths_closure);
 }
 
 // Called during startup and installation before ComponentReady().
@@ -101,8 +101,9 @@ std::string STHSetComponentInstallerTraits::GetName() const {
   return kSTHSetFetcherManifestName;
 }
 
-std::string STHSetComponentInstallerTraits::GetAp() const {
-  return std::string();
+update_client::InstallerAttributes
+STHSetComponentInstallerTraits::GetInstallerAttributes() const {
+  return update_client::InstallerAttributes();
 }
 
 void STHSetComponentInstallerTraits::LoadSTHsFromDisk(
@@ -143,12 +144,18 @@ void STHSetComponentInstallerTraits::LoadSTHsFromDisk(
     }
 
     DVLOG(1) << "STH: Successfully read: " << json_sth;
-    safe_json::SafeJsonParser::Parse(
-        json_sth,
-        base::Bind(&STHSetComponentInstallerTraits::OnJsonParseSuccess,
-                   base::Unretained(this), log_id),
-        base::Bind(&STHSetComponentInstallerTraits::OnJsonParseError,
-                   base::Unretained(this), log_id));
+
+    int error_code = 0;
+    std::string error_message;
+    std::unique_ptr<base::Value> parsed_json =
+        base::JSONReader::ReadAndReturnError(json_sth, base::JSON_PARSE_RFC,
+                                             &error_code, &error_message);
+
+    if (error_code == base::JSONReader::JSON_NO_ERROR) {
+      OnJsonParseSuccess(log_id, std::move(parsed_json));
+    } else {
+      OnJsonParseError(log_id, error_message);
+    }
   }
 }
 
@@ -168,7 +175,7 @@ void STHSetComponentInstallerTraits::OnJsonParseSuccess(
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&net::ct::STHObserver::NewSTHObserved,
-                 base::Unretained(sth_observer_.get()), signed_tree_head));
+                 base::Unretained(sth_observer_), signed_tree_head));
 }
 
 void STHSetComponentInstallerTraits::OnJsonParseError(
@@ -182,14 +189,13 @@ void RegisterSTHSetComponent(ComponentUpdateService* cus,
                              const base::FilePath& user_data_dir) {
   DVLOG(1) << "Registering STH Set fetcher component.";
 
-  // TODO(eranm): The next step in auditing CT logs (crbug.com/506227) is to
-  // pass the distributor to the IOThread so it can be used in a per-profile
-  // context for checking inclusion of SCTs.
-  std::unique_ptr<net::ct::STHDistributor> distributor(
-      new net::ct::STHDistributor());
+  net::ct::STHDistributor* distributor =
+      chrome_browser_net::GetGlobalSTHDistributor();
+  // The global STHDistributor should have been created by this point.
+  DCHECK(distributor);
 
   std::unique_ptr<ComponentInstallerTraits> traits(
-      new STHSetComponentInstallerTraits(std::move(distributor)));
+      new STHSetComponentInstallerTraits(distributor));
   // |cus| will take ownership of |installer| during installer->Register(cus).
   DefaultComponentInstaller* installer =
       new DefaultComponentInstaller(std::move(traits));

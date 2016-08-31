@@ -2,7 +2,7 @@
 
 let mockImageCaptureReady = define(
   'mockImageCapture',
-  ['third_party/WebKit/public/platform/modules/imagecapture/image_capture.mojom',
+  ['media/mojo/interfaces/image_capture.mojom',
    'mojo/public/js/bindings',
    'mojo/public/js/connection',
    'content/public/renderer/service_registry',
@@ -13,24 +13,23 @@ let mockImageCaptureReady = define(
       serviceRegistry.addServiceOverrideForTesting(
           imageCapture.ImageCapture.name,
           pipe => this.bindToPipe(pipe));
-      this.getCapabilitiesCallback_  = null;
+
+      this.capabilities_ = { capabilities: { zoom : { min : 0, max : 10, current : 5 } } };
+      this.settings_ = null;
     }
 
     bindToPipe(pipe) {
-      this.stub_ = connection.bindHandleToStub(
-          pipe, imageCapture.ImageCapture);
+      this.stub_ = connection.bindHandleToStub(pipe, imageCapture.ImageCapture);
       bindings.StubBindings(this.stub_).delegate = this;
     }
 
     getCapabilities(source_id) {
-      const response =
-          { capabilities : { zoom : { min : 0, max : 10, initial : 5 } } };
-      if (this.getCapabilitiesCallback_) {
-        // Give the time needed for the Mojo response to ripple back to Blink.
-        setTimeout(this.getCapabilitiesCallback_, 0, response.capabilities);
-        //this.getCapabilitiesCallback_(response.capabilities)
-      }
-      return Promise.resolve(response);
+      return Promise.resolve(this.capabilities_);
+    }
+
+    setOptions(source_id, settings) {
+      this.settings_ = settings;
+      return Promise.resolve({ success : true });
     }
 
     takePhoto(source_id) {
@@ -38,10 +37,12 @@ let mockImageCaptureReady = define(
                                data : "(,,,)=(^.^)=(,,,)" });
     }
 
-    waitForGetCapabilities() {
-      return new Promise((resolve,reject) => {
-         this.getCapabilitiesCallback_ = resolve;
-      });
+    capabilities() {
+      return this.capabilities_.capabilities;
+    }
+
+    options() {
+      return this.settings_;
     }
 
   }

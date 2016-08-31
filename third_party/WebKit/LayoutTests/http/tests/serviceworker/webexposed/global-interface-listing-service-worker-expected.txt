@@ -5,6 +5,13 @@ interface Blob
     method close
     method constructor
     method slice
+interface BroadcastChannel : EventTarget
+    getter name
+    getter onmessage
+    method close
+    method constructor
+    method postMessage
+    setter onmessage
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -139,19 +146,18 @@ interface Event
     getter bubbles
     getter cancelBubble
     getter cancelable
+    getter composed
     getter currentTarget
     getter defaultPrevented
     getter eventPhase
     getter path
-    getter relatedTargetScoped
     getter returnValue
-    getter scoped
     getter srcElement
     getter target
     getter timeStamp
     getter type
+    method composedPath
     method constructor
-    method deepPath
     method initEvent
     method preventDefault
     method stopImmediatePropagation
@@ -361,6 +367,14 @@ interface IDBObjectStore
     method openCursor
     method openKeyCursor
     method put
+interface IDBObserver
+    method constructor
+    method observe
+interface IDBObserverChangesRecord
+    getter key
+    getter type
+    getter value
+    method constructor
 interface IDBOpenDBRequest : IDBRequest
     getter onblocked
     getter onupgradeneeded
@@ -495,6 +509,7 @@ interface OffscreenCanvasRenderingContext2D
     method beginPath
     method bezierCurveTo
     method clearRect
+    method clip
     method closePath
     method constructor
     method createImageData
