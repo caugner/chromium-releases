@@ -1,4 +1,4 @@
-CONSOLE WARNING: line 18: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
+CONSOLE WARNING: line 18: The <keygen> element is deprecated and will be removed in M56, around January 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -74,10 +74,12 @@ namespace http://www.w3.org/1999/xhtml
     property getElementsByClassName
     property getElementsByTagName
     property getElementsByTagNameNS
+    property getRootNode
     property hasAttribute
     property hasAttributeNS
     property hasAttributes
     property hasChildNodes
+    property hasPointerCapture
     property hidden
     property id
     property innerHTML
@@ -111,6 +113,7 @@ namespace http://www.w3.org/1999/xhtml
     property offsetTop
     property offsetWidth
     property onabort
+    property onauxclick
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -277,6 +280,7 @@ html element applet
 html element area
     property alt
     property coords
+    property download
     property hash
     property host
     property hostname
@@ -289,6 +293,7 @@ html element area
     property port
     property protocol
     property referrerPolicy
+    property rel
     property search
     property shape
     property target
@@ -1179,10 +1184,12 @@ namespace http://www.w3.org/2000/svg
     property getElementsByClassName
     property getElementsByTagName
     property getElementsByTagNameNS
+    property getRootNode
     property hasAttribute
     property hasAttributeNS
     property hasAttributes
     property hasChildNodes
+    property hasPointerCapture
     property hidden
     property id
     property innerHTML
@@ -1216,6 +1223,7 @@ namespace http://www.w3.org/2000/svg
     property offsetTop
     property offsetWidth
     property onabort
+    property onauxclick
     property onbeforecopy
     property onbeforecut
     property onbeforepaste

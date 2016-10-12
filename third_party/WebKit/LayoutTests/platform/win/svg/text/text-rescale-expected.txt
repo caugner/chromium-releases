@@ -71,7 +71,7 @@
         {
           "object": "LayoutSVGInlineText #text",
           "rect": [0, 14, 194, 45],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutSVGTSpan tspan",
@@ -82,16 +82,6 @@
           "object": "LayoutSVGText text",
           "rect": [0, 14, 194, 45],
           "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [210, 13, 100, 100],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [210, 113, 100, 87],
-          "reason": "bounds change"
         },
         {
           "object": "LayoutBlockFlow P",
@@ -131,7 +121,7 @@
         {
           "object": "LayoutSVGViewportContainer svg",
           "rect": [310, 14, 92, 45],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutText #text",
@@ -189,11 +179,6 @@
           "reason": "bounds change"
         },
         {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [6, 3, 4, 4],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow P",
           "rect": [6, 3, 4, 2],
           "reason": "bounds change"
@@ -212,11 +197,6 @@
           "object": "LayoutSVGContainer g id='text1g'",
           "rect": [0, 0, 1, 1],
           "reason": "full"
-        },
-        {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [0, 0, 1, 1],
-          "reason": "bounds change"
         },
         {
           "object": "LayoutText #text",
@@ -269,11 +249,11 @@
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "bounds change"
+      "reason": "became visible"
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",
@@ -293,7 +273,7 @@
     },
     {
       "object": "LayoutSVGViewportContainer svg",
-      "reason": "bounds change"
+      "reason": "became visible"
     },
     {
       "object": "LayoutSVGText text",
@@ -317,67 +297,79 @@
     },
     {
       "object": "LayoutSVGText text",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS '",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGTSpan tspan",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineFlowBox",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGViewportContainer svg",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGText text",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGContainer g id='text3g'",
@@ -421,7 +413,7 @@
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",

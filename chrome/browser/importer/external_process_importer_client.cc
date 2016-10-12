@@ -63,7 +63,7 @@ void ExternalProcessImporterClient::Cancel() {
 }
 
 void ExternalProcessImporterClient::OnProcessCrashed(int exit_code) {
-  DLOG(ERROR) << __FUNCTION__;
+  DLOG(ERROR) << __func__;
   if (cancelled_)
     return;
 
@@ -310,9 +310,10 @@ void ExternalProcessImporterClient::NotifyItemFinishedOnIOThread(
 
 void ExternalProcessImporterClient::StartProcessOnIOThread(
     BrowserThread::ID thread_id) {
-  utility_process_host_ = UtilityProcessHost::Create(
-      this, BrowserThread::GetMessageLoopProxyForThread(thread_id).get())
-      ->AsWeakPtr();
+  utility_process_host_ =
+      UtilityProcessHost::Create(
+          this, BrowserThread::GetTaskRunnerForThread(thread_id).get())
+          ->AsWeakPtr();
   utility_process_host_->SetName(l10n_util::GetStringUTF16(
       IDS_UTILITY_PROCESS_PROFILE_IMPORTER_NAME));
   utility_process_host_->DisableSandbox();

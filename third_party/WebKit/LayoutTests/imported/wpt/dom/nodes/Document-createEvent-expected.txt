@@ -1,4 +1,3 @@
-CONSOLE WARNING: line 13: 'SVGZoomEvent' is deprecated and will be removed in M52, around July 2016. See https://www.chromestatus.com/features/5760883808534528 for more details.
 This is a testharness.js-based test.
 PASS AnimationEvent should be an alias for AnimationEvent. 
 PASS createEvent('AnimationEvent') should be initialized correctly. 
@@ -164,14 +163,14 @@ FAIL svgevents should be an alias for Event. Failed to execute 'createEvent' on 
 FAIL createEvent('svgevents') should be initialized correctly. Cannot read property 'type' of undefined
 FAIL SVGEVENTS should be an alias for Event. Failed to execute 'createEvent' on 'Document': The provided event type ('SVGEVENTS') is invalid.
 FAIL createEvent('SVGEVENTS') should be initialized correctly. Cannot read property 'type' of undefined
-PASS SVGZoomEvent should be an alias for SVGZoomEvent. 
-PASS createEvent('SVGZoomEvent') should be initialized correctly. 
+FAIL SVGZoomEvent should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('SVGZoomEvent') is invalid.
+FAIL createEvent('SVGZoomEvent') should be initialized correctly. Cannot read property 'type' of undefined
 FAIL svgzoomevent should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('svgzoomevent') is invalid.
 FAIL createEvent('svgzoomevent') should be initialized correctly. Cannot read property 'type' of undefined
 FAIL SVGZOOMEVENT should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('SVGZOOMEVENT') is invalid.
 FAIL createEvent('SVGZOOMEVENT') should be initialized correctly. Cannot read property 'type' of undefined
-PASS SVGZoomEvents should be an alias for SVGZoomEvent. 
-PASS createEvent('SVGZoomEvents') should be initialized correctly. 
+FAIL SVGZoomEvents should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('SVGZoomEvents') is invalid.
+FAIL createEvent('SVGZoomEvents') should be initialized correctly. Cannot read property 'type' of undefined
 FAIL svgzoomevents should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('svgzoomevents') is invalid.
 FAIL createEvent('svgzoomevents') should be initialized correctly. Cannot read property 'type' of undefined
 FAIL SVGZOOMEVENTS should be an alias for SVGZoomEvent. Failed to execute 'createEvent' on 'Document': The provided event type ('SVGZOOMEVENTS') is invalid.
@@ -231,9 +230,7 @@ FAIL WHEELEVENT should be an alias for WheelEvent. Failed to execute 'createEven
 FAIL createEvent('WHEELEVENT') should be initialized correctly. Cannot read property 'type' of undefined
 PASS Should throw NOT_SUPPORTED_ERR for pluralized legacy event interface "WheelEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for unrecognized arguments 
-FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "AnimationPlayerEvent" assert_throws: function "function () {
-        var evt = document.createEvent(eventInterface);
-      }" did not throw
+PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "AnimationPlayerEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "AnimationPlayerEvents" 
 FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "ApplicationCacheErrorEvent" assert_throws: function "function () {
         var evt = document.createEvent(eventInterface);
@@ -261,9 +258,7 @@ PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "CommandEvent
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "CommandEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "DataContainerEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "DataContainerEvents" 
-FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "DeviceLightEvent" assert_throws: function "function () {
-        var evt = document.createEvent(eventInterface);
-      }" did not throw
+PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "DeviceLightEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "DeviceLightEvents" 
 FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "ExtendableEvent" assert_throws: function "function () {
         var evt = document.createEvent(eventInterface);
@@ -287,9 +282,7 @@ FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "GamepadEvent
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "GamepadEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "GeofencingEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "GeofencingEvents" 
-FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "InstallEvent" assert_throws: function "function () {
-        var evt = document.createEvent(eventInterface);
-      }" did not throw
+PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "InstallEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "InstallEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "KeyEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "KeyEvents" 
@@ -345,9 +338,7 @@ PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "OrientationE
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "OrientationEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "PageTransition" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "PageTransitions" 
-FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "PointerEvent" assert_throws: function "function () {
-        var evt = document.createEvent(eventInterface);
-      }" did not throw
+PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "PointerEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "PointerEvents" 
 PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "PopUpEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "PopUpEvents" 
@@ -379,9 +370,7 @@ FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "RTCIceCandid
         var evt = document.createEvent(eventInterface);
       }" did not throw
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "RTCIceCandidateEvents" 
-FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "RelatedEvent" assert_throws: function "function () {
-        var evt = document.createEvent(eventInterface);
-      }" did not throw
+PASS Should throw NOT_SUPPORTED_ERR for non-legacy event interface "RelatedEvent" 
 PASS Should throw NOT_SUPPORTED_ERR for pluralized non-legacy event interface "RelatedEvents" 
 FAIL Should throw NOT_SUPPORTED_ERR for non-legacy event interface "ResourceProgressEvent" assert_throws: function "function () {
         var evt = document.createEvent(eventInterface);

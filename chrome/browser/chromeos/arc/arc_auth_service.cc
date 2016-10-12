@@ -6,15 +6,14 @@
 
 #include <utility>
 
-#include "ash/shelf/shelf_delegate.h"
-#include "ash/shell.h"
+#include "ash/common/shelf/shelf_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/strings/string16.h"
-#include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/arc/arc_android_management_checker.h"
 #include "chrome/browser/chromeos/arc/arc_auth_context.h"
 #include "chrome/browser/chromeos/arc/arc_auth_notification.h"
@@ -43,6 +42,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/user.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -53,20 +53,22 @@ namespace arc {
 namespace {
 
 // Weak pointer.  This class is owned by ArcServiceManager.
-ArcAuthService* arc_auth_service = nullptr;
-
-base::LazyInstance<base::ThreadChecker> thread_checker =
-    LAZY_INSTANCE_INITIALIZER;
+ArcAuthService* g_arc_auth_service = nullptr;
 
 // Skip creating UI in unit tests
-bool disable_ui_for_testing = false;
+bool g_disable_ui_for_testing = false;
 
 // Use specified ash::ShelfDelegate for unit tests.
-ash::ShelfDelegate* shelf_delegate_for_testing = nullptr;
+ash::ShelfDelegate* g_shelf_delegate_for_testing = nullptr;
 
 // The Android management check is disabled by default, it's used only for
 // testing.
-bool enable_check_android_management_for_testing = false;
+bool g_enable_check_android_management_for_testing = false;
+
+// Maximum amount of time we'll wait for ARC to finish booting up. Once this
+// timeout expires, keep ARC running in case the user wants to file feedback,
+// but present the UI to try again.
+constexpr base::TimeDelta kArcSignInTimeout = base::TimeDelta::FromMinutes(5);
 
 const char kStateNotInitialized[] = "NOT_INITIALIZED";
 const char kStateStopped[] = "STOPPED";
@@ -84,11 +86,13 @@ bool IsArcDisabledForEnterprise() {
 }
 
 ash::ShelfDelegate* GetShelfDelegate() {
-  if (shelf_delegate_for_testing)
-    return shelf_delegate_for_testing;
-  if (!ash::Shell::HasInstance())
-    return nullptr;
-  return ash::Shell::GetInstance()->GetShelfDelegate();
+  if (g_shelf_delegate_for_testing)
+    return g_shelf_delegate_for_testing;
+  if (ash::WmShell::HasInstance()) {
+    DCHECK(ash::WmShell::Get()->shelf_delegate());
+    return ash::WmShell::Get()->shelf_delegate();
+  }
+  return nullptr;
 }
 
 ProvisioningResult ConvertArcSignInFailureReasonToProvisioningResult(
@@ -126,30 +130,30 @@ ProvisioningResult ConvertArcSignInFailureReasonToProvisioningResult(
 
 ArcAuthService::ArcAuthService(ArcBridgeService* bridge_service)
     : ArcService(bridge_service), binding_(this), weak_ptr_factory_(this) {
-  DCHECK(!arc_auth_service);
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(!g_arc_auth_service);
 
-  arc_auth_service = this;
+  g_arc_auth_service = this;
 
   arc_bridge_service()->AddObserver(this);
   arc_bridge_service()->auth()->AddObserver(this);
 }
 
 ArcAuthService::~ArcAuthService() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
-  DCHECK(arc_auth_service == this);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_EQ(this, g_arc_auth_service);
 
   Shutdown();
   arc_bridge_service()->auth()->RemoveObserver(this);
   arc_bridge_service()->RemoveObserver(this);
 
-  arc_auth_service = nullptr;
+  g_arc_auth_service = nullptr;
 }
 
 // static
 ArcAuthService* ArcAuthService::Get() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
-  return arc_auth_service;
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return g_arc_auth_service;
 }
 
 // static
@@ -165,13 +169,13 @@ void ArcAuthService::RegisterProfilePrefs(
 
 // static
 void ArcAuthService::DisableUIForTesting() {
-  disable_ui_for_testing = true;
+  g_disable_ui_for_testing = true;
 }
 
 // static
 void ArcAuthService::SetShelfDelegateForTesting(
     ash::ShelfDelegate* shelf_delegate) {
-  shelf_delegate_for_testing = shelf_delegate;
+  g_shelf_delegate_for_testing = shelf_delegate;
 }
 
 // static
@@ -182,13 +186,12 @@ bool ArcAuthService::IsOptInVerificationDisabled() {
 
 // static
 void ArcAuthService::EnableCheckAndroidManagementForTesting() {
-  enable_check_android_management_for_testing = true;
+  g_enable_check_android_management_for_testing = true;
 }
 
 // static
 bool ArcAuthService::IsAllowedForProfile(const Profile* profile) {
-  if (!arc::ArcBridgeService::GetEnabled(
-          base::CommandLine::ForCurrentProcess())) {
+  if (!ArcBridgeService::GetEnabled(base::CommandLine::ForCurrentProcess())) {
     VLOG(1) << "Arc is not enabled.";
     return false;
   }
@@ -231,17 +234,14 @@ void ArcAuthService::OnInstanceReady() {
 
 void ArcAuthService::OnBridgeStopped(ArcBridgeService::StopReason reason) {
   // TODO(crbug.com/625923): Use |reason| to report more detailed errors.
-  if (waiting_for_reply_) {
-    // Using SERVICE_UNAVAILABLE instead of UNKNOWN_ERROR, since the latter
-    // causes this code to not try to stop ARC, so it would retry without the
-    // user noticing.
+  if (arc_sign_in_timer_.IsRunning()) {
     OnSignInFailedInternal(ProvisioningResult::ARC_STOPPED);
   }
 
   if (clear_required_) {
     // This should be always true, but just in case as this is looked at
     // inside RemoveArcData() at first.
-    DCHECK(arc_bridge_service()->state() == ArcBridgeService::State::STOPPED);
+    DCHECK(arc_bridge_service()->stopped());
     RemoveArcData();
   } else {
     // To support special "Stop and enable ARC" procedure for enterprise,
@@ -253,7 +253,7 @@ void ArcAuthService::OnBridgeStopped(ArcBridgeService::StopReason reason) {
 }
 
 void ArcAuthService::RemoveArcData() {
-  if (arc_bridge_service()->state() != ArcBridgeService::State::STOPPED) {
+  if (!arc_bridge_service()->stopped()) {
     // Just set a flag. On bridge stopped, this will be re-called,
     // then session manager should remove the data.
     clear_required_ = true;
@@ -286,7 +286,7 @@ void ArcAuthService::OnArcDataRemoved(bool success) {
 }
 
 std::string ArcAuthService::GetAndResetAuthCode() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   std::string auth_code;
   auth_code_.swap(auth_code);
   return auth_code;
@@ -294,13 +294,13 @@ std::string ArcAuthService::GetAndResetAuthCode() {
 
 void ArcAuthService::GetAuthCodeDeprecated(
     const GetAuthCodeDeprecatedCallback& callback) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!IsOptInVerificationDisabled());
   callback.Run(mojo::String(GetAndResetAuthCode()));
 }
 
 void ArcAuthService::GetAuthCode(const GetAuthCodeCallback& callback) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   const std::string auth_code = GetAndResetAuthCode();
   const bool verification_disabled = IsOptInVerificationDisabled();
@@ -315,11 +315,11 @@ void ArcAuthService::GetAuthCode(const GetAuthCodeCallback& callback) {
 }
 
 void ArcAuthService::OnSignInComplete() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_EQ(state_, State::ACTIVE);
   DCHECK(!sign_in_time_.is_null());
 
-  waiting_for_reply_ = false;
+  arc_sign_in_timer_.Stop();
 
   if (!IsOptInVerificationDisabled() &&
       !profile_->GetPrefs()->GetBoolean(prefs::kArcSignedIn)) {
@@ -331,7 +331,8 @@ void ArcAuthService::OnSignInComplete() {
   CloseUI();
   UpdateProvisioningTiming(base::Time::Now() - sign_in_time_, true,
                            IsAccountManaged(profile_));
-  UpdateProvisioningResultUMA(ProvisioningResult::SUCCESS);
+  UpdateProvisioningResultUMA(ProvisioningResult::SUCCESS,
+                              IsAccountManaged(profile_));
 
   FOR_EACH_OBSERVER(Observer, observer_list_, OnInitialStart());
 }
@@ -342,16 +343,16 @@ void ArcAuthService::OnSignInFailed(arc::mojom::ArcSignInFailureReason reason) {
 }
 
 void ArcAuthService::OnSignInFailedInternal(ProvisioningResult result) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_EQ(state_, State::ACTIVE);
   DCHECK(!sign_in_time_.is_null());
 
-  waiting_for_reply_ = false;
+  arc_sign_in_timer_.Stop();
 
   UpdateProvisioningTiming(base::Time::Now() - sign_in_time_, false,
                            IsAccountManaged(profile_));
   UpdateOptInCancelUMA(OptInCancelReason::CLOUD_PROVISION_FLOW_FAIL);
-  UpdateProvisioningResultUMA(result);
+  UpdateProvisioningResultUMA(result, IsAccountManaged(profile_));
 
   int error_message_id;
   switch (result) {
@@ -393,8 +394,13 @@ void ArcAuthService::OnSignInFailedInternal(ProvisioningResult result) {
   if (result == ProvisioningResult::CLOUD_PROVISION_FLOW_FAILED ||
       result == ProvisioningResult::CLOUD_PROVISION_FLOW_TIMEOUT ||
       result == ProvisioningResult::CLOUD_PROVISION_FLOW_INTERNAL_ERROR ||
-      result == ProvisioningResult::UNKNOWN_ERROR)
+      // OVERALL_SIGN_IN_TIMEOUT might be an indication that ARC believes it is
+      // fully setup, but Chrome does not.
+      result == ProvisioningResult::OVERALL_SIGN_IN_TIMEOUT ||
+      // Just to be safe, remove data if we don't know the cause.
+      result == ProvisioningResult::UNKNOWN_ERROR) {
     RemoveArcData();
+  }
 
   // We'll delay shutting down the bridge in this case to allow people to send
   // feedback.
@@ -404,7 +410,7 @@ void ArcAuthService::OnSignInFailedInternal(ProvisioningResult result) {
 
 void ArcAuthService::GetIsAccountManaged(
     const GetIsAccountManagedCallback& callback) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   callback.Run(IsAccountManaged(profile_));
 }
@@ -418,13 +424,13 @@ void ArcAuthService::SetState(State state) {
 }
 
 bool ArcAuthService::IsAllowed() const {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return profile_ != nullptr;
 }
 
 void ArcAuthService::OnPrimaryUserProfilePrepared(Profile* profile) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile && profile != profile_);
-  DCHECK(thread_checker.Get().CalledOnValidThread());
 
   Shutdown();
 
@@ -446,25 +452,27 @@ void ArcAuthService::OnPrimaryUserProfilePrepared(Profile* profile) {
   context_.reset(new ArcAuthContext(this, profile_));
 
   // In case UI is disabled we assume that ARC is opted-in.
-  if (!IsOptInVerificationDisabled()) {
-    if (!disable_ui_for_testing || enable_check_android_management_for_testing)
-      ArcAndroidManagementChecker::StartClient();
-    pref_change_registrar_.Init(profile_->GetPrefs());
-    pref_change_registrar_.Add(
-        prefs::kArcEnabled,
-        base::Bind(&ArcAuthService::OnOptInPreferenceChanged,
-                   weak_ptr_factory_.GetWeakPtr()));
-    if (profile_->GetPrefs()->GetBoolean(prefs::kArcEnabled)) {
-      OnOptInPreferenceChanged();
-    } else {
-      RemoveArcData();
-      UpdateEnabledStateUMA(false);
-      PrefServiceSyncableFromProfile(profile_)->AddObserver(this);
-      OnIsSyncingChanged();
-    }
-  } else {
+  if (IsOptInVerificationDisabled()) {
     auth_code_.clear();
     StartArc();
+    return;
+  }
+
+  if (!g_disable_ui_for_testing ||
+      g_enable_check_android_management_for_testing) {
+    ArcAndroidManagementChecker::StartClient();
+  }
+  pref_change_registrar_.Init(profile_->GetPrefs());
+  pref_change_registrar_.Add(
+      prefs::kArcEnabled, base::Bind(&ArcAuthService::OnOptInPreferenceChanged,
+                                     weak_ptr_factory_.GetWeakPtr()));
+  if (profile_->GetPrefs()->GetBoolean(prefs::kArcEnabled)) {
+    OnOptInPreferenceChanged();
+  } else {
+    RemoveArcData();
+    UpdateEnabledStateUMA(false);
+    PrefServiceSyncableFromProfile(profile_)->AddObserver(this);
+    OnIsSyncingChanged();
   }
 }
 
@@ -479,7 +487,7 @@ void ArcAuthService::OnIsSyncingChanged() {
   if (IsArcEnabled())
     OnOptInPreferenceChanged();
 
-  if (!disable_ui_for_testing && profile_->IsNewProfile() &&
+  if (!g_disable_ui_for_testing && profile_->IsNewProfile() &&
       !profile_->GetPrefs()->HasPrefPath(prefs::kArcEnabled)) {
     ArcAuthNotification::Show(profile_);
   }
@@ -500,7 +508,7 @@ void ArcAuthService::Shutdown() {
 }
 
 void ArcAuthService::ShowUI(UIPage page, const base::string16& status) {
-  if (disable_ui_for_testing || IsOptInVerificationDisabled())
+  if (g_disable_ui_for_testing || IsOptInVerificationDisabled())
     return;
 
   SetUIPage(page, status);
@@ -523,7 +531,7 @@ void ArcAuthService::ShowUI(UIPage page, const base::string16& status) {
 }
 
 void ArcAuthService::OnContextReady() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   DCHECK(!initial_opt_in_);
   CheckAndroidManagement(false);
@@ -531,7 +539,7 @@ void ArcAuthService::OnContextReady() {
 
 void ArcAuthService::OnSyncedPrefChanged(const std::string& path,
                                          bool from_sync) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Update UMA only for local changes
   if (!from_sync) {
@@ -557,7 +565,7 @@ void ArcAuthService::StopArc() {
 }
 
 void ArcAuthService::OnOptInPreferenceChanged() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile_);
 
   // TODO(dspaid): Move code from OnSyncedPrefChanged into this method.
@@ -583,8 +591,8 @@ void ArcAuthService::OnOptInPreferenceChanged() {
     StartUI();
   } else {
     // Ready to start Arc, but check Android management first.
-    if (!disable_ui_for_testing ||
-        enable_check_android_management_for_testing) {
+    if (!g_disable_ui_for_testing ||
+        g_enable_check_android_management_for_testing) {
       CheckAndroidManagement(true);
     } else {
       StartArc();
@@ -595,6 +603,7 @@ void ArcAuthService::OnOptInPreferenceChanged() {
 }
 
 void ArcAuthService::ShutdownBridge() {
+  arc_sign_in_timer_.Stop();
   playstore_launcher_.reset();
   auth_callback_.Reset();
   android_management_checker_.reset();
@@ -616,19 +625,19 @@ void ArcAuthService::ShutdownBridgeAndShowUI(UIPage page,
 }
 
 void ArcAuthService::AddObserver(Observer* observer) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   observer_list_.AddObserver(observer);
 }
 
 void ArcAuthService::RemoveObserver(Observer* observer) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   observer_list_.RemoveObserver(observer);
 }
 
 void ArcAuthService::CloseUI() {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnOptInUIClose());
   SetUIPage(UIPage::NO_PAGE, base::string16());
-  if (!disable_ui_for_testing)
+  if (!g_disable_ui_for_testing)
     ArcAuthNotification::Hide();
 }
 
@@ -642,20 +651,20 @@ void ArcAuthService::SetUIPage(UIPage page, const base::string16& status) {
 // This is the special method to support enterprise mojo API.
 // TODO(hidehiko): Remove this.
 void ArcAuthService::StopAndEnableArc() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
-  DCHECK(arc_bridge_service()->state() != ArcBridgeService::State::STOPPED);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(!arc_bridge_service()->stopped());
   reenable_arc_ = true;
   StopArc();
 }
 
 void ArcAuthService::StartArc() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   arc_bridge_service()->HandleStartup();
   SetState(State::ACTIVE);
 }
 
 void ArcAuthService::SetAuthCodeAndStartArc(const std::string& auth_code) {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!auth_code.empty());
 
   if (!auth_callback_.is_null()) {
@@ -673,16 +682,24 @@ void ArcAuthService::SetAuthCodeAndStartArc(const std::string& auth_code) {
   }
 
   sign_in_time_ = base::Time::Now();
+  VLOG(1) << "Starting ARC for first sign in.";
 
   SetUIPage(UIPage::START_PROGRESS, base::string16());
   ShutdownBridge();
   auth_code_ = auth_code;
-  waiting_for_reply_ = true;
+  arc_sign_in_timer_.Start(FROM_HERE, kArcSignInTimeout,
+                           base::Bind(&ArcAuthService::OnArcSignInTimeout,
+                                      weak_ptr_factory_.GetWeakPtr()));
   StartArc();
 }
 
+void ArcAuthService::OnArcSignInTimeout() {
+  LOG(ERROR) << "Timed out waiting for first sign in.";
+  OnSignInFailedInternal(ProvisioningResult::OVERALL_SIGN_IN_TIMEOUT);
+}
+
 void ArcAuthService::StartLso() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Update UMA only if error (with or without feedback) is currently shown.
   if (ui_page_ == UIPage::ERROR) {
@@ -697,7 +714,7 @@ void ArcAuthService::StartLso() {
 }
 
 void ArcAuthService::CancelAuthCode() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (state_ == State::NOT_INITIALIZED) {
     NOTREACHED();
@@ -728,13 +745,13 @@ void ArcAuthService::CancelAuthCode() {
 }
 
 bool ArcAuthService::IsArcManaged() const {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile_);
   return profile_->GetPrefs()->IsManagedPreference(prefs::kArcEnabled);
 }
 
 bool ArcAuthService::IsArcEnabled() const {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!IsAllowed())
     return false;
 
@@ -743,26 +760,34 @@ bool ArcAuthService::IsArcEnabled() const {
 }
 
 void ArcAuthService::EnableArc() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile_);
 
-  if (!IsArcEnabled()) {
-    if (IsArcManaged())
-      return;
-    profile_->GetPrefs()->SetBoolean(prefs::kArcEnabled, true);
-  } else {
+  if (IsArcEnabled()) {
     OnOptInPreferenceChanged();
+    return;
   }
+
+  if (!IsArcManaged())
+    profile_->GetPrefs()->SetBoolean(prefs::kArcEnabled, true);
 }
 
 void ArcAuthService::DisableArc() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile_);
   profile_->GetPrefs()->SetBoolean(prefs::kArcEnabled, false);
 }
 
 void ArcAuthService::StartUI() {
-  DCHECK(thread_checker.Get().CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (!arc_bridge_service()->stopped()) {
+    // If the user attempts to re-enable ARC while the bridge is still running
+    // the user should not be able to continue until the bridge has stopped.
+    ShowUI(UIPage::ERROR, l10n_util::GetStringUTF16(
+                              IDS_ARC_SIGN_IN_SERVICE_UNAVAILABLE_ERROR));
+    return;
+  }
 
   SetState(State::FETCHING_CODE);
 

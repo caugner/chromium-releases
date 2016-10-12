@@ -84,16 +84,6 @@
           "reason": "forced by layout"
         },
         {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [210, 13, 100, 100],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [210, 113, 100, 87],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow P",
           "rect": [210, 113, 100, 48],
           "reason": "bounds change"
@@ -149,48 +139,88 @@
           "reason": "full"
         },
         {
+          "object": "LayoutSVGContainer g id='text1g'",
+          "rect": [0, 0, 8, 2],
+          "reason": "full"
+        },
+        {
           "object": "LayoutSVGInlineText #text",
-          "rect": [0, 3, 7, 2],
+          "rect": [0, 0, 8, 2],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [0, 3, 7, 2],
+          "rect": [0, 0, 8, 2],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [0, 3, 7, 2],
+          "rect": [0, 0, 8, 2],
           "reason": "bounds change"
         },
         {
           "object": "LayoutSVGTSpan tspan",
-          "rect": [0, 3, 7, 2],
+          "rect": [0, 0, 8, 2],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGText text",
-          "rect": [0, 3, 7, 2],
+          "rect": [0, 0, 8, 2],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [9, 3, 5, 2],
+          "rect": [0, 3, 7, 3],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [0, 3, 7, 3],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [0, 3, 7, 3],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGTSpan tspan",
+          "rect": [0, 3, 7, 3],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGText text",
-          "rect": [9, 3, 5, 2],
+          "rect": [0, 3, 7, 3],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [9, 3, 5, 3],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGText text",
+          "rect": [9, 3, 5, 3],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutSVGViewportContainer svg",
-          "rect": [9, 3, 5, 2],
+          "rect": [9, 3, 5, 3],
           "reason": "bounds change"
         },
         {
-          "object": "LayoutSVGForeignObject foreignObject",
-          "rect": [6, 3, 4, 4],
+          "object": "LayoutSVGInlineText #text",
+          "rect": [0, 0, 5, 2],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGText text",
+          "rect": [0, 0, 5, 2],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutSVGViewportContainer svg",
+          "rect": [0, 0, 5, 2],
           "reason": "bounds change"
         },
         {
@@ -205,16 +235,6 @@
         },
         {
           "object": "LayoutBlockFlow P",
-          "rect": [0, 0, 1, 1],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutSVGContainer g id='text1g'",
-          "rect": [0, 0, 1, 1],
-          "reason": "full"
-        },
-        {
-          "object": "LayoutSVGForeignObject foreignObject",
           "rect": [0, 0, 1, 1],
           "reason": "bounds change"
         },
@@ -273,7 +293,7 @@
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",
@@ -317,67 +337,79 @@
     },
     {
       "object": "LayoutSVGText text",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS '",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGTSpan tspan",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineFlowBox",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGViewportContainer svg",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGText text",
-      "reason": "none"
+      "reason": "location change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox 'PASS'",
-      "reason": "none"
+      "reason": "location change"
     },
     {
       "object": "LayoutSVGContainer g id='text3g'",
@@ -421,7 +453,7 @@
     },
     {
       "object": "LayoutSVGForeignObject foreignObject",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow P",

@@ -6,13 +6,12 @@
 
 function test()
 {
-
-    var namePrompt = new WebInspector.StylesSidebarPane.CSSPropertyPrompt(WebInspector.CSSMetadata.cssPropertiesMetainfo, null, true);
+    var namePrompt = new WebInspector.StylesSidebarPane.CSSPropertyPrompt(WebInspector.cssMetadata().allProperties(), null, true);
     var valuePrompt = valuePromptFor("color");
 
     function valuePromptFor(name)
     {
-        return new WebInspector.StylesSidebarPane.CSSPropertyPrompt(WebInspector.CSSMetadata.keywordsForProperty(name), null, false);
+        return new WebInspector.StylesSidebarPane.CSSPropertyPrompt(WebInspector.cssMetadata().propertyValues(name), null, false);
     }
 
     InspectorTest.runTestSuite([
@@ -82,7 +81,7 @@ function test()
             selectionRange.selectNodeContents(proxyElement);
         }
         var range = selectionRange.startContainer.rangeOfWord(selectionRange.startOffset, prompt._completionStopCharacters, proxyElement, "backward");
-        prompt._buildPropertyCompletions(proxyElement, inputText, inputText.length, range, force, completions);
+        prompt._buildPropertyCompletions(proxyElement, range, force, completions);
 
         function completions(result, index)
         {

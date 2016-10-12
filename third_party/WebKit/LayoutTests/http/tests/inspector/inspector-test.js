@@ -43,10 +43,10 @@ InspectorTest.evaluateInPage = function(code, callback)
 {
     callback = InspectorTest.safeWrap(callback);
 
-    function mycallback(error, result, wasThrown)
+    function mycallback(error, result, exceptionDetails)
     {
         if (!error)
-            callback(InspectorTest.runtimeModel.createRemoteObject(result), wasThrown);
+            callback(InspectorTest.runtimeModel.createRemoteObject(result), exceptionDetails);
     }
     InspectorTest.RuntimeAgent.evaluate(code, "console", false, mycallback);
 }
@@ -54,6 +54,42 @@ InspectorTest.evaluateInPage = function(code, callback)
 InspectorTest.evaluateInPagePromise = function(code)
 {
     return new Promise(succ => InspectorTest.evaluateInPage(code, succ));
+}
+
+InspectorTest.evaluateInPageAsync = function(code)
+{
+    var callback;
+    var promise = new Promise((fulfill) => { callback = fulfill });
+    InspectorTest.RuntimeAgent.evaluate(code,
+        "console",
+        /* includeCommandLineAPI */ false,
+        /* doNotPauseOnExceptionsAndMuteConsole */ undefined,
+        /* contextId */ undefined,
+        /* returnByValue */ undefined,
+        /* generatePreview */ undefined,
+        /* userGesture */ undefined,
+        /* awaitPromise */ true,
+        mycallback);
+
+    function mycallback(error, result, exceptionDetails)
+    {
+        if (!error && !exceptionDetails) {
+            callback(InspectorTest.runtimeModel.createRemoteObject(result));
+        } else {
+            if (error)
+                InspectorTest.addResult("Error: " + error);
+            else
+                InspectorTest.addResult("Error: " + (exceptionDetails ? exceptionDetails.text : " exception while evaluation in page."));
+            InspectorTest.completeTest();
+        }
+    }
+    return promise;
+}
+
+InspectorTest.callFunctionInPageAsync = function(name, args)
+{
+    args = args || [];
+    return InspectorTest.evaluateInPageAsync(name + "(" + args.map(JSON.stringify).join(",") + ")");
 }
 
 InspectorTest.evaluateInPageWithTimeout = function(code)
@@ -68,111 +104,10 @@ InspectorTest.evaluateFunctionInOverlay = function(func, callback)
     var mainContext = InspectorTest.runtimeModel.executionContexts()[0];
     mainContext.evaluate(expression, "", false, false, true, false, false, wrapCallback);
 
-    function wrapCallback(val, err, result)
+    function wrapCallback(result, exceptionDetails)
     {
         callback(result.value)
     }
-}
-
-var lastEvalId = 0;
-var pendingEvalRequests = {};
-
-var lastPromiseEvalId = 0;
-var pendingPromiseEvalRequests = {};
-
-/**
- * The given function should take two callback paraters before the arguments:
- *  * resolve - called when successful (with optional result)
- *  * reject  - called when there was a failure (with optional error)
- */
-InspectorTest.invokePageFunctionPromise = function(functionName, parameters)
-{
-    return new Promise(function(resolve, reject) {
-        var id = ++lastPromiseEvalId;
-        pendingPromiseEvalRequests[id] = { resolve: InspectorTest.safeWrap(resolve), reject: InspectorTest.safeWrap(reject) };
-
-        var jsonParameters = [];
-        for (var i = 0; i < parameters.length; ++i)
-            jsonParameters.push(JSON.stringify(parameters[i]));
-        var asyncEvalWrapper = function(callId, functionName, argumentsArray)
-        {
-            function evalCallbackResolve(result)
-            {
-                testRunner.evaluateInWebInspector(evalCallbackCallId, "InspectorTest.didInvokePageFunctionPromise(" + callId + ", " + JSON.stringify(result) + ", true);");
-            }
-
-            function evalCallbackReject(result)
-            {
-                testRunner.evaluateInWebInspector(evalCallbackCallId, "InspectorTest.didInvokePageFunctionPromise(" + callId + ", " + JSON.stringify(result) + ", false);");
-            }
-
-            var args = [evalCallbackResolve, evalCallbackReject].concat(argumentsArray.map(JSON.stringify));
-            var functionCall = functionName + ".call(null, " + args.join(", ") + ")";
-            try {
-                eval(functionCall);
-            } catch(e) {
-                InspectorTest.addResult("Error: " + e);
-                evalCallbackReject(e);
-            }
-        }
-        var pageRequest = "(" + asyncEvalWrapper.toString() + ")(" + id + ", unescape('" + escape(functionName) + "'), [" + jsonParameters.join(", ") + "])";
-        InspectorTest.evaluateInPage(pageRequest);
-    });
-}
-
-
-InspectorTest.didInvokePageFunctionPromise = function(callId, value, didResolve)
-{
-    var callbacks = pendingPromiseEvalRequests[callId];
-    if (!callbacks) {
-        InspectorTest.addResult("Missing callback for async eval " + callId + ", perhaps callback invoked twice?");
-        return;
-    }
-    var callback = didResolve ? callbacks.resolve : callbacks.reject;
-    delete pendingPromiseEvalRequests[callId];
-    callback(value);
-}
-
-/**
- * @param {string} functionName
- * @param {...} varArgs
- * @param {function()} callback
- */
-InspectorTest.invokePageFunctionAsync = function(functionName, varArgs)
-{
-    var id = ++lastEvalId;
-    var args = Array.prototype.slice.call(arguments, 1);
-    var callback = args.pop();
-    pendingEvalRequests[id] = InspectorTest.safeWrap(callback);
-    var asyncEvalWrapper = function(callId, functionName, argsString)
-    {
-        function evalCallback(result)
-        {
-            testRunner.evaluateInWebInspector(evalCallbackCallId, "InspectorTest.didInvokePageFunctionAsync(" + callId + ", " + JSON.stringify(result) + ");");
-        }
-        var argsArray = argsString.replace(/^\[(.*)\]$/, "$1");
-        if (argsArray.length)
-            argsArray += ",";
-        try {
-            eval(functionName + "(" + argsArray + evalCallback + ")");
-        } catch(e) {
-            InspectorTest.addResult("Error: " + e);
-            evalCallback(String(e));
-        }
-    }
-    var escapedJSONArgs = JSON.stringify(JSON.stringify(args));
-    InspectorTest.evaluateInPage("(" + asyncEvalWrapper.toString() + ")(" + id + ", unescape('" + escape(functionName) + "')," + escapedJSONArgs + ")");
-}
-
-InspectorTest.didInvokePageFunctionAsync = function(callId, value)
-{
-    var callback = pendingEvalRequests[callId];
-    if (!callback) {
-        InspectorTest.addResult("Missing callback for async eval " + callId + ", perhaps callback invoked twice?");
-        return;
-    }
-    delete pendingEvalRequests[callId];
-    callback(value);
 }
 
 InspectorTest.check = function(passCondition, failureText)
@@ -384,12 +319,9 @@ InspectorTest.dumpObjectPropertyTreeElement = function(treeElement)
     }
 }
 
-InspectorTest.expandAndDumpEventListeners = function(eventListenersView, updateCallback, callback)
+InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callback)
 {
     InspectorTest.addSniffer(WebInspector.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
-
-    if (updateCallback)
-        updateCallback();
 
     function listenersArrived()
     {
@@ -523,16 +455,7 @@ InspectorTest.deprecatedRunAfterPendingDispatches = function(callback)
 
 InspectorTest.createKeyEvent = function(key, ctrlKey, altKey, shiftKey, metaKey)
 {
-    var keyIdentifier = key;
-    if (key === "Tab")
-        keyIdentifier = "U+0009";
-    else if (key == "Escape")
-        keyIdentifier = "U+001B";
-    else if (key == "ArrowUp")
-        keyIdentifier = "Up";
-    else if (key == "ArrowDown")
-        keyIdentifier = "Down";
-    return new KeyboardEvent("keydown", {key: key, keyIdentifier: keyIdentifier, bubbles: true, cancelable: true, ctrlKey: ctrlKey, altKey: altKey, shiftKey: shiftKey, metaKey: metaKey});
+    return new KeyboardEvent("keydown", {key: key, bubbles: true, cancelable: true, ctrlKey: ctrlKey, altKey: altKey, shiftKey: shiftKey, metaKey: metaKey});
 }
 
 InspectorTest.runTestSuite = function(testSuite)
@@ -755,7 +678,7 @@ InspectorTest.hideInspectorView = function()
 
 InspectorTest.mainFrame = function()
 {
-    return InspectorTest.mainTarget.resourceTreeModel.mainFrame;
+    return WebInspector.ResourceTreeModel.fromTarget(InspectorTest.mainTarget).mainFrame;
 }
 
 InspectorTest.StringOutputStream = function(callback)
@@ -906,7 +829,7 @@ InspectorTest.dumpLoadedModules = function(next)
     var modules = self.runtime._modules;
     modules.sort(moduleSorter);
     for (var i = 0; i < modules.length; ++i) {
-        if (modules[i]._loaded)
+        if (modules[i]._loadedForTest)
             InspectorTest.addResult("    " + modules[i]._descriptor.name);
     }
     if (next)
@@ -955,7 +878,6 @@ WebInspector.targetManager.observeTargets({
         if (InspectorTest.CSSAgent)
             return;
         InspectorTest.CSSAgent = target.cssAgent();
-        InspectorTest.ConsoleAgent = target.consoleAgent();
         InspectorTest.DeviceOrientationAgent = target.deviceOrientationAgent();
         InspectorTest.DOMAgent = target.domAgent();
         InspectorTest.DOMDebuggerAgent = target.domdebuggerAgent();
@@ -971,9 +893,10 @@ WebInspector.targetManager.observeTargets({
         InspectorTest.WorkerAgent = target.workerAgent();
 
         InspectorTest.consoleModel = target.consoleModel;
-        InspectorTest.networkManager = target.networkManager;
-        InspectorTest.resourceTreeModel = target.resourceTreeModel;
-        InspectorTest.networkLog = target.networkLog;
+        InspectorTest.networkManager = WebInspector.NetworkManager.fromTarget(target);
+        InspectorTest.securityOriginManager = WebInspector.SecurityOriginManager.fromTarget(target);
+        InspectorTest.resourceTreeModel = WebInspector.ResourceTreeModel.fromTarget(target);
+        InspectorTest.networkLog = WebInspector.NetworkLog.fromTarget(target);
         InspectorTest.debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
         InspectorTest.runtimeModel = target.runtimeModel;
         InspectorTest.domModel = WebInspector.DOMModel.fromTarget(target);
@@ -1007,7 +930,17 @@ InspectorTest.preloadModule = function(moduleName)
     InspectorTest._modulesToPreload.push(moduleName);
 }
 
-};  // initialize_InspectorTest
+InspectorTest.isDedicatedWorker = function(target)
+{
+    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasNetworkCapability() && !target.hasWorkerCapability();
+}
+
+InspectorTest.isServiceWorker = function(target)
+{
+    return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasNetworkCapability() && target.hasWorkerCapability();
+}
+
+    };  // initialize_InspectorTest
 
 var initializeCallId = 0;
 var runTestCallId = 1;

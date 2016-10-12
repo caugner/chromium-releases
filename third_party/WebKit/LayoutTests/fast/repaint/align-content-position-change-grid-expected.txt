@@ -9,23 +9,8 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutGrid DIV id='container'",
-          "rect": [0, 52, 200, 300],
-          "reason": "style change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 302, 200, 50],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow DIV class='item'",
           "rect": [0, 302, 200, 50],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 252, 200, 50],
           "reason": "bounds change"
         },
         {
@@ -34,18 +19,8 @@
           "reason": "bounds change"
         },
         {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 202, 200, 50],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow DIV class='item'",
           "rect": [0, 202, 200, 50],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 152, 200, 50],
           "reason": "bounds change"
         },
         {
@@ -54,18 +29,8 @@
           "reason": "bounds change"
         },
         {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 102, 200, 50],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow DIV class='item'",
           "rect": [0, 102, 200, 50],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [0, 52, 200, 50],
           "reason": "bounds change"
         },
         {
@@ -78,8 +43,12 @@
   ],
   "objectPaintInvalidations": [
     {
-      "object": "LayoutGrid DIV id='container'",
-      "reason": "style change"
+      "object": "LayoutBlockFlow DIV class='item'",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutBlockFlow DIV",
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='item'",
@@ -87,7 +56,7 @@
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='item'",
@@ -95,15 +64,7 @@
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV class='item'",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV",
-      "reason": "bounds change"
+      "reason": "location change"
     }
   ]
 }

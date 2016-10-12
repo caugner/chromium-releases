@@ -16,6 +16,7 @@
 #include "ui/gfx/paint_throbber.h"
 
 namespace {
+
 constexpr int kUpdateIconIntervalMs = 40;  // 40ms for 25 frames per second.
 constexpr int kSpinningGapPercent = 25;
 
@@ -62,9 +63,17 @@ ArcAppDeferredLauncherController::ArcAppDeferredLauncherController(
     observed_profile_ = owner->GetProfile();
     ArcAppListPrefs::Get(observed_profile_)->AddObserver(this);
   }
+  arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+  // arc::ArcAuthService might not be set in tests.
+  if (auth_service)
+    auth_service->AddObserver(this);
 }
 
 ArcAppDeferredLauncherController::~ArcAppDeferredLauncherController() {
+  arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+  // arc::ArcAuthService may be released first.
+  if (auth_service)
+    auth_service->RemoveObserver(this);
   if (observed_profile_)
     ArcAppListPrefs::Get(observed_profile_)->RemoveObserver(this);
 }
@@ -84,6 +93,12 @@ void ArcAppDeferredLauncherController::MaybeApplySpinningEffect(
               gfx::ImageSkiaOperations::CreateHSLShiftedImage(*image, shift),
               0.5)),
       image->size());
+}
+
+void ArcAppDeferredLauncherController::Remove(const std::string& app_id) {
+  const std::string shelf_app_id =
+      ArcAppWindowLauncherController::GetShelfAppIdFromArcAppId(app_id);
+  app_controller_map_.erase(shelf_app_id);
 }
 
 void ArcAppDeferredLauncherController::Close(const std::string& app_id) {
@@ -116,11 +131,26 @@ void ArcAppDeferredLauncherController::OnAppReadyChanged(
 
   Close(app_id);
 
-  arc::LaunchApp(owner_->GetProfile(), app_id);
+  arc::LaunchApp(observed_profile_, app_id);
 }
 
 void ArcAppDeferredLauncherController::OnAppRemoved(const std::string& app_id) {
   Close(app_id);
+}
+
+void ArcAppDeferredLauncherController::OnOptInEnabled(bool enabled) {
+  if (enabled)
+    return;
+
+  // If Arc was disabled, remove all deferred launch requests.
+  while (!app_controller_map_.empty())
+    Close(app_controller_map_.begin()->first);
+}
+
+bool ArcAppDeferredLauncherController::HasApp(const std::string& app_id) const {
+  const std::string shelf_app_id =
+      ArcAppWindowLauncherController::GetShelfAppIdFromArcAppId(app_id);
+  return app_controller_map_.count(shelf_app_id);
 }
 
 base::TimeDelta ArcAppDeferredLauncherController::GetActiveTime(
@@ -150,6 +180,11 @@ void ArcAppDeferredLauncherController::RegisterNextUpdate() {
 
 void ArcAppDeferredLauncherController::RegisterDeferredLaunch(
     const std::string& app_id) {
+  const arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+  DCHECK(auth_service);
+  DCHECK(auth_service->state() != arc::ArcAuthService::State::STOPPED);
+  DCHECK(auth_service->state() != arc::ArcAuthService::State::NOT_INITIALIZED);
+
   const std::string shelf_app_id =
       ArcAppWindowLauncherController::GetShelfAppIdFromArcAppId(app_id);
   const ash::ShelfID shelf_id = owner_->GetShelfIDForAppID(shelf_app_id);

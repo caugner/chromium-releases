@@ -15,10 +15,8 @@
 #include "components/arc/instance_holder.h"
 
 namespace base {
-
 class FilePath;
-
-}  // namespace base
+}
 
 namespace arc {
 
@@ -41,7 +39,7 @@ class ArcDownloadsWatcherService
   void StartWatchingDownloads();
   void StopWatchingDownloads();
 
-  void OnDownloadsChanged(const std::vector<base::FilePath>& paths);
+  void OnDownloadsChanged(mojo::Array<mojo::String> paths);
 
   std::unique_ptr<DownloadsWatcher> watcher_;
 

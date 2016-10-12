@@ -17,6 +17,8 @@ description("Spell checking should be triggered on focus of an editable. "
     + "misspellings are marked.");
 
 jsTestIsAsync = true;
+if (window.testRunner)
+    testRunner.setMockSpellCheckerEnabled(true);
 
 function findFirstTextNodeOf(id) {
     return findFirstTextNode(document.getElementById(id));
@@ -48,8 +50,6 @@ function test() {
         debug("Automatic testing impossible. Test manually.");
         return;
     }
-
-    internals.settings.setUnifiedTextCheckerEnabled(true);
 
     // Check whether non-focused elements do not have spelling markers, then
     // verify them when they get focused.

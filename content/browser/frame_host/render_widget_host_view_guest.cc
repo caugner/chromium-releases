@@ -115,7 +115,7 @@ void RenderWidgetHostViewGuest::Show() {
     // the renderer.
     if (!surface_id_.is_null()) {
       cc::SurfaceSequence sequence = cc::SurfaceSequence(
-          id_allocator_->id_namespace(), next_surface_sequence_++);
+          id_allocator_->client_id(), next_surface_sequence_++);
       GetSurfaceManager()
           ->GetSurfaceForId(surface_id_)
           ->AddDestructionDependency(sequence);
@@ -166,43 +166,43 @@ void RenderWidgetHostViewGuest::ProcessAckedTouchEvent(
 }
 #endif
 
+void RenderWidgetHostViewGuest::ProcessMouseEvent(
+    const blink::WebMouseEvent& event,
+    const ui::LatencyInfo& latency) {
+  if (event.type == blink::WebInputEvent::MouseDown) {
+    DCHECK(guest_->GetOwnerRenderWidgetHostView());
+    RenderWidgetHost* embedder =
+        guest_->GetOwnerRenderWidgetHostView()->GetRenderWidgetHost();
+    if (!embedder->GetView()->HasFocus())
+      embedder->GetView()->Focus();
+
+    // With direct routing, the embedder would not know to focus the guest on
+    // click. Sends a synthetic event for the focusing side effect.
+    // TODO(wjmaclean): When we remove BrowserPlugin, delete this code.
+    // http://crbug.com/533069
+    MaybeSendSyntheticTapGesture(
+        blink::WebFloatPoint(event.x, event.y),
+        blink::WebFloatPoint(event.globalX, event.globalY));
+  }
+  host_->ForwardMouseEventWithLatencyInfo(event, latency);
+}
+
 void RenderWidgetHostViewGuest::ProcessTouchEvent(
     const blink::WebTouchEvent& event,
     const ui::LatencyInfo& latency) {
   if (event.type == blink::WebInputEvent::TouchStart) {
     DCHECK(guest_->GetOwnerRenderWidgetHostView());
-    RenderWidgetHostImpl* embedder = static_cast<RenderWidgetHostImpl*>(
-        guest_->GetOwnerRenderWidgetHostView()->GetRenderWidgetHost());
+    RenderWidgetHost* embedder =
+        guest_->GetOwnerRenderWidgetHostView()->GetRenderWidgetHost();
     if (!embedder->GetView()->HasFocus())
       embedder->GetView()->Focus();
 
-    // Since we now route GestureEvents directly to the guest renderer, we need
-    // a way to make sure that the BrowserPlugin in the embedder gets focused so
-    // that keyboard input (which still travels via BrowserPlugin) is routed to
-    // the plugin and thus onwards to the guest.
+    // With direct routing, the embedder would not know to focus the guest on
+    // touch. Sends a synthetic event for the focusing side effect.
     // TODO(wjmaclean): When we remove BrowserPlugin, delete this code.
     // http://crbug.com/533069
-    if (!HasFocus()) {
-      // We need to a account for the position of the guest view within the
-      // embedder, as well as the fact that the embedder's host will add its
-      // offset in screen coordinates before sending the event (with the latter
-      // component just serving to confuse the renderer, hence why it should be
-      // removed).
-      gfx::Vector2d offset = GetViewBounds().origin() -
-          GetOwnerRenderWidgetHostView()->GetBoundsInRootWindow().origin();
-      blink::WebGestureEvent gesture_tap_event;
-      gesture_tap_event.sourceDevice = blink::WebGestureDeviceTouchscreen;
-      gesture_tap_event.type = blink::WebGestureEvent::GestureTapDown;
-      gesture_tap_event.x = event.touches[0].position.x + offset.x();
-      gesture_tap_event.y = event.touches[0].position.y + offset.y();
-      gesture_tap_event.globalX = event.touches[0].screenPosition.x;
-      gesture_tap_event.globalY = event.touches[0].screenPosition.y;
-      GetOwnerRenderWidgetHostView()->ProcessGestureEvent(gesture_tap_event,
-                                                          ui::LatencyInfo());
-      gesture_tap_event.type = blink::WebGestureEvent::GestureTapCancel;
-      GetOwnerRenderWidgetHostView()->ProcessGestureEvent(gesture_tap_event,
-                                                          ui::LatencyInfo());
-    }
+    MaybeSendSyntheticTapGesture(event.touches[0].position,
+                                 event.touches[0].screenPosition);
   }
 
   host_->ForwardTouchEventWithLatencyInfo(event, latency);
@@ -246,8 +246,14 @@ gfx::Size RenderWidgetHostViewGuest::GetPhysicalBackingSize() const {
   return RenderWidgetHostViewBase::GetPhysicalBackingSize();
 }
 
-base::string16 RenderWidgetHostViewGuest::GetSelectedText() const {
+base::string16 RenderWidgetHostViewGuest::GetSelectedText() {
   return platform_view_->GetSelectedText();
+}
+
+void RenderWidgetHostViewGuest::SetNeedsBeginFrames(
+    bool needs_begin_frames) {
+ if (platform_view_)
+   platform_view_->SetNeedsBeginFrames(needs_begin_frames);
 }
 
 void RenderWidgetHostViewGuest::SetTooltipText(
@@ -295,7 +301,7 @@ void RenderWidgetHostViewGuest::OnSwapCompositorFrame(
     surface_factory_->Create(surface_id_);
 
     cc::SurfaceSequence sequence = cc::SurfaceSequence(
-        id_allocator_->id_namespace(), next_surface_sequence_++);
+        id_allocator_->client_id(), next_surface_sequence_++);
     // The renderer process will satisfy this dependency when it creates a
     // SurfaceLayer.
     cc::SurfaceManager* manager = GetSurfaceManager();
@@ -464,14 +470,6 @@ void RenderWidgetHostViewGuest::UnlockMouse() {
   return platform_view_->UnlockMouse();
 }
 
-void RenderWidgetHostViewGuest::GetScreenInfo(blink::WebScreenInfo* results) {
-  if (!guest_)
-    return;
-  RenderWidgetHostViewBase* embedder_view = GetOwnerRenderWidgetHostView();
-  if (embedder_view)
-    embedder_view->GetScreenInfo(results);
-}
-
 #if defined(OS_MACOSX)
 void RenderWidgetHostViewGuest::SetActive(bool active) {
   platform_view_->SetActive(active);
@@ -531,6 +529,35 @@ RenderWidgetHostViewGuest::GetOwnerRenderWidgetHostView() const {
       guest_->GetOwnerRenderWidgetHostView());
 }
 
+// TODO(wjmaclean): When we remove BrowserPlugin, delete this code.
+// http://crbug.com/533069
+void RenderWidgetHostViewGuest::MaybeSendSyntheticTapGesture(
+    const blink::WebFloatPoint& position,
+    const blink::WebFloatPoint& screenPosition) const {
+  if (!HasFocus()) {
+    // We need to a account for the position of the guest view within the
+    // embedder, as well as the fact that the embedder's host will add its
+    // offset in screen coordinates before sending the event (with the latter
+    // component just serving to confuse the renderer, hence why it should be
+    // removed).
+    gfx::Vector2d offset =
+        GetViewBounds().origin() -
+        GetOwnerRenderWidgetHostView()->GetBoundsInRootWindow().origin();
+    blink::WebGestureEvent gesture_tap_event;
+    gesture_tap_event.sourceDevice = blink::WebGestureDeviceTouchscreen;
+    gesture_tap_event.type = blink::WebGestureEvent::GestureTapDown;
+    gesture_tap_event.x = position.x + offset.x();
+    gesture_tap_event.y = position.y + offset.y();
+    gesture_tap_event.globalX = screenPosition.x;
+    gesture_tap_event.globalY = screenPosition.y;
+    GetOwnerRenderWidgetHostView()->ProcessGestureEvent(gesture_tap_event,
+                                                        ui::LatencyInfo());
+    gesture_tap_event.type = blink::WebGestureEvent::GestureTapCancel;
+    GetOwnerRenderWidgetHostView()->ProcessGestureEvent(gesture_tap_event,
+                                                        ui::LatencyInfo());
+  }
+}
+
 void RenderWidgetHostViewGuest::WheelEventAck(
     const blink::WebMouseWheelEvent& event,
     InputEventAckState ack_result) {
@@ -588,7 +615,7 @@ void RenderWidgetHostViewGuest::OnHandleInputEvent(
         static_cast<const blink::WebMouseEvent&>(*event);
     // A MouseDown on the ButtonRight could suggest a ContextMenu.
     if (guest_ && mouse_event.type == blink::WebInputEvent::MouseDown &&
-        mouse_event.button == blink::WebPointerProperties::ButtonRight)
+        mouse_event.button == blink::WebPointerProperties::Button::Right)
       guest_->SetContextMenuPosition(
           gfx::Point(mouse_event.globalX - GetViewBounds().x(),
                      mouse_event.globalY - GetViewBounds().y()));

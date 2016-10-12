@@ -62,6 +62,8 @@ fast/harness/sample-fail-mismatch-reftest.html [ WontFix ]
 
 # Mac does not have menu key.
 [ Mac ] editing/spelling/spelling-on-context-menu-key.html [ WontFix ]
+[ Mac ] fast/events/context-menu-key-shift-f10-modifiers.html [ WontFix ]
+[ Mac ] fast/events/context-menu-key-shift-f10-prevent-default.html [ WontFix ]
 [ Mac ] fast/events/menu-key-context-menu-document.html [ WontFix ]
 [ Mac ] fast/events/menu-key-context-menu.html [ WontFix ]
 [ Mac ] fast/events/menu-key-context-menu-position.html [ WontFix ]
@@ -88,6 +90,14 @@ fast/harness/sample-fail-mismatch-reftest.html [ WontFix ]
 
 # Tests in media/stable are only supposed to be run as virtual test (see virtual/stable/media).
 media/stable [ WontFix ]
+
+# These tests are only supposed be run as virtual test. See /virtual/media-gpu-accelerated/http/tests/media/media-source/.
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-av-audio-bitrate.html [ WontFix ]
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-av-framesize.html [ WontFix ]
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-av-video-bitrate.html [ WontFix ]
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-v-bitrate.html [ WontFix ]
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-v-framerate.html [ WontFix ]
+[ Android ] http/tests/media/media-source/mediasource-config-change-mp4-v-framesize.html [ WontFix ]
 
 # Only run fake-Android tests on Linux
 [ Mac Win ] virtual/android [ WontFix ]
@@ -170,3 +180,6 @@ crbug.com/551843 [ Linux Win ] fast/text/emoji-font-weight-mac.html [ WontFix ]
 # pass in the virtual test suite version.
 webkit.org/b/49629 compositing/lots-of-img-layers.html [ WontFix ]
 webkit.org/b/49629 compositing/lots-of-img-layers-with-opacity.html [ WontFix ]
+
+# Only Windows supports Symbol CMAP encoded fonts.
+crbug.com/627953 [ Android Linux Mac ] fast/text/symbol-cmap.html [ WontFix ]

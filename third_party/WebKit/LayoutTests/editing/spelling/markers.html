@@ -17,9 +17,8 @@
 description("Tests spelling and grammar markers for misspellings.");
 
 jsTestIsAsync = true;
-
-if (window.internals)
-    internals.settings.setUnifiedTextCheckerEnabled(true);
+if (window.testRunner)
+    testRunner.setMockSpellCheckerEnabled(true);
 
 function createEditableElement(parent) {
     var e = document.createElement('div');

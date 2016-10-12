@@ -52,7 +52,7 @@
           },
           referenceFunction: linearResult,
           automationTime: 4 * renderQuantum / sampleRate,
-          thresholdSetTarget: 2.19417e-7,
+          thresholdSetTarget: 3.43632e-7,
           thresholdRamp: 1.07972e-6
         }).then(done);
       });
@@ -66,7 +66,7 @@
           referenceFunction: exponentialResult,
           automationTime: renderQuantum / sampleRate,
           thresholdSetTarget: 0,
-          thresholdRamp: 1.13249e-5
+          thresholdRamp: 1.14441e-5
         }).then(done);
       });
 
@@ -78,8 +78,8 @@
           },
           referenceFunction: exponentialResult,
           automationTime: 4 * renderQuantum / sampleRate,
-          thresholdSetTarget: 2.19417e-7,
-          thresholdRamp: 4.17233e-6
+          thresholdSetTarget: 3.43632e-7,
+          thresholdRamp: 4.29154e-6
         }).then(done);
       });
 
@@ -215,9 +215,8 @@
           // Verify the ramp part of the curve
           startIndex += length;
           length = expected.rampPart.length;
-          success = Should(prefix, result.slice(startIndex, startIndex + length), {
-              verbose: true
-            }).beCloseToArray(expected.rampPart, thresholdRamp) && success;
+          success = Should(prefix, result.slice(startIndex, startIndex + length))
+            .beCloseToArray(expected.rampPart, thresholdRamp) && success;
 
           // Verify that the end of the curve after the ramp (if any) is a constant.
           startIndex += length;

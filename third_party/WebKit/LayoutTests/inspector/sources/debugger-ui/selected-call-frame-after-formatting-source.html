@@ -24,14 +24,14 @@ var test = function()
 
     function step1()
     {
-        var testName = InspectorTest.resourceTreeModel.inspectedPageURL();
+        var testName = InspectorTest.mainTarget.inspectedURL();
         testName = testName.substring(testName.lastIndexOf('/') + 1);
         InspectorTest.showScriptSource(testName, step2);
     }
 
     function step2(frame)
     {
-        sourceFrame = frame; 
+        sourceFrame = frame;
         InspectorTest.runTestFunctionAndWaitUntilPaused(step3);
     }
 
@@ -44,7 +44,7 @@ var test = function()
 
     function step4()
     {
-        InspectorTest.assertEquals("testFunction", InspectorTest.debuggerModel.selectedCallFrame().functionName);
+        InspectorTest.assertEquals("testFunction", WebInspector.context.flavor(WebInspector.DebuggerModel.CallFrame).functionName);
         sourceFrame._toggleFormatSource(step5);
     }
 

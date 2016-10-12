@@ -11,7 +11,7 @@
         {
           "object": "LayoutBlockFlow (positioned) DIV",
           "rect": [158, 74, 50, 50],
-          "reason": "bounds change"
+          "reason": "style change"
         },
         {
           "object": "LayoutBlockFlow (positioned) DIV",
@@ -32,7 +32,7 @@
     },
     {
       "object": "LayoutBlockFlow (positioned) DIV",
-      "reason": "bounds change"
+      "reason": "style change"
     }
   ]
 }

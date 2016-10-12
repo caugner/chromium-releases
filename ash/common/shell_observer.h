@@ -14,9 +14,6 @@ class WmWindow;
 
 class ASH_EXPORT ShellObserver {
  public:
-  // Invoked after the screen's work area insets changes.
-  virtual void OnDisplayWorkAreaInsetsChanged() {}
-
   // Invoked when the user logs in.
   virtual void OnLoginStateChanged(LoginStatus status) {}
 
@@ -66,6 +63,9 @@ class ASH_EXPORT ShellObserver {
   // Called when the always maximize mode has ended. Windows may still be
   // animating but have been restored.
   virtual void OnMaximizeModeEnded() {}
+
+  // Called when keyboard is activated/deactivated.
+  virtual void OnVirtualKeyboardStateChanged(bool activated) {}
 
   // Called at the end of Shell::Init.
   virtual void OnShellInitialized() {}

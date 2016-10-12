@@ -264,6 +264,14 @@ interface BlobEvent : Event
     attribute @@toStringTag
     getter data
     method constructor
+interface BroadcastChannel : EventTarget
+    attribute @@toStringTag
+    getter name
+    getter onmessage
+    method close
+    method constructor
+    method postMessage
+    setter onmessage
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -429,6 +437,7 @@ interface CanvasRenderingContext2D
     getter globalAlpha
     getter globalCompositeOperation
     getter imageSmoothingEnabled
+    getter imageSmoothingQuality
     getter lineCap
     getter lineDashOffset
     getter lineJoin
@@ -489,6 +498,7 @@ interface CanvasRenderingContext2D
     setter globalAlpha
     setter globalCompositeOperation
     setter imageSmoothingEnabled
+    setter imageSmoothingQuality
     setter lineCap
     setter lineDashOffset
     setter lineJoin
@@ -515,12 +525,15 @@ interface CharacterData : Node
     getter length
     getter nextElementSibling
     getter previousElementSibling
+    method after
     method appendData
+    method before
     method constructor
     method deleteData
     method insertData
     method remove
     method replaceData
+    method replaceWith
     method substringData
     setter data
 interface ClientRect
@@ -589,6 +602,12 @@ interface CryptoKey
     getter type
     getter usages
     method constructor
+interface CustomElementRegistry
+    attribute @@toStringTag
+    method constructor
+    method define
+    method get
+    method whenDefined
 interface CustomEvent : Event
     attribute @@toStringTag
     getter detail
@@ -878,6 +897,7 @@ interface Document : Node
     getter xmlStandalone
     getter xmlVersion
     method adoptNode
+    method append
     method caretRangeFromPoint
     method close
     method constructor
@@ -912,6 +932,7 @@ interface Document : Node
     method hasFocus
     method importNode
     method open
+    method prepend
     method queryCommandEnabled
     method queryCommandIndeterm
     method queryCommandState
@@ -1018,8 +1039,10 @@ interface DocumentFragment : Node
     getter children
     getter firstElementChild
     getter lastElementChild
+    method append
     method constructor
     method getElementById
+    method prepend
     method querySelector
     method querySelectorAll
 interface DocumentType : Node
@@ -1028,8 +1051,11 @@ interface DocumentType : Node
     getter name
     getter publicId
     getter systemId
+    method after
+    method before
     method constructor
     method remove
+    method replaceWith
 interface DragEvent : MouseEvent
     attribute @@toStringTag
     getter dataTransfer
@@ -1084,8 +1110,11 @@ interface Element : Node
     getter shadowRoot
     getter slot
     getter tagName
+    method after
     method animate
+    method append
     method attachShadow
+    method before
     method closest
     method constructor
     method createShadowRoot
@@ -1106,12 +1135,14 @@ interface Element : Node
     method insertAdjacentHTML
     method insertAdjacentText
     method matches
+    method prepend
     method querySelector
     method querySelectorAll
     method remove
     method removeAttribute
     method removeAttributeNS
     method removeAttributeNode
+    method replaceWith
     method requestPointerLock
     method scrollIntoView
     method scrollIntoViewIfNeeded
@@ -1225,22 +1256,6 @@ interface File : Blob
     getter lastModifiedDate
     getter name
     getter webkitRelativePath
-    method constructor
-interface FileError : DOMError
-    attribute @@toStringTag
-    attribute ABORT_ERR
-    attribute ENCODING_ERR
-    attribute INVALID_MODIFICATION_ERR
-    attribute INVALID_STATE_ERR
-    attribute NOT_FOUND_ERR
-    attribute NOT_READABLE_ERR
-    attribute NO_MODIFICATION_ALLOWED_ERR
-    attribute PATH_EXISTS_ERR
-    attribute QUOTA_EXCEEDED_ERR
-    attribute SECURITY_ERR
-    attribute SYNTAX_ERR
-    attribute TYPE_MISMATCH_ERR
-    getter code
     method constructor
 interface FileList
     attribute @@toStringTag
@@ -1397,6 +1412,7 @@ interface HTMLAreaElement : HTMLElement
     attribute @@toStringTag
     getter alt
     getter coords
+    getter download
     getter hash
     getter host
     getter hostname
@@ -1409,6 +1425,7 @@ interface HTMLAreaElement : HTMLElement
     getter port
     getter protocol
     getter referrerPolicy
+    getter rel
     getter search
     getter shape
     getter target
@@ -1417,6 +1434,7 @@ interface HTMLAreaElement : HTMLElement
     method toString
     setter alt
     setter coords
+    setter download
     setter hash
     setter host
     setter hostname
@@ -1428,6 +1446,7 @@ interface HTMLAreaElement : HTMLElement
     setter port
     setter protocol
     setter referrerPolicy
+    setter rel
     setter search
     setter shape
     setter target
@@ -3025,7 +3044,6 @@ interface KeyboardEvent : UIEvent
     getter ctrlKey
     getter key
     getter keyCode
-    getter keyIdentifier
     getter location
     getter metaKey
     getter repeat
@@ -3450,6 +3468,7 @@ interface Node : EventTarget
     method compareDocumentPosition
     method constructor
     method contains
+    method getRootNode
     method hasChildNodes
     method insertBefore
     method isDefaultNamespace
@@ -3644,8 +3663,10 @@ interface PerformanceResourceTiming : PerformanceEntry
     attribute @@toStringTag
     getter connectEnd
     getter connectStart
+    getter decodedBodySize
     getter domainLookupEnd
     getter domainLookupStart
+    getter encodedBodySize
     getter fetchStart
     getter initiatorType
     getter redirectEnd
@@ -3654,6 +3675,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter responseEnd
     getter responseStart
     getter secureConnectionStart
+    getter transferSize
     getter workerStart
     method constructor
 interface PerformanceTiming
@@ -3787,10 +3809,16 @@ interface PushManager
 interface PushSubscription
     attribute @@toStringTag
     getter endpoint
+    getter options
     method constructor
     method getKey
     method toJSON
     method unsubscribe
+interface PushSubscriptionOptions
+    attribute @@toStringTag
+    getter applicationServerKey
+    getter userVisibleOnly
+    method constructor
 interface RTCCertificate
     attribute @@toStringTag
     getter expires
@@ -4986,14 +5014,6 @@ interface SVGViewSpec
     getter zoomAndPan
     method constructor
     setter zoomAndPan
-interface SVGZoomEvent : UIEvent
-    attribute @@toStringTag
-    getter newScale
-    getter newTranslate
-    getter previousScale
-    getter previousTranslate
-    getter zoomRectScreen
-    method constructor
 interface Screen
     attribute @@toStringTag
     getter availHeight
@@ -5075,6 +5095,7 @@ interface ServiceWorker : EventTarget
     setter onstatechange
 interface ServiceWorkerContainer : EventTarget
     attribute @@toStringTag
+    getter controller
     getter oncontrollerchange
     getter onmessage
     getter ready
@@ -5094,10 +5115,13 @@ interface ServiceWorkerMessageEvent : Event
     method constructor
 interface ServiceWorkerRegistration : EventTarget
     attribute @@toStringTag
+    getter active
+    getter installing
     getter onupdatefound
     getter pushManager
     getter scope
     getter sync
+    getter waiting
     method constructor
     method getNotifications
     method showNotification
@@ -5367,7 +5391,6 @@ interface TouchEvent : UIEvent
     getter targetTouches
     getter touches
     method constructor
-    method initTouchEvent
 interface TouchList
     attribute @@toStringTag
     getter length
@@ -6342,7 +6365,6 @@ interface webkitMediaStream : EventTarget
     getter id
     getter onactive
     getter onaddtrack
-    getter onended
     getter oninactive
     getter onremovetrack
     method addTrack
@@ -6355,7 +6377,6 @@ interface webkitMediaStream : EventTarget
     method removeTrack
     setter onactive
     setter onaddtrack
-    setter onended
     setter oninactive
     setter onremovetrack
 interface webkitOfflineAudioContext : AudioContext
@@ -6508,12 +6529,14 @@ interface webkitURL
     attribute closed
     attribute console
     attribute crypto
+    attribute customElements
     attribute defaultStatus
     attribute defaultstatus
     attribute devicePixelRatio
     attribute document
     attribute event
     attribute eventSender
+    attribute external
     attribute frameElement
     attribute frames
     attribute gamepadController

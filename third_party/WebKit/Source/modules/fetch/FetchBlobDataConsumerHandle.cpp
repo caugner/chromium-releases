@@ -76,8 +76,10 @@ public:
             m_updater->update(createUnexpectedErrorDataConsumerHandle());
         if (m_loader) {
             m_loader->cancel();
-            m_loader.reset();
+            m_loader = nullptr;
         }
+        if (!m_registeredBlobURL.isEmpty())
+            BlobRegistry::revokePublicBlobURL(m_registeredBlobURL);
     }
 
     void start(ExecutionContext* executionContext) override
@@ -85,17 +87,17 @@ public:
         ASSERT(executionContext->isContextThread());
         ASSERT(!m_loader);
 
-        KURL url = BlobURL::createPublicURL(executionContext->getSecurityOrigin());
-        if (url.isEmpty()) {
+        m_registeredBlobURL = BlobURL::createPublicURL(executionContext->getSecurityOrigin());
+        if (m_registeredBlobURL.isEmpty()) {
             m_updater->update(createUnexpectedErrorDataConsumerHandle());
             return;
         }
-        BlobRegistry::registerPublicBlobURL(executionContext->getSecurityOrigin(), url, m_blobDataHandle);
+        BlobRegistry::registerPublicBlobURL(executionContext->getSecurityOrigin(), m_registeredBlobURL, m_blobDataHandle);
 
         m_loader = createLoader(executionContext, this);
         ASSERT(m_loader);
 
-        ResourceRequest request(url);
+        ResourceRequest request(m_registeredBlobURL);
         request.setRequestContext(WebURLRequest::RequestContextInternal);
         request.setUseStreamOnResponse(true);
         // We intentionally skip 'setExternalRequestStateFromRequestorAddressSpace', as 'data:' can never be external.
@@ -103,7 +105,7 @@ public:
     }
 
 private:
-    std::unique_ptr<ThreadableLoader> createLoader(ExecutionContext* executionContext, ThreadableLoaderClient* client) const
+    ThreadableLoader* createLoader(ExecutionContext* executionContext, ThreadableLoaderClient* client) const
     {
         ThreadableLoaderOptions options;
         options.preflightPolicy = ConsiderPreflight;
@@ -134,14 +136,14 @@ private:
 
     void didFinishLoading(unsigned long, double) override
     {
-        m_loader.reset();
+        m_loader = nullptr;
     }
 
     void didFail(const ResourceError&) override
     {
         if (!m_receivedResponse)
             m_updater->update(createUnexpectedErrorDataConsumerHandle());
-        m_loader.reset();
+        m_loader = nullptr;
     }
 
     void didFailRedirectCheck() override
@@ -154,14 +156,15 @@ private:
 
     RefPtr<BlobDataHandle> m_blobDataHandle;
     Persistent<FetchBlobDataConsumerHandle::LoaderFactory> m_loaderFactory;
-    std::unique_ptr<ThreadableLoader> m_loader;
+    Persistent<ThreadableLoader> m_loader;
+    KURL m_registeredBlobURL;
 
     bool m_receivedResponse;
 };
 
 class DefaultLoaderFactory final : public FetchBlobDataConsumerHandle::LoaderFactory {
 public:
-    std::unique_ptr<ThreadableLoader> create(
+    ThreadableLoader* create(
         ExecutionContext& executionContext,
         ThreadableLoaderClient* client,
         const ThreadableLoaderOptions& options,
@@ -308,9 +311,9 @@ std::unique_ptr<FetchDataConsumerHandle> FetchBlobDataConsumerHandle::create(Exe
     return wrapUnique(new FetchBlobDataConsumerHandle(executionContext, blobDataHandle, new DefaultLoaderFactory));
 }
 
-FetchDataConsumerHandle::Reader* FetchBlobDataConsumerHandle::obtainReaderInternal(Client* client)
+std::unique_ptr<FetchDataConsumerHandle::Reader> FetchBlobDataConsumerHandle::obtainFetchDataReader(Client* client)
 {
-    return m_readerContext->obtainReader(client).release();
+    return m_readerContext->obtainReader(client);
 }
 
 } // namespace blink

@@ -48,16 +48,16 @@
         floatRelError: 2.3906e-5
       }, {
         order: 10,
-        floatRelError: 1.2765e-5
+        floatRelError: 2.0483e-5
       }, {
         order: 11,
-        floatRelError: 8.4920e-6,
+        floatRelError: 1.3456e-5
       }, {
         order: 12,
-        floatRelError: 4.3344e-7
+        floatRelError: 4.6116e-7
       }, {
         order: 13,
-        floatRelError: 3.1314e-7
+        floatRelError: 3.2106e-7
       }, {
         order: 14,
         floatRelError: 1.1756e-7
@@ -184,9 +184,13 @@
           var minValue = Math.min(...expected);
           var maxValue = Math.max(...expected);
 
-          basicTestsPassed = Should("Min FFT value", minValue)
+          basicTestsPassed = Should("Min FFT value", minValue, {
+              brief: true
+            })
             .beLessThanOrEqualTo(analyser.minDecibels) && basicTestsPassed;
-          basicTestsPassed = Should("Max FFT value", maxValue)
+          basicTestsPassed = Should("Max FFT value", maxValue, {
+              brief: true
+            })
             .beGreaterThanOrEqualTo(analyser.maxDecibels) && basicTestsPassed;
 
           // Test the byte frequency data.
@@ -198,9 +202,8 @@
           var expectedByteData = convertFloatToByte(expected, analyser.minDecibels,
             analyser.maxDecibels);
 
-          basicTestsPassed = Should(analyser.fftSize + "-point byte FFT", byteFreqData, {
-            verbose: true
-          }).beCloseToArray(expectedByteData, 0) && basicTestsPassed;
+          basicTestsPassed = Should(analyser.fftSize + "-point byte FFT", byteFreqData)
+            .beCloseToArray(expectedByteData, 0) && basicTestsPassed;
 
         }).then(context.resume.bind(context));
 

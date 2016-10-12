@@ -22,20 +22,11 @@
           "object": "LayoutSVGInlineText #text",
           "rect": [90, 116, 44, 17],
           "reason": "layoutObject insertion"
-        },
-        {
-          "object": "LayoutSVGText text id='status'",
-          "rect": [89, 115, 3, 19],
-          "reason": "invalidate paint rectangle"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
-    {
-      "object": "LayoutSVGText text id='status'",
-      "reason": "invalidate paint rectangle"
-    },
     {
       "object": "LayoutSVGInlineText #text",
       "reason": "layoutObject removal"

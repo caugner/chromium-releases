@@ -4,15 +4,15 @@ InspectorTest.preloadPanel("elements");
 
 InspectorTest.inlineStyleSection = function()
 {
-    return WebInspector.panels.elements.sidebarPanes.styles._sectionBlocks[0].sections[0];
+    return WebInspector.panels.elements._stylesWidget._sectionBlocks[0].sections[0];
 }
 
 InspectorTest.computedStyleWidget = function()
 {
-    return WebInspector.panels.elements.sidebarPanes.computedStyle.children()[0]
+    return WebInspector.panels.elements._computedStyleWidget;
 }
 
-InspectorTest.dumpComputedStyle = function()
+InspectorTest.dumpComputedStyle = function(doNotAutoExpand)
 {
     var computed = InspectorTest.computedStyleWidget();
     var treeOutline = computed._propertiesOutline;
@@ -26,6 +26,8 @@ InspectorTest.dumpComputedStyle = function()
         dumpText += " ";
         dumpText += treeElement.title.querySelector(".property-value").textContent;
         InspectorTest.addResult(dumpText);
+        if (doNotAutoExpand && !treeElement.expanded)
+            continue;
         for (var trace of treeElement.children()) {
             var title = trace.title;
             var dumpText = "";
@@ -50,14 +52,14 @@ InspectorTest.findComputedPropertyWithName = function(name)
     for (var treeElement of children) {
         var property = treeElement[WebInspector.ComputedStyleWidget._propertySymbol];
         if (property.name === name)
-            return treeElement.title;
+            return treeElement;
     }
     return null;
 }
 
 InspectorTest.firstMatchedStyleSection = function()
 {
-    return WebInspector.panels.elements.sidebarPanes.styles._sectionBlocks[0].sections[1];
+    return WebInspector.panels.elements._stylesWidget._sectionBlocks[0].sections[1];
 }
 
 InspectorTest.firstMediaTextElementInSection = function(section)
@@ -297,12 +299,12 @@ InspectorTest.filterMatchedStyles = function(text)
 {
     var regex = text ? new RegExp(text, "i") : null;
     InspectorTest.addResult("Filtering styles by: " + text);
-    WebInspector.panels.elements.sidebarPanes.styles.onFilterChanged(regex);
+    WebInspector.panels.elements._stylesWidget.onFilterChanged(regex);
 }
 
 InspectorTest.dumpRenderedMatchedStyles = function()
 {
-    var sectionBlocks = WebInspector.panels.elements.sidebarPanes.styles._sectionBlocks;
+    var sectionBlocks = WebInspector.panels.elements._stylesWidget._sectionBlocks;
     for (var block of sectionBlocks) {
         for (var section of block.sections) {
             // Skip sections which were filtered out.
@@ -350,7 +352,7 @@ InspectorTest.dumpRenderedMatchedStyles = function()
 
 InspectorTest.dumpSelectedElementStyles = function(excludeComputed, excludeMatched, omitLonghands, includeSelectorGroupMarks)
 {
-    var sectionBlocks = WebInspector.panels.elements.sidebarPanes.styles._sectionBlocks;
+    var sectionBlocks = WebInspector.panels.elements._stylesWidget._sectionBlocks;
     if (!excludeComputed)
         InspectorTest.dumpComputedStyle();
     for (var block of sectionBlocks) {
@@ -434,14 +436,18 @@ InspectorTest.toggleMatchedStyleProperty = function(propertyName, checked)
 
 InspectorTest.eventListenersWidget = function()
 {
-    var sidebarPane = WebInspector.panels.elements.sidebarPanes.eventListeners;
-    sidebarPane.expand();
-    return sidebarPane.children()[0];
+    WebInspector.viewManager.showView("elements.eventListeners");
+    return self.runtime.sharedInstance(WebInspector.EventListenersWidget);
+}
+
+InspectorTest.showEventListenersWidget = function()
+{
+    return WebInspector.viewManager.showView("elements.eventListeners");
 }
 
 InspectorTest.expandAndDumpSelectedElementEventListeners = function(callback)
 {
-    InspectorTest.expandAndDumpEventListeners(InspectorTest.eventListenersWidget()._eventListenersView, null, callback);
+    InspectorTest.expandAndDumpEventListeners(InspectorTest.eventListenersWidget()._eventListenersView, callback);
 }
 
 InspectorTest.dumpObjectPropertySectionDeep = function(section)
@@ -476,7 +482,7 @@ InspectorTest.getElementStylePropertyTreeItem = function(propertyName)
 // FIXME: this returns the first tree item found (may fail for same-named properties in a style).
 InspectorTest.getMatchedStylePropertyTreeItem = function(propertyName)
 {
-    var sectionBlocks = WebInspector.panels.elements.sidebarPanes.styles._sectionBlocks;
+    var sectionBlocks = WebInspector.panels.elements._stylesWidget._sectionBlocks;
     for (var block of sectionBlocks) {
         for (var section of block.sections) {
             var treeItem = InspectorTest.getFirstPropertyTreeItemForSection(section, propertyName);
@@ -928,7 +934,7 @@ InspectorTest.matchingSelectors = function(matchedStyles, rule)
 InspectorTest.addNewRuleInStyleSheet = function(styleSheetHeader, selector, callback)
 {
     InspectorTest.addSniffer(WebInspector.StylesSidebarPane.prototype, "_addBlankSection", onBlankSection.bind(null, selector, callback));
-    WebInspector.panels.elements.sidebarPanes.styles._createNewRuleInStyleSheet(styleSheetHeader);
+    WebInspector.panels.elements._stylesWidget._createNewRuleInStyleSheet(styleSheetHeader);
 }
 
 InspectorTest.addNewRule = function(selector, callback)

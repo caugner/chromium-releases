@@ -12,11 +12,6 @@
   },
   {
     "prefix": "threaded",
-    "base": "fast/canvas-toBlob",
-    "args": ["--enable-threaded-compositing"]
-  },
-  {
-    "prefix": "threaded",
     "base": "compositing/visibility",
     "args": ["--enable-threaded-compositing"]
   },
@@ -74,6 +69,11 @@
   },
   {
     "prefix": "stable",
+    "base": "http/tests/navigation",
+    "args": ["--stable-release-mode"]
+  },
+  {
+    "prefix": "stable",
     "base": "animations-unprefixed",
     "args": ["--stable-release-mode"]
   },
@@ -91,6 +91,16 @@
              "--force-overlay-fullscreen-video", "--enable-overlay-scrollbars", "--enable-overscroll-notifications",
              "--enable-fixed-layout", "--enable-viewport", "--disable-canvas-aa",
              "--disable-composited-antialiasing"]
+  },
+  {
+    "prefix": "media-gpu-accelerated",
+    "base": "http/tests/media/media-source",
+    "args": ["--use-gpu-in-tests"]
+  },
+  {
+    "prefix": "media-gpu-accelerated",
+    "base": "media",
+    "args": ["--use-gpu-in-tests"]
   },
   {
     "prefix": "android",
@@ -161,6 +171,12 @@
     "prefix": "mediasession",
     "base": "media/mediasession",
     "args": ["--enable-blink-features=MediaSession"]
+  },
+  {
+    "prefix": "mse-1mb-buffers",
+    "base": "http/tests/media/media-source/stream_memory_tests",
+    "args": ["--mse-audio-buffer-size-limit=1048576",
+             "--mse-video-buffer-size-limit=1048576"]
   },
   {
     "prefix": "sharedarraybuffer",
@@ -247,5 +263,25 @@
     "prefix": "asyncawait",
     "base": "inspector/sources/debugger-async/async-await",
     "args": ["--js-flags=--harmony-async-await"]
+  },
+  {
+    "prefix": "wheelscrolllatching",
+    "base": "fast/events/wheel",
+    "args": ["--enable-features=TouchpadAndWheelScrollLatching"]
+  },
+  {
+    "prefix": "parsehtmlonmainthread_sync",
+    "base": "fast/parser",
+    "args": ["--blink-settings=parseHTMLOnMainThreadSyncTokenize=true"]
+  },
+  {
+    "prefix": "parsehtmlonmainthread_coalesce",
+    "base": "fast/parser",
+    "args": ["--disable-blink-features=ParseHTMLOnMainThread", "--blink-settings=parseHTMLOnMainThreadCoalesceChunks=true"]
+  },
+  {
+    "prefix": "mojo-loading",
+    "base": "webexposed",
+    "args": ["--enable-blink-features=LoadingWithMojo"]
   }
 ]

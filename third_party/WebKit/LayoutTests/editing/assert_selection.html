@@ -2,7 +2,6 @@
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
 <script src="assert_selection.js"></script>
-<div id="log"></div>
 <script>
 function checked_assert_selection(input, command, output) {
     try {
@@ -14,6 +13,7 @@ function checked_assert_selection(input, command, output) {
 }
 
 test(() => {
+    assert_selection('foo', 'noop', 'foo');
     assert_selection('|foo', 'noop', '|foo');
     assert_selection('f|oo', 'noop', 'f|oo');
     assert_selection('foo|', 'noop', 'foo|');
@@ -61,9 +61,16 @@ test(() => {
 }, 'markers around table');
 
 test(() => {
-    assert_equals(checked_assert_selection('foo', 'noop', 'baz'),
-        'You should specify caret position in "foo".');
-}, 'no marker in input');
+    assert_selection(
+        '<div>foo</div>',
+        selection => {
+            let doc = selection.document;
+            doc.documentElement.replaceChild(
+                doc.createTextNode('baz'), doc.body);
+        },
+        '<html><head></head>baz</html>',
+        'Serialize document element instead of document.body when it is null.');
+}, 'result with out body');
 
 test(() => {
     assert_equals(checked_assert_selection('fo|o', 'noop', 'fo|o'),
@@ -109,4 +116,21 @@ test(() => {
     assert_equals(checked_assert_selection('|foo', 'noop', 'b^|az'),
         'You should have focus marker and should not have anchor marker if and only if selection is a caret in "b^|az".');
 }, 'anchor == foucs in output');
+
+// TODO: It's better to have more powerful diff like
+// |CreateUnifiedDiff()| in gtest or "Longest common substring"
+test(() => {
+    assert_equals(checked_assert_selection('foo', 'noop', 'foz'),
+        `LayoutTests/editing/assert_selection.html:8:9)\n` +
+        `\t expected foz,\n` +
+        `\t but got  foo,\n` +
+        `\t sameupto fo`);
+}, 'Compare result');
+
+test(() => {
+    assert_selection(
+        '<div contenteditable><p>^test|</p></div>',
+        'insertHTML <span style="color: green">green</span>',
+        '<div contenteditable><p><span style="color: green">green|</span></p></div>');
+}, 'multiple spaces in function');
 </script>

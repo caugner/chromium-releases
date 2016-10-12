@@ -249,66 +249,6 @@
           "reason": "bounds change"
         },
         {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 372, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 366, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 333, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 327, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 294, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableSection TBODY",
-          "rect": [67, 288, 46, 16],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 374, 46, 12],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 368, 46, 12],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 335, 46, 12],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 329, 46, 12],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 296, 46, 12],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutTableRow TR",
-          "rect": [67, 290, 46, 12],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutTableCell TD",
           "rect": [69, 374, 42, 12],
           "reason": "bounds change"
@@ -783,8 +723,40 @@
   ],
   "objectPaintInvalidations": [
     {
-      "object": "LayoutBlockFlow DIV id='spacer1' class='spacer'",
-      "reason": "became visible"
+      "object": "LayoutBlockFlow DIV class='outer'",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutBlockFlow DIV",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutBlockFlow (floating) DIV",
+      "reason": "bounds change"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutInline SPAN",
+      "reason": "bounds change"
+    },
+    {
+      "object": "InlineFlowBox",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "bounds change"
+    },
+    {
+      "object": "InlineTextBox 'x'",
+      "reason": "bounds change"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -820,11 +792,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer2' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -860,11 +828,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer3' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -900,11 +864,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer4' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -940,51 +900,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer5' class='spacer'",
-      "reason": "became visible"
-    },
-    {
-      "object": "LayoutBlockFlow DIV class='outer'",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow (floating) DIV",
-      "reason": "bounds change"
-    },
-    {
-      "object": "RootInlineBox",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutInline SPAN",
-      "reason": "bounds change"
-    },
-    {
-      "object": "InlineFlowBox",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "InlineTextBox 'x'",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer6' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutDeprecatedFlexibleBox DIV class='outer box'",
@@ -1020,11 +936,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer12' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutDeprecatedFlexibleBox DIV class='outer box'",
@@ -1060,11 +972,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer7' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutTable TABLE class='outer'",
@@ -1072,11 +980,11 @@
     },
     {
       "object": "LayoutTableSection TBODY",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableRow TR",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableCell TD",
@@ -1108,11 +1016,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer8' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutTable TABLE class='outer'",
@@ -1120,11 +1024,11 @@
     },
     {
       "object": "LayoutTableSection TBODY",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableRow TR",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableCell TD",
@@ -1156,11 +1060,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer14' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow (anonymous)",
@@ -1176,11 +1076,11 @@
     },
     {
       "object": "LayoutTableSection TBODY",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableRow TR",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutTableCell TD",
@@ -1212,15 +1112,11 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer9' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -1256,11 +1152,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer10' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -1296,11 +1188,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer11' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -1336,11 +1224,7 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow DIV id='spacer13' class='spacer'",
-      "reason": "became visible"
+      "reason": "location change"
     },
     {
       "object": "LayoutBlockFlow DIV class='outer'",
@@ -1380,11 +1264,11 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "location change"
     }
   ]
 }

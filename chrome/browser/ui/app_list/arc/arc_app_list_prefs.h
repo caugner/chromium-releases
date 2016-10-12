@@ -19,6 +19,7 @@
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/ui/app_list/arc/arc_default_app_list.h"
 #include "components/arc/common/app.mojom.h"
 #include "components/arc/instance_holder.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -49,7 +50,8 @@ class ArcAppListPrefs
     : public KeyedService,
       public arc::mojom::AppHost,
       public arc::InstanceHolder<arc::mojom::AppInstance>::Observer,
-      public arc::ArcAuthService::Observer {
+      public arc::ArcAuthService::Observer,
+      public ArcDefaultAppList::Delegate {
  public:
   struct AppInfo {
     AppInfo(const std::string& name,
@@ -135,6 +137,8 @@ class ArcAppListPrefs
         const arc::mojom::ArcPackageInfo& package_info) {}
     // Notifies that package has been uninstalled.
     virtual void OnPackageRemoved(const std::string& package_name) {}
+    // Notifies sync date type controller the model is ready to start.
+    virtual void OnPackageListInitialRefreshed() {}
 
     virtual void OnTaskOrientationLockRequested(
         int32_t task_id,
@@ -183,6 +187,11 @@ class ArcAppListPrefs
   // Constructs path to app icon for specific scale factor.
   base::FilePath GetIconPath(const std::string& app_id,
                              ui::ScaleFactor scale_factor) const;
+  // Constructs path to default app icon for specific scale factor. This path
+  // is used to resolve icon if no icon is available at |GetIconPath|.
+  base::FilePath MaybeGetIconPathForDefaultApp(
+      const std::string& app_id,
+      ui::ScaleFactor scale_factor) const;
 
   // Sets last launched time for the requested app.
   void SetLastLaunchTime(const std::string& app_id, const base::Time& time);
@@ -201,6 +210,10 @@ class ArcAppListPrefs
 
   // Returns true if app is registered.
   bool IsRegistered(const std::string& app_id) const;
+  // Returns true if app is a default app.
+  bool IsDefault(const std::string& app_id) const;
+  // Returns true if app is an OEM app.
+  bool IsOem(const std::string& app_id) const;
   // Returns true if app is a shortcut
   bool IsShortcut(const std::string& app_id) const;
 
@@ -211,6 +224,9 @@ class ArcAppListPrefs
   // arc::ArcAuthService::Observer:
   void OnOptInEnabled(bool enabled) override;
 
+  // ArcDefaultAppList::Delegate:
+  void OnDefaultAppsReady() override;
+
   // Removes app with the given app_id.
   void RemoveApp(const std::string& app_id);
 
@@ -218,8 +234,14 @@ class ArcAppListPrefs
     return app_instance_holder_;
   }
 
+  bool package_list_initial_refreshed() const {
+    return package_list_initial_refreshed_;
+  }
+
   std::unordered_set<std::string> GetAppsForPackage(
       const std::string& package_name) const;
+
+  void SetDefaltAppsReadyCallback(base::Closure callback);
 
  private:
   friend class ChromeLauncherControllerImplTest;
@@ -264,8 +286,20 @@ class ArcAppListPrefs
       int32_t task_id,
       const arc::mojom::OrientationLock orientation_lock) override;
 
+  void StartPrefs();
+
+  void UpdateDefaultAppsHiddenState();
+  void RegisterDefaultApps();
+
+  // Returns list of packages from prefs. If |installed| is set to true then
+  // returns currently installed packages. If not, returns list of packages that
+  // where uninstalled. Note, we store uninstall packages only for packages of
+  // default apps.
+  std::vector<std::string> GetPackagesFromPrefs(bool installed) const;
+
   void AddApp(const arc::mojom::AppInfo& app_info);
-  void AddAppAndShortcut(const std::string& name,
+  void AddAppAndShortcut(bool app_ready,
+                         const std::string& name,
                          const std::string& package_name,
                          const std::string& activity,
                          const std::string& intent_uri,
@@ -275,6 +309,13 @@ class ArcAppListPrefs
                          const bool shortcut,
                          const bool launchable,
                          arc::mojom::OrientationLock orientation_lock);
+  // Adds or updates local pref for given package.
+  void AddOrUpdatePackagePrefs(PrefService* prefs,
+                               const arc::mojom::ArcPackageInfo& package);
+  // Removes given package from local pref.
+  void RemovePackageFromPrefs(PrefService* prefs,
+                              const std::string& package_name);
+
   void DisableAllApps();
   void RemoveAllApps();
   std::vector<std::string> GetAppIdsNoArcEnabledCheck() const;
@@ -295,9 +336,9 @@ class ArcAppListPrefs
 
   // This checks if app is not registered yet and in this case creates
   // non-launchable app entry.
-  void MayAddNonLaunchableApp(const std::string& name,
-                              const std::string& package_name,
-                              const std::string& activity);
+  void MaybeAddNonLaunchableApp(const std::string& name,
+                                const std::string& package_name,
+                                const std::string& activity);
 
   // Reveals first app from provided package in app launcher if package is newly
   // installed by user. If all apps in package are hidden then app list is not
@@ -327,10 +368,16 @@ class ArcAppListPrefs
   bool is_initialized_ = false;
   // True if apps were restored.
   bool apps_restored_ = false;
+  // True is Arc package list has been refreshed once.
+  bool package_list_initial_refreshed_ = false;
 
   arc::ArcPackageSyncableService* sync_service_;
 
   mojo::Binding<arc::mojom::AppHost> binding_;
+
+  bool default_apps_ready_ = false;
+  ArcDefaultAppList default_apps_;
+  base::Closure default_apps_ready_callback_;
 
   base::WeakPtrFactory<ArcAppListPrefs> weak_ptr_factory_;
 
