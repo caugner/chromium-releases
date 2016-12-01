@@ -5,7 +5,7 @@ onload = function() {
     // Double rAF to ensure content is painted before scroll.
     requestAnimationFrame(function() {
         requestAnimationFrame(function() {
-            document.getElementById('scroller').scrollTo(0, 200);
+            document.getElementById('scroller').scrollTop = 200;
             if (window.testRunner)
                 window.testRunner.notifyDone();
         })

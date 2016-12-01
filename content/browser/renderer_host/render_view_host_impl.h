@@ -36,7 +36,6 @@
 #include "ui/base/window_open_disposition.h"
 
 class SkBitmap;
-struct ViewHostMsg_CreateWindow_Params;
 
 namespace content {
 
@@ -46,6 +45,10 @@ class SessionStorageNamespace;
 struct FileChooserFileInfo;
 struct FileChooserParams;
 struct FrameReplicationState;
+
+namespace mojom {
+class CreateNewWindowParams;
+}
 
 // This implements the RenderViewHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
@@ -216,12 +219,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // Tells the renderer view to focus the first (last if reverse is true) node.
   void SetInitialFocus(bool reverse);
 
-  // Notifies the RenderViewHost that its load state changed.
-  void LoadStateChanged(const GURL& url,
-                        const net::LoadStateWithParam& load_state,
-                        uint64_t upload_position,
-                        uint64_t upload_size);
-
   bool SuddenTerminationAllowed() const;
   void set_sudden_termination_allowed(bool enabled) {
     sudden_termination_allowed_ = enabled;
@@ -231,7 +228,7 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void CreateNewWindow(int32_t route_id,
                        int32_t main_frame_route_id,
                        int32_t main_frame_widget_route_id,
-                       const ViewHostMsg_CreateWindow_Params& params,
+                       const mojom::CreateNewWindowParams& params,
                        SessionStorageNamespace* session_storage_namespace);
 
   // Creates a new RenderWidget with the given route id.  |popup_type| indicates

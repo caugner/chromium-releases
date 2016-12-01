@@ -43,6 +43,15 @@
         }
     }
 
+    var localPathRegExp;
+    if (document.URL.startsWith("file:///")) {
+        var index = document.URL.indexOf("/imported/wpt");
+        if (index >= 0) {
+            var localPath = document.URL.substring("file:///".length, index + "/imported/wpt".length);
+            localPathRegExp = new RegExp(localPath.replace(/(\W)/g, "\\$1"), "g");
+        }
+    }
+
     // Sanitizes the given text for display in test results.
     function sanitize(text) {
         if (!text) {
@@ -51,7 +60,11 @@
         // Escape null characters, otherwise diff will think the file is binary.
         text = text.replace(/\0/g, "\\0");
         // Escape carriage returns as they break rietveld's difftools.
-        return text.replace(/\r/g, "\\r");
+        text = text.replace(/\r/g, "\\r");
+        // Replace machine-dependent path with "...".
+        if (localPathRegExp)
+            text = text.replace(localPathRegExp, "...");
+        return text;
     }
 
     // If the test has a meta tag named flags and the content contains "dom",
@@ -91,7 +104,8 @@
         didDispatchLoadEvent = true;
         window.removeEventListener('load', handleLoad);
         // Add synthetic input to pointer event manual tests
-        if(window.location.pathname.includes('imported/wpt/pointerevents/')) {
+        if(window.location.pathname.includes('imported/wpt/pointerevents/')
+            || window.location.pathname.includes('imported/wpt/uievents/')) {
             setTimeout(injectSyntheticInput, 0);
         }
     };

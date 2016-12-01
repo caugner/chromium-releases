@@ -26,6 +26,7 @@ const char kChromeUIBlobInternalsHost[] = "blob-internals";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
 const char kChromeUIGpuHost[] = "gpu";
 const char kChromeUIHistogramHost[] = "histograms";
+const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryExhaustHost[] = "memory-exhaust";
 const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
@@ -34,6 +35,7 @@ const char kChromeUINetworkErrorsListingHost[] = "network-errors";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIServiceWorkerInternalsHost[] = "serviceworker-internals";
 const char kChromeUITracingHost[] = "tracing";
+const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
 
 const char kChromeUIBadCastCrashURL[] = "chrome://badcastcrash";
@@ -60,5 +62,8 @@ const char kUnreachableWebDataURL[] = "data:text/html,chromewebdata";
 const char kChromeUINetworkViewCacheURL[] = "chrome://view-http-cache/";
 const char kChromeUIResourcesURL[] = "chrome://resources/";
 const char kChromeUIShorthangURL[] = "chrome://shorthang";
+
+const char kHttpSuboriginScheme[] = "http-so";
+const char kHttpsSuboriginScheme[] = "https-so";
 
 }  // namespace content

@@ -740,7 +740,7 @@ void InterstitialPageImpl::CreateNewWindow(
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
-    const ViewHostMsg_CreateWindow_Params& params,
+    const mojom::CreateNewWindowParams& params,
     SessionStorageNamespace* session_storage_namespace) {
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
@@ -943,7 +943,7 @@ TextInputManager* InterstitialPageImpl::GetTextInputManager() {
                                         ->GetTextInputManager();
 }
 
-void InterstitialPageImpl::GetScreenInfo(blink::WebScreenInfo* screen_info) {
+void InterstitialPageImpl::GetScreenInfo(ScreenInfo* screen_info) {
   WebContentsImpl* web_contents_impl =
       static_cast<WebContentsImpl*>(web_contents_);
   if (!web_contents_impl) {

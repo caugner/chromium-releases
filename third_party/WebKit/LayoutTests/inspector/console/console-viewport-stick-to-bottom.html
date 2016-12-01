@@ -81,20 +81,20 @@ function test()
         {
             var keyEvent = InspectorTest.createKeyEvent("a");
             viewport._contentElement.dispatchEvent(keyEvent);
-            consoleView._prompt._proxyElement.dispatchEvent(new Event('input'));
+            consoleView._promptElement.dispatchEvent(new Event('input'));
 
             dumpAndContinue(next);
         },
 
         function testViewportMutationsShouldPreserveStickToBottom(next)
         {
-            viewport._contentElement.children[1].innerText = "More than 2 lines: foo\n\nbar";
+            viewport._contentElement.lastChild.innerText = "More than 2 lines: foo\n\nbar";
             dumpAndContinue(onMessagesDumped);
 
             function onMessagesDumped()
             {
                 viewport.setStickToBottom(false);
-                viewport._contentElement.children[1].innerText = "More than 3 lines: foo\n\n\nbar";
+                viewport._contentElement.lastChild.innerText = "More than 3 lines: foo\n\n\nbar";
                 dumpAndContinue(next);
             }
         },
@@ -137,13 +137,13 @@ function test()
             var text = "Foo";
             for (var i = 0; i < viewportHeight; i++)
                 text += "\n";
-            consoleView._promptElement.textContent = text;
             WebInspector.ConsoleView.clearConsole();
+            consoleView._prompt.setText(text);
             viewport.element.scrollTop -= 10;
 
             var keyEvent = InspectorTest.createKeyEvent("a");
             viewport._contentElement.dispatchEvent(keyEvent);
-            consoleView._prompt._proxyElement.dispatchEvent(new Event('input'));
+            consoleView._promptElement.dispatchEvent(new Event('input'));
 
             dumpAndContinue(next);
         }
@@ -152,7 +152,7 @@ function test()
     function sendPageUp()
     {
         var keyEvent = InspectorTest.createKeyEvent("PageUp");
-        consoleView._prompt._proxyElement.dispatchEvent(keyEvent);
+        consoleView._prompt.element.dispatchEvent(keyEvent);
         viewport.element.scrollTop -= 10;
     }
 

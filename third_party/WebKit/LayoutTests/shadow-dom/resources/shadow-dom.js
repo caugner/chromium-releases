@@ -19,13 +19,15 @@ function convertTemplatesToShadowRootsWithin(node) {
     for (var i = 0; i < nodes.length; ++i) {
         var template = nodes[i];
         var mode = template.getAttribute("data-mode");
+        var delegatesFocus = template.hasAttribute("data-delegatesFocus");
         var parent = template.parentNode;
         parent.removeChild(template);
         var shadowRoot;
         if (!mode || mode == 'v0'){
             shadowRoot = parent.createShadowRoot();
         } else {
-            shadowRoot = parent.attachShadow({'mode': mode});
+            shadowRoot = parent.attachShadow({'mode': mode,
+                                              'delegatesFocus': delegatesFocus});
         }
         var expose = template.getAttribute("data-expose-as");
         if (expose)
@@ -190,4 +192,10 @@ function assert_event_path_equals(actual, expected) {
     assert_equals(actual[i][2], expected[i][2], 'relatedTarget at ' + i + ' should be same');
     assert_array_equals(actual[i][3], expected[i][3], 'composedPath at ' + i + ' should be same');
   }
+}
+
+function assert_background_color(path, color)
+{
+  assert_equals(window.getComputedStyle(getNodeInComposedTree(path)).backgroundColor, color,
+                'backgroundColor for ' + path + ' should be ' + color);
 }

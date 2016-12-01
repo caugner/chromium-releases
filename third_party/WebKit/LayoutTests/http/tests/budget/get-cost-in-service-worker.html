@@ -17,10 +17,11 @@
         var port;
 
         budgetServiceMock.then(mock => {
+          mock.setCost("silent-push", TEST_BUDGET_COST);
           getActiveServiceWorkerWithMessagePort(test, script, scope)
             .then(function(workerInfo) {
               port = workerInfo.port;
-              port.postMessage({command: 'getCost'});
+              port.postMessage({ command: 'getCost' });
 
               port.addEventListener('message', function(event) {
                 if (typeof event.data != 'object' || !event.data.command)

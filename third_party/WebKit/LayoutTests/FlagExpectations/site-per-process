@@ -4,10 +4,6 @@
 # https://crbug.com/611838 - regression when geolocation tests use JS mock.
 http/tests/security/powerfulFeatureRestrictions/geolocation-on-secure-origin-in-insecure-origin.html [ Timeout ]
 
-# https://crbug.com/611154 - DCHECK in NavigatorImpl::DidStartProvisionalLoad.
-http/tests/security/upgrade-insecure-requests/iframe-upgrade.https.html [ Crash ]
-http/tests/security/upgrade-insecure-requests/iframe-upgrade-csp.https.html [ Crash ]
-
 # https://crbug.com/582494 - [sigsegv / av] blink::Document::styleEngine.
 http/tests/security/mixedContent/insecure-plugin-in-iframe.html [ Crash ]
 
@@ -68,9 +64,6 @@ http/tests/security/contentSecurityPolicy/1.1/plugintypes-affects-cross-site-chi
 # https://crbug.com/615156 - Need to make IntersectionObserver work with OOPIFs.
 http/tests/intersection-observer/iframe-cross-origin.html [ Timeout ]
 
-# https://crbug.com/616608 - Test-generated mouse click doesn't work with --site-per-process.
-http/tests/security/referrer-policy-redirect-link.html [ Timeout ]
-
 # https://crbug.com/616626 - allow_universal_access_from_file_urls doesn't work with --site-per-process.
 http/tests/local/drag-over-remote-content.html [ Timeout ]
 
@@ -98,3 +91,63 @@ http/tests/inspector/extensions-useragent.html [ Timeout ]
 # https://crbug.com/623265 - cross-site navigation in main page breaks test.
 http/tests/inspector/indexeddb/resources-panel.html [ Timeout ]
 
+# https://crbug.com/645641 - test_runner.cc(1863) Check failed:
+# layout_test_runtime_flags_.have_top_loading_frame()
+imported/wpt/html/syntax/parsing/html5lib_tests19.html [ Crash Failure ]
+
+# TODO(lukasza, alexmos): Triage these failures.
+fast/frames/cached-frame-counter.html [ Timeout ]
+fast/frames/frame-limit.html [ Timeout ]
+fast/loader/reload-zero-byte-plugin.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_adoption01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_adoption02.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_comments01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_doctype01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_domjs-unsafe.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_entities01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_entities02.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_html5test-com.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_inbody01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_isindex.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_main-element.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_pending-spec-changes-plain-text-unsafe.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_pending-spec-changes.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_plain-text-unsafe.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_scriptdata01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_scripted_adoption01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_scripted_ark.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_scripted_webkit01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tables01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_template.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests1.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests10.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests11.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests12.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests14.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests15.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests16.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests17.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests18.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests2.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests20.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests21.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests22.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests23.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests24.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests25.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests26.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests3.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests5.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests6.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests7.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests8.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tests9.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_tricky01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_webkit01.html [ Failure ]
+imported/wpt/html/syntax/parsing/html5lib_webkit02.html [ Failure ]
+inspector/sources/debugger-frameworks/frameworks-dom-xhr-event-breakpoints.html [ Timeout ]
+jquery/manipulation.html [ Timeout ]
+storage/indexeddb/blob-valid-after-deletion.html [ Failure ]
+storage/indexeddb/blob-valid-before-commit.html [ Failure ]
+storage/indexeddb/empty-crash.html [ Timeout ]
+virtual/stable/http/tests/navigation/cross-origin-fragment-navigation-is-async.html [ Failure ]

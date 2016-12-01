@@ -16,6 +16,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_enumerator.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
@@ -219,8 +220,6 @@ HistoryBackend::HistoryBackend(
 
 HistoryBackend::~HistoryBackend() {
   DCHECK(!scheduled_commit_) << "Deleting without cleanup";
-  base::STLDeleteContainerPointers(queued_history_db_tasks_.begin(),
-                                   queued_history_db_tasks_.end());
   queued_history_db_tasks_.clear();
 
   // Release stashed embedder object before cleaning up the databases.
@@ -1182,7 +1181,15 @@ bool HistoryBackend::CreateDownload(const DownloadRow& history_info) {
   if (!db_)
     return false;
   bool success = db_->CreateDownload(history_info);
+#if defined(OS_ANDROID)
+  // On android, browser process can get easily killed. Download will no longer
+  // be able to resume and the temporary file will linger forever if the
+  // download is not committed before that. Do the commit right away to avoid
+  // uncommitted download entry if browser is killed.
+  Commit();
+#else
   ScheduleCommit();
+#endif
   return success;
 }
 
@@ -1214,10 +1221,6 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
                         (1000 * micros) / num_downloads_deleted);
   }
   DCHECK_GE(ids.size(), num_downloads_deleted);
-  if (ids.size() < num_downloads_deleted)
-    return;
-  UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
-                       ids.size() - num_downloads_deleted);
 }
 
 void HistoryBackend::QueryHistory(const base::string16& text_query,
@@ -2241,7 +2244,7 @@ void HistoryBackend::ScheduleCommit() {
   scheduled_commit_ = new CommitLaterTask(this);
   task_runner_->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&CommitLaterTask::RunCommit, scheduled_commit_.get()),
+      base::Bind(&CommitLaterTask::RunCommit, scheduled_commit_),
       base::TimeDelta::FromSeconds(kCommitIntervalSeconds));
 }
 
@@ -2255,26 +2258,24 @@ void HistoryBackend::CancelScheduledCommit() {
 void HistoryBackend::ProcessDBTaskImpl() {
   if (!db_) {
     // db went away, release all the refs.
-    base::STLDeleteContainerPointers(queued_history_db_tasks_.begin(),
-                                     queued_history_db_tasks_.end());
     queued_history_db_tasks_.clear();
     return;
   }
 
   // Remove any canceled tasks.
   while (!queued_history_db_tasks_.empty()) {
-    QueuedHistoryDBTask* task = queued_history_db_tasks_.front();
+    QueuedHistoryDBTask* task = queued_history_db_tasks_.front().get();
     if (!task->is_canceled())
       break;
 
-    delete task;
     queued_history_db_tasks_.pop_front();
   }
   if (queued_history_db_tasks_.empty())
     return;
 
   // Run the first task.
-  std::unique_ptr<QueuedHistoryDBTask> task(queued_history_db_tasks_.front());
+  std::unique_ptr<QueuedHistoryDBTask> task =
+      std::move(queued_history_db_tasks_.front());
   queued_history_db_tasks_.pop_front();
   if (task->Run(this, db_.get())) {
     // The task is done, notify the callback.
@@ -2282,7 +2283,7 @@ void HistoryBackend::ProcessDBTaskImpl() {
   } else {
     // The task wants to run some more. Schedule it at the end of the current
     // tasks, and process it after an invoke later.
-    queued_history_db_tasks_.push_back(task.release());
+    queued_history_db_tasks_.push_back(std::move(task));
     task_runner_->PostTask(
         FROM_HERE, base::Bind(&HistoryBackend::ProcessDBTaskImpl, this));
   }
@@ -2477,8 +2478,8 @@ void HistoryBackend::ProcessDBTask(
     scoped_refptr<base::SingleThreadTaskRunner> origin_loop,
     const base::CancelableTaskTracker::IsCanceledCallback& is_canceled) {
   bool scheduled = !queued_history_db_tasks_.empty();
-  queued_history_db_tasks_.push_back(
-      new QueuedHistoryDBTask(std::move(task), origin_loop, is_canceled));
+  queued_history_db_tasks_.push_back(base::MakeUnique<QueuedHistoryDBTask>(
+      std::move(task), origin_loop, is_canceled));
   if (!scheduled)
     ProcessDBTaskImpl();
 }

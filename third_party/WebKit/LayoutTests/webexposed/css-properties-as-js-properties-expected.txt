@@ -190,11 +190,14 @@ minWidth
 minZoom
 mixBlendMode
 motion
-motionOffset
-motionPath
-motionRotation
 objectFit
 objectPosition
+offset
+offsetAnchor
+offsetDistance
+offsetPath
+offsetPosition
+offsetRotation
 opacity
 order
 orientation
@@ -205,6 +208,7 @@ outlineOffset
 outlineStyle
 outlineWidth
 overflow
+overflowAnchor
 overflowWrap
 overflowX
 overflowY
@@ -327,7 +331,6 @@ webkitBoxOrdinalGroup
 webkitBoxOrient
 webkitBoxPack
 webkitBoxReflect
-webkitClipPath
 webkitColumnBreakAfter
 webkitColumnBreakBefore
 webkitColumnBreakInside

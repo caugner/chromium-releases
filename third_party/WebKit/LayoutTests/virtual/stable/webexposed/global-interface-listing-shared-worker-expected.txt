@@ -314,6 +314,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method getKey
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
+[Worker]     setter name
 [Worker] interface IDBKeyRange
 [Worker]     static method bound
 [Worker]     static method lowerBound
@@ -347,6 +348,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
 [Worker]     method put
+[Worker]     setter name
 [Worker] interface IDBOpenDBRequest : IDBRequest
 [Worker]     attribute @@toStringTag
 [Worker]     getter onblocked
@@ -538,6 +540,10 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     attribute PERSISTENT
 [Worker]     attribute TEMPORARY
 [Worker]     method constructor
+[Worker] interface StorageManager
+[Worker]     attribute @@toStringTag
+[Worker]     method constructor
+[Worker]     method persisted
 [Worker] interface SubtleCrypto
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
@@ -637,6 +643,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter caches
 [Worker]     getter crypto
 [Worker]     getter indexedDB
+[Worker]     getter isSecureContext
 [Worker]     getter location
 [Worker]     getter navigator
 [Worker]     getter onerror
@@ -681,6 +688,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter permissions
 [Worker]     getter platform
 [Worker]     getter product
+[Worker]     getter storage
 [Worker]     getter userAgent
 [Worker]     method constructor
 [Worker] interface XMLHttpRequest : XMLHttpRequestEventTarget
@@ -785,6 +793,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method getKey
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
+[Worker]     setter name
 [Worker] interface webkitIDBKeyRange
 [Worker]     static method bound
 [Worker]     static method lowerBound
@@ -818,6 +827,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
 [Worker]     method put
+[Worker]     setter name
 [Worker] interface webkitIDBRequest : EventTarget
 [Worker]     attribute @@toStringTag
 [Worker]     getter error

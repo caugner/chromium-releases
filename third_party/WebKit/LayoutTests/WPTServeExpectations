@@ -14,6 +14,7 @@ crbug.com/508730 imported/wpt/html/webappapis/scripting/processing-model-2/compi
 
 # Fail when run with --enable-wptserve: (crbug.com/508734)
 crbug.com/508734 imported/wpt/html/browsers/history/the-location-interface/security_location_0.sub.htm [ Failure ]
+crbug.com/508734 imported/wpt/html/semantics/document-metadata/the-link-element/link-style-error-01.html [ Failure ]
 crbug.com/508734 imported/wpt/html/semantics/embedded-content/media-elements/track/track-element/cloneNode.html [ Failure ]
 crbug.com/508734 imported/wpt/html/webappapis/system-state-and-capabilities/the-navigator-object/protocol/004.xhtml [ Failure ]
 crbug.com/508734 imported/wpt/webrtc/simplecall.html [ Failure ]
@@ -46,9 +47,6 @@ crbug.com/508725 imported/wpt/html/webappapis/system-state-and-capabilities/the-
 # but instead there is a [ Failure ] expectation in TestExpectations.
 crbug.com/508725 imported/wpt/html/semantics/embedded-content/the-iframe-element/iframe_sandbox_allow_script.html [ Pass ]
 crbug.com/508725 imported/wpt/pointerevents/pointerevent_constructor.html [ Pass ]
-
-# These tests timeout with --enable-wptserve enabled.
-crbug.com/508734 imported/wpt/html/semantics/document-metadata/the-link-element/link-style-error-01.html [ Timeout ]
 
 # These tests fail with --enable-wptserve due to blocked cross-origin frame (crbug.com/619746)
 crbug.com/619746 imported/wpt/dom/nodes/Document-contentType/contentType/contenttype_datauri_01.html [ Failure ]
@@ -88,4 +86,25 @@ crbug.com/627008 imported/wpt/pointerevents/pointerevent_setpointercapture_inact
 crbug.com/627008 imported/wpt/pointerevents/pointerevent_setpointercapture_invalid_pointerid-manual.html [ Timeout ]
 crbug.com/627008 imported/wpt/pointerevents/pointerevent_setpointercapture_relatedtarget-manual.html [ Timeout ]
 crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-mouse-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_change-touch-action-onpointerdown_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointercancel_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointerenter_nohover-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointerleave_after_pointercancel_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointerleave_after_pointerup_nohover-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointerleave_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_pointerout_after_pointercancel_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_releasepointercapture_onpointercancel_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-auto-css_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_child-auto-child-none_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_child-none_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_child-pan-x-child-pan-x_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_child-pan-x-child-pan-y_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_highest-parent-none_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-inherit_parent-none_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-keyboard-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-none-css_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-pan-x-css_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-pan-x-pan-y-pan-y_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-pan-x-pan-y_touch-manual.html [ Timeout ]
+crbug.com/627008 imported/wpt/pointerevents/pointerevent_touch-action-pan-y-css_touch-manual.html [ Timeout ]
 

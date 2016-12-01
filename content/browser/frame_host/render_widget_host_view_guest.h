@@ -45,7 +45,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
     : public RenderWidgetHostViewChildFrame,
       public ui::GestureConsumer {
  public:
-  RenderWidgetHostViewGuest(
+  static RenderWidgetHostViewGuest* Create(
       RenderWidgetHost* widget,
       BrowserPluginGuest* guest,
       base::WeakPtr<RenderWidgetHostViewBase> platform_view);
@@ -93,7 +93,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                         const gfx::Range& range) override;
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override;
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
+  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
                              cc::CompositorFrame frame) override;
 #if defined(USE_AURA)
   void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
@@ -126,10 +126,17 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
 
+  bool IsRenderWidgetHostViewGuest() override;
+
  protected:
   friend class RenderWidgetHostView;
 
  private:
+  RenderWidgetHostViewGuest(
+      RenderWidgetHost* widget,
+      BrowserPluginGuest* guest,
+      base::WeakPtr<RenderWidgetHostViewBase> platform_view);
+
   RenderWidgetHostViewBase* GetOwnerRenderWidgetHostView() const;
 
   // Since we now route GestureEvents directly to the guest renderer, we need

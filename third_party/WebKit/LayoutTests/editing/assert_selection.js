@@ -508,6 +508,32 @@ class Serializer {
   }
 }
 
+/**
+ * @this {!DOMSelection}
+ * @param {string} html
+ * @param {string=} opt_text
+ */
+function setClipboardData(html, opt_text) {
+  assert_not_equals(window.internals, undefined,
+    'This test requests clipboard access from JavaScript.');
+  function computeTextData() {
+    if (opt_text !== undefined)
+      return opt_text;
+    const element = document.createElement('div');
+    element.innerHTML = html;
+    return element.textContent;
+  }
+  function copyHandler(event) {
+    const clipboardData = event.clipboardData;
+    clipboardData.setData('text/plain', computeTextData());
+    clipboardData.setData('text/html', html);
+    event.preventDefault();
+  }
+  document.addEventListener('copy', copyHandler);
+  document.execCommand('copy');
+  document.removeEventListener('copy', copyHandler);
+}
+
 class Sample {
   /**
    * @public
@@ -526,7 +552,11 @@ class Sample {
     this.selection_.document = this.document_;
     this.selection_.document.offsetLeft = this.iframe_.offsetLeft;
     this.selection_.document.offsetTop = this.iframe_.offsetTop;
+    this.selection_.setClipboardData = setClipboardData;
 
+    // Set focus to sample IFRAME to make |eventSender| and
+    // |testRunner.execCommand()| to work on sample rather than main frame.
+    this.iframe_.focus();
     this.load(sampleText);
   }
 
@@ -652,13 +682,22 @@ function commonPrefixOf(str1, str2) {
  * @param {string} inputText
  * @param {function(!Selection)|string}
  * @param {string} expectedText
- * @param {string=} opt_description
+ * @param {Object=} opt_options
+ * @return {!Sample}
  */
 function assertSelection(
-    inputText, tester, expectedText, opt_description = '') {
+    inputText, tester, expectedText, opt_options = {}) {
+  const kDescription = 'description';
+  const kRemoveSampleIfSucceeded = 'removeSampleIfSucceeded';
+  /** @type {!Object} */
+  const options = typeof(opt_options) === 'string'
+      ? {description: opt_options} : opt_options;
   /** @type {string} */
-  const description =
-      opt_description === '' ? assembleDescription() : opt_description;
+  const description = kDescription in options
+      ? options[kDescription] : assembleDescription();
+  /** @type {boolean} */
+  const removeSampleIfSucceeded = kRemoveSampleIfSucceeded in options
+      ? !!options[kRemoveSampleIfSucceeded] : true;
   checkExpectedText(expectedText);
   const sample = new Sample(inputText);
   if (typeof(tester) === 'function') {
@@ -674,8 +713,9 @@ function assertSelection(
   // We keep sample HTML when assertion is false for ease of debugging test
   // case.
   if (actualText === expectedText) {
-    sample.remove();
-    return;
+    if (removeSampleIfSucceeded)
+        sample.remove();
+    return sample;
   }
   throw new Error(`${description}\n` +
     `\t expected ${expectedText},\n` +

@@ -360,7 +360,17 @@ InspectorTest.dumpNavigatorView = function(navigatorView)
 
     function dumpNavigatorTreeElement(prefix, treeElement)
     {
-        InspectorTest.addResult(prefix + treeElement.title);
+        var titleText;
+        if (treeElement.title instanceof Element)
+            titleText = treeElement.title.firstChild.textContent + " [mapped]";
+        else
+            titleText = treeElement.title;
+        if (treeElement._nodeType === WebInspector.NavigatorView.Types.FileSystem || treeElement._nodeType === WebInspector.NavigatorView.Types.FileSystemFolder) {
+            var hasMappedFiles = treeElement.listItemElement.classList.contains("has-mapped-files");
+            if (!hasMappedFiles)
+                titleText += " [dimmed]";
+        }
+        InspectorTest.addResult(prefix + titleText);
         treeElement.expand();
         var children = treeElement.children();
         for (var i = 0; i < children.length; ++i)
@@ -641,8 +651,6 @@ InspectorTest.textContentWithLineBreaks = function(node)
         } else if (currentNode.nodeName === "STYLE") {
             currentNode = currentNode.traverseNextNode(node);
             continue;
-        } else if (currentNode.classList && currentNode.classList.contains("console-message")) {
-            buffer += "\n\n";
         } else if (currentNode.classList && currentNode.classList.contains("object-properties-section")) {
             ignoreFirst = true;
         }
@@ -938,6 +946,17 @@ InspectorTest.isDedicatedWorker = function(target)
 InspectorTest.isServiceWorker = function(target)
 {
     return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasNetworkCapability() && target.hasWorkerCapability();
+}
+
+InspectorTest.describeTargetType = function(target)
+{
+    if (InspectorTest.isDedicatedWorker(target))
+        return "worker";
+    if (InspectorTest.isServiceWorker(target))
+        return "service-worker";
+    if (!target.parentTarget())
+        return "page";
+    return "frame";
 }
 
     };  // initialize_InspectorTest
