@@ -151,13 +151,13 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/ash/ash_util.h"
+#endif  // defined(OS_CHROMEOS)
+
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
-#endif
-
-#if defined(USE_ASH)
-#include "chrome/browser/ui/ash/ash_util.h"
-#endif
+#endif  // !defined(OS_CHROMEOS)
 
 #if defined(USE_AURA)
 #include "ui/aura/client/window_parenting_client.h"
@@ -526,11 +526,6 @@ gfx::Point BrowserView::OffsetPointForToolbarBackgroundImage(
 }
 
 bool BrowserView::IsTabStripVisible() const {
-  if (immersive_mode_controller_->ShouldHideTopViews() &&
-      immersive_mode_controller_->ShouldHideTabIndicators()) {
-    return false;
-  }
-
   // Return false if this window does not normally display a tabstrip.
   if (!browser_->SupportsWindowFeature(Browser::FEATURE_TABSTRIP))
     return false;
@@ -567,7 +562,7 @@ bool BrowserView::GetAccelerator(int cmd_id,
                                  ui::Accelerator* accelerator) const {
   // We retrieve the accelerator information for standard accelerators
   // for cut, copy and paste.
-  if (chrome::GetStandardAcceleratorForCommandId(cmd_id, accelerator))
+  if (GetStandardAcceleratorForCommandId(cmd_id, accelerator))
     return true;
   // Else, we retrieve the accelerator information from the accelerator table.
   for (std::map<ui::Accelerator, int>::const_iterator it =
@@ -578,7 +573,7 @@ bool BrowserView::GetAccelerator(int cmd_id,
     }
   }
   // Else, we retrieve the accelerator information from Ash (if applicable).
-  return chrome::GetAshAcceleratorForCommandId(cmd_id, accelerator);
+  return GetAshAcceleratorForCommandId(cmd_id, accelerator);
 }
 
 bool BrowserView::IsAcceleratorRegistered(const ui::Accelerator& accelerator) {
@@ -593,10 +588,10 @@ WebContents* BrowserView::GetActiveWebContents() const {
 // BrowserView, BrowserWindow implementation:
 
 void BrowserView::Show() {
-#if !defined(OS_WIN) && !defined(USE_ASH)
+#if !defined(OS_WIN) && !defined(OS_CHROMEOS)
   // The Browser associated with this browser window must become the active
   // browser at the time |Show()| is called. This is the natural behavior under
-  // Windows and Ash, but other platforms will not trigger
+  // Windows and Chrome OS, but other platforms will not trigger
   // OnWidgetActivationChanged() until we return to the runloop. Therefore any
   // calls to Browser::GetLastActive() will return the wrong result if we do not
   // explicitly set it here.
@@ -992,12 +987,11 @@ LocationBar* BrowserView::GetLocationBar() const {
 }
 
 void BrowserView::SetFocusToLocationBar(bool select_all) {
-  // On Windows, changing focus to the location bar causes the browser
-  // window to become active. This can steal focus if the user has
-  // another window open already. On ChromeOS, changing focus makes a
-  // view believe it has a focus even if the widget doens't have a
-  // focus. Either cases, we need to ignore this when the browser
-  // window isn't active.
+  // On Windows, changing focus to the location bar causes the browser window to
+  // become active. This can steal focus if the user has another window open
+  // already. On Chrome OS, changing focus makes a view believe it has a focus
+  // even if the widget doens't have a focus. Either cases, we need to ignore
+  // this when the browser window isn't active.
 #if defined(OS_WIN) || defined(OS_CHROMEOS)
   if (!force_location_bar_focus_ && !IsActive())
     return;
@@ -1035,7 +1029,6 @@ void BrowserView::UpdateToolbar(content::WebContents* contents) {
   // We may end up here during destruction.
   if (toolbar_)
     toolbar_->Update(contents);
-  frame_->UpdateToolbar();
 }
 
 void BrowserView::ResetToolbarTabState(content::WebContents* contents) {
@@ -1283,14 +1276,10 @@ void BrowserView::ShowWebsiteSettings(
     content::WebContents* web_contents,
     const GURL& virtual_url,
     const security_state::SecurityInfo& security_info) {
-  // Some browser windows have a location icon embedded in the frame. Try to
-  // use that if it exists. If it doesn't exist, use the location icon from
-  // the location bar.
-  views::View* popup_anchor =
-      ui::MaterialDesignController::IsSecondaryUiMaterial()
-          ? toolbar_->location_bar()
-          : frame_->GetLocationIconView();
-  if (!popup_anchor)
+  views::View* popup_anchor = nullptr;
+  if (ui::MaterialDesignController::IsSecondaryUiMaterial())
+    popup_anchor = toolbar_->location_bar();
+  else
     popup_anchor = GetLocationBarView()->location_icon_view()->GetImageView();
 
   WebsiteSettingsPopupView::ShowPopup(popup_anchor, gfx::Rect(), profile,
@@ -1313,8 +1302,8 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                          bool* is_keyboard_shortcut) {
   *is_keyboard_shortcut = false;
 
-  if ((event.type != blink::WebInputEvent::RawKeyDown) &&
-      (event.type != blink::WebInputEvent::KeyUp)) {
+  if ((event.type() != blink::WebInputEvent::RawKeyDown) &&
+      (event.type() != blink::WebInputEvent::KeyUp)) {
     return false;
   }
 
@@ -1348,11 +1337,14 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 
 #if defined(OS_CHROMEOS)
   if (chrome::IsAcceleratorDeprecated(accelerator)) {
-    if (event.type == blink::WebInputEvent::RawKeyDown)
+    if (event.type() == blink::WebInputEvent::RawKeyDown)
       *is_keyboard_shortcut = true;
     return false;
   }
 #endif  // defined(OS_CHROMEOS)
+
+  if (frame_->PreHandleKeyboardEvent(event))
+    return true;
 
   chrome::BrowserCommandController* controller = browser_->command_controller();
 
@@ -1379,7 +1371,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 
   if (id != -1) {
     // |accelerator| is a non-reserved browser shortcut (e.g. Ctrl+f).
-    if (event.type == blink::WebInputEvent::RawKeyDown)
+    if (event.type() == blink::WebInputEvent::RawKeyDown)
       *is_keyboard_shortcut = true;
   } else if (processed) {
     // |accelerator| is a non-browser shortcut (e.g. F4-F10 on Ash). Report
@@ -1391,6 +1383,9 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 }
 
 void BrowserView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+  if (frame_->HandleKeyboardEvent(event))
+    return;
+
   unhandled_keyboard_event_handler_.HandleKeyboardEvent(event,
                                                         GetFocusManager());
 }
@@ -1589,6 +1584,15 @@ base::string16 BrowserView::GetWindowTitle() const {
 
 base::string16 BrowserView::GetAccessibleWindowTitle() const {
   const bool include_app_name = false;
+  int active_index = browser_->tab_strip_model()->active_index();
+  if (active_index > -1) {
+    if (IsIncognito()) {
+      return l10n_util::GetStringFUTF16(
+          IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT,
+          GetAccessibleTabLabel(include_app_name, active_index));
+    }
+    return GetAccessibleTabLabel(include_app_name, active_index);
+  }
   if (IsIncognito()) {
     return l10n_util::GetStringFUTF16(
         IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT,
@@ -1597,18 +1601,64 @@ base::string16 BrowserView::GetAccessibleWindowTitle() const {
   return browser_->GetWindowTitleForCurrentTab(include_app_name);
 }
 
+base::string16 BrowserView::GetAccessibleTabLabel(bool include_app_name,
+                                                  int index) const {
+  // ChromeVox provides an invalid index on browser start up before
+  // any tabs are created.
+  if (index == -1)
+    return base::string16();
+
+  base::string16 window_title =
+      browser_->GetWindowTitleForTab(include_app_name, index);
+  const TabRendererData& data = tabstrip_->tab_at(index)->data();
+
+  // Tab has crashed.
+  if (data.IsCrashed()) {
+    return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_CRASHED_FORMAT,
+                                      window_title);
+  }
+  // Network error interstitial.
+  if (data.network_state == TabRendererData::NETWORK_STATE_ERROR) {
+    return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_NETWORK_ERROR_FORMAT,
+                                      window_title);
+  }
+  // Alert tab states.
+  switch (data.alert_state) {
+    case TabAlertState::AUDIO_PLAYING:
+      return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_AUDIO_PLAYING_FORMAT,
+                                        window_title);
+    case TabAlertState::USB_CONNECTED:
+      return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_USB_CONNECTED_FORMAT,
+                                        window_title);
+    case TabAlertState::BLUETOOTH_CONNECTED:
+      return l10n_util::GetStringFUTF16(
+          IDS_TAB_AX_LABEL_BLUETOOTH_CONNECTED_FORMAT, window_title);
+    case TabAlertState::MEDIA_RECORDING:
+      return l10n_util::GetStringFUTF16(
+          IDS_TAB_AX_LABEL_MEDIA_RECORDING_FORMAT, window_title);
+    case TabAlertState::AUDIO_MUTING:
+      return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_AUDIO_MUTING_FORMAT,
+                                        window_title);
+    case TabAlertState::TAB_CAPTURING:
+      return l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_TAB_CAPTURING_FORMAT,
+                                        window_title);
+    case TabAlertState::NONE:
+      return window_title;
+  }
+  return base::string16();
+}
+
 views::View* BrowserView::GetInitiallyFocusedView() {
   return nullptr;
 }
 
 bool BrowserView::ShouldShowWindowTitle() const {
-#if defined(USE_ASH)
-  // For Ash only, trusted windows (apps and settings) do not show a title,
-  // crbug.com/119411. Child windows (i.e. popups) do show a title.
-  if (browser_->is_trusted_source() &&
-      !browser_->SupportsWindowFeature(Browser::FEATURE_WEBAPPFRAME))
+#if defined(OS_CHROMEOS)
+  // For Chrome OS only, trusted windows (apps and settings) do not show a
+  // title, crbug.com/119411. Child windows (i.e. popups) do show a title.
+  if (browser_->is_trusted_source())
     return false;
-#endif  // USE_ASH
+#endif  // OS_CHROMEOS
 
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
 }
@@ -1637,13 +1687,12 @@ gfx::ImageSkia BrowserView::GetWindowIcon() {
 }
 
 bool BrowserView::ShouldShowWindowIcon() const {
-#if defined(USE_ASH)
-  // For Ash only, trusted windows (apps and settings) do not show an icon,
-  // crbug.com/119411. Child windows (i.e. popups) do show an icon.
-  if (browser_->is_trusted_source() &&
-      !browser_->SupportsWindowFeature(Browser::FEATURE_WEBAPPFRAME))
+#if defined(OS_CHROMEOS)
+  // For Chrome OS only, trusted windows (apps and settings) do not show an
+  // icon, crbug.com/119411. Child windows (i.e. popups) do show an icon.
+  if (browser_->is_trusted_source())
     return false;
-#endif  // USE_ASH
+#endif  // OS_CHROMEOS
 
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
 }
@@ -1735,9 +1784,13 @@ void BrowserView::OnWidgetDestroying(views::Widget* widget) {
   // Destroy any remaining WebContents early on. Doing so may result in
   // calling back to one of the Views/LayoutManagers or supporting classes of
   // BrowserView. By destroying here we ensure all said classes are valid.
-  ScopedVector<content::WebContents> contents;
+  std::vector<content::WebContents*> contents;
   while (browser()->tab_strip_model()->count())
     contents.push_back(browser()->tab_strip_model()->DetachWebContentsAt(0));
+  // Note: The BrowserViewTest tests rely on the contents being destroyed in the
+  // order that they were present in the tab strip.
+  for (auto* content : contents)
+    delete content;
 }
 
 void BrowserView::OnWidgetActivationChanged(views::Widget* widget,
@@ -1911,11 +1964,7 @@ void BrowserView::OnThemeChanged() {
 #if defined(USE_AURA)
     ui::NativeThemeDarkAura::instance()->NotifyObservers();
 #endif
-#if defined(OS_WIN)
-    ui::NativeThemeWin::instance()->NotifyObservers();
-#elif defined(OS_LINUX)
-    ui::NativeThemeAura::instance()->NotifyObservers();
-#endif
+    ui::NativeTheme::GetInstanceForNativeUi()->NotifyObservers();
   }
 
   views::View::OnThemeChanged();
@@ -1941,7 +1990,7 @@ bool BrowserView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   DCHECK(iter != accelerator_table_.end());
   int command_id = iter->second;
 
-  if (accelerator.IsRepeat() && !chrome::IsCommandRepeatable(command_id))
+  if (accelerator.IsRepeat() && !IsCommandRepeatable(command_id))
     return false;
 
   chrome::BrowserCommandController* controller = browser_->command_controller();
@@ -2019,8 +2068,7 @@ void BrowserView::InitViews() {
 
   // TabStrip takes ownership of the controller.
   BrowserTabStripController* tabstrip_controller =
-      new BrowserTabStripController(browser_.get(),
-                                    browser_->tab_strip_model());
+      new BrowserTabStripController(browser_->tab_strip_model(), this);
   tabstrip_ = new TabStrip(tabstrip_controller);
   top_container_->AddChildView(tabstrip_);
   tabstrip_controller->InitFromModel(tabstrip_);
@@ -2299,16 +2347,16 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
 }
 
 bool BrowserView::ShouldUseImmersiveFullscreenForUrl(const GURL& url) const {
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   // Kiosk mode needs the whole screen.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
     return false;
 
   return url.is_empty();
 #else
-  // No immersive except in Ash.
+  // No immersive except in Chrome OS.
   return false;
-#endif  // !USE_ASH
+#endif
 }
 
 void BrowserView::LoadAccelerators() {
@@ -2317,17 +2365,15 @@ void BrowserView::LoadAccelerators() {
 
   // Let's fill our own accelerator table.
   const bool is_app_mode = chrome::IsRunningInForcedAppMode();
-  const std::vector<chrome::AcceleratorMapping> accelerator_list(
-      chrome::GetAcceleratorList());
-  for (std::vector<chrome::AcceleratorMapping>::const_iterator it =
-           accelerator_list.begin(); it != accelerator_list.end(); ++it) {
+  const std::vector<AcceleratorMapping> accelerator_list(GetAcceleratorList());
+  for (const auto& entry : accelerator_list) {
     // In app mode, only allow accelerators of white listed commands to pass
     // through.
-    if (is_app_mode && !chrome::IsCommandAllowedInAppMode(it->command_id))
+    if (is_app_mode && !chrome::IsCommandAllowedInAppMode(entry.command_id))
       continue;
 
-    ui::Accelerator accelerator(it->keycode, it->modifiers);
-    accelerator_table_[accelerator] = it->command_id;
+    ui::Accelerator accelerator(entry.keycode, entry.modifiers);
+    accelerator_table_[accelerator] = entry.command_id;
 
     // Also register with the focus manager.
     focus_manager->RegisterAccelerator(

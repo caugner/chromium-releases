@@ -18,6 +18,7 @@
 #include "chromecast/media/cma/base/decoder_buffer_adapter.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/media/cma/base/decoder_config_adapter.h"
+#include "chromecast/media/cma/base/decoder_config_logging.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_bus.h"
 #include "media/base/cdm_context.h"
@@ -85,7 +86,10 @@ class CastAudioDecoderImpl : public CastAudioDecoder {
 
     if (data->decrypt_context() != nullptr) {
       LOG(ERROR) << "Audio decoder doesn't support encrypted stream";
-      decode_callback.Run(kDecodeError, data);
+      // Post the task to ensure that |decode_callback| is not called from
+      // within a call to Decode().
+      task_runner_->PostTask(FROM_HERE,
+                             base::Bind(decode_callback, kDecodeError, data));
     } else if (!initialized_ || decode_pending_) {
       decode_queue_.push(std::make_pair(data, decode_callback));
     } else {
@@ -123,14 +127,22 @@ class CastAudioDecoderImpl : public CastAudioDecoder {
 
   void OnInitialized(bool success) {
     DCHECK(!initialized_);
-    LOG_IF(ERROR, !success) << "Failed to initialize FFmpegAudioDecoder";
-    if (success)
+    if (success) {
       initialized_ = true;
-
-    if (success && !decode_queue_.empty()) {
-      const auto& d = decode_queue_.front();
-      DecodeNow(d.first, d.second);
-      decode_queue_.pop();
+      if (!decode_queue_.empty()) {
+        const auto& d = decode_queue_.front();
+        DecodeNow(d.first, d.second);
+        decode_queue_.pop();
+      }
+    } else {
+      LOG(ERROR) << "Failed to initialize FFmpegAudioDecoder";
+      LOG(INFO) << "Config:";
+      LOG(INFO) << "\tEncrypted: "
+                << (config_.is_encrypted() ? "true" : "false");
+      LOG(INFO) << "\tCodec: " << config_.codec;
+      LOG(INFO) << "\tSample format: " << config_.sample_format;
+      LOG(INFO) << "\tChannels: " << config_.channel_number;
+      LOG(INFO) << "\tSample rate: " << config_.samples_per_second;
     }
 
     if (!initialized_callback_.is_null())

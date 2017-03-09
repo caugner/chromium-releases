@@ -23,17 +23,17 @@
         },
         {
           "object": "LayoutText #text",
-          "rect": [43, 174, 3, 22],
+          "rect": [43, 175, 3, 21],
           "reason": "invalidate paint rectangle"
         },
         {
           "object": "LayoutText #text",
-          "rect": [43, 174, 3, 22],
+          "rect": [43, 175, 3, 21],
           "reason": "invalidate paint rectangle"
         },
         {
           "object": "LayoutText #text",
-          "rect": [43, 174, 3, 22],
+          "rect": [43, 175, 3, 21],
           "reason": "invalidate paint rectangle"
         }
       ]

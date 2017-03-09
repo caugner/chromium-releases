@@ -115,6 +115,7 @@ break-before: auto
 break-inside: auto
 buffered-rendering: auto
 caption-side: top
+caret-color: rgb(0, 0, 0)
 clear: none
 clip: auto
 clip-path: none
@@ -205,7 +206,7 @@ min-width: 0px
 mix-blend-mode: normal
 object-fit: fill
 object-position: 50% 50%
-offset-anchor: 50% 50%
+offset-anchor: auto
 offset-distance: 0px
 offset-path: none
 offset-position: auto
@@ -238,7 +239,7 @@ right: auto
 rotate: 0deg
 rx: auto
 ry: auto
-scale: 1
+scale: none
 scroll-behavior: auto
 scroll-snap-coordinate: none
 scroll-snap-destination: 0px 0px

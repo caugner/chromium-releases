@@ -9,7 +9,7 @@ function display()
     var promise = new Promise((fulfill) => callback = fulfill);
     if (window.testRunner)
         testRunner.setCanOpenWindows(true);
-    var popup = window.open("data:text/html,<b>Hello, world</b>");
+    var popup = window.open("resources/hello.html");
     popup.onload = function()
     {
         requestAnimationFrame(testRunner.capturePixelsAsyncThen.bind(testRunner, callback));
@@ -19,7 +19,7 @@ function display()
 
 function test()
 {
-    UI.panels.timeline._captureJSProfileSetting.set(false);
+    UI.panels.timeline._disableCaptureJSProfileSetting.set(true);
     InspectorTest.startTimeline(function() { InspectorTest.reloadPage(pageReloaded); });
 
     function pageReloaded()

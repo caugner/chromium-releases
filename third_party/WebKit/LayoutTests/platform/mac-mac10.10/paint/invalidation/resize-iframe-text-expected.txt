@@ -1,42 +1,30 @@
 {
-  "name": "Content Root Layer",
-  "bounds": [800, 745],
-  "children": [
+  "layers": [
     {
       "name": "LayoutView #document",
-      "bounds": [800, 745],
+      "bounds": [800, 681],
       "contentsOpaque": true,
       "drawsContent": true,
       "paintInvalidations": [
         {
           "object": "LayoutIFrame (positioned) IFRAME",
-          "rect": [0, 0, 800, 745],
+          "rect": [0, 0, 800, 681],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutView #document",
-          "rect": [0, 600, 800, 145],
+          "rect": [0, 600, 800, 81],
           "reason": "incremental"
         },
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 800, 34],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 785, 745],
-          "reason": "forced by layout"
+          "object": "LayoutView #document",
+          "rect": [0, 600, 785, 81],
+          "reason": "incremental"
         },
         {
           "object": "LayoutBlockFlow BODY",
           "rect": [8, 8, 784, 18],
           "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow H1",
-          "rect": [8, 700, 600, 37],
-          "reason": "bounds change"
         },
         {
           "object": "LayoutText #text",
@@ -45,7 +33,7 @@
         },
         {
           "object": "LayoutView #document",
-          "rect": [785, 0, 15, 745],
+          "rect": [785, 0, 15, 681],
           "reason": "scroll"
         },
         {
@@ -60,10 +48,6 @@
     {
       "object": "LayoutView #document",
       "reason": "incremental"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
     },
     {
       "object": "LayoutBlockFlow BODY",
@@ -86,16 +70,8 @@
       "reason": "forced by layout"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow H1",
-      "reason": "bounds change"
-    },
-    {
-      "object": "RootInlineBox",
-      "reason": "bounds change"
+      "object": "HorizontalScrollbar",
+      "reason": "scroll"
     },
     {
       "object": "LayoutView #document",
@@ -104,6 +80,10 @@
     {
       "object": "VerticalScrollbar",
       "reason": "scroll"
+    },
+    {
+      "object": "LayoutView #document",
+      "reason": "incremental"
     }
   ]
 }

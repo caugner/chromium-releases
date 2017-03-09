@@ -3,7 +3,6 @@
 <script src="../../inspector-test.js"></script>
 <script src="../../debugger-test.js"></script>
 <script src="../../elements-test.js"></script>
-<script src="../../workspace-test.js"></script>
 <script src="../../isolated-filesystem-test.js"></script>
 <script>
 function loadStylesheet(line0, line1, line2)
@@ -41,7 +40,7 @@ function test()
 
             function fileSystemCreated()
             {
-                var fileSystemProjectId = Bindings.FileSystemWorkspaceBinding.projectId(fileSystemPath);
+                var fileSystemProjectId = Persistence.FileSystemWorkspaceBinding.projectId(fileSystemPath);
                 uiSourceCode = Workspace.workspace.uiSourceCode(fileSystemProjectId, "file:///var/www/foo.css");
                 InspectorTest.showUISourceCode(uiSourceCode, didShowScriptSource);
             }

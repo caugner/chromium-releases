@@ -1,7 +1,5 @@
 {
-  "name": "Content Root Layer",
-  "bounds": [800, 728],
-  "children": [
+  "layers": [
     {
       "name": "LayoutView #document",
       "bounds": [800, 728],
@@ -29,6 +27,11 @@
           "reason": "forced by layout"
         },
         {
+          "object": "LayoutView #document",
+          "rect": [0, 600, 785, 128],
+          "reason": "incremental"
+        },
+        {
           "object": "LayoutBlockFlow BODY",
           "rect": [8, 8, 784, 18],
           "reason": "forced by layout"
@@ -36,7 +39,7 @@
         {
           "object": "LayoutBlockFlow H1",
           "rect": [8, 700, 600, 28],
-          "reason": "bounds change"
+          "reason": "became visible"
         },
         {
           "object": "LayoutText #text",
@@ -86,16 +89,8 @@
       "reason": "forced by layout"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow H1",
-      "reason": "bounds change"
-    },
-    {
-      "object": "RootInlineBox",
-      "reason": "bounds change"
+      "object": "HorizontalScrollbar",
+      "reason": "scroll"
     },
     {
       "object": "LayoutView #document",
@@ -104,6 +99,22 @@
     {
       "object": "VerticalScrollbar",
       "reason": "scroll"
+    },
+    {
+      "object": "LayoutView #document",
+      "reason": "incremental"
+    },
+    {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
+    },
+    {
+      "object": "LayoutBlockFlow H1",
+      "reason": "became visible"
+    },
+    {
+      "object": "RootInlineBox",
+      "reason": "became visible"
     }
   ]
 }

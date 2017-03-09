@@ -4,6 +4,7 @@
 
 #include "ui/views/widget/widget.h"
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -165,7 +166,8 @@ Widget::Widget()
       auto_release_capture_(true),
       root_layers_dirty_(false),
       movement_disabled_(false),
-      observer_manager_(this) {
+      observer_manager_(this),
+      processing_theme_changed_(false) {
 }
 
 Widget::~Widget() {
@@ -738,10 +740,6 @@ const ui::ThemeProvider* Widget::GetThemeProvider() const {
   return default_theme_provider_.get();
 }
 
-const ui::NativeTheme* Widget::GetNativeTheme() const {
-  return native_widget_->GetNativeTheme();
-}
-
 FocusManager* Widget::GetFocusManager() {
   Widget* toplevel_widget = GetTopLevelWidget();
   return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
@@ -903,6 +901,8 @@ void Widget::DebugToggleFrameType() {
 }
 
 void Widget::FrameTypeChanged() {
+  if (processing_theme_changed_)
+    return;
   native_widget_->FrameTypeChanged();
 }
 
@@ -981,10 +981,6 @@ void Widget::SynthesizeMouseMoveEvent() {
                              mouse_location, ui::EventTimeForNow(),
                              ui::EF_IS_SYNTHESIZED, 0);
   root_view_->OnMouseMoved(mouse_event);
-}
-
-void Widget::OnRootViewLayout() {
-  native_widget_->OnRootViewLayout();
 }
 
 bool Widget::IsTranslucentWindowOpacitySupported() const {
@@ -1311,18 +1307,24 @@ const Widget* Widget::AsWidget() const {
 }
 
 bool Widget::SetInitialFocus(ui::WindowShowState show_state) {
+  FocusManager* focus_manager = GetFocusManager();
   View* v = widget_delegate_->GetInitiallyFocusedView();
   if (!focus_on_creation_ || show_state == ui::SHOW_STATE_INACTIVE ||
       show_state == ui::SHOW_STATE_MINIMIZED) {
     // If not focusing the window now, tell the focus manager which view to
     // focus when the window is restored.
-    if (v && focus_manager_.get())
-      focus_manager_->SetStoredFocusView(v);
+    if (v && focus_manager)
+      focus_manager->SetStoredFocusView(v);
     return true;
   }
-  if (v)
+  if (v) {
     v->RequestFocus();
-  return !!v;
+    // If the request for focus was unsuccessful, fall back to using the first
+    // focusable View instead.
+    if (focus_manager && focus_manager->GetFocusedView() == nullptr)
+      focus_manager->AdvanceFocus(false);
+  }
+  return !!focus_manager->GetFocusedView();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1364,6 +1366,10 @@ void Widget::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
     observer_manager_.Add(current_native_theme);
   }
 
+  DCHECK_EQ(processing_theme_changed_, false);
+
+  base::AutoReset<bool> auto_theme_changed_recursion_break(
+      &processing_theme_changed_, true);
   root_view_->PropagateNativeThemeChanged(current_native_theme);
 }
 
@@ -1375,6 +1381,7 @@ internal::RootView* Widget::CreateRootView() {
 }
 
 void Widget::DestroyRootView() {
+  NotifyWillRemoveView(root_view_.get());
   non_client_view_ = NULL;
   root_view_.reset();
 }

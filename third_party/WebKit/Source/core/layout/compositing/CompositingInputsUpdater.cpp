@@ -5,14 +5,14 @@
 #include "core/layout/compositing/CompositingInputsUpdater.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/layout/LayoutBlock.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
-#include "core/page/scrolling/RootScrollerController.h"
 #include "core/paint/PaintLayer.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 
 namespace blink {
 
@@ -102,7 +102,8 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer,
   layer->updateAncestorOverflowLayer(info.lastOverflowClipLayer);
   if (info.lastOverflowClipLayer && layer->needsCompositingInputsUpdate() &&
       layer->layoutObject()->style()->position() == StickyPosition) {
-    if (info.lastOverflowClipLayer != previousOverflowLayer) {
+    if (info.lastOverflowClipLayer != previousOverflowLayer &&
+        !RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
       // Old ancestor scroller should no longer have these constraints.
       ASSERT(!previousOverflowLayer ||
              !previousOverflowLayer->getScrollableArea()
@@ -239,36 +240,27 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer,
   if (layer->layoutObject()->hasClipPath())
     info.hasAncestorWithClipPath = true;
 
-  bool hasDescendantWithClipPath = false;
-  bool hasNonIsolatedDescendantWithBlendMode = false;
-  bool hasRootScrollerAsDescendant = false;
   for (PaintLayer* child = layer->firstChild(); child;
-       child = child->nextSibling()) {
+       child = child->nextSibling())
     updateRecursive(child, updateType, info);
 
-    hasRootScrollerAsDescendant |= child->hasRootScrollerAsDescendant() ||
-                                   (child ==
-                                    child->layoutObject()
-                                        ->document()
-                                        .rootScrollerController()
-                                        ->rootScrollerPaintLayer());
-    hasDescendantWithClipPath |= child->hasDescendantWithClipPath() ||
-                                 child->layoutObject()->hasClipPath();
-    hasNonIsolatedDescendantWithBlendMode |=
-        (!child->stackingNode()->isStackingContext() &&
-         child->hasNonIsolatedDescendantWithBlendMode()) ||
-        child->layoutObject()->style()->hasBlendMode();
-  }
-
-  layer->updateDescendantDependentCompositingInputs(
-      hasDescendantWithClipPath, hasNonIsolatedDescendantWithBlendMode,
-      hasRootScrollerAsDescendant);
   layer->didUpdateCompositingInputs();
 
   m_geometryMap.popMappingsToAncestor(layer->parent());
+
+  if (layer->selfPaintingStatusChanged()) {
+    layer->clearSelfPaintingStatusChanged();
+    // If the floating object becomes non-self-painting, so some ancestor should
+    // paint it; if it becomes self-painting, it should paint itself and no
+    // ancestor should paint it.
+    if (layer->layoutObject()->isFloating()) {
+      LayoutBlockFlow::updateAncestorShouldPaintFloatingObject(
+          *layer->layoutBox());
+    }
+  }
 }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 
 void CompositingInputsUpdater::assertNeedsCompositingInputsUpdateBitsCleared(
     PaintLayer* layer) {

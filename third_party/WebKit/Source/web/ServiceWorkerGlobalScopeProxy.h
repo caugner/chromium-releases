@@ -42,7 +42,6 @@
 
 namespace blink {
 
-class ConsoleMessage;
 class Document;
 class FetchEvent;
 class ServiceWorkerGlobalScope;
@@ -51,7 +50,7 @@ class WebEmbeddedWorkerImpl;
 class WebServiceWorkerContextClient;
 struct WebServiceWorkerError;
 class WebServiceWorkerRequest;
-class WebServiceWorkerResponse;
+class WebURLResponse;
 
 // This class is created and destructed on the main thread, but live most
 // of its time as a resident of the worker thread.
@@ -109,16 +108,20 @@ class ServiceWorkerGlobalScopeProxy final
                                       const WebNotificationData&) override;
   void dispatchPushEvent(int, const WebString& data) override;
   void dispatchSyncEvent(int, const WebString& tag, LastChanceOption) override;
+  void dispatchPaymentRequestEvent(int,
+                                   const WebPaymentAppRequestData&) override;
   bool hasFetchEventHandler() override;
   void onNavigationPreloadResponse(
       int fetchEventID,
-      std::unique_ptr<WebServiceWorkerResponse>,
+      std::unique_ptr<WebURLResponse>,
       std::unique_ptr<WebDataConsumerHandle>) override;
   void onNavigationPreloadError(
       int fetchEventID,
       std::unique_ptr<WebServiceWorkerError>) override;
 
   // WorkerReportingProxy overrides:
+  void countFeature(UseCounter::Feature) override;
+  void countDeprecation(UseCounter::Feature) override;
   void reportException(const String& errorMessage,
                        std::unique_ptr<SourceLocation>,
                        int exceptionId) override;
@@ -127,6 +130,7 @@ class ServiceWorkerGlobalScopeProxy final
                             const String& message,
                             SourceLocation*) override;
   void postMessageToPageInspector(const String&) override;
+  ParentFrameTaskRunners* getParentFrameTaskRunners() override;
   void didCreateWorkerGlobalScope(WorkerOrWorkletGlobalScope*) override;
   void didInitializeWorkerContext() override;
   void willEvaluateWorkerScript(size_t scriptSize,
@@ -160,6 +164,8 @@ class ServiceWorkerGlobalScopeProxy final
   // as part of its finalization.
   WebEmbeddedWorkerImpl* m_embeddedWorker;
   Member<Document> m_document;
+
+  Member<ParentFrameTaskRunners> m_parentFrameTaskRunners;
 
   HeapHashMap<int, Member<FetchEvent>> m_pendingPreloadFetchEvents;
 

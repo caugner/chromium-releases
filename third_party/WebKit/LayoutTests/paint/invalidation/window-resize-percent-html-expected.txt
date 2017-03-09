@@ -12,9 +12,14 @@
           "reason": "incremental"
         },
         {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 600, 250],
+          "reason": "forced by layout"
+        },
+        {
           "object": "LayoutBlockFlow DIV",
-          "rect": [0, 62, 300, 63],
-          "reason": "incremental"
+          "rect": [0, 0, 300, 125],
+          "reason": "border box change"
         }
       ]
     }
@@ -25,8 +30,12 @@
       "reason": "incremental"
     },
     {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
+    },
+    {
       "object": "LayoutBlockFlow DIV",
-      "reason": "incremental"
+      "reason": "border box change"
     }
   ]
 }
@@ -39,13 +48,18 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutView #document",
-          "rect": [400, 0, 200, 250],
-          "reason": "incremental"
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 600, 125],
+          "reason": "forced by layout"
         },
         {
           "object": "LayoutBlockFlow DIV",
-          "rect": [200, 0, 100, 63],
+          "rect": [0, 0, 300, 63],
+          "reason": "border box change"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [400, 0, 200, 250],
           "reason": "incremental"
         }
       ]
@@ -57,8 +71,12 @@
       "reason": "incremental"
     },
     {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
+    },
+    {
       "object": "LayoutBlockFlow DIV",
-      "reason": "incremental"
+      "reason": "border box change"
     }
   ]
 }
@@ -76,9 +94,14 @@
           "reason": "incremental"
         },
         {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 400, 300],
+          "reason": "forced by layout"
+        },
+        {
           "object": "LayoutBlockFlow DIV",
-          "rect": [0, 62, 200, 88],
-          "reason": "incremental"
+          "rect": [0, 0, 200, 150],
+          "reason": "border box change"
         }
       ]
     }
@@ -89,8 +112,12 @@
       "reason": "incremental"
     },
     {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
+    },
+    {
       "object": "LayoutBlockFlow DIV",
-      "reason": "incremental"
+      "reason": "border box change"
     }
   ]
 }
@@ -102,6 +129,11 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 800, 300],
+          "reason": "forced by layout"
+        },
         {
           "object": "LayoutView #document",
           "rect": [400, 0, 400, 600],
@@ -119,6 +151,10 @@
     {
       "object": "LayoutView #document",
       "reason": "incremental"
+    },
+    {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
     },
     {
       "object": "LayoutBlockFlow DIV",

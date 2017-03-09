@@ -250,7 +250,6 @@ class BookmarkButtonBase : public views::LabelButton {
  private:
   std::unique_ptr<gfx::SlideAnimation> show_animation_;
 
-
   DISALLOW_COPY_AND_ASSIGN(BookmarkButtonBase);
 };
 
@@ -289,7 +288,7 @@ class BookmarkButton : public BookmarkButtonBase {
 
   void SetText(const base::string16& text) override {
     BookmarkButtonBase::SetText(text);
-    tooltip_text_.empty();
+    tooltip_text_.clear();
   }
 
   const char* GetClassName() const override { return kViewClassName; }
@@ -1207,6 +1206,8 @@ int BookmarkBarView::OnPerformDrop(const DropTargetEvent& event) {
   DCHECK(data.is_valid());
   bool copy = drop_info_->location.operation == ui::DragDropTypes::DRAG_COPY;
   drop_info_.reset();
+
+  content::RecordAction(base::UserMetricsAction("BookmarkBar_DragEnd"));
   return chrome::DropBookmarks(
       browser_->profile(), data, parent_node, index, copy);
 }

@@ -4,12 +4,14 @@ Loaded modules:
     bindings
     common
     components
+    dom_extension
     emulation
     extensions
     host
     main
     persistence
     platform
+    protocol
     sdk
     services
     ui
