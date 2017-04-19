@@ -64,6 +64,11 @@ var client_characteristic_configuration = {
   name: 'gatt.client_characteristic_configuration',
   uuid: '00002902-0000-1000-8000-00805f9b34fb'
 };
+var measurement_interval = {
+  alias: 0x2a21,
+  name: 'measurement_interval',
+  uuid: '00002a21-0000-1000-8000-00805f9b34fb'
+};
 
 // The following tests make sure the Web Bluetooth implementation
 // responds correctly to the different types of errors the
@@ -148,9 +153,20 @@ function requestDeviceWithKeyDown() {
   return callWithKeyDown(() => navigator.bluetooth.requestDevice.apply(navigator.bluetooth, args));
 }
 
+function assert_testRunner() {
+  assert_true(window.testRunner instanceof Object,
+    "window.testRunner is required for this test, it will not work manually.");
+}
+
+function setBluetoothManualChooser(enable) {
+  assert_testRunner();
+  testRunner.setBluetoothManualChooser(enable);
+}
+
 // Calls testRunner.getBluetoothManualChooserEvents() until it's returned
 // |expected_count| events. Or just once if |expected_count| is undefined.
 function getBluetoothManualChooserEvents(expected_count) {
+  assert_testRunner();
   return new Promise((resolve, reject) => {
     let events = [];
     let accumulate_events = new_events => {
@@ -165,7 +181,13 @@ function getBluetoothManualChooserEvents(expected_count) {
   });
 }
 
+function sendBluetoothManualChooserEvent(event, argument) {
+  assert_testRunner();
+  testRunner.sendBluetoothManualChooserEvent(event, argument);
+}
+
 function setBluetoothFakeAdapter(adapter_name) {
+  assert_testRunner();
   return new Promise(resolve => {
     testRunner.setBluetoothFakeAdapter(adapter_name, resolve);
   });
@@ -325,7 +347,7 @@ function generate_string(size, char) {
 class EventCatcher {
   constructor(object, event) {
     this.eventFired = false;
-    let event_listener = e => {
+    let event_listener = () => {
       object.removeEventListener(event, event_listener);
       this.eventFired = true;
     }

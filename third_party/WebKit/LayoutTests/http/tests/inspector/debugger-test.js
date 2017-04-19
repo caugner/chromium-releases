@@ -104,12 +104,14 @@ InspectorTest.runTestFunctionAndWaitUntilPausedPromise = function()
 
 InspectorTest.runAsyncCallStacksTest = function(totalDebuggerStatements, maxAsyncCallStackDepth)
 {
+    var defaultMaxAsyncCallStackDepth = 8;
+
     InspectorTest.setQuiet(true);
     InspectorTest.startDebuggerTest(step1);
 
     function step1()
     {
-        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth, step2);
+        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth || defaultMaxAsyncCallStackDepth, step2);
     }
 
     function step2()
@@ -648,8 +650,7 @@ InspectorTest.waitForExecutionContextInTarget = function(target, callback)
 InspectorTest.selectThread = function(target)
 {
     var threadsPane = self.runtime.sharedInstance(Sources.ThreadsSidebarPane);
-    var listItem = threadsPane._targetToListItem.get(target);
-    threadsPane._onListItemClick(listItem, target);
+    threadsPane._list.selectItem(target.model(SDK.DebuggerModel));
 }
 
 InspectorTest.evaluateOnCurrentCallFrame = function(code)
@@ -718,14 +719,20 @@ InspectorTest.dumpJavaScriptSourceFrameBreakpoints = function(sourceFrame)
     }
 }
 
-InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineNumber, index)
+InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineNumber, index, next)
 {
     var textEditor = sourceFrame._textEditor;
     var lineLength = textEditor.line(lineNumber).length;
     var lineRange = new Common.TextRange(lineNumber, 0, lineNumber, lineLength);
     var bookmarks = textEditor.bookmarks(lineRange, Sources.JavaScriptSourceFrame.BreakpointDecoration._bookmarkSymbol);
     bookmarks.sort((bookmark1, bookmark2) => bookmark1.position().startColumn - bookmark2.position().startColumn);
-    bookmarks[index][Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest].click();
+    var bookmark = bookmarks[index];
+    if (bookmark) {
+        bookmark[Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest].click();
+    } else {
+        InspectorTest.addResult(`Could not click on Javascript breakpoint - lineNumber: ${lineNumber}, index: ${index}`);
+        next();
+    }
 }
 
 };

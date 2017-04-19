@@ -9,7 +9,7 @@
         {
           "object": "LayoutBlockFlow DIV",
           "rect": [7, 41, 786, 56],
-          "reason": "outline"
+          "reason": "border box change"
         },
         {
           "object": "LayoutBlockFlow DIV id='div'",
@@ -18,39 +18,20 @@
         },
         {
           "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 59, 3, 19],
-          "reason": "invalidate paint rectangle"
+          "rect": [8, 60, 1, 17],
+          "reason": "caret"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
       "object": "LayoutBlockFlow DIV",
-      "reason": "outline"
+      "reason": "border box change"
+    },
+    {
+      "object": "Caret",
+      "reason": "caret"
     },
     {
       "object": "LayoutBlockFlow DIV id='div'",
@@ -62,11 +43,7 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutBR BR",

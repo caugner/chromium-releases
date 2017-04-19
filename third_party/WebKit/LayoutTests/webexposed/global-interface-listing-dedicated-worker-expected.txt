@@ -228,6 +228,51 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method toString
 [Worker]     method transformPoint
 [Worker]     method translate
+[Worker] interface DOMPoint : DOMPointReadOnly
+[Worker]     attribute @@toStringTag
+[Worker]     getter w
+[Worker]     getter x
+[Worker]     getter y
+[Worker]     getter z
+[Worker]     method constructor
+[Worker]     setter w
+[Worker]     setter x
+[Worker]     setter y
+[Worker]     setter z
+[Worker] interface DOMPointReadOnly
+[Worker]     static method fromPoint
+[Worker]     attribute @@toStringTag
+[Worker]     getter w
+[Worker]     getter x
+[Worker]     getter y
+[Worker]     getter z
+[Worker]     method constructor
+[Worker]     method matrixTransform
+[Worker]     method toJSON
+[Worker] interface DOMRect : DOMRectReadOnly
+[Worker]     attribute @@toStringTag
+[Worker]     getter height
+[Worker]     getter width
+[Worker]     getter x
+[Worker]     getter y
+[Worker]     method constructor
+[Worker]     setter height
+[Worker]     setter width
+[Worker]     setter x
+[Worker]     setter y
+[Worker] interface DOMRectReadOnly
+[Worker]     static method fromRect
+[Worker]     attribute @@toStringTag
+[Worker]     getter bottom
+[Worker]     getter height
+[Worker]     getter left
+[Worker]     getter right
+[Worker]     getter top
+[Worker]     getter width
+[Worker]     getter x
+[Worker]     getter y
+[Worker]     method constructor
+[Worker]     method toJSON
 [Worker] interface DOMStringList
 [Worker]     attribute @@toStringTag
 [Worker]     getter length
@@ -629,6 +674,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     attribute @@toStringTag
 [Worker]     getter canvas
 [Worker]     getter fillStyle
+[Worker]     getter filter
 [Worker]     getter globalAlpha
 [Worker]     getter globalCompositeOperation
 [Worker]     getter imageSmoothingEnabled
@@ -681,6 +727,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method transform
 [Worker]     method translate
 [Worker]     setter fillStyle
+[Worker]     setter filter
 [Worker]     setter globalAlpha
 [Worker]     setter globalCompositeOperation
 [Worker]     setter imageSmoothingEnabled
@@ -743,6 +790,8 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method cancel
 [Worker]     method constructor
 [Worker]     method getReader
+[Worker]     method pipeThrough
+[Worker]     method pipeTo
 [Worker]     method tee
 [Worker] interface Request
 [Worker]     attribute @@toStringTag

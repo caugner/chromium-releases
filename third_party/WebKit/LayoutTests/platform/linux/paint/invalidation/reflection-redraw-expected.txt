@@ -8,22 +8,22 @@
       "paintInvalidations": [
         {
           "object": "LayoutText #text",
-          "rect": [381, 267, 284, 59],
+          "rect": [380, 267, 286, 59],
           "reason": "style change"
         },
         {
           "object": "LayoutText #text",
-          "rect": [71, 267, 284, 59],
+          "rect": [70, 267, 286, 59],
           "reason": "style change"
         },
         {
           "object": "LayoutText #text",
-          "rect": [306, 34, 124, 182],
+          "rect": [305, 34, 126, 182],
           "reason": "style change"
         },
         {
           "object": "LayoutText #text",
-          "rect": [306, 377, 124, 156],
+          "rect": [305, 377, 126, 156],
           "reason": "style change"
         }
       ]
@@ -35,27 +35,11 @@
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'The color of this text'",
+      "object": "InlineTextBox 'The color of this'",
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'in the reflection'",
-      "reason": "style change"
-    },
-    {
-      "object": "InlineTextBox 'should be green'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "style change"
-    },
-    {
-      "object": "InlineTextBox 'The color of this text'",
-      "reason": "style change"
-    },
-    {
-      "object": "InlineTextBox 'in the reflection'",
+      "object": "InlineTextBox 'text in the reflection'",
       "reason": "style change"
     },
     {
@@ -67,11 +51,11 @@
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'The color of this text'",
+      "object": "InlineTextBox 'The color of this'",
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'in the reflection'",
+      "object": "InlineTextBox 'text in the reflection'",
       "reason": "style change"
     },
     {
@@ -83,11 +67,27 @@
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'The color of this text'",
+      "object": "InlineTextBox 'The color of this'",
       "reason": "style change"
     },
     {
-      "object": "InlineTextBox 'in the reflection'",
+      "object": "InlineTextBox 'text in the reflection'",
+      "reason": "style change"
+    },
+    {
+      "object": "InlineTextBox 'should be green'",
+      "reason": "style change"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "style change"
+    },
+    {
+      "object": "InlineTextBox 'The color of this'",
+      "reason": "style change"
+    },
+    {
+      "object": "InlineTextBox 'text in the reflection'",
       "reason": "style change"
     },
     {

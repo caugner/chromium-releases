@@ -8,7 +8,7 @@
       "paintInvalidations": [
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 523, 446, 77],
+          "rect": [16, 523, 449, 77],
           "reason": "selection"
         },
         {
@@ -58,52 +58,52 @@
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [378, 36, 77, 34],
+          "rect": [376, 36, 81, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 491, 76, 34],
+          "rect": [16, 491, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 441, 76, 34],
+          "rect": [16, 441, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 391, 76, 34],
+          "rect": [16, 391, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 341, 76, 34],
+          "rect": [16, 341, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 291, 76, 34],
+          "rect": [16, 291, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 241, 76, 34],
+          "rect": [16, 241, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 191, 76, 34],
+          "rect": [16, 191, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 141, 76, 34],
+          "rect": [16, 141, 79, 34],
           "reason": "selection"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [16, 91, 76, 34],
+          "rect": [16, 91, 79, 34],
           "reason": "selection"
         },
         {

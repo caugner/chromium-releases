@@ -1,4 +1,5 @@
 This is a testharness.js-based test.
+Found 391 tests; 299 PASS, 92 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS DOMImplementation.createDocument(namespace, qualifiedName, doctype) 
 PASS createDocument test: null,null,null,null 
 FAIL createDocument test: metadata for null,null,null assert_equals: expected "about:blank" but got ""
@@ -153,7 +154,6 @@ PASS createDocument test: characterSet aliases for "http://example.com/","a-b:c"
 PASS createDocument test: "http://example.com/","xml",null,null 
 FAIL createDocument test: metadata for "http://example.com/","xml",null assert_equals: expected "about:blank" but got ""
 PASS createDocument test: characterSet aliases for "http://example.com/","xml",null 
-PASS createDocument test: "http://example.com/","xmlns",null,"NAMESPACE_ERR" 
 PASS createDocument test: "http://example.com/","XMLNS",null,null 
 FAIL createDocument test: metadata for "http://example.com/","XMLNS",null assert_equals: expected "about:blank" but got ""
 PASS createDocument test: characterSet aliases for "http://example.com/","XMLNS",null 
@@ -303,9 +303,6 @@ PASS createDocument test: "foo:","xmlfoo:bar",null,null
 FAIL createDocument test: metadata for "foo:","xmlfoo:bar",null assert_equals: expected "about:blank" but got ""
 PASS createDocument test: characterSet aliases for "foo:","xmlfoo:bar",null 
 PASS createDocument test: null,null,false,object "TypeError" 
-PASS createDocument test: null,null,null,null 
-FAIL createDocument test: metadata for null,null,null assert_equals: expected "about:blank" but got ""
-PASS createDocument test: characterSet aliases for null,null,null 
 PASS createDocument test: null,"",null,null 
 FAIL createDocument test: metadata for null,"",null assert_equals: expected "about:blank" but got ""
 PASS createDocument test: characterSet aliases for null,"",null 

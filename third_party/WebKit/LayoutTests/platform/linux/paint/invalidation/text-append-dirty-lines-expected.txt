@@ -8,7 +8,7 @@
       "paintInvalidations": [
         {
           "object": "LayoutText #text",
-          "rect": [8, 44, 781, 119],
+          "rect": [7, 44, 757, 139],
           "reason": "full"
         }
       ]
@@ -24,23 +24,27 @@
       "reason": "full"
     },
     {
-      "object": "InlineTextBox 'pellentesque cursus. Proin vitae nulla. Vivamus in ipsum. Etiam mi. Nam malesuada purus in sem. Sed eget elit vel erat laoreet'",
+      "object": "InlineTextBox 'pellentesque cursus. Proin vitae nulla. Vivamus in ipsum. Etiam mi. Nam malesuada purus in sem. Sed eget elit vel erat'",
       "reason": "full"
     },
     {
-      "object": "InlineTextBox 'feugiat. Phasellus mollis pulvinar mi. Etiam ut neque sed eros egestas laoreet. Vestibulum ullamcorper, nulla non feugiat molestie, mi'",
+      "object": "InlineTextBox 'laoreet feugiat. Phasellus mollis pulvinar mi. Etiam ut neque sed eros egestas laoreet. Vestibulum ullamcorper, nulla non'",
       "reason": "full"
     },
     {
-      "object": "InlineTextBox 'lorem bibendum leo, ac gravida orci nunc nec nulla. Nunc nunc lorem, rhoncus et, rutrum ac, fermentum ut, tortor. Sed rhoncus.'",
+      "object": "InlineTextBox 'feugiat molestie, mi lorem bibendum leo, ac gravida orci nunc nec nulla. Nunc nunc lorem, rhoncus et, rutrum ac,'",
       "reason": "full"
     },
     {
-      "object": "InlineTextBox 'Quisque enim metus, luctus tincidunt, vestibulum eu, vestibulum eu, libero. Mauris sagittis aliquam nunc. Nullam pharetra molestie'",
+      "object": "InlineTextBox 'fermentum ut, tortor. Sed rhoncus. Quisque enim metus, luctus tincidunt, vestibulum eu, vestibulum eu, libero. Mauris'",
       "reason": "full"
     },
     {
-      "object": "InlineTextBox 'eros. Donec tempus purus ut ligula. Phasellus non nisl. Etiam eu mauris. Curabitur a velit.'",
+      "object": "InlineTextBox 'sagittis aliquam nunc. Nullam pharetra molestie eros. Donec tempus purus ut ligula. Phasellus non nisl. Etiam eu mauris.'",
+      "reason": "full"
+    },
+    {
+      "object": "InlineTextBox 'Curabitur a velit.'",
       "reason": "full"
     }
   ]

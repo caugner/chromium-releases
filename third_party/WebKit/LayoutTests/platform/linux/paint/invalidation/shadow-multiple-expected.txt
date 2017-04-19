@@ -7,6 +7,6 @@ layer at (0,0) size 800x600
         LayoutInline {SPAN} at (0,0) size 290x55
           LayoutText {#text} at (0,1) size 290x55
             text run at (0,1) width 290: "      multiple    "
-        LayoutText {#text} at (290,1) size 305x55
-          text run at (290,1) width 305: "     shadows      "
+        LayoutText {#text} at (290,1) size 307x55
+          text run at (290,1) width 307: "     shadows      "
       LayoutBlockFlow {DIV} at (100,157) size 100x100

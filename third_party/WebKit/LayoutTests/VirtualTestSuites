@@ -90,6 +90,11 @@
   },
   {
     "prefix": "stable",
+    "base": "http/tests/sendbeacon",
+    "args": ["--stable-release-mode"]
+  },
+  {
+    "prefix": "stable",
     "base": "animations-unprefixed",
     "args": ["--stable-release-mode"]
   },
@@ -99,20 +104,14 @@
     "args": ["--stable-release-mode"]
   },
   {
-    "prefix": "stable",
+    "prefix": "disable-spinvalidation",
     "base": "paint/invalidation",
-    "args": ["--stable-release-mode"]
+    "args": ["--disable-slimming-paint-invalidation"]
   },
   {
-    "prefix": "stable",
+    "prefix": "origin-trials-runtimeflags-disabled",
     "base": "http/tests/origin_trials/webexposed",
-    "args": ["--stable-release-mode"]
-  },
-  {
-    "prefix": "origin-trials-features-disabled",
-    "base": "http/tests/origin_trials/webexposed",
-    "args": ["--disable-blink-features=ForeignFetch,ImageCapture,LinkServiceWorker,LongTaskObserver,ServiceWorkerNavigationPreload,SetRootScroller,WebUSB,WebVR,WebShare",
-             "--disable-features=ForeignFetch,ImageCapture,LinkServiceWorker,LongTaskObserver,ServiceWorkerNavigationPreload,SetRootScroller,WebUSB,WebVR,WebShare"]
+    "args": ["--disable-blink-features=ForeignFetch,ImageCapture,LinkServiceWorker,LongTaskObserver,ServiceWorkerNavigationPreload,SetRootScroller,WebUSB,WebVR,WebShare"]
   },
   {
     "prefix": "android",
@@ -287,16 +286,6 @@
     "args": ["--enable-features=TouchpadAndWheelScrollLatching"]
   },
   {
-    "prefix": "parsehtmlonmainthread_sync",
-    "base": "fast/parser",
-    "args": ["--blink-settings=parseHTMLOnMainThreadSyncTokenize=true"]
-  },
-  {
-    "prefix": "parsehtmlonmainthread_coalesce",
-    "base": "fast/parser",
-    "args": ["--disable-blink-features=ParseHTMLOnMainThread", "--blink-settings=parseHTMLOnMainThreadCoalesceChunks=true"]
-  },
-  {
     "prefix": "mojo-loading",
     "base": "webexposed",
     "args": ["--enable-blink-features=LoadingWithMojo"]
@@ -339,22 +328,22 @@
   {
     "prefix": "layout_ng",
     "base": "fast/block/basic",
-    "args": ["--enable-blink-features=LayoutNG"]
+    "args": ["--enable-blink-features=LayoutNG, LayoutNGInline"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/block/margin-collapse",
-    "args": ["--enable-blink-features=LayoutNG"]
+    "args": ["--enable-blink-features=LayoutNG, LayoutNGInline"]
   },
   {
     "prefix": "layout_ng",
     "base": "css2.1/20110323",
-    "args": ["--enable-blink-features=LayoutNG"]
+    "args": ["--enable-blink-features=LayoutNG, LayoutNGInline"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/block/float",
-    "args": ["--enable-blink-features=LayoutNG"]
+    "args": ["--enable-blink-features=LayoutNG, LayoutNGInline"]
   },
   {
     "prefix": "feature-policy",
@@ -370,5 +359,10 @@
     "prefix": "mojo-localstorage",
     "base": "storage/domstorage/localstorage",
     "args": ["--mojo-local-storage"]
+  },
+  {
+    "prefix": "print_browser",
+    "base": "print_testharness",
+    "args": ["--enable-print-browser"]
   }
 ]

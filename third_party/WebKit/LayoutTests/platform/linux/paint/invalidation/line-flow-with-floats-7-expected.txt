@@ -8,12 +8,12 @@
       "paintInvalidations": [
         {
           "object": "LayoutText #text",
-          "rect": [65, 380, 304, 59],
+          "rect": [14, 420, 355, 39],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutText #text",
-          "rect": [297, 420, 72, 19],
+          "rect": [298, 440, 70, 19],
           "reason": "style change"
         }
       ]
@@ -25,19 +25,15 @@
       "reason": "forced by layout"
     },
     {
-      "object": "InlineTextBox 'for'",
+      "object": "InlineTextBox 'for turns,\n'",
       "reason": "forced by layout"
     },
     {
-      "object": "InlineTextBox 'turns,\n'",
+      "object": "InlineTextBox 'quarrelling all the while, and fighting'",
       "reason": "forced by layout"
     },
     {
-      "object": "InlineTextBox 'quarrelling all the while, and fighting for the'",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "InlineTextBox 'hedgehogs; and in\n'",
+      "object": "InlineTextBox 'for the hedgehogs; and in\n'",
       "reason": "forced by layout"
     },
     {

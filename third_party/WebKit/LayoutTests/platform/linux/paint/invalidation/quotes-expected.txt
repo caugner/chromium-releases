@@ -13,17 +13,17 @@
         },
         {
           "object": "LayoutText #text",
-          "rect": [17, 28, 46, 19],
+          "rect": [17, 28, 47, 19],
           "reason": "style change"
         },
         {
           "object": "LayoutText #text",
-          "rect": [15, 28, 46, 19],
+          "rect": [16, 28, 47, 19],
           "reason": "style change"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [63, 28, 9, 19],
+          "rect": [64, 28, 9, 19],
           "reason": "style change"
         },
         {
@@ -33,7 +33,7 @@
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [61, 28, 8, 19],
+          "rect": [63, 28, 8, 19],
           "reason": "style change"
         }
       ]

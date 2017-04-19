@@ -6,21 +6,21 @@ layer at (0,0) size 800x600
       LayoutImage {IMG} at (0,0) size 479x150
       LayoutText {#text} at (479,135) size 4x19
         text run at (479,135) width 4: " "
-      LayoutInline {MAP} at (0,0) size 214x19
+      LayoutInline {MAP} at (0,0) size 224x19
         LayoutText {#text} at (0,0) size 0x0
         LayoutBR {BR} at (0,0) size 0x0
-        LayoutInline {A} at (0,0) size 87x19 [color=#0000EE]
-          LayoutText {#text} at (0,155) size 87x19
-            text run at (0,155) width 87: "John Hancock"
-        LayoutText {#text} at (87,155) size 11x19
-          text run at (87,155) width 11: " | "
-        LayoutInline {A} at (0,0) size 38x19 [color=#0000EE]
-          LayoutText {#text} at (98,155) size 38x19
-            text run at (98,155) width 38: "Nokia"
-        LayoutText {#text} at (136,155) size 11x19
-          text run at (136,155) width 11: " | "
-        LayoutInline {A} at (0,0) size 67x19 [color=#0000EE]
-          LayoutText {#text} at (147,155) size 67x19
-            text run at (147,155) width 67: "Downtown"
+        LayoutInline {A} at (0,0) size 91x19 [color=#0000EE]
+          LayoutText {#text} at (0,155) size 91x19
+            text run at (0,155) width 91: "John Hancock"
+        LayoutText {#text} at (91,155) size 11x19
+          text run at (91,155) width 11: " | "
+        LayoutInline {A} at (0,0) size 39x19 [color=#0000EE]
+          LayoutText {#text} at (102,155) size 39x19
+            text run at (102,155) width 39: "Nokia"
+        LayoutText {#text} at (141,155) size 11x19
+          text run at (141,155) width 11: " | "
+        LayoutInline {A} at (0,0) size 72x19 [color=#0000EE]
+          LayoutText {#text} at (152,155) size 72x19
+            text run at (152,155) width 72: "Downtown"
         LayoutText {#text} at (0,0) size 0x0
       LayoutText {#text} at (0,0) size 0x0

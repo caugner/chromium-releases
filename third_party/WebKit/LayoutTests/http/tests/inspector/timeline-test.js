@@ -41,7 +41,8 @@ InspectorTest.timelinePropertyFormatters = {
     finishTime: "formatAsTypeName",
     thread: "formatAsTypeName",
     allottedMilliseconds: "formatAsTypeName",
-    timedOut: "formatAsTypeName"
+    timedOut: "formatAsTypeName",
+    networkTime: "formatAsTypeName",
 };
 
 InspectorTest.InvalidationFormatters = {
@@ -78,7 +79,7 @@ InspectorTest.createTracingModel = function()
 
 InspectorTest.tracingModel = function()
 {
-    return UI.panels.timeline._tracingModel;
+    return UI.panels.timeline._performanceModel.tracingModel();
 }
 
 InspectorTest.invokeWithTracing = function(functionName, callback, additionalCategories, enableJSSampling)
@@ -89,69 +90,69 @@ InspectorTest.invokeWithTracing = function(functionName, callback, additionalCat
     var timelinePanel = UI.panels.timeline;
     var timelineController = InspectorTest.timelineController();
     timelinePanel._timelineController = timelineController;
-    timelineController._startRecordingWithCategories(categories, enableJSSampling, tracingStarted);
+    timelineController._startRecordingWithCategories(categories, enableJSSampling).then(tracingStarted);
 
     function tracingStarted()
     {
+        timelinePanel._recordingStarted();
         InspectorTest.callFunctionInPageAsync(functionName).then(onPageActionsDone);
     }
 
     function onPageActionsDone()
     {
-        InspectorTest.addSniffer(UI.panels.timeline, "loadingComplete", callback)
+        InspectorTest.runWhenTimelineIsReady(callback);
         timelineController.stopRecording();
     }
 }
 
+InspectorTest.performanceModel = function()
+{
+    return UI.panels.timeline._performanceModel;
+}
+
 InspectorTest.timelineModel = function()
 {
-    return UI.panels.timeline._model;
+    return InspectorTest.performanceModel().timelineModel();
 }
 
 InspectorTest.timelineFrameModel = function()
 {
-    return UI.panels.timeline._frameModel;
+    return InspectorTest.performanceModel().frameModel();
 }
 
-InspectorTest.setTraceEvents = function(timelineModel, tracingModel, events)
-{
-    tracingModel.reset();
-    tracingModel.addEvents(events);
-    tracingModel.tracingComplete();
-    timelineModel.setEvents(tracingModel);
-}
-
-InspectorTest.createTimelineModelWithEvents = function(events)
+InspectorTest.createPerformanceModelWithEvents = function(events)
 {
     var tracingModel = new SDK.TracingModel(new Bindings.TempFileBackingStorage("tracing"));
-    var timelineModel = new TimelineModel.TimelineModel(Timeline.TimelineUIUtils.visibleEventsFilter());
-    InspectorTest.setTraceEvents(timelineModel, tracingModel, events);
-    return timelineModel;
+    tracingModel.addEvents(events);
+    tracingModel.tracingComplete();
+    var performanceModel = new Timeline.PerformanceModel();
+    performanceModel.setTracingModel(tracingModel);
+    return performanceModel;
 }
 
 InspectorTest.timelineController = function()
 {
-    var mainTarget = SDK.targetManager.mainTarget();
-    var timelinePanel =  UI.panels.timeline;
-    return new Timeline.TimelineController(mainTarget, timelinePanel, timelinePanel._tracingModel);
+    var performanceModel = new Timeline.PerformanceModel();
+    UI.panels.timeline._pendingPerformanceModel = performanceModel;
+    return new Timeline.TimelineController(InspectorTest.tracingManager, performanceModel, UI.panels.timeline);
+}
+
+InspectorTest.runWhenTimelineIsReady = function(callback)
+{
+    InspectorTest.addSniffer(UI.panels.timeline, "loadingComplete", () => callback());
 }
 
 InspectorTest.startTimeline = function(callback)
 {
     var panel = UI.panels.timeline;
-    InspectorTest.addSniffer(panel, "recordingStarted", callback);
+    InspectorTest.addSniffer(panel, "_recordingStarted", callback);
     panel._toggleRecording();
 };
 
 InspectorTest.stopTimeline = function(callback)
 {
-    var panel = UI.panels.timeline;
-    function didStop()
-    {
-        InspectorTest.deprecatedRunAfterPendingDispatches(callback);
-    }
-    InspectorTest.addSniffer(panel, "loadingComplete", didStop);
-    panel._toggleRecording();
+    InspectorTest.runWhenTimelineIsReady(callback);
+    UI.panels.timeline._toggleRecording();
 };
 
 InspectorTest.evaluateWithTimeline = function(actions, doneCallback)
@@ -196,34 +197,28 @@ InspectorTest.performActionsAndPrint = function(actions, typeName, includeTimeSt
     InspectorTest.evaluateWithTimeline(actions, callback);
 };
 
-InspectorTest.printTimelineRecords = function(typeName, formatter)
+InspectorTest.printTimelineRecords = function(name)
 {
-    InspectorTest.timelineModel().forAllRecords(InspectorTest._printTimlineRecord.bind(InspectorTest, typeName, formatter));
+    for (let event of InspectorTest.timelineModel().mainThreadEvents()) {
+        if (event.name === name)
+            InspectorTest.printTraceEventProperties(event);
+    }
 };
 
-InspectorTest.printTimelineRecordsWithDetails = function(typeName)
+InspectorTest.printTimelineRecordsWithDetails = function(name)
 {
-    function detailsFormatter(recordType, record)
-    {
-        if (recordType && recordType !== record.type())
-            return;
-        const event = record.traceEvent();
-        const details = Timeline.TimelineUIUtils.buildDetailsTextForTraceEvent(event,
-            SDK.targetManager.mainTarget(),
-            new Components.Linkifier());
-        InspectorTest.addResult(`Text details for ${record.type()}: ${details}`);
-        if (TimelineModel.TimelineData.forEvent(event).warning)
-            InspectorTest.addResult(record.type() + " has a warning");
+    for (let event of InspectorTest.timelineModel().mainThreadEvents()) {
+        if (name === event.name)
+            InspectorTest.printTraceEventPropertiesWithDetails(event);
     }
-
-    InspectorTest.timelineModel().forAllRecords(InspectorTest._printTimlineRecord.bind(InspectorTest, typeName, detailsFormatter.bind(null, typeName)));
 };
 
 InspectorTest.walkTimelineEventTree = function(callback)
 {
-    var model = InspectorTest.timelineModel();
-    var view = new Timeline.EventsTimelineTreeView(model, UI.panels.timeline._filters, null);
-    var selection = Timeline.TimelineSelection.fromRange(model.minimumRecordTime(), model.maximumRecordTime());
+    var performanceModel = InspectorTest.performanceModel();
+    var view = new Timeline.EventsTimelineTreeView(UI.panels.timeline._filters, null);
+    view.setModel(performanceModel);
+    var selection = Timeline.TimelineSelection.fromRange(performanceModel.timelineModel().minimumRecordTime(), performanceModel.timelineModel().maximumRecordTime());
     view.updateContents(selection);
     InspectorTest.walkTimelineEventTreeUnderNode(callback, view._currentTree, 0);
 }
@@ -233,31 +228,18 @@ InspectorTest.walkTimelineEventTreeUnderNode = function(callback, root, level)
     var event = root.event;
     if (event)
         callback(event, level)
-    var children = root.children ? root.children.values() : [];
-    for (var child of children)
+    for (var child of root.children().values())
         InspectorTest.walkTimelineEventTreeUnderNode(callback, child, (level || 0) + 1);
 }
 
-InspectorTest.printTimestampRecords = function(typeName, formatter)
+InspectorTest.printTimestampRecords = function(typeName)
 {
-    const records = InspectorTest.timelineModel().eventDividerRecords();
-    for (let record of records)
-        InspectorTest._printTimlineRecord(typeName, formatter, record);
+    var dividers = InspectorTest.timelineModel().eventDividers();
+    for (var event of dividers) {
+        if (event.name === typeName)
+            InspectorTest.printTraceEventProperties(event);
+    }
 };
-
-InspectorTest._printTimlineRecord = function(typeName, formatter, record)
-{
-    if (typeName && record.type() === typeName)
-        InspectorTest.printTraceEventProperties(record.traceEvent());
-    if (formatter)
-        formatter(record);
-};
-
-InspectorTest.printTraceEventPropertiesIfNameMatches = function(set, traceEvent)
-{
-    if (set.has(traceEvent.name))
-        InspectorTest.printTraceEventProperties(traceEvent);
-}
 
 InspectorTest.forAllEvents = function(events, callback)
 {
@@ -291,9 +273,30 @@ InspectorTest.printTraceEventProperties = function(traceEvent)
     InspectorTest.addObject(object, InspectorTest.timelinePropertyFormatters);
 };
 
+InspectorTest.printTraceEventPropertiesWithDetails = function(event)
+{
+    InspectorTest.printTraceEventProperties(event);
+    const details = Timeline.TimelineUIUtils.buildDetailsTextForTraceEvent(event,
+        SDK.targetManager.mainTarget(),
+        new Components.Linkifier());
+    InspectorTest.addResult(`Text details for ${event.name}: ${details}`);
+    if (TimelineModel.TimelineData.forEvent(event).warning)
+        InspectorTest.addResult(`${event.name} has a warning`);
+}
+
 InspectorTest.findTimelineEvent = function(name, index)
 {
     return InspectorTest.timelineModel().mainThreadEvents().filter(e => e.name === name)[index || 0];
+}
+
+InspectorTest.findChildEvent = function(events, parentIndex, name)
+{
+    var endTime = events[parentIndex].endTime;
+    for (var i = parentIndex + 1; i < events.length && (!events[i].endTime || events[i].endTime <= endTime); ++i) {
+        if (events[i].name === name)
+            return events[i];
+    }
+    return null;
 }
 
 InspectorTest.FakeFileReader = function(input, delegate, callback)
@@ -361,7 +364,7 @@ InspectorTest.dumpFlameChartProvider = function(provider, includeGroups)
 }
 
 InspectorTest.dumpTimelineFlameChart = function(includeGroups) {
-    const provider = UI.panels.timeline._flameChart._dataProvider;
+    const provider = UI.panels.timeline._flameChart._mainDataProvider;
     InspectorTest.addResult('Timeline Flame Chart');
     InspectorTest.dumpFlameChartProvider(provider, includeGroups);
 }
@@ -418,7 +421,9 @@ InspectorTest.loadTimeline = function(timelineData)
     }
 
     InspectorTest.override(Timeline.TimelineLoader, "_createFileReader", createFileReader);
+    var promise = new Promise(fulfill => InspectorTest.runWhenTimelineIsReady(fulfill));
     timeline._loadFromFile({});
+    return promise;
 }
 
 };
