@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 100 tests; 77 PASS, 23 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 85 tests; 67 PASS, 18 FAIL, 0 TIMEOUT, 0 NOTRUN.
 FAIL Window interface: attribute onvrdisplayconnect assert_own_property: The global object must have a property "onvrdisplayconnect" expected property "onvrdisplayconnect" missing
 FAIL Window interface: attribute onvrdisplaydisconnect assert_own_property: The global object must have a property "onvrdisplaydisconnect" expected property "onvrdisplaydisconnect" missing
 FAIL Window interface: attribute onvrdisplayactivate assert_own_property: The global object must have a property "onvrdisplayactivate" expected property "onvrdisplayactivate" missing
@@ -17,7 +17,6 @@ PASS VRDisplay interface object length
 PASS VRDisplay interface object name 
 FAIL VRDisplay interface: existence and properties of interface prototype object assert_equals: class string of VRDisplay.prototype expected "[object VRDisplayPrototype]" but got "[object VRDisplay]"
 PASS VRDisplay interface: existence and properties of interface prototype object's "constructor" property 
-PASS VRDisplay interface: attribute isConnected 
 PASS VRDisplay interface: attribute isPresenting 
 PASS VRDisplay interface: attribute capabilities 
 PASS VRDisplay interface: attribute stageParameters 
@@ -25,8 +24,6 @@ PASS VRDisplay interface: operation getEyeParameters(VREye)
 PASS VRDisplay interface: attribute displayId 
 PASS VRDisplay interface: attribute displayName 
 PASS VRDisplay interface: operation getFrameData(VRFrameData) 
-PASS VRDisplay interface: operation getPose() 
-PASS VRDisplay interface: operation resetPose() 
 PASS VRDisplay interface: attribute depthNear 
 PASS VRDisplay interface: attribute depthFar 
 PASS VRDisplay interface: operation requestAnimationFrame(FrameRequestCallback) 
@@ -41,19 +38,9 @@ PASS VRDisplayCapabilities interface object name
 FAIL VRDisplayCapabilities interface: existence and properties of interface prototype object assert_equals: class string of VRDisplayCapabilities.prototype expected "[object VRDisplayCapabilitiesPrototype]" but got "[object VRDisplayCapabilities]"
 PASS VRDisplayCapabilities interface: existence and properties of interface prototype object's "constructor" property 
 PASS VRDisplayCapabilities interface: attribute hasPosition 
-PASS VRDisplayCapabilities interface: attribute hasOrientation 
 PASS VRDisplayCapabilities interface: attribute hasExternalDisplay 
 PASS VRDisplayCapabilities interface: attribute canPresent 
 PASS VRDisplayCapabilities interface: attribute maxLayers 
-PASS VRFieldOfView interface: existence and properties of interface object 
-PASS VRFieldOfView interface object length 
-PASS VRFieldOfView interface object name 
-FAIL VRFieldOfView interface: existence and properties of interface prototype object assert_equals: class string of VRFieldOfView.prototype expected "[object VRFieldOfViewPrototype]" but got "[object VRFieldOfView]"
-PASS VRFieldOfView interface: existence and properties of interface prototype object's "constructor" property 
-FAIL VRFieldOfView interface: attribute upDegrees assert_equals: setter must be undefined for readonly attributes expected (undefined) undefined but got (function) function "function () { [native code] }"
-FAIL VRFieldOfView interface: attribute rightDegrees assert_equals: setter must be undefined for readonly attributes expected (undefined) undefined but got (function) function "function () { [native code] }"
-FAIL VRFieldOfView interface: attribute downDegrees assert_equals: setter must be undefined for readonly attributes expected (undefined) undefined but got (function) function "function () { [native code] }"
-FAIL VRFieldOfView interface: attribute leftDegrees assert_equals: setter must be undefined for readonly attributes expected (undefined) undefined but got (function) function "function () { [native code] }"
 PASS VRPose interface: existence and properties of interface object 
 PASS VRPose interface object length 
 PASS VRPose interface object name 
@@ -70,7 +57,6 @@ PASS VRFrameData interface object length
 PASS VRFrameData interface object name 
 FAIL VRFrameData interface: existence and properties of interface prototype object assert_equals: class string of VRFrameData.prototype expected "[object VRFrameDataPrototype]" but got "[object VRFrameData]"
 PASS VRFrameData interface: existence and properties of interface prototype object's "constructor" property 
-PASS VRFrameData interface: attribute timestamp 
 PASS VRFrameData interface: attribute leftProjectionMatrix 
 PASS VRFrameData interface: attribute leftViewMatrix 
 PASS VRFrameData interface: attribute rightProjectionMatrix 
@@ -82,7 +68,6 @@ PASS VREyeParameters interface object name
 FAIL VREyeParameters interface: existence and properties of interface prototype object assert_equals: class string of VREyeParameters.prototype expected "[object VREyeParametersPrototype]" but got "[object VREyeParameters]"
 PASS VREyeParameters interface: existence and properties of interface prototype object's "constructor" property 
 PASS VREyeParameters interface: attribute offset 
-PASS VREyeParameters interface: attribute fieldOfView 
 PASS VREyeParameters interface: attribute renderWidth 
 PASS VREyeParameters interface: attribute renderHeight 
 PASS VRStageParameters interface: existence and properties of interface object 

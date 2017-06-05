@@ -71,6 +71,22 @@ FileSystemCompatibilityState GetFileSystemCompatibilityPref(
 }  // namespace
 
 bool IsArcAllowedForProfile(const Profile* profile) {
+  if (!IsArcAllowedInAppListForProfile(profile))
+    return false;
+
+  if (base::SysInfo::IsRunningOnChromeOS()) {
+    // Do not allow newer version of ARC on old filesystem.
+    // Check this condition only on real Chrome OS devices. Test runs on Linux
+    // workstation does not have expected /etc/lsb-release field nor profile
+    // creation step.
+    if (!IsArcCompatibleFileSystemUsedForProfile(profile))
+      return false;
+  }
+
+  return true;
+}
+
+bool IsArcAllowedInAppListForProfile(const Profile* profile) {
   if (g_disallow_for_testing) {
     VLOG(1) << "ARC is disallowed for testing.";
     return false;
@@ -140,6 +156,38 @@ bool IsArcAllowedForProfile(const Profile* profile) {
   return true;
 }
 
+bool IsArcCompatibleFileSystemUsedForProfile(const Profile* profile) {
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
+
+  // Returns false for profiles not associated with users (like sign-in profile)
+  if (!user)
+    return false;
+
+  // chromeos::UserSessionManager does the actual file system check and stores
+  // the result to prefs, so that it survives crash-restart.
+  FileSystemCompatibilityState filesystem_compatibility =
+      GetFileSystemCompatibilityPref(user->GetAccountId());
+  const bool is_filesystem_compatible =
+      filesystem_compatibility != kFileSystemIncompatible;
+  std::string arc_sdk_version;
+  const bool is_M = base::SysInfo::GetLsbReleaseValue(kLsbReleaseArcVersionKey,
+                                                      &arc_sdk_version) &&
+                    arc_sdk_version == kAndroidMSdkVersion;
+
+  // To run ARC we want to make sure either
+  // - Underlying file system is compatible with ARC, or
+  // - SDK version is M.
+  if (!is_filesystem_compatible && !is_M) {
+    VLOG(1)
+        << "Users with SDK version (" << arc_sdk_version
+        << ") are not supported when they postponed to migrate to dircrypto.";
+    return false;
+  }
+
+  return true;
+}
+
 void DisallowArcForTesting() {
   g_disallow_for_testing = true;
 }
@@ -179,6 +227,13 @@ void SetArcPlayStoreEnabledForProfile(Profile* profile, bool enabled) {
   profile->GetPrefs()->SetBoolean(prefs::kArcEnabled, enabled);
 }
 
+bool AreArcAllOptInPreferencesManagedForProfile(const Profile* profile) {
+  return profile->GetPrefs()->IsManagedPreference(
+             prefs::kArcBackupRestoreEnabled) &&
+         profile->GetPrefs()->IsManagedPreference(
+             prefs::kArcLocationServiceEnabled);
+}
+
 void UpdateArcFileSystemCompatibilityPrefIfNeeded(
     const AccountId& account_id,
     const base::FilePath& profile_path,
@@ -186,7 +241,11 @@ void UpdateArcFileSystemCompatibilityPrefIfNeeded(
   DCHECK(!callback.is_null());
 
   // If ARC is not available, skip the check.
-  if (!IsArcAvailable()) {
+  // This shortcut is just for merginally improving the log-in performance on
+  // old devices without ARC. We can always safely remove the following 4 lines
+  // without changing any functionality when, say, the code clarity becomes
+  // more important in the future.
+  if (!IsArcAvailable() && !IsArcKioskAvailable()) {
     callback.Run();
     return;
   }
