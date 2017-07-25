@@ -1,4 +1,4 @@
-CONSOLE WARNING: line 104: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 113: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
 Tests property access on a cached DOMWindow after the associated frame is navigated. Test should not crash and properties read from the cached DOMWindow should be identical to properties through the 'current' DOMWindow.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -80,7 +80,6 @@ PASS oldChildWindow.onclose is newChildWindow.onclose
 PASS oldChildWindow.oncontextmenu is newChildWindow.oncontextmenu
 PASS oldChildWindow.oncuechange is newChildWindow.oncuechange
 PASS oldChildWindow.ondblclick is newChildWindow.ondblclick
-PASS oldChildWindow.ondevicelight is newChildWindow.ondevicelight
 PASS oldChildWindow.ondevicemotion is newChildWindow.ondevicemotion
 PASS oldChildWindow.ondeviceorientation is newChildWindow.ondeviceorientation
 PASS oldChildWindow.ondeviceorientationabsolute is newChildWindow.ondeviceorientationabsolute
@@ -110,6 +109,7 @@ PASS oldChildWindow.onloadedmetadata is newChildWindow.onloadedmetadata
 PASS oldChildWindow.onloadstart is newChildWindow.onloadstart
 PASS oldChildWindow.onlostpointercapture is newChildWindow.onlostpointercapture
 PASS oldChildWindow.onmessage is newChildWindow.onmessage
+PASS oldChildWindow.onmessageerror is newChildWindow.onmessageerror
 PASS oldChildWindow.onmousedown is newChildWindow.onmousedown
 PASS oldChildWindow.onmouseenter is newChildWindow.onmouseenter
 PASS oldChildWindow.onmouseleave is newChildWindow.onmouseleave
@@ -224,13 +224,13 @@ PASS oldChildWindow.status is newChildWindow.status
 PASS oldChildWindow.statusbar.visible is newChildWindow.statusbar.visible
 PASS oldChildWindow.styleMedia.type is newChildWindow.styleMedia.type
 PASS oldChildWindow.toolbar.visible is newChildWindow.toolbar.visible
-PASS oldChildWindow.visualViewport.clientHeight is newChildWindow.visualViewport.clientHeight
-PASS oldChildWindow.visualViewport.clientWidth is newChildWindow.visualViewport.clientWidth
-PASS oldChildWindow.visualViewport.pageX is newChildWindow.visualViewport.pageX
-PASS oldChildWindow.visualViewport.pageY is newChildWindow.visualViewport.pageY
-PASS oldChildWindow.visualViewport.scale is newChildWindow.visualViewport.scale
-PASS oldChildWindow.visualViewport.scrollLeft is newChildWindow.visualViewport.scrollLeft
-PASS oldChildWindow.visualViewport.scrollTop is newChildWindow.visualViewport.scrollTop
+PASS oldChildWindow.view.height is newChildWindow.view.height
+PASS oldChildWindow.view.offsetLeft is newChildWindow.view.offsetLeft
+PASS oldChildWindow.view.offsetTop is newChildWindow.view.offsetTop
+PASS oldChildWindow.view.pageLeft is newChildWindow.view.pageLeft
+PASS oldChildWindow.view.pageTop is newChildWindow.view.pageTop
+PASS oldChildWindow.view.scale is newChildWindow.view.scale
+PASS oldChildWindow.view.width is newChildWindow.view.width
 PASS successfullyParsed is true
 
 TEST COMPLETE

@@ -260,10 +260,16 @@ interface BroadcastChannel : EventTarget
     attribute @@toStringTag
     getter name
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     setter onmessage
+    setter onmessageerror
+interface BudgetService
+    attribute @@toStringTag
+    method constructor
+    method reserve
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -337,8 +343,6 @@ interface CSSRule
     attribute PAGE_RULE
     attribute STYLE_RULE
     attribute SUPPORTS_RULE
-    attribute WEBKIT_KEYFRAMES_RULE
-    attribute WEBKIT_KEYFRAME_RULE
     getter cssText
     getter parentRule
     getter parentStyleSheet
@@ -460,7 +464,6 @@ interface CanvasRenderingContext2D
     method fill
     method fillRect
     method fillText
-    method getContextAttributes
     method getImageData
     method getLineDash
     method isPointInPath
@@ -581,7 +584,9 @@ interface Credential
 interface CredentialsContainer
     attribute @@toStringTag
     method constructor
+    method create
     method get
+    method preventSilentAccess
     method requireUserMediation
     method store
 interface Crypto
@@ -1246,8 +1251,10 @@ interface EventTarget
     method constructor
     method dispatchEvent
     method removeEventListener
-interface FederatedCredential : SiteBoundCredential
+interface FederatedCredential : Credential
     attribute @@toStringTag
+    getter iconURL
+    getter name
     getter protocol
     getter provider
     method constructor
@@ -1296,6 +1303,7 @@ interface FocusEvent : UIEvent
     method constructor
 interface FontFace
     attribute @@toStringTag
+    getter display
     getter family
     getter featureSettings
     getter loaded
@@ -1307,6 +1315,7 @@ interface FontFace
     getter weight
     method constructor
     method load
+    setter display
     setter family
     setter featureSettings
     setter stretch
@@ -1485,6 +1494,7 @@ interface HTMLBodyElement : HTMLElement
     getter onlanguagechange
     getter onload
     getter onmessage
+    getter onmessageerror
     getter onoffline
     getter ononline
     getter onpagehide
@@ -1511,6 +1521,7 @@ interface HTMLBodyElement : HTMLElement
     setter onlanguagechange
     setter onload
     setter onmessage
+    setter onmessageerror
     setter onoffline
     setter ononline
     setter onpagehide
@@ -1923,6 +1934,7 @@ interface HTMLFrameSetElement : HTMLElement
     getter onlanguagechange
     getter onload
     getter onmessage
+    getter onmessageerror
     getter onoffline
     getter ononline
     getter onpagehide
@@ -1945,6 +1957,7 @@ interface HTMLFrameSetElement : HTMLElement
     setter onlanguagechange
     setter onload
     setter onmessage
+    setter onmessageerror
     setter onoffline
     setter ononline
     setter onpagehide
@@ -1986,7 +1999,9 @@ interface HTMLHtmlElement : HTMLElement
 interface HTMLIFrameElement : HTMLElement
     attribute @@toStringTag
     getter align
+    getter allow
     getter allowFullscreen
+    getter allowPaymentRequest
     getter contentDocument
     getter contentWindow
     getter frameBorder
@@ -2004,7 +2019,9 @@ interface HTMLIFrameElement : HTMLElement
     method constructor
     method getSVGDocument
     setter align
+    setter allow
     setter allowFullscreen
+    setter allowPaymentRequest
     setter frameBorder
     setter height
     setter longDesc
@@ -2851,7 +2868,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -2908,7 +2924,6 @@ interface IDBFactory
     method constructor
     method deleteDatabase
     method open
-    method webkitGetDatabaseNames
 interface IDBIndex
     attribute @@toStringTag
     getter keyPath
@@ -3082,6 +3097,14 @@ interface InputDeviceCapabilities
     attribute @@toStringTag
     getter firesTouchEvents
     method constructor
+interface InputEvent : UIEvent
+    attribute @@toStringTag
+    getter data
+    getter dataTransfer
+    getter inputType
+    getter isComposing
+    method constructor
+    method getTargetRanges
 interface IntersectionObserver
     attribute @@toStringTag
     getter root
@@ -3119,7 +3142,6 @@ interface KeyboardEvent : UIEvent
     getter metaKey
     getter repeat
     getter shiftKey
-    getter which
     method constructor
     method getModifierState
     method initKeyboardEvent
@@ -3413,11 +3435,13 @@ interface MessageEvent : Event
 interface MessagePort : EventTarget
     attribute @@toStringTag
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     method start
     setter onmessage
+    setter onmessageerror
 interface MimeType
     attribute @@toStringTag
     getter description
@@ -3455,7 +3479,6 @@ interface MouseEvent : UIEvent
     getter screenY
     getter shiftKey
     getter toElement
-    getter which
     getter x
     getter y
     method constructor
@@ -3515,6 +3538,7 @@ interface Navigator
     getter appCodeName
     getter appName
     getter appVersion
+    getter budget
     getter cookieEnabled
     getter credentials
     getter doNotTrack
@@ -3603,26 +3627,6 @@ interface Node : EventTarget
     method replaceChild
     setter nodeValue
     setter textContent
-interface NodeFilter
-    attribute @@toStringTag
-    attribute FILTER_ACCEPT
-    attribute FILTER_REJECT
-    attribute FILTER_SKIP
-    attribute SHOW_ALL
-    attribute SHOW_ATTRIBUTE
-    attribute SHOW_CDATA_SECTION
-    attribute SHOW_COMMENT
-    attribute SHOW_DOCUMENT
-    attribute SHOW_DOCUMENT_FRAGMENT
-    attribute SHOW_DOCUMENT_TYPE
-    attribute SHOW_ELEMENT
-    attribute SHOW_ENTITY
-    attribute SHOW_ENTITY_REFERENCE
-    attribute SHOW_NOTATION
-    attribute SHOW_PROCESSING_INSTRUCTION
-    attribute SHOW_TEXT
-    method acceptNode
-    method constructor
 interface NodeIterator
     attribute @@toStringTag
     getter filter
@@ -3742,10 +3746,13 @@ interface PannerNode : AudioNode
     setter panningModel
     setter refDistance
     setter rolloffFactor
-interface PasswordCredential : SiteBoundCredential
+interface PasswordCredential : Credential
     attribute @@toStringTag
     getter additionalData
+    getter iconURL
     getter idName
+    getter name
+    getter password
     getter passwordName
     method constructor
     setter additionalData
@@ -3763,6 +3770,52 @@ interface Path2D
     method moveTo
     method quadraticCurveTo
     method rect
+interface PaymentAddress
+    attribute @@toStringTag
+    getter addressLine
+    getter city
+    getter country
+    getter dependentLocality
+    getter languageCode
+    getter organization
+    getter phone
+    getter postalCode
+    getter recipient
+    getter region
+    getter sortingCode
+    method constructor
+    method toJSON
+interface PaymentRequest : EventTarget
+    attribute @@toStringTag
+    getter id
+    getter onshippingaddresschange
+    getter onshippingoptionchange
+    getter shippingAddress
+    getter shippingOption
+    getter shippingType
+    method abort
+    method canMakePayment
+    method constructor
+    method show
+    setter onshippingaddresschange
+    setter onshippingoptionchange
+interface PaymentRequestUpdateEvent : Event
+    attribute @@toStringTag
+    method constructor
+    method updateWith
+interface PaymentResponse
+    attribute @@toStringTag
+    getter details
+    getter methodName
+    getter payerEmail
+    getter payerName
+    getter payerPhone
+    getter requestId
+    getter shippingAddress
+    getter shippingOption
+    method complete
+    method constructor
+    method toJSON
 interface Performance : EventTarget
     attribute @@toStringTag
     getter memory
@@ -3835,6 +3888,9 @@ interface PerformanceObserverEntryList
     method getEntries
     method getEntriesByName
     method getEntriesByType
+interface PerformancePaintTiming : PerformanceEntry
+    attribute @@toStringTag
+    method constructor
 interface PerformanceResourceTiming : PerformanceEntry
     attribute @@toStringTag
     getter connectEnd
@@ -4010,6 +4066,7 @@ interface PromiseRejectionEvent : Event
     getter reason
     method constructor
 interface PushManager
+    static getter supportedContentEncodings
     attribute @@toStringTag
     method constructor
     method getSubscription
@@ -4018,6 +4075,7 @@ interface PushManager
 interface PushSubscription
     attribute @@toStringTag
     getter endpoint
+    getter expirationTime
     getter options
     method constructor
     method getKey
@@ -4229,6 +4287,7 @@ interface Request
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface Response
@@ -4248,6 +4307,7 @@ interface Response
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface SVGAElement : SVGGraphicsElement
@@ -5453,6 +5513,11 @@ interface ShadowRoot : DocumentFragment
     method elementsFromPoint
     method getSelection
     setter innerHTML
+interface SharedArrayBuffer
+    attribute @@toStringTag
+    getter byteLength
+    method constructor
+    method slice
 interface SharedWorker : EventTarget
     attribute @@toStringTag
     getter onerror
@@ -5460,11 +5525,6 @@ interface SharedWorker : EventTarget
     getter workerStart
     method constructor
     setter onerror
-interface SiteBoundCredential : Credential
-    attribute @@toStringTag
-    getter iconURL
-    getter name
-    method constructor
 interface SourceBuffer : EventTarget
     attribute @@toStringTag
     getter appendWindowEnd
@@ -5536,6 +5596,14 @@ interface SpeechSynthesisUtterance : EventTarget
     setter text
     setter voice
     setter volume
+interface StaticRange
+    attribute @@toStringTag
+    getter collapsed
+    getter endContainer
+    getter endOffset
+    getter startContainer
+    getter startOffset
+    method constructor
 interface StereoPannerNode : AudioNode
     attribute @@toStringTag
     getter pan
@@ -6241,7 +6309,6 @@ interface WebGL2RenderingContext
     attribute STENCIL_CLEAR_VALUE
     attribute STENCIL_FAIL
     attribute STENCIL_FUNC
-    attribute STENCIL_INDEX
     attribute STENCIL_INDEX8
     attribute STENCIL_PASS_DEPTH_FAIL
     attribute STENCIL_PASS_DEPTH_PASS
@@ -6867,7 +6934,6 @@ interface WebGLRenderingContext
     attribute STENCIL_CLEAR_VALUE
     attribute STENCIL_FAIL
     attribute STENCIL_FUNC
-    attribute STENCIL_INDEX
     attribute STENCIL_INDEX8
     attribute STENCIL_PASS_DEPTH_FAIL
     attribute STENCIL_PASS_DEPTH_PASS
@@ -7503,6 +7569,7 @@ interface webkitURL
     setter search
     setter username
 [GLOBAL OBJECT]
+    attribute Atomics
     attribute GCController
     attribute accessibilityController
     attribute chrome
@@ -7592,6 +7659,7 @@ interface webkitURL
     getter onloadstart
     getter onlostpointercapture
     getter onmessage
+    getter onmessageerror
     getter onmousedown
     getter onmouseenter
     getter onmouseleave
@@ -7669,6 +7737,7 @@ interface webkitURL
     getter styleMedia
     getter toolbar
     getter webkitStorageInfo
+    method NodeFilter
     method alert
     method atob
     method blur
@@ -7768,6 +7837,7 @@ interface webkitURL
     setter onloadstart
     setter onlostpointercapture
     setter onmessage
+    setter onmessageerror
     setter onmousedown
     setter onmouseenter
     setter onmouseleave

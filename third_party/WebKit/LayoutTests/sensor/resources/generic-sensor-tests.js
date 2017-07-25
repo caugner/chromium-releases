@@ -68,6 +68,30 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
   }, 'Test that frequency is capped to 60.0 Hz.');
 
   sensor_test(sensor => {
+    let sensorObject = new sensorType();
+    sensorObject.start();
+    return sensor.mockSensorProvider.getCreatedSensor()
+        .then(mockSensor => mockSensor.addConfigurationCalled())
+        .then(mockSensor => {
+          return new Promise((resolve, reject) => {
+            sensorObject.onactivate = () => {
+              // Now sensor proxy is initialized.
+              let anotherSensor = new sensorType({frequency: 21});
+              anotherSensor.start();
+              anotherSensor.stop();
+              resolve(mockSensor);
+            }
+          });
+        })
+        .then(mockSensor => mockSensor.removeConfigurationCalled())
+        .then(mockSensor => {
+          sensorObject.stop();
+          return mockSensor;
+        })
+        .then(mockSensor => mockSensor.removeConfigurationCalled());
+  }, 'Test that configuration is removed for a stopped sensor.');
+
+  sensor_test(sensor => {
     let maxSupportedFrequency = 15;
     sensor.mockSensorProvider.setMaximumSupportedFrequency(maxSupportedFrequency);
     let sensorObject = new sensorType({frequency: 50});
@@ -321,11 +345,8 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
                 // By the moment slow sensor (9 Hz) is notified for the
                 // next time, the fast sensor (30 Hz) has been notified
                 // for int(30/9) = 3 times.
-                // In actual implementation updates are bound to rAF,
-                // (not to a timer) so fluctuations are possible, so we
-                // reference to the actual elapsed updates count.
                 let elapsedUpdates = mockSensor.reading_updates_count() - readingUpdatesCounter;
-                assert_approx_equals(fastSensorNotifiedCounter, elapsedUpdates, 1);
+                assert_equals(fastSensorNotifiedCounter, elapsedUpdates);
                 fastSensor.stop();
                 slowSensor.stop();
                 resolve(mockSensor);

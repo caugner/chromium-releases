@@ -44,16 +44,14 @@ InspectorTest.flushResults = function()
     results = [];
 }
 
-InspectorTest.evaluateInPage = function(code, callback)
+InspectorTest.evaluateInPage = async function(code, callback)
 {
-    callback = InspectorTest.safeWrap(callback);
-
-    function mycallback(error, result, exceptionDetails)
-    {
-        if (!error)
-            callback(InspectorTest.runtimeModel.createRemoteObject(result), exceptionDetails);
-    }
-    InspectorTest.RuntimeAgent.evaluate(code, "console", false, mycallback);
+    var response = await InspectorTest.RuntimeAgent.invoke_evaluate({
+        expression: code,
+        objectGroup: "console"
+    });
+    if (!response[Protocol.Error])
+        InspectorTest.safeWrap(callback)(InspectorTest.runtimeModel.createRemoteObject(response.result), response.exceptionDetails);
 }
 
 InspectorTest.addScriptUISourceCode = function(url, content, isContentScript, worldId) {
@@ -67,7 +65,7 @@ InspectorTest.addScriptUISourceCode = function(url, content, isContentScript, wo
 InspectorTest.addScriptForFrame = function(url, content, frame) {
     content += '\n//# sourceURL=' + url;
     var executionContext = InspectorTest.runtimeModel.executionContexts().find(context => context.frameId === frame.id);
-    InspectorTest.RuntimeAgent.evaluate(content, "console", false, false, executionContext.id, function() { });
+    InspectorTest.RuntimeAgent.evaluate(content, "console", false, false, executionContext.id);
 }
 
 InspectorTest.evaluateInPagePromise = function(code)
@@ -75,34 +73,25 @@ InspectorTest.evaluateInPagePromise = function(code)
     return new Promise(succ => InspectorTest.evaluateInPage(code, succ));
 }
 
-InspectorTest.evaluateInPageAsync = function(code)
+InspectorTest.evaluateInPageAsync = async function(code)
 {
-    var callback;
-    var promise = new Promise((fulfill) => { callback = fulfill });
-    InspectorTest.RuntimeAgent.evaluate(code,
-        "console",
-        /* includeCommandLineAPI */ false,
-        /* doNotPauseOnExceptionsAndMuteConsole */ undefined,
-        /* contextId */ undefined,
-        /* returnByValue */ undefined,
-        /* generatePreview */ undefined,
-        /* userGesture */ undefined,
-        /* awaitPromise */ true,
-        mycallback);
+    var response = await InspectorTest.RuntimeAgent.invoke_evaluate({
+        expression: code,
+        objectGroup: "console",
+        includeCommandLineAPI: false,
+        silent: undefined,
+        contextId: undefined,
+        returnByValue: undefined,
+        generatePreview: undefined,
+        userGesture: undefined,
+        awaitPromise: true
+    });
 
-    function mycallback(error, result, exceptionDetails)
-    {
-        if (!error && !exceptionDetails) {
-            callback(InspectorTest.runtimeModel.createRemoteObject(result));
-        } else {
-            if (error)
-                InspectorTest.addResult("Error: " + error);
-            else
-                InspectorTest.addResult("Error: " + (exceptionDetails ? exceptionDetails.text : " exception while evaluation in page."));
-            InspectorTest.completeTest();
-        }
-    }
-    return promise;
+    var error = response[Protocol.Error];
+    if (!error && !response.exceptionDetails)
+        return InspectorTest.runtimeModel.createRemoteObject(response.result);
+    InspectorTest.addResult("Error: " + (error || response.exceptionDetails && response.exceptionDetails.text || "exception while evaluation in page."));
+    InspectorTest.completeTest();
 }
 
 InspectorTest.callFunctionInPageAsync = function(name, args)
@@ -245,6 +234,21 @@ InspectorTest.dumpDeepInnerHTML = function(element)
         InspectorTest.addResult(prefix + "</" + element.nodeName + ">");
     }
     innerHTML("", element)
+}
+
+InspectorTest.deepTextContent = function(element)
+{
+    if (!element)
+        return "";
+    if (element.nodeType === Node.TEXT_NODE && element.nodeValue)
+        return !element.parentElement || element.parentElement.nodeName !== "STYLE" ? element.nodeValue : "";
+    var res = "";
+    var children = element.childNodes;
+    for (var i = 0; i < children.length; ++i)
+        res += InspectorTest.deepTextContent(children[i]);
+    if (element.shadowRoot)
+        res += InspectorTest.deepTextContent(element.shadowRoot);
+    return res;
 }
 
 InspectorTest.dump = function(value, customFormatters, prefix, prefixWithName)
@@ -427,6 +431,27 @@ InspectorTest.dumpNavigatorViewInMode = function(view, mode)
     InspectorTest.dumpNavigatorView(view);
 }
 
+/**
+ * @param {symbol} event
+ * @param {!Common.Object} obj
+ * @param {function(?):boolean=} condition
+ * @return {!Promise}
+ */
+InspectorTest.waitForEvent = function(event, obj, condition)
+{
+    condition = condition || function() { return true;};
+    return new Promise(resolve => {
+        obj.addEventListener(event, onEventFired);
+
+        function onEventFired(event) {
+            if (!condition(event.data))
+                return;
+            obj.removeEventListener(event, onEventFired);
+            resolve(event.data);
+        }
+    });
+}
+
 InspectorTest.waitForUISourceCode = function(urlSuffix, projectType)
 {
     function matches(uiSourceCode)
@@ -445,28 +470,48 @@ InspectorTest.waitForUISourceCode = function(urlSuffix, projectType)
             return Promise.resolve(uiSourceCode);
     }
 
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
-    return promise;
-
-    function uiSourceCodeAdded(event)
-    {
-        if (!matches(event.data))
-            return;
-        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
-        fulfill(event.data);
-    }
+    return InspectorTest.waitForEvent(Workspace.Workspace.Events.UISourceCodeAdded, Workspace.workspace, matches);
 }
 
 InspectorTest.waitForUISourceCodeRemoved = function(callback)
 {
-    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
-    function uiSourceCodeRemoved(event)
-    {
-        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
-        callback(event.data);
+    InspectorTest.waitForEvent(Workspace.Workspace.Events.UISourceCodeRemoved, Workspace.workspace).then(callback);
+}
+
+InspectorTest.waitForTarget = function(filter) {
+    filter = filter || (target => true);
+    for (var target of SDK.targetManager.targets()) {
+        if (filter(target))
+            return Promise.resolve(target);
     }
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    var observer = {
+        targetAdded: function(target) {
+            if (filter(target)) {
+                SDK.targetManager.unobserveTargets(observer);
+                fulfill(target);
+            }
+        },
+        targetRemoved: function() {
+        },
+    };
+    SDK.targetManager.observeTargets(observer);
+    return promise;
+}
+
+InspectorTest.waitForExecutionContext = function(runtimeModel) {
+    if (runtimeModel.executionContexts().length)
+        return Promise.resolve(runtimeModel.executionContexts()[0]);
+    return InspectorTest.waitForEvent(SDK.RuntimeModel.Events.ExecutionContextCreated, runtimeModel);
+}
+
+InspectorTest.waitForExecutionContextDestroyed = function(context) {
+    var runtimeModel = context.runtimeModel;
+    if (runtimeModel.executionContexts().indexOf(context) === -1)
+        return Promise.resolve();
+    return InspectorTest.waitForEvent(SDK.RuntimeModel.Events.ExecutionContextDestroyed, runtimeModel,
+        destroyedContext => destroyedContext === context);
 }
 
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
@@ -489,31 +534,31 @@ InspectorTest.navigatePromise = function(url)
     return promise;
 }
 
-InspectorTest.hardReloadPage = function(callback, scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest.hardReloadPage = function(callback, scriptToEvaluateOnLoad)
 {
-    InspectorTest._innerReloadPage(true, callback, scriptToEvaluateOnLoad, scriptPreprocessor);
+    InspectorTest._innerReloadPage(true, callback, scriptToEvaluateOnLoad);
 }
 
-InspectorTest.reloadPage = function(callback, scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest.reloadPage = function(callback, scriptToEvaluateOnLoad)
 {
-    InspectorTest._innerReloadPage(false, callback, scriptToEvaluateOnLoad, scriptPreprocessor);
+    InspectorTest._innerReloadPage(false, callback, scriptToEvaluateOnLoad);
 }
 
-InspectorTest.reloadPagePromise = function(scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest.reloadPagePromise = function(scriptToEvaluateOnLoad)
 {
     var fulfill;
     var promise = new Promise(x => fulfill = x);
-    InspectorTest.reloadPage(fulfill, scriptToEvaluateOnLoad, scriptPreprocessor);
+    InspectorTest.reloadPage(fulfill, scriptToEvaluateOnLoad);
     return promise;
 }
 
-InspectorTest._innerReloadPage = function(hardReload, callback, scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest._innerReloadPage = function(hardReload, callback, scriptToEvaluateOnLoad)
 {
     InspectorTest._pageLoadedCallback = InspectorTest.safeWrap(callback);
 
     if (UI.panels.network)
         UI.panels.network._networkLogView.reset();
-    InspectorTest.PageAgent.reload(hardReload, scriptToEvaluateOnLoad, scriptPreprocessor);
+    InspectorTest.resourceTreeModel.reloadPage(hardReload, scriptToEvaluateOnLoad);
 }
 
 InspectorTest.pageLoaded = function()
@@ -978,6 +1023,7 @@ SDK.targetManager.observeTargets({
         InspectorTest.HeapProfilerAgent = target.heapProfilerAgent();
         InspectorTest.InspectorAgent = target.inspectorAgent();
         InspectorTest.NetworkAgent = target.networkAgent();
+        InspectorTest.OverlayAgent = target.overlayAgent();
         InspectorTest.PageAgent = target.pageAgent();
         InspectorTest.ProfilerAgent = target.profilerAgent();
         InspectorTest.RuntimeAgent = target.runtimeAgent();
@@ -989,8 +1035,10 @@ SDK.targetManager.observeTargets({
         InspectorTest.debuggerModel = target.model(SDK.DebuggerModel);
         InspectorTest.runtimeModel = target.model(SDK.RuntimeModel);
         InspectorTest.domModel = target.model(SDK.DOMModel);
+        InspectorTest.domDebuggerModel = target.model(SDK.DOMDebuggerModel);
         InspectorTest.cssModel = target.model(SDK.CSSModel);
         InspectorTest.cpuProfilerModel = target.model(SDK.CPUProfilerModel);
+        InspectorTest.overlayModel = target.model(SDK.OverlayModel);
         InspectorTest.serviceWorkerManager = target.model(SDK.ServiceWorkerManager);
         InspectorTest.tracingManager = target.model(SDK.TracingManager);
         InspectorTest.mainTarget = target;

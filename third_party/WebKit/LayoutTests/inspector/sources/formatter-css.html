@@ -14,7 +14,7 @@ async function test()
     InspectorTest.addResult(`Formatted:\n${targetContent}`);
 
     var originalContent = await uiSourceCode.requestContent();
-    var styleHeader = Bindings.NetworkProject.styleHeaderForUISourceCode(uiSourceCode);
+    var styleHeader = Bindings.cssWorkspaceBinding.uiLocationToRawLocations(uiSourceCode.uiLocation(0, 0))[0].header();
     var text = new TextUtils.Text(originalContent);
     var liveLocationsPool = new Bindings.LiveLocationPool();
     var locationUpdateCount = 0;
@@ -41,7 +41,9 @@ async function test()
       InspectorTest.addResult("Mapped locations:");
       for (var rawLocation of rawLocations) {
         var uiLocation = Bindings.cssWorkspaceBinding.rawLocationToUILocation(rawLocation);
-        InspectorTest.addResult(`${rawLocation.lineNumber}:${rawLocation.columnNumber} -> ${uiLocation.lineNumber}:${uiLocation.columnNumber}`);
+        var reverseRawLocation = Bindings.cssWorkspaceBinding.uiLocationToRawLocations(uiLocation)[0];
+        InspectorTest.addResult(`${rawLocation.lineNumber}:${rawLocation.columnNumber} -> ${uiLocation.lineNumber}:${uiLocation.columnNumber} ` +
+            `-> ${reverseRawLocation.lineNumber}:${reverseRawLocation.columnNumber}`);
       }
       InspectorTest.addResult(`Live locations (updated: ${locationUpdateCount}):`);
       for (var liveLocation of liveLocations) {

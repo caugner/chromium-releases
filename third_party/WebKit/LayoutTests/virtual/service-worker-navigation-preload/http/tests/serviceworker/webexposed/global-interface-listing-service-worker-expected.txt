@@ -82,6 +82,7 @@ interface CanvasPattern
 interface Client
     getter frameType
     getter id
+    getter type
     getter url
     method constructor
     method postMessage
@@ -450,7 +451,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -491,7 +491,6 @@ interface IDBFactory
     method constructor
     method deleteDatabase
     method open
-    method webkitGetDatabaseNames
 interface IDBIndex
     getter keyPath
     getter multiEntry
@@ -597,7 +596,6 @@ interface ImageData
     getter height
     getter width
     method constructor
-    method createImageData
     method getColorSettings
 interface InstallEvent : ExtendableEvent
     method constructor
@@ -629,9 +627,12 @@ interface NavigationPreloadManager
     method getState
     method setHeaderValue
 interface NetworkInformation : EventTarget
+    getter downlink
     getter downlinkMax
+    getter effectiveType
     getter onchange
     getter ontypechange
+    getter rtt
     getter type
     method constructor
     setter onchange
@@ -762,6 +763,7 @@ interface Path2D
     method quadraticCurveTo
     method rect
 interface PaymentInstruments
+    method clear
     method constructor
     method delete
     method get
@@ -769,7 +771,13 @@ interface PaymentInstruments
     method keys
     method set
 interface PaymentRequestEvent : ExtendableEvent
-    getter appRequest
+    getter instrumentKey
+    getter methodData
+    getter modifiers
+    getter paymentRequestId
+    getter paymentRequestOrigin
+    getter topLevelOrigin
+    getter total
     method constructor
     method respondWith
 interface PerformanceObserverEntryList
@@ -841,6 +849,7 @@ interface Request
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface Response
@@ -859,6 +868,7 @@ interface Response
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface ServiceWorkerGlobalScope : WorkerGlobalScope

@@ -19,7 +19,7 @@
         {
           "object": "LayoutText #text",
           "rect": [90, 30, 12, 18],
-          "reason": "layoutObject removal"
+          "reason": "disappeared"
         }
       ]
     }
@@ -27,7 +27,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutText #text",
-      "reason": "layoutObject removal"
+      "reason": "disappeared"
     },
     {
       "object": "LayoutTableCell TD id='foo'",

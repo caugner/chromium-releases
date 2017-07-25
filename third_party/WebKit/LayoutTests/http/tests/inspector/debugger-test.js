@@ -104,7 +104,7 @@ InspectorTest.runTestFunctionAndWaitUntilPausedPromise = function()
 
 InspectorTest.runAsyncCallStacksTest = function(totalDebuggerStatements, maxAsyncCallStackDepth)
 {
-    var defaultMaxAsyncCallStackDepth = 8;
+    var defaultMaxAsyncCallStackDepth = 32;
 
     InspectorTest.setQuiet(true);
     InspectorTest.startDebuggerTest(step1);
@@ -654,26 +654,8 @@ InspectorTest.evaluateOnCurrentCallFrame = function(code)
     return new Promise(succ => InspectorTest.debuggerModel.evaluateOnSelectedCallFrame(code, "console", false, true, false, false, InspectorTest.safeWrap(succ)));
 }
 
-InspectorTest.prepareSourceFrameForBreakpointTest = function(sourceFrame)
-{
-    var symbol = Symbol('waitedDecorations');
-    sourceFrame[symbol] = 0;
-    InspectorTest.addSniffer(sourceFrame.__proto__, "_willAddInlineDecorationsForTest", () => sourceFrame[symbol]++, true);
-    InspectorTest.addSniffer(sourceFrame.__proto__, "_didAddInlineDecorationsForTest", (updateWasScheduled) => {
-        sourceFrame[symbol]--;
-        if (!updateWasScheduled)
-            sourceFrame._breakpointDecorationsUpdatedForTest();
-    }, true);
-    sourceFrame._waitingForPossibleLocationsForTest = () => !!sourceFrame[symbol];
-}
-
 InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame, inline)
 {
-    if (!sourceFrame._waitingForPossibleLocationsForTest) {
-        InspectorTest.addResult("Error: source frame should be prepared with InspectorTest.prepareSourceFrameForBreakpointTest function.");
-        InspectorTest.completeTest();
-        return;
-    }
     return waitUpdate().then(checkIfReady);
     function waitUpdate()
     {
@@ -681,8 +663,6 @@ InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame, inlin
     }
     function checkIfReady()
     {
-        if (sourceFrame._waitingForPossibleLocationsForTest())
-            return waitUpdate().then(checkIfReady);
         for (var breakpoint of Bindings.breakpointManager._allBreakpoints()) {
             if (breakpoint._fakePrimaryLocation && breakpoint.enabled())
                 return waitUpdate().then(checkIfReady);
@@ -728,6 +708,19 @@ InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineN
     } else {
         InspectorTest.addResult(`Could not click on Javascript breakpoint - lineNumber: ${lineNumber}, index: ${index}`);
         next();
+    }
+}
+
+InspectorTest.setEventListenerBreakpoint = function(id, enabled, targetName)
+{
+    var pane = self.runtime.sharedInstance(Sources.EventListenerBreakpointsSidebarPane);
+    var auxData = {'eventName': id};
+    if (targetName)
+        auxData.targetName = targetName;
+    var breakpoint = SDK.domDebuggerManager.resolveEventListenerBreakpoint(auxData);
+    if (breakpoint.enabled() !== enabled) {
+        pane._breakpoints.get(breakpoint).checkbox.checked = enabled;
+        pane._breakpointCheckboxClicked(breakpoint);
     }
 }
 

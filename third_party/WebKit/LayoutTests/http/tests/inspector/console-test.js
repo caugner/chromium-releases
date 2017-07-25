@@ -93,7 +93,7 @@ InspectorTest.dumpConsoleMessages = function(printOriginatingCommand, dumpClassN
 
 InspectorTest.dumpConsoleMessagesIntoArray = function(printOriginatingCommand, dumpClassNames, formatter)
 {
-    Common.settingForTest('messageLevelFilters2').set(ConsoleModel.ConsoleMessage.MessageLevel.Verbose);
+    Console.ConsoleViewFilter.levelFilterSetting().set(Console.ConsoleViewFilter.allLevelsFilterValue());
     formatter = formatter || InspectorTest.prepareConsoleMessageText;
     var result = [];
     InspectorTest.disableConsoleViewport();
@@ -394,19 +394,14 @@ InspectorTest.waitUntilNthMessageReceivedPromise = function(count)
 
 InspectorTest.changeExecutionContext = function(namePrefix)
 {
-    var selector = Console.ConsoleView.instance()._consoleContextSelector._selectElement;
-    var option = selector.firstChild;
-    while (option) {
-        if (option.textContent && option.textContent.trim().startsWith(namePrefix))
-            break;
-        option = option.nextSibling;
+    var selector = Console.ConsoleView.instance()._consoleContextSelector;
+    for (var executionContext of selector._list._items) {
+        if (selector._titleFor(executionContext).startsWith(namePrefix)) {
+            UI.context.setFlavor(SDK.ExecutionContext, executionContext);
+            return;
+        }
     }
-    if (!option) {
-        InspectorTest.addResult("FAILED: context with prefix: "  + namePrefix + " not found in the context list");
-        return;
-    }
-    option.selected = true;
-    Console.ConsoleView.instance()._consoleContextSelector._executionContextChanged();
+    InspectorTest.addResult("FAILED: context with prefix: "  + namePrefix + " not found in the context list");
 }
 
 InspectorTest.waitForConsoleMessages = function(expectedCount, callback)
@@ -422,6 +417,33 @@ InspectorTest.waitForConsoleMessages = function(expectedCount, callback)
         } else {
             InspectorTest.addSniffer(consoleView, "_messageAppendedForTests", checkAndReturn);
         }
+    }
+}
+
+InspectorTest.selectConsoleMessages = function(fromMessage, fromTextOffset, toMessage, toTextOffset, useTextContainer)
+{
+    var consoleView = Console.ConsoleView.instance();
+    var from = selectionContainerAndOffset(consoleView.itemElement(fromMessage).element(), fromTextOffset);
+    var to = selectionContainerAndOffset(consoleView.itemElement(toMessage).element(), toTextOffset);
+    window.getSelection().setBaseAndExtent(from.container, from.offset, to.container, to.offset);
+
+    function selectionContainerAndOffset(container, offset)
+    {
+        if (offset === 0 && container.nodeType !== Node.TEXT_NODE)
+            container = container.traverseNextTextNode();
+        var charCount = 0;
+        var node = container;
+        while (node = node.traverseNextTextNode(true)) {
+            var length = node.textContent.length;
+            if (charCount + length >= offset) {
+                return {
+                    container: node,
+                    offset: offset - charCount
+                };
+            }
+            charCount += length;
+        }
+        return null;
     }
 }
 

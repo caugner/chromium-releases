@@ -6,10 +6,15 @@ interface Blob
 interface BroadcastChannel : EventTarget
     getter name
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     setter onmessage
+    setter onmessageerror
+interface BudgetService
+    method constructor
+    method reserve
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -32,6 +37,7 @@ interface CacheStorage
 interface Client
     getter frameType
     getter id
+    getter type
     getter url
     method constructor
     method postMessage
@@ -237,7 +243,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -278,7 +283,6 @@ interface IDBFactory
     method constructor
     method deleteDatabase
     method open
-    method webkitGetDatabaseNames
 interface IDBIndex
     getter keyPath
     getter multiEntry
@@ -390,11 +394,13 @@ interface MessageEvent : Event
     method initMessageEvent
 interface MessagePort : EventTarget
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     method start
     setter onmessage
+    setter onmessageerror
 interface NavigationPreloadManager
     method constructor
     method disable
@@ -453,6 +459,7 @@ interface PushEvent : ExtendableEvent
     getter data
     method constructor
 interface PushManager
+    static getter supportedContentEncodings
     method constructor
     method getSubscription
     method permissionState
@@ -465,6 +472,7 @@ interface PushMessageData
     method text
 interface PushSubscription
     getter endpoint
+    getter expirationTime
     getter options
     method constructor
     method getKey
@@ -497,6 +505,7 @@ interface Request
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface Response
@@ -515,6 +524,7 @@ interface Response
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface ServiceWorkerGlobalScope : WorkerGlobalScope
@@ -534,6 +544,10 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
+interface SharedArrayBuffer
+    getter byteLength
+    method constructor
+    method slice
 interface StorageManager
     method constructor
     method persisted
@@ -679,6 +693,7 @@ interface WorkerNavigator
     getter appCodeName
     getter appName
     getter appVersion
+    getter budget
     getter hardwareConcurrency
     getter onLine
     getter permissions
@@ -693,6 +708,7 @@ interface WritableStream
     method constructor
     method getWriter
 global object
+    attribute Atomics
     attribute console
     attribute internals
     getter clients

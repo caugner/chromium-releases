@@ -117,7 +117,9 @@
             // Fullscreen tests all use the same automation script.
             src = automationPath + '/fullscreen/auto-click.js';
         } else if (pathAndBase.startsWith('/pointerevents/')
-                   || pathAndBase.startsWith('/uievents/')) {
+                   || pathAndBase.startsWith('/uievents/')
+                   || pathAndBase.startsWith('/pointerlock/')
+                   || pathAndBase.startsWith('/html/')) {
             // Per-test automation scripts.
             src = automationPath + pathAndBase + '-automation.js';
         } else {

@@ -25,23 +25,11 @@
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'Gradient on fill'",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutSVGResourceLinearGradient linearGradient id='dynGrad'",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutSVGGradientStop stop",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutSVGGradientStop stop",
-      "reason": "layoutObject insertion"
+      "reason": "geometry"
     }
   ]
 }

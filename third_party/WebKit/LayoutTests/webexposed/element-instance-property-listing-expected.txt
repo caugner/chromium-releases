@@ -25,6 +25,7 @@ namespace http://www.w3.org/1999/xhtml
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
     property accessKey
+    property accessibleNode
     property addEventListener
     property after
     property animate
@@ -81,6 +82,7 @@ namespace http://www.w3.org/1999/xhtml
     property hasPointerCapture
     property hidden
     property id
+    property inert
     property innerHTML
     property innerText
     property inputMode
@@ -106,6 +108,7 @@ namespace http://www.w3.org/1999/xhtml
     property nodeName
     property nodeType
     property nodeValue
+    property nonce
     property normalize
     property offsetHeight
     property offsetLeft
@@ -373,6 +376,7 @@ html element body
     property onhashchange
     property onlanguagechange
     property onmessage
+    property onmessageerror
     property onoffline
     property ononline
     property onpagehide
@@ -519,6 +523,7 @@ html element frameset
     property onhashchange
     property onlanguagechange
     property onmessage
+    property onmessageerror
     property onoffline
     property ononline
     property onpagehide
@@ -555,6 +560,7 @@ html element html
 html element i
 html element iframe
     property align
+    property allow
     property allowFullscreen
     property allowPaymentRequest
     property contentDocument
@@ -835,7 +841,7 @@ html element script
     property event
     property htmlFor
     property integrity
-    property nonce
+    property noModule
     property src
     property text
     property type
@@ -1125,6 +1131,7 @@ namespace http://www.w3.org/2000/svg
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
     property accessKey
+    property accessibleNode
     property addEventListener
     property after
     property animate
@@ -1181,6 +1188,7 @@ namespace http://www.w3.org/2000/svg
     property hasPointerCapture
     property hidden
     property id
+    property inert
     property innerHTML
     property innerText
     property inputMode
@@ -1206,6 +1214,7 @@ namespace http://www.w3.org/2000/svg
     property nodeName
     property nodeType
     property nodeValue
+    property nonce
     property normalize
     property offsetHeight
     property offsetLeft
@@ -1431,7 +1440,7 @@ svg element script
     property event
     property htmlFor
     property integrity
-    property nonce
+    property noModule
     property src
     property text
     property type

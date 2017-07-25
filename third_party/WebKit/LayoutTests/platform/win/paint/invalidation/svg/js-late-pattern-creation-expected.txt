@@ -25,23 +25,11 @@
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'Pattern on fill'",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutSVGResourcePattern pattern id='dynPattern'",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutSVGRect rect",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutSVGRect rect",
-      "reason": "layoutObject insertion"
+      "reason": "geometry"
     }
   ]
 }
