@@ -22,7 +22,6 @@ layer at (0,0) size 800x2645 backgroundClip at (0,0) size 800x600 clip at (0,0) 
           text run at (163,75) width 1: " "
           text run at (0,90) width 352: ".six {margin: -10px; background-color: aqua;}"
           text run at (351,90) width 1: " "
-      LayoutBlockFlow {HR} at (0,152) size 784x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,170) size 784x36
         LayoutText {#text} at (0,0) size 752x36
           text run at (0,0) width 752: "NOTE: The following tests are separated by class-zero paragraphs, so as to prevent margin-collapsing as described in"
@@ -164,3 +163,5 @@ layer at (0,0) size 800x2645 backgroundClip at (0,0) size 800x600 clip at (0,0) 
               LayoutBlockFlow {P} at (4,1201) size 762x18 [bgcolor=#C0C0C0]
                 LayoutText {#text} at (0,0) size 208x18
                   text run at (0,0) width 208: "This element has a class of zero."
+layer at (8,160) size 784x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,152) size 784x2 [border: (1px inset #EEEEEE)]

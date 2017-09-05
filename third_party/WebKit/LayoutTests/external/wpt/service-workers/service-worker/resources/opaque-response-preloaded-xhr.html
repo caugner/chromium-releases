@@ -9,6 +9,7 @@ function runTest() {
   // response.
   l.setAttribute('rel', 'preload');
   l.setAttribute('href', URL);
+  l.setAttribute('as', 'fetch');
   l.onload = function() {
     xhr = new XMLHttpRequest;
     xhr.withCredentials = true;

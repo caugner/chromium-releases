@@ -15,7 +15,7 @@ Workspace: 7 uiSourceCodes.
 
 Running: createIframesAndWaitForSourceMaps
 Removed: 0 uiSourceCodes
-Workspace: 21 uiSourceCodes.
+Workspace: 19 uiSourceCodes.
     debugger:///VM[XXX] bindings-test.js
     debugger:///VM[XXX] inspector-test.js
 [+] debugger:///VM[XXX] sourcemap-script.js
@@ -26,11 +26,9 @@ Workspace: 21 uiSourceCodes.
 [+] debugger:///VM[XXX] _test_create-iframe2.js
     http://127.0.0.1:8000/inspector/bindings/bindings-test.js
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
-[+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-sass.scss
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-script.js
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-script.js
-[+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-style.css
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-style.css
 [+] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-typescript.ts
     http://127.0.0.1:8000/inspector/bindings/suspendtarget-bindings.html
@@ -39,7 +37,7 @@ Workspace: 21 uiSourceCodes.
 [+] _test_create-iframe2.js
 
 Running: Suspending targets.
-Removed: 18 uiSourceCodes
+Removed: 17 uiSourceCodes
 [-] debugger:///VM[XXX] bindings-test.js
 [-] debugger:///VM[XXX] inspector-test.js
 [-] debugger:///VM[XXX] sourcemap-script.js
@@ -53,19 +51,16 @@ Removed: 18 uiSourceCodes
 [-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-script.js
 [-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-script.js
 [-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-style.css
-[-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-style.css
 [-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-typescript.ts
 [-] http://127.0.0.1:8000/inspector/inspector-test.js
 [-] _test_create-iframe1.js
 [-] _test_create-iframe2.js
-Workspace: 3 uiSourceCodes.
-    http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
+Workspace: 2 uiSourceCodes.
     http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
     http://127.0.0.1:8000/inspector/bindings/suspendtarget-bindings.html
 
 Running: detachFrame
-Removed: 1 uiSourceCodes
-[-] http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
+Removed: 0 uiSourceCodes
 Workspace: 2 uiSourceCodes.
     http://127.0.0.1:8000/inspector/bindings/resources/sourcemap-frame.html
     http://127.0.0.1:8000/inspector/bindings/suspendtarget-bindings.html

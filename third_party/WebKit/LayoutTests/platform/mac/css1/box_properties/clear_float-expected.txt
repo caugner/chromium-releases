@@ -24,7 +24,6 @@ layer at (0,0) size 800x775 backgroundClip at (0,0) size 800x600 clip at (0,0) s
           text run at (0,105) width 469: "             color: black; background: yellow; clear: none;}"
           text run at (468,105) width 1: " "
           text run at (0,120) width 0: " "
-      LayoutBlockFlow {HR} at (0,179) size 784x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow (floating) {DIV} at (0,189) size 192x116.38 [color=#FFFFFF] [bgcolor=#008000]
         LayoutBlockFlow {H1} at (8,8) size 176x22
           LayoutText {#text} at (0,0) size 82x22
@@ -158,3 +157,5 @@ layer at (0,0) size 800x775 backgroundClip at (0,0) size 800x600 clip at (0,0) s
                     text run at (0,0) width 298: "The top of the yellow rectangle (to which this"
                     text run at (0,18) width 298: "paragraph belongs) should be vertically"
                     text run at (0,36) width 275: "aligned with the top of the green rectangle."
+layer at (8,187) size 784x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,179) size 784x2 [border: (1px inset #EEEEEE)]

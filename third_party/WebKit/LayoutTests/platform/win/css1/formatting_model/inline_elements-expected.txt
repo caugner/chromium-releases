@@ -21,7 +21,6 @@ layer at (0,0) size 785x790 backgroundClip at (0,0) size 785x600 clip at (0,0) s
           text run at (0,80) width 192: "          padding: 2pt;}"
           text run at (192,80) width 0: " "
           text run at (0,96) width 0: " "
-      LayoutBlockFlow {HR} at (0,161) size 769x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,179) size 769x192
         LayoutText {#text} at (0,6) size 179x19
           text run at (0,6) width 179: "This is a paragraph that has a "
@@ -94,3 +93,5 @@ layer at (0,0) size 785x790 backgroundClip at (0,0) size 785x600 clip at (0,0) s
                 LayoutText {#text} at (169,48) size 405x15
                   text run at (169,48) width 3: " "
                   text run at (172,48) width 402: "The line spacing in the whole paragraph should be 12pt, with font-size 10pt."
+layer at (8,169) size 769x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,161) size 769x2 [border: (1px inset #EEEEEE)]

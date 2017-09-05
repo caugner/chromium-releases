@@ -14,7 +14,6 @@ layer at (0,0) size 800x600
           text run at (432,16) width 0: " "
           text run at (0,32) width 280: ".three {border-bottom-width: 25px;}"
           text run at (280,32) width 0: " "
-      LayoutBlockFlow {HR} at (0,97) size 784x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,115) size 784x108 [border: (3px solid #000000) (25px solid #000000) (3px solid #000000)]
         LayoutText {#text} at (3,3) size 172x19
           text run at (3,3) width 172: "This element has a class of "
@@ -85,3 +84,5 @@ layer at (0,0) size 800x600
                 LayoutText {#text} at (248,43) size 751x39
                   text run at (248,43) width 506: ", which should have no bottom border width or visible border because no border"
                   text run at (3,63) width 83: "style was set."
+layer at (8,105) size 784x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,97) size 784x2 [border: (1px inset #EEEEEE)]

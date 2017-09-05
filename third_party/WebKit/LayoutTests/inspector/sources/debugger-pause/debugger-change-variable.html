@@ -45,7 +45,7 @@ var test = function()
     function step2(callFrames)
     {
         var pane = self.runtime.sharedInstance(Sources.CallStackSidebarPane);
-        pane._list.selectItem(pane._list.itemAtIndex(1));
+        pane._list.selectItem(pane._list._model.at(1));
         InspectorTest.deprecatedRunAfterPendingDispatches(step3);
     }
 
@@ -55,18 +55,10 @@ var test = function()
         evalLocalVariables(step4);
     }
 
-    function step4()
+    async function step4()
     {
-        localScopeObject().setPropertyValue("localObject1", "({ a: -290})", step5);
-    }
-
-    function step5()
-    {
-        localScopeObject().setPropertyValue({ value: "localObject2" }, "123", step6);
-    }
-
-    function step6()
-    {
+        await localScopeObject().setPropertyValue("localObject1", "({ a: -290})");
+        await localScopeObject().setPropertyValue({ value: "localObject2" }, "123");
         InspectorTest.addResult("\nEvaluated after modification:");
         evalLocalVariables(step7);
     }

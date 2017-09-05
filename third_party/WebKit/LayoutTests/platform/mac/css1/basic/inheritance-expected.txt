@@ -22,7 +22,6 @@ layer at (0,0) size 800x731 backgroundClip at (0,0) size 800x600 clip at (0,0) s
           text run at (148,75) width 1: " "
           text run at (0,90) width 180: ".three {color: purple;}"
           text run at (179,90) width 1: " "
-      LayoutBlockFlow {HR} at (0,152) size 784x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {H3} at (0,172.72) size 784x22 [color=#0000FF]
         LayoutText {#text} at (0,0) size 216x22
           text run at (0,0) width 216: "This sentence should show "
@@ -187,3 +186,5 @@ layer at (0,0) size 800x731 backgroundClip at (0,0) size 800x600 clip at (0,0) s
                     text run at (359,0) width 178: "this part (which is spanned)"
                 LayoutText {#text} at (536,0) size 5x18
                   text run at (536,0) width 5: "."
+layer at (8,160) size 784x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,152) size 784x2 [border: (1px inset #EEEEEE)]

@@ -6,13 +6,13 @@
 function test() {
     function check(jsonText)
     {
-        var resultData = Network.JSONView._extractJSON(jsonText);
+        var resultData = SourceFrame.JSONView._extractJSON(jsonText);
         if (!resultData) {
             failure();
             return;
         }
 
-        Common.formatterWorkerPool.parseJSONRelaxed(resultData.data).then(success);
+        Formatter.formatterWorkerPool().parseJSONRelaxed(resultData.data).then(success);
 
         function success(data)
         {

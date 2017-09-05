@@ -1,5 +1,6 @@
+Tests Page.createIsolatedWorld method.
 Runtime enabled
 Page enabled
 Main Frame obtained
-PASS - isolated world created.
+PASS - execution context id match.
 

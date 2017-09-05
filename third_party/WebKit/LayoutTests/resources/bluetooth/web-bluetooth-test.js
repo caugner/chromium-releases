@@ -21,6 +21,7 @@
       FakeBluetoothPtr: mojo_.FakeBluetoothPtr,
       FakeCentral: mojo_.FakeCentral,
       FakeCentralPtr: mojo_.FakeCentralPtr,
+      CharacteristicProperties: mojo_.CharacteristicProperties,
     }] = mojo_.modules;
 
     return mojo_;
@@ -37,6 +38,37 @@
       default:
         throw `Unsupported value ${state} for state.`;
     }
+  }
+
+  // Mapping of the property names of
+  // BluetoothCharacteristicProperties defined in
+  // https://webbluetoothcg.github.io/web-bluetooth/#characteristicproperties
+  // to property names of the CharacteristicProperties mojo struct.
+  const CHARACTERISTIC_PROPERTIES_WEB_TO_MOJO = {
+    broadcast: 'broadcast',
+    read: 'read',
+    write_without_response: 'write_without_response',
+    write: 'write',
+    notify: 'notify',
+    indicate: 'indicate',
+    authenticatedSignedWrites: 'authenticated_signed_writes',
+    extended_properties: 'extended_properties',
+  };
+
+  function ArrayToMojoCharacteristicProperties(arr) {
+    let struct = new mojo_.CharacteristicProperties();
+
+    arr.forEach(val => {
+      let mojo_property =
+        CHARACTERISTIC_PROPERTIES_WEB_TO_MOJO[val];
+
+      if (struct.hasOwnProperty(mojo_property))
+        struct[mojo_property] = true;
+      else
+        throw `Invalid member '${val}' for CharacteristicProperties`;
+    });
+
+    return struct;
   }
 
   class FakeBluetooth {
@@ -139,7 +171,7 @@
 
       let peripheral = this.peripherals_.get(address);
       if (peripheral === undefined) {
-        peripheral = new FakePeripheral(address, this);
+        peripheral = new FakePeripheral(address, this.fake_central_ptr_);
         this.peripherals_.set(address, peripheral);
       }
 
@@ -148,9 +180,194 @@
   }
 
   class FakePeripheral {
-    constructor(address, fake_central) {
+    constructor(address, fake_central_ptr) {
       this.address = address;
-      this.fake_central_ = fake_central;
+      this.fake_central_ptr_ = fake_central_ptr;
+    }
+
+    // Sets the next GATT Connection request response to |code|. |code| could be
+    // an HCI Error Code from BT 4.2 Vol 2 Part D 1.3 List Of Error Codes or a
+    // number outside that range returned by specific platforms e.g. Android
+    // returns 0x101 to signal a GATT failure
+    // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#GATT_FAILURE
+    async setNextGATTConnectionResponse({code}) {
+      let {success} =
+        await this.fake_central_ptr_.setNextGATTConnectionResponse(
+          this.address, code);
+
+      if (success !== true) throw 'setNextGATTConnectionResponse failed.';
+    }
+
+    // Adds a fake GATT Service with |uuid| to be discovered when discovering
+    // the peripheral's GATT Attributes. Returns a FakeRemoteGATTService
+    // corresponding to this service. |uuid| should be a BluetoothServiceUUIDs
+    // https://webbluetoothcg.github.io/web-bluetooth/#typedefdef-bluetoothserviceuuid
+    async addFakeService({uuid}) {
+      let {service_id} = await this.fake_central_ptr_.addFakeService(
+        this.address, {uuid: BluetoothUUID.getService(uuid)});
+
+      if (service_id === null) throw 'addFakeService failed';
+
+      return new FakeRemoteGATTService(
+        service_id, this.address, this.fake_central_ptr_);
+    }
+
+    // Sets the next GATT Discovery request response for peripheral with
+    // |address| to |code|. |code| could be an HCI Error Code from
+    // BT 4.2 Vol 2 Part D 1.3 List Of Error Codes or a number outside that
+    // range returned by specific platforms e.g. Android returns 0x101 to signal
+    // a GATT failure
+    // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#GATT_FAILURE
+    //
+    // The following procedures defined at BT 4.2 Vol 3 Part G Section 4.
+    // "GATT Feature Requirements" are used to discover attributes of the
+    // GATT Server:
+    //  - Primary Service Discovery
+    //  - Relationship Discovery
+    //  - Characteristic Discovery
+    //  - Characteristic Descriptor Discovery
+    // This method aims to simulate the response once all of these procedures
+    // have completed or if there was an error during any of them.
+    async setNextGATTDiscoveryResponse({code}) {
+      let {success} =
+        await this.fake_central_ptr_.setNextGATTDiscoveryResponse(
+          this.address, code);
+
+      if (success !== true) throw 'setNextGATTDiscoveryResponse failed.';
+    }
+  }
+
+  class FakeRemoteGATTService {
+    constructor(service_id, peripheral_address, fake_central_ptr) {
+      this.service_id_ = service_id;
+      this.peripheral_address_ = peripheral_address;
+      this.fake_central_ptr_ = fake_central_ptr;
+    }
+
+    // Adds a fake GATT Characteristic with |uuid| and |properties|
+    // to this fake service. The characteristic will be found when discovering
+    // the peripheral's GATT Attributes. Returns a FakeRemoteGATTCharacteristic
+    // corresponding to the added characteristic.
+    async addFakeCharacteristic({uuid, properties}) {
+      let {characteristic_id} = await this.fake_central_ptr_.addFakeCharacteristic(
+        {uuid: BluetoothUUID.getCharacteristic(uuid)},
+        ArrayToMojoCharacteristicProperties(properties),
+        this.service_id_,
+        this.peripheral_address_
+      );
+
+      if (characteristic_id === null) throw 'addFakeCharacteristic failed';
+
+      return new FakeRemoteGATTCharacteristic(
+        characteristic_id, this.service_id_,
+        this.peripheral_address_, this.fake_central_ptr_);
+    }
+  }
+
+  class FakeRemoteGATTCharacteristic {
+    constructor(characteristic_id, service_id, peripheral_address, fake_central_ptr) {
+      this.ids_ = [characteristic_id, service_id, peripheral_address];
+      this.descriptors_ = [];
+      this.fake_central_ptr_ = fake_central_ptr;
+    }
+
+    // Adds a fake GATT Descriptor with |uuid| to be discovered when
+    // discovering the peripheral's GATT Attributes. Returns a
+    // FakeRemoteGATTDescriptor corresponding to this descriptor. |uuid| should
+    // be a BluetoothDescriptorUUID
+    // https://webbluetoothcg.github.io/web-bluetooth/#typedefdef-bluetoothdescriptoruuid
+    async addFakeDescriptor({uuid}) {
+      let {descriptor_id} = await this.fake_central_ptr_.addFakeDescriptor(
+        {uuid: BluetoothUUID.getDescriptor(uuid)}, ...this.ids_);
+
+      if (descriptor_id === null) throw 'addFakeDescriptor failed';
+
+      let fake_descriptor = new FakeRemoteGATTDescriptor(
+        descriptor_id, ...this.ids_, this.fake_central_ptr_);
+      this.descriptors_.push(fake_descriptor);
+
+      return fake_descriptor;
+    }
+
+    // Sets the next read response for characteristic to |code| and |value|.
+    // |code| could be a GATT Error Response from
+    // BT 4.2 Vol 3 Part F 3.4.1.1 Error Response or a number outside that range
+    // returned by specific platforms e.g. Android returns 0x101 to signal a GATT
+    // failure.
+    // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#GATT_FAILURE
+    async setNextReadResponse(gatt_code, value=null) {
+      if (gatt_code === 0 && value === null) {
+        throw '|value| can\'t be null if read should success.';
+      }
+      if (gatt_code !== 0 && value !== null) {
+        throw '|value| must be null if read should fail.';
+      }
+
+      let {success} =
+        await this.fake_central_ptr_.setNextReadCharacteristicResponse(
+          gatt_code, value, ...this.ids_);
+
+      if (!success) throw 'setNextReadCharacteristicResponse failed';
+    }
+
+    // Sets the next write response for this characteristic to |code|. If
+    // writing to a characteristic that only supports 'write_without_response'
+    // the set response will be ignored.
+    // |code| could be a GATT Error Response from
+    // BT 4.2 Vol 3 Part F 3.4.1.1 Error Response or a number outside that range
+    // returned by specific platforms e.g. Android returns 0x101 to signal a GATT
+    // failure.
+    async setNextWriteResponse(gatt_code) {
+      let {success} =
+        await this.fake_central_ptr_.setNextWriteCharacteristicResponse(
+          gatt_code, ...this.ids_);
+
+      if (!success) throw 'setNextWriteResponse failed';
+    }
+
+    // Gets the last successfully written value to the characteristic.
+    // Returns null if no value has yet been written to the characteristic.
+    async getLastWrittenValue() {
+      let {success, value} =
+        await this.fake_central_ptr_.getLastWrittenValue(...this.ids_);
+
+      if (!success) throw 'getLastWrittenValue failed';
+
+      return value;
+    }
+
+  }
+
+  class FakeRemoteGATTDescriptor {
+    constructor(descriptor_id,
+                characteristic_id,
+                service_id,
+                peripheral_address,
+                fake_central_ptr) {
+      this.ids_ = [
+        descriptor_id, characteristic_id, service_id, peripheral_address];
+      this.fake_central_ptr_ = fake_central_ptr;
+    }
+
+    // Sets the next read response for descriptor to |code| and |value|.
+    // |code| could be a GATT Error Response from
+    // BT 4.2 Vol 3 Part F 3.4.1.1 Error Response or a number outside that range
+    // returned by specific platforms e.g. Android returns 0x101 to signal a GATT
+    // failure.
+    // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#GATT_FAILURE
+    async setNextReadResponse(gatt_code, value=null) {
+      if (gatt_code === 0 && value === null) {
+        throw '|value| can\'t be null if read should success.';
+      }
+      if (gatt_code !== 0 && value !== null) {
+        throw '|value| must be null if read should fail.';
+      }
+
+      let {success} =
+        await this.fake_central_ptr_.setNextReadDescriptorResponse(
+          gatt_code, value, ...this.ids_);
+
+      if (!success) throw 'setNextReadDescriptorResponse failed';
     }
   }
 

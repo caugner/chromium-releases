@@ -12,9 +12,19 @@
           "reason": "geometry"
         },
         {
+          "object": "LayoutBlockFlow DIV id='inline-block-2' class='item'",
+          "rect": [0, 200, 100, 100],
+          "reason": "geometry"
+        },
+        {
           "object": "LayoutBlockFlow DIV id='inline-block-1' class='item'",
           "rect": [0, 100, 100, 100],
           "reason": "disappeared"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='inline-block-2' class='item'",
+          "rect": [0, 100, 100, 100],
+          "reason": "geometry"
         }
       ]
     }
@@ -26,6 +36,10 @@
     },
     {
       "object": "LayoutBlockFlow DIV id='inline-block-1' class='item'",
+      "reason": "disappeared"
+    },
+    {
+      "object": "LayoutText #text",
       "reason": "disappeared"
     },
     {

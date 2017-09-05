@@ -37,7 +37,6 @@ layer at (0,0) size 785x921 backgroundClip at (0,0) size 785x600 clip at (0,0) s
           text run at (0,208) width 176: ".eight {color: green;}"
           text run at (176,208) width 0: " "
           text run at (0,224) width 0: " "
-      LayoutBlockFlow {HR} at (0,289) size 769x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,307) size 769x20 [color=#008000]
         LayoutText {#text} at (0,0) size 194x19
           text run at (0,0) width 194: "This sentence should be green."
@@ -98,3 +97,5 @@ layer at (0,0) size 785x921 backgroundClip at (0,0) size 785x600 clip at (0,0) s
               LayoutBlockFlow {P} at (4,256) size 194x20 [color=#008000]
                 LayoutText {#text} at (0,0) size 194x19
                   text run at (0,0) width 194: "This sentence should be green."
+layer at (8,297) size 769x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,289) size 769x2 [border: (1px inset #EEEEEE)]

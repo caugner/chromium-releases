@@ -14,8 +14,6 @@ crbug.com/24182 editing/selection/modify_move/move-by-word-visually-mac.html [ S
 crbug.com/24182 editing/selection/modify_move/move-by-word-visually-multi-line.html [ Slow ]
 crbug.com/24182 compositing/culling/filter-occlusion-blur-large.html [ Slow ]
 crbug.com/24182 compositing/video-frame-size-change.html [ Slow ]
-crbug.com/24182 virtual/disable-spinvalidation/compositing/culling/filter-occlusion-blur-large.html [ Slow ]
-crbug.com/24182 virtual/disable-spinvalidation/compositing/video-frame-size-change.html [ Slow ]
 crbug.com/24182 css3/filters/effect-reference-hidpi-hw.html [ Slow ]
 crbug.com/24182 css3/filters/filter-change-repaint-composited.html [ Slow ]
 crbug.com/24182 editing/selection/caret-at-bidi-boundary.html [ Slow ]
@@ -63,6 +61,8 @@ crbug.com/24182 media/track/track-cues-cuechange.html [ Slow ]
 crbug.com/24182 media/track/track-cues-enter-exit.html [ Slow ]
 crbug.com/24182 media/controls/controls-cast-do-not-fade-out.html [ Slow ]
 crbug.com/24182 virtual/new-remote-playback-pipeline/media/controls/controls-cast-do-not-fade-out.html [ Slow ]
+crbug.com/24182 media/controls/controls-cast-overlay-slow-fade.html [ Slow ]
+crbug.com/24182 virtual/new-remote-playback-pipeline/media/controls/controls-cast-overlay-slow-fade.html [ Slow ]
 crbug.com/24182 svg/filters/big-sized-filter.svg [ Slow ]
 crbug.com/24182 tables/mozilla/other/slashlogo.html [ Slow ]
 crbug.com/24182 virtual/gpu/fast/canvas/canvas-blend-image.html [ Slow ]
@@ -96,9 +96,9 @@ crbug.com/24182 svg/hixie/perf/006.xml [ Slow ]
 crbug.com/451577 [ Debug ] fast/dom/gc-treescope.html  [ Slow ]
 crbug.com/451577 [ Debug ] fast/frames/calculate-round.html [ Slow ]
 crbug.com/451577 external/wpt/IndexedDB/idbindex-multientry-big.htm [ Slow ]
-crbug.com/451577 [ Mac ] inspector/extensions/extensions-reload.html [ Slow ]
-crbug.com/451577 [ Mac ] inspector/extensions/extensions-resources.html [ Slow ]
-crbug.com/451577 [ Win10 ] inspector/extensions/extensions-sidebar.html [ Slow ]
+crbug.com/451577 [ Mac ] http/tests/inspector/extensions/extensions-reload.html [ Slow ]
+crbug.com/451577 [ Mac ] http/tests/inspector/extensions/extensions-resources.html [ Slow ]
+crbug.com/451577 [ Win10 ] http/tests/inspector/extensions/extensions-sidebar.html [ Slow ]
 crbug.com/451577 [ Mac ] inspector/layers/layer-canvas-log.html [ Slow ]
 crbug.com/451577 [ Mac ] inspector/network/network-domain-filter.html [ Slow ]
 
@@ -127,8 +127,8 @@ crbug.com/420008 inspector/tracing/ [ Slow ]
 crbug.com/420008 virtual/threaded/inspector/tracing/ [ Slow ]
 crbug.com/246190 [ Release ] http/tests/inspector/indexeddb/ [ Slow ]
 crbug.com/246190 [ Release ] virtual/mojo-loading/http/tests/inspector/indexeddb/ [ Slow ]
-crbug.com/451577 [ Mac ] inspector/extensions/extensions-sidebar.html [ Slow ]
-crbug.com/451577 [ Mac ] inspector/extensions/extensions-events.html [ Slow ]
+crbug.com/451577 [ Mac ] http/tests/inspector/extensions/extensions-sidebar.html [ Slow ]
+crbug.com/451577 [ Mac ] http/tests/inspector/extensions/extensions-events.html [ Slow ]
 
 # Random slow tests
 webkit.org/b/90488 [ Release ] http/tests/inspector/compiler-source-mapping-debug.html [ Slow ]
@@ -165,10 +165,10 @@ crbug.com/248938 [ Linux Win ] virtual/threaded/animations/combo-transform-rotat
 crbug.com/248938 virtual/threaded/animations/3d/change-transform-in-end-event.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/3d/state-at-end-event-transform.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/3d/transform-perspective.html [ Slow ]
-crbug.com/248938 virtual/threaded/animations/animation-direction-reverse-fill-mode-hardware.html [ Slow ]
-crbug.com/248938 virtual/threaded/animations/animation-direction-reverse-fill-mode.html [ Slow ]
-crbug.com/248938 virtual/threaded/animations/animation-direction-reverse-hardware.html [ Slow ]
-crbug.com/248938 virtual/threaded/animations/animation-on-inline-crash.html [ Slow ]
+crbug.com/248938 virtual/threaded/animations/direction-and-fill/animation-direction-reverse-fill-mode-hardware.html [ Slow ]
+crbug.com/248938 virtual/threaded/animations/direction-and-fill/animation-direction-reverse-fill-mode.html [ Slow ]
+crbug.com/248938 virtual/threaded/animations/direction-and-fill/animation-direction-reverse-hardware.html [ Slow ]
+crbug.com/248938 virtual/threaded/animations/stability/animation-on-inline-crash.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/cross-fade-background-image.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/cross-fade-border-image-source.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/cross-fade-webkit-mask-box-image.html [ Slow ]
@@ -176,17 +176,13 @@ crbug.com/248938 virtual/threaded/animations/cross-fade-webkit-mask-image.html [
 crbug.com/248938 virtual/threaded/animations/missing-values-last-keyframe.html [ Slow ]
 crbug.com/248938 virtual/threaded/animations/3d/replace-filling-transform.html [ Slow ]
 crbug.com/311482 virtual/threaded/animations/interpolation/filter-interpolation.html [ Slow ]
-crbug.com/311482 virtual/threaded/animations/keyframes-unprefixed-03.html [ Slow ]
+crbug.com/311482 virtual/threaded/animations/prefixed/keyframes-unprefixed-03.html [ Slow ]
 crbug.com/243871 virtual/threaded/fast/scroll-behavior/ [ Slow ]
 crbug.com/243871 virtual/threaded/fast/idle-callback/idle_periods.html [ Slow ]
-crbug.com/664857 virtual/threaded/animations/transform-responsive-neutral-keyframe.html [ Slow ]
-crbug.com/669911 virtual/threaded/animations/zoom-responsive-transform-animation.html [ Slow ]
+crbug.com/664857 virtual/threaded/animations/responsive/transform-responsive-neutral-keyframe.html [ Slow ]
+crbug.com/669911 virtual/threaded/animations/responsive/zoom-responsive-transform-animation.html [ Slow ]
 
-crbug.com/258896 animations/animation-direction-reverse-fill-mode.html [ Slow ]
-
-# This test has to generate >250MB of data which takes ~6s in both release and debug.
-crbug.com/420240 http/tests/xmlhttprequest/xmlhttprequest-json-response-overflow.html [ Slow ]
-crbug.com/420240 virtual/mojo-loading/http/tests/xmlhttprequest/xmlhttprequest-json-response-overflow.html [ Slow ]
+crbug.com/258896 animations/direction-and-fill/animation-direction-reverse-fill-mode.html [ Slow ]
 
 # These html5lib tests are generated tests that test a huge amount of permutations so they need a bit more time.
 crbug.com/453312 html5lib/generated/run-doctype01-data.html [ Slow ]
@@ -219,7 +215,7 @@ crbug.com/241576 [ Win ] http/tests/appcache/404-manifest.html [ Slow ]
 crbug.com/241576 [ Win ] virtual/mojo-loading/http/tests/appcache/404-manifest.html [ Slow ]
 crbug.com/241869 [ Debug ] css3/flexbox/multiline-justify-content.html [ Slow ]
 crbug.com/245154 editing/selection/modify_move/move-by-character-brute-force.html [ Slow ]
-crbug.com/246749 inspector/extensions/extensions-panel.html [ Slow ]
+crbug.com/246749 http/tests/inspector/extensions/extensions-panel.html [ Slow ]
 
 # This test takes 5+ seconds as intended because it tests connection throttling.
 crbug.com/459377 http/tests/websocket/multiple-connections-throttled.html [ Slow ]
@@ -257,8 +253,8 @@ crbug.com/357427 http/tests/workers/terminate-during-sync-operation-filesystem.h
 crbug.com/357427 virtual/mojo-loading/http/tests/workers/terminate-during-sync-operation-filesystem.html [ Slow ]
 crbug.com/364250 [ Debug ] virtual/threaded/animations/interpolation/transform-interpolation.html [ Slow ]
 crbug.com/364250 [ Debug ] virtual/threaded/animations/interpolation/webkit-transform-interpolation.html [ Slow ]
-crbug.com/402379 [ Win7 Debug ] storage/indexeddb/cursor-continue-validity.html [ Slow ]
-crbug.com/402379 [ Win7 Debug ] storage/indexeddb/mozilla/indexes.html [ Slow ]
+crbug.com/402379 [ Debug ] storage/indexeddb/cursor-continue-validity.html [ Slow ]
+crbug.com/402379 [ Debug ] storage/indexeddb/mozilla/indexes.html [ Slow ]
 crbug.com/504706 [ Linux ] inspector/profiler/heap-snapshot-containment-expansion-preserved-when-sorting.html [ Slow ]
 crbug.com/504706 [ Linux ] inspector/profiler/heap-snapshot-containment-sorting.html [ Slow ]
 crbug.com/440452 virtual/display_list_2d_canvas/fast/canvas/canvas-partial-invalidation-zoomed.html [ Slow ]
@@ -266,7 +262,7 @@ crbug.com/480769 http/tests/inspector/service-workers/service-workers-redundant.
 crbug.com/480769 virtual/mojo-loading/http/tests/inspector/service-workers/service-workers-redundant.html [ Slow ]
 crbug.com/480769 http/tests/inspector/service-workers/service-worker-agents.html [ Slow ]
 crbug.com/480769 virtual/mojo-loading/http/tests/inspector/service-workers/service-worker-agents.html [ Slow ]
-crbug.com/504703 inspector-protocol/debugger/debugger-step-into-dedicated-worker.html [ Slow ]
+crbug.com/504703 inspector-protocol/debugger/debugger-step-into-dedicated-worker.js [ Slow ]
 crbug.com/535478 [ Win ] virtual/threaded/inspector/tracing/decode-resize.html [ Slow ]
 crbug.com/548765 http/tests/inspector/console-fetch-logging.html [ Slow ]
 crbug.com/548765 virtual/mojo-loading/http/tests/inspector/console-fetch-logging.html [ Slow ]
@@ -298,7 +294,6 @@ crbug.com/528419 [ Linux ] inspector/elements/shadow/shadow-host-display-modes.h
 crbug.com/528419 inspector/elements/styles-2/pseudo-elements.html [ Slow ]
 
 crbug.com/529345 [ Win10 ] paint/masks/fieldset-mask.html [ Slow ]
-crbug.com/529345 [ Win10 ] virtual/disable-spinvalidation/paint/masks/fieldset-mask.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-root-frame-animates.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-animates.html [ Slow ]
 crbug.com/570656 [ Mac ] fast/writing-mode/Kusa-Makura-background-canvas.html [ Slow ]
@@ -343,7 +338,7 @@ crbug.com/697735 external/wpt/editing/run/unlink.html [ Slow ]
 crbug.com/584807 printing/webgl-oversized-printing.html [ Slow ]
 crbug.com/584807 virtual/threaded/printing/webgl-oversized-printing.html [ Slow ]
 
-crbug.com/592183 usb/usbDevice.html [ Slow ]
+crbug.com/592183 external/wpt/webusb/usbDevice.https.html [ Slow ]
 
 crbug.com/594189 virtual/spv2/fast/overflow/lots-of-sibling-inline-boxes.html [ Slow ]
 
@@ -351,7 +346,6 @@ crbug.com/614910 virtual/gpu-rasterization/images/pixel-crack-image-background-w
 crbug.com/614910 virtual/gpu-rasterization/images/color-profile-filter.html [ Slow ]
 
 crbug.com/623798 paint/images/animated-gif-last-frame-crash.html [ Slow ]
-crbug.com/623798 virtual/disable-spinvalidation/paint/images/animated-gif-last-frame-crash.html [ Slow ]
 
 crbug.com/606649 fast/dom/gc-dom-tree-lifetime.html [ Slow ]
 
@@ -366,15 +360,13 @@ crbug.com/647192 [ Win Debug ] webexposed/global-interface-listing.html [ Slow ]
 # bots running tests on real hardware or maybe when using SwiftShader.
 crbug.com/646528 compositing/lots-of-img-layers.html [ Slow ]
 crbug.com/646528 compositing/lots-of-img-layers-with-opacity.html [ Slow ]
-crbug.com/646528 virtual/disable-spinvalidation/compositing/lots-of-img-layers.html [ Slow ]
-crbug.com/646528 virtual/disable-spinvalidation/compositing/lots-of-img-layers-with-opacity.html [ Slow ]
 
 # IDB Observer tests require multiple browsing contexts/workers interacting with
 # IndexedDB, which can be slow.
 crbug.com/660468 [ Linux ] storage/indexeddb/observer-frame.html [ Slow ]
 crbug.com/660468 [ Linux ] storage/indexeddb/observer-workers.html [ Slow ]
 
-crbug.com/660492 [ Linux ] storage/indexeddb/structured-clone.html [ Slow ]
+crbug.com/660492 storage/indexeddb/structured-clone.html [ Slow ]
 
 # Foreign fetch tests make many requests, and create multiple browsing contexts,
 # which can be very slow.
@@ -386,3 +378,34 @@ crbug.com/722825 media/controls/video-enter-exit-fullscreen-while-hovering-shows
 crbug.com/722825 media/controls/video-enter-exit-fullscreen-without-hovering-doesnt-show-controls.html [ Slow ]
 crbug.com/722825 virtual/new-remote-playback-pipeline/media/controls/video-enter-exit-fullscreen-while-hovering-shows-controls.html [ Slow ]
 crbug.com/722825 virtual/new-remote-playback-pipeline/media/controls/video-enter-exit-fullscreen-without-hovering-doesnt-show-controls.html [ Slow ]
+
+crbug.com/719298 fast/dnd/dropEffect-for-effectAllowed.html [ Slow ]
+
+crbug.com/725548 [ Debug ] storage/indexeddb/objectstore-keycursor.html [ Slow ]
+
+crbug.com/676572 [ Debug ] external/wpt/webstorage/storage_local_setitem_quotaexceedederr.html [ Slow ]
+
+crbug.com/741259 editing/selection/select-bidi-run.html [ Slow ]
+
+# These tests were previously marked Slow in ASANExpectations.
+crbug.com/451577 [ Linux ] inspector/elements/user-properties.html [ Slow ]
+crbug.com/451577 [ Linux ] inspector/layers/layer-canvas-log.html [ Slow ]
+
+# These imported tests exercise tens of thousands of code points and generate large results.
+crbug.com/736056 external/wpt/encoding/legacy-mb-japanese [ Slow ]
+crbug.com/736056 external/wpt/encoding/legacy-mb-korean [ Slow ]
+crbug.com/736056 external/wpt/encoding/legacy-mb-tchinese [ Slow ]
+
+# These tests need to do many iterations and so can't be fast.
+crbug.com/748418 http/tests/streams/chromium/deep-recursion-getwriter.html [ Slow ]
+crbug.com/748418 http/tests/streams/chromium/simple-queue-empty-node-push.html [ Slow ]
+crbug.com/748418 http/tests/streams/chromium/simple-queue-full-node-reject.html [ Slow ]
+crbug.com/748418 http/tests/streams/chromium/simple-queue-full-node-shift.html [ Slow ]
+crbug.com/748418 http/tests/streams/chromium/simple-queue-many-foreach.html [ Slow ]
+crbug.com/748418 http/tests/streams/chromium/simple-queue-push-shift-peek.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/deep-recursion-getwriter.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/simple-queue-empty-node-push.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/simple-queue-full-node-reject.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/simple-queue-full-node-shift.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/simple-queue-many-foreach.html [ Slow ]
+crbug.com/748418 virtual/mojo-loading/http/tests/streams/chromium/simple-queue-push-shift-peek.html [ Slow ]

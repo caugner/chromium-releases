@@ -9,8 +9,8 @@
 <script>
 
 var canvas = document.getElementById('canvas');
-var context = canvas.getContext("2d");
-context.fillStyle = "red";
+var context = canvas.getContext('2d');
+context.fillStyle = 'red';
 context.fillRect(0, 0, 10, 10);
 
 // This test verifies that MediaStreamTrack.applyConstraints() rejects if any
@@ -22,7 +22,7 @@ var makePromiseTest = function(getConstraint) {
     return mockImageCaptureReady
       .then(mock => {
         theMock = mock;
-        theMock.capabilities().supports_torch = false;
+        theMock.state().supports_torch = false;
 
         var stream = canvas.captureStream();
         videoTrack = stream.getVideoTracks()[0];
@@ -35,22 +35,22 @@ var makePromiseTest = function(getConstraint) {
         return new Promise(resolve => setTimeout(resolve, 100));
       },
       error => {
-        assert_unreached("Error creating MockImageCapture: " + error);
+        assert_unreached('Error creating MockImageCapture: ' + error);
       })
       .then(function() {
         const constraints = {
-          advanced : [ getConstraint(theMock.capabilities()) ]
+          advanced : [ getConstraint(theMock.state()) ]
         };
-        return promise_rejects(t, "NotSupportedError",
+        return promise_rejects(t, 'NotSupportedError',
                                videoTrack.applyConstraints(constraints));
       });
   });
 };
 
 const constraintGenerators = [
-  capabilities => ({ whiteBalanceMode: "manual" }),
-  capabilities => ({ exposureMode: "manual" }),
-  capabilities => ({ focusMode: "continuous" }),
+  capabilities => ({ whiteBalanceMode: 'manual' }),
+  capabilities => ({ exposureMode: 'manual' }),
+  capabilities => ({ focusMode: 'continuous' }),
   capabilities => ({
     exposureCompensation: capabilities.exposure_compensation.max + 1
   }),

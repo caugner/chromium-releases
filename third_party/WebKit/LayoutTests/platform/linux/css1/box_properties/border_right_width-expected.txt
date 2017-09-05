@@ -20,7 +20,6 @@ layer at (0,0) size 785x893 backgroundClip at (0,0) size 785x600 clip at (0,0) s
           text run at (432,64) width 0: " "
           text run at (0,80) width 272: ".five {border-right-width: 100px;}"
           text run at (272,80) width 0: " "
-      LayoutBlockFlow {HR} at (0,145) size 769x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,163) size 769x20
         LayoutText {#text} at (0,0) size 157x19
           text run at (0,0) width 157: "(These will only work if "
@@ -102,3 +101,5 @@ layer at (0,0) size 785x893 backgroundClip at (0,0) size 785x600 clip at (0,0) s
                     text run at (522,3) width 96: "border-style"
                 LayoutText {#text} at (618,0) size 54x19
                   text run at (618,0) width 54: " was set."
+layer at (8,153) size 769x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,145) size 769x2 [border: (1px inset #EEEEEE)]

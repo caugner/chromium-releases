@@ -25,13 +25,11 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (0,112) width 176: ".right {float: right;}"
           text run at (176,112) width 0: " "
           text run at (0,128) width 0: " "
-      LayoutBlockFlow {HR} at (0,193) size 769x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,211) size 769x40
         LayoutText {#text} at (0,0) size 751x39
           text run at (0,0) width 681: "On this test page, each test is performed once with floating paragraphs, and then again with floating images. "
           text run at (681,0) width 67: "Other than"
           text run at (0,20) width 751: "the substitution of images for pargraphs, the structure of the test is exactly the same, including the direction of the floats."
-      LayoutBlockFlow {HR} at (24,275) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,301) size 765x110 [border: (5px solid #800080)]
         LayoutBlockFlow (floating) {P} at (5,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 130x59
@@ -50,7 +48,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (199,45) width 354: "of this DIV, which means that the borders of the floating"
           text run at (199,65) width 360: "elements should not overlap the top or side borders of the"
           text run at (199,85) width 31: "DIV."
-      LayoutBlockFlow {HR} at (364.28,419) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,429) size 765x70 [border: (5px solid #800080)]
         LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
         LayoutImage (floating) {IMG} at (745,5) size 15x36 [border: (3px solid #000000)]
@@ -59,7 +56,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (194,5) width 537: "The floating images within this DIV should not go beyond the left or right inner edge"
           text run at (20,25) width 707: "of this DIV, which means that the borders of the floating images should not overlap the top or side borders of the"
           text run at (5,45) width 31: "DIV."
-      LayoutBlockFlow {HR} at (24,523) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,549) size 442x250 [border: (5px solid #800080)]
         LayoutBlockFlow (floating) {P} at (5,5) size 194x74 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 122x39
@@ -88,7 +84,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (114,185) width 298: "In addition, they should not overlap each other."
           text run at (5,205) width 425: "The first two should be side by side, whereas the third should be on"
           text run at (5,225) width 95: "the next \"line.\""
-      LayoutBlockFlow {HR} at (364.28,807) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,817) size 360x210 [border: (5px solid #800080)]
         LayoutImage (floating) {IMG} at (5,5) size 156x36 [border: (3px solid #000000)]
         LayoutImage (floating) {IMG} at (161,5) size 156x36 [border: (3px solid #000000)]
@@ -107,7 +102,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,165) width 40: "other. "
           text run at (44,165) width 308: "The first two should be side by side, whereas the"
           text run at (5,185) width 213: "third should be on the next \"line.\""
-      LayoutBlockFlow {HR} at (24,1051) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,1077) size 314x384 [border: (5px solid #800080)]
         LayoutBlockFlow (floating) {P} at (5,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 130x59
@@ -139,7 +133,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,319) width 268: "side-by-side, but instead the first should be"
           text run at (5,339) width 288: "floated left, and the second floated to the right"
           text run at (5,359) width 94: "below the first."
-      LayoutBlockFlow {HR} at (364.28,1469) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,1479) size 410x246 [border: (5px solid #800080)]
         LayoutImage (floating) {IMG} at (5,5) size 256x36 [border: (3px solid #000000)]
         LayoutImage (floating) {IMG} at (149,41) size 256x36 [border: (3px solid #000000)]
@@ -158,7 +151,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (69,181) width 334: "In addition, the floated images should not be side-by-"
           text run at (5,201) width 390: "side, but instead the first should be floated left, and the second"
           text run at (5,221) width 213: "floated to the right below the first."
-      LayoutBlockFlow {HR} at (24,1749) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,1775) size 765x130 [border: (5px solid #800080)]
         LayoutBlockFlow (floating) {P} at (566,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 139x59
@@ -179,7 +171,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (199,85) width 61: "any way. "
           text run at (259,85) width 265: "In addition, the top of the left-floating box"
           text run at (5,105) width 365: "should not be higher than the top of the right-floating box."
-      LayoutBlockFlow {HR} at (364.28,1913) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,1923) size 765x70 [border: (5px solid #800080)]
         LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
         LayoutImage (floating) {IMG} at (745,5) size 15x36 [border: (3px solid #000000)]
@@ -189,7 +180,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (20,25) width 705: "which means that the borders of the floating images should not overlap the top or side borders of the DIV in any"
           text run at (5,45) width 34: "way. "
           text run at (38,45) width 662: "In addition, the top of the left-floating image should not be higher than the top of the right-floating image."
-      LayoutBlockFlow {HR} at (24,2017) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,2043) size 765x150 [border: (5px solid #800080)]
         LayoutText {#text} at (199,5) size 183x19
           text run at (199,5) width 175: "This is text within the DIV. "
@@ -216,7 +206,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (530,85) width 13: "In"
           text run at (5,105) width 544: "order to mark these points clearly, an asterisk has been inserted just before each floated"
           text run at (5,125) width 53: "element."
-      LayoutBlockFlow {HR} at (364.28,2201) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,2211) size 765x90 [border: (5px solid #800080)]
         LayoutText {#text} at (20,5) size 183x19
           text run at (20,5) width 175: "This is text within the DIV. "
@@ -232,7 +221,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,45) width 725: "high as the top edge of the inline element containing the content just before the floating images occur in the source. "
           text run at (730,45) width 13: "In"
           text run at (5,65) width 590: "order to mark these points clearly, an asterisk has been inserted just before each floated image."
-      LayoutBlockFlow {HR} at (24,2325) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,2351) size 765x290 [border: (5px solid #800080)]
         LayoutText {#text} at (199,5) size 183x19
           text run at (199,5) width 175: "This is text within the DIV. "
@@ -282,7 +270,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,245) width 722: "has room for a floated element, then the element should float so that its top is aligned with the top of the line-box in"
           text run at (5,265) width 173: "which the asterisk appears. "
           text run at (178,265) width 402: "Otherwise, its top should align with the top of the next line-box."
-      LayoutBlockFlow {HR} at (364.28,2649) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,2659) size 765x130 [border: (5px solid #800080)]
         LayoutText {#text} at (20,5) size 183x19
           text run at (20,5) width 175: "This is text within the DIV. "
@@ -309,7 +296,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (20,85) width 700: "has room for a floated image, then the image should float so that its top is aligned with the top of the line-box in"
           text run at (5,105) width 173: "which the asterisk appears. "
           text run at (178,105) width 402: "Otherwise, its top should align with the top of the next line-box."
-      LayoutBlockFlow {HR} at (24,2813) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,2839) size 490x330 [border: (5px solid #800080)]
         LayoutText {#text} at (199,5) size 54x19
           text run at (199,5) width 54: "This is *"
@@ -342,7 +328,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,265) width 475: "align with the top of the line-box following the insertion point of the floated"
           text run at (5,285) width 466: "element to avoid floating elements appearing before text which precedes it"
           text run at (5,305) width 150: "in the source document."
-      LayoutBlockFlow {HR} at (364.28,3177) size 40.44x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {DIV} at (2,3187) size 490x250 [border: (5px solid #800080)]
         LayoutText {#text} at (20,5) size 54x19
           text run at (20,5) width 54: "This is *"
@@ -365,7 +350,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
           text run at (5,185) width 429: "line-box following the insertion point of the floated element to avoid"
           text run at (5,205) width 442: "floating elements appearing before text which precedes it in the source"
           text run at (5,225) width 66: "document."
-      LayoutBlockFlow {HR} at (24,3461) size 578.75x2 [border: (1px inset #EEEEEE)]
       LayoutTable {TABLE} at (0,3487) size 769x3295 [border: (1px outset #808080)]
         LayoutTableSection {TBODY} at (1,1) size 767x3293
           LayoutTableRow {TR} at (0,0) size 767x28
@@ -384,7 +368,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (681,0) width 36: "Other"
                   text run at (0,20) width 740: "than the substitution of images for pargraphs, the structure of the test is exactly the same, including the direction of the"
                   text run at (0,40) width 38: "floats."
-              LayoutBlockFlow {HR} at (28,88) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,114) size 743x110 [border: (5px solid #800080)]
                 LayoutBlockFlow (floating) {P} at (5,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 130x59
@@ -403,7 +386,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (199,45) width 332: "inner edge of this DIV, which means that the borders"
                   text run at (199,65) width 332: "of the floating elements should not overlap the top or"
                   text run at (199,85) width 151: "side borders of the DIV."
-              LayoutBlockFlow {HR} at (357.83,232) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,242) size 743x70 [border: (5px solid #800080)]
                 LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
                 LayoutImage (floating) {IMG} at (723,5) size 15x36 [border: (3px solid #000000)]
@@ -412,7 +394,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (194,5) width 503: "The floating images within this DIV should not go beyond the left or right inner"
                   text run at (20,25) width 701: "edge of this DIV, which means that the borders of the floating images should not overlap the top or side borders"
                   text run at (5,45) width 71: "of the DIV."
-              LayoutBlockFlow {HR} at (28,336) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,362) size 442x250 [border: (5px solid #800080)]
                 LayoutBlockFlow (floating) {P} at (5,5) size 194x74 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 122x39
@@ -441,7 +422,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (114,185) width 298: "In addition, they should not overlap each other."
                   text run at (5,205) width 425: "The first two should be side by side, whereas the third should be on"
                   text run at (5,225) width 95: "the next \"line.\""
-              LayoutBlockFlow {HR} at (357.83,620) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,630) size 360x210 [border: (5px solid #800080)]
                 LayoutImage (floating) {IMG} at (5,5) size 156x36 [border: (3px solid #000000)]
                 LayoutImage (floating) {IMG} at (161,5) size 156x36 [border: (3px solid #000000)]
@@ -460,7 +440,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,165) width 40: "other. "
                   text run at (44,165) width 308: "The first two should be side by side, whereas the"
                   text run at (5,185) width 213: "third should be on the next \"line.\""
-              LayoutBlockFlow {HR} at (28,864) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,890) size 314x384 [border: (5px solid #800080)]
                 LayoutBlockFlow (floating) {P} at (5,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 130x59
@@ -492,7 +471,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,319) width 268: "side-by-side, but instead the first should be"
                   text run at (5,339) width 288: "floated left, and the second floated to the right"
                   text run at (5,359) width 94: "below the first."
-              LayoutBlockFlow {HR} at (357.83,1282) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,1292) size 410x246 [border: (5px solid #800080)]
                 LayoutImage (floating) {IMG} at (5,5) size 256x36 [border: (3px solid #000000)]
                 LayoutImage (floating) {IMG} at (149,41) size 256x36 [border: (3px solid #000000)]
@@ -511,7 +489,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (69,181) width 334: "In addition, the floated images should not be side-by-"
                   text run at (5,201) width 390: "side, but instead the first should be floated left, and the second"
                   text run at (5,221) width 213: "floated to the right below the first."
-              LayoutBlockFlow {HR} at (28,1562) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,1588) size 743x130 [border: (5px solid #800080)]
                 LayoutBlockFlow (floating) {P} at (544,5) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 139x59
@@ -532,7 +509,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (199,85) width 133: "the DIV in any way. "
                   text run at (331,85) width 189: "In addition, the top of the left-"
                   text run at (5,105) width 445: "floating box should not be higher than the top of the right-floating box."
-              LayoutBlockFlow {HR} at (357.83,1726) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,1736) size 743x70 [border: (5px solid #800080)]
                 LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
                 LayoutImage (floating) {IMG} at (723,5) size 15x36 [border: (3px solid #000000)]
@@ -542,7 +518,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (20,25) width 678: "which means that the borders of the floating images should not overlap the top or side borders of the DIV in"
                   text run at (5,45) width 61: "any way. "
                   text run at (65,45) width 662: "In addition, the top of the left-floating image should not be higher than the top of the right-floating image."
-              LayoutBlockFlow {HR} at (28,1830) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,1856) size 743x150 [border: (5px solid #800080)]
                 LayoutText {#text} at (199,5) size 183x19
                   text run at (199,5) width 175: "This is text within the DIV. "
@@ -568,7 +543,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,105) width 127: "occur in the source. "
                   text run at (132,105) width 411: "In order to mark these points clearly, an asterisk has been inserted"
                   text run at (5,125) width 203: "just before each floated element."
-              LayoutBlockFlow {HR} at (357.83,2014) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,2024) size 743x90 [border: (5px solid #800080)]
                 LayoutText {#text} at (20,5) size 183x19
                   text run at (20,5) width 175: "This is text within the DIV. "
@@ -584,7 +558,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,45) width 689: "as high as the top edge of the inline element containing the content just before the floating images occur in the"
                   text run at (5,65) width 49: "source. "
                   text run at (54,65) width 607: "In order to mark these points clearly, an asterisk has been inserted just before each floated image."
-              LayoutBlockFlow {HR} at (28,2138) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,2164) size 743x250 [border: (5px solid #800080)]
                 LayoutText {#text} at (199,5) size 183x19
                   text run at (199,5) width 175: "This is text within the DIV. "
@@ -631,7 +604,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (199,205) width 470: "its top is aligned with the top of the line-box in which the asterisk appears. "
                   text run at (669,205) width 69: "Otherwise,"
                   text run at (199,225) width 329: "its top should align with the top of the next line-box."
-              LayoutBlockFlow {HR} at (357.83,2423) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,2433) size 743x130 [border: (5px solid #800080)]
                 LayoutText {#text} at (20,5) size 183x19
                   text run at (20,5) width 175: "This is text within the DIV. "
@@ -657,7 +629,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (20,85) width 712: "If a line has room for a floated image, then the image should float so that its top is aligned with the top of the line-"
                   text run at (5,105) width 217: "box in which the asterisk appears. "
                   text run at (222,105) width 402: "Otherwise, its top should align with the top of the next line-box."
-              LayoutBlockFlow {HR} at (28,2587) size 562.25x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,2613) size 490x330 [border: (5px solid #800080)]
                 LayoutText {#text} at (199,5) size 54x19
                   text run at (199,5) width 54: "This is *"
@@ -690,7 +661,6 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,265) width 475: "align with the top of the line-box following the insertion point of the floated"
                   text run at (5,285) width 466: "element to avoid floating elements appearing before text which precedes it"
                   text run at (5,305) width 150: "in the source document."
-              LayoutBlockFlow {HR} at (357.83,2951) size 39.34x2 [border: (1px inset #EEEEEE)]
               LayoutBlockFlow {DIV} at (6,2961) size 490x250 [border: (5px solid #800080)]
                 LayoutText {#text} at (20,5) size 54x19
                   text run at (20,5) width 54: "This is *"
@@ -713,4 +683,65 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                   text run at (5,185) width 429: "line-box following the insertion point of the floated element to avoid"
                   text run at (5,205) width 442: "floating elements appearing before text which precedes it in the source"
                   text run at (5,225) width 66: "document."
-              LayoutBlockFlow {HR} at (28,3235) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (8,201) size 769x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,193) size 769x2 [border: (1px inset #EEEEEE)]
+layer at (32,283) size 579x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,275) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,427) size 41x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,419) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,531) size 579x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,523) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,815) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,807) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,1059) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,1051) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,1477) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,1469) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,1757) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,1749) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,1921) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,1913) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,2025) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,2017) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,2209) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,2201) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,2333) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,2325) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,2657) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,2649) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,2821) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,2813) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (372,3185) size 41x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (364.28,3177) size 40.44x2 [border: (1px inset #EEEEEE)]
+layer at (32,3469) size 579x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (24,3461) size 578.75x2 [border: (1px inset #EEEEEE)]
+layer at (49,3612) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,88) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,3756) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,232) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,3860) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,336) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,4144) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,620) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,4388) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,864) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,4806) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,1282) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,5086) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,1562) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,5250) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,1726) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,5354) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,1830) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,5538) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,2014) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,5662) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,2138) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,5947) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,2423) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,6111) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,2587) size 562.25x2 [border: (1px inset #EEEEEE)]
+layer at (379,6475) size 39x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (357.83,2951) size 39.34x2 [border: (1px inset #EEEEEE)]
+layer at (49,6759) size 562x2 backgroundClip at (0,0) size 0x0 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (28,3235) size 562.25x2 [border: (1px inset #EEEEEE)]

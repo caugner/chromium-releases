@@ -18,7 +18,6 @@ layer at (0,0) size 785x751 backgroundClip at (0,0) size 785x600 clip at (0,0) s
           text run at (0,32) width 312: "P.three:first-letter {font-size: 350%;}"
           text run at (312,32) width 0: " "
           text run at (0,48) width 0: " "
-      LayoutBlockFlow {HR} at (0,113) size 769x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,131) size 769x60
         LayoutInline {<pseudo:first-letter>} at (0,0) size 10x19 [color=#800000]
           LayoutTextFragment (anonymous) at (0,0) size 10x19
@@ -91,3 +90,5 @@ layer at (0,0) size 785x751 backgroundClip at (0,0) size 785x600 clip at (0,0) s
                   text run at (0,66) width 617: "quote mark and a capital 'W'-- should be 350% bigger than the rest of the paragraph, and maroon. "
                   text run at (617,66) width 122: "Note that this is not"
                   text run at (0,86) width 284: "required under CSS1, but it is recommended."
+layer at (8,121) size 769x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,113) size 769x2 [border: (1px inset #EEEEEE)]

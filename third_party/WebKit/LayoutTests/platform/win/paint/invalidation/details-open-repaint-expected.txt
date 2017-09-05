@@ -12,6 +12,16 @@
           "reason": "appeared"
         },
         {
+          "object": "LayoutTextControl INPUT",
+          "rect": [8, 72, 173, 22],
+          "reason": "appeared"
+        },
+        {
+          "object": "LayoutBlockFlow DIV id='inner-editor'",
+          "rect": [10, 75, 169, 16],
+          "reason": "appeared"
+        },
+        {
           "object": "LayoutDetailsMarker DIV id='details-marker'",
           "rect": [8, 56, 11, 11],
           "reason": "full"
@@ -47,10 +57,6 @@
     {
       "object": "HorizontalScrollbar",
       "reason": "scroll control"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "appeared"
     },
     {
       "object": "LayoutText #text",

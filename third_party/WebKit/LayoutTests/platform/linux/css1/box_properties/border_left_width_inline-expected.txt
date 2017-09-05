@@ -14,7 +14,6 @@ layer at (0,0) size 800x600
           text run at (416,16) width 0: " "
           text run at (0,32) width 264: ".three {border-left-width: 25px;}"
           text run at (264,32) width 0: " "
-      LayoutBlockFlow {HR} at (0,97) size 784x2 [border: (1px inset #EEEEEE)]
       LayoutBlockFlow {P} at (0,115) size 784x86 [border: (3px solid #000000) (25px solid #000000)]
         LayoutText {#text} at (25,3) size 172x19
           text run at (25,3) width 172: "This element has a class of "
@@ -95,3 +94,5 @@ layer at (0,0) size 800x600
                 LayoutText {#text} at (355,43) size 693x39
                   text run at (355,43) width 363: ", which should have no left border width or visible border"
                   text run at (25,63) width 202: "because no border style was set."
+layer at (8,105) size 784x2 clip at (0,0) size 0x0
+  LayoutBlockFlow {HR} at (0,97) size 784x2 [border: (1px inset #EEEEEE)]

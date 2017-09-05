@@ -5,6 +5,7 @@
 // is called so that the value read in JavaScript are the values expected (the ones
 // sent by |updateReading|).
 function runGenericSensorTests(sensorType, updateReading, verifyReading) {
+  const prefix = sensorType.name + ': ';
   sensor_test(sensor => {
     sensor.mockSensorProvider.setGetSensorShouldFail(true);
     let sensorObject = new sensorType;
@@ -19,7 +20,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
 
       sensorObject.onerror = wrapper.callback;
     });
-  }, 'Test that "onerror" is send when sensor is not supported.');
+  }, prefix + 'Test that "onerror" is send when sensor is not supported.');
 
   sensor_test(sensor => {
       let sensorObject = new sensorType({frequency: 560});
@@ -42,7 +43,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           });
         });
       return testPromise;
-  }, 'Test that "onerror" is send when start() call has failed.');
+  }, prefix + 'Test that "onerror" is send when start() call has failed.');
 
   sensor_test(sensor => {
       let sensorObject = new sensorType({frequency: 560});
@@ -53,7 +54,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           .then(mockSensor => {
             return new Promise((resolve, reject) => {
               let wrapper = new CallbackWrapper(() => {
-                let configuration = mockSensor.active_sensor_configurations_[0];
+                let configuration = mockSensor.activeSensorConfigurations_[0];
                 assert_equals(configuration.frequency, 60);
                 sensorObject.stop();
                 assert_false(sensorObject.activated);
@@ -65,7 +66,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           })
           .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
       return testPromise;
-  }, 'Test that frequency is capped to 60.0 Hz.');
+  }, prefix + 'Test that frequency is capped to 60.0 Hz.');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType();
@@ -89,7 +90,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           return mockSensor;
         })
         .then(mockSensor => mockSensor.removeConfigurationCalled());
-  }, 'Test that configuration is removed for a stopped sensor.');
+  }, prefix + 'Test that configuration is removed for a stopped sensor.');
 
   sensor_test(sensor => {
     let maxSupportedFrequency = 15;
@@ -101,7 +102,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => {
           return new Promise((resolve, reject) => {
             let wrapper = new CallbackWrapper(() => {
-              let configuration = mockSensor.active_sensor_configurations_[0];
+              let configuration = mockSensor.activeSensorConfigurations_[0];
               assert_equals(configuration.frequency, maxSupportedFrequency);
               sensorObject.stop();
               assert_false(sensorObject.activated);
@@ -113,7 +114,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         })
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
     return testPromise;
-  }, 'Test that frequency is capped to the maximum supported from frequency.');
+  }, prefix + 'Test that frequency is capped to the maximum supported from frequency.');
 
   sensor_test(sensor => {
     let minSupportedFrequency = 2;
@@ -125,7 +126,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => {
           return new Promise((resolve, reject) => {
             let wrapper = new CallbackWrapper(() => {
-              let configuration = mockSensor.active_sensor_configurations_[0];
+              let configuration = mockSensor.activeSensorConfigurations_[0];
               assert_equals(configuration.frequency, minSupportedFrequency);
               sensorObject.stop();
               assert_false(sensorObject.activated);
@@ -137,7 +138,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         })
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
     return testPromise;
-  }, 'Test that frequency is limited to the minimum supported from frequency.');
+  }, prefix + 'Test that frequency is limited to the minimum supported from frequency.');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType({frequency: 60});
@@ -159,7 +160,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
       })
       .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
     return testPromise;
-  }, 'Test that sensor can be successfully created and its states are correct.');
+  }, prefix + 'Test that sensor can be successfully created and its states are correct.');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType();
@@ -180,7 +181,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         })
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
     return testPromise;
-  }, 'Test that sensor can be constructed with default configuration.');
+  }, prefix + 'Test that sensor can be constructed with default configuration.');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType({frequency: 60});
@@ -203,7 +204,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
 
     return testPromise;
-  }, 'Test that addConfiguration and removeConfiguration is called.');
+  }, prefix + 'Test that addConfiguration and removeConfiguration is called.');
 
   function checkOnChangeIsCalledAndReadingIsValid(sensor) {
     let sensorObject = new sensorType({frequency: 60});
@@ -221,7 +222,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
               resolve(mockSensor);
             }, reject);
 
-            sensorObject.onchange = wrapper.callback;
+            sensorObject.onreading = wrapper.callback;
             sensorObject.onerror = reject;
           });
         })
@@ -232,12 +233,12 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
 
   sensor_test(sensor => {
     return checkOnChangeIsCalledAndReadingIsValid(sensor);
-  }, 'Test that onChange is called and sensor reading is valid (onchange reporting).');
+  }, prefix + 'Test that onChange is called and sensor reading is valid (onreading reporting).');
 
   sensor_test(sensor => {
     sensor.mockSensorProvider.setContinuousReportingMode();
     return checkOnChangeIsCalledAndReadingIsValid(sensor);
-  }, 'Test that onChange is called and sensor reading is valid (continuous reporting).');
+  }, prefix + 'Test that onChange is called and sensor reading is valid (continuous reporting).');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType;
@@ -253,7 +254,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
               resolve(mockSensor);
             }, reject);
 
-            sensorObject.onchange = wrapper.callback;
+            sensorObject.onreading = wrapper.callback;
             sensorObject.onerror = reject;
           });
         })
@@ -275,8 +276,46 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
 
     return testPromise;
-  }, 'Test that sensor receives suspend / resume notifications when page'
+  }, prefix + 'Test that sensor receives suspend / resume notifications when page'
       + ' visibility changes.');
+
+  sensor_test(sensor => {
+    let sensorObject = new sensorType;
+    sensorObject.start();
+
+    // Create a focused editbox inside a cross-origin iframe, sensor notification must suspend.
+    const iframeSrc = 'data:text/html;charset=utf-8,<html><body><input type="text" autofocus></body></html>';
+    let iframe = document.createElement('iframe');
+    iframe.src = encodeURI(iframeSrc);
+
+    return sensor.mockSensorProvider.getCreatedSensor()
+        .then(mockSensor => mockSensor.setUpdateSensorReadingFunction(updateReading))
+        .then(mockSensor => new Promise((resolve, reject) => {
+          let wrapper = new CallbackWrapper(() => {
+            assert_true(verifyReading(sensorObject));
+            resolve(mockSensor);
+          }, reject);
+
+          sensorObject.onreading = wrapper.callback;
+          sensorObject.onerror = reject;
+        }))
+        .then(mockSensor => {
+          document.body.appendChild(iframe);
+          return mockSensor.suspendCalled();
+        })
+        .then(mockSensor => {
+          window.focus();
+          return mockSensor.resumeCalled();
+        })
+        .then(mockSensor => new Promise((resolve, reject) => {
+          sensorObject.stop();
+          document.body.removeChild(iframe);
+          resolve(mockSensor);
+          sensorObject.onerror = reject;
+        }))
+        .then(mockSensor => mockSensor.removeConfigurationCalled());
+  }, prefix + 'Test that sensor receives suspend / resume notifications when'
+      + ' cross-origin subframe is focused');
 
   sensor_test(sensor => {
     let sensor1 = new sensorType({frequency: 60});
@@ -307,7 +346,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
               resolve(mockSensor);
             }, reject);
 
-            sensor1.onchange = wrapper.callback;
+            sensor1.onreading = wrapper.callback;
             sensor1.onerror = reject;
             sensor2.onerror = reject;
           });
@@ -315,7 +354,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
 
     return testPromise;
-  }, 'Test that sensor reading is correct.');
+  }, prefix + 'Test that sensor reading is correct.');
 
   function checkFrequencyHintWorks(sensor) {
     let fastSensor = new sensorType({frequency: 30});
@@ -340,21 +379,24 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
               slowSensorNotifiedCounter++;
               if (slowSensorNotifiedCounter == 1) {
                   fastSensor.start();
-                  readingUpdatesCounter = mockSensor.reading_updates_count();
+                  readingUpdatesCounter = mockSensor.readingUpdatesCount();
               } else if (slowSensorNotifiedCounter == 2) {
                 // By the moment slow sensor (9 Hz) is notified for the
                 // next time, the fast sensor (30 Hz) has been notified
                 // for int(30/9) = 3 times.
-                let elapsedUpdates = mockSensor.reading_updates_count() - readingUpdatesCounter;
-                assert_equals(fastSensorNotifiedCounter, elapsedUpdates);
+                let elapsedUpdates = mockSensor.readingUpdatesCount() - readingUpdatesCounter;
+                // Approximation because 'slowSensor.onreading' is sometimes
+                // called before 'fastSensor.onreading', in this case
+                // 'fastSensorNotifiedCounter == elapsedUpdates - 1'.
+                assert_approx_equals(fastSensorNotifiedCounter, elapsedUpdates, 1);
                 fastSensor.stop();
                 slowSensor.stop();
                 resolve(mockSensor);
               }
             }, reject);
 
-            fastSensor.onchange = fastSensorWrapper.callback;
-            slowSensor.onchange = slowSensorWrapper.callback;
+            fastSensor.onreading = fastSensorWrapper.callback;
+            slowSensor.onreading = slowSensorWrapper.callback;
             fastSensor.onerror = reject;
             slowSensor.onerror = reject;
           });
@@ -366,10 +408,37 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
 
   sensor_test(sensor => {
     return checkFrequencyHintWorks(sensor);
-  }, 'Test that frequency hint works (onchange reporting).');
+  }, prefix + 'Test that frequency hint works (onreading reporting).');
 
   sensor_test(sensor => {
     sensor.mockSensorProvider.setContinuousReportingMode();
     return checkFrequencyHintWorks(sensor);
-  }, 'Test that frequency hint works (continuous reporting).');
+  }, prefix + 'Test that frequency hint works (continuous reporting).');
+
+  promise_test(() => {
+    return new Promise((resolve,reject) => {
+      let iframe = document.createElement('iframe');
+      iframe.srcdoc = '<script>' +
+                      '  window.onmessage = message => {' +
+                      '    if (message.data === "LOADED") {' +
+                      '      try {' +
+                      '        new ' + sensorType.name + '();' +
+                      '        parent.postMessage("FAIL", "*");' +
+                      '      } catch (e) {' +
+                      '        parent.postMessage("PASS", "*");' +
+                      '      }' +
+                      '    }' +
+                      '   };' +
+                      '<\/script>';
+      iframe.onload = () => iframe.contentWindow.postMessage('LOADED', '*');
+      document.body.appendChild(iframe);
+      window.onmessage = message => {
+        if (message.data == 'PASS') {
+          resolve();
+        } else if (message.data == 'FAIL') {
+          reject();
+        }
+      }
+    });
+  }, prefix + 'Test that sensor cannot be constructed within iframe.');
 }
