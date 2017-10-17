@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank('Tests that Runtime.awaitPromise works.');
+  var {page, session, dp} = await testRunner.startBlank('Tests that Runtime.awaitPromise works.');
 
   function dumpResult(result) {
     if (result.exceptionDetails) {
@@ -13,7 +13,7 @@
       if (result.exceptionDetails.exception)
         result.exceptionDetails.exception.objectId = 0;
     }
-    testRunner.logObject(result);
+    testRunner.log(result);
   }
 
   await session.evaluate(`
@@ -85,7 +85,7 @@
       var promise = dp.Runtime.awaitPromise({ promiseObjectId: objectId });
       dp.Runtime.releaseObject({ objectId: objectId}).then(() => dp.Runtime.evaluate({ expression: 'runGC()' }));
       result = await promise;
-      testRunner.logObject(result.error);
+      testRunner.log(result.error);
     }
   ]);
 })

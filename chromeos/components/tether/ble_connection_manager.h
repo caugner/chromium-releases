@@ -17,14 +17,18 @@
 #include "chromeos/components/tether/ble_advertisement_device_queue.h"
 #include "chromeos/components/tether/ble_advertiser.h"
 #include "chromeos/components/tether/ble_scanner.h"
+#include "chromeos/components/tether/connection_priority.h"
 #include "chromeos/components/tether/proto/tether.pb.h"
 #include "components/cryptauth/remote_device.h"
 #include "components/cryptauth/secure_channel.h"
 
 namespace cryptauth {
 class CryptAuthService;
-class LocalDeviceDataProvider;
 }  // namespace cryptauth
+
+namespace device {
+class BluetoothDevice;
+}  // namespace device
 
 namespace chromeos {
 
@@ -76,8 +80,9 @@ class BleConnectionManager : public BleScanner::Observer {
   BleConnectionManager(
       cryptauth::CryptAuthService* cryptauth_service,
       scoped_refptr<device::BluetoothAdapter> adapter,
-      const cryptauth::LocalDeviceDataProvider* local_device_data_provider,
-      const cryptauth::RemoteBeaconSeedFetcher* remote_beacon_seed_fetcher);
+      BleAdvertisementDeviceQueue* ble_advertisement_device_queue,
+      BleAdvertiser* ble_advertiser,
+      BleScanner* ble_scanner);
   virtual ~BleConnectionManager();
 
   // Registers |remote_device| for |connection_reason|. Once registered, this
@@ -114,18 +119,10 @@ class BleConnectionManager : public BleScanner::Observer {
 
   // BleScanner::Observer:
   void OnReceivedAdvertisementFromDevice(
-      const std::string& device_address,
-      cryptauth::RemoteDevice remote_device) override;
+      const cryptauth::RemoteDevice& remote_device,
+      device::BluetoothDevice* bluetooth_device) override;
 
  protected:
-  BleConnectionManager(
-      cryptauth::CryptAuthService* cryptauth_service,
-      scoped_refptr<device::BluetoothAdapter> adapter,
-      std::unique_ptr<BleScanner> ble_scanner,
-      std::unique_ptr<BleAdvertiser> ble_advertiser,
-      std::unique_ptr<BleAdvertisementDeviceQueue> device_queue,
-      std::unique_ptr<TimerFactory> timer_factory);
-
   void SendMessageReceivedEvent(cryptauth::RemoteDevice remote_device,
                                 std::string payload);
   void SendSecureChannelStatusChangeEvent(
@@ -154,12 +151,14 @@ class BleConnectionManager : public BleScanner::Observer {
 
     void RegisterConnectionReason(const MessageType& connection_reason);
     void UnregisterConnectionReason(const MessageType& connection_reason);
+    ConnectionPriority GetConnectionPriority();
     bool HasReasonForConnection() const;
 
     bool HasEstablishedConnection() const;
     cryptauth::SecureChannel::Status GetStatus() const;
 
     void StartConnectionAttemptTimer(bool use_short_error_timeout);
+    void StopConnectionAttemptTimer();
     bool HasSecureChannel();
     void SetSecureChannel(
         std::unique_ptr<cryptauth::SecureChannel> secure_channel);
@@ -199,6 +198,7 @@ class BleConnectionManager : public BleScanner::Observer {
   void UpdateAdvertisementQueue();
 
   void StartConnectionAttempt(const cryptauth::RemoteDevice& remote_device);
+  void EndUnsuccessfulAttempt(const cryptauth::RemoteDevice& remote_device);
   void StopConnectionAttemptAndMoveToEndOfQueue(
       const cryptauth::RemoteDevice& remote_device);
 
@@ -208,7 +208,8 @@ class BleConnectionManager : public BleScanner::Observer {
       const cryptauth::SecureChannel::Status& old_status,
       const cryptauth::SecureChannel::Status& new_status);
 
-  void SetClockForTest(std::unique_ptr<base::Clock> clock_for_test);
+  void SetTestDoubles(std::unique_ptr<base::Clock> test_clock,
+                      std::unique_ptr<TimerFactory> test_timer_factory);
 
   // Record various operation durations. These need to be separate methods
   // because internally they use a macro which maintains a static state that
@@ -218,9 +219,10 @@ class BleConnectionManager : public BleScanner::Observer {
 
   cryptauth::CryptAuthService* cryptauth_service_;
   scoped_refptr<device::BluetoothAdapter> adapter_;
-  std::unique_ptr<BleScanner> ble_scanner_;
-  std::unique_ptr<BleAdvertiser> ble_advertiser_;
-  std::unique_ptr<BleAdvertisementDeviceQueue> device_queue_;
+  BleAdvertisementDeviceQueue* ble_advertisement_device_queue_;
+  BleAdvertiser* ble_advertiser_;
+  BleScanner* ble_scanner_;
+
   std::unique_ptr<TimerFactory> timer_factory_;
   std::unique_ptr<base::Clock> clock_;
 

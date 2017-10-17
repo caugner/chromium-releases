@@ -1,5 +1,0 @@
-Tests frameScheduledNavigation event when navigation is initiated in JS.
-Scheduled navigation with delay 0
-Started loading
-Cleared scheduled navigation
-

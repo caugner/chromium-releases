@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank('Tests that we do not report scope variables with empty names.');
+  var {page, session, dp} = await testRunner.startBlank('Tests that we do not report scope variables with empty names.');
 
   dp.Debugger.enable();
   dp.Runtime.evaluate({expression: `
@@ -21,7 +21,7 @@
   }
 
   for (var objectId of localScopeObjectIds)
-    testRunner.logObject((await dp.Runtime.getProperties({objectId})).result);
+    testRunner.log((await dp.Runtime.getProperties({objectId})).result);
 
   await dp.Debugger.resume();
   testRunner.completeTest();

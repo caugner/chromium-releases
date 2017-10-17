@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
-<script src="../resources/mojo-helpers.js"></script>
 <script src="file:///gen/layout_test_data/mojo/public/js/mojo_bindings.js"></script>
 <script src="file:///gen/services/device/public/interfaces/sensor_provider.mojom.js"></script>
 <script src="resources/sensor-helpers.js"></script>
@@ -72,7 +71,8 @@ function checkPopulateMatrix(sensor, sensorType) {
 
           let rotationDOMMatrix = new DOMMatrix();
           sensorObject.populateMatrix(rotationDOMMatrix);
-          assert_array_equals(rotationDOMMatrix, kRotationDOMMatrix);
+          assert_array_equals(rotationDOMMatrix.toFloat64Array(),
+                              kRotationMatrix);
 
           // Sets every matrix element.
           rotationMatrix64.fill(123);

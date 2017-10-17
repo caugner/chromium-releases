@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank(`Check that while Runtime.getProperties call on proxy object no user defined trap will be executed.`);
+  var {page, session, dp} = await testRunner.startBlank(`Check that while Runtime.getProperties call on proxy object no user defined trap will be executed.`);
 
   function testFunction() {
     window.counter = 0;
@@ -79,6 +79,6 @@
   var response = await dp.Runtime.evaluate({expression: '(' + testFunction.toString() + ')()'});
   await dp.Runtime.getProperties({ objectId: response.result.result.objectId, generatePreview: true });
   response = await dp.Runtime.evaluate({ expression: 'window.counter' });
-  testRunner.logObject(response.result);
+  testRunner.log(response.result);
   testRunner.completeTest();
 })

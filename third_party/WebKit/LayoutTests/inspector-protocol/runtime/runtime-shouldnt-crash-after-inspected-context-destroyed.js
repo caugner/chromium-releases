@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank(`Tests that call to console after inspected context was destroyed shouldn't produce crash.`);
+  var {page, session, dp} = await testRunner.startBlank(`Tests that call to console after inspected context was destroyed shouldn't produce crash.`);
   await session.evaluate(`
     var iframe = document.createElement('iframe');
     document.body.appendChild(iframe);
@@ -8,6 +8,6 @@
     iframe.contentWindow.console = a;
     iframe.remove();
   `);
-  testRunner.logMessage(await dp.Runtime.evaluate({expression: 'console.log(239);'}));
+  testRunner.log(await dp.Runtime.evaluate({expression: 'console.log(239);'}));
   testRunner.completeTest();
 })

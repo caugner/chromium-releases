@@ -75,7 +75,7 @@ function minOverloadLength(overloads)
 }
 
 //@}
-function throwOrReject(a_test, operation, fn, obj, args,  message, cb)
+function throwOrReject(a_test, operation, fn, obj, args, message, cb)
 //@{
 {
     if (operation.idlType.generic !== "Promise") {
@@ -85,7 +85,7 @@ function throwOrReject(a_test, operation, fn, obj, args,  message, cb)
         cb();
     } else {
         try {
-            promise_rejects(a_test, new TypeError(), fn.apply(obj, args)).then(cb, cb);
+            promise_rejects(a_test, new TypeError(), fn.apply(obj, args), message).then(cb, cb);
         } catch (e){
             a_test.step(function() {
                 assert_unreached("Throws \"" + e + "\" instead of rejecting promise");
@@ -401,9 +401,11 @@ IdlArray.prototype.is_json_type = function(type)
                var map = new Map();
                while (stack.length)
                {
-                   stack.pop().members.forEach(m => map.set(m.name, m.idlType));
+                   stack.pop().members.forEach(function(m) {
+                       map.set(m.name, m.idlType)
+                   });
                }
-               return [...map.values()].every(this.is_json_type, this);
+               return Array.from(map.values()).every(this.is_json_type, this);
            }
            
            //  interface types that have a toJSON operation declared on themselves or
@@ -415,14 +417,14 @@ IdlArray.prototype.is_json_type = function(type)
                    if (thing.has_to_json_regular_operation()) { return true; }
                    var mixins = this.implements[thing.name];
                    if (mixins) {
-                       mixins = mixins.map(id => {
+                       mixins = mixins.map(function(id) {
                            var mixin = this.members[id];
                            if (!mixin) {
                                throw new Error("Interface " + id + " not found (implemented by " + thing.name + ")");
                            }
                            return mixin;
-                       });
-                       if (mixins.some(m => m.has_to_json_regular_operation())) { return true; }
+                       }, this);
+                       if (mixins.some(function(m) { return m.has_to_json_regular_operation() } )) { return true; }
                    }
                    if (!thing.base) { return false; }
                    base = this.members[thing.base];
@@ -1006,7 +1008,7 @@ function _traverse_inherited_and_consequential_interfaces(stack, callback) {
     callback(I);
     var mixins = I.array["implements"][I.name];
     if (mixins) {
-        mixins.forEach(id => {
+        mixins.forEach(function(id) {
             var mixin = I.array.members[id];
             if (!mixin) {
                 throw new Error("Interface " + id + " not found (implemented by " + I.name + ")");
@@ -1322,6 +1324,14 @@ IdlInterface.prototype.test_self = function()
         // "Otherwise, if A is declared with the [LegacyArrayClass] extended
         // attribute, then return %ArrayPrototype%.
         // "Otherwise, return %ObjectPrototype%.
+        //
+        // "In the ECMAScript binding, the DOMException type has some additional
+        // requirements:
+        //
+        //     "Unlike normal interface types, the interface prototype object
+        //     for DOMException must have as its [[Prototype]] the intrinsic
+        //     object %ErrorPrototype%."
+        //
         if (this.name === "Window") {
             assert_class_string(Object.getPrototypeOf(self[this.name].prototype),
                                 'WindowProperties',
@@ -1337,6 +1347,9 @@ IdlInterface.prototype.test_self = function()
                          .has_extended_attribute("NoInterfaceObject");
             } else if (this.has_extended_attribute('LegacyArrayClass')) {
                 inherit_interface = 'Array';
+                inherit_interface_has_interface_object = true;
+            } else if (this.name === "DOMException") {
+                inherit_interface = 'Error';
                 inherit_interface_has_interface_object = true;
             } else {
                 inherit_interface = 'Object';
@@ -1685,7 +1698,7 @@ IdlInterface.prototype.test_member_operation = function(member)
 {
     var a_test = async_test(this.name + " interface: operation " + member.name +
                             "(" + member.arguments.map(
-                                function(m) {return m.idlType.idlType; } )
+                                function(m) {return m.idlType.idlType; } ).join(", ")
                             +")");
     a_test.step(function()
     {
@@ -2180,6 +2193,11 @@ IdlInterface.prototype.test_interface_of = function(desc, obj, exception, expect
         || member.type == "operation")
         && member.name)
         {
+            var described_name = member.name;
+            if (member.type == "operation")
+            {
+                described_name += "(" + member.arguments.map(arg => arg.idlType.idlType).join(", ") + ")";
+            }
             test(function()
             {
                 assert_equals(exception, null, "Unexpected exception when evaluating object");
@@ -2219,7 +2237,7 @@ IdlInterface.prototype.test_interface_of = function(desc, obj, exception, expect
                         assert_equals(typeof obj[member.name], "function");
                     }
                 }
-            }.bind(this), this.name + " interface: " + desc + ' must inherit property "' + member.name + '" with the proper type (' + i + ')');
+            }.bind(this), this.name + " interface: " + desc + ' must inherit property "' + described_name + '" with the proper type');
         }
         // TODO: This is wrong if there are multiple operations with the same
         // identifier.
@@ -2227,22 +2245,25 @@ IdlInterface.prototype.test_interface_of = function(desc, obj, exception, expect
         if (member.type == "operation" && member.name && member.arguments.length)
         {
             var a_test = async_test( this.name + " interface: calling " + member.name +
-            "(" + member.arguments.map(function(m) { return m.idlType.idlType; }) +
+            "(" + member.arguments.map(function(m) { return m.idlType.idlType; }).join(", ") +
             ") on " + desc + " with too few arguments must throw TypeError");
             a_test.step(function()
             {
                 assert_equals(exception, null, "Unexpected exception when evaluating object");
                 assert_equals(typeof obj, expected_typeof, "wrong typeof object");
+                var fn;
                 if (!member["static"]) {
                     if (!this.is_global() && !member.isUnforgeable) {
                         assert_inherits(obj, member.name);
                     } else {
                         assert_own_property(obj, member.name);
                     }
+                    fn = obj[member.name];
                 }
                 else
                 {
-                    assert_false(member.name in obj);
+                    assert_own_property(obj.constructor, member.name, "interface object must have static operation as own property");
+                    fn = obj.constructor[member.name];
                 }
 
                 var minLength = minOverloadLength(this.members.filter(function(m) {
@@ -2251,7 +2272,7 @@ IdlInterface.prototype.test_interface_of = function(desc, obj, exception, expect
                 var args = [];
                 var cb = awaitNCallbacks(minLength, a_test.done.bind(a_test));
                 for (var i = 0; i < minLength; i++) {
-                    throwOrReject(a_test, member, obj[member.name], obj, args,  "Called with " + i + " arguments", cb);
+                    throwOrReject(a_test, member, fn, obj, args, "Called with " + i + " arguments", cb);
 
                     args.push(create_suitable_object(member.arguments[i].idlType));
                 }
@@ -2267,6 +2288,11 @@ IdlInterface.prototype.test_interface_of = function(desc, obj, exception, expect
 IdlInterface.prototype.has_stringifier = function()
 //@{
 {
+    if (this.name === "DOMException") {
+        // toString is inherited from Error, so don't assume we have the
+        // default stringifer
+        return true;
+    }
     if (this.members.some(function(member) { return member.stringifier; })) {
         return true;
     }

@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank('Tests that CommandLineAPI is presented only while evaluation.');
+  var {page, session, dp} = await testRunner.startBlank('Tests that CommandLineAPI is presented only while evaluation.');
 
   await session.evaluate(`
     var methods = ['dir','dirxml','profile','profileEnd','clear','table','keys','values','debug','undebug','monitor','unmonitor','inspect','copy'];
@@ -66,20 +66,20 @@
     testRunner.log(expression);
     await setLastEvaluationResultTo239();
     var result = await evaluate(expression + '; var a = presentedAPIMethods(); a', true);
-    testRunner.logObject(result);
+    testRunner.log(result);
   }
 
   async function dumpLeftMethods() {
     // Should always be zero.
     await setLastEvaluationResultTo239();
     var result = await evaluate('presentedAPIMethods()', false);
-    testRunner.logObject(result);
+    testRunner.log(result);
   }
 
   async function dumpDir() {
     // Should always be presented.
     var result = await evaluate('dir', false);
-    testRunner.logObject(result);
+    testRunner.log(result);
   }
 
   await runExpressionAndDumpPresentedMethods('');

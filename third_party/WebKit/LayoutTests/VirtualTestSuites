@@ -113,54 +113,14 @@
     "args": ["--stable-release-mode"]
   },
   {
-    "prefix": "off-main-thread-fetch",
-    "base": "external/wpt/html/browsers/offline/appcache/workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
+    "prefix": "feature-policy-permissions",
+    "base": "http/tests/webmidi",
+    "args": ["--enable-features=UseFeaturePolicyForPermissions"]
   },
   {
-    "prefix": "off-main-thread-fetch",
-    "base": "external/wpt/service-workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/fetch/chromium",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/fetch/workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/inspector/service-workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/misc",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/security/cookies",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/serviceworker",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/xmlhttprequest/workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
-  },
-  {
-    "prefix": "off-main-thread-fetch",
-    "base": "http/tests/workers",
-    "args": ["--enable-features=OffMainThreadFetch"]
+    "prefix": "feature-policy-permissions",
+    "base": "http/tests/geolocation-api",
+    "args": ["--enable-features=UseFeaturePolicyForPermissions"]
   },
   {
     "prefix": "origin-trials-runtimeflags-disabled",
@@ -194,11 +154,6 @@
     "prefix": "media-gpu-accelerated",
     "base": "media",
     "args": ["--use-gpu-in-tests"]
-  },
-  {
-    "prefix": "android",
-    "base": "media/mediadocument",
-    "args": ["--enable-features=MediaDocumentDownloadButton"]
   },
   {
     "prefix": "stable",
@@ -278,7 +233,7 @@
   },
   {
     "prefix": "threaded",
-    "base": "inspector/tracing",
+    "base": "http/tests/devtools/tracing",
     "args": ["--enable-threaded-compositing"]
   },
   {
@@ -327,6 +282,11 @@
     "args": ["--force-device-scale-factor=2"]
   },
   {
+    "prefix": "scalefactor200",
+    "base": "external/wpt/css-paint-api/hidpi",
+    "args": ["--force-device-scale-factor=2"]
+  },
+  {
     "prefix": "scalefactor150",
     "base": "fast/hidpi/static",
     "args": ["--force-device-scale-factor=1.5"]
@@ -335,11 +295,6 @@
     "prefix": "scalefactor200withzoom",
     "base": "fast/hidpi/static",
     "args": ["--force-device-scale-factor=2", "--enable-use-zoom-for-dsf"]
-  },
-  {
-    "prefix": "documentwriteevaluator",
-    "base": "http/tests/preload/document-write",
-    "args": ["--enable-blink-features=DocumentWriteEvaluator"]
   },
   {
     "prefix": "wheelscrolllatching",
@@ -397,16 +352,6 @@
     "prefix": "enable_asmjs",
     "base": "http/tests/asmjs",
     "args": ["--enable-features=AsmJsToWebAssembly"]
-  },
-  {
-    "prefix": "service-worker-navigation-preload-disabled",
-    "base": "webexposed",
-    "args": ["--disable-features=ServiceWorkerNavigationPreload"]
-  },
-  {
-    "prefix": "service-worker-navigation-preload-disabled",
-    "base": "http/tests/serviceworker/webexposed",
-    "args": ["--disable-features=ServiceWorkerNavigationPreload"]
   },
   {
     "prefix": "service-worker-script-streaming",
@@ -535,7 +480,57 @@
   },
   {
     "prefix": "outofblink-cors",
-    "base": "webexposed",
-    "args": ["--enable-blink-features=OutOfBlinkCORS"]
+    "base": "external/wpt/fetch",
+    "args": ["--enable-features=OutOfBlinkCORS,LoadingWithMojo"]
+  },
+  {
+    "prefix": "outofblink-cors",
+    "base": "external/wpt/http",
+    "args": ["--enable-features=OutOfBlinkCORS,LoadingWithMojo"]
+  },
+  {
+    "prefix": "outofblink-cors",
+    "base": "external/wpt/referrer-policy",
+    "args": ["--enable-features=OutOfBlinkCORS,LoadingWithMojo"]
+  },
+  {
+    "prefix": "outofblink-cors",
+    "base": "external/wpt/service-workers",
+    "args": ["--enable-features=OutOfBlinkCORS,LoadingWithMojo"]
+  },
+  {
+    "prefix": "outofblink-cors",
+    "base": "http/tests/xmlhttprequest",
+    "args": ["--enable-features=OutOfBlinkCORS,LoadingWithMojo"]
+  },
+  {
+    "prefix": "presentation",
+    "base": "receiver",
+    "args": ["--force-presentation-receiver-for-testing"]
+  },
+  {
+    "prefix": "mojo-blobs",
+    "base": "external/wpt/FileAPI",
+    "args": ["--enable-features=MojoBlobs"]
+  },
+  {
+    "prefix": "mojo-blobs",
+    "base": "external/wpt/fetch",
+    "args": ["--enable-features=MojoBlobs"]
+  },
+  {
+    "prefix": "mojo-blobs",
+    "base": "external/wpt/service-workers",
+    "args": ["--enable-features=MojoBlobs"]
+  },
+  {
+    "prefix": "mojo-blobs",
+    "base": "fast/files",
+    "args": ["--enable-features=MojoBlobs"]
+  },
+  {
+    "prefix": "longtask-v2",
+    "base": "http/tests/performance-timing/longtask-v2",
+    "args": ["--enable-features=LongTaskV2"]
   }
 ]

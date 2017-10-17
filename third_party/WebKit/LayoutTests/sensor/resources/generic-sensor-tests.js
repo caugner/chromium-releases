@@ -46,6 +46,17 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
   }, prefix + 'Test that "onerror" is send when start() call has failed.');
 
   sensor_test(sensor => {
+    let sensorObject = new sensorType();
+    sensorObject.start();
+
+    return sensor.mockSensorProvider.getCreatedSensor()
+      .then(mockSensor => {
+        mockSensor.setStartShouldFail(true);
+        return mockSensor.addConfigurationCalled(); })
+      .then(mockSensor => mockSensor.removeConfigurationCalled());
+  }, prefix + 'Test that no pending configuration left after start() failure.');
+
+  sensor_test(sensor => {
       let sensorObject = new sensorType({frequency: 560});
       sensorObject.start();
 
@@ -54,8 +65,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           .then(mockSensor => {
             return new Promise((resolve, reject) => {
               let wrapper = new CallbackWrapper(() => {
-                let configuration = mockSensor.activeSensorConfigurations_[0];
-                assert_equals(configuration.frequency, 60);
+                assert_less_than_equal(mockSensor.getSamplingFrequency(), 60);
                 sensorObject.stop();
                 assert_false(sensorObject.activated);
                 resolve(mockSensor);
@@ -66,7 +76,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
           })
           .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
       return testPromise;
-  }, prefix + 'Test that frequency is capped to 60.0 Hz.');
+  }, prefix + 'Test that frequency is capped to allowed maximum.');
 
   sensor_test(sensor => {
     let sensorObject = new sensorType();
@@ -93,7 +103,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
   }, prefix + 'Test that configuration is removed for a stopped sensor.');
 
   sensor_test(sensor => {
-    let maxSupportedFrequency = 15;
+    let maxSupportedFrequency = 5;
     sensor.mockSensorProvider.setMaximumSupportedFrequency(maxSupportedFrequency);
     let sensorObject = new sensorType({frequency: 50});
     sensorObject.start();
@@ -102,8 +112,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => {
           return new Promise((resolve, reject) => {
             let wrapper = new CallbackWrapper(() => {
-              let configuration = mockSensor.activeSensorConfigurations_[0];
-              assert_equals(configuration.frequency, maxSupportedFrequency);
+              assert_equals(mockSensor.getSamplingFrequency(), maxSupportedFrequency);
               sensorObject.stop();
               assert_false(sensorObject.activated);
               resolve(mockSensor);
@@ -126,8 +135,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
         .then(mockSensor => {
           return new Promise((resolve, reject) => {
             let wrapper = new CallbackWrapper(() => {
-              let configuration = mockSensor.activeSensorConfigurations_[0];
-              assert_equals(configuration.frequency, minSupportedFrequency);
+              assert_equals(mockSensor.getSamplingFrequency(), minSupportedFrequency);
               sensorObject.stop();
               assert_false(sensorObject.activated);
               resolve(mockSensor);
@@ -358,18 +366,16 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
 
   function checkFrequencyHintWorks(sensor) {
     let fastSensor = new sensorType({frequency: 30});
-    let slowSensor = new sensorType({frequency: 9});
+    let slowSensor = new sensorType({frequency: 5});
     slowSensor.start();
 
     let testPromise = sensor.mockSensorProvider.getCreatedSensor()
-        .then(mockSensor => {
-          return mockSensor.setUpdateSensorReadingFunction(updateReading);
-        })
+        .then(mockSensor =>
+              mockSensor.setUpdateSensorReadingFunction(updateReading))
         .then(mockSensor => {
           return new Promise((resolve, reject) => {
             let fastSensorNotifiedCounter = 0;
             let slowSensorNotifiedCounter = 0;
-            let readingUpdatesCounter = 0;
 
             let fastSensorWrapper = new CallbackWrapper(() => {
               fastSensorNotifiedCounter++;
@@ -379,16 +385,9 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
               slowSensorNotifiedCounter++;
               if (slowSensorNotifiedCounter == 1) {
                   fastSensor.start();
-                  readingUpdatesCounter = mockSensor.readingUpdatesCount();
-              } else if (slowSensorNotifiedCounter == 2) {
-                // By the moment slow sensor (9 Hz) is notified for the
-                // next time, the fast sensor (30 Hz) has been notified
-                // for int(30/9) = 3 times.
-                let elapsedUpdates = mockSensor.readingUpdatesCount() - readingUpdatesCounter;
-                // Approximation because 'slowSensor.onreading' is sometimes
-                // called before 'fastSensor.onreading', in this case
-                // 'fastSensorNotifiedCounter == elapsedUpdates - 1'.
-                assert_approx_equals(fastSensorNotifiedCounter, elapsedUpdates, 1);
+              } else if (slowSensorNotifiedCounter == 3) {
+                assert_true(fastSensorNotifiedCounter > 2,
+                            "Fast sensor overtakes the slow one");
                 fastSensor.stop();
                 slowSensor.stop();
                 resolve(mockSensor);
@@ -401,7 +400,7 @@ function runGenericSensorTests(sensorType, updateReading, verifyReading) {
             slowSensor.onerror = reject;
           });
         })
-        .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
+        .then(mockSensor => mockSensor.removeConfigurationCalled());
 
     return testPromise;
   }
