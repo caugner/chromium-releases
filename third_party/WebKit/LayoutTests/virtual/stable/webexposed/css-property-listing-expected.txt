@@ -197,6 +197,7 @@ All changes to this list should go through Blink's feature review process: http:
     font-stretch
     font-style
     font-variant-caps
+    font-variant-east-asian
     font-variant-ligatures
     font-variant-numeric
     font-variation-settings
@@ -263,6 +264,8 @@ All changes to this list should go through Blink's feature review process: http:
     overflow-wrap
     overflow-x
     overflow-y
+    overscroll-behavior-x
+    overscroll-behavior-y
     padding-bottom
     padding-left
     padding-right
@@ -503,20 +506,20 @@ All changes to this list should go through Blink's feature review process: http:
         font-stretch
         font-style
         font-variant-caps
+        font-variant-east-asian
         font-variant-ligatures
         font-variant-numeric
         font-weight
         line-height
     font-variant
         font-variant-caps
+        font-variant-east-asian
         font-variant-ligatures
         font-variant-numeric
     grid
         grid-auto-columns
         grid-auto-flow
         grid-auto-rows
-        grid-column-gap
-        grid-row-gap
         grid-template-areas
         grid-template-columns
         grid-template-rows
@@ -562,6 +565,9 @@ All changes to this list should go through Blink's feature review process: http:
     overflow
         overflow-x
         overflow-y
+    overscroll-behavior
+        overscroll-behavior-x
+        overscroll-behavior-y
     padding
         padding-bottom
         padding-left

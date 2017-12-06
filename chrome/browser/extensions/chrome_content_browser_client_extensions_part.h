@@ -16,6 +16,10 @@ class ResourceContext;
 class VpnServiceProxy;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace extensions {
 
 // Implements the extensions portion of ChromeContentBrowserClient.
@@ -26,7 +30,9 @@ class ChromeContentBrowserClientExtensionsPart
   ~ChromeContentBrowserClientExtensionsPart() override;
 
   // Corresponds to the ChromeContentBrowserClient function of the same name.
-  static GURL GetEffectiveURL(Profile* profile, const GURL& url);
+  static GURL GetEffectiveURL(Profile* profile,
+                              const GURL& url,
+                              bool is_isolated_origin);
   static bool ShouldUseProcessPerSite(Profile* profile,
                                       const GURL& effective_url);
   static bool DoesSiteRequireDedicatedProcess(
@@ -34,6 +40,7 @@ class ChromeContentBrowserClientExtensionsPart
       const GURL& effective_site_url);
   static bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                                  const GURL& effective_site_url);
+  static bool ShouldBypassDocumentBlocking(const url::Origin& initiator);
   static bool CanCommitURL(content::RenderProcessHost* process_host,
                            const GURL& url);
   static bool IsSuitableHost(Profile* profile,

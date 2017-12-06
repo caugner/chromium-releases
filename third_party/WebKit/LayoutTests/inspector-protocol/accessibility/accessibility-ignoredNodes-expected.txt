@@ -152,7 +152,6 @@ WebArea
   *GenericContainer
     text "Div in list isn't presentational"
   checkbox "Content within label refers to label container"
-  text
   GenericContainer
   combobox
 {
@@ -338,10 +337,12 @@ WebArea
   text "List item also presentational"
   GenericContainer
   checkbox "Content within label refers to label container"
-  text
   GenericContainer
   *combobox
     MenuListPopup
+      menuitem "Options should be"
+      menuitem "sent down even though"
+      menuitem "they are grandchildren"
 {
   "nodeId": "<string>",
   "ignored": false,

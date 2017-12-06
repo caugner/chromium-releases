@@ -4,7 +4,7 @@
       "name": "LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
-      "drawsContent": true,
+      "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow DIV class='innerWrapper'",
@@ -22,15 +22,15 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow DIV class='innerWrapper'",
-      "reason": "subtree"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV class='red'",
-      "reason": "subtree"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV id='ucp' class='green'",
-      "reason": "subtree"
+      "reason": "geometry"
     }
   ]
 }

@@ -8,6 +8,7 @@
 #include <sys/statfs.h>
 #include <map>
 #include <set>
+#include <string>
 
 #include "base/callback.h"
 #include "base/command_line.h"
@@ -23,8 +24,8 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/known_user.h"
@@ -330,7 +331,7 @@ bool SetArcPlayStoreEnabledForProfile(Profile* profile, bool enabled) {
     // Need update ARC session manager manually for managed case in order to
     // keep its state up to date, otherwise it may stuck with enabling
     // request.
-    // TODO (khmel): Consider finding the better way handling this.
+    // TODO(khmel): Consider finding the better way handling this.
     ArcSessionManager* arc_session_manager = ArcSessionManager::Get();
     // |arc_session_manager| can be nullptr in unit_tests.
     if (!arc_session_manager)
