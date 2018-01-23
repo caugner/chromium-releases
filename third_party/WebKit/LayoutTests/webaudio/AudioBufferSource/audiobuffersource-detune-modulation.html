@@ -10,6 +10,7 @@
     <script src="../resources/audit.js"></script>
     <script src="../resources/audiobuffersource-testing.js"></script>
     <script src="../resources/buffer-loader.js"></script>
+    <script src="../resources/audio-file-utils.js"></script>
   </head>
   <body>
     <script id="layout-test-code">
@@ -56,8 +57,8 @@
               // experiments.
               compareBuffersWithConstraints(should, actual, expected, {
                 prefix: '',
-                thresholdSNR: 93.31,
-                thresholdDiffULP: 1.01,
+                thresholdSNR: 93.336,
+                thresholdDiffULP: 1.0141,
                 thresholdDiffCount: 0,
                 bitDepth: 16
               });

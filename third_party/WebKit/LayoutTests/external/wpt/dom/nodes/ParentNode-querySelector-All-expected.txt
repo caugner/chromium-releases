@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 1819 tests; 1817 PASS, 2 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 1851 tests; 1849 PASS, 2 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS Selectors-API Test Suite: HTML
 PASS Document supports querySelector
 PASS Document supports querySelectorAll
@@ -103,6 +103,8 @@ PASS Document.querySelector: Unknown pseudo-element: ::example
 PASS Document.querySelectorAll: Unknown pseudo-element: ::example
 PASS Document.querySelector: Invalid pseudo-element: :::before
 PASS Document.querySelectorAll: Invalid pseudo-element: :::before
+PASS Document.querySelector: Invalid pseudo-element: :: before
+PASS Document.querySelectorAll: Invalid pseudo-element: :: before
 PASS Document.querySelector: Undeclared namespace: ns|div
 PASS Document.querySelectorAll: Undeclared namespace: ns|div
 PASS Document.querySelector: Undeclared namespace: :not(ns|div)
@@ -167,6 +169,8 @@ PASS Detached Element.querySelector: Unknown pseudo-element: ::example
 PASS Detached Element.querySelectorAll: Unknown pseudo-element: ::example
 PASS Detached Element.querySelector: Invalid pseudo-element: :::before
 PASS Detached Element.querySelectorAll: Invalid pseudo-element: :::before
+PASS Detached Element.querySelector: Invalid pseudo-element: :: before
+PASS Detached Element.querySelectorAll: Invalid pseudo-element: :: before
 PASS Detached Element.querySelector: Undeclared namespace: ns|div
 PASS Detached Element.querySelectorAll: Undeclared namespace: ns|div
 PASS Detached Element.querySelector: Undeclared namespace: :not(ns|div)
@@ -231,6 +235,8 @@ PASS Fragment.querySelector: Unknown pseudo-element: ::example
 PASS Fragment.querySelectorAll: Unknown pseudo-element: ::example
 PASS Fragment.querySelector: Invalid pseudo-element: :::before
 PASS Fragment.querySelectorAll: Invalid pseudo-element: :::before
+PASS Fragment.querySelector: Invalid pseudo-element: :: before
+PASS Fragment.querySelectorAll: Invalid pseudo-element: :: before
 PASS Fragment.querySelector: Undeclared namespace: ns|div
 PASS Fragment.querySelectorAll: Undeclared namespace: ns|div
 PASS Fragment.querySelector: Undeclared namespace: :not(ns|div)
@@ -295,6 +301,8 @@ PASS In-document Element.querySelector: Unknown pseudo-element: ::example
 PASS In-document Element.querySelectorAll: Unknown pseudo-element: ::example
 PASS In-document Element.querySelector: Invalid pseudo-element: :::before
 PASS In-document Element.querySelectorAll: Invalid pseudo-element: :::before
+PASS In-document Element.querySelector: Invalid pseudo-element: :: before
+PASS In-document Element.querySelectorAll: Invalid pseudo-element: :: before
 PASS In-document Element.querySelector: Undeclared namespace: ns|div
 PASS In-document Element.querySelectorAll: Undeclared namespace: ns|div
 PASS In-document Element.querySelector: Undeclared namespace: :not(ns|div)
@@ -387,6 +395,8 @@ PASS Document.querySelectorAll: Attribute begins with selector, matching href at
 PASS Document.querySelector: Attribute begins with selector, matching href attributes beginning with specified substring: #attr-begins a[href^="http://www"]
 PASS Document.querySelectorAll: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
 PASS Document.querySelector: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
+PASS Document.querySelectorAll: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
+PASS Document.querySelector: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
 PASS Document.querySelectorAll: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Document.querySelector: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Document.querySelectorAll: Attribute begins with selector with single-quoted value, matching class attribute beginning with specified substring: #attr-begins [class^=' apple']
@@ -399,6 +409,8 @@ PASS Document.querySelectorAll: Attribute ends with selector, matching href attr
 PASS Document.querySelector: Attribute ends with selector, matching href attributes ending with specified substring: #attr-ends a[href$=".org"]
 PASS Document.querySelectorAll: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
 PASS Document.querySelector: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
+PASS Document.querySelectorAll: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
+PASS Document.querySelector: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
 PASS Document.querySelectorAll: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Document.querySelector: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Document.querySelectorAll: Attribute ends with selector with single-quoted value, matching class attribute ending with specified substring: #attr-ends [class$='apple ']
@@ -417,6 +429,8 @@ PASS Document.querySelectorAll: Attribute contains selector, matching lang attri
 PASS Document.querySelector: Attribute contains selector, matching lang attributes beginning with specified substring, : #attr-contains [lang*="en-"]
 PASS Document.querySelectorAll: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
 PASS Document.querySelector: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
+PASS Document.querySelectorAll: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
+PASS Document.querySelector: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
 PASS Document.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Document.querySelector: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Document.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute ending with specified substring: #attr-contains [class*='orange ']
@@ -605,8 +619,10 @@ PASS Document.querySelectorAll: Descendant combinator, matching element with cla
 PASS Document.querySelector: Descendant combinator, matching element with class that is a descendant of an element with class: .descendant-div1 .descendant-div3
 PASS Document.querySelectorAll: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
 PASS Document.querySelector: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
-PASS Document.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
-PASS Document.querySelector: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
+PASS Document.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
+PASS Document.querySelector: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
 PASS Document.querySelectorAll: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Document.querySelector: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Document.querySelectorAll: Child combinator, matching element with id that is a child of an element: div>#child-div1
@@ -623,12 +639,20 @@ PASS Document.querySelectorAll: Child combinator, not matching element with id t
 PASS Document.querySelector: Child combinator, not matching element with id that is not a child of an element with class: #child-div1>.child-div3
 PASS Document.querySelectorAll: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
 PASS Document.querySelector: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
-PASS Document.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Document.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Document.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Document.querySelector: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Document.querySelectorAll: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
-PASS Document.querySelector: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
+PASS Document.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Document.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Document.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Document.querySelector: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Document.querySelectorAll: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
+PASS Document.querySelector: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
 PASS Document.querySelectorAll: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Document.querySelector: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Document.querySelectorAll: Adjacent sibling combinator, matching element that is an adjacent sibling of an element with id: #adjacent-div2+div
@@ -645,12 +669,20 @@ PASS Document.querySelectorAll: Adjacent sibling combinator, matching p element 
 PASS Document.querySelector: Adjacent sibling combinator, matching p element that is an adjacent sibling of a div element: #adjacent div+p
 PASS Document.querySelectorAll: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
 PASS Document.querySelector: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
-PASS Document.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Document.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Document.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Document.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Document.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
-PASS Document.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
+PASS Document.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Document.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Document.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Document.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Document.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
+PASS Document.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
 PASS Document.querySelectorAll: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Document.querySelector: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Document.querySelectorAll: General sibling combinator, matching element that is a sibling of an element with id: #sibling-div2~div
@@ -667,20 +699,36 @@ PASS Document.querySelectorAll: General sibling combinator, not matching element
 PASS Document.querySelector: General sibling combinator, not matching element with id that is not a sibling after a p element: #sibling>p~div
 PASS Document.querySelectorAll: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
 PASS Document.querySelector: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
-PASS Document.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Document.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Document.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Document.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Document.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
-PASS Document.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
+PASS Document.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Document.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Document.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Document.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Document.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
+PASS Document.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
 PASS Document.querySelectorAll: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
 PASS Document.querySelector: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
-PASS Document.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Document.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Document.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Document.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Document.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
-PASS Document.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
+PASS Document.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Document.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Document.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Document.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Document.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
+PASS Document.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
 PASS Document.querySelectorAll: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS Document.querySelector: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS Detached Element.querySelectorAll: Type selector, matching html element: html
@@ -765,6 +813,8 @@ PASS Detached Element.querySelectorAll: Attribute begins with selector, matching
 PASS Detached Element.querySelector: Attribute begins with selector, matching href attributes beginning with specified substring: #attr-begins a[href^="http://www"]
 PASS Detached Element.querySelectorAll: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
 PASS Detached Element.querySelector: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
+PASS Detached Element.querySelectorAll: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
+PASS Detached Element.querySelector: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
 PASS Detached Element.querySelectorAll: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Detached Element.querySelector: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Detached Element.querySelectorAll: Attribute begins with selector with single-quoted value, matching class attribute beginning with specified substring: #attr-begins [class^=' apple']
@@ -777,6 +827,8 @@ PASS Detached Element.querySelectorAll: Attribute ends with selector, matching h
 PASS Detached Element.querySelector: Attribute ends with selector, matching href attributes ending with specified substring: #attr-ends a[href$=".org"]
 PASS Detached Element.querySelectorAll: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
 PASS Detached Element.querySelector: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
+PASS Detached Element.querySelectorAll: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
+PASS Detached Element.querySelector: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
 PASS Detached Element.querySelectorAll: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Detached Element.querySelector: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Detached Element.querySelectorAll: Attribute ends with selector with single-quoted value, matching class attribute ending with specified substring: #attr-ends [class$='apple ']
@@ -795,6 +847,8 @@ PASS Detached Element.querySelectorAll: Attribute contains selector, matching la
 PASS Detached Element.querySelector: Attribute contains selector, matching lang attributes beginning with specified substring, : #attr-contains [lang*="en-"]
 PASS Detached Element.querySelectorAll: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
 PASS Detached Element.querySelector: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
+PASS Detached Element.querySelectorAll: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
+PASS Detached Element.querySelector: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
 PASS Detached Element.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Detached Element.querySelector: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Detached Element.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute ending with specified substring: #attr-contains [class*='orange ']
@@ -983,8 +1037,10 @@ PASS Detached Element.querySelectorAll: Descendant combinator, matching element 
 PASS Detached Element.querySelector: Descendant combinator, matching element with class that is a descendant of an element with class: .descendant-div1 .descendant-div3
 PASS Detached Element.querySelectorAll: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
 PASS Detached Element.querySelector: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
-PASS Detached Element.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
-PASS Detached Element.querySelector: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
+PASS Detached Element.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
+PASS Detached Element.querySelector: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
 PASS Detached Element.querySelectorAll: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Detached Element.querySelector: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Detached Element.querySelectorAll: Child combinator, matching element with id that is a child of an element: div>#child-div1
@@ -1001,12 +1057,20 @@ PASS Detached Element.querySelectorAll: Child combinator, not matching element w
 PASS Detached Element.querySelector: Child combinator, not matching element with id that is not a child of an element with class: #child-div1>.child-div3
 PASS Detached Element.querySelectorAll: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
 PASS Detached Element.querySelector: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
-PASS Detached Element.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Detached Element.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Detached Element.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Detached Element.querySelector: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Detached Element.querySelectorAll: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
-PASS Detached Element.querySelector: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
+PASS Detached Element.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Detached Element.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Detached Element.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Detached Element.querySelector: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Detached Element.querySelectorAll: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
+PASS Detached Element.querySelector: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
 PASS Detached Element.querySelectorAll: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Detached Element.querySelector: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Detached Element.querySelectorAll: Adjacent sibling combinator, matching element that is an adjacent sibling of an element with id: #adjacent-div2+div
@@ -1023,12 +1087,20 @@ PASS Detached Element.querySelectorAll: Adjacent sibling combinator, matching p 
 PASS Detached Element.querySelector: Adjacent sibling combinator, matching p element that is an adjacent sibling of a div element: #adjacent div+p
 PASS Detached Element.querySelectorAll: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
 PASS Detached Element.querySelector: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
-PASS Detached Element.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Detached Element.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Detached Element.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Detached Element.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Detached Element.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
-PASS Detached Element.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
+PASS Detached Element.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Detached Element.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Detached Element.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Detached Element.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Detached Element.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
+PASS Detached Element.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
 PASS Detached Element.querySelectorAll: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Detached Element.querySelector: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Detached Element.querySelectorAll: General sibling combinator, matching element that is a sibling of an element with id: #sibling-div2~div
@@ -1045,20 +1117,36 @@ PASS Detached Element.querySelectorAll: General sibling combinator, not matching
 PASS Detached Element.querySelector: General sibling combinator, not matching element with id that is not a sibling after a p element: #sibling>p~div
 PASS Detached Element.querySelectorAll: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
 PASS Detached Element.querySelector: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
-PASS Detached Element.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Detached Element.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Detached Element.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Detached Element.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Detached Element.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
-PASS Detached Element.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
+PASS Detached Element.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Detached Element.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Detached Element.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Detached Element.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Detached Element.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
+PASS Detached Element.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
 PASS Detached Element.querySelectorAll: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
 PASS Detached Element.querySelector: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
-PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Detached Element.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Detached Element.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
-PASS Detached Element.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
+PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Detached Element.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Detached Element.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
+PASS Detached Element.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
 PASS Detached Element.querySelectorAll: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS Detached Element.querySelector: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS Fragment.querySelectorAll: Type selector, matching html element: html
@@ -1143,6 +1231,8 @@ PASS Fragment.querySelectorAll: Attribute begins with selector, matching href at
 PASS Fragment.querySelector: Attribute begins with selector, matching href attributes beginning with specified substring: #attr-begins a[href^="http://www"]
 PASS Fragment.querySelectorAll: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
 PASS Fragment.querySelector: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
+PASS Fragment.querySelectorAll: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
+PASS Fragment.querySelector: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
 PASS Fragment.querySelectorAll: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Fragment.querySelector: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS Fragment.querySelectorAll: Attribute begins with selector with single-quoted value, matching class attribute beginning with specified substring: #attr-begins [class^=' apple']
@@ -1155,6 +1245,8 @@ PASS Fragment.querySelectorAll: Attribute ends with selector, matching href attr
 PASS Fragment.querySelector: Attribute ends with selector, matching href attributes ending with specified substring: #attr-ends a[href$=".org"]
 PASS Fragment.querySelectorAll: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
 PASS Fragment.querySelector: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
+PASS Fragment.querySelectorAll: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
+PASS Fragment.querySelector: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
 PASS Fragment.querySelectorAll: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Fragment.querySelector: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS Fragment.querySelectorAll: Attribute ends with selector with single-quoted value, matching class attribute ending with specified substring: #attr-ends [class$='apple ']
@@ -1173,6 +1265,8 @@ PASS Fragment.querySelectorAll: Attribute contains selector, matching lang attri
 PASS Fragment.querySelector: Attribute contains selector, matching lang attributes beginning with specified substring, : #attr-contains [lang*="en-"]
 PASS Fragment.querySelectorAll: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
 PASS Fragment.querySelector: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
+PASS Fragment.querySelectorAll: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
+PASS Fragment.querySelector: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
 PASS Fragment.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Fragment.querySelector: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS Fragment.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute ending with specified substring: #attr-contains [class*='orange ']
@@ -1361,8 +1455,10 @@ PASS Fragment.querySelectorAll: Descendant combinator, matching element with cla
 PASS Fragment.querySelector: Descendant combinator, matching element with class that is a descendant of an element with class: .descendant-div1 .descendant-div3
 PASS Fragment.querySelectorAll: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
 PASS Fragment.querySelector: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
-PASS Fragment.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
-PASS Fragment.querySelector: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
+PASS Fragment.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
+PASS Fragment.querySelector: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
 PASS Fragment.querySelectorAll: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Fragment.querySelector: Child combinator, matching element that is a child of an element with id: #child>div
 PASS Fragment.querySelectorAll: Child combinator, matching element with id that is a child of an element: div>#child-div1
@@ -1379,12 +1475,20 @@ PASS Fragment.querySelectorAll: Child combinator, not matching element with id t
 PASS Fragment.querySelector: Child combinator, not matching element with id that is not a child of an element with class: #child-div1>.child-div3
 PASS Fragment.querySelectorAll: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
 PASS Fragment.querySelector: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
-PASS Fragment.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Fragment.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS Fragment.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Fragment.querySelector: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS Fragment.querySelectorAll: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
-PASS Fragment.querySelector: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
+PASS Fragment.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Fragment.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS Fragment.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Fragment.querySelector: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS Fragment.querySelectorAll: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
+PASS Fragment.querySelector: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
 PASS Fragment.querySelectorAll: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Fragment.querySelector: Child combinator, no whitespace: #child-div1>#child-div2
 PASS Fragment.querySelectorAll: Adjacent sibling combinator, matching element that is an adjacent sibling of an element with id: #adjacent-div2+div
@@ -1401,12 +1505,20 @@ PASS Fragment.querySelectorAll: Adjacent sibling combinator, matching p element 
 PASS Fragment.querySelector: Adjacent sibling combinator, matching p element that is an adjacent sibling of a div element: #adjacent div+p
 PASS Fragment.querySelectorAll: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
 PASS Fragment.querySelector: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
-PASS Fragment.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Fragment.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS Fragment.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Fragment.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS Fragment.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
-PASS Fragment.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
+PASS Fragment.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Fragment.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS Fragment.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Fragment.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS Fragment.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
+PASS Fragment.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
 PASS Fragment.querySelectorAll: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Fragment.querySelector: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS Fragment.querySelectorAll: General sibling combinator, matching element that is a sibling of an element with id: #sibling-div2~div
@@ -1423,20 +1535,36 @@ PASS Fragment.querySelectorAll: General sibling combinator, not matching element
 PASS Fragment.querySelector: General sibling combinator, not matching element with id that is not a sibling after a p element: #sibling>p~div
 PASS Fragment.querySelectorAll: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
 PASS Fragment.querySelector: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
-PASS Fragment.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Fragment.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS Fragment.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Fragment.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS Fragment.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
-PASS Fragment.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
+PASS Fragment.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Fragment.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS Fragment.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Fragment.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS Fragment.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
+PASS Fragment.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
 PASS Fragment.querySelectorAll: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
 PASS Fragment.querySelector: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
-PASS Fragment.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Fragment.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS Fragment.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Fragment.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS Fragment.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
-PASS Fragment.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
+PASS Fragment.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Fragment.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS Fragment.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Fragment.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS Fragment.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
+PASS Fragment.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
 PASS Fragment.querySelectorAll: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS Fragment.querySelector: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS In-document Element.querySelectorAll: Type selector, matching html element: html
@@ -1521,6 +1649,8 @@ PASS In-document Element.querySelectorAll: Attribute begins with selector, match
 PASS In-document Element.querySelector: Attribute begins with selector, matching href attributes beginning with specified substring: #attr-begins a[href^="http://www"]
 PASS In-document Element.querySelectorAll: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
 PASS In-document Element.querySelector: Attribute begins with selector, matching lang attributes beginning with specified substring, : #attr-begins [lang^="en-"]
+PASS In-document Element.querySelectorAll: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
+PASS In-document Element.querySelector: Attribute begins with selector, not matching class attribute with empty value: #attr-begins [class^=""]
 PASS In-document Element.querySelectorAll: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS In-document Element.querySelector: Attribute begins with selector, not matching class attribute not beginning with specified substring: #attr-begins [class^=apple]
 PASS In-document Element.querySelectorAll: Attribute begins with selector with single-quoted value, matching class attribute beginning with specified substring: #attr-begins [class^=' apple']
@@ -1533,6 +1663,8 @@ PASS In-document Element.querySelectorAll: Attribute ends with selector, matchin
 PASS In-document Element.querySelector: Attribute ends with selector, matching href attributes ending with specified substring: #attr-ends a[href$=".org"]
 PASS In-document Element.querySelectorAll: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
 PASS In-document Element.querySelector: Attribute ends with selector, matching lang attributes ending with specified substring, : #attr-ends [lang$="-CH"]
+PASS In-document Element.querySelectorAll: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
+PASS In-document Element.querySelector: Attribute ends with selector, not matching class attribute with empty value: #attr-ends [class$=""]
 PASS In-document Element.querySelectorAll: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS In-document Element.querySelector: Attribute ends with selector, not matching class attribute not ending with specified substring: #attr-ends [class$=apple]
 PASS In-document Element.querySelectorAll: Attribute ends with selector with single-quoted value, matching class attribute ending with specified substring: #attr-ends [class$='apple ']
@@ -1551,6 +1683,8 @@ PASS In-document Element.querySelectorAll: Attribute contains selector, matching
 PASS In-document Element.querySelector: Attribute contains selector, matching lang attributes beginning with specified substring, : #attr-contains [lang*="en-"]
 PASS In-document Element.querySelectorAll: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
 PASS In-document Element.querySelector: Attribute contains selector, matching lang attributes ending with specified substring, : #attr-contains [lang*="-CH"]
+PASS In-document Element.querySelectorAll: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
+PASS In-document Element.querySelector: Attribute contains selector, not matching class attribute with empty value: #attr-contains [class*=""]
 PASS In-document Element.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS In-document Element.querySelector: Attribute contains selector with single-quoted value, matching class attribute beginning with specified substring: #attr-contains [class*=' apple']
 PASS In-document Element.querySelectorAll: Attribute contains selector with single-quoted value, matching class attribute ending with specified substring: #attr-contains [class*='orange ']
@@ -1741,8 +1875,10 @@ PASS In-document Element.querySelectorAll: Descendant combinator, matching eleme
 PASS In-document Element.querySelector: Descendant combinator, matching element with class that is a descendant of an element with class: .descendant-div1 .descendant-div3
 PASS In-document Element.querySelectorAll: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
 PASS In-document Element.querySelector: Descendant combinator, not matching element with id that is not a descendant of an element with id: #descendant-div1 #descendant-div4
-PASS In-document Element.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
-PASS In-document Element.querySelector: Descendant combinator, whitespace characters: #descendant	\r\n#descendant-div2
+PASS In-document Element.querySelectorAll: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
+PASS In-document Element.querySelector: Descendant combinator, whitespace characters: #descendant	\r
+#descendant-div2
 PASS In-document Element.querySelectorAll: Child combinator, matching element that is a child of an element with id: #child>div
 PASS In-document Element.querySelector: Child combinator, matching element that is a child of an element with id: #child>div
 PASS In-document Element.querySelectorAll: Child combinator, matching element with id that is a child of an element: div>#child-div1
@@ -1759,12 +1895,20 @@ PASS In-document Element.querySelectorAll: Child combinator, not matching elemen
 PASS In-document Element.querySelector: Child combinator, not matching element with id that is not a child of an element with class: #child-div1>.child-div3
 PASS In-document Element.querySelectorAll: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
 PASS In-document Element.querySelector: Child combinator, not matching element with class that is not a child of an element with class: .child-div1>.child-div3
-PASS In-document Element.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS In-document Element.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r\n>	\r\n#child-div2
-PASS In-document Element.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS In-document Element.querySelector: Child combinator, whitespace after: #child-div1>	\r\n#child-div2
-PASS In-document Element.querySelectorAll: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
-PASS In-document Element.querySelector: Child combinator, whitespace before: #child-div1	\r\n>#child-div2
+PASS In-document Element.querySelectorAll: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS In-document Element.querySelector: Child combinator, surrounded by whitespace: #child-div1	\r
+>	\r
+#child-div2
+PASS In-document Element.querySelectorAll: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS In-document Element.querySelector: Child combinator, whitespace after: #child-div1>	\r
+#child-div2
+PASS In-document Element.querySelectorAll: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
+PASS In-document Element.querySelector: Child combinator, whitespace before: #child-div1	\r
+>#child-div2
 PASS In-document Element.querySelectorAll: Child combinator, no whitespace: #child-div1>#child-div2
 PASS In-document Element.querySelector: Child combinator, no whitespace: #child-div1>#child-div2
 PASS In-document Element.querySelectorAll: Adjacent sibling combinator, matching element that is an adjacent sibling of an element with id: #adjacent-div2+div
@@ -1781,12 +1925,20 @@ PASS In-document Element.querySelectorAll: Adjacent sibling combinator, matching
 PASS In-document Element.querySelector: Adjacent sibling combinator, matching p element that is an adjacent sibling of a div element: #adjacent div+p
 PASS In-document Element.querySelectorAll: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
 PASS In-document Element.querySelector: Adjacent sibling combinator, not matching element with id that is not an adjacent sibling of an element with id: #adjacent-div2+#adjacent-p2, #adjacent-div2+#adjacent-div1
-PASS In-document Element.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS In-document Element.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r\n+	\r\n#adjacent-p3
-PASS In-document Element.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS In-document Element.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r\n#adjacent-p3
-PASS In-document Element.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
-PASS In-document Element.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r\n+#adjacent-p3
+PASS In-document Element.querySelectorAll: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS In-document Element.querySelector: Adjacent sibling combinator, surrounded by whitespace: #adjacent-p2	\r
++	\r
+#adjacent-p3
+PASS In-document Element.querySelectorAll: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS In-document Element.querySelector: Adjacent sibling combinator, whitespace after: #adjacent-p2+	\r
+#adjacent-p3
+PASS In-document Element.querySelectorAll: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
+PASS In-document Element.querySelector: Adjacent sibling combinator, whitespace before: #adjacent-p2	\r
++#adjacent-p3
 PASS In-document Element.querySelectorAll: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS In-document Element.querySelector: Adjacent sibling combinator, no whitespace: #adjacent-p2+#adjacent-p3
 PASS In-document Element.querySelectorAll: General sibling combinator, matching element that is a sibling of an element with id: #sibling-div2~div
@@ -1803,20 +1955,36 @@ PASS In-document Element.querySelectorAll: General sibling combinator, not match
 PASS In-document Element.querySelector: General sibling combinator, not matching element with id that is not a sibling after a p element: #sibling>p~div
 PASS In-document Element.querySelectorAll: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
 PASS In-document Element.querySelector: General sibling combinator, not matching element with id that is not a sibling after an element with id: #sibling-div2~#sibling-div3, #sibling-div2~#sibling-div1
-PASS In-document Element.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS In-document Element.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r\n~	\r\n#sibling-p3
-PASS In-document Element.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS In-document Element.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r\n#sibling-p3
-PASS In-document Element.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
-PASS In-document Element.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r\n~#sibling-p3
+PASS In-document Element.querySelectorAll: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS In-document Element.querySelector: General sibling combinator, surrounded by whitespace: #sibling-p2	\r
+~	\r
+#sibling-p3
+PASS In-document Element.querySelectorAll: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS In-document Element.querySelector: General sibling combinator, whitespace after: #sibling-p2~	\r
+#sibling-p3
+PASS In-document Element.querySelectorAll: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
+PASS In-document Element.querySelector: General sibling combinator, whitespace before: #sibling-p2	\r
+~#sibling-p3
 PASS In-document Element.querySelectorAll: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
 PASS In-document Element.querySelector: General sibling combinator, no whitespace: #sibling-p2~#sibling-p3
-PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS In-document Element.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r \n,	\r \n#group strong
-PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS In-document Element.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r\n#group strong
-PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
-PASS In-document Element.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r\n,#group strong
+PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS In-document Element.querySelector: Syntax, group of selectors separator, surrounded by whitespace: #group em	\r 
+,	\r 
+#group strong
+PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS In-document Element.querySelector: Syntax, group of selectors separator, whitespace after: #group em,	\r
+#group strong
+PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
+PASS In-document Element.querySelector: Syntax, group of selectors separator, whitespace before: #group em	\r
+,#group strong
 PASS In-document Element.querySelectorAll: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 PASS In-document Element.querySelector: Syntax, group of selectors separator, no whitespace: #group em,#group strong
 Harness: the test ran to completion.

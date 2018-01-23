@@ -101,10 +101,8 @@
         };
 
         let src;
-        if (pathAndBase.startsWith('/fullscreen/') ||
-            pathAndBase.startsWith('/webusb/')) {
-            // Fullscreen tests all use the same automation script and WebUSB
-            // tests borrow it.
+        if (pathAndBase.startsWith('/fullscreen/')) {
+            // Fullscreen tests all use the same automation script.
             src = automationPath + '/fullscreen/auto-click.js';
         } else if (
             pathAndBase.startsWith('/pointerevents/') ||
@@ -321,7 +319,6 @@
         text = text.replace(/\0/g, '\\0');
         // Escape some special characters to improve readability of the output.
         text = text.replace(/\r/g, '\\r');
-        text = text.replace(/\n/g, '\\n');
 
         // Replace machine-dependent path with "...".
         if (localPathRegExp) {

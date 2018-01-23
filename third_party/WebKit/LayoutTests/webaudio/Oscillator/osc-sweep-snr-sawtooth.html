@@ -10,6 +10,7 @@
     <script src="../resources/audit.js"></script>
     <script src="../resources/buffer-loader.js"></script>
     <script src="../resources/oscillator-testing.js"></script>
+    <script src="../resources/audio-file-utils.js"></script>
   </head>
   <body>
     <script id="layout-test-code">
@@ -21,7 +22,7 @@
             1, tester.sampleRate * tester.lengthInSeconds, tester.sampleRate);
 
         // The thresholds are experimentally determined.
-        tester.setThresholds({snr: 134.45, maxDiff: 1.0878e-6});
+        tester.setThresholds({snr: 134.41, maxDiff: 1.0878e-6});
         tester.runTest(
             context, 'sawtooth', 'Sawtooth Oscillator with Exponential Sweep',
             task, should);

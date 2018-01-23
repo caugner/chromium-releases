@@ -21,9 +21,10 @@
     console.warn("abc warn");
     console.warn("def warn");
   `);
+  Console.ConsoleView.instance()._setImmediatelyFilterMessagesForTest();
 
   function dumpVisibleMessages() {
-    var menuText = Console.ConsoleView.instance()._filter._levelMenuButton.text();
+    var menuText = Console.ConsoleView.instance()._filter._levelMenuButton._text;
     TestRunner.addResult('Level menu: ' + menuText);
 
     var messages = Console.ConsoleView.instance()._visibleViewMessages;
@@ -79,14 +80,14 @@
     function abcMessagePlain(next) {
       Console.ConsoleViewFilter.levelFilterSetting().set({ verbose: true });
       Console.ConsoleView.instance()._filter._textFilterUI.setValue('abc');
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },
 
     function abcMessageRegex(next) {
       Console.ConsoleView.instance()._filter._textFilterUI.setValue('/ab[a-z]/');
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },

@@ -4,27 +4,27 @@
 
 #include "modules/geolocation/GeoNotifier.h"
 
-#include "core/dom/TaskRunnerHelper.h"
 #include "modules/geolocation/Geolocation.h"
 #include "modules/geolocation/PositionError.h"
 #include "modules/geolocation/PositionOptions.h"
 #include "platform/Histogram.h"
 #include "platform/wtf/Assertions.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 GeoNotifier::GeoNotifier(Geolocation* geolocation,
                          V8PositionCallback* success_callback,
-                         PositionErrorCallback* error_callback,
+                         V8PositionErrorCallback* error_callback,
                          const PositionOptions& options)
     : geolocation_(geolocation),
       success_callback_(success_callback),
       error_callback_(error_callback),
       options_(options),
-      timer_(TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI,
-                                   geolocation->GetDocument()),
-             this,
-             &GeoNotifier::TimerFired),
+      timer_(
+          geolocation->GetDocument()->GetTaskRunner(TaskType::kMiscPlatformAPI),
+          this,
+          &GeoNotifier::TimerFired),
       use_cached_position_(false) {
   DCHECK(geolocation_);
   DCHECK(success_callback_);
@@ -35,15 +35,16 @@ GeoNotifier::GeoNotifier(Geolocation* geolocation,
   timeout_histogram.Count(options_.timeout());
 }
 
-DEFINE_TRACE(GeoNotifier) {
+void GeoNotifier::Trace(blink::Visitor* visitor) {
   visitor->Trace(geolocation_);
   visitor->Trace(success_callback_);
   visitor->Trace(error_callback_);
   visitor->Trace(fatal_error_);
 }
 
-DEFINE_TRACE_WRAPPERS(GeoNotifier) {
+void GeoNotifier::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(success_callback_);
+  visitor->TraceWrappers(error_callback_);
 }
 
 void GeoNotifier::SetFatalError(PositionError* error) {
@@ -56,21 +57,21 @@ void GeoNotifier::SetFatalError(PositionError* error) {
   fatal_error_ = error;
   // An existing timer may not have a zero timeout.
   timer_.Stop();
-  timer_.StartOneShot(0, BLINK_FROM_HERE);
+  timer_.StartOneShot(TimeDelta(), BLINK_FROM_HERE);
 }
 
 void GeoNotifier::SetUseCachedPosition() {
   use_cached_position_ = true;
-  timer_.StartOneShot(0, BLINK_FROM_HERE);
+  timer_.StartOneShot(TimeDelta(), BLINK_FROM_HERE);
 }
 
 void GeoNotifier::RunSuccessCallback(Geoposition* position) {
-  success_callback_->call(nullptr, position);
+  success_callback_->InvokeAndReportException(nullptr, position);
 }
 
 void GeoNotifier::RunErrorCallback(PositionError* error) {
   if (error_callback_)
-    error_callback_->handleEvent(error);
+    error_callback_->InvokeAndReportException(nullptr, error);
 }
 
 void GeoNotifier::StartTimer() {
@@ -83,6 +84,12 @@ void GeoNotifier::StopTimer() {
 
 void GeoNotifier::TimerFired(TimerBase*) {
   timer_.Stop();
+
+  // As the timer fires asynchronously, it's possible that the execution context
+  // has already gone.  Check it first.
+  if (!geolocation_->GetExecutionContext()) {
+    return;  // Do not invoke anything because of no execution context.
+  }
 
   // Test for fatal error first. This is required for the case where the
   // LocalFrame is disconnected and requests are cancelled.
@@ -101,9 +108,11 @@ void GeoNotifier::TimerFired(TimerBase*) {
     return;
   }
 
-  if (error_callback_)
-    error_callback_->handleEvent(
+  if (error_callback_) {
+    error_callback_->InvokeAndReportException(
+        nullptr,
         PositionError::Create(PositionError::kTimeout, "Timeout expired"));
+  }
 
   DEFINE_STATIC_LOCAL(CustomCountHistogram, timeout_expired_histogram,
                       ("Geolocation.TimeoutExpired", 0,

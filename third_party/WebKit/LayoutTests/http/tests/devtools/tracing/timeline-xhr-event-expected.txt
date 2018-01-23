@@ -6,7 +6,7 @@ XHRReadyStateChange Properties:
         frame : <string>
         readyState : 1
         stackTrace : <object>
-        url : http://127.0.0.1:8000/devtools/tracing/network/resources/resource.php
+        url : .../devtools/tracing/network/resources/resource.php
     }
     endTime : <number>
     frameId : <string>
@@ -14,56 +14,56 @@ XHRReadyStateChange Properties:
     startTime : <number>
     type : "XHRReadyStateChange"
 }
-Text details for XHRReadyStateChange: network/resources/resource.php
+Text details for XHRReadyStateChange: :8000/devtools/tracing/network/resources/resource.php
 XHRReadyStateChange Properties:
 {
     data : {
         frame : <string>
         readyState : 2
-        url : http://127.0.0.1:8000/devtools/tracing/network/resources/resource.php
+        url : .../devtools/tracing/network/resources/resource.php
     }
     endTime : <number>
     frameId : <string>
     startTime : <number>
     type : "XHRReadyStateChange"
 }
-Text details for XHRReadyStateChange: network/resources/resource.php
+Text details for XHRReadyStateChange: :8000/devtools/tracing/network/resources/resource.php
 XHRReadyStateChange Properties:
 {
     data : {
         frame : <string>
         readyState : 3
-        url : http://127.0.0.1:8000/devtools/tracing/network/resources/resource.php
+        url : .../devtools/tracing/network/resources/resource.php
     }
     endTime : <number>
     frameId : <string>
     startTime : <number>
     type : "XHRReadyStateChange"
 }
-Text details for XHRReadyStateChange: network/resources/resource.php
+Text details for XHRReadyStateChange: :8000/devtools/tracing/network/resources/resource.php
 XHRReadyStateChange Properties:
 {
     data : {
         frame : <string>
         readyState : 4
-        url : http://127.0.0.1:8000/devtools/tracing/network/resources/resource.php
+        url : .../devtools/tracing/network/resources/resource.php
     }
     endTime : <number>
     frameId : <string>
     startTime : <number>
     type : "XHRReadyStateChange"
 }
-Text details for XHRReadyStateChange: network/resources/resource.php
+Text details for XHRReadyStateChange: :8000/devtools/tracing/network/resources/resource.php
 XHRLoad Properties:
 {
     data : {
         frame : <string>
-        url : http://127.0.0.1:8000/devtools/tracing/network/resources/resource.php
+        url : .../devtools/tracing/network/resources/resource.php
     }
     endTime : <number>
     frameId : <string>
     startTime : <number>
     type : "XHRLoad"
 }
-Text details for XHRLoad: network/resources/resource.php
+Text details for XHRLoad: :8000/devtools/tracing/network/resources/resource.php
 

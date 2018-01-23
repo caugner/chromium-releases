@@ -82,17 +82,11 @@ cr.define('route_controls', function() {
       test('initial text setting', function() {
         // Set |route|.
         controls.onRouteUpdated_(fakeRouteOne);
-        assertElementText(
-            loadTimeData.getStringF(
-                'castingActivityStatus', fakeRouteOne.description),
-            'route-description');
+        assertElementText(fakeRouteOne.description, 'route-description');
 
         // Set |route| to a different route.
         controls.onRouteUpdated_(fakeRouteTwo);
-        assertElementText(
-            loadTimeData.getStringF(
-                'castingActivityStatus', fakeRouteTwo.description),
-            'route-description');
+        assertElementText(fakeRouteTwo.description, 'route-description');
       });
 
       // Tests that the route title and status are shown when RouteStatus is
@@ -276,6 +270,32 @@ cr.define('route_controls', function() {
             done();
           }, 1000);
         }, 1000);
+      });
+
+      test('set media remoting enabled', function(done) {
+        assertElementHidden('mirroring-fullscreen-video-controls');
+        let routeStatus = createRouteStatus();
+        controls.routeStatus = routeStatus;
+        assertElementHidden('mirroring-fullscreen-video-controls');
+
+        routeStatus = createRouteStatus();
+        routeStatus.mirroringExtraData = {mediaRemotingEnabled: true};
+        controls.routeStatus = routeStatus;
+        assertElementShown('mirroring-fullscreen-video-controls');
+        assertEquals(controls.FullscreenVideoOption_.REMOTE_SCREEN,
+            controls.$$('#mirroring-fullscreen-video-dropdown').value);
+
+        document.addEventListener('mock-set-media-remoting-enabled',
+            function(e) {
+              assertFalse(e.detail.enabled);
+              done();
+            });
+
+        // Simulate changing the dropdown menu value.
+        controls.$$('#mirroring-fullscreen-video-dropdown').value =
+            controls.FullscreenVideoOption_.BOTH_SCREENS;
+        controls.$$('#mirroring-fullscreen-video-dropdown').dispatchEvent(
+            new Event('change'));
       });
 
       test('hangouts local present mode', function(done) {

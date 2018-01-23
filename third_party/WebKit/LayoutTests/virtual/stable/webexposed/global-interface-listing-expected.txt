@@ -570,7 +570,6 @@ interface CredentialsContainer
     method create
     method get
     method preventSilentAccess
-    method requireUserMediation
     method store
 interface Crypto
     attribute @@toStringTag
@@ -3941,16 +3940,10 @@ interface PannerNode : AudioNode
     setter rolloffFactor
 interface PasswordCredential : Credential
     attribute @@toStringTag
-    getter additionalData
     getter iconURL
-    getter idName
     getter name
     getter password
-    getter passwordName
     method constructor
-    setter additionalData
-    setter idName
-    setter passwordName
 interface Path2D
     attribute @@toStringTag
     method arc
@@ -4343,10 +4336,12 @@ interface RTCPeerConnection : EventTarget
     getter onnegotiationneeded
     getter onremovestream
     getter onsignalingstatechange
+    getter ontrack
     getter remoteDescription
     getter signalingState
     method addIceCandidate
     method addStream
+    method addTrack
     method close
     method constructor
     method createAnswer
@@ -4356,8 +4351,10 @@ interface RTCPeerConnection : EventTarget
     method getLocalStreams
     method getReceivers
     method getRemoteStreams
+    method getSenders
     method getStats
     method removeStream
+    method removeTrack
     method setConfiguration
     method setLocalDescription
     method setRemoteDescription
@@ -4369,6 +4366,7 @@ interface RTCPeerConnection : EventTarget
     setter onnegotiationneeded
     setter onremovestream
     setter onsignalingstatechange
+    setter ontrack
 interface RTCPeerConnectionIceEvent : Event
     attribute @@toStringTag
     getter candidate
@@ -4383,6 +4381,10 @@ interface RTCRtpReceiver
     getter track
     method constructor
     method getContributingSources
+interface RTCRtpSender
+    attribute @@toStringTag
+    getter track
+    method constructor
 interface RTCSessionDescription
     attribute @@toStringTag
     getter sdp
@@ -4402,6 +4404,12 @@ interface RTCStatsReport
     method has
     method keys
     method values
+interface RTCTrackEvent : Event
+    attribute @@toStringTag
+    getter receiver
+    getter streams
+    getter track
+    method constructor
 interface RadioNodeList : NodeList
     attribute @@toStringTag
     getter value
@@ -4469,6 +4477,7 @@ interface RemotePlayback : EventTarget
 interface Request
     attribute @@toStringTag
     getter bodyUsed
+    getter cache
     getter credentials
     getter headers
     getter integrity
@@ -4485,6 +4494,17 @@ interface Request
     method formData
     method json
     method text
+interface ResizeObserver
+    attribute @@toStringTag
+    method constructor
+    method disconnect
+    method observe
+    method unobserve
+interface ResizeObserverEntry
+    attribute @@toStringTag
+    getter contentRect
+    getter target
+    method constructor
 interface Response
     static method error
     static method redirect
@@ -5702,7 +5722,6 @@ interface ShadowRoot : DocumentFragment
     getter host
     getter innerHTML
     getter mode
-    getter olderShadowRoot
     getter pointerLockElement
     getter styleSheets
     method constructor
@@ -5710,11 +5729,6 @@ interface ShadowRoot : DocumentFragment
     method elementsFromPoint
     method getSelection
     setter innerHTML
-interface SharedArrayBuffer
-    attribute @@toStringTag
-    getter byteLength
-    method constructor
-    method slice
 interface SharedWorker : EventTarget
     attribute @@toStringTag
     getter onerror
@@ -7767,10 +7781,12 @@ interface webkitRTCPeerConnection : EventTarget
     getter onnegotiationneeded
     getter onremovestream
     getter onsignalingstatechange
+    getter ontrack
     getter remoteDescription
     getter signalingState
     method addIceCandidate
     method addStream
+    method addTrack
     method close
     method constructor
     method createAnswer
@@ -7780,8 +7796,10 @@ interface webkitRTCPeerConnection : EventTarget
     method getLocalStreams
     method getReceivers
     method getRemoteStreams
+    method getSenders
     method getStats
     method removeStream
+    method removeTrack
     method setConfiguration
     method setLocalDescription
     method setRemoteDescription
@@ -7793,6 +7811,7 @@ interface webkitRTCPeerConnection : EventTarget
     setter onnegotiationneeded
     setter onremovestream
     setter onsignalingstatechange
+    setter ontrack
 interface webkitSpeechGrammar
     attribute @@toStringTag
     getter src
@@ -7887,7 +7906,6 @@ interface webkitURL
     setter search
     setter username
 [GLOBAL OBJECT]
-    attribute Atomics
     attribute GCController
     attribute accessibilityController
     attribute chrome
@@ -7897,7 +7915,6 @@ interface webkitURL
     attribute frames
     attribute gamepadController
     attribute internals
-    attribute layoutTestController
     attribute length
     attribute location
     attribute opener
@@ -8076,7 +8093,6 @@ interface webkitURL
     method focus
     method gc
     method getComputedStyle
-    method getMatchedCSSRules
     method getSelection
     method matchMedia
     method moveBy

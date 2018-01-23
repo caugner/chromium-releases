@@ -29,10 +29,8 @@ interface BackgroundFetchRegistration : EventTarget
     attribute @@toStringTag
     getter downloadTotal
     getter downloaded
-    getter icons
     getter id
     getter onprogress
-    getter title
     getter totalDownloadSize
     getter uploadTotal
     getter uploaded
@@ -488,12 +486,28 @@ interface FileReader : EventTarget
     setter onloadend
     setter onloadstart
     setter onprogress
-interface ForeignFetchEvent : ExtendableEvent
+interface FontFace
     attribute @@toStringTag
-    getter origin
-    getter request
+    getter display
+    getter family
+    getter featureSettings
+    getter loaded
+    getter status
+    getter stretch
+    getter style
+    getter unicodeRange
+    getter variant
+    getter weight
     method constructor
-    method respondWith
+    method load
+    setter display
+    setter family
+    setter featureSettings
+    setter stretch
+    setter style
+    setter unicodeRange
+    setter variant
+    setter weight
 interface FormData
     attribute @@toStringTag
     method @@iterator
@@ -681,7 +695,6 @@ interface ImageData
 interface InstallEvent : ExtendableEvent
     attribute @@toStringTag
     method constructor
-    method registerForeignFetch
 interface MessageChannel
     attribute @@toStringTag
     getter port1
@@ -775,6 +788,7 @@ interface NetworkInformation : EventTarget
     getter onchange
     getter ontypechange
     getter rtt
+    getter saveData
     getter type
     method constructor
     setter onchange
@@ -789,7 +803,6 @@ interface Notification : EventTarget
     getter data
     getter dir
     getter icon
-    getter image
     getter lang
     getter onclick
     getter onclose
@@ -1053,6 +1066,7 @@ interface Request
     getter credentials
     getter headers
     getter integrity
+    getter keepalive
     getter method
     getter mode
     getter redirect
@@ -1100,6 +1114,7 @@ interface ServiceWorkerRegistration : EventTarget
     getter pushManager
     getter scope
     getter sync
+    getter updateViaCache
     getter waiting
     method constructor
     method getNotifications
@@ -1107,11 +1122,6 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
-interface SharedArrayBuffer
-    attribute @@toStringTag
-    getter byteLength
-    method constructor
-    method slice
 interface StorageManager
     attribute @@toStringTag
     method constructor
@@ -1158,6 +1168,10 @@ interface TextEncoder
     getter encoding
     method constructor
     method encode
+interface TransformStream
+    getter readable
+    getter writable
+    method constructor
 interface TrustedHTML
     static method escape
     static method unsafelyCreate
@@ -2481,6 +2495,7 @@ interface WorkerGlobalScope : EventTarget
     attribute @@toStringTag
     getter caches
     getter crypto
+    getter fonts
     getter indexedDB
     getter isSecureContext
     getter location
@@ -2539,7 +2554,6 @@ interface WritableStream
     method constructor
     method getWriter
 [GLOBAL OBJECT]
-    attribute Atomics
     attribute console
     attribute internals
     getter clients
@@ -2551,7 +2565,6 @@ interface WritableStream
     getter onbackgroundfetchfail
     getter oncanmakepayment
     getter onfetch
-    getter onforeignfetch
     getter oninstall
     getter onmessage
     getter onnotificationclick
@@ -2571,7 +2584,6 @@ interface WritableStream
     setter onbackgroundfetchfail
     setter oncanmakepayment
     setter onfetch
-    setter onforeignfetch
     setter oninstall
     setter onmessage
     setter onnotificationclick

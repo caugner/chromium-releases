@@ -35,6 +35,7 @@ var prefsEmpty = {
     protectedContent: {},
     sound: {},
     unsandboxed_plugins: {},
+    clipboard: {},
   },
   exceptions: {
     ads: [],
@@ -53,6 +54,7 @@ var prefsEmpty = {
     protectedContent: [],
     sound: [],
     unsandboxed_plugins: [],
+    clipboard: [],
   },
 };
 
@@ -125,11 +127,13 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
     this.prefs_ = prefs;
 
     // Notify all listeners that their data may be out of date.
-    for (var type in settings.ContentSettingsTypes) {
-      cr.webUIListenerCallback(
-          'contentSettingSitePermissionChanged',
-          settings.ContentSettingsTypes[type],
-          '');
+    for (var type in this.prefs_.exceptions) {
+      let exceptionList = this.prefs_.exceptions[type];
+      for (var i = 0; i < exceptionList.length; ++i) {
+        cr.webUIListenerCallback(
+            'contentSettingSitePermissionChanged', type,
+            exceptionList[i].origin, '');
+      }
     }
   }
 
@@ -207,6 +211,19 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
 
   /** @override */
   setOriginPermissions(origin, contentTypes, blanketSetting) {
+    for (var type in this.prefs_.exceptions) {
+      let exceptionList = this.prefs_.exceptions[type];
+      for (var i = 0; i < exceptionList.length; ++i) {
+        var effectiveSetting = blanketSetting;
+        if (blanketSetting == settings.ContentSetting.DEFAULT) {
+          effectiveSetting = this.prefs_.defaults[type].setting;
+          exceptionList[i].source = settings.SiteSettingSource.DEFAULT;
+        }
+        exceptionList[i].setting = effectiveSetting;
+      }
+    }
+
+    this.setPrefs(this.prefs_);
     this.methodCalled(
         'setOriginPermissions', [origin, contentTypes, blanketSetting]);
   }
@@ -252,6 +269,8 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       pref = this.prefs_.defaults.unsandboxed_plugins;
     } else if (contentType == settings.ContentSettingsTypes.PROTECTED_CONTENT) {
       pref = this.prefs_.defaults.protectedContent;
+    } else if (contentType == settings.ContentSettingsTypes.CLIPBOARD) {
+      pref = this.prefs_.defaults.clipboard;
     } else {
       console.log('getDefault received unknown category: ' + contentType);
     }
@@ -299,6 +318,8 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       pref = this.prefs_.exceptions.sound;
     else if (contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS)
       pref = this.prefs_.exceptions.unsandboxed_plugins;
+    else if (contentType == settings.ContentSettingsTypes.CLIPBOARD)
+      pref = this.prefs_.exceptions.clipboard;
     else
       console.log('getExceptionList received unknown category: ' + contentType);
 
@@ -395,7 +416,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
         displayName: '',
         setting: setting,
         source: source,
-      })
+      });
     }, this);
     return Promise.resolve(exceptionList);
   }

@@ -200,7 +200,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, NoScriptAccessAfterSwapOut) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Open a same-site link in a new window.
   ShellAddedObserver new_shell_observer;
@@ -277,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer + target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -323,7 +323,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer + target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -442,7 +442,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a same-site rel=noreferrer + target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -490,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a same-site rel=noopener + target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -541,7 +541,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=blank link.
   ShellAddedObserver new_shell_observer;
@@ -580,7 +580,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer link.
   bool success = false;
@@ -617,7 +617,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a rel=noreferrer link.
   bool success = false;
@@ -655,7 +655,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -729,7 +729,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, MAYBE_DisownOpener) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=_blank link.
   ShellAddedObserver new_shell_observer;
@@ -823,7 +823,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Open a popup using window.open with a 'foo' window.name.
   Shell* new_shell = OpenPopup(shell(), GURL(url::kAboutBlankURL), "foo");
@@ -886,7 +886,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* opener_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       opener_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
   RenderFrameHostManager* opener_manager = static_cast<WebContentsImpl*>(
       opener_contents)->GetRenderManagerForTesting();
 
@@ -1023,7 +1023,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* opener_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       opener_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
   RenderFrameHostManager* opener_manager = static_cast<WebContentsImpl*>(
       opener_contents)->GetRenderManagerForTesting();
 
@@ -1106,7 +1106,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebContents* orig_contents = shell()->web_contents();
   scoped_refptr<SiteInstance> orig_site_instance(
       orig_contents->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -1206,7 +1206,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Test clicking a target=foo link.
   ShellAddedObserver new_shell_observer;
@@ -1261,7 +1261,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, ClickLinkAfter204Error) {
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  EXPECT_TRUE(orig_site_instance.get() != nullptr);
 
   // Load a cross-site page that fails with a 204 error.
   EXPECT_TRUE(
@@ -1831,57 +1831,15 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   // Ensure that such URLs can still work as the initial navigation of a tab.
   // We postpone the initial navigation of the tab using an empty GURL, so that
   // we can add a watcher for crashes.
-  Shell* shell2 = Shell::CreateNewWindow(
-      shell()->web_contents()->GetBrowserContext(), GURL(), NULL, gfx::Size());
+  Shell* shell2 =
+      Shell::CreateNewWindow(shell()->web_contents()->GetBrowserContext(),
+                             GURL(), nullptr, gfx::Size());
   RenderProcessHostWatcher crash_observer2(
       shell2->web_contents(),
       RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
   EXPECT_TRUE(
       NavigateToURLAndExpectNoCommit(shell2, GURL(kChromeUIKillURL)));
   crash_observer2.Wait();
-}
-
-// Ensure that renderer-side debug URLs don't take effect on crashed renderers,
-// even when going back/forward.
-// See https://crbug.com/477606.
-
-// This test is flaky on Android. crbug.com/585327
-#if defined(OS_ANDROID)
-#define MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed \
-    DISABLED_IgnoreForwardToRendererDebugURLsWhenCrashed
-#else
-#define MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed \
-    IgnoreForwardToRendererDebugURLsWhenCrashed
-#endif
-IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
-                       MAYBE_IgnoreForwardToRendererDebugURLsWhenCrashed) {
-  // Visit a WebUI page with bindings.
-  GURL webui_url = GURL(std::string(kChromeUIScheme) + "://" +
-                        std::string(kChromeUIGpuHost));
-  NavigateToURL(shell(), webui_url);
-  EXPECT_TRUE(ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
-      shell()->web_contents()->GetMainFrame()->GetProcess()->GetID()));
-
-  // Visit a debug URL that manages to commit, then go back.
-  NavigateToURL(shell(), GURL(kChromeUIDumpURL));
-  TestNavigationObserver back_nav_load_observer(shell()->web_contents());
-  shell()->web_contents()->GetController().GoBack();
-  back_nav_load_observer.Wait();
-
-  // Crash the renderer of the WebUI page.
-  RenderProcessHostWatcher crash_observer(
-      shell()->web_contents(),
-      RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  EXPECT_TRUE(
-      NavigateToURLAndExpectNoCommit(shell(), GURL(kChromeUICrashURL)));
-  crash_observer.Wait();
-
-  // Going forward with no live renderer should have no effect, and should not
-  // crash.
-  EXPECT_TRUE(shell()->web_contents()->GetController().CanGoForward());
-  shell()->web_contents()->GetController().GoForward();
-  EXPECT_FALSE(shell()->web_contents()->GetController().GetPendingEntry());
-  EXPECT_TRUE(shell()->web_contents()->GetController().CanGoForward());
 }
 
 // Ensure that pending_and_current_web_ui_ is cleared when a URL commits.
@@ -1971,7 +1929,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, WebUIGetsBindings) {
 
   // Open a new tab. Initially it gets a render view in the original tab's
   // current site instance.
-  TestNavigationObserver nav_observer(NULL);
+  TestNavigationObserver nav_observer(nullptr);
   nav_observer.StartWatchingNewWebContents();
   ShellAddedObserver shao;
   OpenUrlViaClickTarget(shell(), url2);
@@ -2050,7 +2008,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebUIImpl* web_ui = rfh->web_ui();
 
   EXPECT_TRUE(web_ui->CanCallJavascript());
-  auto handler_owner = base::MakeUnique<TestWebUIMessageHandler>();
+  auto handler_owner = std::make_unique<TestWebUIMessageHandler>();
   TestWebUIMessageHandler* handler = handler_owner.get();
 
   web_ui->AddMessageHandler(std::move(handler_owner));
@@ -3186,7 +3144,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
   RenderFrameHostImpl* rfh_a = root->current_frame_host();
   rfh_a->DisableSwapOutTimerForTesting();
 
-  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_a), rfh_a->GetLastCommittedOrigin());
   EXPECT_EQ(rfh_a, web_contents->GetMainFrame());
 
   // Start a navigation to a b.com URL, and don't wait for commit.
@@ -3203,22 +3161,22 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
           ? root->render_manager()->speculative_frame_host()
           : root->render_manager()->pending_frame_host();
   EXPECT_EQ("null", rfh_b->GetLastCommittedOrigin().Serialize());
-  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_a), rfh_a->GetLastCommittedOrigin());
 
   // Verify that the last committed origin is set for the b.com RHF once it
   // commits.
   commit_observer.WaitForCommit();
-  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_b), rfh_b->GetLastCommittedOrigin());
   EXPECT_EQ(rfh_b, web_contents->GetMainFrame());
 
   // The old RFH should now be pending deletion.  Verify it still has correct
   // last committed origin.
-  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_a), rfh_a->GetLastCommittedOrigin());
   EXPECT_FALSE(rfh_a->is_active());
 
   // Wait for |rfh_a| to be deleted and double-check |rfh_b|'s origin.
   deleted_observer.WaitUntilDeleted();
-  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_b), rfh_b->GetLastCommittedOrigin());
 
   // Navigate to a same-origin page with an about:blank iframe.  The iframe
   // should also have a b.com origin.
@@ -3226,11 +3184,11 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
       "b.com", "/navigation_controller/page_with_iframe.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url_b_with_frame));
   EXPECT_EQ(rfh_b, web_contents->GetMainFrame());
-  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_b), rfh_b->GetLastCommittedOrigin());
   FrameTreeNode* child = root->child_at(0);
   RenderFrameHostImpl* child_rfh_b = root->child_at(0)->current_frame_host();
   child_rfh_b->DisableSwapOutTimerForTesting();
-  EXPECT_EQ(url::Origin(url_b), child_rfh_b->GetLastCommittedOrigin());
+  EXPECT_EQ(url::Origin::Create(url_b), child_rfh_b->GetLastCommittedOrigin());
 
   // Navigate subframe to c.com.  Wait for commit but not full load, and then
   // verify the subframe's origin.
@@ -3241,7 +3199,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
         ExecuteScript(child, "location.href = '" + url_c.spec() + "';"));
     commit_observer.WaitForCommit();
   }
-  EXPECT_EQ(url::Origin(url_c),
+  EXPECT_EQ(url::Origin::Create(url_c),
             child->current_frame_host()->GetLastCommittedOrigin());
 
   // With OOPIFs, this navigation used a cross-process transfer.  Ensure that
@@ -3250,78 +3208,8 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
   if (AreAllSitesIsolatedForTesting()) {
     EXPECT_FALSE(child_rfh_b->is_active());
     EXPECT_NE(child_rfh_b, child->current_frame_host());
-    EXPECT_EQ(url::Origin(url_b), child_rfh_b->GetLastCommittedOrigin());
-  }
-}
-
-// Verify that with Site Isolation enabled, chrome:// pages with subframes
-// to other chrome:// URLs all stay in the same process.
-IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
-                       ChromeSchemeSubframesStayInProcessWithParent) {
-  // Enable Site Isolation so subframes with different chrome:// URLs will be
-  // treated as cross-site.
-  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
-  StartEmbeddedServer();
-
-  GURL chrome_top_url = GURL(std::string(kChromeUIScheme) + "://" +
-                             std::string(kChromeUIBlobInternalsHost));
-  GURL chrome_child_url = GURL(std::string(kChromeUIScheme) + "://" +
-                               std::string(kChromeUIHistogramHost));
-  GURL regular_web_url(embedded_test_server()->GetURL("/title1.html"));
-
-  NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
-      shell()->web_contents()->GetController());
-  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
-
-  // Navigate the main frame to the top chrome:// URL.
-  NavigateToURL(shell(), chrome_top_url);
-
-  // Inject a frame in the page and navigate it to a chrome:// URL as well.
-  {
-    std::string script = base::StringPrintf(
-        "var frame = document.createElement('iframe');\n"
-        "frame.src = '%s';\n"
-        "document.body.appendChild(frame);\n",
-        chrome_child_url.spec().c_str());
-
-    TestNavigationObserver navigation_observer(shell()->web_contents());
-    EXPECT_TRUE(ExecuteScript(shell(), script));
-    navigation_observer.Wait();
-    EXPECT_EQ(1U, root->child_count());
-
-    // Ensure the subframe navigated to the expected URL and that it is in the
-    // same SiteInstance as the parent frame.
-    NavigationEntryImpl* entry = controller.GetLastCommittedEntry();
-    ASSERT_EQ(1U, entry->root_node()->children.size());
-    EXPECT_EQ(chrome_child_url,
-              entry->root_node()->children[0]->frame_entry->url());
-    EXPECT_EQ(root->current_frame_host()->GetSiteInstance(),
-              root->child_at(0)->current_frame_host()->GetSiteInstance());
-  }
-
-  // Ensure that non-chrome:// pages get a different SiteInstance and process.
-  {
-    std::string script = base::StringPrintf(
-        "var frame = document.createElement('iframe');\n"
-        "frame.src = '%s';\n"
-        "document.body.appendChild(frame);\n",
-        regular_web_url.spec().c_str());
-
-    TestNavigationObserver navigation_observer(shell()->web_contents());
-    EXPECT_TRUE(ExecuteScript(shell(), script));
-    navigation_observer.Wait();
-    EXPECT_EQ(2U, root->child_count());
-
-    // Ensure the subframe navigated to the expected URL and that it is in a
-    // different SiteInstance from the parent frame.
-    NavigationEntryImpl* entry = controller.GetLastCommittedEntry();
-    ASSERT_EQ(2U, entry->root_node()->children.size());
-    EXPECT_EQ(regular_web_url,
-              entry->root_node()->children[1]->frame_entry->url());
-    EXPECT_NE(root->current_frame_host()->GetSiteInstance(),
-              root->child_at(1)->current_frame_host()->GetSiteInstance());
+    EXPECT_EQ(url::Origin::Create(url_b),
+              child_rfh_b->GetLastCommittedOrigin());
   }
 }
 

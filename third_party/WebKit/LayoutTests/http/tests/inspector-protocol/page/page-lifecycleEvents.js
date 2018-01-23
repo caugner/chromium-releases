@@ -1,21 +1,20 @@
 (async function(testRunner) {
   var {page, session, dp} = await testRunner.startBlank(
       `Tests that Page.lifecycleEvent is issued for important events.`);
-  dp.Page.enable();
-  dp.Runtime.enable();
+
+  await dp.Page.enable();
+  await dp.Page.setLifecycleEventsEnabled({ enabled: true });
 
   var events = [];
-  dp.Page.onLifecycleEvent(result => {
-    events.push(result.params.name);
-    if (events.includes('networkIdle') && events.includes('networkAlmostIdle')) {
-      events.sort();
-      testRunner.log(events);
+  dp.Page.onLifecycleEvent(event => {
+    events.push(event);
+    if (event.params.name === 'networkIdle') {
+      var names = events.map(event => event.params.name);
+      names.sort();
+      testRunner.log(names);
       testRunner.completeTest();
     }
   });
 
-  // It's possible for Blink to finish the load and run out of tasks before
-  // network idle lifecycle events are generated.  Add a timeout
-  // greater than the network quiet window to guarantee that those events fire.
-  dp.Page.navigate({url: "data:text/html,Hello! <script>setTimeout(() => {}, 2000);</script>"});
+  var response = await dp.Page.navigate({url: "data:text/html,Hello!"});
 })

@@ -18,8 +18,8 @@ function checkDataTypeAgainstStorageFormat(data, storageFormat) {
 }
 
 function checkColorSettings(colorSettings, colorSpace, storageFormat) {
-  assert_equals(colorSpace, colorSettings.colorSpace);
-  assert_equals(storageFormat, colorSettings.storageFormat);
+  assert_equals(colorSettings.colorSpace, colorSpace);
+  assert_equals(colorSettings.storageFormat, storageFormat);
 }
 
 function runTest(colorSettings, expectedColorSettings) {
