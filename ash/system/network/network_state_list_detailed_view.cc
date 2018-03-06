@@ -67,16 +67,18 @@ class NetworkStateListDetailedView::InfoBubble
     set_shadow(views::BubbleBorder::NO_ASSETS);
     set_anchor_view_insets(gfx::Insets(0, 0, kBubbleMargin, 0));
     set_notify_enter_exit_on_child(true);
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     AddChildView(content);
   }
 
   ~InfoBubble() override {
-    // Anchor view can be destructed before info bubble is destructed. Call
-    // OnInfoBubbleDestroyed only if anchor view is live.
-    if (GetAnchorView())
+    // The detailed view can be destructed before info bubble is destructed.
+    // Call OnInfoBubbleDestroyed only if the detailed view is live.
+    if (detailed_view_)
       detailed_view_->OnInfoBubbleDestroyed();
   }
+
+  void OnNetworkStateListDetailedViewIsDeleting() { detailed_view_ = nullptr; }
 
  private:
   // View:
@@ -176,6 +178,8 @@ NetworkStateListDetailedView::NetworkStateListDetailedView(
       info_bubble_(nullptr) {}
 
 NetworkStateListDetailedView::~NetworkStateListDetailedView() {
+  if (info_bubble_)
+    info_bubble_->OnNetworkStateListDetailedViewIsDeleting();
   ResetInfoBubble();
 }
 
@@ -290,10 +294,8 @@ void NetworkStateListDetailedView::UpdateHeaderButtons() {
   if (list_type_ == LIST_TYPE_NETWORK) {
     NetworkStateHandler* network_state_handler =
         NetworkHandler::Get()->network_state_handler();
-    // TODO(crbug.com/756092): Add | operator to NetworkTypePattern.
-    const bool scanning =
-        network_state_handler->GetScanningByType(NetworkTypePattern::WiFi()) ||
-        network_state_handler->GetScanningByType(NetworkTypePattern::Tether());
+    const bool scanning = network_state_handler->GetScanningByType(
+        NetworkTypePattern::WiFi() | NetworkTypePattern::Tether());
     ShowProgress(-1, scanning);
   }
 }

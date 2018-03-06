@@ -116,10 +116,6 @@ bool SessionController::IsUserSessionBlocked() const {
          !(state_ == SessionState::LOCKED && is_unlocking_);
 }
 
-bool SessionController::IsUnlocking() const {
-  return is_unlocking_;
-}
-
 bool SessionController::IsInSecondaryLoginScreen() const {
   return state_ == SessionState::LOGIN_SECONDARY;
 }
@@ -176,6 +172,14 @@ bool SessionController::IsUserSupervised() const {
   user_manager::UserType active_user_type = GetUserSession(0)->user_info->type;
   return active_user_type == user_manager::USER_TYPE_SUPERVISED ||
          active_user_type == user_manager::USER_TYPE_CHILD;
+}
+
+bool SessionController::IsUserLegacySupervised() const {
+  if (!IsActiveUserSessionStarted())
+    return false;
+
+  user_manager::UserType active_user_type = GetUserSession(0)->user_info->type;
+  return active_user_type == user_manager::USER_TYPE_SUPERVISED;
 }
 
 bool SessionController::IsUserChild() const {

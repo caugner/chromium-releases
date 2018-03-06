@@ -3,6 +3,16 @@
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [800, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
+      "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
@@ -17,19 +27,9 @@
           "reason": "appeared"
         },
         {
-          "object": "InlineTextBox 'text-anchor'",
-          "rect": [352, 12, 131, 36],
-          "reason": "selection"
-        },
-        {
           "object": "LayoutSVGText text",
           "rect": [352, 12, 131, 36],
           "reason": "appeared"
-        },
-        {
-          "object": "InlineTextBox 'text-anchor'",
-          "rect": [519, 12, 130, 36],
-          "reason": "selection"
         },
         {
           "object": "LayoutSVGText text",
@@ -37,14 +37,24 @@
           "reason": "appeared"
         },
         {
-          "object": "InlineTextBox 'text-anchor'",
-          "rect": [186, 12, 130, 36],
-          "reason": "selection"
-        },
-        {
           "object": "LayoutSVGText text",
           "rect": [186, 12, 130, 36],
           "reason": "appeared"
+        },
+        {
+          "object": "InlineTextBox 'text-anchor'",
+          "rect": [519, 12, 129, 36],
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'text-anchor'",
+          "rect": [352, 12, 129, 36],
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'text-anchor'",
+          "rect": [186, 12, 128, 36],
+          "reason": "selection"
         },
         {
           "object": "InlineTextBox '1'",

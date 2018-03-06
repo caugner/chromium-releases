@@ -50,12 +50,6 @@ var testParams = [
   }
 ];
 
-for (let params of testParams) {
-  test(() => {
-    assert_equals(params.input.toString(), params.cssText);
-  }, "toString is correct for " + params.cssText);
-}
-
 test(() => {
   assert_throws(new TypeError(), () => { new CSSScale(); });
   assert_throws(new TypeError(), () => { new CSSScale(1); });
@@ -83,20 +77,5 @@ test(() => {
   assert_throws(new TypeError(), () => { new CSSScale(NaN, 0, NaN); });
   assert_throws(new TypeError(), () => { new CSSScale(NaN, NaN, NaN); });
 }, "Invalid input throws an exception.");
-
-for (let params of testParams) {
-  test(() => {
-    var input = params.input;
-    var transformValue = new CSSTransformValue([input]);
-    var inputAsMatrix = transformValue.toMatrix();
-    assert_equals(inputAsMatrix.is2D, input.is2D);
-
-    var expectedMatrix = input.is2D ?
-        new DOMMatrixReadOnly([input.x, 0, 0, input.y, 0, 0]) :
-        new DOMMatrixReadOnly(
-          [input.x, 0, 0, 0, 0, input.y, 0, 0, 0, 0, input.z, 0, 0, 0, 0, 1]);
-    assert_matrix_approx_equals(inputAsMatrix, expectedMatrix, EPSILON);
-  }, "asMatrix is constructed correctly for " + params.cssText);
-}
 
 </script>

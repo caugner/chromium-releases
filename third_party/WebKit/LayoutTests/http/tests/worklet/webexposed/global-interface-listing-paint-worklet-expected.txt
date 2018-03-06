@@ -55,6 +55,7 @@ CONSOLE MESSAGE: line 147:     method min
 CONSOLE MESSAGE: line 147:     method mul
 CONSOLE MESSAGE: line 147:     method sub
 CONSOLE MESSAGE: line 147:     method to
+CONSOLE MESSAGE: line 147:     method toSum
 CONSOLE MESSAGE: line 147: interface CSSPerspective : CSSTransformComponent
 CONSOLE MESSAGE: line 147:     getter length
 CONSOLE MESSAGE: line 147:     method constructor
@@ -121,7 +122,6 @@ CONSOLE MESSAGE: line 147: interface CSSURLImageValue : CSSImageValue
 CONSOLE MESSAGE: line 147:     getter url
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSUnitValue : CSSNumericValue
-CONSOLE MESSAGE: line 147:     getter type
 CONSOLE MESSAGE: line 147:     getter unit
 CONSOLE MESSAGE: line 147:     getter value
 CONSOLE MESSAGE: line 147:     method constructor
@@ -138,6 +138,8 @@ CONSOLE MESSAGE: line 147: interface CSSVariableReferenceValue
 CONSOLE MESSAGE: line 147:     getter fallback
 CONSOLE MESSAGE: line 147:     getter variable
 CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter fallback
+CONSOLE MESSAGE: line 147:     setter variable
 CONSOLE MESSAGE: line 147: interface CountQueuingStrategy
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method size
@@ -262,7 +264,7 @@ CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method delete
 CONSOLE MESSAGE: line 147:     method set
 CONSOLE MESSAGE: line 147:     method update
-CONSOLE MESSAGE: line 147: interface StylePropertyMapReadonly
+CONSOLE MESSAGE: line 147: interface StylePropertyMapReadOnly
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method entries
 CONSOLE MESSAGE: line 147:     method forEach
@@ -344,6 +346,7 @@ CONSOLE MESSAGE: line 147:     method min
 CONSOLE MESSAGE: line 147:     method mul
 CONSOLE MESSAGE: line 147:     method sub
 CONSOLE MESSAGE: line 147:     method to
+CONSOLE MESSAGE: line 147:     method toSum
 CONSOLE MESSAGE: line 147: interface CSSPerspective : CSSTransformComponent
 CONSOLE MESSAGE: line 147:     getter length
 CONSOLE MESSAGE: line 147:     method constructor
@@ -410,7 +413,6 @@ CONSOLE MESSAGE: line 147: interface CSSURLImageValue : CSSImageValue
 CONSOLE MESSAGE: line 147:     getter url
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147: interface CSSUnitValue : CSSNumericValue
-CONSOLE MESSAGE: line 147:     getter type
 CONSOLE MESSAGE: line 147:     getter unit
 CONSOLE MESSAGE: line 147:     getter value
 CONSOLE MESSAGE: line 147:     method constructor
@@ -427,6 +429,8 @@ CONSOLE MESSAGE: line 147: interface CSSVariableReferenceValue
 CONSOLE MESSAGE: line 147:     getter fallback
 CONSOLE MESSAGE: line 147:     getter variable
 CONSOLE MESSAGE: line 147:     method constructor
+CONSOLE MESSAGE: line 147:     setter fallback
+CONSOLE MESSAGE: line 147:     setter variable
 CONSOLE MESSAGE: line 147: interface CountQueuingStrategy
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method size
@@ -551,7 +555,7 @@ CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method delete
 CONSOLE MESSAGE: line 147:     method set
 CONSOLE MESSAGE: line 147:     method update
-CONSOLE MESSAGE: line 147: interface StylePropertyMapReadonly
+CONSOLE MESSAGE: line 147: interface StylePropertyMapReadOnly
 CONSOLE MESSAGE: line 147:     method constructor
 CONSOLE MESSAGE: line 147:     method entries
 CONSOLE MESSAGE: line 147:     method forEach

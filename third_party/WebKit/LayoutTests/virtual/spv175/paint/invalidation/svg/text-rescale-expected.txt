@@ -3,6 +3,16 @@
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [800, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
+      "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
@@ -33,7 +43,7 @@
         },
         {
           "object": "LayoutSVGViewportContainer svg",
-          "rect": [9, 3, 5, 3],
+          "rect": [9, 3, 4, 3],
           "reason": "paint property change"
         },
         {

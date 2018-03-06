@@ -20,11 +20,11 @@
 #include "build/build_config.h"
 #include "chrome/browser/chrome_service.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/common/network_service.mojom.h"
 #include "content/public/common/resource_type.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
+#include "services/network/public/interfaces/network_service.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 class ChromeContentBrowserClientParts;
@@ -102,8 +102,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool AllowGpuLaunchRetryOnIOThread() override;
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
   GURL GetEffectiveURL(content::BrowserContext* browser_context,
-                       const GURL& url,
-                       bool is_isolated_origin) override;
+                       const GURL& url) override;
   bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                const GURL& effective_url) override;
   bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
@@ -147,10 +146,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::SiteInstance* site_instance,
       const GURL& current_url,
       const GURL& new_url) override;
-  bool ShouldSwapProcessesForRedirect(
-      content::BrowserContext* browser_context,
-      const GURL& current_url,
-      const GURL& new_url) override;
   bool ShouldAssignSiteForURL(const GURL& url) override;
   std::vector<url::Origin> GetOriginsRequiringDedicatedProcess() override;
   bool IsFileAccessAllowed(const base::FilePath& path,
@@ -165,9 +160,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   const gfx::ImageSkia* GetDefaultFavicon() override;
   bool IsDataSaverEnabled(content::BrowserContext* context) override;
-  std::unique_ptr<net::HttpRequestHeaders>
-  GetAdditionalNavigationRequestHeaders(content::BrowserContext* context,
-                                        const GURL& url) const override;
+  void NavigationRequestStarted(
+      int frame_tree_node_id,
+      const GURL& url,
+      std::unique_ptr<net::HttpRequestHeaders>* extra_headers,
+      int* extra_load_flags) override;
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::ResourceContext* context) override;
@@ -324,10 +321,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  bool BindAssociatedInterfaceRequestFromFrame(
-      content::RenderFrameHost* render_frame_host,
-      const std::string& interface_name,
-      mojo::ScopedInterfaceEndpointHandle* handle) override;
   void BindInterfaceRequestFromWorker(
       content::RenderProcessHost* render_process_host,
       const url::Origin& origin,
@@ -365,7 +358,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<content::MemoryCoordinatorDelegate>
   GetMemoryCoordinatorDelegate() override;
   ::rappor::RapporService* GetRapporService() override;
-  content::mojom::NetworkContextPtr CreateNetworkContext(
+  network::mojom::NetworkContextPtr CreateNetworkContext(
       content::BrowserContext* context,
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
@@ -382,7 +375,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::CommandLine& command_line) override;
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
-      const base::Callback<content::WebContents*()>& wc_getter) override;
+      const base::Callback<content::WebContents*()>& wc_getter,
+      content::NavigationUIData* navigation_ui_data) override;
   void RegisterNonNetworkNavigationURLLoaderFactories(
       content::RenderFrameHost* frame_host,
       NonNetworkURLLoaderFactoryMap* factories) override;
@@ -390,6 +384,20 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* frame_host,
       const GURL& frame_url,
       NonNetworkURLLoaderFactoryMap* factories) override;
+  bool AllowRenderingMhtmlOverHttp(
+      content::NavigationUIData* navigation_ui_data) override;
+  bool ShouldForceDownloadResource(const GURL& url,
+                                   const std::string& mime_type) override;
+  void CreateUsbDeviceManager(
+      content::RenderFrameHost* render_frame_host,
+      device::mojom::UsbDeviceManagerRequest request) override;
+  void CreateUsbChooserService(
+      content::RenderFrameHost* render_frame_host,
+      device::mojom::UsbChooserServiceRequest request) override;
+  bool ShowPaymentHandlerWindow(
+      content::BrowserContext* browser_context,
+      const GURL& url,
+      base::OnceCallback<void(bool, int, int)> callback) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);

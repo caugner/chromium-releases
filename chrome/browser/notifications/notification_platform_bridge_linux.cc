@@ -27,8 +27,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/dbus/dbus_thread_linux.h"
-#include "chrome/browser/notifications/notification_display_service.h"
-#include "chrome/browser/notifications/notification_display_service_factory.h"
+#include "chrome/browser/notifications/notification_display_service_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration_linux.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
@@ -76,6 +75,7 @@ const char kCapabilityPersistence[] = "persistence";
 const char kCapabilitySound[] = "sound";
 
 // Button IDs.
+const char kCloseButtonId[] = "close";
 const char kDefaultButtonId[] = "default";
 const char kSettingsButtonId[] = "settings";
 
@@ -184,11 +184,20 @@ void ProfileLoadedCallback(NotificationCommon::Operation operation,
   if (!profile)
     return;
 
-  auto* display_service =
-      NotificationDisplayServiceFactory::GetForProfile(profile);
+  NotificationDisplayServiceImpl* display_service =
+      NotificationDisplayServiceImpl::GetForProfile(profile);
   display_service->ProcessNotificationOperation(operation, notification_type,
                                                 origin, notification_id,
                                                 action_index, reply, by_user);
+}
+
+bool ShouldAddCloseButton(const std::string& server_name) {
+  // Cinnamon doesn't add a close button on notifications.  With eg. calendar
+  // notifications, which are stay-on-screen, this can lead to a situation where
+  // the only way to dismiss a notification is to click on it, which would
+  // create an unwanted web navigation.  For this reason, manually add a close
+  // button. (https://crbug.com/804637)
+  return server_name == "cinnamon";
 }
 
 void ForwardNotificationOperationOnUiThread(
@@ -457,6 +466,17 @@ class NotificationPlatformBridgeLinuxImpl
         &NotificationPlatformBridgeLinuxImpl::SetBodyImagesSupported, this,
         base::ContainsKey(capabilities_, kCapabilityBodyImages)));
 
+    dbus::MethodCall get_server_information_call(kFreedesktopNotificationsName,
+                                                 "GetServerInformation");
+    std::unique_ptr<dbus::Response> server_information_response =
+        notification_proxy_->CallMethodAndBlock(
+            &get_server_information_call,
+            dbus::ObjectProxy::TIMEOUT_USE_DEFAULT);
+    if (server_information_response) {
+      dbus::MessageReader reader(server_information_response.get());
+      reader.PopString(&server_name_);
+    }
+
     connected_signals_barrier_ = base::BarrierClosure(
         2, base::Bind(&NotificationPlatformBridgeLinuxImpl::
                           OnConnectionInitializationFinishedOnTaskRunner,
@@ -621,6 +641,11 @@ class NotificationPlatformBridgeLinuxImpl
         actions.push_back(kSettingsButtonId);
         actions.push_back(
             l10n_util::GetStringUTF8(IDS_NOTIFICATION_BUTTON_SETTINGS));
+      }
+      if (ShouldAddCloseButton(server_name_)) {
+        actions.push_back(kCloseButtonId);
+        actions.push_back(
+            l10n_util::GetStringUTF8(IDS_NOTIFICATION_BUTTON_CLOSE));
       }
     }
     writer.AppendArrayOfStrings(actions);
@@ -792,6 +817,8 @@ class NotificationPlatformBridgeLinuxImpl
       ForwardNotificationOperation(data, NotificationCommon::SETTINGS,
                                    base::nullopt /* action_index */,
                                    base::nullopt /* by_user */);
+    } else if (action == kCloseButtonId) {
+      CloseOnTaskRunner(data->profile_id, data->notification_id);
     } else {
       size_t id;
       if (!base::StringToSizeT(action, &id))
@@ -944,6 +971,8 @@ class NotificationPlatformBridgeLinuxImpl
   dbus::ObjectProxy* notification_proxy_ = nullptr;
 
   std::unordered_set<std::string> capabilities_;
+
+  std::string server_name_;
 
   base::Closure connected_signals_barrier_;
 

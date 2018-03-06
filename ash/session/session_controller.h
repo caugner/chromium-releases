@@ -80,9 +80,6 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   // session.
   bool IsUserSessionBlocked() const;
 
-  // Returns whether session unlocking is in progress.
-  bool IsUnlocking() const;
-
   // Convenience function that returns true if session state is LOGIN_SECONDARY.
   bool IsInSecondaryLoginScreen() const;
 
@@ -108,6 +105,9 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   // Returns true if the current user is supervised: has legacy supervised
   // account or kid account.
   bool IsUserSupervised() const;
+
+  // Returns true if the current user is legacy supervised.
+  bool IsUserLegacySupervised() const;
 
   // Returns true if the current user is a child account.
   bool IsUserChild() const;
@@ -223,9 +223,7 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
       const AccountId& account_id,
       std::unique_ptr<PrefService> pref_service);
 
-  // Bindings for mojom::SessionController interface.
-  // TODO(jamescook): This should be mojo::Binding<> but that causes crashes in
-  // browser test UserAddingScreenTest.AddingSeveralUsers.
+  // Bindings for users of the mojom::SessionController interface.
   mojo::BindingSet<mojom::SessionController> bindings_;
 
   // Client interface to session manager code (chrome).

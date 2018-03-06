@@ -11,10 +11,6 @@
       #inspected {
       }
       </style>
-      <p>
-      Verifies that cancelling property value editing doesn't affect
-      undo stack.
-      </p>
 
       <div id="inspected">Text</div>
     `);
@@ -56,7 +52,7 @@
 
     function undoStyles(next) {
       ElementsTestRunner.dumpSelectedElementStyles(true, false, true);
-      TestRunner.domModel.undo();
+      SDK.domModelUndoStack.undo();
       ElementsTestRunner.waitForStyles('inspected', next, true);
     },
 

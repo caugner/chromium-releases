@@ -193,6 +193,26 @@ function muteButton(videoElement) {
     return mediaControlsButton(videoElement, 'mute-button');
 }
 
+function timelineElement(videoElement) {
+    return mediaControlsButton(videoElement, 'timeline');
+}
+
+function timelineThumb(videoElement) {
+    const timeline = timelineElement(videoElement);
+    const thumb = window.internals.shadowRoot(timeline).getElementById('thumb');
+    if (!thumb)
+        throw 'Failed to find timeline thumb';
+    return thumb;
+}
+
+function timelineThumbCurrentTime(videoElement) {
+    const timeline = timelineElement(videoElement);
+    const thumb = window.internals.shadowRoot(timeline).getElementById('thumb-current-time');
+    if (!thumb)
+        throw 'Failed to find timeline current time';
+    return thumb;
+}
+
 function clickAtCoordinates(x, y)
 {
     eventSender.mouseMoveTo(x, y);
@@ -285,4 +305,59 @@ function checkButtonNotHasClass(button, className) {
 
 function checkControlsClassName(videoElement, className) {
   assert_equals(window.internals.shadowRoot(videoElement).firstChild.className, className);
+}
+
+function mediaControlsOverlayPlayButton(videoElement) {
+  return mediaControlsButton(videoElement, 'overlay-play-button');
+}
+
+function mediaControlsOverlayPlayButtonInternal(videoElement) {
+  var controlID = '-internal-media-controls-overlay-play-button-internal';
+  var element = mediaControlsElement(
+      window.internals.shadowRoot(
+          mediaControlsOverlayPlayButton(videoElement)).firstChild, controlID);
+  if (!element)
+    throw 'Failed to find the internal overlay play button';
+  return element;
+}
+
+function doubleTapAtCoordinates(x, y, timeout, callback) {
+  if (timeout == undefined)
+    timeout = 100;
+
+  chrome.gpuBenchmarking.pointerActionSequence([
+    {
+      source: 'mouse',
+      actions: [
+        { name: 'pointerDown', x: x, y: y },
+        { name: 'pointerUp' },
+        { name: 'pause', duration: timeout / 1000 },
+        { name: 'pointerDown', x: x, y: y },
+        { name: 'pointerUp' }
+      ]
+    }
+  ], callback);
+}
+
+function singleTapAtCoordinates(xPos, yPos, callback) {
+  chrome.gpuBenchmarking.pointerActionSequence([
+    {
+      source: 'mouse',
+      actions: [
+        { name: 'pointerDown', x: xPos, y: yPos },
+        { name: 'pointerUp' }
+      ]
+    }
+  ], callback);
+}
+
+function enableDoubleTapToJumpForTest(t) {
+  var doubleTapToJumpOnVideoEnabledValue =
+      internals.runtimeFlags.doubleTapToJumpOnVideoEnabled;
+  internals.runtimeFlags.doubleTapToJumpOnVideoEnabled = true;
+
+  t.add_cleanup(() => {
+    internals.runtimeFlags.doubleTapToJumpOnVideoEnabled =
+        doubleTapToJumpOnVideoEnabledValue;
+  });
 }

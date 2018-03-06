@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_switches.h"
@@ -163,6 +162,12 @@ void ExtensionApiTest::SetUpOnMainThread() {
                           net::FilePathToFileURL(test_data_dir_).spec());
   test_config_->SetBoolean(kBrowserSideNavigationEnabled,
                            content::IsBrowserSideNavigationEnabled());
+  if (embedded_test_server()->Started()) {
+    // InitializeEmbeddedTestServer was called before |test_config_| was set.
+    // Set the missing port key.
+    test_config_->SetInteger(kEmbeddedTestServerPort,
+                             embedded_test_server()->port());
+  }
   extensions::TestGetConfigFunction::set_test_config_state(
       test_config_.get());
 }
@@ -416,8 +421,12 @@ bool ExtensionApiTest::InitializeEmbeddedTestServer() {
   // Build a dictionary of values that tests can use to build URLs that
   // access the test server and local file system.  Tests can see these values
   // using the extension API function chrome.test.getConfig().
-  test_config_->SetInteger(kEmbeddedTestServerPort,
-                           embedded_test_server()->port());
+  if (test_config_) {
+    test_config_->SetInteger(kEmbeddedTestServerPort,
+                             embedded_test_server()->port());
+  }
+  // else SetUpOnMainThread has not been called yet. Possibly because the
+  // caller needs a valid port in an overridden SetUpCommandLine method.
 
   return true;
 }

@@ -96,7 +96,7 @@ test(function() {
 
   assert_equals(entries.length, 1);
   assert_equals(entries[0].constructor, CSSUnparsedValue);
-  assert_equals(entries[0].toString(), '--bg-color');
+  assert_equals(entries[0].toString(), 'var(--bg-color)');
   assert_equals([...entries[0]].length, 1);
   assert_equals([...entries[0]][0].variable, "--bg-color");
   assert_equals([...entries[0]][0].fallback, null);
@@ -112,8 +112,8 @@ test(function() {
   assert_equals(propertyAndValue.length, 2);
 
   assert_equals(propertyAndValue[0], '--my-custom-property');
-  assert_equals(propertyAndValue[1].constructor, CSSStyleValue);
+  assert_equals(propertyAndValue[1].constructor, CSSUnparsedValue);
   assert_equals(propertyAndValue[1].toString(), '5px');
-}, "Custom properties set on the element come out as CSSStyleValues");
+}, "Custom properties set on the element come out as CSSUnparsedValue");
 
 </script>

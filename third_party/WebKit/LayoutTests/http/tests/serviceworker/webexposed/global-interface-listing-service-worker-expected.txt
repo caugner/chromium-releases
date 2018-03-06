@@ -31,7 +31,6 @@ interface BackgroundFetchRegistration : EventTarget
     getter downloaded
     getter id
     getter onprogress
-    getter totalDownloadSize
     getter uploadTotal
     getter uploaded
     method abort
@@ -134,6 +133,14 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
+interface CookieStore
+    attribute @@toStringTag
+    method constructor
+    method delete
+    method get
+    method getAll
+    method has
+    method set
 interface CountQueuingStrategy
     method constructor
     method size
@@ -695,6 +702,16 @@ interface ImageData
 interface InstallEvent : ExtendableEvent
     attribute @@toStringTag
     method constructor
+interface Lock
+    attribute @@toStringTag
+    getter mode
+    getter name
+    method constructor
+interface LockManager
+    attribute @@toStringTag
+    method acquire
+    method constructor
+    method query
 interface MessageChannel
     attribute @@toStringTag
     getter port1
@@ -967,6 +984,7 @@ interface PerformanceObserver
     method constructor
     method disconnect
     method observe
+    method takeRecords
 interface PerformanceObserverEntryList
     attribute @@toStringTag
     method constructor
@@ -994,6 +1012,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter transferSize
     getter workerStart
     method constructor
+    method toJSON
 interface PerformanceServerTiming
     attribute @@toStringTag
     getter description
@@ -1064,6 +1083,7 @@ interface Request
     getter bodyUsed
     getter cache
     getter credentials
+    getter destination
     getter headers
     getter integrity
     getter keepalive
@@ -2540,7 +2560,9 @@ interface WorkerNavigator
     getter appVersion
     getter budget
     getter connection
+    getter deviceMemory
     getter hardwareConcurrency
+    getter locks
     getter onLine
     getter permissions
     getter platform
@@ -2557,6 +2579,7 @@ interface WritableStream
     attribute console
     attribute internals
     getter clients
+    getter cookieStore
     getter onabortpayment
     getter onactivate
     getter onbackgroundfetchabort
@@ -2576,6 +2599,7 @@ interface WritableStream
     method fetch
     method gc
     method skipWaiting
+    setter cookieStore
     setter onabortpayment
     setter onactivate
     setter onbackgroundfetchabort
