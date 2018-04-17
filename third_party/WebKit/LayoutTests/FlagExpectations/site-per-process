@@ -1,11 +1,11 @@
 # These tests currently fail when they run with --site-per-process.
 # See https://crbug.com/477150.
 
-# https://crbug.com/794631: Recent regression.
-crbug.com/794631 virtual/unified-autoplay/external/wpt/feature-policy/autoplay-allowed-by-feature-policy-attribute.https.sub.html [ Failure ]
-crbug.com/794631 virtual/unified-autoplay/external/wpt/feature-policy/autoplay-allowed-by-feature-policy.https.sub.html [ Failure ]
+# TODO(lukasza): Remove these once CORB is enabled by default.
+crbug.com/802835 external/wpt/fetch/corb/img-png-mislabeled-as-html-nosniff.tentative.sub.html [ Pass ]
+crbug.com/802835 external/wpt/fetch/corb/script-html-correctly-labeled.tentative.sub.html [ Pass ]
 
-# https://crbug.com/793127: Crash related to frame consolidation CL.
+# https://crbug.com/793127: NOTREACHED() from clamy@ tickled by frame consolidation CL?
 crbug.com/793127 http/tests/security/upgrade-insecure-requests/iframe-upgrade.https.html [ Crash ]
 
 # https://crbug.com/789781: Document blocking should skip these cases.
@@ -68,7 +68,8 @@ crbug.com/585188 virtual/outofblink-cors/http/tests/xmlhttprequest/origin-whitel
 
 # https://crbug.com/601584 - No OOPIF support for UserGestureIndicator triggers
 #                            cross-origin-iframe.html layout test failure
-crbug.com/601584 http/tests/bluetooth/https/requestDevice/cross-origin-iframe.html [ Skip ]
+crbug.com/601584 external/wpt/http/tests/bluetooth/https/requestDevice/cross-origin-iframe.sub.https.html [ Skip ]
+crbug.com/601584 virtual/outofblink-cors/external/wpt/http/tests/bluetooth/https/requestDevice/cross-origin-iframe.sub.https.html [ Skip ]
 
 # https://crbug.com/606594 - UaF of delegate_ in WebFrameTestClient::willSendRequest
 # https://crbug.com/786510 - test tries to access cross-origin document body
@@ -76,12 +77,6 @@ crbug.com/606594 http/tests/local/serviceworker/fetch-request-body-file.html [ S
 
 # https://crbug.com/607991 - MockWebClipboardImpl not replicated across OOPIFs.
 crbug.com/607991 http/tests/misc/copy-resolves-urls.html [ Failure ]
-
-# https://crbug.com/608780 - window.performance doesn't work with OOPIFs
-crbug.com/608780 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cross_origin_redirect.html [ Failure ]
-crbug.com/608780 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cross_origin_redirect_with_timing_allow_origin.html [ Failure ]
-crbug.com/608780 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cross_origin_resource_request.html [ Failure ]
-crbug.com/608780 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_timing_allow_cross_origin_resource_request.html [ Failure ]
 
 # https://crbug.com/611232 - CSP checks from remote parent frame do not properly report violations
 crbug.com/611232 http/tests/security/contentSecurityPolicy/frame-src-child-frame-navigates-to-blocked-origin.html [ Timeout ]
@@ -170,6 +165,8 @@ Bug(none) external/wpt/html/browsers/the-window-object/apis-for-creating-and-nav
 Bug(none) external/wpt/html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-origin-domain.sub.html [ Failure ]
 Bug(none) external/wpt/html/infrastructure/safe-passing-of-structured-data/shared-array-buffers/window-domain-success.sub.html [ Timeout ]
 Bug(none) external/wpt/html/infrastructure/safe-passing-of-structured-data/shared-array-buffers/window-similar-but-cross-origin-success.sub.html [ Timeout ]
+Bug(none) virtual/sharedarraybuffer/external/wpt/html/infrastructure/safe-passing-of-structured-data/shared-array-buffers/window-domain-success.sub.html [ Timeout ]
+Bug(none) virtual/sharedarraybuffer/external/wpt/html/infrastructure/safe-passing-of-structured-data/shared-array-buffers/window-similar-but-cross-origin-success.sub.html [ Timeout ]
 Bug(none) external/wpt/html/infrastructure/urls/resolving-urls/query-encoding/windows-1251.html [ Crash ]
 Bug(none) external/wpt/html/semantics/embedded-content/media-elements/error-codes/error.html [ Timeout ]
 Bug(none) external/wpt/html/semantics/embedded-content/media-elements/ready-states/autoplay.html [ Timeout ]
@@ -253,10 +250,6 @@ Bug(none) jquery/manipulation.html [ Timeout ]
 Bug(none) storage/indexeddb/blob-valid-after-deletion.html [ Failure ]
 Bug(none) storage/indexeddb/blob-valid-before-commit.html [ Failure ]
 Bug(none) storage/indexeddb/empty-crash.html [ Timeout ]
-Bug(none) virtual/mojo-blobs/external/wpt/FileAPI/url/multi-global-origin-serialization.sub.html [ Failure ]
-Bug(none) virtual/mojo-blobs/external/wpt/fetch/api/basic/keepalive.html [ Timeout ]
-Bug(none) virtual/mojo-blobs/external/wpt/webmessaging/event.origin.sub.htm [ Failure ]
-Bug(none) virtual/mojo-blobs/external/wpt/webmessaging/postMessage_asterisk_xorigin.sub.htm [ Failure ]
 Bug(none) virtual/outofblink-cors/external/wpt/fetch/api/basic/keepalive.html [ Timeout ]
 
 crbug.com/801992 external/wpt/content-security-policy/frame-ancestors/frame-ancestors-nested-cross-in-cross-url-allow.html [ Pass Timeout ]
@@ -269,5 +262,11 @@ crbug.com/801992 external/wpt/content-security-policy/frame-ancestors/frame-ance
 crbug.com/801992 external/wpt/html/browsers/the-window-object/apis-for-creating-and-navigating-browsing-contexts-by-name/open-features-non-integer-width.html [ Crash ]
 crbug.com/801992 external/wpt/html/browsers/the-window-object/security-window/window-security.html [ Pass Timeout ]
 crbug.com/801992 http/tests/misc/iframe-script-modify-attr.html [ Pass Crash ]
+
+crbug.com/711468 compositing/reflections/nested-reflection-transition.html [ Pass Timeout ]
+crbug.com/711468 virtual/gpu/fast/canvas/canvas-composite-image.html [ Pass Timeout ]
+crbug.com/711468 virtual/gpu/fast/canvas/canvas-fillPath-shadow.html [ Pass Timeout ]
+crbug.com/711468 virtual/gpu/fast/canvas/canvas-scale-strokePath-shadow.html [ Pass Timeout ]
+crbug.com/711468 http/tests/intersection-observer/cross-origin-iframe-with-nesting.html [ Failure ]
 
 crbug.com/807675 http/tests/images/image-decode-in-frame.html [ Crash Failure ]

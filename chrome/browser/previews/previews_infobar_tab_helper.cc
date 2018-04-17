@@ -16,8 +16,8 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
+#include "components/offline_pages/buildflags/buildflags.h"
 #include "components/offline_pages/core/offline_page_item.h"
-#include "components/offline_pages/features/features.h"
 #include "components/previews/content/previews_content_util.h"
 #include "components/previews/content/previews_ui_service.h"
 #include "components/previews/core/previews_experiments.h"
@@ -149,10 +149,17 @@ void PreviewsInfoBarTabHelper::DidFinishNavigation(
         previews_user_data_->committed_previews_type();
     if (main_frame_preview != previews::PreviewsType::NONE &&
         main_frame_preview != previews::PreviewsType::LOFI) {
+      base::Time previews_freshness;
+      if (main_frame_preview == previews::PreviewsType::LITE_PAGE) {
+        const net::HttpResponseHeaders* headers =
+            navigation_handle->GetResponseHeaders();
+        if (headers)
+          headers->GetDateValue(&previews_freshness);
+      }
+
       PreviewsInfoBarDelegate::Create(
-          web_contents(), main_frame_preview,
-          base::Time() /* previews_freshness */, true /* is_data_saver_user */,
-          is_reload,
+          web_contents(), main_frame_preview, previews_freshness,
+          true /* is_data_saver_user */, is_reload,
           base::BindOnce(&AddPreviewNavigationCallback,
                          web_contents()->GetBrowserContext(),
                          navigation_handle->GetRedirectChain()[0],

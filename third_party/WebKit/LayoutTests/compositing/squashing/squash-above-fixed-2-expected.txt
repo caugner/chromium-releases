@@ -5,6 +5,17 @@ CASE 1, original layer tree:
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [785, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [785, 4050],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
@@ -37,6 +48,17 @@ CASE 2, scrolling y to 80, the "container" element should remain positioned with
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [785, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [785, 4050],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
@@ -77,7 +99,8 @@ CASE 2, scrolling y to 80, the "container" element should remain positioned with
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [0, -80, 0, 1]
-      ]
+      ],
+      "flattenInheritedTransform": false
     }
   ]
 }

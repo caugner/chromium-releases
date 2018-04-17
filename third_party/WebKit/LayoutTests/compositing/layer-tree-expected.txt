@@ -22,33 +22,25 @@ Layer tree:
                   "drawsContent": false,
                   "children": [
                     {
-                      "name": "Frame Overflow Controls Host Layer",
+                      "name": "LayoutView #document",
                       "bounds": [800, 600],
                       "drawsContent": false,
+                      "backgroundColor": "#FFFFFF",
+                      "shouldFlattenTransform": false,
                       "children": [
                         {
-                          "name": "Frame Clipping Layer",
+                          "name": "Scrolling Layer",
                           "bounds": [780, 580],
                           "drawsContent": false,
+                          "flattenInheritedTransform": false,
+                          "shouldFlattenTransform": false,
                           "children": [
                             {
-                              "name": "Frame Scrolling Layer",
-                              "drawsContent": false,
-                              "children": [
-                                {
-                                  "name": "Content Root Layer",
-                                  "bounds": [1200, 900],
-                                  "drawsContent": false,
-                                  "children": [
-                                    {
-                                      "name": "LayoutView #document",
-                                      "bounds": [1200, 900],
-                                      "contentsOpaque": true,
-                                      "backgroundColor": "#FFFFFF"
-                                    }
-                                  ]
-                                }
-                              ]
+                              "name": "Scrolling Contents Layer",
+                              "bounds": [1200, 900],
+                              "contentsOpaque": true,
+                              "backgroundColor": "#FFFFFF",
+                              "flattenInheritedTransform": false
                             }
                           ]
                         }
@@ -61,19 +53,26 @@ Layer tree:
           ]
         },
         {
-          "name": "Frame Horizontal Scrollbar Layer",
-          "position": [0, 580],
-          "bounds": [780, 20]
-        },
-        {
-          "name": "Frame Vertical Scrollbar Layer",
-          "position": [780, 0],
-          "bounds": [20, 580]
-        },
-        {
-          "name": "Frame Scroll Corner Layer",
-          "position": [780, 580],
-          "bounds": [20, 20]
+          "name": "Overflow Controls Host Layer",
+          "bounds": [800, 600],
+          "drawsContent": false,
+          "children": [
+            {
+              "name": "Horizontal Scrollbar Layer",
+              "position": [0, 580],
+              "bounds": [780, 20]
+            },
+            {
+              "name": "Vertical Scrollbar Layer",
+              "position": [780, 0],
+              "bounds": [20, 580]
+            },
+            {
+              "name": "Scroll Corner Layer",
+              "position": [780, 580],
+              "bounds": [20, 20]
+            }
+          ]
         }
       ]
     }
@@ -106,42 +105,39 @@ Layer list
       "drawsContent": false
     },
     {
-      "name": "Frame Overflow Controls Host Layer",
+      "name": "LayoutView #document",
       "bounds": [800, 600],
-      "drawsContent": false
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Frame Clipping Layer",
+      "name": "Scrolling Layer",
       "bounds": [780, 580],
       "drawsContent": false
     },
     {
-      "name": "Frame Scrolling Layer",
-      "drawsContent": false
-    },
-    {
-      "name": "Content Root Layer",
-      "bounds": [1200, 900],
-      "drawsContent": false
-    },
-    {
-      "name": "LayoutView #document",
+      "name": "Scrolling Contents Layer",
       "bounds": [1200, 900],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Frame Horizontal Scrollbar Layer",
+      "name": "Overflow Controls Host Layer",
+      "bounds": [800, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Horizontal Scrollbar Layer",
       "position": [0, 580],
       "bounds": [780, 20]
     },
     {
-      "name": "Frame Vertical Scrollbar Layer",
+      "name": "Vertical Scrollbar Layer",
       "position": [780, 0],
       "bounds": [20, 580]
     },
     {
-      "name": "Frame Scroll Corner Layer",
+      "name": "Scroll Corner Layer",
       "position": [780, 580],
       "bounds": [20, 20]
     }

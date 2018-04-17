@@ -127,13 +127,12 @@ AccountReconcilorFactory::CreateAccountReconcilorDelegate(Profile* profile) {
     case signin::AccountConsistencyMethod::kDiceFixAuthErrors:
       return std::make_unique<signin::AccountReconcilorDelegate>();
     case signin::AccountConsistencyMethod::kDicePrepareMigration:
-    case signin::AccountConsistencyMethod::
-        kDicePrepareMigrationChromeSyncEndpoint:
     case signin::AccountConsistencyMethod::kDiceMigration:
     case signin::AccountConsistencyMethod::kDice:
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
       return std::make_unique<signin::DiceAccountReconcilorDelegate>(
-          ChromeSigninClientFactory::GetForProfile(profile));
+          ChromeSigninClientFactory::GetForProfile(profile),
+          AccountConsistencyModeManager::GetMethodForProfile(profile));
 #else
       NOTREACHED();
       return nullptr;

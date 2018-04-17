@@ -5,6 +5,17 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 
 Starting worker: resources/global-interface-listing-worker.js
 [Worker] [INTERFACES]
+[Worker] interface AbortController
+[Worker]     attribute @@toStringTag
+[Worker]     getter signal
+[Worker]     method abort
+[Worker]     method constructor
+[Worker] interface AbortSignal : EventTarget
+[Worker]     attribute @@toStringTag
+[Worker]     getter aborted
+[Worker]     getter onabort
+[Worker]     method constructor
+[Worker]     setter onabort
 [Worker] interface BackgroundFetchFetch
 [Worker]     attribute @@toStringTag
 [Worker]     getter request
@@ -643,9 +654,9 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method constructor
 [Worker] interface LockManager
 [Worker]     attribute @@toStringTag
-[Worker]     method acquire
 [Worker]     method constructor
 [Worker]     method query
+[Worker]     method request
 [Worker] interface MessageChannel
 [Worker]     attribute @@toStringTag
 [Worker]     getter port1
@@ -658,7 +669,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter origin
 [Worker]     getter ports
 [Worker]     getter source
-[Worker]     getter suborigin
 [Worker]     method constructor
 [Worker]     method initMessageEvent
 [Worker] interface MessagePort : EventTarget
@@ -1003,6 +1013,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter redirect
 [Worker]     getter referrer
 [Worker]     getter referrerPolicy
+[Worker]     getter signal
 [Worker]     getter url
 [Worker]     method arrayBuffer
 [Worker]     method blob
@@ -1882,6 +1893,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method samplerParameterf
 [Worker]     method samplerParameteri
 [Worker]     method scissor
+[Worker]     method setCompatibleXRDevice
 [Worker]     method shaderSource
 [Worker]     method stencilFunc
 [Worker]     method stencilFuncSeparate
@@ -2348,6 +2360,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method renderbufferStorage
 [Worker]     method sampleCoverage
 [Worker]     method scissor
+[Worker]     method setCompatibleXRDevice
 [Worker]     method shaderSource
 [Worker]     method stencilFunc
 [Worker]     method stencilFuncSeparate

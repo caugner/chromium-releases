@@ -473,8 +473,7 @@ class WifiHeaderRowView : public NetworkListView::SectionHeaderRowView {
     gfx::ImageSkia disabled_image = network_icon::GetImageForNewWifiNetwork(
         SkColorSetA(prominent_color, kDisabledJoinIconAlpha),
         SkColorSetA(prominent_color, kDisabledJoinBadgeAlpha));
-    join_ = new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
-                                 normal_image, disabled_image,
+    join_ = new SystemMenuButton(this, normal_image, disabled_image,
                                  IDS_ASH_STATUS_TRAY_OTHER_WIFI);
     join_->SetInkDropColor(prominent_color);
     join_->SetEnabled(enabled);
@@ -568,7 +567,7 @@ void NetworkListView::UpdateNetworks(
     if (!NetworkTypePattern::NonVirtual().MatchesType(network->type()))
       continue;
     // If cellular is disabled, skip the default cellular service.
-    if (network->Matches(NetworkTypePattern::Cellular()) && !cellular_enabled)
+    if (network->IsDefaultCellular() && !cellular_enabled)
       continue;
     network_list_.push_back(std::make_unique<NetworkInfo>(network->guid()));
   }
@@ -700,14 +699,17 @@ NetworkListView::UpdateNetworkListEntries() {
       &wifi_header_view_, &wifi_separator_view_);
 
   // "Wifi Enabled / Disabled".
-  int wifi_message_id = 0;
-  if (!handler->IsTechnologyEnabled(NetworkTypePattern::WiFi()))
-    wifi_message_id = IDS_ASH_STATUS_TRAY_NETWORK_WIFI_DISABLED;
-  else if (!handler->FirstNetworkByType(NetworkTypePattern::WiFi()))
-    wifi_message_id = IDS_ASH_STATUS_TRAY_NETWORK_WIFI_ENABLED;
-  UpdateInfoLabel(wifi_message_id, index, &no_wifi_networks_view_);
-  if (wifi_message_id)
+  if (!handler->IsTechnologyEnabled(NetworkTypePattern::WiFi())) {
+    UpdateInfoLabel(IDS_ASH_STATUS_TRAY_NETWORK_WIFI_DISABLED, index,
+                    &no_wifi_networks_view_);
+    return new_guids;
+  }
+
+  if (!handler->FirstNetworkByType(NetworkTypePattern::WiFi())) {
+    UpdateInfoLabel(IDS_ASH_STATUS_TRAY_NETWORK_WIFI_ENABLED, index,
+                    &no_wifi_networks_view_);
     ++index;
+  }
 
   // Add Wi-Fi networks.
   std::unique_ptr<std::set<std::string>> new_wifi_guids =
@@ -872,8 +874,10 @@ void NetworkListView::PlaceViewAtIndex(views::View* view, int index) {
     scroll_content()->AddChildViewAt(view, index);
   } else {
     // No re-order and re-layout is necessary if |view| is already at |index|.
-    if (scroll_content()->child_at(index) == view)
+    if (index < scroll_content()->child_count() &&
+        scroll_content()->child_at(index) == view) {
       return;
+    }
     scroll_content()->ReorderChildView(view, index);
   }
   needs_relayout_ = true;

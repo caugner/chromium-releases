@@ -1,4 +1,4 @@
-# These tests currently fail when run with --enable-network-service
+# These tests currently fail when run with --enable-features=NetworkSerivce
 # See https://crbug.com/729849
 
 Bug(none) external/wpt/clear-site-data/storage.https.html [ Failure ]
@@ -22,30 +22,17 @@ Bug(none) external/wpt/html/semantics/embedded-content/the-iframe-element/iframe
 Bug(none) external/wpt/navigation-timing/nav2_test_attributes_values.html [ Failure Timeout ]
 Bug(none) external/wpt/resource-timing/test_resource_timing.html [ Failure Timeout ]
 Bug(none) external/wpt/service-workers/service-worker/claim-shared-worker-fetch.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/client-navigate.https.html [ Pass Crash Failure ]
 Bug(none) external/wpt/service-workers/service-worker/clients-get-client-types.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/clients-get.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/fetch-event.https.html [ Pass Failure Crash ]
-Bug(none) external/wpt/service-workers/service-worker/fetch-frame-resource.https.html [ Pass Failure ]
+crbug.com/807271 external/wpt/service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html [ Failure ]
 Bug(none) external/wpt/service-workers/service-worker/fetch-header-visibility.https.html [ Pass Failure Crash ]
-Bug(none) external/wpt/service-workers/service-worker/fetch-request-resources.https.html [ Pass Failure Crash ]
 Bug(none) external/wpt/service-workers/service-worker/fetch-request-xhr-sync.https.html [ Timeout ]
-Bug(none) external/wpt/service-workers/service-worker/fetch-request-xhr.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/import-scripts-resource-map.https.html [ Failure Crash ]
 crbug.com/771118 external/wpt/service-workers/service-worker/mime-sniffing.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/register-link-header.https.html [ Timeout ]
 Bug(none) external/wpt/service-workers/service-worker/registration-updateviacache.https.html [ Failure Timeout ]
 Bug(none) external/wpt/service-workers/service-worker/shared-worker-controlled.https.html [ Timeout ]
 Bug(none) external/wpt/service-workers/service-worker/update-bytecheck.https.html [ Pass Timeout Failure ]
 Bug(none) external/wpt/service-workers/service-worker/worker-interception.https.html [ Pass Crash Failure ]
 Bug(none) external/wpt/service-workers/service-worker/navigation-preload/broken-chunked-encoding.https.html [ Failure ]
-Bug(none) external/wpt/service-workers/service-worker/ServiceWorkerGlobalScope/unregister.https.html [ Pass Failure ]
-Bug(none) external/wpt/service-workers/service-worker/appcache-ordering-main.https.html [ Pass Failure ]
 Bug(none) external/wpt/service-workers/service-worker/ready.https.html [ Pass Crash Failure ]
-Bug(none) external/wpt/service-workers/service-worker/skip-waiting-using-registration.https.html [ Pass Timeout ]
-Bug(none) http/tests/local/serviceworker/fetch-request-body-file.html [ Pass Crash Failure ]
-Bug(none) http/tests/serviceworker/chromium/stop-worker-during-respond-with.html [ Pass Failure ]
 Bug(none) http/tests/appcache/top-frame-3.html [ Pass Timeout ]
 Bug(none) http/tests/appcache/top-frame-4.html [ Pass Timeout ]
 Bug(none) http/tests/appcache/local-content.html [ Pass Timeout ]
@@ -53,8 +40,6 @@ Bug(none) http/tests/appcache/offline-access.html [ Pass Timeout ]
 Bug(none) http/tests/appcache/foreign-fallback.html [ Pass Timeout ]
 Bug(none) http/tests/appcache/main-resource-redirect.html [ Pass Timeout ]
 Bug(none) http/tests/appcache/reload.html [ Pass Timeout ]
-
-# NetworkService won't support Foreign Fetch.
 
 # Passes on NetworkService and fails on non-NetworkService because
 # NetworkService isn't affected by https://crbug.com/595993.
@@ -116,6 +101,7 @@ crbug.com/721408 http/tests/inspector-protocol/network/request-interception-on-b
 crbug.com/721408 http/tests/inspector-protocol/network/request-interception-on-response-redirect.js [ Failure ]
 crbug.com/721408 http/tests/inspector-protocol/network/request-interception-on-response.js [ Failure ]
 crbug.com/721408 http/tests/inspector-protocol/network/request-interception-patterns.js [ Failure ]
+crbug.com/721408 http/tests/inspector-protocol/network/request-interception-raw-headers.js [ Failure ]
 crbug.com/721408 http/tests/inspector-protocol/network/request-interception-resource-types.js [ Failure ]
 crbug.com/721408 http/tests/inspector-protocol/network/request-response-interception-disable-between.js [ Failure Timeout ]
 crbug.com/721408 http/tests/inspector-protocol/network/response-interception-cancel-xhr-while-responding-error.js [ Failure Timeout ]
@@ -125,6 +111,7 @@ crbug.com/721408 http/tests/inspector-protocol/network/response-interception-req
 crbug.com/721408 http/tests/inspector-protocol/network/response-interception-with-data-url.js [ Failure Timeout ]
 crbug.com/721408 http/tests/inspector-protocol/network/xhr-interception-auth-fail.js [ Failure ]
 crbug.com/721408 http/tests/inspector-protocol/network/xhr-interception.js [ Timeout ]
+crbug.com/721408 http/tests/inspector-protocol/network/request-interception-referer.js [ Timeout ]
 crbug.com/721408 http/tests/devtools/console/console-uncaught-promise.js [ Failure ]
 crbug.com/721408 http/tests/devtools/sdk/network-interception-wildcard-pattern-matching.js [ Failure ]
 crbug.com/721408 http/tests/devtools/sources/debugger-async/async-callstack-xhrs.js [ Failure Timeout ]
@@ -159,11 +146,8 @@ Bug(none) http/tests/security/mime-type-execute-as-html-04.html [ Failure ]
 Bug(none) http/tests/security/mixedContent/filesystem-url-in-iframe.html [ Failure Timeout ]
 Bug(none) http/tests/security/mixedContent/nonwebby-scheme-in-iframe-allowed.https.html [ Failure Timeout ]
 Bug(none) http/tests/security/offscreen-canvas-worker-read-blocked-by-setting.html [ Crash Pass Timeout ]
-Bug(none) http/tests/security/suborigins/suborigin-unsafe-cookies.php [ Timeout ]
-Bug(none) http/tests/serviceworker/chromium.fetch-event-headers.html [ Failure ]
 Bug(none) http/tests/serviceworker/chromium.update-served-from-cache.html [ Failure ]
 Bug(none) http/tests/serviceworker/chromium/register-error-messages.html [ Failure ]
-Bug(none) http/tests/serviceworker/chromium/request-body-blob-crash.html [ Crash Failure ]
 Bug(none) http/tests/websocket/cookie-document-to-ws.html [ Failure ]
 Bug(none) http/tests/websocket/cookie-http-to-ws.pl [ Failure ]
 Bug(none) http/tests/websocket/httponly-cookie.pl [ Failure ]
@@ -171,6 +155,11 @@ Bug(none) http/tests/xmlhttprequest/xmlhttprequest-data-url.html [ Failure ]
 Bug(none) http/tests/devtools/sources/debugger-breakpoints/event-listener-breakpoints-xhr.js [ Timeout ]
 Bug(none) plugins/iframe-plugin-bgcolor.html [ Timeout ]
 Bug(none) virtual/mouseevent_fractional/fast/events/attribute-listener-cloned-from-frameless-doc.xhtml [ Timeout ]
+
+# The parent or opener frame might be out-of-process:
+crbug.com/805310 http/tests/devtools/network/oopif-content.js [ Crash Failure ]
+crbug.com/805310 http/tests/devtools/oopif/oopif-targets.js [ Pass Failure Timeout ]
+crbug.com/805310 http/tests/devtools/oopif/oopif-cookies-refresh.js [ Failure Timeout ]
 
 # Plugin throttle is not implemented.
 crbug.com/764474 http/tests/security/contentSecurityPolicy/object-src-url-allowed.html [ Failure ]
@@ -241,3 +230,14 @@ Bug(none) http/tests/devtools/audits2/audits2-successful-run.js [ Failure ]
 
 # Started failing @ r529490
 Bug(none) virtual/layout_ng/fast/inline/positioned-object-between-replaced-elements.html [ Failure ]
+
+# http://crbug.com/803958: Tests failing on bot but not in local checkout.
+crbug.com/803958 external/wpt/websockets/cookies/001.html?wss [ Failure ]
+crbug.com/803958 external/wpt/websockets/cookies/002.html?wss [ Failure ]
+crbug.com/803958 external/wpt/websockets/cookies/003.html?wss [ Failure ]
+crbug.com/803958 external/wpt/websockets/cookies/007.html [ Failure ]
+crbug.com/803958 external/wpt/websockets/cookies/007.html?wss [ Failure ]
+
+crbug.com/809119 http/tests/fetch/chromium/keepalive-resource-exhaustion.html [ Failure ]
+
+crbug.com/816556 external/wpt/html/semantics/text-level-semantics/the-a-element/a-download-click-404.html [ Failure ]

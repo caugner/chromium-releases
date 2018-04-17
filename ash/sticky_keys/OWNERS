@@ -1,3 +1,4 @@
-tengs@chromium.org
+file://ui/accessibility/OWNERS
 
-# COMPONENT: UI>Shell
+# TEAM: chromium-accessibility@chromium.org
+# COMPONENT: UI>Accessibility

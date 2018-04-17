@@ -24,6 +24,7 @@
 #include "core/page/scrolling/SnapCoordinator.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/Histogram.h"
+#include "platform/scroll/ScrollCustomization.h"
 #include "platform/wtf/PtrUtil.h"
 
 namespace blink {
@@ -148,10 +149,10 @@ void ScrollManager::RecomputeScrollChain(const Node& start_node,
 
 bool ScrollManager::CanScroll(const ScrollState& scroll_state,
                               const Element& current_element) {
-  const double delta_x = scroll_state.isBeginning() ? scroll_state.deltaXHint()
-                                                    : scroll_state.deltaX();
-  const double delta_y = scroll_state.isBeginning() ? scroll_state.deltaYHint()
-                                                    : scroll_state.deltaY();
+  double delta_x = scroll_state.isBeginning() ? scroll_state.deltaXHint()
+                                              : scroll_state.deltaX();
+  double delta_y = scroll_state.isBeginning() ? scroll_state.deltaYHint()
+                                              : scroll_state.deltaY();
   if (!delta_x && !delta_y)
     return true;
 
@@ -159,12 +160,11 @@ bool ScrollManager::CanScroll(const ScrollState& scroll_state,
 
   if (IsViewportScrollingElement(current_element) ||
       current_element == *(frame_->GetDocument()->documentElement())) {
-    if (!frame_->Tree().Parent() || frame_->Tree().Parent()->IsLocalFrame())
+    if (frame_->IsMainFrame())
       return true;
 
-    // For oopif the viewport is added to scroll chain only if it can actually
-    // consume some delta hints.
-    DCHECK(frame_->Tree().Parent()->IsRemoteFrame());
+    // For subframes, the viewport is added to the scroll chain only if it can
+    // actually consume some delta hints.
     scrollable_area =
         frame_->View() ? frame_->View()->GetScrollableArea() : nullptr;
   }
@@ -174,6 +174,11 @@ bool ScrollManager::CanScroll(const ScrollState& scroll_state,
 
   if (!scrollable_area)
     return false;
+
+  if (!scrollable_area->UserInputScrollable(kHorizontalScrollbar))
+    delta_x = 0;
+  if (!scrollable_area->UserInputScrollable(kVerticalScrollbar))
+    delta_y = 0;
 
   ScrollOffset current_offset = scrollable_area->GetScrollOffset();
   ScrollOffset target_offset = current_offset + ScrollOffset(delta_x, delta_y);
@@ -252,6 +257,7 @@ void ScrollManager::CustomizedScroll(ScrollState& scroll_state) {
     frame_->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   DCHECK(!current_scroll_chain_.empty());
+
   scroll_state.SetScrollChain(current_scroll_chain_);
 
   scroll_state.distributeToScrollChainDescendant();
@@ -338,8 +344,8 @@ WebInputEventResult ScrollManager::HandleGestureScrollBegin(
       !scroll_gesture_handling_node_->GetLayoutObject())
     return WebInputEventResult::kNotHandled;
 
-  PassScrollGestureEvent(gesture_event,
-                         scroll_gesture_handling_node_->GetLayoutObject());
+  WebInputEventResult child_result = PassScrollGestureEvent(
+      gesture_event, scroll_gesture_handling_node_->GetLayoutObject());
 
   RecordScrollRelatedMetrics(gesture_event.source_device);
 
@@ -360,8 +366,14 @@ WebInputEventResult ScrollManager::HandleGestureScrollBegin(
   ScrollState* scroll_state = ScrollState::Create(std::move(scroll_state_data));
   RecomputeScrollChain(*scroll_gesture_handling_node_.Get(), *scroll_state,
                        current_scroll_chain_);
-  if (current_scroll_chain_.empty())
-    return WebInputEventResult::kNotHandled;
+
+  if (current_scroll_chain_.empty()) {
+    // If a child has a non-empty scroll chain, we need to consider that instead
+    // of simply returning WebInputEventResult::kNotHandled.
+    return child_result;
+  }
+
+  NotifyScrollPhaseBeginForCustomizedScroll(*scroll_state);
 
   CustomizedScroll(*scroll_state);
 
@@ -516,6 +528,7 @@ WebInputEventResult ScrollManager::HandleGestureScrollEnd(
         ScrollState::Create(std::move(scroll_state_data));
     CustomizedScroll(*scroll_state);
     SnapAtGestureScrollEnd();
+    NotifyScrollPhaseEndForCustomizedScroll();
   }
 
   ClearGestureScrollState();
@@ -535,14 +548,16 @@ WebInputEventResult ScrollManager::PassScrollGestureEvent(
       !layout_object->IsLayoutEmbeddedContent())
     return WebInputEventResult::kNotHandled;
 
-  LocalFrameView* frame_view =
+  FrameView* frame_view =
       ToLayoutEmbeddedContent(layout_object)->ChildFrameView();
 
-  if (!frame_view)
+  if (!frame_view || !frame_view->IsLocalFrameView())
     return WebInputEventResult::kNotHandled;
 
-  return frame_view->GetFrame().GetEventHandler().HandleGestureScrollEvent(
-      gesture_event);
+  return ToLocalFrameView(frame_view)
+      ->GetFrame()
+      .GetEventHandler()
+      .HandleGestureScrollEvent(gesture_event);
 }
 
 bool ScrollManager::IsViewportScrollingElement(const Element& element) const {
@@ -742,6 +757,26 @@ WebGestureEvent ScrollManager::SynthesizeGestureScrollBegin(
   scroll_begin.data.scroll_begin.delta_hint_units =
       update_event.data.scroll_update.delta_units;
   return scroll_begin;
+}
+
+void ScrollManager::NotifyScrollPhaseBeginForCustomizedScroll(
+    const ScrollState& scroll_state) {
+  ScrollCustomization::ScrollDirection direction =
+      ScrollCustomization::GetScrollDirectionFromDeltas(
+          scroll_state.deltaXHint(), scroll_state.deltaYHint());
+  for (auto id : current_scroll_chain_) {
+    Node* node = DOMNodeIds::NodeForId(id);
+    if (node && node->IsElementNode())
+      ToElement(node)->WillBeginCustomizedScrollPhase(direction);
+  }
+}
+
+void ScrollManager::NotifyScrollPhaseEndForCustomizedScroll() {
+  for (auto id : current_scroll_chain_) {
+    Node* node = DOMNodeIds::NodeForId(id);
+    if (node && node->IsElementNode())
+      ToElement(node)->DidEndCustomizedScrollPhase();
+  }
 }
 
 }  // namespace blink

@@ -6,7 +6,7 @@
 
 #include "base/bind_helpers.h"
 #include "platform/scheduler/base/task_queue_impl.h"
-#include "platform/scheduler/base/task_queue_manager.h"
+#include "platform/scheduler/base/task_queue_manager_impl.h"
 
 namespace blink {
 namespace scheduler {
@@ -59,6 +59,10 @@ void TaskQueue::ShutdownTaskQueue() {
     return;
   }
   impl_->SetBlameContext(nullptr);
+  impl_->SetOnTaskStartedHandler(
+      internal::TaskQueueImpl::OnTaskStartedHandler());
+  impl_->SetOnTaskCompletedHandler(
+      internal::TaskQueueImpl::OnTaskCompletedHandler());
   task_queue_manager_->UnregisterTaskQueueImpl(TakeTaskQueueImpl());
 }
 
@@ -69,28 +73,40 @@ bool TaskQueue::RunsTasksInCurrentSequence() const {
 bool TaskQueue::PostDelayedTask(const base::Location& from_here,
                                 base::OnceClosure task,
                                 base::TimeDelta delay) {
-  auto lock = AcquireImplReadLockIfNeeded();
-  if (!impl_)
-    return false;
-  return impl_->PostDelayedTask(
-      PostedTask(std::move(task), from_here, delay, base::Nestable::kNestable));
+  internal::TaskQueueImpl::PostTaskResult result;
+  {
+    auto lock = AcquireImplReadLockIfNeeded();
+    if (!impl_)
+      return false;
+    result = impl_->PostDelayedTask(PostedTask(
+        std::move(task), from_here, delay, base::Nestable::kNestable));
+  }
+  return result.success;
 }
 
 bool TaskQueue::PostNonNestableDelayedTask(const base::Location& from_here,
                                            base::OnceClosure task,
                                            base::TimeDelta delay) {
-  auto lock = AcquireImplReadLockIfNeeded();
-  if (!impl_)
-    return false;
-  return impl_->PostDelayedTask(PostedTask(std::move(task), from_here, delay,
-                                           base::Nestable::kNonNestable));
+  internal::TaskQueueImpl::PostTaskResult result;
+  {
+    auto lock = AcquireImplReadLockIfNeeded();
+    if (!impl_)
+      return false;
+    result = impl_->PostDelayedTask(PostedTask(
+        std::move(task), from_here, delay, base::Nestable::kNonNestable));
+  }
+  return result.success;
 }
 
 bool TaskQueue::PostTaskWithMetadata(PostedTask task) {
-  auto lock = AcquireImplReadLockIfNeeded();
-  if (!impl_)
-    return false;
-  return impl_->PostDelayedTask(std::move(task));
+  internal::TaskQueueImpl::PostTaskResult result;
+  {
+    auto lock = AcquireImplReadLockIfNeeded();
+    if (!impl_)
+      return false;
+    result = impl_->PostDelayedTask(std::move(task));
+  }
+  return result.success;
 }
 
 std::unique_ptr<TaskQueue::QueueEnabledVoter>
@@ -256,10 +272,6 @@ base::Optional<MoveableAutoLock> TaskQueue::AcquireImplReadLockIfNeeded()
 
 std::unique_ptr<internal::TaskQueueImpl> TaskQueue::TakeTaskQueueImpl() {
   DCHECK(impl_);
-  impl_->SetOnTaskStartedHandler(
-      internal::TaskQueueImpl::OnTaskStartedHandler());
-  impl_->SetOnTaskCompletedHandler(
-      internal::TaskQueueImpl::OnTaskCompletedHandler());
   return std::move(impl_);
 }
 

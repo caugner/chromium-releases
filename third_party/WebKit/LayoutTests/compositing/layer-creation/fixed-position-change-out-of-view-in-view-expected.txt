@@ -3,6 +3,17 @@ Layer tree when the fixed elements are out-of-view (should have just a root laye
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [785, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [785, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
@@ -27,6 +38,17 @@ Layer tree when the fixed elements are in-view (both fixed elements should have 
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [785, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [785, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
@@ -52,6 +74,17 @@ Layer tree when the fixed elements are out-of-view again (should have just a roo
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [785, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [785, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"

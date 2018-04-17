@@ -30,13 +30,21 @@ class TestClientControlledStateDelegate
 
   void HandleWindowStateRequest(WindowState* window_state,
                                 mojom::WindowStateType next_state) override {
+    EXPECT_FALSE(deleted_);
     old_state_ = window_state->GetStateType();
     new_state_ = next_state;
   }
 
   void HandleBoundsRequest(WindowState* window_state,
+                           ash::mojom::WindowStateType requested_state,
                            const gfx::Rect& bounds) override {
     requested_bounds_ = bounds;
+    if (requested_state != window_state->GetStateType()) {
+      DCHECK(requested_state == ash::mojom::WindowStateType::LEFT_SNAPPED ||
+             requested_state == ash::mojom::WindowStateType::RIGHT_SNAPPED);
+      old_state_ = window_state->GetStateType();
+      new_state_ = requested_state;
+    }
   }
 
   mojom::WindowStateType old_state() const { return old_state_; }
@@ -51,10 +59,13 @@ class TestClientControlledStateDelegate
     requested_bounds_.SetRect(0, 0, 0, 0);
   }
 
+  void mark_as_deleted() { deleted_ = true; }
+
  private:
   mojom::WindowStateType old_state_ = mojom::WindowStateType::DEFAULT;
   mojom::WindowStateType new_state_ = mojom::WindowStateType::DEFAULT;
   gfx::Rect requested_bounds_;
+  bool deleted_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestClientControlledStateDelegate);
 };
@@ -390,6 +401,18 @@ TEST_F(ClientControlledStateTest, TrustedPinnedBasic) {
   EXPECT_TRUE(window_state_2->IsTrustedPinned());
 }
 
+TEST_F(ClientControlledStateTest, ClosePinned) {
+  EXPECT_FALSE(window_state()->IsPinned());
+  EXPECT_FALSE(GetScreenPinningController()->IsPinned());
+
+  const WMEvent trusted_pin_event(WM_EVENT_TRUSTED_PIN);
+  window_state()->OnWMEvent(&trusted_pin_event);
+  EXPECT_TRUE(window_state()->IsPinned());
+  EXPECT_TRUE(GetScreenPinningController()->IsPinned());
+  delegate()->mark_as_deleted();
+  widget()->CloseNow();
+}
+
 TEST_F(ClientControlledStateTest, MoveWindowToDisplay) {
   UpdateDisplay("500x500, 500x500");
 
@@ -406,6 +429,27 @@ TEST_F(ClientControlledStateTest, MoveWindowToDisplay) {
   // coordinates.
   EXPECT_EQ(second_display_id, screen->GetDisplayNearestWindow(window()).id());
   EXPECT_EQ(gfx::Rect(0, 0, 100, 100), delegate()->requested_bounds());
+}
+
+TEST_F(ClientControlledStateTest, MoveWindowToDisplayWindowVisibility) {
+  UpdateDisplay("1000x500, 500x500");
+
+  state()->set_bounds_locally(true);
+  widget()->SetBounds(gfx::Rect(600, 0, 100, 200));
+  state()->set_bounds_locally(false);
+  EXPECT_EQ(gfx::Rect(600, 0, 100, 200), widget()->GetWindowBoundsInScreen());
+
+  display::Screen* screen = display::Screen::GetScreen();
+
+  const int64_t first_display_id = screen->GetAllDisplays()[0].id();
+  const int64_t second_display_id = screen->GetAllDisplays()[1].id();
+  EXPECT_EQ(first_display_id, screen->GetDisplayNearestWindow(window()).id());
+
+  MoveWindowToDisplay(window(), second_display_id);
+
+  // Ensure |ash::wm::kMinimumOnScreenArea + 1| window visibility for window
+  // added to a new workspace.
+  EXPECT_EQ(gfx::Rect(1474, 0, 100, 200), widget()->GetWindowBoundsInScreen());
 }
 
 }  // namespace wm

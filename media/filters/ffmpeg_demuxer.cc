@@ -23,7 +23,6 @@
 #include "base/sys_byteorder.h"
 #include "base/task_runner_util.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -1709,8 +1708,10 @@ void FFmpegDemuxer::OnEnabledAudioTracksChanged(
 
   std::set<FFmpegDemuxerStream*> enabled_streams;
   for (const auto& id : track_ids) {
-    FFmpegDemuxerStream* stream = track_id_to_demux_stream_map_[id];
-    DCHECK(stream);
+    auto it = track_id_to_demux_stream_map_.find(id);
+    if (it == track_id_to_demux_stream_map_.end())
+      continue;
+    FFmpegDemuxerStream* stream = it->second;
     DCHECK_EQ(DemuxerStream::AUDIO, stream->type());
     // TODO(servolk): Remove after multiple enabled audio tracks are supported
     // by the media::RendererImpl.
@@ -1745,9 +1746,12 @@ void FFmpegDemuxer::OnSelectedVideoTrackChanged(
 
   FFmpegDemuxerStream* selected_stream = nullptr;
   if (track_id) {
-    selected_stream = track_id_to_demux_stream_map_[*track_id];
-    DCHECK(selected_stream);
-    DCHECK_EQ(DemuxerStream::VIDEO, selected_stream->type());
+    auto it = track_id_to_demux_stream_map_.find(*track_id);
+    if (it != track_id_to_demux_stream_map_.end()) {
+      selected_stream = it->second;
+      DCHECK(selected_stream);
+      DCHECK_EQ(DemuxerStream::VIDEO, selected_stream->type());
+    }
   }
 
   // First disable all streams that need to be disabled and then enable the
@@ -1878,7 +1882,7 @@ bool FFmpegDemuxer::StreamsHaveAvailableCapacity() {
 bool FFmpegDemuxer::IsMaxMemoryUsageReached() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  size_t memory_left = kDemuxerMemoryLimit;
+  size_t memory_left = GetDemuxerMemoryLimit();
   for (const auto& stream : streams_) {
     if (!stream)
       continue;

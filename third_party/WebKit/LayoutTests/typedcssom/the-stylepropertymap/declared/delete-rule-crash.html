@@ -12,7 +12,7 @@
 <script>
 test(() => {
   var sheet = document.styleSheets[0];
-  var styleMap = sheet.cssRules[0].attributeStyleMap;
+  var styleMap = sheet.cssRules[0].styleMap;
   sheet.deleteRule(0);
   gc();
 
@@ -20,10 +20,10 @@ test(() => {
   styleMap.get('color');
   styleMap.getAll('color');
   [...styleMap];
-  styleMap.getProperties();
   styleMap.append('transition-duration', '1s');
   styleMap.delete('color');
   styleMap.set('width', '10px');
-  styleMap.update('width', () => CSS.px(1));
+  styleMap.clear();
+  styleMap.size;
 }, "Deleting a style rule does not crash the corresponding declared style map");
 </script>

@@ -16,11 +16,28 @@ function isControlVisible(control) {
     return (display != "none" && visibility == "visible");
 }
 
+function mediaControls(videoElement) {
+  var controlID = '-webkit-media-controls';
+  var element = mediaControlsElement(window.internals.shadowRoot(videoElement).firstChild, controlID);
+  if (!element)
+    throw 'Failed to find media controls';
+  return element;
+}
+
 function castButton(videoElement) {
     var controlID = '-internal-media-controls-cast-button';
     var button = mediaControlsElement(window.internals.shadowRoot(videoElement).firstChild, controlID);
     if (!button)
         throw 'Failed to find cast button';
+    return button;
+}
+
+function pictureInPictureButton(videoElement) {
+    var controlID = '-internal-media-controls-picture-in-picture-button';
+
+    var button = mediaControlsElement(window.internals.shadowRoot(videoElement).firstChild, controlID);
+    if (!button)
+        throw 'Failed to find picture in picture button';
     return button;
 }
 
@@ -206,11 +223,20 @@ function timelineThumb(videoElement) {
 }
 
 function timelineThumbCurrentTime(videoElement) {
+    const controlID = '-internal-media-controls-thumb-current-time';
     const timeline = timelineElement(videoElement);
-    const thumb = window.internals.shadowRoot(timeline).getElementById('thumb-current-time');
+    const thumb = mediaControlsElement(window.internals.shadowRoot(timeline).firstChild, controlID);
     if (!thumb)
         throw 'Failed to find timeline current time';
     return thumb;
+}
+
+function scrubbingMessageElement(videoElement) {
+    var controlID = '-internal-media-controls-scrubbing-message';
+    var button = mediaControlsElement(window.internals.shadowRoot(videoElement).firstChild, controlID);
+    if (!button)
+        throw 'Failed to find scrubbing message element';
+    return button;
 }
 
 function clickAtCoordinates(x, y)
@@ -321,6 +347,23 @@ function mediaControlsOverlayPlayButtonInternal(videoElement) {
   return element;
 }
 
+function pictureInPictureInterstitial(videoElement) {
+  var controlID = '-internal-picture-in-picture-icon';
+
+  var interstitial = getElementByPseudoId(window.internals.shadowRoot(videoElement).firstChild, controlID);
+  if (!interstitial)
+      throw 'Failed to find picture in picture interstitial';
+  return interstitial;
+}
+
+function checkPictureInPictureInterstitialDoesNotExist(videoElement) {
+  var controlID = '-internal-picture-in-picture-icon';
+
+  var interstitial = getElementByPseudoId(internals.shadowRoot(videoElement), controlID);
+  if (interstitial)
+      throw 'Should not have a picture in picture interstitial';
+}
+
 function doubleTapAtCoordinates(x, y, timeout, callback) {
   if (timeout == undefined)
     timeout = 100;
@@ -360,4 +403,48 @@ function enableDoubleTapToJumpForTest(t) {
     internals.runtimeFlags.doubleTapToJumpOnVideoEnabled =
         doubleTapToJumpOnVideoEnabledValue;
   });
+}
+
+function enablePictureInPictureForTest(t) {
+  var pictureInPictureEnabledValue =
+      internals.runtimeFlags.pictureInPictureEnabled;
+  internals.runtimeFlags.pictureInPictureEnabled = true;
+
+  t.add_cleanup(() => {
+    internals.runtimeFlags.pictureInPictureEnabled =
+        pictureInPictureEnabledValue;
+  });
+}
+
+function traverseNextNode(node, stayWithin) {
+    var nextNode = node.firstChild;
+    if (nextNode)
+        return nextNode;
+
+    if (stayWithin && node === stayWithin)
+        return null;
+
+    nextNode = node.nextSibling;
+    if (nextNode)
+        return nextNode;
+
+    nextNode = node;
+    while (nextNode && !nextNode.nextSibling && (!stayWithin || !nextNode.parentNode || nextNode.parentNode !== stayWithin))
+        nextNode = nextNode.parentNode;
+    if (!nextNode)
+        return null;
+
+    return nextNode.nextSibling;
+}
+
+function getElementByPseudoId(root, pseudoId) {
+    if (!window.internals)
+        return null;
+    var node = root;
+    while (node) {
+        if (node.nodeType === Node.ELEMENT_NODE && internals.shadowPseudoId(node) === pseudoId)
+            return node;
+        node = traverseNextNode(node, root);
+    }
+    return null;
 }

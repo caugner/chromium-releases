@@ -3,6 +3,17 @@ Not scaled:
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [1600, 1200],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [1600, 1200],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [4008, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
@@ -48,6 +59,17 @@ Scale=0.5:
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [1600, 1200],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [1600, 1200],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [4008, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
@@ -93,6 +115,17 @@ Scale=1.5:
   "layers": [
     {
       "name": "LayoutView #document",
+      "bounds": [1600, 1200],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [1600, 1200],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
       "bounds": [4008, 4016],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"

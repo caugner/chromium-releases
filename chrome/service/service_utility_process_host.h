@@ -11,11 +11,10 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/services/printing/public/interfaces/pdf_to_emf_converter.mojom.h"
+#include "chrome/services/printing/public/mojom/pdf_to_emf_converter.mojom.h"
 #include "content/public/common/child_process_host_delegate.h"
 #include "ipc/ipc_platform_file.h"
 #include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
-#include "services/service_manager/public/interfaces/service.mojom.h"
 
 namespace base {
 class CommandLine;
@@ -26,6 +25,7 @@ class SingleThreadTaskRunner;
 
 namespace content {
 class ChildProcessHost;
+class ServiceManagerConnection;
 }
 
 namespace printing {
@@ -35,9 +35,15 @@ struct PrinterCapsAndDefaults;
 struct PrinterSemanticCapsAndDefaults;
 }  // namespace printing
 
+namespace service_manager {
+class ServiceManager;
+}
+
 // Acts as the service-side host to a utility child process. A
 // utility process is a short-lived sandboxed process that is created to run
 // a specific task.
+// This class is expected to delete itself IFF one of its Start methods has been
+// called.
 class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
  public:
   // Consumers of ServiceUtilityProcessHost must implement this interface to
@@ -123,10 +129,10 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
 
  private:
   // Starts a process.  Returns true iff it succeeded.
-  bool StartProcess(bool no_sandbox);
+  bool StartProcess(bool sandbox);
 
   // Launch the child process synchronously.
-  bool Launch(base::CommandLine* cmd_line, bool no_sandbox);
+  bool Launch(base::CommandLine* cmd_line, bool sandbox);
 
   base::ProcessHandle handle() const { return process_.Handle(); }
 
@@ -161,7 +167,9 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   class PdfToEmfState;
   std::unique_ptr<PdfToEmfState> pdf_to_emf_state_;
 
-  service_manager::mojom::ServicePtr utility_process_connection_;
+  std::unique_ptr<service_manager::ServiceManager> service_manager_;
+  std::unique_ptr<content::ServiceManagerConnection>
+      service_manager_connection_;
 
   base::WeakPtrFactory<ServiceUtilityProcessHost> weak_ptr_factory_;
 

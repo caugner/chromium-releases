@@ -9,7 +9,7 @@
 
 #include "base/time/time.h"
 #include "base/trace_event/blame_context.h"
-#include "platform/scheduler/base/task_queue_manager.h"
+#include "platform/scheduler/base/task_queue_manager_impl.h"
 #include "platform/scheduler/base/time_domain.h"
 #include "platform/scheduler/base/work_queue.h"
 #include "platform/scheduler/util/tracing_helper.h"
@@ -38,7 +38,7 @@ const char* TaskQueue::PriorityToString(TaskQueue::QueuePriority priority) {
 
 namespace internal {
 
-TaskQueueImpl::TaskQueueImpl(TaskQueueManager* task_queue_manager,
+TaskQueueImpl::TaskQueueImpl(TaskQueueManagerImpl* task_queue_manager,
                              TimeDomain* time_domain,
                              const TaskQueue::Spec& spec)
     : name_(spec.name),
@@ -46,9 +46,7 @@ TaskQueueImpl::TaskQueueImpl(TaskQueueManager* task_queue_manager,
       any_thread_(task_queue_manager, time_domain),
       main_thread_only_(task_queue_manager, this, time_domain),
       should_monitor_quiescence_(spec.should_monitor_quiescence),
-      should_notify_observers_(spec.should_notify_observers),
-      should_report_when_execution_blocked_(
-          spec.should_report_when_execution_blocked) {
+      should_notify_observers_(spec.should_notify_observers) {
   DCHECK(time_domain);
   time_domain->RegisterQueue(this);
 }
@@ -56,12 +54,32 @@ TaskQueueImpl::TaskQueueImpl(TaskQueueManager* task_queue_manager,
 TaskQueueImpl::~TaskQueueImpl() {
 #if DCHECK_IS_ON()
   base::AutoLock lock(any_thread_lock_);
-  // NOTE this check shouldn't fire because |TaskQueueManager::queues_|
-  // contains a strong reference to this TaskQueueImpl and the TaskQueueManager
-  // destructor calls UnregisterTaskQueue on all task queues.
+  // NOTE this check shouldn't fire because |TaskQueueManagerImpl::queues_|
+  // contains a strong reference to this TaskQueueImpl and the
+  // TaskQueueManagerImpl destructor calls UnregisterTaskQueue on all task
+  // queues.
   DCHECK(any_thread().task_queue_manager == nullptr)
       << "UnregisterTaskQueue must be called first!";
+  DCHECK(main_thread_only().on_task_started_handler.is_null());
+  DCHECK(main_thread_only().on_task_completed_handler.is_null());
 #endif
+}
+
+TaskQueueImpl::PostTaskResult::PostTaskResult()
+    : task(base::OnceClosure(), base::Location()) {}
+
+TaskQueueImpl::PostTaskResult::PostTaskResult(bool success,
+                                              TaskQueue::PostedTask task)
+    : success(success), task(std::move(task)) {}
+
+TaskQueueImpl::PostTaskResult TaskQueueImpl::PostTaskResult::Success() {
+  return PostTaskResult(
+      true, TaskQueue::PostedTask(base::OnceClosure(), base::Location()));
+}
+
+TaskQueueImpl::PostTaskResult TaskQueueImpl::PostTaskResult::Fail(
+    TaskQueue::PostedTask task) {
+  return PostTaskResult(false, std::move(task));
 }
 
 TaskQueueImpl::Task::Task(TaskQueue::PostedTask task,
@@ -87,14 +105,14 @@ TaskQueueImpl::Task::Task(TaskQueue::PostedTask task,
   sequence_num = sequence_number;
 }
 
-TaskQueueImpl::AnyThread::AnyThread(TaskQueueManager* task_queue_manager,
+TaskQueueImpl::AnyThread::AnyThread(TaskQueueManagerImpl* task_queue_manager,
                                     TimeDomain* time_domain)
     : task_queue_manager(task_queue_manager), time_domain(time_domain) {}
 
 TaskQueueImpl::AnyThread::~AnyThread() = default;
 
 TaskQueueImpl::MainThreadOnly::MainThreadOnly(
-    TaskQueueManager* task_queue_manager,
+    TaskQueueManagerImpl* task_queue_manager,
     TaskQueueImpl* task_queue,
     TimeDomain* time_domain)
     : task_queue_manager(task_queue_manager),
@@ -169,20 +187,22 @@ bool TaskQueueImpl::RunsTasksInCurrentSequence() const {
   return base::PlatformThread::CurrentId() == thread_id_;
 }
 
-bool TaskQueueImpl::PostDelayedTask(TaskQueue::PostedTask task) {
+TaskQueueImpl::PostTaskResult TaskQueueImpl::PostDelayedTask(
+    TaskQueue::PostedTask task) {
   if (task.delay.is_zero())
     return PostImmediateTaskImpl(std::move(task));
 
   return PostDelayedTaskImpl(std::move(task));
 }
 
-bool TaskQueueImpl::PostImmediateTaskImpl(TaskQueue::PostedTask task) {
+TaskQueueImpl::PostTaskResult TaskQueueImpl::PostImmediateTaskImpl(
+    TaskQueue::PostedTask task) {
   // Use CHECK instead of DCHECK to crash earlier. See http://crbug.com/711167
   // for details.
   CHECK(task.callback);
   base::AutoLock lock(any_thread_lock_);
   if (!any_thread().task_queue_manager)
-    return false;
+    return PostTaskResult::Fail(std::move(task));
 
   EnqueueOrder sequence_number =
       any_thread().task_queue_manager->GetNextSequenceNumber();
@@ -190,10 +210,11 @@ bool TaskQueueImpl::PostImmediateTaskImpl(TaskQueue::PostedTask task) {
   PushOntoImmediateIncomingQueueLocked(Task(std::move(task),
                                             any_thread().time_domain->Now(),
                                             sequence_number, sequence_number));
-  return true;
+  return PostTaskResult::Success();
 }
 
-bool TaskQueueImpl::PostDelayedTaskImpl(TaskQueue::PostedTask task) {
+TaskQueueImpl::PostTaskResult TaskQueueImpl::PostDelayedTaskImpl(
+    TaskQueue::PostedTask task) {
   // Use CHECK instead of DCHECK to crash earlier. See http://crbug.com/711167
   // for details.
   CHECK(task.callback);
@@ -201,7 +222,7 @@ bool TaskQueueImpl::PostDelayedTaskImpl(TaskQueue::PostedTask task) {
   if (base::PlatformThread::CurrentId() == thread_id_) {
     // Lock-free fast path for delayed tasks posted from the main thread.
     if (!main_thread_only().task_queue_manager)
-      return false;
+      return PostTaskResult::Fail(std::move(task));
 
     EnqueueOrder sequence_number =
         main_thread_only().task_queue_manager->GetNextSequenceNumber();
@@ -218,7 +239,7 @@ bool TaskQueueImpl::PostDelayedTaskImpl(TaskQueue::PostedTask task) {
     // assumption prove to be false in future, we may need to revisit this.
     base::AutoLock lock(any_thread_lock_);
     if (!any_thread().task_queue_manager)
-      return false;
+      return PostTaskResult::Fail(std::move(task));
 
     EnqueueOrder sequence_number =
         any_thread().task_queue_manager->GetNextSequenceNumber();
@@ -228,7 +249,7 @@ bool TaskQueueImpl::PostDelayedTaskImpl(TaskQueue::PostedTask task) {
     PushOntoDelayedIncomingQueueLocked(
         Task(std::move(task), time_domain_delayed_run_time, sequence_number));
   }
-  return true;
+  return PostTaskResult::Success();
 }
 
 void TaskQueueImpl::PushOntoDelayedIncomingQueueFromMainThread(
@@ -458,8 +479,9 @@ void TaskQueueImpl::TraceQueueSize() const {
 void TaskQueueImpl::SetQueuePriority(TaskQueue::QueuePriority priority) {
   if (!main_thread_only().task_queue_manager || priority == GetQueuePriority())
     return;
-  main_thread_only().task_queue_manager->selector_.SetQueuePriority(this,
-                                                                    priority);
+  main_thread_only()
+      .task_queue_manager->main_thread_only()
+      .selector.SetQueuePriority(this, priority);
 }
 
 TaskQueue::QueuePriority TaskQueueImpl::GetQueuePriority() const {
@@ -824,13 +846,17 @@ void TaskQueueImpl::EnableOrDisableWithSelector(bool enable) {
 
     ScheduleDelayedWorkInTimeDomain(main_thread_only().time_domain->Now());
 
-    // Note the selector calls TaskQueueManager::OnTaskQueueEnabled which posts
-    // a DoWork if needed.
-    main_thread_only().task_queue_manager->selector_.EnableQueue(this);
+    // Note the selector calls TaskQueueManagerImpl::OnTaskQueueEnabled which
+    // posts a DoWork if needed.
+    main_thread_only()
+        .task_queue_manager->main_thread_only()
+        .selector.EnableQueue(this);
   } else {
     if (!main_thread_only().delayed_incoming_queue.empty())
       main_thread_only().time_domain->CancelDelayedWork(this);
-    main_thread_only().task_queue_manager->selector_.DisableQueue(this);
+    main_thread_only()
+        .task_queue_manager->main_thread_only()
+        .selector.DisableQueue(this);
   }
 }
 
@@ -982,7 +1008,8 @@ bool TaskQueueImpl::IsUnregistered() const {
   return !any_thread().task_queue_manager;
 }
 
-base::WeakPtr<TaskQueueManager> TaskQueueImpl::GetTaskQueueManagerWeakPtr() {
+base::WeakPtr<TaskQueueManagerImpl>
+TaskQueueImpl::GetTaskQueueManagerWeakPtr() {
   return main_thread_only().task_queue_manager->GetWeakPtr();
 }
 

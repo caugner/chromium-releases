@@ -182,31 +182,6 @@
     "args": ["--enable-threaded-compositing"]
   },
   {
-    "prefix": "rootlayerscrolls",
-    "base": "scrollingcoordinator",
-    "args": ["--root-layer-scrolls"]
-  },
-  {
-    "prefix": "rootlayerscrolls",
-    "base": "fast/scrolling",
-    "args": ["--root-layer-scrolls"]
-  },
-  {
-    "prefix": "rootlayerscrolls",
-    "base": "rootscroller",
-    "args": ["--root-layer-scrolls"]
-  },
-  {
-    "prefix": "rootlayerscrolls",
-    "base": "fast/history/scroll-restoration",
-    "args": ["--root-layer-scrolls"]
-  },
-  {
-    "prefix": "rootlayerscrolls",
-    "base": "scrollbars",
-    "args": ["--root-layer-scrolls"]
-  },
-  {
     "prefix": "scroll_customization",
     "base": "fast/scroll-behavior",
     "args": ["--enable-blink-features=ScrollCustomization"]
@@ -278,46 +253,39 @@
     "args": ["--enable-slimming-paint-v2"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "compositing",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "paint",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "fast/borders",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "fast/multicol",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "fast/pagination",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "fragmentation",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
-    "prefix": "spv175",
+    "prefix": "disable-spv175",
     "base": "printing",
-    "args": ["--enable-slimming-paint-v175", "--root-layer-scrolls"],
-    "references_use_default_args": true
+    "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
   {
     "prefix": "scalefactor200",
@@ -351,7 +319,13 @@
   },
   {
     "prefix": "wheelscrolllatching",
-    "base": "fast/compositor-wheel-scroll-latching",
+    "base": "fast/compositor-wheel-scroll-latching/animated-scroll",
+    "args": ["--enable-features=TouchpadAndWheelScrollLatching",
+             "--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "wheelscrolllatching",
+    "base": "fast/compositor-wheel-scroll-latching/non-animated-scroll",
     "args": ["--enable-features=TouchpadAndWheelScrollLatching",
              "--enable-threaded-compositing",
              "--disable-smooth-scrolling"]
@@ -392,116 +366,76 @@
     "args": ["--enable-features=PWAFullCodeCache"]
   },
   {
-    "prefix": "service-worker-script-streaming",
-    "base": "external/wpt/service-workers",
-    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
-  },
-  {
-    "prefix": "service-worker-script-streaming",
-    "base": "http/tests/serviceworker",
-    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
-  },
-  {
-    "prefix": "service-worker-script-streaming",
-    "base": "http/tests/fetch/serviceworker",
-    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
-  },
-  {
-    "prefix": "service-worker-script-streaming",
-    "base": "http/tests/fetch/serviceworker-proxied",
-    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
-  },
-  {
     "prefix": "layout_ng",
     "base": "fast/block/basic",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/block/margin-collapse",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/block/float",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/linebox",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/normal-flow",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/abspos",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/positioning",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/floats",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "external/wpt/css/CSS2/floats-clear",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "overflow",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/inline",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
   },
   {
     "prefix": "layout_ng",
     "base": "fast/writing-mode",
-    "args": ["--enable-blink-features=LayoutNG,LayoutNGPaintFragments",
+    "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
-  },
-  {
-    "prefix": "feature-policy",
-    "base": "http/tests/feature-policy",
-    "args": ["--enable-blink-features=FeaturePolicy"]
-  },
-  {
-    "prefix": "feature-policy-experimental-features",
-    "base": "http/tests/feature-policy-experimental-features",
-    "args": ["--enable-blink-features=FeaturePolicy,FeaturePolicyExperimentalFeatures"]
-  },
-  {
-    "prefix": "mojo-localstorage",
-    "base": "external/wpt/webstorage",
-    "args": ["--disable-mojo-local-storage"]
-  },
-  {
-    "prefix": "mojo-localstorage",
-    "base": "storage/domstorage/localstorage",
-    "args": ["--disable-mojo-local-storage"]
   },
   {
     "prefix": "print_browser",
@@ -574,6 +508,12 @@
     "args": ["--force-presentation-receiver-for-testing"]
   },
   {
+    "prefix": "sharedarraybuffer",
+    "base": "external/wpt/html/infrastructure/safe-passing-of-structured-data/shared-array-buffers",
+    "args": ["--js-flags=--harmony-sharedarraybuffer",
+             "--enable-blink-features=SharedArrayBuffer"]
+  },
+  {
     "prefix": "longtask-v2",
     "base": "http/tests/performance-timing/longtask-v2",
     "args": ["--enable-blink-features=LongTaskV2"]
@@ -611,22 +551,27 @@
   {
     "prefix": "incremental-shadow-dom",
     "base": "external/wpt/shadow-dom",
-    "args": ["--enable-blink-features=IncrementalShadowDOM"]
+    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
   },
   {
     "prefix": "incremental-shadow-dom",
     "base": "fast/dom/shadow",
-    "args": ["--enable-blink-features=IncrementalShadowDOM"]
+    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
   },
   {
     "prefix": "incremental-shadow-dom",
     "base": "shadow-dom",
-    "args": ["--enable-blink-features=IncrementalShadowDOM"]
+    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
+  },
+  {
+    "prefix": "incremental-shadow-dom",
+    "base": "html/details_summary",
+    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
   },
   {
     "prefix": "incremental-shadow-dom",
     "base": "external/wpt/css/css-scoping",
-    "args": ["--enable-blink-features=IncrementalShadowDOM"]
+    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
   },
   {
     "prefix": "modern-media-controls",
@@ -637,6 +582,11 @@
     "prefix": "unified-autoplay",
     "base": "external/wpt/feature-policy",
     "args": ["--autoplay-policy=document-user-activation-required"]
+  },
+  {
+    "prefix": "sampling-heap-profiler",
+    "base": "inspector-protocol/memory",
+    "args": ["--sampling-heap-profiler"]
   },
   {
     "prefix": "navigation-mojo-response",

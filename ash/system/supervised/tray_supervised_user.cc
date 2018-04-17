@@ -18,8 +18,8 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/notification.h"
-#include "ui/message_center/notification_delegate.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 
 using base::UTF8ToUTF16;
 using message_center::MessageCenter;
@@ -100,6 +100,11 @@ void TraySupervisedUser::OnUserSessionUpdated(const AccountId& account_id) {
 }
 
 void TraySupervisedUser::CreateOrUpdateNotification() {
+  // No notification for the child user.
+  if (Shell::Get()->session_controller()->IsUserChild())
+    return;
+
+  // Regular supervised user.
   std::unique_ptr<Notification> notification =
       Notification::CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId,
