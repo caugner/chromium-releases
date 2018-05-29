@@ -69,32 +69,32 @@
         },
         {
           "object": "InlineTextBox 'away,\n'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {
           "object": "InlineTextBox 'but generally, just as she had got its'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {
           "object": "InlineTextBox 'comfortably enough, under her arm, with its legs'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {
           "object": "InlineTextBox 'hanging down,\n'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {
           "object": "InlineTextBox 'neck nicely straightened\n'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {
           "object": "InlineTextBox 'out, and was going to give the'",
-          "rect": [14, 80, 355, 119],
+          "rect": [14, 80, 354, 119],
           "reason": "disappeared"
         },
         {

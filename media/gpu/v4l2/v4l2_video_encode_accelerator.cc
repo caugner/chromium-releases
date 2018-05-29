@@ -95,6 +95,9 @@ struct V4L2VideoEncodeAccelerator::BitstreamBufferRef {
 
 V4L2VideoEncodeAccelerator::InputRecord::InputRecord() : at_device(false) {}
 
+V4L2VideoEncodeAccelerator::InputRecord::InputRecord(const InputRecord&) =
+    default;
+
 V4L2VideoEncodeAccelerator::InputRecord::~InputRecord() {}
 
 V4L2VideoEncodeAccelerator::OutputRecord::OutputRecord()
@@ -109,6 +112,9 @@ V4L2VideoEncodeAccelerator::InputFrameInfo::InputFrameInfo(
     scoped_refptr<VideoFrame> frame,
     bool force_keyframe)
     : frame(frame), force_keyframe(force_keyframe) {}
+
+V4L2VideoEncodeAccelerator::InputFrameInfo::InputFrameInfo(
+    const InputFrameInfo&) = default;
 
 V4L2VideoEncodeAccelerator::InputFrameInfo::~InputFrameInfo() {}
 
@@ -386,7 +392,8 @@ void V4L2VideoEncodeAccelerator::FlushTask(FlushCallback flush_callback) {
     VLOGF(1) << "Flush failed: there is a pending flush, "
              << "or VEA is not in kEncoding state";
     NOTIFY_ERROR(kIllegalStateError);
-    std::move(flush_callback).Run(false);
+    child_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(std::move(flush_callback), false));
     return;
   }
   flush_callback_ = std::move(flush_callback);
@@ -628,7 +635,8 @@ void V4L2VideoEncodeAccelerator::Enqueue() {
       // nothing left to process, so we can return flush success back to the
       // client.
       if (!input_streamon_) {
-        std::move(flush_callback_).Run(true);
+        child_task_runner_->PostTask(
+            FROM_HERE, base::BindOnce(std::move(flush_callback_), true));
         return;
       }
       struct v4l2_encoder_cmd cmd;
@@ -637,7 +645,8 @@ void V4L2VideoEncodeAccelerator::Enqueue() {
       if (device_->Ioctl(VIDIOC_ENCODER_CMD, &cmd) != 0) {
         VPLOGF(1) << "ioctl() failed: VIDIOC_ENCODER_CMD";
         NOTIFY_ERROR(kPlatformFailureError);
-        std::move(flush_callback_).Run(false);
+        child_task_runner_->PostTask(
+            FROM_HERE, base::BindOnce(std::move(flush_callback_), false));
         return;
       }
       encoder_state_ = kFlushing;
@@ -732,17 +741,6 @@ void V4L2VideoEncodeAccelerator::Dequeue() {
       VPLOGF(1) << "ioctl() failed: VIDIOC_DQBUF";
       NOTIFY_ERROR(kPlatformFailureError);
       return;
-    }
-    if ((encoder_state_ == kFlushing) && (dqbuf.flags & V4L2_BUF_FLAG_LAST)) {
-      DVLOGF(3) << "Flush completed. Start the encoder again.";
-      encoder_state_ = kEncoding;
-      // Notify client that flush has finished successfully.
-      std::move(flush_callback_).Run(true);
-      // Start the encoder again.
-      struct v4l2_encoder_cmd cmd;
-      memset(&cmd, 0, sizeof(cmd));
-      cmd.cmd = V4L2_ENC_CMD_START;
-      IOCTL_OR_ERROR_RETURN(VIDIOC_ENCODER_CMD, &cmd);
     }
     const bool key_frame = ((dqbuf.flags & V4L2_BUF_FLAG_KEYFRAME) != 0);
     OutputRecord& output_record = output_buffer_map_[dqbuf.index];

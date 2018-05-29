@@ -138,7 +138,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="2422937916923936891">Položka nabídky – zaškrtávací políčko</translation>
 <translation id="2428534162001909979">Příkazové nabídky</translation>
 <translation id="2429669115401274487">PM</translation>
-<translation id="2435413342408885429"><ph name="KEY" /> je nyní nový modifikátor funkce ChromeVox.</translation>
+<translation id="2435413342408885429"><ph name="KEY" /> je teď nový modifikátor funkce ChromeVox.</translation>
 <translation id="2450814015951372393">Zaškrtávací políčko</translation>
 <translation id="2462626033734746142">Skupina přepínačů</translation>
 <translation id="2471138580042810658">Nadpis 6</translation>
@@ -237,7 +237,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="3241638166094654466">Buňky na každém řádku:</translation>
 <translation id="3286390186030710347">Posuvník</translation>
 <translation id="3299925995433437805">Žádný další navštívený odkaz není.</translation>
-<translation id="3300348286427369683">Podpora formátovaného textu. ChromeVox nyní podporuje pole s formátovaným textem, včetně příkazů přeskočení, ovládání kurzoru pomocí tlačítek braillského řádku, výběru a dalších funkcí.</translation>
+<translation id="3300348286427369683">Podpora formátovaného textu. ChromeVox teď podporuje pole s formátovaným textem, včetně příkazů přeskočení, ovládání kurzoru pomocí tlačítek braillského řádku, výběru a dalších funkcí.</translation>
 <translation id="3307886118343381874">Přejít na konec tabulky</translation>
 <translation id="3311969765485641742">Chcete-li upozornění zkontrolovat, stiskněte klávesy Alt+Shift+A</translation>
 <translation id="3312997241656799641">Další navštívený odkaz</translation>
@@ -369,6 +369,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="4176463684765177261">Deaktivováno</translation>
 <translation id="4188530942454211480">Předchozí věta</translation>
 <translation id="4191918948604314587">Tlačítko</translation>
+<translation id="419265409837491189">Přejít na předchozí sloupec</translation>
 <translation id="4202186506458631436">Posunout doprava</translation>
 <translation id="4206289001967551965">V tabulce</translation>
 <translation id="4209770650650780359">Stisknutím šipky nahoru nebo dolů lze vybrat návrhy automatického dokončení.</translation>
@@ -419,6 +420,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="4660783501463101648">Byl odebrán klasický režim. Byl odstraněn přepínač klávesnice, pomocí kterého bylo možné vrátit se do klasického režimu ChromeVox.</translation>
 <translation id="4661075872484491155">strom</translation>
 <translation id="4668929960204016307">,</translation>
+<translation id="4677535310137735442">Přejít na další sloupec</translation>
 <translation id="4688873778442829762">mřížka</translation>
 <translation id="4693675773662933727">Předchozí orientační bod</translation>
 <translation id="4696413482802371445">Žádný další nadpis 5. úrovně.</translation>
@@ -434,6 +436,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="4826415162591436065">Přejít dopředu</translation>
 <translation id="4826604887384865800">Další skok</translation>
 <translation id="4827410568042294688">nevybráno</translation>
+<translation id="4839925464551908214">Přejít na předchozí řádek</translation>
 <translation id="4842108708071771135">Žádná další bloková citace.</translation>
 <translation id="4844625982113518938">Stisknutím libovolné klávesy se dozvíte její název. Stisknutím kombinace kláves Ctrl+W režim výuky zavřete.</translation>
 <translation id="4846428657345567687">Vítejte v nástroji ChromeVox!</translation>
@@ -451,7 +454,7 @@ Chcete-li výukový program ukončit, přejděte pomocí nástroje ChromeVox na 
 <translation id="4973717656530883744">Min <ph name="X" /></translation>
 <translation id="4973762002207131920">Přepnuto na klávesu <ph name="KEY" />.</translation>
 <translation id="4975416682604111799">ms</translation>
-<translation id="49787999531187221">ChromeVox je nyní neaktivní.</translation>
+<translation id="49787999531187221">ChromeVox je teď neaktivní.</translation>
 <translation id="4979404613699303341">Předchozí tlačítko</translation>
 <translation id="4982773647088557172"><ph name="VALUE" />, <ph name="NAME" />, seznam</translation>
 <translation id="4983588134362688868">Přejít na začátek stránky</translation>
@@ -788,6 +791,7 @@ Chcete-li otevřít nabídku prohlížeče Chrome, stiskněte Alt + F.</translat
 <translation id="8186185314313222077">přepnout zobrazení na celou obrazovku</translation>
 <translation id="8199231515320852133">Oznámit záhlaví aktuální buňky</translation>
 <translation id="820417203470636242">Prázdná buňka.</translation>
+<translation id="820469951249669083">Přejít na další řádek</translation>
 <translation id="8215202828671303819">Vícenásobný výběr</translation>
 <translation id="826991282343985864">ř$1s$2</translation>
 <translation id="8276439074553447000">Přejít na předchozí zaměřitelnou položku</translation>

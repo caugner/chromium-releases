@@ -1,4 +1,4 @@
-CONSOLE WARNING: line 74: 'webkitURL' is deprecated. Please use 'URL' instead.
+CONSOLE WARNING: line 78: 'webkitURL' is deprecated. Please use 'URL' instead.
 This test documents all interface attributes and methods on the global window object and element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -16,6 +16,15 @@ interface AbortSignal : EventTarget
     getter onabort
     method constructor
     setter onabort
+interface AbsoluteOrientationSensor : OrientationSensor
+    attribute @@toStringTag
+    method constructor
+interface Accelerometer : Sensor
+    attribute @@toStringTag
+    getter x
+    getter y
+    getter z
+    method constructor
 interface AnalyserNode : AudioNode
     attribute @@toStringTag
     getter fftSize
@@ -194,6 +203,24 @@ interface AudioWorklet : Worklet
     method constructor
 interface AudioWorkletNode : AudioNode
     attribute @@toStringTag
+    getter onprocessorerror
+    getter parameters
+    getter port
+    method constructor
+    setter onprocessorerror
+interface AuthenticatorAssertionResponse : AuthenticatorResponse
+    attribute @@toStringTag
+    getter authenticatorData
+    getter signature
+    getter userHandle
+    method constructor
+interface AuthenticatorAttestationResponse : AuthenticatorResponse
+    attribute @@toStringTag
+    getter attestationObject
+    method constructor
+interface AuthenticatorResponse
+    attribute @@toStringTag
+    getter clientDataJSON
     method constructor
 interface BarProp
     attribute @@toStringTag
@@ -365,6 +392,7 @@ interface CSSKeyframeRule : CSSRule
     getter style
     method constructor
     setter keyText
+    setter style
 interface CSSKeyframesRule : CSSRule
     attribute @@toStringTag
     getter cssRules
@@ -1089,28 +1117,6 @@ interface DataTransferItemList
     method clear
     method constructor
     method remove
-interface DataView
-    attribute @@toStringTag
-    getter buffer
-    getter byteLength
-    getter byteOffset
-    method constructor
-    method getFloat32
-    method getFloat64
-    method getInt16
-    method getInt32
-    method getInt8
-    method getUint16
-    method getUint32
-    method getUint8
-    method setFloat32
-    method setFloat64
-    method setInt16
-    method setInt32
-    method setInt8
-    method setUint16
-    method setUint32
-    method setUint8
 interface DelayNode : AudioNode
     attribute @@toStringTag
     getter delayTime
@@ -1752,6 +1758,12 @@ interface GamepadButton
 interface GamepadEvent : Event
     attribute @@toStringTag
     getter gamepad
+    method constructor
+interface Gyroscope : Sensor
+    attribute @@toStringTag
+    getter x
+    getter y
+    getter z
     method constructor
 interface HTMLAllCollection
     attribute @@toStringTag
@@ -3510,6 +3522,10 @@ interface InputDeviceCapabilities
     attribute @@toStringTag
     getter firesTouchEvents
     method constructor
+interface InputDeviceInfo : MediaDeviceInfo
+    attribute @@toStringTag
+    method constructor
+    method getCapabilities
 interface InputEvent : UIEvent
     attribute @@toStringTag
     getter data
@@ -3558,6 +3574,9 @@ interface KeyboardEvent : UIEvent
     method constructor
     method getModifierState
     method initKeyboardEvent
+interface LinearAccelerationSensor : Accelerometer
+    attribute @@toStringTag
+    method constructor
 interface Location
     attribute @@toStringTag
     method constructor
@@ -4146,6 +4165,11 @@ interface Option
     setter selected
     setter text
     setter value
+interface OrientationSensor : Sensor
+    attribute @@toStringTag
+    getter quaternion
+    method constructor
+    method populateMatrix
 interface OscillatorNode : AudioScheduledSourceNode
     attribute @@toStringTag
     getter detune
@@ -4517,6 +4541,13 @@ interface PromiseRejectionEvent : Event
     getter promise
     getter reason
     method constructor
+interface PublicKeyCredential : Credential
+    static method isUserVerifyingPlatformAuthenticatorAvailable
+    attribute @@toStringTag
+    getter rawId
+    getter response
+    method constructor
+    method getClientExtensionResults
 interface PushManager
     static getter supportedContentEncodings
     attribute @@toStringTag
@@ -4660,11 +4691,13 @@ interface RTCRtpReceiver
     getter track
     method constructor
     method getContributingSources
+    method getStats
 interface RTCRtpSender
     attribute @@toStringTag
     getter dtmf
     getter track
     method constructor
+    method getStats
     method replaceTrack
 interface RTCSessionDescription
     attribute @@toStringTag
@@ -4742,6 +4775,9 @@ interface ReadableStream
     method pipeThrough
     method pipeTo
     method tee
+interface RelativeOrientationSensor : OrientationSensor
+    attribute @@toStringTag
+    method constructor
 interface RemotePlayback : EventTarget
     attribute @@toStringTag
     getter onconnect
@@ -5963,6 +5999,24 @@ interface Selection
     method setBaseAndExtent
     method setPosition
     method toString
+interface Sensor : EventTarget
+    attribute @@toStringTag
+    getter activated
+    getter hasReading
+    getter onactivate
+    getter onerror
+    getter onreading
+    getter timestamp
+    method constructor
+    method start
+    method stop
+    setter onactivate
+    setter onerror
+    setter onreading
+interface SensorErrorEvent : Event
+    attribute @@toStringTag
+    getter error
+    method constructor
 interface ServiceWorker : EventTarget
     attribute @@toStringTag
     getter onerror
@@ -6310,6 +6364,10 @@ interface TouchList
 interface TrackEvent : Event
     attribute @@toStringTag
     getter track
+    method constructor
+interface TransformStream
+    getter readable
+    getter writable
     method constructor
 interface TransitionEvent : Event
     attribute @@toStringTag

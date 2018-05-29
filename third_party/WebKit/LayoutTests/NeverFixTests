@@ -45,7 +45,8 @@ fast/harness/results.html [ WontFix ]
 [ Win Linux ] fast/dom/partial-layout-overlay-scrollbars.html [ WontFix ]
 
 # Tests trak table support / letter spacing specific to Mac system font
-[ Win Linux Android Mac10.10 Mac10.11 ] fast/text/mac-system-ui-trak.html [ WontFix ]
+# Only maintain this for the latest macOS (and Retina is currently 10.12).
+[ Win Linux Android Mac10.10 Mac10.11 Mac10.12 Retina ] fast/text/mac-system-ui-trak.html [ WontFix ]
 
  # Mac's popup behavior is different.
 [ Mac ] fast/forms/select/menulist-onchange-fired-with-key-up-down.html [ WontFix ]
@@ -236,7 +237,7 @@ crbug.com/753080 external/wpt/css/css-transforms/ttwf-css-3d-polygon-cycle.html 
 
 # We could fix this test for us and upstream it if the test shell user agent
 # would let us differentiate test_shell and WebKit DumpTreeNode.
-crbug.com/7482 [ Win Mac ] http/tests/misc/timer-vs-loading.html [ WontFix ]
+crbug.com/7482 [ Linux Win Mac ] http/tests/misc/timer-vs-loading.html [ WontFix ]
 
 # On Linux bold emoji are already supported.
 crbug.com/551843 [ Linux ] fast/text/fallback-traits-fixup.html [ WontFix ]
@@ -274,8 +275,7 @@ crbug.com/627953 [ Android Linux Mac ] fast/text/symbol-cmap.html [ WontFix ]
 crbug.com/642912 http/tests/wasm/ [ WontFix ]
 
 # These tests require audio codecs which are generally not available;
-# these tests can still be run manually with --skiped=ignore.
-webaudio/codec-tests/mp3 [ WontFix ]
+# these tests can still be run manually with --skipped=ignore.
 webaudio/codec-tests/aac [ WontFix ]
 
 # WPT for CSS cascade
@@ -311,6 +311,8 @@ external/wpt/encrypted-media/drm-mp4-playback-temporary-multikey.https.html [ Wo
 external/wpt/encrypted-media/drm-mp4-playback-temporary-multikey-sequential.https.html [ WontFix ]
 external/wpt/encrypted-media/drm-mp4-playback-temporary-multikey-sequential-readyState.https.html [ WontFix ]
 external/wpt/encrypted-media/drm-mp4-playback-temporary-multisession.https.html [ WontFix ]
+external/wpt/encrypted-media/drm-mp4-playback-temporary-playduration-keystatus.html [ WontFix ]
+external/wpt/encrypted-media/drm-mp4-playback-temporary-playduration.html [ WontFix ]
 external/wpt/encrypted-media/drm-mp4-playback-temporary-setMediaKeys-after-src.https.html [ WontFix ]
 external/wpt/encrypted-media/drm-mp4-playback-temporary-setMediaKeys-after-update.https.html [ WontFix ]
 external/wpt/encrypted-media/drm-mp4-playback-temporary-setMediaKeys-immediately.https.html [ WontFix ]
@@ -748,8 +750,6 @@ external/wpt/css/css-writing-modes/first-page-vlr-003.xht [ WontFix ]
 external/wpt/css/css-writing-modes/first-page-vrl-002.xht [ WontFix ]
 external/wpt/css/css-writing-modes/page-flow-direction-002.xht [ WontFix ]
 external/wpt/css/css-writing-modes/page-flow-direction-003.xht [ WontFix ]
-external/wpt/css/css-writing-modes/page-flow-direction-slr-005.xht [ WontFix ]
-external/wpt/css/css-writing-modes/page-flow-direction-srl-004.xht [ WontFix ]
 external/wpt/css/selectors/hover-001-manual.html [ WontFix ]
 external/wpt/entries-api/errors-manual.html [ WontFix ]
 external/wpt/entries-api/filesystemdirectoryentry-attributes-manual.html [ WontFix ]
@@ -773,13 +773,13 @@ external/wpt/geolocation-API/getCurrentPosition_permission_allow-manual.html [ W
 external/wpt/geolocation-API/getCurrentPosition_permission_deny-manual.html [ WontFix ]
 external/wpt/geolocation-API/getCurrentPosition_permission-manual.html [ WontFix ]
 external/wpt/geolocation-API/watchPosition_permission-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/browser-state/navigator_online_event-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/manifest_main_empty-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/manifest_notchanged_online-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/manifest_section_empty-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/manifest_section_many-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/section_network_offline-manual.html [ WontFix ]
-external/wpt/html/browsers/offline/section_network_online-manual.html [ WontFix ]
+external/wpt/html/browsers/offline/browser-state/navigator_online_event-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/manifest_main_empty-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/manifest_notchanged_online-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/manifest_section_empty-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/manifest_section_many-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/section_network_offline-manual.https.html [ WontFix ]
+external/wpt/html/browsers/offline/section_network_online-manual.https.html [ WontFix ]
 external/wpt/html/browsers/windows/noreferrer-cross-origin-close-manual.sub.html [ WontFix ]
 external/wpt/html/browsers/windows/noreferrer-cross-origin-manual.html [ WontFix ]
 external/wpt/html/browsers/windows/noreferrer-cross-origin-window-name-manual.sub.html [ WontFix ]

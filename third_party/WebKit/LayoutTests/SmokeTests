@@ -64,14 +64,11 @@ css3/selectors3/xml/css3-modsel-18.xml
 css3/selectors3/xml/css3-modsel-61.xml
 css3/style-zoomed-image.html
 css3/supports-crash.html
-cssom/cssimportrule-media.html
 css-parser/color-escape-parsing.html
 css-parser/font-size-adjust.html
 custom-elements/array-squat-crash.html
 custom-elements/imports/upgrade-order.html
 custom-elements/spec/state-failed-create.html
-custom-properties/register-property.html
-custom-properties/var-reference-registered-properties.html
 device_orientation/motion/add-listener-from-callback.html
 device_orientation/orientation/create-event.html
 dom/attr/parent-adopt-node.html
@@ -158,6 +155,8 @@ external/wpt/css/cssom/cssom-cssText-serialize.html
 external/wpt/css/cssom/medialist-interfaces-004.html
 external/wpt/css/cssom-view/cssom-view/media-query-list-interface.xht
 external/wpt/css/cssom-view/cssom-view-window-screen-interface.html
+external/wpt/css/css-properties-values-api/register-property.html
+external/wpt/css/css-properties-values-api/var-reference-registered-properties.html
 external/wpt/css/cssom-view/ttwf-scrollintoview.html
 external/wpt/css/css-timing/cubic-bezier-timing-functions-output.html
 external/wpt/css/css-timing/frames-timing-functions-output.html
@@ -186,6 +185,7 @@ external/wpt/dom/nodes/Document-contentType/contentType/createHTMLDocument.html
 external/wpt/dom/nodes/Node-lookupPrefix.xhtml
 external/wpt/domparsing/innerhtml-03.xhtml
 external/wpt/domparsing/innerhtml-04.html
+external/wpt/dom/ranges/Range-compareBoundaryPoints.html
 external/wpt/dom/ranges/Range-constructor.html
 external/wpt/dom/traversal/NodeFilter-constants.html
 external/wpt/dom/traversal/TreeWalker-walking-outside-a-tree.html
@@ -318,7 +318,10 @@ external/wpt/web-animations/timing-model/animation-effects/active-time.html
 external/wpt/web-animations/timing-model/animations/finishing-an-animation.html
 external/wpt/web-animations/timing-model/animations/set-the-animation-start-time.html
 external/wpt/web-animations/timing-model/time-transformations/transformed-progress.html
+external/wpt/webaudio/the-audio-api/the-audionode-interface/channel-mode-interp-basic.html
+external/wpt/webaudio/the-audio-api/the-audioworklet-interface/baseaudiocontext-audioworklet.https.html
 external/wpt/webaudio/the-audio-api/the-constantsourcenode-interface/constant-source-onended.html
+external/wpt/webaudio/the-audio-api/the-channelsplitternode-interface/audiochannelsplitter.html
 external/wpt/webaudio/the-audio-api/the-delaynode-interface/delaynode-scheduling.html
 external/wpt/webaudio/the-audio-api/the-iirfilternode-interface/iirfilter-getFrequencyResponse.html
 external/wpt/webaudio/the-audio-api/the-pannernode-interface/distance-linear.html
@@ -822,7 +825,6 @@ http/tests/streams/chromium/get-reader-byob.html
 http/tests/uri/escaped-entity.html
 http/tests/uri/resolve-encoding-relative.html
 http/tests/uri/utf8-path.html
-http/tests/webaudio/audio-worklet/context-audio-worklet.html
 http/tests/websocket/bad-handshake-crash.html
 http/tests/websocket/compressed-control-frame.html
 http/tests/worklet/webexposed/global-interface-listing-paint-worklet.html
@@ -846,8 +848,6 @@ navigator_language/navigator_language.html
 netinfo/type-change-no-listener.html
 nfc/idl-NavigatorNFC.html
 paint/float/float-text-clip.html
-paint/invalidation/image/animated-gif-transformed-offscreen.html
-paint/invalidation/image/animated-png-offscreen.html
 paint/invalidation/button-inner-no-repaint.html
 paint/invalidation/compositing/should-not-repaint-composited-opacity.html
 paint/invalidation/table/display-table-row-crash.html
@@ -999,9 +999,7 @@ wake_lock/wakelock-api.html
 wake_lock/wakelock-in-nested-frame.html
 webaudio/AudioBufferSource/audiobuffersource-ended.html
 webaudio/AudioBufferSource/audiobuffersource-playbackrate-zero.html
-webaudio/AudioNode/channel-mode-interp-basic.html
 webaudio/AudioParam/audioparam-setValueCurve-duration.html
-webaudio/ChannelSplitter/audiochannelsplitter.html
 webaudio/codec-tests/flac/flac-decode.html
 webaudio/codec-tests/vorbis/vbr-128kbps-44khz.html
 webaudio/codec-tests/vorbis/vbr-70kbps-44khz.html

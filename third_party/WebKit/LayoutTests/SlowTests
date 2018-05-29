@@ -11,7 +11,6 @@
 crbug.com/24182 storage/indexeddb/objectstore-cursor.html [ Slow ]
 crbug.com/24182 storage/indexeddb/mozilla/test_objectStore_openKeyCursor.html [ Slow ]
 crbug.com/24182 editing/selection/modify_move/move-by-word-visually-mac.html [ Slow ]
-crbug.com/24182 editing/selection/modify_move/move-by-word-visually-multi-line.html [ Slow ]
 crbug.com/24182 compositing/culling/filter-occlusion-blur-large.html [ Slow ]
 crbug.com/24182 virtual/disable-spv175/compositing/culling/filter-occlusion-blur-large.html [ Slow ]
 crbug.com/24182 compositing/video-frame-size-change.html [ Slow ]
@@ -143,9 +142,8 @@ crbug.com/510337 cssom/cssvalue-comparison.html [ Slow ]
 
 crbug.com/680917 http/tests/devtools/audits2/ [ Slow ]
 
-# This test is intentionally SLOW as we're waiting for a connection timeout.
+# These tests are intentionally SLOW because of throttled loading.
 crbug.com/73609 http/tests/media/video-play-stall.html [ Slow ]
-# This test is intentionally SLOW because of throttled loading.
 crbug.com/73609 http/tests/media/video-preload-metadata.html [ Slow ]
 
 # Many of the virtual animations tests are slow.
@@ -305,8 +303,10 @@ crbug.com/791659 [ Win Linux ] fast/webgl/webgl-composite-modes-repaint.html [ S
 
 # Slow on Win Debug in part due to incremental linking.
 crbug.com/647192 [ Win Debug ] fast/css3-text/css3-word-break/word-break-all-ascii.html [ Slow ]
-crbug.com/647192 [ Win Debug ] virtual/stable/webexposed/global-interface-listing.html [ Slow ]
-crbug.com/647192 [ Win Debug ] webexposed/global-interface-listing.html [ Slow ]
+
+# Slow in Debug on all platforms.
+crbug.com/819641 [ Debug ] virtual/stable/webexposed/global-interface-listing.html [ Slow ]
+crbug.com/819641 [ Debug ] webexposed/global-interface-listing.html [ Slow ]
 
 # These tests are slow with our MESA backend. They may be less slow when we have
 # bots running tests on real hardware or maybe when using SwiftShader.
@@ -475,7 +475,9 @@ crbug.com/779366 fast/shapes/crash-allocating-very-large-raster-shape.html [ Slo
 
 crbug.com/787971 external/wpt/WebCryptoAPI/wrapKey_unwrapKey/wrapKey_unwrapKey.https.worker.html [ Slow ]
 
+# These font-display tests are slow as they test web fonts behavior around the 3-seconds timeout.
 crbug.com/564109 http/tests/webfont/font-display-intervention.html [ Slow ]
+crbug.com/816026 external/wpt/css/css-fonts/font-display/font-display.html [ Slow ]
 
 # This test has many test cases and each case requires a gesture scroll with pauses in between.
 crbug.com/765326 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/scroll-customization-property.html [ Slow ]
@@ -485,4 +487,30 @@ crbug.com/800359 external/wpt/mimesniff/mime-types/parsing.any.worker.html [ Slo
 
 crbug.com/808185 [ Win Release ] http/tests/devtools/editor/text-editor-ctrl-d-1.js [ Slow ]
 
+# OffscreenCanvas non-virtual convert-to-blob tests
+# These two tests are running without idle-task support in non-virtual
+# environment; we are testing whether they can switch to force-encoding mode
+# after waiting for idle task to start for a threshold time. Therefore, we
+# intentionally mark them as slow tests to allow the waiting to finish.
+crbug.com/817091 external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Slow ]
+crbug.com/817091 external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.w.html [ Slow ]
+
 crbug.com/808153 fast/webgl/texImage-imageBitmap-from-blob-resize.html [ Slow ]
+
+# This test is very CPU intensive, as it parses a lot of IDL in JS. It's slow
+# even on a normal bot, and takes over a minute with MSAN.
+crbug.com/810963 external/wpt/dom/interfaces.html [ Slow ]
+
+# css-transitions test imported from wpt which sometimes time out according to
+# the flakiness dashboard. They are slow because of many tests and/or long
+# transition durations.
+crbug.com/825170 external/wpt/css/css-transitions/properties-value-001.html [ Slow ]
+crbug.com/825170 external/wpt/css/css-transitions/properties-value-003.html [ Slow ]
+crbug.com/825170 external/wpt/css/css-transitions/properties-value-implicit-001.html [ Slow ]
+crbug.com/825170 external/wpt/css/css-transitions/properties-value-inherit-001.html [ Slow ]
+crbug.com/825170 external/wpt/css/css-transitions/properties-value-inherit-002.html [ Slow ]
+crbug.com/825170 external/wpt/css/css-transitions/transitioncancel-001.html [ Slow ]
+
+# This test does a lot of IPC because it tests limits on IPC allocations,
+# and is therefore slow.
+crbug.com/826957 fast/peerconnection/RTCPeerConnection-manyCandidates.html [ Slow ]

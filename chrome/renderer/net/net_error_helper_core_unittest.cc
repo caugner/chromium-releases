@@ -17,7 +17,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
 #include "base/timer/mock_timer.h"
@@ -178,8 +177,8 @@ class NetErrorHelperCoreTest : public testing::Test,
     // The old value of timer_, if any, will be freed by the old core_ being
     // destructed, since core_ takes ownership of the timer.
     timer_ = new base::MockTimer(false, false);
-    core_.reset(new NetErrorHelperCore(
-        this, auto_reload_enabled, auto_reload_visible_only, visible, true));
+    core_.reset(new NetErrorHelperCore(this, auto_reload_enabled,
+                                       auto_reload_visible_only, visible));
     core_->set_timer_for_testing(std::unique_ptr<base::Timer>(timer_));
   }
 

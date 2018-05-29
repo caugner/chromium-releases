@@ -83,6 +83,12 @@ suite('SiteDetails', function() {
       test_util.createContentSettingTypeToValuePair(
           settings.ContentSettingsTypes.SENSORS,
           [test_util.createRawSiteException('https://foo.com:443')]),
+      test_util.createContentSettingTypeToValuePair(
+          settings.ContentSettingsTypes.PAYMENT_HANDLER,
+          [test_util.createRawSiteException('https://foo.com:443')]),
+      test_util.createContentSettingTypeToValuePair(
+          settings.ContentSettingsTypes.USB_DEVICES,
+          [test_util.createRawSiteException('https://foo.com:443')]),
     ]);
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
@@ -103,7 +109,6 @@ suite('SiteDetails', function() {
     const nonSiteDetailsContentSettingsTypes = [
       settings.ContentSettingsTypes.COOKIES,
       settings.ContentSettingsTypes.PROTOCOL_HANDLERS,
-      settings.ContentSettingsTypes.USB_DEVICES,
       settings.ContentSettingsTypes.ZOOM_LEVELS,
     ];
     if (!cr.isChromeOS)
@@ -126,6 +131,9 @@ suite('SiteDetails', function() {
     optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
                                                 .SENSORS] =
         'enableSensorsContentSetting';
+    optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
+                                                .PAYMENT_HANDLER] =
+        'enablePaymentHandlerContentSetting';
     browserProxy.setPrefs(prefs);
 
     // First, explicitly set all the optional settings to false.
@@ -195,6 +203,7 @@ suite('SiteDetails', function() {
     loadTimeData.overrideValues({enableSafeBrowsingSubresourceFilter: true});
     loadTimeData.overrideValues({enableClipboardContentSetting: true});
     loadTimeData.overrideValues({enableSensorsContentSetting: true});
+    loadTimeData.overrideValues({enablePaymentHandlerContentSetting: true});
     testElement = createSiteDetails('https://foo.com:443');
 
     return browserProxy.whenCalled('isOriginValid')

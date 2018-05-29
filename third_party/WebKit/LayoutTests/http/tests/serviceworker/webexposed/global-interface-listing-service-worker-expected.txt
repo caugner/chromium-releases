@@ -47,10 +47,23 @@ interface BackgroundFetchRegistration : EventTarget
     method abort
     method constructor
     setter onprogress
+interface BackgroundFetchSettledEvent : BackgroundFetchEvent
+    attribute @@toStringTag
+    getter fetches
+    method constructor
 interface BackgroundFetchSettledFetch : BackgroundFetchFetch
     attribute @@toStringTag
     getter response
     method constructor
+interface BackgroundFetchSettledFetches
+    attribute @@toStringTag
+    method constructor
+    method match
+    method values
+interface BackgroundFetchUpdateEvent : BackgroundFetchSettledEvent
+    attribute @@toStringTag
+    method constructor
+    method updateUI
 interface BackgroundFetchedEvent : BackgroundFetchEvent
     attribute @@toStringTag
     getter fetches
@@ -144,14 +157,21 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
-interface CookieStore
+interface CookieChangeEvent : Event
     attribute @@toStringTag
+    getter changed
+    getter deleted
+    method constructor
+interface CookieStore : EventTarget
+    attribute @@toStringTag
+    getter onchange
     method constructor
     method delete
     method get
     method getAll
     method has
     method set
+    setter onchange
 interface CountQueuingStrategy
     method constructor
     method size
@@ -370,28 +390,6 @@ interface DOMStringList
     method constructor
     method contains
     method item
-interface DataView
-    attribute @@toStringTag
-    getter buffer
-    getter byteLength
-    getter byteOffset
-    method constructor
-    method getFloat32
-    method getFloat64
-    method getInt16
-    method getInt32
-    method getInt8
-    method getUint16
-    method getUint32
-    method getUint8
-    method setFloat32
-    method setFloat64
-    method setInt16
-    method setInt32
-    method setInt8
-    method setUint16
-    method setUint32
-    method setUint8
 interface Event
     attribute @@toStringTag
     attribute AT_TARGET

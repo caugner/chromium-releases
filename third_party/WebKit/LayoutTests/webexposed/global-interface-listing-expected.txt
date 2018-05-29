@@ -1,4 +1,4 @@
-CONSOLE WARNING: line 74: 'webkitURL' is deprecated. Please use 'URL' instead.
+CONSOLE WARNING: line 78: 'webkitURL' is deprecated. Please use 'URL' instead.
 This test documents all interface attributes and methods on the global window object and element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -190,41 +190,12 @@ interface Animation : EventTarget
     setter onfinish
     setter playbackRate
     setter startTime
-interface AnimationEffectReadOnly
+interface AnimationEffect
     attribute @@toStringTag
-    getter timing
     method constructor
     method getComputedTiming
-interface AnimationEffectTiming : AnimationEffectTimingReadOnly
-    attribute @@toStringTag
-    getter delay
-    getter direction
-    getter duration
-    getter easing
-    getter endDelay
-    getter fill
-    getter iterationStart
-    getter iterations
-    method constructor
-    setter delay
-    setter direction
-    setter duration
-    setter easing
-    setter endDelay
-    setter fill
-    setter iterationStart
-    setter iterations
-interface AnimationEffectTimingReadOnly
-    attribute @@toStringTag
-    getter delay
-    getter direction
-    getter duration
-    getter easing
-    getter endDelay
-    getter fill
-    getter iterationStart
-    getter iterations
-    method constructor
+    method getTiming
+    method updateTiming
 interface AnimationEvent : Event
     attribute @@toStringTag
     getter animationName
@@ -418,7 +389,11 @@ interface AudioWorklet : Worklet
     method constructor
 interface AudioWorkletNode : AudioNode
     attribute @@toStringTag
+    getter onprocessorerror
+    getter parameters
+    getter port
     method constructor
+    setter onprocessorerror
 interface AuthenticatorAssertionResponse : AuthenticatorResponse
     attribute @@toStringTag
     getter authenticatorData
@@ -637,6 +612,7 @@ interface CSSKeyframeRule : CSSRule
     getter style
     method constructor
     setter keyText
+    setter style
 interface CSSKeyframesRule : CSSRule
     attribute @@toStringTag
     getter cssRules
@@ -1112,14 +1088,21 @@ interface ConvolverNode : AudioNode
     method constructor
     setter buffer
     setter normalize
-interface CookieStore
+interface CookieChangeEvent : Event
     attribute @@toStringTag
+    getter changed
+    getter deleted
+    method constructor
+interface CookieStore : EventTarget
+    attribute @@toStringTag
+    getter onchange
     method constructor
     method delete
     method get
     method getAll
     method has
     method set
+    setter onchange
 interface CountQueuingStrategy
     method constructor
     method size
@@ -1426,28 +1409,6 @@ interface DataTransferItemList
     method clear
     method constructor
     method remove
-interface DataView
-    attribute @@toStringTag
-    getter buffer
-    getter byteLength
-    getter byteOffset
-    method constructor
-    method getFloat32
-    method getFloat64
-    method getInt16
-    method getInt32
-    method getInt8
-    method getUint16
-    method getUint32
-    method getUint8
-    method setFloat32
-    method setFloat64
-    method setInt16
-    method setInt32
-    method setInt8
-    method setUint16
-    method setUint32
-    method setUint8
 interface DelayNode : AudioNode
     attribute @@toStringTag
     getter delayTime
@@ -1555,6 +1516,8 @@ interface Document : Node
     getter onended
     getter onerror
     getter onfocus
+    getter onformdata
+    getter onfreeze
     getter onfullscreenchange
     getter onfullscreenerror
     getter ongotpointercapture
@@ -1595,6 +1558,7 @@ interface Document : Node
     getter onreadystatechange
     getter onreset
     getter onresize
+    getter onresume
     getter onscroll
     getter onsearch
     getter onsecuritypolicyviolation
@@ -1637,6 +1601,7 @@ interface Document : Node
     getter title
     getter visibilityState
     getter vlinkColor
+    getter wasDiscarded
     getter webkitCurrentFullScreenElement
     getter webkitFullscreenElement
     getter webkitFullscreenEnabled
@@ -1740,6 +1705,8 @@ interface Document : Node
     setter onended
     setter onerror
     setter onfocus
+    setter onformdata
+    setter onfreeze
     setter onfullscreenchange
     setter onfullscreenerror
     setter ongotpointercapture
@@ -1780,6 +1747,7 @@ interface Document : Node
     setter onreadystatechange
     setter onreset
     setter onresize
+    setter onresume
     setter onscroll
     setter onsearch
     setter onsecuritypolicyviolation
@@ -2119,6 +2087,10 @@ interface FormData
     method keys
     method set
     method values
+interface FormDataEvent : Event
+    attribute @@toStringTag
+    getter formData
+    method constructor
 interface GainNode : AudioNode
     attribute @@toStringTag
     getter gain
@@ -2302,7 +2274,6 @@ interface HTMLBodyElement : HTMLElement
     getter onblur
     getter onerror
     getter onfocus
-    getter onfreeze
     getter onhashchange
     getter onlanguagechange
     getter onload
@@ -2315,7 +2286,6 @@ interface HTMLBodyElement : HTMLElement
     getter onpopstate
     getter onrejectionhandled
     getter onresize
-    getter onresume
     getter onscroll
     getter onstorage
     getter onunhandledrejection
@@ -2333,7 +2303,6 @@ interface HTMLBodyElement : HTMLElement
     setter onblur
     setter onerror
     setter onfocus
-    setter onfreeze
     setter onhashchange
     setter onlanguagechange
     setter onload
@@ -2346,7 +2315,6 @@ interface HTMLBodyElement : HTMLElement
     setter onpopstate
     setter onrejectionhandled
     setter onresize
-    setter onresume
     setter onscroll
     setter onstorage
     setter onunhandledrejection
@@ -2495,6 +2463,7 @@ interface HTMLElement : Element
     getter onended
     getter onerror
     getter onfocus
+    getter onformdata
     getter ongotpointercapture
     getter oninput
     getter oninvalid
@@ -2590,6 +2559,7 @@ interface HTMLElement : Element
     setter onended
     setter onerror
     setter onfocus
+    setter onformdata
     setter ongotpointercapture
     setter oninput
     setter oninvalid
@@ -2749,7 +2719,6 @@ interface HTMLFrameSetElement : HTMLElement
     getter onblur
     getter onerror
     getter onfocus
-    getter onfreeze
     getter onhashchange
     getter onlanguagechange
     getter onload
@@ -2762,7 +2731,6 @@ interface HTMLFrameSetElement : HTMLElement
     getter onpopstate
     getter onrejectionhandled
     getter onresize
-    getter onresume
     getter onscroll
     getter onstorage
     getter onunhandledrejection
@@ -2776,7 +2744,6 @@ interface HTMLFrameSetElement : HTMLElement
     setter onblur
     setter onerror
     setter onfocus
-    setter onfreeze
     setter onhashchange
     setter onlanguagechange
     setter onload
@@ -2789,7 +2756,6 @@ interface HTMLFrameSetElement : HTMLElement
     setter onpopstate
     setter onrejectionhandled
     setter onresize
-    setter onresume
     setter onscroll
     setter onstorage
     setter onunhandledrejection
@@ -3968,6 +3934,10 @@ interface InputDeviceCapabilities
     attribute @@toStringTag
     getter firesTouchEvents
     method constructor
+interface InputDeviceInfo : MediaDeviceInfo
+    attribute @@toStringTag
+    method constructor
+    method getCapabilities
 interface InputEvent : UIEvent
     attribute @@toStringTag
     getter data
@@ -3996,6 +3966,11 @@ interface IntersectionObserverEntry
     getter target
     getter time
     method constructor
+interface Keyboard
+    attribute @@toStringTag
+    method constructor
+    method lock
+    method unlock
 interface KeyboardEvent : UIEvent
     attribute @@toStringTag
     attribute DOM_KEY_LOCATION_LEFT
@@ -4016,18 +3991,14 @@ interface KeyboardEvent : UIEvent
     method constructor
     method getModifierState
     method initKeyboardEvent
-interface KeyframeEffect : KeyframeEffectReadOnly
-    attribute @@toStringTag
-    getter composite
-    method constructor
-    method setKeyframes
-    setter composite
-interface KeyframeEffectReadOnly : AnimationEffectReadOnly
+interface KeyframeEffect : AnimationEffect
     attribute @@toStringTag
     getter composite
     getter target
     method constructor
     method getKeyframes
+    method setKeyframes
+    setter composite
 interface LinearAccelerationSensor : Accelerometer
     attribute @@toStringTag
     method constructor
@@ -4546,6 +4517,7 @@ interface Navigator
     getter doNotTrack
     getter geolocation
     getter hardwareConcurrency
+    getter keyboard
     getter language
     getter languages
     getter locks
@@ -4578,8 +4550,6 @@ interface Navigator
     method getUserMedia
     method getVRDisplays
     method javaEnabled
-    method keyboardLock
-    method keyboardUnlock
     method registerProtocolHandler
     method requestMIDIAccess
     method requestMediaKeySystemAccess
@@ -5233,6 +5203,7 @@ interface PublicKeyCredential : Credential
     getter rawId
     getter response
     method constructor
+    method getClientExtensionResults
 interface PushManager
     static getter supportedContentEncodings
     attribute @@toStringTag
@@ -5322,6 +5293,7 @@ interface RTCPeerConnection : EventTarget
     attribute @@toStringTag
     getter iceConnectionState
     getter iceGatheringState
+    getter id
     getter localDescription
     getter onaddstream
     getter ondatachannel
@@ -5376,12 +5348,16 @@ interface RTCRtpReceiver
     getter track
     method constructor
     method getContributingSources
+    method getStats
 interface RTCRtpSender
     attribute @@toStringTag
     getter dtmf
     getter track
     method constructor
+    method getParameters
+    method getStats
     method replaceTrack
+    method setParameters
 interface RTCSessionDescription
     attribute @@toStringTag
     getter sdp
@@ -5712,6 +5688,7 @@ interface SVGElement : Element
     getter onended
     getter onerror
     getter onfocus
+    getter onformdata
     getter ongotpointercapture
     getter oninput
     getter oninvalid
@@ -5794,6 +5771,7 @@ interface SVGElement : Element
     setter onended
     setter onerror
     setter onfocus
+    setter onformdata
     setter ongotpointercapture
     setter oninput
     setter oninvalid
@@ -8996,7 +8974,6 @@ interface XRCoordinateSystem
     method getTransformTo
 interface XRDevice : EventTarget
     attribute @@toStringTag
-    getter external
     method constructor
     method requestSession
     method supportsSession
@@ -9009,6 +8986,22 @@ interface XRFrameOfReference : XRCoordinateSystem
     attribute @@toStringTag
     getter bounds
     getter emulatedHeight
+    method constructor
+interface XRInputPose
+    attribute @@toStringTag
+    getter emulatedPosition
+    getter gripMatrix
+    getter pointerMatrix
+    method constructor
+interface XRInputSource
+    attribute @@toStringTag
+    getter handedness
+    getter pointerOrigin
+    method constructor
+interface XRInputSourceEvent : Event
+    attribute @@toStringTag
+    getter frame
+    getter inputSource
     method constructor
 interface XRLayer
     attribute @@toStringTag
@@ -9023,6 +9016,7 @@ interface XRPresentationFrame
     getter views
     method constructor
     method getDevicePose
+    method getInputPose
 interface XRSession : EventTarget
     attribute @@toStringTag
     getter baseLayer
@@ -9038,6 +9032,7 @@ interface XRSession : EventTarget
     method cancelAnimationFrame
     method constructor
     method end
+    method getInputSources
     method requestAnimationFrame
     method requestFrameOfReference
     setter baseLayer
@@ -9065,7 +9060,6 @@ interface XRView
     getter eye
     getter projectionMatrix
     method constructor
-    method getViewport
 interface XRViewport
     attribute @@toStringTag
     getter height
@@ -9085,6 +9079,7 @@ interface XRWebGLLayer : XRLayer
     getter multiview
     getter stencil
     method constructor
+    method getViewport
     method requestViewportScaling
 interface XSLTProcessor
     attribute @@toStringTag
@@ -9122,6 +9117,7 @@ interface webkitRTCPeerConnection : EventTarget
     attribute @@toStringTag
     getter iceConnectionState
     getter iceGatheringState
+    getter id
     getter localDescription
     getter onaddstream
     getter ondatachannel
@@ -9335,7 +9331,7 @@ interface webkitURL
     getter onended
     getter onerror
     getter onfocus
-    getter onfreeze
+    getter onformdata
     getter ongotpointercapture
     getter onhashchange
     getter oninput
@@ -9380,7 +9376,6 @@ interface webkitURL
     getter onrejectionhandled
     getter onreset
     getter onresize
-    getter onresume
     getter onscroll
     getter onsearch
     getter onseeked
@@ -9520,7 +9515,7 @@ interface webkitURL
     setter onended
     setter onerror
     setter onfocus
-    setter onfreeze
+    setter onformdata
     setter ongotpointercapture
     setter onhashchange
     setter oninput
@@ -9565,7 +9560,6 @@ interface webkitURL
     setter onrejectionhandled
     setter onreset
     setter onresize
-    setter onresume
     setter onscroll
     setter onsearch
     setter onseeked

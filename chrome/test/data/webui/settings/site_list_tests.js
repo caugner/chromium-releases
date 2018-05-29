@@ -297,7 +297,7 @@ suite('SiteList', function() {
 
   /** Closes the action menu. */
   function closeActionMenu() {
-    const menu = testElement.$$('dialog[is=cr-action-menu]');
+    const menu = testElement.$$('cr-action-menu');
     if (menu.open)
       menu.close();
   }
@@ -307,7 +307,7 @@ suite('SiteList', function() {
    * @param {Array<string>} items The items expected to show in the menu.
    */
   function assertMenu(items) {
-    const menu = testElement.$$('dialog[is=cr-action-menu]');
+    const menu = testElement.$$('cr-action-menu');
     assertTrue(!!menu);
     const menuItems = menu.querySelectorAll('button:not([hidden])');
     assertEquals(items.length, menuItems.length);
@@ -354,8 +354,8 @@ suite('SiteList', function() {
         .then(function(contentType) {
           // Flush to be sure list container is populated.
           Polymer.dom.flush();
-          const dotsMenu =
-              testElement.$.listContainer.querySelector('#actionMenuButton');
+          const dotsMenu = testElement.$.listContainer.querySelector(
+              '#actionMenuButtonContainer');
           assertFalse(dotsMenu.hidden);
           testElement.setAttribute('read-only-list', true);
           Polymer.dom.flush();
@@ -422,7 +422,7 @@ suite('SiteList', function() {
     setUpCategory(
         settings.ContentSettingsTypes.GEOLOCATION,
         settings.ContentSetting.ALLOW, prefsGeolocation);
-    const actionMenu = testElement.$$('dialog[is=cr-action-menu]');
+    const actionMenu = testElement.$$('cr-action-menu');
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           Polymer.dom.flush();  // Populates action menu.
@@ -640,16 +640,16 @@ suite('SiteList', function() {
           const item = testElement.$.listContainer.children[0];
 
           // Assert action button is hidden.
-          const dots = item.querySelector('#actionMenuButton');
+          const dots = item.querySelector('#actionMenuButtonContainer');
           assertTrue(!!dots);
           assertTrue(dots.hidden);
 
           // Assert reset button is visible.
-          const resetButton = item.querySelector('#resetSite');
+          const resetButton = item.querySelector('#resetSiteContainer');
           assertTrue(!!resetButton);
           assertFalse(resetButton.hidden);
 
-          MockInteractions.tap(resetButton);
+          MockInteractions.tap(resetButton.querySelector('button'));
           return browserProxy.whenCalled('resetCategoryPermissionForPattern');
         })
         .then(function(args) {
@@ -669,7 +669,7 @@ suite('SiteList', function() {
 
       openActionMenu(0);
       assertMenu(['Allow', 'Block', 'Edit', 'Remove'], testElement);
-      const menu = testElement.$$('dialog[is=cr-action-menu]');
+      const menu = testElement.$$('cr-action-menu');
       assertTrue(menu.open);
       const edit = testElement.$.edit;
       assertTrue(!!edit);
@@ -798,12 +798,14 @@ suite('SiteList', function() {
           Polymer.dom.flush();
           // Validate that embeddingOrigin sites cannot be edited.
           const firstItem = testElement.$.listContainer.children[0];
-          assertTrue(firstItem.querySelector('#actionMenuButton').hidden);
-          assertFalse(firstItem.querySelector('#resetSite').hidden);
+          assertTrue(
+              firstItem.querySelector('#actionMenuButtonContainer').hidden);
+          assertFalse(firstItem.querySelector('#resetSiteContainer').hidden);
           // Validate that non-embeddingOrigin sites can be edited.
           const secondItem = testElement.$.listContainer.children[1];
-          assertFalse(secondItem.querySelector('#actionMenuButton').hidden);
-          assertTrue(secondItem.querySelector('#resetSite').hidden);
+          assertFalse(
+              secondItem.querySelector('#actionMenuButtonContainer').hidden);
+          assertTrue(secondItem.querySelector('#resetSiteContainer').hidden);
         });
   });
 

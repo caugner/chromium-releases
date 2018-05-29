@@ -172,7 +172,7 @@
 <translation id="2770781857296573485">समूह अन्‍वेषण डालें</translation>
 <translation id="2777845298774924149">बाहर हो गया</translation>
 <translation id="2781264313200109999">लिंक शुरू</translation>
-<translation id="2784959586797362050">आप हमेशा की तरह Search+a और उसके बाद i दबाकर हमें सीधे फ़ीडबैक भेज सकते हैं. हम आपके विचार जानने के लिए बेताब हैं.</translation>
+<translation id="2784959586797362050">आप हमेशा की तरह Search+a और उसके बाद i दबाकर हमें सीधे सुझाव भेज सकते हैं. हम आपके विचार जानने के लिए बेताब हैं.</translation>
 <translation id="2800204403141299078">कोई और भिन्‍न तत्‍व नहीं.</translation>
 <translation id="2800780099804980316">कोई पिछला स्‍तर 1 शीर्षक नहीं.</translation>
 <translation id="280499067616661124">पेज में ChromeVox ढूंढें</translation>
@@ -370,6 +370,7 @@
 <translation id="4176463684765177261">अक्षम</translation>
 <translation id="4188530942454211480">पिछला वाक्य</translation>
 <translation id="4191918948604314587">बटन</translation>
+<translation id="419265409837491189">पिछले स्तंभ पर जाएं</translation>
 <translation id="4202186506458631436">दाएं ले जाएं</translation>
 <translation id="4206289001967551965">तालिका के अंदर</translation>
 <translation id="4209770650650780359">शब्दों को अपने आप पूरा करने की सुविधा के लिए ऊपर या नीचे वाला तीर दबाएं.</translation>
@@ -420,6 +421,7 @@
 <translation id="4660783501463101648">क्लासिक को हटाया गया. ChromeVox क्लासिक में वापस ले जाने वाला कीबोर्ड टॉगल हटा दिया गया है.</translation>
 <translation id="4661075872484491155">ट्री</translation>
 <translation id="4668929960204016307">,</translation>
+<translation id="4677535310137735442">अगले स्तंभ पर जाएं</translation>
 <translation id="4688873778442829762">grd</translation>
 <translation id="4693675773662933727">पिछला थानचिह्न</translation>
 <translation id="4696413482802371445">कोई अगला स्‍तर 5 शीर्षक नहीं.</translation>
@@ -435,6 +437,7 @@
 <translation id="4826415162591436065">आगे की ओर नेविगेट करें</translation>
 <translation id="4826604887384865800">अगला जंप</translation>
 <translation id="4827410568042294688">अचयनित</translation>
+<translation id="4839925464551908214">पिछली पंक्ति पर जाएं</translation>
 <translation id="4842108708071771135">कोई अगला ब्लॉककोट नहीं.</translation>
 <translation id="4844625982113518938">किसी भी कुंजी का नाम जानने के लिए उसे दबाएं. Ctrl+W से जानें मोड बंद हो जाएगा.</translation>
 <translation id="4846428657345567687">ChromeVox में आपका स्वागत है!</translation>
@@ -564,7 +567,7 @@ Chrome ब्राउज़र मेनू खोलने के लिए, A
 <translation id="5748623122140342504">पिछले स्‍तर 5 का शीर्षक</translation>
 <translation id="5750633686117194034">कोई संशोधक नहीं दबाया गया; कृपया एक या अधिक संशोधक दबाकर रखें; पूर्ण हो जाने पर अपनी अंगुलियां उठा लें और आपको सुनाई देगा कि कुंजियां सेट हो गई हैं. बाहर निकलने के लिए टैब दबाएं.</translation>
 <translation id="5788275253279308023">गुप्‍त विंडो, <ph name="TITLE" />, टैब</translation>
-<translation id="5806206155699461681">विशिष्ट साइटें (जैसे Google खोज) एन्‍हांस करें.</translation>
+<translation id="5806206155699461681">चुनिंदा साइटों (जैसे 'Google सर्च') को बेहतर बनाएं.</translation>
 <translation id="5819072574982403430">ट्री आइटम</translation>
 <translation id="5826479389509458994">पंक्ति <ph name="ROW" /> स्तंभ <ph name="COL" /></translation>
 <translation id="5850707923114094062">पीछे पैन करें</translation>
@@ -789,6 +792,7 @@ Chrome ब्राउज़र मेनू खोलने के लिए, A
 <translation id="8186185314313222077">पूर्ण स्‍क्रीन टॉगल करें</translation>
 <translation id="8199231515320852133">वर्तमान सेल के शीर्षलेखों को प्रदर्शित करें</translation>
 <translation id="820417203470636242">खाली सेल.</translation>
+<translation id="820469951249669083">अगली पंक्ति पर जाएं</translation>
 <translation id="8215202828671303819">एकाधिक चयन</translation>
 <translation id="826991282343985864">पंक्ति$1स्तंभ$2</translation>
 <translation id="8276439074553447000">पिछले फ़ोकस करने योग्‍य आइटम पर जंप करें</translation>

@@ -17,6 +17,7 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
       'signOut',
       'startSignIn',
       'startSyncingWithEmail',
+      'setSyncEverything',
     ]);
 
     /** @private {number} */
@@ -52,8 +53,8 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  startSyncingWithEmail(email) {
-    this.methodCalled('startSyncingWithEmail', email);
+  startSyncingWithEmail(email, isDefaultPromoAccount) {
+    this.methodCalled('startSyncingWithEmail', [email, isDefaultPromoAccount]);
   }
 
   setImpressionCount(count) {
@@ -77,8 +78,8 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  didNavigateAwayFromSyncPage() {
-    this.methodCalled('didNavigateAwayFromSyncPage');
+  didNavigateAwayFromSyncPage(abort) {
+    this.methodCalled('didNavigateAwayFromSyncPage', abort);
   }
 
   /** @override */
@@ -91,5 +92,11 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   setSyncEncryption(syncPrefs) {
     this.methodCalled('setSyncEncryption', syncPrefs);
     return Promise.resolve(this.encryptionResponse);
+  }
+
+  /** @override */
+  setSyncEverything(syncEverything) {
+    this.methodCalled('setSyncEverything', syncEverything);
+    return Promise.resolve(settings.PageStatus.CONFIGURE);
   }
 }

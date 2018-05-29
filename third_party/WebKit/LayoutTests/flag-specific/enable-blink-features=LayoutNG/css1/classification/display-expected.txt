@@ -25,10 +25,10 @@ layer at (0,0) size 785x857 backgroundClip at (0,0) size 785x600 clip at (0,0) s
         LayoutInline {P} at (0,0) size 448x19
           LayoutText {#text} at (0,0) size 448x19
             text run at (0,0) width 448: "This sentence should be part of an inline element, as are the next three. "
-        LayoutInline {P} at (0,0) size 766x59
-          LayoutText {#text} at (447,0) size 766x59
-            text run at (447,0) width 275: "This sentence and the next two are part of a"
-            text run at (0,20) width 766: "second inline element. They should therefore appear, along with the sentence above, to be all one paragraph which is four"
+        LayoutInline {P} at (0,0) size 765x59
+          LayoutText {#text} at (448,0) size 765x59
+            text run at (448,0) width 274: "This sentence and the next two are part of a"
+            text run at (0,20) width 765: "second inline element. They should therefore appear, along with the sentence above, to be all one paragraph which is four"
             text run at (0,40) width 350: "sentences long. If this is not the case, then the keyword "
           LayoutInline {CODE} at (0,0) size 48x16
             LayoutText {#text} at (350,43) size 48x16
@@ -48,7 +48,7 @@ layer at (0,0) size 785x857 backgroundClip at (0,0) size 785x600 clip at (0,0) s
             text run at (18,23) width 120: "list-style-type"
         LayoutText {#text} at (138,20) size 719x39
           text run at (138,20) width 581: " is supported, there will be a square for the item marker). A 3em left margin has been applied"
-          text run at (0,40) width 376: "in order to ensure that there is space for the list-item marker."
+          text run at (0,40) width 375: "in order to ensure that there is space for the list-item marker."
       LayoutNGBlockFlow {P} at (0,335) size 769x20
         LayoutText {#text} at (0,0) size 456x19
           text run at (0,0) width 456: "The next paragraph should be invisible (if it's visible, you'll see red text)."
@@ -84,10 +84,10 @@ layer at (0,0) size 785x857 backgroundClip at (0,0) size 785x600 clip at (0,0) s
                 LayoutInline {P} at (0,0) size 448x19
                   LayoutText {#text} at (0,0) size 448x19
                     text run at (0,0) width 448: "This sentence should be part of an inline element, as are the next three. "
-                LayoutInline {P} at (0,0) size 736x59
-                  LayoutText {#text} at (447,0) size 736x59
-                    text run at (447,0) width 275: "This sentence and the next two are part of a"
-                    text run at (0,20) width 736: "second inline element. They should therefore appear, along with the sentence above, to be all one paragraph which is"
+                LayoutInline {P} at (0,0) size 735x59
+                  LayoutText {#text} at (448,0) size 735x59
+                    text run at (448,0) width 274: "This sentence and the next two are part of a"
+                    text run at (0,20) width 735: "second inline element. They should therefore appear, along with the sentence above, to be all one paragraph which is"
                     text run at (0,40) width 380: "four sentences long. If this is not the case, then the keyword "
                   LayoutInline {CODE} at (0,0) size 48x16
                     LayoutText {#text} at (380,43) size 48x16
@@ -107,7 +107,7 @@ layer at (0,0) size 785x857 backgroundClip at (0,0) size 785x600 clip at (0,0) s
                     text run at (55,23) width 120: "list-style-type"
                 LayoutText {#text} at (175,20) size 672x39
                   text run at (175,20) width 497: " is supported, there will be a square for the item marker). A 3em left margin has"
-                  text run at (0,40) width 460: "been applied in order to ensure that there is space for the list-item marker."
+                  text run at (0,40) width 459: "been applied in order to ensure that there is space for the list-item marker."
               LayoutNGBlockFlow {P} at (4,192) size 747x20
                 LayoutText {#text} at (0,0) size 456x19
                   text run at (0,0) width 456: "The next paragraph should be invisible (if it's visible, you'll see red text)."

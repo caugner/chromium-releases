@@ -34,8 +34,8 @@
 #include "url/gurl.h"
 #include "url/url_canon.h"
 
-using download::DownloadItem;
 using content::DownloadManager;
+using download::DownloadItem;
 
 namespace safe_browsing {
 
@@ -84,7 +84,6 @@ const char kLandingReferrerURLWithQuery[] =
 const char kPageBeforeLandingReferrerURL[] =
     "/safe_browsing/download_protection/navigation_observer/"
     "page_before_landing_referrer.html";
-const char kTestExeURL[] = "/temporary/test.exe";
 
 class DownloadItemCreatedObserver : public DownloadManager::Observer {
  public:
@@ -200,14 +199,6 @@ class SBNavigationObserverBrowserTest : public InProcessBrowserTest {
     if (!browser())
       return false;
 
-    if (!downloads_directory_.CreateUniqueTempDir())
-      return false;
-
-    // Set up default download path.
-    browser()->profile()->GetPrefs()->SetFilePath(
-        prefs::kDownloadDefaultDirectory, downloads_directory_.GetPath());
-    browser()->profile()->GetPrefs()->SetFilePath(
-        prefs::kSaveFileDefaultDirectory, downloads_directory_.GetPath());
     browser()->profile()->GetPrefs()->SetBoolean(prefs::kPromptForDownload,
                                                  false);
     content::DownloadManager* manager =
@@ -372,7 +363,7 @@ class SBNavigationObserverBrowserTest : public InProcessBrowserTest {
   void IdentifyReferrerChainForDownload(
       DownloadItem* download,
       ReferrerChain* referrer_chain) {
-    int download_tab_id = SessionTabHelper::IdForTab(
+    SessionID download_tab_id = SessionTabHelper::IdForTab(
         content::DownloadItemUtils::GetWebContents(download));
     auto result = observer_manager_->IdentifyReferrerChainByEventURL(
         download->GetURL(), download_tab_id,
@@ -401,7 +392,7 @@ class SBNavigationObserverBrowserTest : public InProcessBrowserTest {
       const GURL& initiating_frame_url,
       content::WebContents* web_contents,
       ReferrerChain* referrer_chain) {
-    int tab_id = SessionTabHelper::IdForTab(web_contents);
+    SessionID tab_id = SessionTabHelper::IdForTab(web_contents);
     bool has_user_gesture = observer_manager_->HasUserGesture(web_contents);
     observer_manager_->OnUserGestureConsumed(web_contents, base::Time::Now());
     EXPECT_LE(observer_manager_->IdentifyReferrerChainByHostingPage(
@@ -462,7 +453,7 @@ class SBNavigationObserverBrowserTest : public InProcessBrowserTest {
                                            const GURL& target_url) {
     NavigationEvent* nav_event =
         observer_manager_->navigation_event_list()->FindNavigationEvent(
-            target_url, GURL(), -1);
+            target_url, GURL(), SessionID::InvalidValue());
     if (nav_event) {
       observer_manager_->AddToReferrerChain(referrer_chain, nav_event, GURL(),
                                             ReferrerChainEntry::EVENT_URL);
@@ -472,9 +463,6 @@ class SBNavigationObserverBrowserTest : public InProcessBrowserTest {
  protected:
   SafeBrowsingNavigationObserverManager* observer_manager_;
   SafeBrowsingNavigationObserver* observer_;
-
- private:
-  base::ScopedTempDir downloads_directory_;
 };
 
 // Type download URL into address bar and start download on the same page.
@@ -2135,8 +2123,6 @@ IN_PROC_BROWSER_TEST_F(SBNavigationObserverBrowserTest,
   GURL hosting_url = embedded_test_server()->GetURL(kSingleFrameTestURL);
   TriggerDownloadViaHtml5FileApi();
   std::string test_server_ip(embedded_test_server()->host_port_pair().host());
-  GURL filesystem_url(std::string(url::kFileSystemScheme) + ":" +
-                      embedded_test_server()->GetURL(kTestExeURL).spec());
   auto* nav_list = navigation_event_list();
   ASSERT_TRUE(nav_list);
   ASSERT_EQ(1U, nav_list->Size());
@@ -2151,19 +2137,7 @@ IN_PROC_BROWSER_TEST_F(SBNavigationObserverBrowserTest,
   VerifyHostToIpMap();
   ReferrerChain referrer_chain;
   IdentifyReferrerChainForDownload(GetDownload(), &referrer_chain);
-  ASSERT_EQ(2, referrer_chain.size());
-
-  VerifyReferrerChainEntry(
-      filesystem_url,                 // url
-      GURL(),                         // main_frame_url
-      ReferrerChainEntry::EVENT_URL,  // type
-      std::string(),                  // ip_address
-      hosting_url,                    // referrer_url
-      GURL(),                         // referrer_main_frame_url
-      false,                          // is_retargeting
-      std::vector<GURL>(),            // server redirects
-      ReferrerChainEntry::RENDERER_INITIATED_WITHOUT_USER_GESTURE,
-      referrer_chain.Get(0));
+  ASSERT_EQ(1, referrer_chain.size());
 
   VerifyReferrerChainEntry(hosting_url,  // url
                            GURL(),       // main_frame_url
@@ -2174,7 +2148,7 @@ IN_PROC_BROWSER_TEST_F(SBNavigationObserverBrowserTest,
                            false,                // is_retargeting
                            std::vector<GURL>(),  // server redirects
                            ReferrerChainEntry::BROWSER_INITIATED,
-                           referrer_chain.Get(1));
+                           referrer_chain.Get(0));
 }
 
 // Verify referrer chain when there are URL fragments.

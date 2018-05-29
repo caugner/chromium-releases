@@ -36,15 +36,18 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/autofill/core/browser/test_autofill_clock.h"
+#include "components/autofill/core/browser/test_sync_service.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "components/prefs/pref_service.h"
+#include "components/sync/driver/sync_service_utils.h"
 #include "components/variations/variations_params_manager.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_database_service.h"
@@ -124,7 +127,7 @@ class PersonalDataManagerTestBase {
         scoped_refptr<AutofillWebDataService>(autofill_database_service_),
         prefs_.get(), identity_test_env_.identity_manager(), is_incognito);
     personal_data_->AddObserver(&personal_data_observer_);
-    personal_data_->OnSyncServiceInitialized(nullptr);
+    personal_data_->OnSyncServiceInitialized(&sync_service_);
 
     // Verify that the web database has been updated and the notification sent.
     EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
@@ -206,6 +209,57 @@ class PersonalDataManagerTestBase {
     ASSERT_EQ(3U, personal_data_->GetCreditCards().size());
   }
 
+  // Add 3 credit cards. One local, one masked, one full. Creates two masked
+  // cards on Linux, since full server cards are not supported.
+  void SetUpThreeCardTypes() {
+    EXPECT_EQ(0U, personal_data_->GetCreditCards().size());
+    CreditCard masked_server_card;
+    test::SetCreditCardInfo(&masked_server_card, "Elvis Presley",
+                            "4234567890123456",  // Visa
+                            "04", "2999", "1");
+    masked_server_card.set_guid("00000000-0000-0000-0000-000000000007");
+    masked_server_card.set_record_type(CreditCard::FULL_SERVER_CARD);
+    masked_server_card.set_server_id("masked_id");
+    masked_server_card.set_use_count(15);
+    personal_data_->AddFullServerCreditCard(masked_server_card);
+    EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+        .WillOnce(QuitMainMessageLoop());
+    base::RunLoop().Run();
+    ASSERT_EQ(1U, personal_data_->GetCreditCards().size());
+
+// Cards are automatically remasked on Linux since full server cards are not
+// supported.
+#if !defined(OS_LINUX) || defined(OS_CHROMEOS)
+    personal_data_->ResetFullServerCard(
+        personal_data_->GetCreditCards()[0]->guid());
+#endif
+
+    CreditCard full_server_card;
+    test::SetCreditCardInfo(&full_server_card, "Buddy Holly",
+                            "5187654321098765",  // Mastercard
+                            "10", "2998", "1");
+    full_server_card.set_guid("00000000-0000-0000-0000-000000000008");
+    full_server_card.set_record_type(CreditCard::FULL_SERVER_CARD);
+    full_server_card.set_server_id("full_id");
+    full_server_card.set_use_count(10);
+    personal_data_->AddFullServerCreditCard(full_server_card);
+
+    CreditCard local_card;
+    test::SetCreditCardInfo(&local_card, "Freddy Mercury",
+                            "4234567890123463",  // Visa
+                            "08", "2999", "1");
+    local_card.set_guid("00000000-0000-0000-0000-000000000009");
+    local_card.set_record_type(CreditCard::LOCAL_CARD);
+    local_card.set_use_count(5);
+    personal_data_->AddCreditCard(local_card);
+
+    EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+        .WillOnce(QuitMainMessageLoop());
+    base::RunLoop().Run();
+
+    EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  }
+
   // Helper method to create a local card that was expired 400 days ago,
   // and has not been used in last 400 days. This card is supposed to be
   // deleted during a major version upgrade.
@@ -248,6 +302,7 @@ class PersonalDataManagerTestBase {
   base::MessageLoopForUI message_loop_;
   std::unique_ptr<PrefService> prefs_;
   identity::IdentityTestEnvironment identity_test_env_;
+  TestSyncService sync_service_;
   scoped_refptr<AutofillWebDataService> autofill_database_service_;
   scoped_refptr<WebDatabaseService> web_database_;
   AutofillTable* autofill_table_;  // weak ref
@@ -2007,7 +2062,8 @@ TEST_F(PersonalDataManagerTest,
 
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(AutofillType(CREDIT_CARD_NUMBER),
-                                               base::ASCIIToUTF16("12345678"));
+                                               base::ASCIIToUTF16("12345678"),
+                                               /*include_server_cards=*/true);
 
   // There should be no suggestions.
   ASSERT_EQ(0U, suggestions.size());
@@ -2022,7 +2078,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions_LocalCardsRanking) {
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(3U, suggestions.size());
 
   // Ordered as expected.
@@ -2070,7 +2127,8 @@ TEST_F(PersonalDataManagerTest,
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(5U, suggestions.size());
 
   // All cards should be ordered as expected.
@@ -2119,7 +2177,8 @@ TEST_F(PersonalDataManagerTest,
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(0U, suggestions.size());
 }
 
@@ -2167,7 +2226,8 @@ TEST_F(PersonalDataManagerTest,
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(0U, suggestions.size());
 }
 
@@ -2212,7 +2272,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions_ExpiredCards) {
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /* include_server_cards= */ true);
   ASSERT_EQ(3U, suggestions.size());
 
   // The never used non expired card should be suggested first.
@@ -2280,7 +2341,8 @@ TEST_F(PersonalDataManagerTest,
 
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NAME_FULL), base::string16());
+            AutofillType(CREDIT_CARD_NAME_FULL), base::string16(),
+            /*include_server_cards=*/true);
     EXPECT_EQ(4U, suggestions.size());
     EXPECT_EQ(base::ASCIIToUTF16("Bonnie Parker"), suggestions[0].value);
     EXPECT_EQ(base::ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
@@ -2296,7 +2358,8 @@ TEST_F(PersonalDataManagerTest,
   {
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NAME_FULL), base::string16());
+            AutofillType(CREDIT_CARD_NAME_FULL), base::string16(),
+            /*include_server_cards=*/true);
     EXPECT_EQ(2U, suggestions.size());
     EXPECT_EQ(base::ASCIIToUTF16("Bonnie Parker"), suggestions[0].value);
     EXPECT_EQ(base::ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
@@ -2306,7 +2369,8 @@ TEST_F(PersonalDataManagerTest,
   {
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("B"));
+            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("B"),
+            /*include_server_cards=*/true);
 
     ASSERT_EQ(1U, suggestions.size());
     EXPECT_EQ(base::ASCIIToUTF16("Bonnie Parker"), suggestions[0].value);
@@ -2316,7 +2380,8 @@ TEST_F(PersonalDataManagerTest,
   {
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("Cl"));
+            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("Cl"),
+            /*include_server_cards=*/true);
 
     ASSERT_EQ(1U, suggestions.size());
     EXPECT_EQ(base::ASCIIToUTF16("Clyde Barrow"), suggestions[0].value);
@@ -2326,7 +2391,8 @@ TEST_F(PersonalDataManagerTest,
   {
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("Jo"));
+            AutofillType(CREDIT_CARD_NAME_FULL), base::ASCIIToUTF16("Jo"),
+            /*include_server_cards=*/true);
 
     ASSERT_EQ(1U, suggestions.size());
     EXPECT_EQ(base::ASCIIToUTF16("John Dillinger"), suggestions[0].value);
@@ -2338,7 +2404,8 @@ TEST_F(PersonalDataManagerTest,
   {
     std::vector<Suggestion> suggestions =
         personal_data_->GetCreditCardSuggestions(
-            AutofillType(CREDIT_CARD_NUMBER), base::ASCIIToUTF16("4234"));
+            AutofillType(CREDIT_CARD_NUMBER), base::ASCIIToUTF16("4234"),
+            /*include_server_cards=*/true);
 
     ASSERT_EQ(2U, suggestions.size());
     EXPECT_EQ(
@@ -2384,7 +2451,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions_NumberMissing) {
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NUMBER),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(1U, suggestions.size());
   EXPECT_EQ(
       base::UTF8ToUTF16(std::string("Amex") + kUTF8MidlineEllipsis + "0005"),
@@ -2442,7 +2510,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions_ServerDuplicates) {
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(4U, suggestions.size());
   EXPECT_EQ(base::ASCIIToUTF16("John Dillinger"), suggestions[0].value);
   EXPECT_EQ(base::ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
@@ -2450,7 +2519,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions_ServerDuplicates) {
   EXPECT_EQ(base::ASCIIToUTF16("Bonnie Parker"), suggestions[3].value);
 
   suggestions = personal_data_->GetCreditCardSuggestions(
-      AutofillType(CREDIT_CARD_NUMBER), /* field_contents= */ base::string16());
+      AutofillType(CREDIT_CARD_NUMBER), /* field_contents= */ base::string16(),
+      /*include_server_cards=*/true);
   ASSERT_EQ(4U, suggestions.size());
   EXPECT_EQ(
       base::UTF8ToUTF16(std::string("Visa") + kUTF8MidlineEllipsis + "3456"),
@@ -2491,7 +2561,8 @@ TEST_F(PersonalDataManagerTest,
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME_FULL),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(3U, suggestions.size());
 
   // Add a second dupe local card to make sure a full server card can be a dupe
@@ -2505,7 +2576,7 @@ TEST_F(PersonalDataManagerTest,
 
   suggestions = personal_data_->GetCreditCardSuggestions(
       AutofillType(CREDIT_CARD_NAME_FULL),
-      /* field_contents= */ base::string16());
+      /* field_contents= */ base::string16(), /*include_server_cards=*/true);
   ASSERT_EQ(3U, suggestions.size());
 }
 
@@ -2561,7 +2632,8 @@ TEST_F(PersonalDataManagerTest,
   std::vector<Suggestion> suggestions =
       personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NUMBER),
-          /* field_contents= */ base::string16());
+          /* field_contents= */ base::string16(),
+          /*include_server_cards=*/true);
   ASSERT_EQ(3U, suggestions.size());
 
   // Local cards will show network.
@@ -3725,7 +3797,7 @@ TEST_F(PersonalDataManagerTest,
   std::vector<AutofillProfile*> profiles =
       personal_data_->GetProfilesToSuggest();
   std::vector<CreditCard*> credit_cards =
-      personal_data_->GetCreditCardsToSuggest();
+      personal_data_->GetCreditCardsToSuggest(/*include_server_cards=*/true);
 
   // |profile1| should have been merged into |profile2| which should then have
   // been merged into |profile3|. |profile4| should have been merged into
@@ -5655,6 +5727,9 @@ TEST_F(PersonalDataManagerTest, RemoveExpiredCreditCardsNotUsedSinceTimestamp) {
 }
 
 TEST_F(PersonalDataManagerTest, CreateDataForTest) {
+  // Disable sync so the data gets created.
+  sync_service_.SetPreferredDataTypes(syncer::ModelType::UNSPECIFIED);
+
   // By default, the creation of test data is disabled.
   ResetPersonalDataManager(USER_MODE_NORMAL);
   ASSERT_EQ(0U, personal_data_->GetProfiles().size());
@@ -5748,5 +5823,281 @@ TEST_F(PersonalDataManagerTest, CreateDataForTest) {
     EXPECT_TRUE((*it)->IsExpired(deletion_threshold));
   }
 }
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// Make sure that it's not possible to add full server cards on Linux.
+TEST_F(PersonalDataManagerTest, CannotAddFullServerCardOnLinux) {
+  SetUpThreeCardTypes();
+
+  // Check that cards were masked and other were untouched.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  for (CreditCard* card : server_cards)
+    EXPECT_TRUE(card->record_type() == CreditCard::MASKED_SERVER_CARD);
+}
+#endif  // #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+
+// These tests are not applicable on Linux since it does not support full server
+// cards.
+#if !defined(OS_LINUX) || defined(OS_CHROMEOS)
+// Make sure that an auth error does not mask all the server cards if the
+// feature is disabled.
+TEST_F(PersonalDataManagerTest, SyncAuthErrorMasksServerCards_FeatureDisabled) {
+  // Explicitely disable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndDisableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Set an auth error and inform the personal data manager.
+  sync_service_.SetInAuthError(true);
+  personal_data_->OnStateChanged(&sync_service_);
+
+  // Remove the auth error to be able to get the server cards.
+  sync_service_.SetInAuthError(false);
+
+  // Check that the full server card was not remasked and that the others are
+  // still present.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  EXPECT_EQ(CreditCard::MASKED_SERVER_CARD, server_cards[0]->record_type());
+  EXPECT_EQ(CreditCard::FULL_SERVER_CARD, server_cards[1]->record_type());
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceStatusOnStateChanged",
+      syncer::UploadState::NOT_ACTIVE, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 0);
+}
+
+// Make sure that an auth error masks all the server cards if the feature is
+// enabled.
+TEST_F(PersonalDataManagerTest, SyncAuthErrorMasksServerCards_FeatureEnabled) {
+  // Explicitely enable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndEnableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Set an auth error and inform the personal data manager.
+  sync_service_.SetInAuthError(true);
+  personal_data_->OnStateChanged(&sync_service_);
+  WaitForOnPersonalDataChanged();
+
+  // Remove the auth error to be able to get the server cards.
+  sync_service_.SetInAuthError(false);
+
+  // Check that cards were masked and other were untouched.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  for (CreditCard* card : server_cards)
+    EXPECT_TRUE(card->record_type() == CreditCard::MASKED_SERVER_CARD);
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceStatusOnStateChanged",
+      syncer::UploadState::NOT_ACTIVE, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 0);
+}
+
+// Test that calling OnSyncServiceInitialized with a null sync service does not
+// remask full server cards if the feature is disabled.
+TEST_F(PersonalDataManagerTest,
+       OnSyncServiceInitialized_NoSyncService_FeatureDisabled) {
+  // Explicitely disable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndDisableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Call OnSyncServiceInitialized with no sync service.
+  personal_data_->OnSyncServiceInitialized(nullptr);
+
+  // Check that the full server card was not remasked and that the others are
+  // still present.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  EXPECT_EQ(CreditCard::MASKED_SERVER_CARD, server_cards[0]->record_type());
+  EXPECT_EQ(CreditCard::FULL_SERVER_CARD, server_cards[1]->record_type());
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceNullOnInitialized", true, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 0);
+}
+
+// Test that calling OnSyncServiceInitialized with a null sync service remasks
+// full server cards if the feature is enabled.
+TEST_F(PersonalDataManagerTest,
+       OnSyncServiceInitialized_NoSyncService_FeatureEnabled) {
+  // Explicitely enable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndEnableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Call OnSyncServiceInitialized with no sync service.
+  personal_data_->OnSyncServiceInitialized(nullptr);
+  WaitForOnPersonalDataChanged();
+
+  // Check that cards were masked and other were untouched.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  for (CreditCard* card : server_cards)
+    EXPECT_TRUE(card->record_type() == CreditCard::MASKED_SERVER_CARD);
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceNullOnInitialized", true, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 0);
+}
+
+// Test that calling OnSyncServiceInitialized with a sync service in auth error
+// does not remask full server cards if the feature is disabled.
+TEST_F(PersonalDataManagerTest,
+       OnSyncServiceInitialized_NotActiveSyncService_FeatureDisabled) {
+  // Explicitely disable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndDisableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Call OnSyncServiceInitialized with a sync service in auth error.
+  TestSyncService sync_service;
+  sync_service.SetInAuthError(true);
+  personal_data_->OnSyncServiceInitialized(&sync_service);
+
+  // Remove the auth error to be able to get the server cards.
+  sync_service.SetInAuthError(false);
+
+  // Check that the full server card was not remasked and that the others are
+  // still present.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  EXPECT_EQ(CreditCard::MASKED_SERVER_CARD, server_cards[0]->record_type());
+  EXPECT_EQ(CreditCard::FULL_SERVER_CARD, server_cards[1]->record_type());
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceNotActiveOnInitialized", true,
+      1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 0);
+}
+
+// Test that calling OnSyncServiceInitialized with a sync service in auth error
+// remasks full server cards if the feature is enabled.
+TEST_F(PersonalDataManagerTest,
+       OnSyncServiceInitialized_NotActiveSyncService_FeatureEnabled) {
+  // Explicitely enable the feature that remasks server cards on auth error.
+  base::test::ScopedFeatureList scoped_features;
+  scoped_features.InitAndEnableFeature(
+      features::kAutofillResetFullServerCardsOnAuthError);
+
+  base::HistogramTester histogram_tester;
+  SetUpThreeCardTypes();
+
+  // Call OnSyncServiceInitialized with a sync service in auth error.
+  TestSyncService sync_service;
+  sync_service.SetInAuthError(true);
+  personal_data_->OnSyncServiceInitialized(&sync_service);
+  WaitForOnPersonalDataChanged();
+
+  // Remove the auth error to be able to get the server cards.
+  sync_service.SetInAuthError(false);
+
+  // Check that cards were masked and other were untouched.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  std::vector<CreditCard*> server_cards =
+      personal_data_->GetServerCreditCards();
+  EXPECT_EQ(2U, server_cards.size());
+  for (CreditCard* card : server_cards)
+    EXPECT_TRUE(card->record_type() == CreditCard::MASKED_SERVER_CARD);
+
+  // Check that the metrics are logged correctly.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.SyncServiceNotActiveOnInitialized", true,
+      1);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.ResetFullServerCards.NumberOfCardsReset.DryRun", 0);
+}
+#endif  // !defined(OS_LINUX) || defined(OS_CHROMEOS)
+
+#if !defined(OS_ANDROID)
+TEST_F(PersonalDataManagerTest, SyncAuthErrorHidesServerCards) {
+  SetUpThreeCardTypes();
+
+  // Set a persistent auth error.
+  sync_service_.SetInAuthError(true);
+
+  // Check that no server cards are available for suggestion, but that the other
+  // calls to get the credit cards are unaffected.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(1U, personal_data_->GetCreditCardsToSuggest(true).size());
+  EXPECT_EQ(1U, personal_data_->GetLocalCreditCards().size());
+  EXPECT_EQ(2U, personal_data_->GetServerCreditCards().size());
+
+  // Remove error
+  sync_service_.SetInAuthError(false);
+
+  // Check that all cards are available.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(3U, personal_data_->GetCreditCardsToSuggest(true).size());
+  EXPECT_EQ(1U, personal_data_->GetLocalCreditCards().size());
+  EXPECT_EQ(2U, personal_data_->GetServerCreditCards().size());
+}
+
+TEST_F(PersonalDataManagerTest, ExcludeServerSideCards) {
+  SetUpThreeCardTypes();
+
+  // include_server_cards is set to false, therefore no server cards should be
+  // available for suggestion, but that the other calls to get the credit cards
+  // are unaffected.
+  EXPECT_EQ(3U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(1U, personal_data_
+                    ->GetCreditCardsToSuggest(/*include_server_cards=*/false)
+                    .size());
+  EXPECT_EQ(1U, personal_data_->GetLocalCreditCards().size());
+  EXPECT_EQ(2U, personal_data_->GetServerCreditCards().size());
+}
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace autofill

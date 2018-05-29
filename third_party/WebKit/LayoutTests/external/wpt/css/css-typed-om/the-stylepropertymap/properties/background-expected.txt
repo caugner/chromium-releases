@@ -4,8 +4,11 @@ FAIL Can set 'background' to var() references assert_equals: expected "CSSUnpars
 PASS Setting 'background' to a length throws TypeError
 PASS Setting 'background' to a percent throws TypeError
 PASS Setting 'background' to a time throws TypeError
+PASS Setting 'background' to an angle throws TypeError
+PASS Setting 'background' to a flexible length throws TypeError
 PASS Setting 'background' to a number throws TypeError
 PASS Setting 'background' to a position throws TypeError
+PASS Setting 'background' to a URL throws TypeError
 PASS Setting 'background' to a transform throws TypeError
 PASS 'background' does not supported 'green'
 PASS 'background' does not supported 'content-box radial-gradient(crimson, skyblue)'
