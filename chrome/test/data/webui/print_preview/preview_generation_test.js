@@ -14,6 +14,7 @@ cr.define('preview_generation_test', function() {
     MediaSize: 'media size',
     PageRange: 'page range',
     Rasterize: 'rasterize',
+    PagesPerSheet: 'pages per sheet',
     Scaling: 'scaling',
     SelectionOnly: 'selection only',
     Destination: 'destination',
@@ -31,20 +32,8 @@ cr.define('preview_generation_test', function() {
     let documentInfo = null;
 
     /** @type {!print_preview.NativeInitialSettings} */
-    const initialSettings = {
-      isInKioskAutoPrintMode: false,
-      isInAppKioskMode: false,
-      thousandsDelimeter: ',',
-      decimalDelimeter: '.',
-      unitType: 1,
-      previewModifiable: true,
-      documentTitle: 'title',
-      documentHasSelection: true,
-      shouldPrintSelectionOnly: false,
-      printerName: 'FooDevice',
-      serializedAppStateStr: null,
-      serializedDefaultDestinationSelectionRulesStr: null
-    };
+    const initialSettings =
+        print_preview_test_utils.getDefaultInitialSettings();
 
     /** @override */
     setup(function() {
@@ -68,18 +57,21 @@ cr.define('preview_generation_test', function() {
 
       page = document.createElement('print-preview-app');
       const previewArea = page.$$('print-preview-preview-area');
-      previewArea.plugin_ = new print_preview.PDFPluginStub(previewArea);
+      previewArea.plugin_ = new print_preview.PDFPluginStub(
+          previewArea.onPluginLoad_.bind(previewArea));
       document.body.appendChild(page);
-      return Promise.all([
-        nativeLayer.whenCalled('getInitialSettings'),
-        nativeLayer.whenCalled('getPrinterCapabilities'),
-      ]).then(function() {
-        if (!documentInfo)
-          initDocumentInfo(false, false);
-        page.set('documentInfo_', documentInfo);
-        page.notifyPath('documentInfo_.isModifiable');
-        return nativeLayer.whenCalled('getPreview');
-      });
+      return Promise
+          .all([
+            nativeLayer.whenCalled('getInitialSettings'),
+            nativeLayer.whenCalled('getPrinterCapabilities'),
+          ])
+          .then(function() {
+            if (!documentInfo)
+              initDocumentInfo(false, false);
+            page.set('documentInfo_', documentInfo);
+            page.notifyPath('documentInfo_.isModifiable');
+            return nativeLayer.whenCalled('getPreview');
+          });
     }
 
     /**
@@ -111,21 +103,25 @@ cr.define('preview_generation_test', function() {
      *     UI state have been verified.
      */
     function testSimpleSetting(
-        settingName, initialSettingValue, updatedSettingValue,
-        ticketKey, initialTicketValue, updatedTicketValue) {
-      return initialize().then(function(args) {
-        const originalTicket = JSON.parse(args.printTicket);
-        assertEquals(initialTicketValue, originalTicket[ticketKey]);
-        nativeLayer.resetResolver('getPreview');
-        assertEquals(initialSettingValue, page.getSettingValue(settingName));
-        page.setSetting(settingName, updatedSettingValue);
-        return nativeLayer.whenCalled('getPreview');
-      }).then(function(args) {
-        assertEquals(updatedSettingValue, page.getSettingValue(settingName));
-        const ticket = JSON.parse(args.printTicket);
-        assertEquals(updatedTicketValue, ticket[ticketKey]);
-        assertEquals(2, ticket.requestID);
-      });
+        settingName, initialSettingValue, updatedSettingValue, ticketKey,
+        initialTicketValue, updatedTicketValue) {
+      return initialize()
+          .then(function(args) {
+            const originalTicket = JSON.parse(args.printTicket);
+            assertEquals(initialTicketValue, originalTicket[ticketKey]);
+            nativeLayer.resetResolver('getPreview');
+            assertEquals(
+                initialSettingValue, page.getSettingValue(settingName));
+            page.setSetting(settingName, updatedSettingValue);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            assertEquals(
+                updatedSettingValue, page.getSettingValue(settingName));
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals(updatedTicketValue, ticket[ticketKey]);
+            assertEquals(2, ticket.requestID);
+          });
     }
 
     /** Validate changing the color updates the preview. */
@@ -172,60 +168,68 @@ cr.define('preview_generation_test', function() {
     /** Validate changing the paper size updates the preview. */
     test(assert(TestNames.MediaSize), function() {
       const mediaSizeCapability =
-          print_preview_test_utils.getCddTemplate('FooDevice').capabilities
-              .printer.media_size;
+          print_preview_test_utils.getCddTemplate('FooDevice')
+              .capabilities.printer.media_size;
       const letterOption = mediaSizeCapability.option[0];
       const squareOption = mediaSizeCapability.option[1];
-      return initialize().then(function(args) {
-        const originalTicket = JSON.parse(args.printTicket);
-        assertEquals(letterOption.width_microns,
-                     originalTicket.mediaSize.width_microns);
-        assertEquals(letterOption.height_microns,
-                     originalTicket.mediaSize.height_microns);
-        nativeLayer.resetResolver('getPreview');
-        const mediaSizeSetting = page.getSettingValue('mediaSize');
-        assertEquals(letterOption.width_microns,
-                     mediaSizeSetting.width_microns);
-        assertEquals(letterOption.height_microns,
-                     mediaSizeSetting.height_microns);
-        page.setSetting('mediaSize', squareOption);
-        return nativeLayer.whenCalled('getPreview');
-      }).then(function(args) {
-        const mediaSizeSettingUpdated = page.getSettingValue('mediaSize');
-        assertEquals(squareOption.width_microns,
-                     mediaSizeSettingUpdated.width_microns);
-        assertEquals(squareOption.height_microns,
-                     mediaSizeSettingUpdated.height_microns);
-        const ticket = JSON.parse(args.printTicket);
-        assertEquals(squareOption.width_microns,
-                     ticket.mediaSize.width_microns);
-        assertEquals(squareOption.height_microns,
-                     ticket.mediaSize.height_microns);
-        nativeLayer.resetResolver('getPreview');
-        assertEquals(2, ticket.requestID);
-      });
+      return initialize()
+          .then(function(args) {
+            const originalTicket = JSON.parse(args.printTicket);
+            assertEquals(
+                letterOption.width_microns,
+                originalTicket.mediaSize.width_microns);
+            assertEquals(
+                letterOption.height_microns,
+                originalTicket.mediaSize.height_microns);
+            nativeLayer.resetResolver('getPreview');
+            const mediaSizeSetting = page.getSettingValue('mediaSize');
+            assertEquals(
+                letterOption.width_microns, mediaSizeSetting.width_microns);
+            assertEquals(
+                letterOption.height_microns, mediaSizeSetting.height_microns);
+            page.setSetting('mediaSize', squareOption);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            const mediaSizeSettingUpdated = page.getSettingValue('mediaSize');
+            assertEquals(
+                squareOption.width_microns,
+                mediaSizeSettingUpdated.width_microns);
+            assertEquals(
+                squareOption.height_microns,
+                mediaSizeSettingUpdated.height_microns);
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals(
+                squareOption.width_microns, ticket.mediaSize.width_microns);
+            assertEquals(
+                squareOption.height_microns, ticket.mediaSize.height_microns);
+            nativeLayer.resetResolver('getPreview');
+            assertEquals(2, ticket.requestID);
+          });
     });
 
     /** Validate changing the page range updates the preview. */
     test(assert(TestNames.PageRange), function() {
-      return initialize().then(function(args) {
-        const originalTicket = JSON.parse(args.printTicket);
-        // Ranges is empty for full document.
-        assertEquals(0, page.getSettingValue('ranges').length);
-        assertEquals(0, originalTicket.pageRange.length);
-        nativeLayer.resetResolver('getPreview');
-        page.setSetting('ranges', [{from: 1, to: 2}]);
-        return nativeLayer.whenCalled('getPreview');
-      }).then(function(args) {
-        const setting = page.getSettingValue('ranges');
-        assertEquals(1, setting.length);
-        assertEquals(1, setting[0].from);
-        assertEquals(2, setting[0].to);
-        const ticket = JSON.parse(args.printTicket);
-        assertEquals(1, ticket.pageRange.length);
-        assertEquals(1, ticket.pageRange[0].from);
-        assertEquals(2, ticket.pageRange[0].to);
-      });
+      return initialize()
+          .then(function(args) {
+            const originalTicket = JSON.parse(args.printTicket);
+            // Ranges is empty for full document.
+            assertEquals(0, page.getSettingValue('ranges').length);
+            assertEquals(0, originalTicket.pageRange.length);
+            nativeLayer.resetResolver('getPreview');
+            page.setSetting('ranges', [{from: 1, to: 2}]);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            const setting = page.getSettingValue('ranges');
+            assertEquals(1, setting.length);
+            assertEquals(1, setting[0].from);
+            assertEquals(2, setting[0].to);
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals(1, ticket.pageRange.length);
+            assertEquals(1, ticket.pageRange[0].from);
+            assertEquals(2, ticket.pageRange[0].to);
+          });
     });
 
     /** Validate changing the selection only setting updates the preview. */
@@ -237,10 +241,14 @@ cr.define('preview_generation_test', function() {
           true);
     });
 
+    /** Validate changing the pages per sheet updates the preview. */
+    test(assert(TestNames.PagesPerSheet), function() {
+      return testSimpleSetting('pagesPerSheet', 1, 2, 'pagesPerSheet', 1, 2);
+    });
+
     /** Validate changing the scaling updates the preview. */
     test(assert(TestNames.Scaling), function() {
-      return testSimpleSetting(
-          'scaling', '100', '90', 'scaleFactor', 100, 90);
+      return testSimpleSetting('scaling', '100', '90', 'scaleFactor', 100, 90);
     });
 
     /**
@@ -256,27 +264,28 @@ cr.define('preview_generation_test', function() {
 
     /** Validate changing the destination updates the preview. */
     test(assert(TestNames.Destination), function() {
-      return initialize().then(function(args) {
-        const originalTicket = JSON.parse(args.printTicket);
-        assertEquals('FooDevice', page.destination_.id);
-        assertEquals('FooDevice', originalTicket.deviceName);
-        const barDestination = new print_preview.Destination(
-            'BarDevice', print_preview.DestinationType.LOCAL,
-            print_preview.DestinationOrigin.LOCAL, 'BarName',
-            false /*isRecent*/,
-            print_preview.DestinationConnectionStatus.ONLINE);
-        barDestination.capabilities =
-            print_preview_test_utils.getCddTemplate(barDestination.id)
-                .capabilities;
-        page.set('destination_', barDestination);
-        nativeLayer.resetResolver('getPreview');
-        page.set('destination_.capabilities', barDestination.capabilities);
-        return nativeLayer.whenCalled('getPreview');
-      }).then(function(args) {
-        assertEquals('BarDevice', page.destination_.id);
-        const ticket = JSON.parse(args.printTicket);
-        assertEquals('BarDevice', ticket.deviceName);
-      });
+      return initialize()
+          .then(function(args) {
+            const originalTicket = JSON.parse(args.printTicket);
+            assertEquals('FooDevice', page.destination_.id);
+            assertEquals('FooDevice', originalTicket.deviceName);
+            const barDestination = new print_preview.Destination(
+                'BarDevice', print_preview.DestinationType.LOCAL,
+                print_preview.DestinationOrigin.LOCAL, 'BarName',
+                false /*isRecent*/,
+                print_preview.DestinationConnectionStatus.ONLINE);
+            barDestination.capabilities =
+                print_preview_test_utils.getCddTemplate(barDestination.id)
+                    .capabilities;
+            nativeLayer.resetResolver('getPreview');
+            page.set('destination_', barDestination);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            assertEquals('BarDevice', page.destination_.id);
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals('BarDevice', ticket.deviceName);
+          });
     });
   });
 

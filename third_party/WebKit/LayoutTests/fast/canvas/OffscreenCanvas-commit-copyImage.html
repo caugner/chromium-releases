@@ -10,7 +10,7 @@ var t = async_test("CopyImageOnTransferredCanvas");
 
 function main() {
   assert_true(!!window.testRunner, "This test requires window.testRunner.");
- 
+
   if (window.testRunner) {
     initTest();
   } else {
@@ -32,18 +32,21 @@ function initTest() {
   ctx.fillStyle = "#ff0";
   ctx.fillRect(128, 128, 128, 128);
 
-
-  ctx.commit().then(runTest);
+  requestAnimationFrame(runTest);
 }
 
 function copyImage() {
-    testRunner.copyImageAtAndCapturePixelsAsyncThen(100, 100, completionCallback);
+  testRunner.copyImageAtAndCapturePixelsAsyncThen(100, 100, completionCallback);
 }
 
 function runTest() {
     // We need setTimeout as a frame barrier for the image frame to be
     // propagated to the placeholder canvas.
-    setTimeout(copyImage, 0);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(copyImage);
+      });
+    });
 }
 
 function completionCallback(width, height, snapshot) {

@@ -133,8 +133,11 @@ var TestRunner = class {
     var targetId = (await DevToolsAPI._sendCommandOrDie('Target.createTarget', {url: 'about:blank'})).targetId;
     await DevToolsAPI._sendCommandOrDie('Target.activateTarget', {targetId});
     var page = new TestRunner.Page(this, targetId);
-    var dummyURL = window.location.href;
-    dummyURL = dummyURL.substring(0, dummyURL.indexOf('inspector-protocol-test.html')) + 'inspector-protocol-page.html';
+    var dummyURL = DevToolsHost.dummyPageURL;
+    if (!dummyURL) {
+      dummyURL = window.location.href;
+      dummyURL = dummyURL.substring(0, dummyURL.indexOf('inspector-protocol-test.html')) + 'inspector-protocol-page.html';
+    }
     await page._navigate(dummyURL);
     return page;
   }
@@ -472,7 +475,7 @@ DevToolsAPI._log = function(text) {
 };
 
 DevToolsAPI._completeTest = function() {
-  window.testRunner.notifyDone();
+  testRunner.notifyDone();
 };
 
 DevToolsAPI._die = function(message, error) {
@@ -538,9 +541,9 @@ DevToolsAPI._fetch = function(url) {
   });
 };
 
-window.testRunner.dumpAsText();
-window.testRunner.waitUntilDone();
-window.testRunner.setCanOpenWindows(true);
+testRunner.dumpAsText();
+testRunner.waitUntilDone();
+testRunner.setCanOpenWindows(true);
 
 window.addEventListener('load', () => {
   var params = new URLSearchParams(window.location.search);

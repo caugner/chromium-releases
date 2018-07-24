@@ -50,6 +50,8 @@ struct Mallocator {
     typedef Mallocator<U> other;
   };
   Mallocator() = default;
+  template <class U>
+  Mallocator(const Mallocator<U>&) {}  // NOLINT(runtime/explicit)
 
   T* allocate(size_t n) { return static_cast<T*>(std::malloc(n * sizeof(T))); }
   void deallocate(T* p, size_t) { std::free(p); }
@@ -1067,6 +1069,17 @@ TEST(HugeStringView, TwoPointTwoGB) {
 #if !defined(NDEBUG) && !defined(ABSL_HAVE_STD_STRING_VIEW)
 TEST(NonNegativeLenTest, NonNegativeLen) {
   EXPECT_DEATH_IF_SUPPORTED(absl::string_view("xyz", -1), "len <= kMaxSize");
+}
+
+TEST(LenExceedsMaxSizeTest, LenExceedsMaxSize) {
+  auto max_size = absl::string_view().max_size();
+
+  // This should construct ok (although the view itself is obviously invalid).
+  absl::string_view ok_view("", max_size);
+
+  // Adding one to the max should trigger an assertion.
+  EXPECT_DEATH_IF_SUPPORTED(absl::string_view("", max_size + 1),
+                            "len <= kMaxSize");
 }
 #endif  // !defined(NDEBUG) && !defined(ABSL_HAVE_STD_STRING_VIEW)
 

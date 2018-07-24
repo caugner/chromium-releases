@@ -581,16 +581,6 @@ PASS Document interface: document.implementation.createDocument(null, "", null) 
 PASS Document interface: document.implementation.createDocument(null, "", null) must inherit property "oncopy" with the proper type
 PASS Document interface: document.implementation.createDocument(null, "", null) must inherit property "oncut" with the proper type
 PASS Document interface: document.implementation.createDocument(null, "", null) must inherit property "onpaste" with the proper type
-PASS SVGElement interface: attribute dataset
-PASS Unscopable handled correctly for dataset property on SVGElement
-PASS SVGElement interface: attribute nonce
-PASS Unscopable handled correctly for nonce property on SVGElement
-PASS SVGElement interface: attribute tabIndex
-PASS Unscopable handled correctly for tabIndex property on SVGElement
-PASS SVGElement interface: operation focus(FocusOptions)
-PASS Unscopable handled correctly for focus(FocusOptions) on SVGElement
-PASS SVGElement interface: operation blur()
-PASS Unscopable handled correctly for blur() on SVGElement
 PASS HTMLAllCollection interface: existence and properties of interface object
 PASS HTMLAllCollection interface object length
 PASS HTMLAllCollection interface object name
@@ -4939,11 +4929,11 @@ PASS CanvasRenderingContext2D interface: operation translate(unrestricted double
 PASS Unscopable handled correctly for translate(unrestricted double, unrestricted double) on CanvasRenderingContext2D
 PASS CanvasRenderingContext2D interface: operation transform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double)
 PASS Unscopable handled correctly for transform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double) on CanvasRenderingContext2D
-FAIL CanvasRenderingContext2D interface: operation getTransform() assert_own_property: interface prototype object missing non-static operation expected property "getTransform" missing
+PASS CanvasRenderingContext2D interface: operation getTransform()
 PASS Unscopable handled correctly for getTransform() on CanvasRenderingContext2D
-FAIL CanvasRenderingContext2D interface: operation setTransform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double) assert_equals: property has wrong .length expected 0 but got 6
+PASS CanvasRenderingContext2D interface: operation setTransform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double)
 PASS Unscopable handled correctly for setTransform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double) on CanvasRenderingContext2D
-FAIL CanvasRenderingContext2D interface: operation setTransform(DOMMatrix2DInit) assert_equals: property has wrong .length expected 0 but got 6
+PASS CanvasRenderingContext2D interface: operation setTransform(DOMMatrix2DInit)
 PASS Unscopable handled correctly for setTransform(DOMMatrix2DInit) on CanvasRenderingContext2D
 PASS CanvasRenderingContext2D interface: operation resetTransform()
 PASS Unscopable handled correctly for resetTransform() on CanvasRenderingContext2D
@@ -5088,7 +5078,7 @@ PASS CanvasRenderingContext2D interface: document.createElement("canvas").getCon
 PASS CanvasRenderingContext2D interface: calling translate(unrestricted double, unrestricted double) on document.createElement("canvas").getContext("2d") with too few arguments must throw TypeError
 PASS CanvasRenderingContext2D interface: document.createElement("canvas").getContext("2d") must inherit property "transform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double)" with the proper type
 PASS CanvasRenderingContext2D interface: calling transform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double) on document.createElement("canvas").getContext("2d") with too few arguments must throw TypeError
-FAIL CanvasRenderingContext2D interface: document.createElement("canvas").getContext("2d") must inherit property "getTransform()" with the proper type assert_inherits: property "getTransform" not found in prototype chain
+PASS CanvasRenderingContext2D interface: document.createElement("canvas").getContext("2d") must inherit property "getTransform()" with the proper type
 PASS CanvasRenderingContext2D interface: document.createElement("canvas").getContext("2d") must inherit property "setTransform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double)" with the proper type
 PASS CanvasRenderingContext2D interface: calling setTransform(unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double, unrestricted double) on document.createElement("canvas").getContext("2d") with too few arguments must throw TypeError
 PASS CanvasRenderingContext2D interface: document.createElement("canvas").getContext("2d") must inherit property "setTransform(DOMMatrix2DInit)" with the proper type
@@ -5210,7 +5200,7 @@ PASS CanvasPattern interface object name
 PASS CanvasPattern interface: existence and properties of interface prototype object
 PASS CanvasPattern interface: existence and properties of interface prototype object's "constructor" property
 PASS CanvasPattern interface: existence and properties of interface prototype object's @@unscopables property
-FAIL CanvasPattern interface: operation setTransform(DOMMatrix2DInit) assert_equals: property has wrong .length expected 0 but got 1
+PASS CanvasPattern interface: operation setTransform(DOMMatrix2DInit)
 PASS Unscopable handled correctly for setTransform(DOMMatrix2DInit) on CanvasPattern
 PASS TextMetrics interface: existence and properties of interface object
 PASS TextMetrics interface object length
@@ -5312,9 +5302,7 @@ PASS OffscreenCanvasRenderingContext2D interface object name
 PASS OffscreenCanvasRenderingContext2D interface: existence and properties of interface prototype object
 PASS OffscreenCanvasRenderingContext2D interface: existence and properties of interface prototype object's "constructor" property
 PASS OffscreenCanvasRenderingContext2D interface: existence and properties of interface prototype object's @@unscopables property
-FAIL OffscreenCanvasRenderingContext2D interface: operation commit() assert_throws: calling operation with this = null didn't throw TypeError function "function() {
-            fn.apply(obj, args);
-        }" did not throw
+PASS OffscreenCanvasRenderingContext2D interface: operation commit()
 PASS Unscopable handled correctly for commit() on OffscreenCanvasRenderingContext2D
 PASS OffscreenCanvasRenderingContext2D interface: attribute canvas
 PASS Unscopable handled correctly for canvas property on OffscreenCanvasRenderingContext2D
@@ -5456,6 +5444,8 @@ PASS CustomElementRegistry interface: operation get(DOMString)
 PASS Unscopable handled correctly for get(DOMString) on CustomElementRegistry
 PASS CustomElementRegistry interface: operation whenDefined(DOMString)
 PASS Unscopable handled correctly for whenDefined(DOMString) on CustomElementRegistry
+PASS CustomElementRegistry interface: operation upgrade(Node)
+PASS Unscopable handled correctly for upgrade(Node) on CustomElementRegistry
 PASS DataTransfer interface: existence and properties of interface object
 PASS DataTransfer interface object length
 PASS DataTransfer interface object name

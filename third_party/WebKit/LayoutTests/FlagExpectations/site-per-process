@@ -1,12 +1,6 @@
 # These tests currently fail when they run with --site-per-process.
 # See https://crbug.com/477150.
 
-# TODO(lukasza): Remove these once CORB is enabled by default.
-crbug.com/802835 external/wpt/fetch/corb/img-png-mislabeled-as-html-nosniff.tentative.sub.html [ Pass ]
-crbug.com/802835 external/wpt/fetch/corb/img-mime-types-coverage.tentative.sub.html [ Pass ]
-crbug.com/802835 external/wpt/fetch/corb/script-html-correctly-labeled.tentative.sub.html [ Pass ]
-crbug.com/802835 external/wpt/fetch/corb/preload-image-png-mislabeled-as-html-nosniff.tentative.sub.html [ Pass ]
-
 # https://crbug.com/794631: OOPIFs VS feature policy VS opaque origins?
 crbug.com/794631 virtual/unified-autoplay/external/wpt/feature-policy/autoplay-allowed-by-feature-policy-attribute.https.sub.html [ Failure ]
 crbug.com/794631 virtual/unified-autoplay/external/wpt/feature-policy/autoplay-allowed-by-feature-policy.https.sub.html [ Failure ]
@@ -14,9 +8,6 @@ crbug.com/794631 virtual/unified-autoplay/external/wpt/feature-policy/autoplay-a
 # https://crbug.com/793127: NOTREACHED() from clamy@ tickled by frame consolidation CL?
 crbug.com/793127 http/tests/security/upgrade-insecure-requests/iframe-upgrade.https.html [ Crash ]
 crbug.com/793127 external/wpt/content-security-policy/securitypolicyviolation/upgrade-insecure-requests-reporting.https.html [ Crash ]
-
-# https://crbug.com/769502: PlzNavigate-related, not-yet-investigated timeout.
-crbug.com/769502 fast/loader/recursive-before-unload-crash.html [ Timeout ]
 
 # https://crbug.com/769508: PlzNavigate-related, not-yet-investigated failures.
 crbug.com/769508 fast/css/acid2.html [ Failure ]
@@ -67,9 +58,6 @@ crbug.com/601584 virtual/outofblink-cors/external/wpt/bluetooth/requestDevice/cr
 # https://crbug.com/606594 - UaF of delegate_ in WebFrameTestClient::willSendRequest
 # https://crbug.com/786510 - test tries to access cross-origin document body
 crbug.com/606594 http/tests/local/serviceworker/fetch-request-body-file.html [ Skip ]
-
-# https://crbug.com/607991 - MockWebClipboardImpl not replicated across OOPIFs.
-crbug.com/607991 http/tests/misc/copy-resolves-urls.html [ Failure ]
 
 # https://crbug.com/616626 - allow_universal_access_from_file_urls doesn't work with --site-per-process.
 # https://crbug.com/665058 - EventSender drag-and-drop simulation doesn't support OOPIFs.
@@ -156,6 +144,71 @@ crbug.com/711468 virtual/gpu/fast/canvas/canvas-scale-strokePath-shadow.html [ P
 crbug.com/711468 http/tests/intersection-observer/cross-origin-iframe-with-nesting.html [ Failure ]
 
 crbug.com/807675 http/tests/images/image-decode-in-frame.html [ Crash Failure ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/access-control-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/auth-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/auth-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cookie-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cookie-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cors-preflight-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cors-preflight2-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/cors.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/redirect-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/redirect-credentials-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/redirect-loop-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/redirect-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/redirect-password-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/scheme-blob-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker-proxied/thorough/scheme-data-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/access-control-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/auth-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/auth-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/cookie-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/cookie-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/cors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/cors-preflight-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/cors-preflight2-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/redirect-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/redirect-credentials-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/redirect-loop-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/redirect-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/redirect-password-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/scheme-blob-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/serviceworker/thorough/scheme-data-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/access-control-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/auth-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/auth-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/cookie-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/cookie-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/cors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/cors-preflight-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/cors-preflight2-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/redirect-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/redirect-credentials-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/redirect-loop-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/redirect-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/redirect-password-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/scheme-blob-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/window/thorough/scheme-data-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/access-control-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/auth-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/auth-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/cookie-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/cookie-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/cors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/cors-preflight-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/cors-preflight2-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/redirect-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/redirect-credentials-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/redirect-loop-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/redirect-nocors-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/redirect-password-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/scheme-blob-base-https-other-https.html [ Pass Timeout ]
+crbug.com/834185 http/tests/fetch/workers/thorough/scheme-data-base-https-other-https.html [ Pass Timeout ]
 
 # These tests have issues with —site-per-process. https://crbug.com/794631
 crbug.com/794631 http/tests/media/autoplay/document-user-activation-cross-origin-feature-policy-delegation.html [ Failure Pass Timeout ]

@@ -133,7 +133,6 @@ CONSOLE MESSAGE: line 151: interface CountQueuingStrategy
 CONSOLE MESSAGE: line 151:     method constructor
 CONSOLE MESSAGE: line 151:     method size
 CONSOLE MESSAGE: line 151: interface PaintRenderingContext2D
-CONSOLE MESSAGE: line 151:     getter currentTransform
 CONSOLE MESSAGE: line 151:     getter fillStyle
 CONSOLE MESSAGE: line 151:     getter filter
 CONSOLE MESSAGE: line 151:     getter globalAlpha
@@ -166,6 +165,7 @@ CONSOLE MESSAGE: line 151:     method ellipse
 CONSOLE MESSAGE: line 151:     method fill
 CONSOLE MESSAGE: line 151:     method fillRect
 CONSOLE MESSAGE: line 151:     method getLineDash
+CONSOLE MESSAGE: line 151:     method getTransform
 CONSOLE MESSAGE: line 151:     method isPointInPath
 CONSOLE MESSAGE: line 151:     method isPointInStroke
 CONSOLE MESSAGE: line 151:     method lineTo
@@ -183,7 +183,6 @@ CONSOLE MESSAGE: line 151:     method stroke
 CONSOLE MESSAGE: line 151:     method strokeRect
 CONSOLE MESSAGE: line 151:     method transform
 CONSOLE MESSAGE: line 151:     method translate
-CONSOLE MESSAGE: line 151:     setter currentTransform
 CONSOLE MESSAGE: line 151:     setter fillStyle
 CONSOLE MESSAGE: line 151:     setter filter
 CONSOLE MESSAGE: line 151:     setter globalAlpha
@@ -386,7 +385,6 @@ CONSOLE MESSAGE: line 151: interface CountQueuingStrategy
 CONSOLE MESSAGE: line 151:     method constructor
 CONSOLE MESSAGE: line 151:     method size
 CONSOLE MESSAGE: line 151: interface PaintRenderingContext2D
-CONSOLE MESSAGE: line 151:     getter currentTransform
 CONSOLE MESSAGE: line 151:     getter fillStyle
 CONSOLE MESSAGE: line 151:     getter filter
 CONSOLE MESSAGE: line 151:     getter globalAlpha
@@ -419,6 +417,7 @@ CONSOLE MESSAGE: line 151:     method ellipse
 CONSOLE MESSAGE: line 151:     method fill
 CONSOLE MESSAGE: line 151:     method fillRect
 CONSOLE MESSAGE: line 151:     method getLineDash
+CONSOLE MESSAGE: line 151:     method getTransform
 CONSOLE MESSAGE: line 151:     method isPointInPath
 CONSOLE MESSAGE: line 151:     method isPointInStroke
 CONSOLE MESSAGE: line 151:     method lineTo
@@ -436,7 +435,6 @@ CONSOLE MESSAGE: line 151:     method stroke
 CONSOLE MESSAGE: line 151:     method strokeRect
 CONSOLE MESSAGE: line 151:     method transform
 CONSOLE MESSAGE: line 151:     method translate
-CONSOLE MESSAGE: line 151:     setter currentTransform
 CONSOLE MESSAGE: line 151:     setter fillStyle
 CONSOLE MESSAGE: line 151:     setter filter
 CONSOLE MESSAGE: line 151:     setter globalAlpha

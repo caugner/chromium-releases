@@ -20,12 +20,12 @@
         {
           "object": "LayoutBlockFlow (relative positioned) DIV",
           "rect": [108, 8, 100, 100],
-          "reason": "appeared"
+          "reason": "disappeared"
         },
         {
           "object": "LayoutBlockFlow (relative positioned) DIV",
           "rect": [108, 8, 100, 100],
-          "reason": "disappeared"
+          "reason": "chunk appeared"
         },
         {
           "object": "LayoutBlockFlow DIV",
@@ -35,17 +35,17 @@
         {
           "object": "LayoutBlockFlow DIV",
           "rect": [8, 8, 100, 100],
-          "reason": "disappeared"
+          "reason": "chunk disappeared"
         },
         {
-          "object": "LayoutBlockFlow (relative positioned) DIV",
+          "object": "InlineTextBox '\u00A0'",
           "rect": [108, 8, 4, 18],
           "reason": "disappeared"
         },
         {
           "object": "LayoutBlockFlow HTML",
           "rect": [8, 8, 4, 18],
-          "reason": "appeared"
+          "reason": "chunk appeared"
         }
       ]
     }

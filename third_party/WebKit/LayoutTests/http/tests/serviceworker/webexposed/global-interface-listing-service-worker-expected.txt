@@ -126,7 +126,7 @@ interface CanMakePaymentEvent : ExtendableEvent
     getter methodData
     getter modifiers
     getter paymentRequestOrigin
-    getter topLevelOrigin
+    getter topOrigin
     method constructor
     method respondWith
 interface CanvasGradient
@@ -136,6 +136,7 @@ interface CanvasGradient
 interface CanvasPattern
     attribute @@toStringTag
     method constructor
+    method setTransform
 interface Client
     attribute @@toStringTag
     getter frameType
@@ -157,21 +158,16 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
-interface CookieChangeEvent : Event
-    attribute @@toStringTag
-    getter changed
-    getter deleted
-    method constructor
 interface CookieStore : EventTarget
     attribute @@toStringTag
-    getter onchange
     method constructor
     method delete
     method get
     method getAll
+    method getChangeSubscriptions
     method has
     method set
-    setter onchange
+    method subscribeToChanges
 interface CountQueuingStrategy
     method constructor
     method size
@@ -439,6 +435,11 @@ interface EventTarget
     method constructor
     method dispatchEvent
     method removeEventListener
+interface ExtendableCookieChangeEvent : ExtendableEvent
+    attribute @@toStringTag
+    getter changed
+    getter deleted
+    method constructor
 interface ExtendableEvent : Event
     attribute @@toStringTag
     method constructor
@@ -974,11 +975,32 @@ interface PaymentRequestEvent : ExtendableEvent
     getter modifiers
     getter paymentRequestId
     getter paymentRequestOrigin
-    getter topLevelOrigin
+    getter topOrigin
     getter total
     method constructor
     method openWindow
     method respondWith
+interface Performance : EventTarget
+    attribute @@toStringTag
+    getter oneventtimingbufferfull
+    getter onresourcetimingbufferfull
+    getter timeOrigin
+    method clearEventTimings
+    method clearMarks
+    method clearMeasures
+    method clearResourceTimings
+    method constructor
+    method getEntries
+    method getEntriesByName
+    method getEntriesByType
+    method mark
+    method measure
+    method now
+    method setEventTimingBufferMaxSize
+    method setResourceTimingBufferSize
+    method toJSON
+    setter oneventtimingbufferfull
+    setter onresourcetimingbufferfull
 interface PerformanceEntry
     attribute @@toStringTag
     getter duration
@@ -2539,12 +2561,14 @@ interface WorkerGlobalScope : EventTarget
     getter self
     method atob
     method btoa
+    method cancelAnimationFrame
     method clearInterval
     method clearTimeout
     method constructor
     method createImageBitmap
     method fetch
     method importScripts
+    method requestAnimationFrame
     method setInterval
     method setTimeout
     setter onerror
@@ -2579,6 +2603,7 @@ interface WorkerNavigator
     getter platform
     getter product
     getter storage
+    getter usb
     getter userAgent
     method constructor
 interface WritableStream

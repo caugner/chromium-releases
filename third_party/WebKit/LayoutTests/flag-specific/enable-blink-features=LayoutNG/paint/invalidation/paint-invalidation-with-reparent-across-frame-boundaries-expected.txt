@@ -19,13 +19,13 @@
       "paintInvalidations": [
         {
           "object": "NGPaintFragment",
-          "rect": [8, 151, 768, 51],
-          "reason": "appeared"
+          "rect": [8, 147, 768, 59],
+          "reason": "chunk appeared"
         },
         {
           "object": "NGPaintFragment",
-          "rect": [8, 151, 768, 34],
-          "reason": "disappeared"
+          "rect": [8, 147, 768, 39],
+          "reason": "chunk disappeared"
         },
         {
           "object": "LayoutIFrame IFRAME id='iframe'",
@@ -34,8 +34,8 @@
         },
         {
           "object": "LayoutNGBlockFlow HTML",
-          "rect": [18, 22, 22, 11],
-          "reason": "disappeared"
+          "rect": [18, 18, 22, 19],
+          "reason": "chunk disappeared"
         }
       ]
     }

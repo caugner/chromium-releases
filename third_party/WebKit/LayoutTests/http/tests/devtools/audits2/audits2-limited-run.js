@@ -8,17 +8,17 @@
   await TestRunner.loadModule('audits2_test_runner');
   await TestRunner.showPanel('audits2');
 
-  Audits2TestRunner.openDialog();
-  var dialogElement = Audits2TestRunner.getDialogElement();
+  var dialogElement = Audits2TestRunner.getContainerElement();
   var checkboxes = dialogElement.querySelectorAll('.checkbox');
   for (var checkbox of checkboxes) {
-    if (checkbox.textElement.textContent === 'Performance')
+    if (checkbox.textElement.textContent === 'Performance' ||
+        checkbox.textElement.textContent === 'Clear storage')
       continue;
 
     checkbox.checkboxElement.click();
   }
 
-  Audits2TestRunner.dumpDialogState();
+  Audits2TestRunner.dumpStartAuditState();
   Audits2TestRunner.getRunButton().click();
 
   var results = await Audits2TestRunner.waitForResults();
@@ -26,7 +26,7 @@
 
   Object.keys(results.audits).sort().forEach(auditName => {
     var audit = results.audits[auditName];
-    TestRunner.addResult(`${audit.name}: ${Boolean(audit.rawValue)}`);
+    TestRunner.addResult(`${audit.id}: ${Boolean(audit.rawValue)}`);
   });
 
   TestRunner.completeTest();

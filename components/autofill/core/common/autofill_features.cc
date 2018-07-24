@@ -12,9 +12,10 @@ namespace features {
 const base::Feature kAutofillAddressNormalizer{
     "AutofillAddressNormalizer", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Controls whether credit card suggestions are made on insecure pages.
-const base::Feature kAutofillRequireSecureCreditCardContext{
-    "AutofillRequireSecureCreditCardContext", base::FEATURE_ENABLED_BY_DEFAULT};
+// Controls the use of GET (instead of POST) to fetch cacheable autofill query
+// responses.
+const base::Feature kAutofillCacheQueryResponses{
+    "AutofillCacheQueryResponses", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Controls whether Autofill attemps to fill dynamically changing forms.
 const base::Feature kAutofillDynamicForms{"AutofillDynamicForms",
@@ -44,6 +45,10 @@ const base::Feature kAutofillEnforceMinRequiredFieldsForUpload{
     "AutofillEnforceMinRequiredFieldsForUpload",
     base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Controls whether credit card suggestions are made on insecure pages.
+const base::Feature kAutofillRequireSecureCreditCardContext{
+    "AutofillRequireSecureCreditCardContext", base::FEATURE_ENABLED_BY_DEFAULT};
+
 // Controls whether Full Server credit cards should be reset when the sync
 // service is in an auth error state.
 const base::Feature kAutofillResetFullServerCardsOnAuthError{
@@ -57,6 +62,18 @@ const base::Feature kAutofillRestrictUnownedFieldsToFormlessCheckout{
     "AutofillRestrictUnownedFieldsToFormlessCheckout",
     base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Controls whether experiment ids should be sent through
+// Google Payments RPCs or not.
+const base::Feature kAutofillSendExperimentIdsInPaymentsRPCs{
+    "AutofillSendExperimentIdsInPaymentsRPCs",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Controls whether we show warnings in the Dev console for misused autocomplete
+// types.
+const base::Feature kAutofillShowAutocompleteConsoleWarnings{
+    "AutofillShowAutocompleteConsoleWarnings",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
 // Controls attaching the autofill type predictions to their respective
 // element in the DOM.
 const base::Feature kAutofillShowTypePredictions{
@@ -68,10 +85,14 @@ const base::Feature kAutofillSkipComparingInferredLabels{
     "AutofillSkipComparingInferredLabels", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Controls whether the credit card upload bubble shows the Google Pay logo and
-// a shorter "Save card?" header message on Android.
-const base::Feature kAutofillUpstreamUseGooglePayOnAndroidBranding{
+// a shorter "Save card?" header message on mobile.
+const base::Feature kAutofillUpstreamUseGooglePayBrandingOnMobile{
     "AutofillUpstreamUseGooglePayOnAndroidBranding",
     base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Controls whether or not the autofill UI triggers on a single click.
+const base::Feature kSingleClickAutofill{"SingleClickAutofill",
+                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace features
 }  // namespace autofill

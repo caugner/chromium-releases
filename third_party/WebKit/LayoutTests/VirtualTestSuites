@@ -1,10 +1,5 @@
 [
   {
-    "prefix": "color_space",
-    "base": "fast/canvas/color-space",
-    "args": ["--force-color-profile=srgb"]
-  },
-  {
     "prefix": "custom-user-timing",
     "base": "http/tests/performance-timing/custom-user-timing",
     "args": ["--enable-blink-features=CustomUserTiming"]
@@ -12,8 +7,7 @@
   {
     "prefix": "gpu",
     "base": "fast/canvas",
-    "args": ["--enable-accelerated-2d-canvas",
-             "--disable-display-list-2d-canvas"]
+    "args": ["--enable-accelerated-2d-canvas"]
   },
   {
     "prefix": "threaded",
@@ -71,6 +65,27 @@
     "base": "fast/scroll-behavior",
     "args": ["--enable-threaded-compositing",
              "--enable-prefer-compositing-to-lcd-text"]
+  },
+  {
+    "prefix": "threaded",
+    "base": "fast/scrolling",
+    "args": ["--enable-threaded-compositing",
+             "--enable-prefer-compositing-to-lcd-text"]
+  },
+  {
+    "prefix": "threaded",
+    "base": "fast/events/pinch",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
+    "base": "fast/events/pointerevents/pinch",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
+    "base": "synthetic_gestures",
+    "args": ["--enable-threaded-compositing"]
   },
   {
     "prefix": "gpu-rasterization",
@@ -267,6 +282,11 @@
     "args": ["--enable-slimming-paint-v2"]
   },
   {
+    "prefix": "blink-gen-property-trees",
+    "base": "paint/transparency",
+    "args": ["--enable-blink-gen-property-trees"]
+  },
+  {
     "prefix": "disable-spv175",
     "base": "compositing",
     "args": ["--disable-blink-features=SlimmingPaintV175"]
@@ -301,12 +321,6 @@
     "base": "printing",
     "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
-  {
-    "prefix": "disable-rls",
-    "base": "compositing/squashing",
-    "args": ["--disable-blink-features=RootLayerScrolling"]
-  },
-
   {
     "prefix": "scalefactor200",
     "base": "fast/hidpi/static",
@@ -349,11 +363,6 @@
     "args": ["--enable-features=TouchpadAndWheelScrollLatching",
              "--enable-threaded-compositing",
              "--disable-smooth-scrolling"]
-  },
-  {
-    "prefix": "mojo-notifications",
-    "base": "http/tests/notifications",
-    "args": ["--enable-blink-features=NotificationsWithMojo"]
   },
   {
     "prefix": "scalefactor150",
@@ -483,6 +492,16 @@
     "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
   },
   {
+    "prefix": "layout_ng_experimental",
+    "base": "css3/flexbox",
+    "args": ["--enable-blink-features=LayoutNGFlexBox"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "external/wpt/css/css-flexbox",
+    "args": ["--enable-blink-features=LayoutNGFlexBox"]
+  },
+  {
     "prefix": "print_browser",
     "base": "print_testharness",
     "args": ["--enable-print-browser"]
@@ -594,36 +613,6 @@
     "args": ["--enable-blink-features=FractionalMouseEvent"]
   },
   {
-    "prefix": "incremental-shadow-dom",
-    "base": "external/wpt/shadow-dom",
-    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
-  },
-  {
-    "prefix": "incremental-shadow-dom",
-    "base": "fast/dom/shadow",
-    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
-  },
-  {
-    "prefix": "incremental-shadow-dom",
-    "base": "shadow-dom",
-    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
-  },
-  {
-    "prefix": "incremental-shadow-dom",
-    "base": "html/details_summary",
-    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
-  },
-  {
-    "prefix": "incremental-shadow-dom",
-    "base": "external/wpt/css/css-scoping",
-    "args": ["--enable-blink-features=SlotInFlatTree,IncrementalShadowDOM"]
-  },
-  {
-    "prefix": "modern-media-controls",
-    "base": "media/controls/modern",
-    "args": ["--enable-features=UseModernMediaControls"]
-  },
-  {
     "prefix": "unified-autoplay",
     "base": "external/wpt/feature-policy",
     "args": ["--autoplay-policy=document-user-activation-required"]
@@ -634,18 +623,13 @@
     "args": ["--sampling-heap-profiler"]
   },
   {
-    "prefix": "navigation-mojo-response",
-    "base": "http/tests/serviceworker",
-    "args": ["--enable-features=NavigationMojoResponse"]
-  },
-  {
-    "prefix": "navigation-mojo-response",
-    "base": "external/wpt/service-workers/service-worker",
-    "args": ["--enable-features=NavigationMojoResponse"]
+    "prefix": "htxg",
+    "base": "http/tests/loading/htxg",
+    "args": ["--enable-features=SignedHTTPExchange"]
   },
   {
     "prefix": "htxg",
-    "base": "http/tests/loading/htxg",
+    "base": "http/tests/devtools/htxg",
     "args": ["--enable-features=SignedHTTPExchange"]
   },
   {
@@ -654,14 +638,29 @@
     "args": ["--enable-features=SignedHTTPExchange,NetworkService"]
   },
   {
+    "prefix": "htxg-with-network-service",
+    "base": "http/tests/devtools/htxg",
+    "args": ["--enable-features=SignedHTTPExchange,NetworkService"]
+  },
+  {
+    "prefix": "htxg-origin-trial",
+    "base": "http/tests/loading/htxg",
+    "args": ["--enable-features=SignedHTTPExchangeOriginTrial"]
+  },
+  {
+    "prefix": "htxg-origin-trial-with-network-service",
+    "base": "http/tests/loading/htxg",
+    "args": ["--enable-features=SignedHTTPExchangeOriginTrial,NetworkService"]
+  },
+  {
     "prefix": "picture-in-picture",
     "base": "external/wpt/picture-in-picture",
-    "args": ["--enable-features=PictureInPicture,UseSurfaceLayerForVideo"]
+    "args": ["--enable-features=UseSurfaceLayerForVideo"]
   },
   {
     "prefix": "picture-in-picture",
     "base": "external/wpt/feature-policy",
-    "args": ["--enable-features=PictureInPicture,UseSurfaceLayerForVideo"]
+    "args": ["--enable-features=UseSurfaceLayerForVideo"]
   },
   {
     "prefix": "picture-in-picture",
@@ -671,21 +670,38 @@
   {
     "prefix": "off-main-thread-websocket",
     "base": "external/wpt/websockets",
-    "args": ["--enable-features=OffMainThreadWebSocket"]
+    "args": ["--disable-features=OffMainThreadWebSocket"]
   },
   {
     "prefix": "off-main-thread-websocket",
     "base": "http/tests/websocket",
-    "args": ["--enable-features=OffMainThreadWebSocket"]
+    "args": ["--disable-features=OffMainThreadWebSocket"]
   },
   {
     "prefix": "off-main-thread-websocket",
     "base": "http/tests/security/mixedContent/websocket",
-    "args": ["--enable-features=OffMainThreadWebSocket"]
+    "args": ["--disable-features=OffMainThreadWebSocket"]
   },
   {
     "prefix": "webrtc-wpt-unified-plan",
     "base": "external/wpt/webrtc",
     "args": ["--enable-blink-features=RTCUnifiedPlanByDefault"]
+  },
+  {
+    "prefix": "video-surface-layer",
+    "base": "media",
+    "args": ["--enable-features=UseSurfaceLayerForVideo",
+             "--enable-display-compositor-pixel-dump"]
+  },
+  {
+    "prefix": "user-activation-v2",
+    "base": "user-activation-v2",
+    "args": ["--enable-features=UserActivationV2"]
+  },
+  {
+    "prefix": "display-compositor-pixel-dump",
+    "base": "fast/canvas/display-compositor-pixel-dump",
+    "args": ["--enable-display-compositor-pixel-dump",
+             "--enable-accelerated-2d-canvas"]
   }
 ]

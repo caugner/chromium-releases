@@ -18,14 +18,14 @@
       "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
         {
-          "object": "LayoutInline (relative positioned) SPAN id='child'",
+          "object": "LayoutBlockFlow (positioned) DIV id='box'",
           "rect": [135, 361, 159, 195],
-          "reason": "paint property change"
+          "reason": "chunk appeared"
         },
         {
-          "object": "LayoutInline (relative positioned) SPAN id='child'",
+          "object": "LayoutBlockFlow HTML",
           "rect": [300, 301, 80, 178],
-          "reason": "paint property change"
+          "reason": "chunk disappeared"
         }
       ]
     }

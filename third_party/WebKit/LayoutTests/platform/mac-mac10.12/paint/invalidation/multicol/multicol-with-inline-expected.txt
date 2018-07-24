@@ -19,8 +19,8 @@
       "paintInvalidations": [
         {
           "object": "LayoutMultiColumnFlowThread (anonymous)",
-          "rect": [483, 8, 85, 81],
-          "reason": "appeared"
+          "rect": [483, 8, 85, 41],
+          "reason": "chunk appeared"
         }
       ]
     }
@@ -28,34 +28,6 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutInline SPAN id='target'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutInline SPAN id='target'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutInline SPAN id='target'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutInline SPAN id='target'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "style change"
-    },
-    {
-      "object": "InlineTextBox 'PASS'",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutText #text",
-      "reason": "style change"
-    },
-    {
-      "object": "InlineTextBox 'PASS'",
       "reason": "style change"
     },
     {

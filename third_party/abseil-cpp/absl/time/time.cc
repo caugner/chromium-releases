@@ -36,8 +36,10 @@
 #include <ctime>
 #include <limits>
 
-#include "cctz/civil_time.h"
-#include "cctz/time_zone.h"
+#include "absl/time/internal/cctz/include/cctz/civil_time.h"
+#include "absl/time/internal/cctz/include/cctz/time_zone.h"
+
+namespace cctz = absl::time_internal::cctz;
 namespace absl {
 
 namespace {
@@ -69,7 +71,7 @@ inline absl::Time::Breakdown InfiniteFutureBreakdown() {
   bd.yearday = 365;
   bd.offset = 0;
   bd.is_dst = false;
-  bd.zone_abbr = "-0000";
+  bd.zone_abbr = "-00";
   return bd;
 }
 
@@ -86,7 +88,7 @@ inline Time::Breakdown InfinitePastBreakdown() {
   bd.yearday = 1;
   bd.offset = 0;
   bd.is_dst = false;
-  bd.zone_abbr = "-0000";
+  bd.zone_abbr = "-00";
   return bd;
 }
 
