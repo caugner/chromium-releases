@@ -55,7 +55,7 @@ function connect_pcs(localPc, remotePc) {
 
 function verifySenderParameters(parameters, kind) {
   assert_exists(parameters, "transactionId", "transactionId");
-  assert_not_exists(parameters, "rtcp", "unimplemented rtcp");
+  assert_exists(parameters, "rtcp", "rtcp");
 
   assert_greater_than(parameters.codecs.length, 0);
   for(let codec of parameters.codecs) {
@@ -73,7 +73,11 @@ function verifySenderParameters(parameters, kind) {
     assert_exists(codec, "payloadType", "payload type");
   }
 
-  assert_not_exists(parameters, "headerExtensions", "unimplemented headerExtension");
+  assert_exists(parameters, "headerExtensions", "headerExtension");
+  for(let header of parameters.headerExtensions) {
+    assert_exists(header, "uri");
+    assert_exists(header, "id");
+  }
 
   assert_greater_than(parameters.encodings.length, 0);
   for(let encoding of parameters.encodings) {

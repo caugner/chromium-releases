@@ -76,7 +76,6 @@ crbug.com/729136 [ Linux ] webaudio/mixing.html [ Timeout ]
 crbug.com/739365 [ Linux ] virtual/layout_ng/fast/block/float/assert-when-moving-float.html [ Skip ]
 
 # Tests timing out on WebKit Linux Trusty MSAN
-crbug.com/760543 [ Linux ] http/tests/devtools/tracing/console-timeline.js [ Pass Timeout ]
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-layout/timeline-layout-with-invalidations.js [ Pass Timeout ]
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-paint/timeline-paint-with-layout-invalidations.js [ Pass Timeout ]
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-paint/timeline-paint-with-style-recalc-invalidations.js [ Pass Timeout ]
@@ -86,6 +85,7 @@ crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-misc/timeline-ev
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-paint/timeline-paint-with-layout-invalidations-on-deleted-node.js [ Pass Timeout ]
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-time/timeline-usertiming.js [ Pass Timeout ]
 crbug.com/760543 [ Linux ] http/tests/devtools/tracing/timeline-paint/timeline-paint.js [ Pass Timeout ]
+crbug.com/760543 [ Linux ] http/tests/devtools/oopif/oopif-performance-cpu-profiles.js [ Pass Timeout ]
 
 # Timing out consistenly on WebKit Linux Trusty MSAN
 crbug.com/798957 [ Linux ] http/tests/devtools/audits2/audits2-limited-run.js [ Skip ]
@@ -112,3 +112,11 @@ crbug.com/838057 [ Linux ] virtual/outofblink-cors/external/wpt/service-workers/
 
 # Crashes on Linux Trusty MSAN
 crbug.com/842262 [ Linux ] virtual/enable_wasm/external/wpt/wasm/wasm_indexeddb_test.https.html [ Crash ]
+
+# The following test is flaky and timing out on chromium.webkit/WebKit Linux Trusty MSAN.
+crbug.com/851497 http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js [ Pass Timeout ]
+
+crbug.com/862750 [ Linux ] inspector-protocol/memory/sampling-native-profile-blink-gc.js [ Pass Crash ]
+crbug.com/862750 [ Linux ] virtual/sampling-heap-profiler/inspector-protocol/memory/sampling-native-profile-blink-gc.js [ Pass Crash ]
+crbug.com/862750 [ Linux ] virtual/sampling-heap-profiler/inspector-protocol/memory/sampling-native-profile-partition-alloc.js [ Pass Crash ]
+

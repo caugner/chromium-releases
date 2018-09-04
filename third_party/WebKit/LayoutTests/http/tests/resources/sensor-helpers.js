@@ -28,6 +28,7 @@ function sensorMocks() {
     constructor(sensorRequest, handle, offset, size, reportingMode) {
       this.client_ = null;
       this.startShouldFail_ = false;
+      this.notifyOnReadingChange_ = true;
       this.reportingMode_ = reportingMode;
       this.sensorReadingTimerId_ = null;
       this.updateReadingFunction_ = null;
@@ -113,6 +114,7 @@ function sensorMocks() {
       this.stopReading();
 
       this.startShouldFail_ = false;
+      this.notifyOnReadingChange_ = true;
       this.updateReadingFunction_ = null;
       this.requestedFrequencies_ = [];
       this.suspendCalled_ = null;
@@ -140,6 +142,12 @@ function sensorMocks() {
     // Sets flag that forces sensor to fail when addConfiguration is invoked.
     setStartShouldFail(shouldFail) {
       this.startShouldFail_ = shouldFail;
+    }
+
+    // Configures whether to report a reading change when in ON_CHANGE
+    // reporting mode.
+    configureReadingChangeNotifications(notifyOnReadingChange) {
+      this.notifyOnReadingChange_ = notifyOnReadingChange;
     }
 
     // Returns resolved promise if suspend() was called, rejected otherwise.
@@ -182,7 +190,8 @@ function sensorMocks() {
             // increasing timestamp in seconds.
             this.buffer_[1] = window.performance.now() * 0.001;
           }
-          if (this.reportingMode_ === device.mojom.ReportingMode.ON_CHANGE) {
+          if (this.reportingMode_ === device.mojom.ReportingMode.ON_CHANGE &&
+              this.notifyOnReadingChange_) {
             this.client_.sensorReadingChanged();
           }
         }, timeout);
@@ -216,8 +225,8 @@ function sensorMocks() {
       this.sharedBufferHandle_ = rv.handle;
       this.activeSensors_ = new Map();
       this.resolveFuncs_ = new Map();
-      this.getSensorShouldFail_ = false;
-      this.permissionsDenied_ = false;
+      this.getSensorShouldFail_ = new Map();
+      this.permissionsDenied_ = new Map();
       this.isContinuous_ = false;
       this.maxFrequency_ = 60;
       this.minFrequency_ = 1;
@@ -233,11 +242,11 @@ function sensorMocks() {
 
     // Returns initialized Sensor proxy to the client.
     async getSensor(type) {
-      if (this.getSensorShouldFail_) {
+      if (this.getSensorShouldFail_.get(type)) {
         return {result: device.mojom.SensorCreationResult.ERROR_NOT_AVAILABLE,
                 initParams: null};
       }
-      if (this.permissionsDenied_) {
+      if (this.permissionsDenied_.get(type)) {
         return {result: device.mojom.SensorCreationResult.ERROR_NOT_ALLOWED,
                 initParams: null};
       }
@@ -310,8 +319,8 @@ function sensorMocks() {
       }
       this.activeSensors_.clear();
       this.resolveFuncs_.clear();
-      this.getSensorShouldFail_ = false;
-      this.permissionsDenied_ = false;
+      this.getSensorShouldFail_.clear();
+      this.permissionsDenied_.clear();
       this.maxFrequency_ = 60;
       this.minFrequency_ = 1;
       this.isContinuous_ = false;
@@ -321,12 +330,12 @@ function sensorMocks() {
 
     // Sets flag that forces mock SensorProvider to fail when getSensor() is
     // invoked.
-    setGetSensorShouldFail(shouldFail) {
-      this.getSensorShouldFail_ = shouldFail;
+    setGetSensorShouldFail(type, shouldFail) {
+      this.getSensorShouldFail_.set(type, shouldFail);
     }
 
-    setPermissionsDenied(permissionsDenied) {
-      this.permissionsDenied_ = permissionsDenied;
+    setPermissionsDenied(type, permissionsDenied) {
+      this.permissionsDenied_.set(type, permissionsDenied);
     }
 
     // Returns mock sensor that was created in getSensor to the layout test.
@@ -361,24 +370,79 @@ function sensorMocks() {
     }
   }
 
-  let mockSensorProvider = new MockSensorProvider;
-  return {mockSensorProvider: mockSensorProvider};
+  return new MockSensorProvider();
 }
 
 function sensor_test(func, name, properties) {
   promise_test(async () => {
-    let sensor = sensorMocks();
+    let sensorProvider = sensorMocks();
 
     // Clean up and reset mock sensor stubs asynchronously, so that the blink
     // side closes its proxies and notifies JS sensor objects before new test is
     // started.
     try {
-      await func(sensor);
+      await func(sensorProvider);
     } finally {
-      sensor.mockSensorProvider.reset();
+      sensorProvider.reset();
       await new Promise(resolve => { setTimeout(resolve, 0); });
     };
   }, name, properties);
+}
+
+async function setMockSensorDataForType(sensorProvider, sensorType, mockDataArray) {
+  let createdSensor = await sensorProvider.getCreatedSensor(sensorType);
+  return createdSensor.setUpdateSensorReadingFunction(buffer => {
+    buffer.set(mockDataArray, 2);
+  });
+}
+
+// Returns a promise that will be resolved when an event equal to the given
+// event is fired.
+function waitForEvent(expectedEvent, targetWindow = window) {
+  let stringify = (thing, targetWindow) => {
+    if (thing instanceof targetWindow.Object && thing.constructor !== targetWindow.Object) {
+      let str = '{';
+      for (let key of Object.keys(Object.getPrototypeOf(thing))) {
+        str += JSON.stringify(key) + ': ' + stringify(thing[key], targetWindow) + ', ';
+      }
+      return str + '}';
+    } else if (thing instanceof Number) {
+      return thing.toFixed(6);
+    }
+    return JSON.stringify(thing);
+  };
+
+  return new Promise((resolve, reject) => {
+    let events = [];
+    let timeoutId = null;
+
+    let expectedEventString = stringify(expectedEvent, window);
+    function listener(event) {
+      let eventString = stringify(event, targetWindow);
+      if (eventString === expectedEventString) {
+        targetWindow.clearTimeout(timeoutId);
+        targetWindow.removeEventListener(expectedEvent.type, listener);
+        resolve();
+      } else {
+        events.push(eventString);
+      }
+    }
+    targetWindow.addEventListener(expectedEvent.type, listener);
+
+    timeoutId = targetWindow.setTimeout(() => {
+      targetWindow.removeEventListener(expectedEvent.type, listener);
+      let errorMessage = 'Timeout waiting for expected event: ' + expectedEventString;
+      if (events.length == 0) {
+        errorMessage += ', no events were fired';
+      } else {
+        errorMessage += ', received events: '
+        for (let event of events) {
+          errorMessage += event + ', ';
+        }
+      }
+      reject(errorMessage);
+    }, 500);
+  });
 }
 
 // TODO(Mikhail): Refactor further to remove code duplication

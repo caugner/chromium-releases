@@ -20,7 +20,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "content/browser/bad_message.h"
 #include "content/common/frame_messages.h"
@@ -247,7 +247,7 @@ class ShowWidgetMessageFilter : public content::BrowserMessageFilter {
 
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
   gfx::Rect initial_rect_;
-  int routing_id_;
+  int routing_id_ = MSG_ROUTING_NONE;
 
   DISALLOW_COPY_AND_ASSIGN(ShowWidgetMessageFilter);
 };

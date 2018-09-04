@@ -7,11 +7,12 @@
 #include <sync/sync.h>
 #include <memory>
 
+#include "base/posix/safe_strerror.h"
 #include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_metadata_utils.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
+#include "mojo/public/cpp/platform/platform_handle.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 
 namespace media {
 
@@ -39,10 +40,11 @@ StreamBufferManager::StreamBufferManager(
     std::unique_ptr<StreamCaptureInterface> capture_interface,
     CameraDeviceContext* device_context,
     std::unique_ptr<CameraBufferFactory> camera_buffer_factory,
-    base::RepeatingCallback<mojom::BlobPtr(
-        const uint8_t* buffer,
-        const uint32_t bytesused,
-        const VideoCaptureFormat& capture_format)> blobify_callback,
+    base::RepeatingCallback<
+        mojom::BlobPtr(const uint8_t* buffer,
+                       const uint32_t bytesused,
+                       const VideoCaptureFormat& capture_format,
+                       int screen_rotation)> blobify_callback,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner)
     : callback_ops_(this, std::move(callback_ops_request)),
       capture_interface_(std::move(capture_interface)),
@@ -318,24 +320,19 @@ void StreamBufferManager::RegisterBuffer(StreamType stream_type) {
   size_t num_planes = buffer_handle.planes.size();
   std::vector<StreamCaptureInterface::Plane> planes(num_planes);
   for (size_t i = 0; i < num_planes; ++i) {
-    // Wrap the platform handle.
-    MojoHandle wrapped_handle;
     // There is only one fd.
     int dup_fd = dup(buffer_handle.fds[0].fd);
     if (dup_fd == -1) {
       device_context_->SetErrorState(FROM_HERE, "Failed to dup fd");
       return;
     }
-    MojoResult result = mojo::edk::CreateInternalPlatformHandleWrapper(
-        mojo::edk::ScopedInternalPlatformHandle(
-            mojo::edk::InternalPlatformHandle(dup_fd)),
-        &wrapped_handle);
-    if (result != MOJO_RESULT_OK) {
+    planes[i].fd =
+        mojo::WrapPlatformHandle(mojo::PlatformHandle(base::ScopedFD(dup_fd)));
+    if (!planes[i].fd.is_valid()) {
       device_context_->SetErrorState(FROM_HERE,
                                      "Failed to wrap gpu memory handle");
       return;
     }
-    planes[i].fd.reset(mojo::Handle(wrapped_handle));
     planes[i].stride = buffer_handle.planes[i].stride;
     planes[i].offset = buffer_handle.planes[i].offset;
   }
@@ -367,7 +364,7 @@ void StreamBufferManager::OnRegisteredBuffer(StreamType stream_type,
   if (result) {
     device_context_->SetErrorState(FROM_HERE,
                                    std::string("Failed to register buffer: ") +
-                                       std::string(strerror(result)));
+                                       base::safe_strerror(-result));
     return;
   }
   stream_context_[stream_type]->registered_buffers.push(buffer_id);
@@ -439,8 +436,8 @@ void StreamBufferManager::OnProcessedCaptureRequest(int32_t result) {
   }
   if (result) {
     device_context_->SetErrorState(
-        FROM_HERE, std::string("Process capture request failed") +
-                       std::string(strerror(result)));
+        FROM_HERE, std::string("Process capture request failed: ") +
+                       base::safe_strerror(-result));
     return;
   }
   // Keeps the preview stream going.
@@ -702,15 +699,14 @@ void StreamBufferManager::SubmitCaptureResult(uint32_t frame_number,
   // Wait on release fence before delivering the result buffer to client.
   if (stream_buffer->release_fence.is_valid()) {
     const int kSyncWaitTimeoutMs = 1000;
-    mojo::edk::ScopedInternalPlatformHandle fence;
-    MojoResult result = mojo::edk::PassWrappedInternalPlatformHandle(
-        stream_buffer->release_fence.release().value(), &fence);
-    if (result != MOJO_RESULT_OK) {
+    mojo::PlatformHandle fence =
+        mojo::UnwrapPlatformHandle(std::move(stream_buffer->release_fence));
+    if (!fence.is_valid()) {
       device_context_->SetErrorState(FROM_HERE,
                                      "Failed to unwrap release fence fd");
       return;
     }
-    if (!sync_wait(fence.get().handle, kSyncWaitTimeoutMs)) {
+    if (!sync_wait(fence.GetFD().get(), kSyncWaitTimeoutMs)) {
       device_context_->SetErrorState(FROM_HERE,
                                      "Sync wait on release fence timed out");
       return;
@@ -740,9 +736,11 @@ void StreamBufferManager::SubmitCaptureResult(uint32_t frame_number,
         device_context_->SetErrorState(FROM_HERE, "Invalid JPEG blob");
         return;
       }
+      // Still capture result from HALv3 already has orientation info in EXIF,
+      // so just provide 0 as screen rotation in |blobify_callback_| parameters.
       mojom::BlobPtr blob = blobify_callback_.Run(
           reinterpret_cast<uint8_t*>(buffer->memory(0)), header->jpeg_size,
-          stream_context_[stream_type]->capture_format);
+          stream_context_[stream_type]->capture_format, 0);
       if (blob) {
         std::move(pending_result.still_capture_callback).Run(std::move(blob));
       } else {

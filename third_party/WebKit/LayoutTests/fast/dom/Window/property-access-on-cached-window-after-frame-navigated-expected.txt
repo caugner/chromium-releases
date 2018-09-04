@@ -61,6 +61,8 @@ PASS oldChildWindow.navigator.serviceWorker.oncontrollerchange is newChildWindow
 PASS oldChildWindow.navigator.serviceWorker.onmessage is newChildWindow.navigator.serviceWorker.onmessage
 PASS oldChildWindow.navigator.usb.onconnect is newChildWindow.navigator.usb.onconnect
 PASS oldChildWindow.navigator.usb.ondisconnect is newChildWindow.navigator.usb.ondisconnect
+PASS oldChildWindow.navigator.userActivation.hasBeenActive is newChildWindow.navigator.userActivation.hasBeenActive
+PASS oldChildWindow.navigator.userActivation.isActive is newChildWindow.navigator.userActivation.isActive
 PASS oldChildWindow.navigator.userAgent is newChildWindow.navigator.userAgent
 PASS oldChildWindow.navigator.vendor is newChildWindow.navigator.vendor
 PASS oldChildWindow.navigator.vendorSub is newChildWindow.navigator.vendorSub
@@ -180,6 +182,7 @@ PASS oldChildWindow.performance.navigation.redirectCount is newChildWindow.perfo
 PASS oldChildWindow.performance.navigation.type is newChildWindow.performance.navigation.type
 PASS oldChildWindow.performance.oneventtimingbufferfull is newChildWindow.performance.oneventtimingbufferfull
 PASS oldChildWindow.performance.onresourcetimingbufferfull is newChildWindow.performance.onresourcetimingbufferfull
+PASS oldChildWindow.performance.shouldYield is newChildWindow.performance.shouldYield
 PASS oldChildWindow.performance.timing.connectEnd is newChildWindow.performance.timing.connectEnd
 PASS oldChildWindow.performance.timing.connectStart is newChildWindow.performance.timing.connectStart
 PASS oldChildWindow.performance.timing.domComplete is newChildWindow.performance.timing.domComplete

@@ -243,7 +243,7 @@ std::string FrameTreeVisualizer::DepictFrameTree(FrameTreeNode* root) {
     // Highlight some exceptionable conditions.
     if (site_instance->active_frame_count() == 0)
       result.append(" (active_frame_count == 0)");
-    if (!site_instance->GetProcess()->HasConnection())
+    if (!site_instance->GetProcess()->IsInitializedAndNotDead())
       result.append(" (no process)");
     prefix = "      ";
   }
@@ -420,8 +420,6 @@ bool ShowWidgetMessageFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 void ShowWidgetMessageFilter::Wait() {
-  initial_rect_ = gfx::Rect();
-  routing_id_ = MSG_ROUTING_NONE;
   message_loop_runner_->Run();
 }
 

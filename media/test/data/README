@@ -44,9 +44,15 @@ nonzero-start-time.webm - Has the same headers as bear-320x240.webm but the firs
 bear-320x240_corrupted_after_init_segment.webm - bear-320x240.webm's initialization segment followed by "CORRUPTED\n"
 bear-320x240-live.webm - bear-320x240.webm remuxed w/o a duration and using clusters with unknown sizes.
                          ffmpeg -i bear-320x240.webm -acodec copy -vcodec copy -f webm pipe:1 > bear-320x240-live.webm
+four-colors.mp4 - A 960x540 H.264 mp4 video with 4 color blocks (Y,R,G,B) in
+                  every frame. The video playback looks like a still image.
+                  An image of 4 color blocks (.png file) is first created by
+                  Windows Paint.exe. This image is then used as a basic video
+                  frame in making this 2-second video from Mac iStopMotion.
 vp8-I-frame-160x240 - The first I frame of a 160x240 reencode of bear-320x240.webm.
 vp8-I-frame-320x120 - The first I frame of a 320x120 reencode of bear-320x240.webm.
 vp8-I-frame-320x240 - The first I frame of bear-320x240.webm.
+vp8-P-frame-320x240 - The second P frame of bear-320x240.webm.
 vp8-I-frame-320x480 - The first I frame of a 320x480 reencode of bear-320x240.webm.
 vp8-I-frame-640x240 - The first I frame of a 640x240 reencode of bear-320x240.webm.
 vp8-corrupt-I-frame - A copy of vp8-I-frame-320x240 w/ all bytes XORed w/ 0xA5.
@@ -136,6 +142,10 @@ bear-640x360-v_frag-cens.mp4
   It was generated from concatenating the output of:
       shaka/packager/tools/pssh/pssh-box.py --widevine-system-id --key-id 30313233343536373839303132333435 --hex
       shaka/packager/tools/pssh/pssh-box.py --common-system-id --key-id 30313233343536373839303132333435 --hex
+
+bear-640x360-a_frag-cbcs.mp4
+- Same as previous instructions, except source is bear-640x360-a_frag.mp4
+  and no clear lead (i.e. --clear_lead 0).
 
 bear-flac-cenc.mp4
 - Encrypted version of bear-flac.mp4, encrypted by Shaka Packager

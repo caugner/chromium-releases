@@ -20,22 +20,7 @@
         {
           "object": "Scrolling Contents Layer",
           "rect": [0, 0, 939, 235],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [9, 7, 921, 213],
-          "reason": "paint property change"
-        },
-        {
-          "object": "Scrolling Contents Layer",
-          "rect": [0, 0, 600, 235],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [167, 8, 424, 227],
-          "reason": "paint property change"
+          "reason": "full layer"
         }
       ],
       "transform": 1
@@ -64,10 +49,6 @@
     },
     {
       "object": "LayoutView #document",
-      "reason": "geometry"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
       "reason": "geometry"
     },
     {
@@ -158,12 +139,7 @@
         {
           "object": "Scrolling Contents Layer",
           "rect": [0, 0, 939, 235],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [9, 7, 921, 213],
-          "reason": "paint property change"
+          "reason": "full layer"
         }
       ],
       "transform": 1
@@ -192,10 +168,6 @@
     },
     {
       "object": "LayoutView #document",
-      "reason": "geometry"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
       "reason": "geometry"
     },
     {
@@ -286,22 +258,7 @@
         {
           "object": "Scrolling Contents Layer",
           "rect": [0, 0, 400, 600],
-          "reason": "paint property change"
-        },
-        {
-          "object": "Scrolling Contents Layer",
-          "rect": [0, 0, 400, 235],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [9, 7, 391, 213],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [38, 7, 353, 554],
-          "reason": "paint property change"
+          "reason": "full layer"
         }
       ]
     }
@@ -317,10 +274,6 @@
     },
     {
       "object": "LayoutView #document",
-      "reason": "geometry"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
       "reason": "geometry"
     },
     {
@@ -442,10 +395,6 @@
     {
       "object": "LayoutView #document",
       "reason": "incremental"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",

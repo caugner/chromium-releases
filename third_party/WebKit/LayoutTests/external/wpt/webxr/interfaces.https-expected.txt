@@ -1,5 +1,7 @@
 This is a testharness.js-based test.
 PASS Test IDL implementation of WebXR API
+PASS Partial interface Navigator: original interface defined
+PASS Partial dictionary WebGLContextAttributes: original dictionary defined
 PASS Navigator interface: attribute xr
 PASS Unscopable handled correctly for xr property on Navigator
 PASS Navigator interface: navigator must inherit property "xr" with the proper type
@@ -31,8 +33,8 @@ PASS XRSession interface: existence and properties of interface prototype object
 PASS XRSession interface: existence and properties of interface prototype object's @@unscopables property
 PASS XRSession interface: attribute device
 PASS Unscopable handled correctly for device property on XRSession
-PASS XRSession interface: attribute exclusive
-PASS Unscopable handled correctly for exclusive property on XRSession
+PASS XRSession interface: attribute immersive
+PASS Unscopable handled correctly for immersive property on XRSession
 PASS XRSession interface: attribute outputContext
 PASS Unscopable handled correctly for outputContext property on XRSession
 PASS XRSession interface: attribute depthNear
@@ -57,16 +59,16 @@ PASS XRSession interface: attribute onresetpose
 PASS Unscopable handled correctly for onresetpose property on XRSession
 PASS XRSession interface: attribute onend
 PASS Unscopable handled correctly for onend property on XRSession
-PASS XRPresentationFrame interface: existence and properties of interface object
-PASS XRPresentationFrame interface object length
-PASS XRPresentationFrame interface object name
-PASS XRPresentationFrame interface: existence and properties of interface prototype object
-PASS XRPresentationFrame interface: existence and properties of interface prototype object's "constructor" property
-PASS XRPresentationFrame interface: existence and properties of interface prototype object's @@unscopables property
-PASS XRPresentationFrame interface: attribute views
-PASS Unscopable handled correctly for views property on XRPresentationFrame
-PASS XRPresentationFrame interface: operation getDevicePose(XRCoordinateSystem)
-PASS Unscopable handled correctly for getDevicePose(XRCoordinateSystem) on XRPresentationFrame
+PASS XRFrame interface: existence and properties of interface object
+PASS XRFrame interface object length
+PASS XRFrame interface object name
+PASS XRFrame interface: existence and properties of interface prototype object
+PASS XRFrame interface: existence and properties of interface prototype object's "constructor" property
+PASS XRFrame interface: existence and properties of interface prototype object's @@unscopables property
+PASS XRFrame interface: attribute views
+PASS Unscopable handled correctly for views property on XRFrame
+PASS XRFrame interface: operation getDevicePose(XRCoordinateSystem)
+PASS Unscopable handled correctly for getDevicePose(XRCoordinateSystem) on XRFrame
 FAIL XRCoordinateSystem interface: existence and properties of interface object assert_equals: prototype of XRCoordinateSystem is not EventTarget expected function "function EventTarget() { [native code] }" but got function "function () { [native code] }"
 PASS XRCoordinateSystem interface object length
 PASS XRCoordinateSystem interface object name
