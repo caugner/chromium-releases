@@ -58,18 +58,6 @@ crbug.com/809609 [ Linux ] editing/pasteboard/drop-file-svg.html [ Pass Leak ]
 crbug.com/809609 [ Linux ] editing/inserting/insert_div_with_style.html [ Pass Leak ]
 
 # -----------------------------------------------------------------
-# Sheriff 2018-03-08
-# -----------------------------------------------------------------
-crbug.com/821547 [ Linux ] animations/composition/backdrop-filter-composition.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] animations/interpolation/backdrop-filter-interpolation.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] animations/interpolation/filter-interpolation-003.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] external/wpt/web-animations/animation-model/animation-types/interpolation-per-property.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] svg/animations/additive-type-by-animation.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] virtual/threaded/animations/composition/backdrop-filter-composition.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] virtual/threaded/animations/interpolation/backdrop-filter-interpolation.html [ Pass Leak ]
-crbug.com/821547 [ Linux ] virtual/threaded/animations/interpolation/filter-interpolation-003.html [ Pass Leak ]
-
-# -----------------------------------------------------------------
 # Sheriff 2018-04-23
 # -----------------------------------------------------------------
 crbug.com/836278 [ Linux ] external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Pass Leak ]
@@ -78,6 +66,21 @@ crbug.com/836278 [ Linux ] virtual/threaded/external/wpt/offscreen-canvas/conver
 # Sheriff 2018-07-10
 # Test flaking on Linux Trusty Leak
 crbug.com/862029 [ Linux ] http/tests/devtools/tracing/timeline-misc/timeline-window-filter.js [ Pass Leak ]
+
+# Sheriff 2018-08-15
+crbug.com/874442 [ Linux ] svg/animations/mpath-remove-from-dependents-on-delete-crash.html [ Pass Crash ]
+
+# Sheriff 2018-08-17
+crbug.com/847114 [ Linux ] http/tests/devtools/tracing/decode-resize.js [ Pass Failure ]
+crbug.com/847114 [ Linux ] virtual/threaded/http/tests/devtools/tracing/decode-resize.js [ Pass Failure ]
+
+# Sheriff 2018-08-27
+crbug.com/878032 [ Linux ] svg/animations/additive-type-by-animation.html [ Pass Leak ]
+
+# Sheriff 2018-08-29
+crbug.com/878724 [ Linux ] editing/selection/modify_extend/extend_by_character.html [ Pass Leak ]
+crbug.com/878724 [ Linux ] editing/selection/modify_move/move_right_word_09_ltr_multi_line.html [ Pass Leak ]
+crbug.com/878727 [ Linux ] virtual/threaded/http/tests/devtools/tracing/timeline-misc/timeline-flame-chart-automatically-size-window.js [ Pass Leak ]
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #

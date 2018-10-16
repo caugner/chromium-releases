@@ -1,9 +1,62 @@
 'use strict';
 
+MockVRService.prototype.setListeningForActivate = function(client) {
+  for (let i = 0; i < this.runtimes_.length; i++) {
+    this.runtimes_[i].displayClient_ = client;
+  }
+};
+
+MockVRService.prototype.getImmersiveVRDisplayInfo = function() {
+  return Promise.resolve(
+      {info: this.runtimes_[0] ? this.runtimes_[0].displayInfo_ : null});
+};
+
+MockRuntime.prototype.setPose = function(pose) {
+  if (pose == null) {
+    this.pose_ = null;
+  } else {
+    this.pose_ = {
+      orientation: null,
+      position: null,
+      angularVelocity: null,
+      linearVelocity: null,
+      angularAcceleration: null,
+      linearAcceleration: null,
+      inputState: null,
+      poseReset: false,
+      poseIndex: 0
+    };
+    for (var field in pose) {
+      if (this.pose_.hasOwnProperty(field)) {
+        this.pose_[field] = pose[field];
+      }
+    }
+  }
+};
+
+MockRuntime.prototype.forceActivate = function(reason) {
+  this.displayClient_.onActivate(reason);
+};
+
 function vr_test(func, vrDisplays, name, properties) {
-  setFakeDevices(vrDisplays);
-  let t = async_test(name, properties);
-  func(t, mockVRService);
+  let chain = Promise.resolve();
+  let firstDeviceController;
+  vrDisplays.forEach(display => {
+    return chain.then(
+        XRTest
+            .simulateDeviceConnection(
+                {supportsImmersive: display.capabilities.canPresent})
+            .then((deviceController) => {
+              deviceController.displayInfo_ = display;
+              if (!firstDeviceController) {
+                firstDeviceController = deviceController;
+              }
+            }));
+  });
+  chain.then(() => {
+    let t = async_test(name, properties);
+    func(t, firstDeviceController);
+  })
 }
 
 function fakeVRDisplays(){
@@ -105,4 +158,4 @@ function fakeVRDisplays(){
     }
     // TODO(bsheedy) add more displays like Rift/Vive
   };
-}
+};

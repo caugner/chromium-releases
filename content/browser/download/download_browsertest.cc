@@ -869,7 +869,7 @@ class DownloadContentTest : public ContentBrowserTest {
     std::string file_contents;
 
     {
-      base::ThreadRestrictions::ScopedAllowIO allow_io_during_test_verification;
+      base::ScopedAllowBlockingForTesting allow_blocking;
       bool read = base::ReadFileToString(path, &file_contents);
       EXPECT_TRUE(read) << "Failed reading file: " << path.value() << std::endl;
       if (!read)
@@ -906,14 +906,14 @@ class DownloadContentTest : public ContentBrowserTest {
   }
 
   static bool PathExists(const base::FilePath& path) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_during_test_verification;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     return base::PathExists(path);
   }
 
   static void ReadAndVerifyFileContents(int seed,
                                         int64_t expected_size,
                                         const base::FilePath& path) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_during_test_verification;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
     ASSERT_TRUE(file.IsValid());
     int64_t file_length = file.GetLength();
@@ -940,6 +940,12 @@ class DownloadContentTest : public ContentBrowserTest {
 
   TestDownloadHttpResponse::InjectErrorCallback inject_error_callback() {
     return inject_error_callback_;
+  }
+
+  void RegisterServiceWorker(Shell* shell, const std::string& worker_url) {
+    NavigateToURL(
+        shell, embedded_test_server()->GetURL("/register_service_worker.html"));
+    EXPECT_EQ("DONE", EvalJs(shell, "register('" + worker_url + "')"));
   }
 
  private:
@@ -1183,6 +1189,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, MultiDownload) {
 #if BUILDFLAG(ENABLE_PLUGINS)
 // Content served with a MIME type of application/octet-stream should be
 // downloaded even when a plugin can be found that handles the file type.
+// See https://crbug.com/104331 for the details.
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadOctetStream) {
   const char kTestPluginName[] = "TestPlugin";
   const char kTestMimeType[] = "application/x-test-mime-type";
@@ -1197,9 +1204,90 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadOctetStream) {
 
   // The following is served with a Content-Type of application/octet-stream.
   NavigateToURLAndWaitForDownload(
-      shell(), embedded_test_server()->GetURL("/download/download-test.lib"),
+      shell(), embedded_test_server()->GetURL("/download/octet-stream.abc"),
       download::DownloadItem::COMPLETE);
 }
+
+// Content served with a MIME type of application/octet-stream should be
+// downloaded even when a plugin can be found that handles the file type.
+// See https://crbug.com/104331 for the details.
+// In this test, the url is in scope of a service worker but the response is
+// served from network.
+// This is regression test for https://crbug.com/896696.
+IN_PROC_BROWSER_TEST_F(DownloadContentTest,
+                       DownloadOctetStream_PassThroughServiceWorker) {
+  const char kTestPluginName[] = "TestPlugin";
+  const char kTestMimeType[] = "application/x-test-mime-type";
+  const char kTestFileType[] = "abc";
+
+  RegisterServiceWorker(shell(), "/fetch_event_passthrough.js");
+
+  WebPluginInfo plugin_info;
+  plugin_info.name = base::ASCIIToUTF16(kTestPluginName);
+  plugin_info.mime_types.push_back(
+      WebPluginMimeType(kTestMimeType, kTestFileType, ""));
+  plugin_info.type = WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS;
+  PluginServiceImpl::GetInstance()->RegisterInternalPlugin(plugin_info, false);
+
+  // The following is served with a Content-Type of application/octet-stream.
+  NavigateToURLAndWaitForDownload(
+      shell(), embedded_test_server()->GetURL("/download/octet-stream.abc"),
+      download::DownloadItem::COMPLETE);
+}
+
+// Content served with a MIME type of application/octet-stream should be
+// downloaded even when a plugin can be found that handles the file type.
+// See https://crbug.com/104331 for the details.
+// In this test, the response will be served from a service worker.
+// This is regression test for https://crbug.com/896696.
+IN_PROC_BROWSER_TEST_F(DownloadContentTest,
+                       DownloadOctetStream_OctetStreamServiceWorker) {
+  const char kTestPluginName[] = "TestPlugin";
+  const char kTestMimeType[] = "application/x-test-mime-type";
+  const char kTestFileType[] = "abc";
+
+  RegisterServiceWorker(shell(), "/fetch_event_octet_stream.js");
+
+  WebPluginInfo plugin_info;
+  plugin_info.name = base::ASCIIToUTF16(kTestPluginName);
+  plugin_info.mime_types.push_back(
+      WebPluginMimeType(kTestMimeType, kTestFileType, ""));
+  plugin_info.type = WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS;
+  PluginServiceImpl::GetInstance()->RegisterInternalPlugin(plugin_info, false);
+
+  // The following is served with a Content-Type of application/octet-stream.
+  NavigateToURLAndWaitForDownload(
+      shell(), embedded_test_server()->GetURL("/download/octet-stream.abc"),
+      download::DownloadItem::COMPLETE);
+}
+
+// Content served with a MIME type of application/octet-stream should be
+// downloaded even when a plugin can be found that handles the file type.
+// See https://crbug.com/104331 for the details.
+// In this test, the url is in scope of a service worker and the response is
+// served from the network via service worker.
+// This is regression test for https://crbug.com/896696.
+IN_PROC_BROWSER_TEST_F(DownloadContentTest,
+                       DownloadOctetStream_RespondWithFetchServiceWorker) {
+  const char kTestPluginName[] = "TestPlugin";
+  const char kTestMimeType[] = "application/x-test-mime-type";
+  const char kTestFileType[] = "abc";
+
+  RegisterServiceWorker(shell(), "/fetch_event_respond_with_fetch.js");
+
+  WebPluginInfo plugin_info;
+  plugin_info.name = base::ASCIIToUTF16(kTestPluginName);
+  plugin_info.mime_types.push_back(
+      WebPluginMimeType(kTestMimeType, kTestFileType, ""));
+  plugin_info.type = WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS;
+  PluginServiceImpl::GetInstance()->RegisterInternalPlugin(plugin_info, false);
+
+  // The following is served with a Content-Type of application/octet-stream.
+  NavigateToURLAndWaitForDownload(
+      shell(), embedded_test_server()->GetURL("/download/octet-stream.abc"),
+      download::DownloadItem::COMPLETE);
+}
+
 #endif
 
 // Try to cancel just before we release the download file, by delaying final
@@ -1812,7 +1900,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, RestartIfNoPartialFile) {
 
   // Delete the intermediate file.
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_testing;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(PathExists(download->GetFullPath()));
     ASSERT_TRUE(base::DeleteFile(download->GetFullPath(), false));
   }
@@ -2360,7 +2448,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_NoHash) {
   std::string output = TestDownloadHttpResponse::GetPatternBytes(
       parameters.pattern_generator_seed, 0, kIntermediateSize);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(kIntermediateSize, base::WriteFile(intermediate_file_path,
                                                  output.data(), output.size()));
   }
@@ -2413,7 +2501,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
   std::string output = TestDownloadHttpResponse::GetPatternBytes(
       parameters.pattern_generator_seed + 1, 0, kIntermediateSize);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(kIntermediateSize, base::WriteFile(intermediate_file_path,
                                                  output.data(), output.size()));
   }
@@ -2467,7 +2555,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
   std::string output = TestDownloadHttpResponse::GetPatternBytes(
       parameters.pattern_generator_seed, 0, kIntermediateSize);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(kIntermediateSize, base::WriteFile(intermediate_file_path,
                                                  output.data(), output.size()));
   }
@@ -2532,7 +2620,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_WrongHash) {
   const int kIntermediateSize = 1331;
   std::vector<char> buffer(kIntermediateSize);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(kIntermediateSize, base::WriteFile(intermediate_file_path,
                                                  buffer.data(), buffer.size()));
   }
@@ -2614,7 +2702,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_ShortFile) {
   std::string output = TestDownloadHttpResponse::GetPatternBytes(
       parameters.pattern_generator_seed, 0, kIntermediateSize - 100);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(
         kIntermediateSize - 100,
         base::WriteFile(intermediate_file_path, output.data(), output.size()));
@@ -2687,7 +2775,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_LongFile) {
   std::string output = TestDownloadHttpResponse::GetPatternBytes(
       parameters.pattern_generator_seed, 0, kIntermediateSize + 100);
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_EQ(
         kIntermediateSize + 100,
         base::WriteFile(intermediate_file_path, output.data(), output.size()));
@@ -3189,7 +3277,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTestWithMojoBlobURLs,
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeSameSiteCookie) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io_during_test;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   net::EmbeddedTestServer test_server;
   ASSERT_TRUE(test_server.InitializeAndListen());
 

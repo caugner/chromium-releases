@@ -9,8 +9,11 @@
 </head>
 <body>
 <script>
-  //helper functions for the tests
-  function testWindowOpen(t, url, win) {
+  var testnb = 0;
+  // helper functions for the tests
+  function testWindowOpen(t, win, nb) {
+    let p = createURL_policy(window, nb);
+    let url = p.createURL(INPUTS.URL);
     let child_window = win.open(url, "", "");
     child_window.onload = t.step_func_done(_ => {
       assert_equals(child_window.location.href, "" + url);
@@ -18,50 +21,39 @@
     });
   }
 
-  function testWindowThrows(t, url, win) {
-    let child_window = win.open(TrustedURL.create(URLS.safe), "", "");
-    child_window.onload = t.step_func_done(_ => {
-      assert_throws(new TypeError(), _ => {
-        child_window = win.open(url, "", "");
-        child_window.close();
-      });
+  function testWindowThrows(t, url, win, nb) {
+    let p = createURL_policy(window, nb);
+    assert_throws(new TypeError(), _ => {
+      let child_window = win.open(url, "", "");
+      child_window.close();
     });
   }
 
-  //TrustedURL assignments do not throw
-  async_test(t => {
-    testWindowOpen(t, TrustedURL.create(URLS.safe), window);
-  }, "window.open: safe URL, safe construction.");
+  // TrustedURL assignments do not throw.
+  test(t => {
+    testWindowOpen(t, window, ++testnb);
+  }, "window.open via policy (successful URL transformation).");
 
-  async_test(t => {
-    testWindowOpen(t, TrustedURL.unsafelyCreate(URLS.safe), window);
-  }, "window.open: safe URL, unsafe construction.");
+  test(t => {
+    testWindowOpen(t, document, ++testnb);
+  }, "document.open via policy (successful URL transformation).");
 
-  async_test(t => {
-    testWindowOpen(t, TrustedURL.create(URLS.safe), document);
-  }, "document.open: safe URL, safe construction.");
-
-  async_test(t => {
-    testWindowOpen(t, TrustedURL.unsafelyCreate(URLS.safe), document);
-  }, "document.open: safe URL, unsafe construction.");
-
-  //String assignments throw
-  async_test(t => {
-    testWindowThrows(t, 'A string', window);
+  // String assignments throw.
+  test(t => {
+    testWindowThrows(t, 'A string', window, ++testnb);
   }, "`window.open(string)` throws.");
 
-  async_test(t => {
-    testWindowThrows(t, 'A string', document);
+  test(t => {
+    testWindowThrows(t, 'A string', document, ++testnb);
   }, "`document.open(string)` throws.");
 
-  //Null assignment throws
-  async_test(t => {
-    testWindowThrows(t, null, window);
+  // Null assignment throws.
+  test(t => {
+    testWindowThrows(t, null, window, ++testnb);
   }, "`window.open(null)` throws.");
 
-  //Null assignment throws
-  async_test(t => {
-    testWindowThrows(t, null, document);
+  test(t => {
+    testWindowThrows(t, null, document, ++testnb);
   }, "`document.open(null)` throws.");
 </script>
 </body>

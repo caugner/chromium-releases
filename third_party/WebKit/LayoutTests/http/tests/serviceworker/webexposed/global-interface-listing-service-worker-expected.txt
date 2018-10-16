@@ -14,17 +14,9 @@ interface AbortSignal : EventTarget
     getter onabort
     method constructor
     setter onabort
-interface BackgroundFetchClickEvent : BackgroundFetchEvent
-    attribute @@toStringTag
-    getter state
-    method constructor
 interface BackgroundFetchEvent : ExtendableEvent
     attribute @@toStringTag
-    getter id
-    method constructor
-interface BackgroundFetchFailEvent : BackgroundFetchEvent
-    attribute @@toStringTag
-    getter fetches
+    getter registration
     method constructor
 interface BackgroundFetchFetch
     attribute @@toStringTag
@@ -36,37 +28,32 @@ interface BackgroundFetchManager
     method fetch
     method get
     method getIds
+interface BackgroundFetchRecord
+    attribute @@toStringTag
+    getter request
+    getter responseReady
+    method constructor
 interface BackgroundFetchRegistration : EventTarget
     attribute @@toStringTag
     getter downloadTotal
     getter downloaded
+    getter failureReason
     getter id
     getter onprogress
+    getter state
     getter uploadTotal
     getter uploaded
     method abort
     method constructor
+    method match
+    method matchAll
     setter onprogress
-interface BackgroundFetchSettledEvent : BackgroundFetchEvent
-    attribute @@toStringTag
-    getter fetches
-    method constructor
 interface BackgroundFetchSettledFetch : BackgroundFetchFetch
     attribute @@toStringTag
     getter response
     method constructor
-interface BackgroundFetchSettledFetches
+interface BackgroundFetchUpdateUIEvent : BackgroundFetchEvent
     attribute @@toStringTag
-    method constructor
-    method match
-    method values
-interface BackgroundFetchUpdateEvent : BackgroundFetchSettledEvent
-    attribute @@toStringTag
-    method constructor
-    method updateUI
-interface BackgroundFetchedEvent : BackgroundFetchEvent
-    attribute @@toStringTag
-    getter fetches
     method constructor
     method updateUI
 interface BarcodeDetector
@@ -89,17 +76,6 @@ interface BroadcastChannel : EventTarget
     method postMessage
     setter onmessage
     setter onmessageerror
-interface BudgetService
-    attribute @@toStringTag
-    method constructor
-    method getBudget
-    method getCost
-    method reserve
-interface BudgetState
-    attribute @@toStringTag
-    getter budgetAt
-    getter time
-    method constructor
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -733,6 +709,7 @@ interface MessageEvent : Event
     getter origin
     getter ports
     getter source
+    getter userActivation
     method constructor
     method initMessageEvent
 interface MessagePort : EventTarget
@@ -1226,6 +1203,10 @@ interface TransformStream
 interface TrustedHTML
     static method escape
     static method unsafelyCreate
+    attribute @@toStringTag
+    method constructor
+    method toString
+interface TrustedScript
     attribute @@toStringTag
     method constructor
     method toString
@@ -3489,7 +3470,6 @@ interface WorkerNavigator
     getter appCodeName
     getter appName
     getter appVersion
-    getter budget
     getter connection
     getter deviceMemory
     getter hardwareConcurrency
@@ -3516,8 +3496,8 @@ interface WritableStream
     getter onactivate
     getter onbackgroundfetchabort
     getter onbackgroundfetchclick
-    getter onbackgroundfetched
     getter onbackgroundfetchfail
+    getter onbackgroundfetchsuccess
     getter oncanmakepayment
     getter oncookiechange
     getter onfetch
@@ -3537,8 +3517,8 @@ interface WritableStream
     setter onactivate
     setter onbackgroundfetchabort
     setter onbackgroundfetchclick
-    setter onbackgroundfetched
     setter onbackgroundfetchfail
+    setter onbackgroundfetchsuccess
     setter oncanmakepayment
     setter oncookiechange
     setter onfetch

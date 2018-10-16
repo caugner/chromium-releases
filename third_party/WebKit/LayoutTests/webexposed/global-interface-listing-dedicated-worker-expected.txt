@@ -30,8 +30,10 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     attribute @@toStringTag
 [Worker]     getter downloadTotal
 [Worker]     getter downloaded
+[Worker]     getter failureReason
 [Worker]     getter id
 [Worker]     getter onprogress
+[Worker]     getter state
 [Worker]     getter uploadTotal
 [Worker]     getter uploaded
 [Worker]     method abort
@@ -57,17 +59,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method postMessage
 [Worker]     setter onmessage
 [Worker]     setter onmessageerror
-[Worker] interface BudgetService
-[Worker]     attribute @@toStringTag
-[Worker]     method constructor
-[Worker]     method getBudget
-[Worker]     method getCost
-[Worker]     method reserve
-[Worker] interface BudgetState
-[Worker]     attribute @@toStringTag
-[Worker]     getter budgetAt
-[Worker]     getter time
-[Worker]     method constructor
 [Worker] interface ByteLengthQueuingStrategy
 [Worker]     method constructor
 [Worker]     method size
@@ -653,6 +644,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter origin
 [Worker]     getter ports
 [Worker]     getter source
+[Worker]     getter userActivation
 [Worker]     method constructor
 [Worker]     method initMessageEvent
 [Worker] interface MessagePort : EventTarget
@@ -1115,6 +1107,10 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker] interface TrustedHTML
 [Worker]     static method escape
 [Worker]     static method unsafelyCreate
+[Worker]     attribute @@toStringTag
+[Worker]     method constructor
+[Worker]     method toString
+[Worker] interface TrustedScript
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
 [Worker]     method toString
@@ -3486,7 +3482,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter appCodeName
 [Worker]     getter appName
 [Worker]     getter appVersion
-[Worker]     getter budget
 [Worker]     getter connection
 [Worker]     getter deviceMemory
 [Worker]     getter hardwareConcurrency
@@ -3558,6 +3553,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker] [GLOBAL OBJECT]
 [Worker]     attribute console
 [Worker]     attribute internals
+[Worker]     getter name
 [Worker]     getter onmessage
 [Worker]     getter onmessageerror
 [Worker]     method close
@@ -3567,6 +3563,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method webkitRequestFileSystemSync
 [Worker]     method webkitResolveLocalFileSystemSyncURL
 [Worker]     method webkitResolveLocalFileSystemURL
+[Worker]     setter name
 [Worker]     setter onmessage
 [Worker]     setter onmessageerror
 PASS successfullyParsed is true

@@ -31,6 +31,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "lifecycle",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "http/tests/worklet",
     "args": ["--enable-threaded-compositing"]
   },
@@ -135,8 +140,7 @@
   {
     "prefix": "feature-policy-permissions",
     "base": "external/wpt/mediacapture-streams",
-    "args": ["--enable-features=UseFeaturePolicyForPermissions",
-             "--use-fake-device-for-media-stream",
+    "args": ["--use-fake-device-for-media-stream",
              "--use-fake-ui-for-media-stream"]
   },
   {
@@ -498,6 +502,11 @@
   },
   {
     "prefix": "outofblink-cors",
+    "base": "external/wpt/xhr",
+    "args": ["--enable-features=OutOfBlinkCORS,ServiceWorkerServicification"]
+  },
+  {
+    "prefix": "outofblink-cors",
     "base": "http/tests/fetch",
     "args": ["--enable-features=OutOfBlinkCORS,ServiceWorkerServicification"]
   },
@@ -524,6 +533,11 @@
   {
     "prefix": "outofblink-cors-ns",
     "base": "external/wpt/service-workers",
+    "args": ["--enable-features=OutOfBlinkCORS,NetworkService"]
+  },
+  {
+    "prefix": "outofblink-cors-ns",
+    "base": "external/wpt/xhr",
     "args": ["--enable-features=OutOfBlinkCORS,NetworkService"]
   },
   {
@@ -558,6 +572,11 @@
     "args": ["--enable-threaded-compositing"]
   },
   {
+    "prefix": "paint-touchaction-rects",
+    "base": "fast/events/touch",
+    "args": ["--enable-blink-features=PaintTouchActionRects"]
+  },
+  {
     "prefix": "cors-rfc1918",
     "base": "http/tests/security/cors-rfc1918",
     "args": ["--enable-blink-features=CorsRFC1918"]
@@ -576,6 +595,11 @@
     "prefix": "reporting-api",
     "base": "external/wpt/content-security-policy/reporting-api",
     "args": ["--enable-features=Reporting"]
+  },
+  {
+    "prefix": "network-error-logging",
+    "base": "external/wpt/network-error-logging",
+    "args": ["--enable-features=Reporting,NetworkErrorLogging"]
   },
   {
     "prefix": "mouseevent_fractional",
@@ -640,21 +664,6 @@
              "--disable-features=NetworkService"]
   },
   {
-    "prefix": "off-main-thread-websocket",
-    "base": "external/wpt/websockets",
-    "args": ["--disable-features=OffMainThreadWebSocket,NestedWorkers"]
-  },
-  {
-    "prefix": "off-main-thread-websocket",
-    "base": "http/tests/websocket",
-    "args": ["--disable-features=OffMainThreadWebSocket,NestedWorkers"]
-  },
-  {
-    "prefix": "off-main-thread-websocket",
-    "base": "http/tests/security/mixedContent/websocket",
-    "args": ["--disable-features=OffMainThreadWebSocket,NestedWorkers"]
-  },
-  {
     "prefix": "webrtc-wpt-unified-plan",
     "base": "external/wpt/webrtc",
     "args": ["--enable-blink-features=RTCUnifiedPlanByDefault"]
@@ -712,5 +721,20 @@
     "prefix": "mojo-blob-urls",
     "base": "external/wpt/FileAPI/url",
     "args": ["--enable-features=MojoBlobURLs"]
+  },
+  {
+    "prefix": "lazyload-image",
+    "base": "http/tests/lazyload",
+    "args": ["--enable-features=LazyImageLoading"]
+  },
+  {
+    "prefix": "origin-policy",
+    "base": "external/wpt/origin-policy",
+    "args": ["--enable-features=OriginPolicy"]
+  },
+  {
+    "prefix": "intersection-observer-v2",
+    "base": "http/tests/intersection-observer",
+    "args": ["--enable-blink-features=IntersectionObserverV2"]
   }
 ]
