@@ -197,6 +197,7 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
       content::RenderFrameHost* frame,
       int render_process_id,
       bool is_navigation,
+      bool is_download,
       network::mojom::URLLoaderFactoryRequest* factory_request,
       network::mojom::TrustedURLLoaderHeaderClientPtrInfo* header_client);
 
@@ -206,6 +207,7 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
   // If this returns |true|, |callback| will eventually be invoked on the UI
   // thread.
   bool MaybeProxyAuthRequest(
+      content::BrowserContext* browser_context,
       net::AuthChallengeInfo* auth_info,
       scoped_refptr<net::HttpResponseHeaders> response_headers,
       const content::GlobalRequestID& request_id,
@@ -289,8 +291,11 @@ class ExtensionWebRequestEventRouter {
   // filter what network events an extension cares about.
   struct RequestFilter {
     RequestFilter();
-    RequestFilter(const RequestFilter& other);
     ~RequestFilter();
+
+    // TODO(devlin): Make these a move constructor/operator.
+    RequestFilter(const RequestFilter& other);
+    RequestFilter& operator=(const RequestFilter& other);
 
     // Returns false if there was an error initializing. If it is a user error,
     // an error message is provided, otherwise the error is internal (and
@@ -324,7 +329,7 @@ class ExtensionWebRequestEventRouter {
     std::unique_ptr<extension_web_request_api_helpers::ResponseHeaders>
         response_headers;
 
-    std::unique_ptr<net::AuthCredentials> auth_credentials;
+    base::Optional<net::AuthCredentials> auth_credentials;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(EventResponse);
@@ -440,6 +445,8 @@ class ExtensionWebRequestEventRouter {
                       const std::string& event_name,
                       const std::string& sub_event_name,
                       uint64_t request_id,
+                      int embedder_process_id,
+                      int web_view_instance_id,
                       EventResponse* response);
 
   // Adds a listener to the given event. |event_name| specifies the event being
@@ -476,9 +483,14 @@ class ExtensionWebRequestEventRouter {
 
   // Whether there is a listener matching the request that has
   // ExtraInfoSpec::EXTRA_HEADERS set.
-  bool HasExtraHeadersListener(void* browser_context,
-                               const extensions::InfoMap* extension_info_map,
-                               const WebRequestInfo* request);
+  bool HasExtraHeadersListenerForRequest(
+      void* browser_context,
+      const extensions::InfoMap* extension_info_map,
+      const WebRequestInfo* request);
+
+  // Whether there are any listeners for this context that have
+  // ExtraInfoSpec::EXTRA_HEADERS set.
+  bool HasAnyExtraHeadersListener(void* browser_context);
 
  private:
   friend class WebRequestAPI;
@@ -549,6 +561,7 @@ class ExtensionWebRequestEventRouter {
   using Listeners = std::vector<std::unique_ptr<EventListener>>;
   using ListenerMapForBrowserContext = std::map<std::string, Listeners>;
   using ListenerMap = std::map<void*, ListenerMapForBrowserContext>;
+  using ExtraHeadersListenerCountMap = std::map<void*, int>;
   using BlockedRequestMap = std::map<uint64_t, BlockedRequest>;
   // Map of request_id -> bit vector of EventTypes already signaled
   using SignaledRequestMap = std::map<uint64_t, int>;
@@ -687,13 +700,22 @@ class ExtensionWebRequestEventRouter {
   // Returns true if |request| was already signaled to some event handlers.
   bool WasSignaled(const WebRequestInfo& request) const;
 
+  // Helper for |HasAnyExtraHeadersListener()|.
+  bool HasAnyExtraHeadersListenerImpl(void* browser_context);
+
   // Get the number of listeners - for testing only.
   size_t GetListenerCountForTesting(void* browser_context,
                                     const std::string& event_name);
 
+  // TODO(karandeepb): The below code should be refactored to have a single map
+  // to store per-browser-context data.
+
   // A map for each browser_context that maps an event name to a set of
   // extensions that are listening to that event.
   ListenerMap listeners_;
+
+  // Count of listeners per browser context which request extra headers.
+  ExtraHeadersListenerCountMap extra_headers_listener_count_;
 
   // A map of network requests that are waiting for at least one event handler
   // to respond.
@@ -764,6 +786,8 @@ class WebRequestInternalEventHandledFunction
       const std::string& event_name,
       const std::string& sub_event_name,
       uint64_t request_id,
+      int embedder_process_id,
+      int web_view_instance_id,
       std::unique_ptr<ExtensionWebRequestEventRouter::EventResponse> response);
 
   // ExtensionFunction:
