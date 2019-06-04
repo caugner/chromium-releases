@@ -50,13 +50,13 @@ void IntersectionObservation::Compute(unsigned flags) {
     // Compute() method will be called again after the delay period has passed.
     return;
   }
-  if (Observer()->trackVisibility()) {
+  if (target_->isConnected() && Observer()->trackVisibility()) {
     FrameOcclusionState occlusion_state =
         target_->GetDocument().GetFrame()->GetOcclusionState();
     // If we're tracking visibility, and we don't have occlusion information
     // from our parent frame, then postpone computing intersections until a
     // later lifecycle when the occlusion information is known.
-    if (occlusion_state == kUnknownOcclusionState)
+    if (occlusion_state == FrameOcclusionState::kUnknown)
       return;
   }
   last_run_time_ = timestamp;
@@ -103,7 +103,8 @@ void IntersectionObservation::Disconnect() {
   DCHECK(Observer());
   if (target_) {
     Target()->EnsureIntersectionObserverData().RemoveObservation(*Observer());
-    if (target_->isConnected()) {
+    if (target_->isConnected() &&
+        !Target()->EnsureIntersectionObserverData().HasObservations()) {
       target_->GetDocument()
           .EnsureIntersectionObserverController()
           .RemoveTrackedTarget(*target_);

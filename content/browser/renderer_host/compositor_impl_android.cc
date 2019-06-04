@@ -72,6 +72,7 @@
 #include "content/public/browser/android/compositor_client.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_stream_constants.h"
 #include "gpu/command_buffer/client/context_support.h"
@@ -93,7 +94,7 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/ca_layer_params.h"
 #include "ui/gfx/swap_result.h"
-#include "ui/gl/gl_utils.h"
+#include "ui/gl/color_space_utils.h"
 #include "ui/latency/latency_tracker.h"
 
 namespace content {
@@ -144,34 +145,6 @@ class SingleThreadTaskGraphRunner : public cc::SingleThreadTaskGraphRunner {
   }
 
   ~SingleThreadTaskGraphRunner() override { Shutdown(); }
-};
-
-// An implementation of HostDisplayClient which handles swap callbacks.
-class AndroidHostDisplayClient : public viz::HostDisplayClient {
- public:
-  explicit AndroidHostDisplayClient(
-      base::RepeatingCallback<void(const gfx::Size&)> on_swap,
-      base::RepeatingCallback<void(gpu::ContextResult)>
-          on_context_creation_failure)
-      : HostDisplayClient(gfx::kNullAcceleratedWidget),
-        on_swap_(std::move(on_swap)),
-        on_context_creation_failure_(std::move(on_context_creation_failure)) {}
-
-  // viz::mojom::DisplayClient implementation:
-  void DidCompleteSwapWithSize(const gfx::Size& pixel_size) override {
-    if (on_swap_)
-      on_swap_.Run(pixel_size);
-  }
-  void OnFatalOrSurfaceContextCreationFailure(
-      gpu::ContextResult context_result) override {
-    if (on_context_creation_failure_)
-      on_context_creation_failure_.Run(context_result);
-  }
-
- private:
-  base::RepeatingCallback<void(const gfx::Size&)> on_swap_;
-  base::RepeatingCallback<void(gpu::ContextResult)>
-      on_context_creation_failure_;
 };
 
 class CompositorDependencies {
@@ -482,7 +455,7 @@ class AndroidOutputSurface : public viz::OutputSurface {
                bool use_stencil) override {
     context_provider()->ContextGL()->ResizeCHROMIUM(
         size.width(), size.height(), device_scale_factor,
-        gl::GetGLColorSpace(color_space), has_alpha);
+        gl::ColorSpaceUtils::GetGLColorSpace(color_space), has_alpha);
   }
 
   viz::OverlayCandidateValidator* GetOverlayCandidateValidator()
@@ -541,6 +514,30 @@ class AndroidOutputSurface : public viz::OutputSurface {
 static bool g_initialized = false;
 
 }  // anonymous namespace
+
+// An implementation of HostDisplayClient which handles swap callbacks.
+class CompositorImpl::AndroidHostDisplayClient : public viz::HostDisplayClient {
+ public:
+  explicit AndroidHostDisplayClient(CompositorImpl* compositor)
+      : HostDisplayClient(gfx::kNullAcceleratedWidget),
+        compositor_(compositor) {}
+
+  // viz::mojom::DisplayClient implementation:
+  void DidCompleteSwapWithSize(const gfx::Size& pixel_size) override {
+    compositor_->DidSwapBuffers(pixel_size);
+  }
+  void OnFatalOrSurfaceContextCreationFailure(
+      gpu::ContextResult context_result) override {
+    compositor_->OnFatalOrSurfaceContextCreationFailure(context_result);
+  }
+  void SetPreferredRefreshRate(float refresh_rate) override {
+    if (compositor_->root_window_)
+      compositor_->root_window_->SetPreferredRefreshRate(refresh_rate);
+  }
+
+ private:
+  CompositorImpl* compositor_;
+};
 
 // static
 Compositor* Compositor::Create(CompositorClient* client,
@@ -617,7 +614,7 @@ CompositorImpl::~CompositorImpl() {
   display::Screen::GetScreen()->RemoveObserver(this);
   DetachRootWindow();
   // Clean-up any surface references.
-  SetSurface(NULL);
+  SetSurface(nullptr, false);
 }
 
 void CompositorImpl::DetachRootWindow() {
@@ -676,13 +673,14 @@ void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
     subroot_layer_->RemoveFromParent();
     subroot_layer_ = nullptr;
   }
-  if (root_window_->GetLayer()) {
+  if (root_layer.get() && root_window_->GetLayer()) {
     subroot_layer_ = root_window_->GetLayer();
     subroot_layer_->AddChild(root_layer);
   }
 }
 
-void CompositorImpl::SetSurface(jobject surface) {
+void CompositorImpl::SetSurface(jobject surface,
+                                bool backed_by_surface_texture) {
   JNIEnv* env = base::android::AttachCurrentThread();
   gpu::GpuSurfaceTracker* tracker = gpu::GpuSurfaceTracker::Get();
 
@@ -693,6 +691,7 @@ void CompositorImpl::SetSurface(jobject surface) {
     ANativeWindow_release(window_);
     window_ = NULL;
     surface_handle_ = gpu::kNullSurfaceHandle;
+    backed_by_surface_texture_ = false;
   }
 
   ANativeWindow* window = NULL;
@@ -706,6 +705,7 @@ void CompositorImpl::SetSurface(jobject surface) {
 
   if (window) {
     window_ = window;
+    backed_by_surface_texture_ = backed_by_surface_texture;
     ANativeWindow_acquire(window);
     // Register first, SetVisible() might create a LayerTreeFrameSink.
     surface_handle_ = tracker->AddSurfaceForNativeWidget(
@@ -1182,6 +1182,12 @@ void CompositorImpl::OnUpdateRefreshRate(float refresh_rate) {
     display_private_->UpdateRefreshRate(refresh_rate);
 }
 
+void CompositorImpl::OnUpdateSupportedRefreshRates(
+    const std::vector<float>& supported_refresh_rates) {
+  if (display_private_)
+    display_private_->SetSupportedRefreshRates(supported_refresh_rates);
+}
+
 void CompositorImpl::InitializeVizLayerTreeFrameSink(
     scoped_refptr<ws::ContextProviderCommandBuffer> context_provider) {
   DCHECK(enable_viz_);
@@ -1203,12 +1209,7 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   viz::mojom::CompositorFrameSinkClientRequest client_request =
       mojo::MakeRequest(&root_params->compositor_frame_sink_client);
   root_params->display_private = mojo::MakeRequest(&display_private_);
-  display_client_ = std::make_unique<AndroidHostDisplayClient>(
-      base::BindRepeating(&CompositorImpl::DidSwapBuffers,
-                          weak_factory_.GetWeakPtr()),
-      base::BindRepeating(
-          &CompositorImpl::OnFatalOrSurfaceContextCreationFailure,
-          weak_factory_.GetWeakPtr()));
+  display_client_ = std::make_unique<AndroidHostDisplayClient>(this);
   root_params->display_client =
       display_client_->GetBoundPtr(task_runner).PassInterface();
 
@@ -1223,6 +1224,8 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
           .GetSizeInPixel();
   renderer_settings.use_skia_renderer = features::IsUsingSkiaRenderer();
   renderer_settings.color_space = display_color_space_;
+  renderer_settings.backed_by_surface_texture = backed_by_surface_texture_;
+
   root_params->frame_sink_id = frame_sink_id_;
   root_params->widget = surface_handle_;
   root_params->gpu_compositing = true;
@@ -1255,6 +1258,8 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   display_private_->SetDisplayColorSpace(display_color_space_,
                                          display_color_space_);
   display_private_->SetVSyncPaused(vsync_paused_);
+  display_private_->SetSupportedRefreshRates(
+      root_window_->GetSupportedRefreshRates());
 }
 
 viz::LocalSurfaceIdAllocation CompositorImpl::GenerateLocalSurfaceId() {
@@ -1273,7 +1278,7 @@ void CompositorImpl::OnFatalOrSurfaceContextCreationFailure(
       << "Fatal error making Gpu context";
 
   if (context_result == gpu::ContextResult::kSurfaceFailure) {
-    SetSurface(nullptr);
+    SetSurface(nullptr, false);
     client_->RecreateSurface();
   }
 }

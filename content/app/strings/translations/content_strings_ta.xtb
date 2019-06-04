@@ -2,7 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="ta">
 <translation id="1018939186200882850">மெனு உருப்படி</translation>
-<translation id="10623998915015855">நிலைமாற்றுதல் பொத்தான்</translation>
+<translation id="10623998915015855">நிலைமாற்றுதல் பட்டன்</translation>
 <translation id="1088086359088493902">வினாடிகள்</translation>
 <translation id="1171774979989969504">ஒரு மின்னஞ்சல் முகவரியை உள்ளிடவும்.</translation>
 <translation id="1178581264944972037">இடைநிறுத்து</translation>
@@ -55,7 +55,7 @@
 <translation id="2709516037105925701">தானாகநிரப்பு</translation>
 <translation id="2723001399770238859">ஆடியோ</translation>
 <translation id="2746543609216772311">மதிப்பானது <ph name="MINIMUM_DATE_OR_TIME" /> அல்லது அதற்குப் பின்பு இருக்க வேண்டும்.</translation>
-<translation id="2759744352195237655">பாப்-அப் பொத்தான்</translation>
+<translation id="2759744352195237655">பாப்-அப் பட்டன்</translation>
 <translation id="2761667185364618470">தொடர விரும்பினால், இந்தப் பெட்டியைத் தேர்ந்தெடுங்கள்.</translation>
 <translation id="2896972712917208084">ரேடியோ குழு</translation>
 <translation id="2908441821576996758">காற்புள்ளியால் பிரிக்கப்பட்ட மின்னஞ்சல் முகவரிகளின் பட்டியலை உள்ளிடுக.</translation>
@@ -81,7 +81,7 @@
 <translation id="383465348367842624">'<ph name="ATSIGN" />' ஐத் தொடர்ந்து வரும் பகுதியில் '<ph name="INVALIDCHARACTER" />' சின்னம் இருக்கக்கூடாது.</translation>
 <translation id="3846214748874656680">முழுத்திரை வேண்டாம்</translation>
 <translation id="3920932319529768807">முடிவு</translation>
-<translation id="3924558731517983934">பயன்பாடு</translation>
+<translation id="3924558731517983934">ஆப்ஸ்</translation>
 <translation id="3944740393230681990">முன்னுரை</translation>
 <translation id="3960700977367013758">உருட்டல் பட்டி</translation>
 <translation id="4103419683916926126">மில்லிவினாடிகள்</translation>
@@ -93,7 +93,7 @@
 <translation id="4254339807215791271">உள்ளடக்கத் தகவல்</translation>
 <translation id="4360991593054037559">சரியான மதிப்பை உள்ளிடவும். <ph name="VALID_VALUE_LOW" /> மற்றும் <ph name="VALID_VALUE_HIGHER" /> ஆகியவை மிக நெருக்கமான சரியான இரண்டு மதிப்புகளாகும்.</translation>
 <translation id="4384583879834880242">கேள்வி-பதில்</translation>
-<translation id="4413860115965805769">மெனு பொத்தான்</translation>
+<translation id="4413860115965805769">மெனு பட்டன்</translation>
 <translation id="4444765639179266822"><ph name="OCR_TEXT" /> என்று சொல்வதாகத் தோன்றுகிறது</translation>
 <translation id="4446524499724042288">அருஞ்சொல் திரட்டு மேற்கோள்</translation>
 <translation id="4522570452068850558">விவரங்கள்</translation>
@@ -132,8 +132,8 @@
 <translation id="561939826962581046">நேரம்</translation>
 <translation id="5630795885300617244">10வி தவிர்க்க, இடது அல்லது வலதுபுறம் இருமுறை தட்டவும்</translation>
 <translation id="5631759159893697722">சுருக்கம்</translation>
-<translation id="5643186887447432888">பொத்தான்</translation>
-<translation id="5677946354068040947">கூடுதல் விருப்பங்கள் பொத்தான்</translation>
+<translation id="5643186887447432888">பட்டன்</translation>
+<translation id="5677946354068040947">கூடுதல் விருப்பங்கள் பட்டன்</translation>
 <translation id="576709008726043716">அறிமுகம்</translation>
 <translation id="57838592816432529">ஒலியடக்கு</translation>
 <translation id="5860033963881614850">ஆஃப்</translation>
@@ -141,7 +141,7 @@
 <translation id="5888666972993069672">இப்போது <ph name="DEVICE_FRIENDLY_NAME" />க்கு அனுப்புகிறது</translation>
 <translation id="5939518447894949180">மீட்டமை</translation>
 <translation id="5966707198760109579">வாரம்</translation>
-<translation id="5987525920412732405">சுழல் பொத்தான்</translation>
+<translation id="5987525920412732405">சுழல் பட்டன்</translation>
 <translation id="6011459053400940133">ஒலியளவு ஸ்லைடர்</translation>
 <translation id="6015796118275082299">ஆண்டு</translation>
 <translation id="6023896073578205740">பட்டியல் பெட்டி</translation>
@@ -176,7 +176,9 @@
 <translation id="6941933287844615239">மீடியாவைப் பதிவிறக்கு</translation>
 <translation id="6981594929165378967">செருகும்</translation>
 <translation id="6989848892321993519">இந்த உரையில் <ph name="MIN_CHARACTERS" /> அல்லது அதற்கு மேற்பட்ட எழுத்துக்குறிகளைப் பயன்படுத்தவும் (தற்போது 1 எழுத்துக்குறியைப் பயன்படுத்துகிறீர்கள்).</translation>
+<translation id="7033340931668032222">ஒலியளவை மாற்ற மேலும் கீழும் அசைக்கவும்</translation>
 <translation id="709897737746224366">கோரிய வடிவமைப்பில் தருக.</translation>
+<translation id="7118469954320184356">விவரம் எதுவுமில்லை.</translation>
 <translation id="7139483182332611405">முன்னுரை</translation>
 <translation id="7263440858009898357">பட்டியலிலிருந்து ஒரு உருப்படியைத் தேர்ந்தெடுங்கள்.</translation>
 <translation id="727747134524199931">நெடுவரிசை மேற்தலைப்பு</translation>
@@ -226,6 +228,7 @@
 <translation id="8550857728288566671">கிராஃபிக்ஸ் சின்னம்</translation>
 <translation id="8583702881314752957">விளக்கப் பட்டியல்</translation>
 <translation id="8597182159515967513">தலைப்பு</translation>
+<translation id="8603553056539299761">நகர்த்த இடது புறமும் வலது புறமும் அசைக்கவும்</translation>
 <translation id="860475260694818407">உள்ளடக்க அட்டவணை</translation>
 <translation id="8613126697340063924">தொலைநிலை இயக்கத்தைக் கட்டுப்படுத்தவும்</translation>
 <translation id="862370744433916922">துணை தலைப்பு</translation>
