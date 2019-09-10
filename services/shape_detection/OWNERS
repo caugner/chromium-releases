@@ -1,7 +1,4 @@
-reillyg@chromium.org
-
-# Original (legacy) owner.
-mcasas@chromium.org
+file://third_party/blink/renderer/modules/shapedetection/OWNERS
 
 # COMPONENT: Blink>ShapeDetection
 # TEAM: device-dev@chromium.org

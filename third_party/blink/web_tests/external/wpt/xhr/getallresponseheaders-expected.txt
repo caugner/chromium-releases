@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-FAIL XMLHttpRequest: getAllResponseHeaders() assert_equals: expected "also-here: Mr. PB\r\newok: lego\r\nfoo-test: 1, 2\r\n" but got "also-here: Mr. PB\r\nfoo-test: 1, 2\r\newok: lego\r\n"
+FAIL XMLHttpRequest: getAllResponseHeaders() assert_equals: expected "also-here: Mr. PB\r\newok: lego\r\nfoo-test: 1, 2\r\n__custom: token\r\n" but got "__custom: token\r\nalso-here: Mr. PB\r\nfoo-test: 1, 2\r\newok: lego\r\n"
 PASS XMLHttpRequest: getAllResponseHeaders() 1
 PASS XMLHttpRequest: getAllResponseHeaders() 2
 PASS XMLHttpRequest: getAllResponseHeaders() 3
