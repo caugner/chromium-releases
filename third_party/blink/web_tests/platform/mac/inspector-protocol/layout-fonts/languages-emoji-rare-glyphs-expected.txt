@@ -36,4 +36,18 @@
 "Khmer MN" : 26,
 "Times" : 1
 
+𐌲𐌿𐍄𐌹𐍃𐌺
+#gothic:
+"Times" : 6
+
+ܐܬܘܪܝܐ
+#syriac:
+"Times" : 6
+
+⇦⇧⇨⇩￩￪￫￬⟀
+#text_presentation_arrows_maths:
+"Arial Unicode MS" : 4,
+"Hiragino Mincho ProN" : 4,
+"Apple Symbols" : 1
+
 
