@@ -1,4 +1,5 @@
 This is a testharness.js-based test.
+PASS setup - define tests
 PASS P-521 good parameters
 PASS P-521 mixed case parameters
 FAIL P-521 with null length assert_true: Derived correct bits expected true got false
