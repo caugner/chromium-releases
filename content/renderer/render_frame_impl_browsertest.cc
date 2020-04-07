@@ -54,6 +54,7 @@
 #include "third_party/blink/public/web/web_history_item.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/native_theme/native_theme_features.h"
 
 using blink::WebString;
@@ -103,7 +104,7 @@ class RenderFrameImplTest : public RenderViewTest {
 
     RenderFrameImpl::FromWebFrame(
         view_->GetMainRenderFrame()->GetWebFrame()->FirstChild())
-        ->OnSwapOut(kFrameProxyRouteId, false, frame_replication_state);
+        ->OnUnload(kFrameProxyRouteId, false, frame_replication_state);
 
     mojo::PendingRemote<service_manager::mojom::InterfaceProvider>
         stub_interface_provider;
@@ -168,7 +169,9 @@ class RenderFrameImplTest : public RenderViewTest {
 class RenderFrameTestObserver : public RenderFrameObserver {
  public:
   explicit RenderFrameTestObserver(RenderFrame* render_frame)
-      : RenderFrameObserver(render_frame), visible_(false) {}
+      : RenderFrameObserver(render_frame),
+        visible_(false),
+        last_intersection_rect_(-1, -1, -1, -1) {}
 
   ~RenderFrameTestObserver() override {}
 
@@ -176,61 +179,58 @@ class RenderFrameTestObserver : public RenderFrameObserver {
   void WasShown() override { visible_ = true; }
   void WasHidden() override { visible_ = false; }
   void OnDestruct() override { delete this; }
+  void OnMainFrameDocumentIntersectionChanged(
+      const blink::WebRect& intersection_rect) override {
+    last_intersection_rect_ = intersection_rect;
+  }
 
   bool visible() { return visible_; }
+  blink::WebRect last_intersection_rect() { return last_intersection_rect_; }
 
  private:
   bool visible_;
+  blink::WebRect last_intersection_rect_;
 };
 
 // Verify that a frame with a RenderFrameProxy as a parent has its own
 // RenderWidget.
 TEST_F(RenderFrameImplTest, SubframeWidget) {
   EXPECT_TRUE(frame_widget());
-  EXPECT_NE(frame_widget(), static_cast<RenderViewImpl*>(view_)->GetWidget());
+
+  RenderFrameImpl* main_frame =
+      static_cast<RenderViewImpl*>(view_)->GetMainRenderFrame();
+  RenderWidget* main_frame_widget = main_frame->GetLocalRootRenderWidget();
+  EXPECT_NE(frame_widget(), main_frame_widget);
 }
 
 // Verify a subframe RenderWidget properly processes its viewport being
 // resized.
 TEST_F(RenderFrameImplTest, FrameResize) {
-  // Make an update where the widget's size and the visible_viewport_size
-  // are not the same.
   VisualProperties visual_properties;
-  gfx::Size widget_size(400, 200);
-  gfx::Size visible_size(350, 170);
-  visual_properties.new_size = widget_size;
-  visual_properties.compositor_viewport_pixel_rect = gfx::Rect(widget_size);
-  visual_properties.visible_viewport_size = visible_size;
-
-  RenderWidget* main_frame_widget =
-      GetMainRenderFrame()->GetLocalRootRenderWidget();
+  gfx::Size size(200, 200);
+  visual_properties.screen_info = ScreenInfo();
+  visual_properties.new_size = size;
+  visual_properties.compositor_viewport_pixel_rect = gfx::Rect(size);
+  visual_properties.visible_viewport_size = size;
+  visual_properties.is_fullscreen_granted = false;
 
   // The main frame's widget will receive the resize message before the
   // subframe's widget, and it will set the size for the WebView.
-  {
-    WidgetMsg_UpdateVisualProperties resize_message(
-        main_frame_widget->routing_id(), visual_properties);
-    main_frame_widget->OnMessageReceived(resize_message);
-  }
-  // The main frame widget's size is the "widget size", not the visible viewport
-  // size, which is given to blink separately.
-  EXPECT_EQ(gfx::Size(view_->GetWebView()->MainFrameWidget()->Size()),
-            widget_size);
-  EXPECT_EQ(gfx::SizeF(view_->GetWebView()->VisualViewportSize()),
-            gfx::SizeF(visible_size));
-  // The main frame doesn't change other local roots directly.
-  EXPECT_NE(gfx::Size(frame_widget()->GetWebWidget()->Size()), visible_size);
+  RenderWidget* main_frame_widget =
+      GetMainRenderFrame()->GetLocalRootRenderWidget();
+  WidgetMsg_UpdateVisualProperties resize_message(
+      main_frame_widget->routing_id(), visual_properties);
 
-  // A subframe in the same process does not modify the WebView.
-  {
-    WidgetMsg_UpdateVisualProperties resize_message_subframe(
-        frame_widget()->routing_id(), visual_properties);
-    frame_widget()->OnMessageReceived(resize_message_subframe);
-  }
-  EXPECT_EQ(gfx::Size(frame_widget()->GetWebWidget()->Size()), widget_size);
+  main_frame_widget->OnMessageReceived(resize_message);
+  EXPECT_EQ(view_->GetWebView()->MainFrameWidget()->Size(),
+            blink::WebSize(size));
+  EXPECT_NE(frame_widget()->GetWebWidget()->Size(), blink::WebSize(size));
 
-  // A subframe in another process would use the |visible_viewport_size| as its
-  // size.
+  // The subframe sets the size only for itself.
+  WidgetMsg_UpdateVisualProperties resize_message_subframe(
+      frame_widget()->routing_id(), visual_properties);
+  frame_widget()->OnMessageReceived(resize_message_subframe);
+  EXPECT_EQ(frame_widget()->GetWebWidget()->Size(), blink::WebSize(size));
 }
 
 // Verify a subframe RenderWidget properly processes a WasShown message.
@@ -481,6 +481,22 @@ TEST_F(RenderFrameImplTest, FileUrlPathAlias) {
     GetMainRenderFrame()->WillSendRequest(request);
     EXPECT_EQ(test_case.transformed, request.Url().GetString().Utf8());
   }
+}
+
+TEST_F(RenderFrameImplTest, MainFrameDocumentIntersectionRecorded) {
+  RenderFrameTestObserver observer(frame());
+  gfx::Point viewport_offset(7, -11);
+  blink::WebRect viewport_intersection(0, 11, 200, 89);
+  blink::WebRect mainframe_intersection(0, 0, 200, 140);
+  blink::FrameOcclusionState occlusion_state =
+      blink::FrameOcclusionState::kUnknown;
+  WidgetMsg_SetViewportIntersection set_viewport_intersection_message(
+      0, {viewport_offset, viewport_intersection, mainframe_intersection,
+          blink::WebRect(), occlusion_state});
+  frame_widget()->OnMessageReceived(set_viewport_intersection_message);
+  // Setting a new frame intersection in a local frame triggers the render frame
+  // observer call.
+  EXPECT_EQ(observer.last_intersection_rect(), blink::WebRect(0, 0, 200, 140));
 }
 
 // Used to annotate the source of an interface request.

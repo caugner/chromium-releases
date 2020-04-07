@@ -189,7 +189,7 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
   // |previews_state| is the PreviewsState if the request is a sub-resource. For
   // Document resources, |previews_state| should be reported as PREVIEWS_OFF.
   virtual void DidStartResponse(
-      const url::Origin& origin_of_final_response_url,
+      const GURL& response_url,
       int request_id,
       const network::mojom::URLResponseHead& response_head,
       content::ResourceType resource_type,
@@ -229,6 +229,10 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
 
   // Called when a worker fetch context will be created.
   virtual void WillCreateWorkerFetchContext(blink::WebWorkerFetchContext*) {}
+
+  // Called when a frame's intersection with the root frame changes.
+  virtual void OnMainFrameDocumentIntersectionChanged(
+      const blink::WebRect& intersect_rect) {}
 
   // Called to give the embedder an opportunity to bind an interface request
   // for a frame. If the request can be bound, |interface_pipe| will be taken.

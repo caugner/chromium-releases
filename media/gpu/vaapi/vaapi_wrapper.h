@@ -228,7 +228,7 @@ class MEDIA_GPU_EXPORT VaapiWrapper
       const base::Optional<gfx::Size>& visible_size = base::nullopt);
 
   // Releases the |va_surfaces| and destroys |va_context_id_|.
-  virtual void DestroyContextAndSurfaces(std::vector<VASurfaceID> va_surfaces);
+  void DestroyContextAndSurfaces(std::vector<VASurfaceID> va_surfaces);
 
   // Creates a VA Context of |size| and sets |va_context_id_|. In the case of a
   // VPP VaapiWrapper, |size| is ignored and 0x0 is used to create the context.
@@ -237,7 +237,7 @@ class MEDIA_GPU_EXPORT VaapiWrapper
   virtual bool CreateContext(const gfx::Size& size);
 
   // Destroys the context identified by |va_context_id_|.
-  void DestroyContext();
+  virtual void DestroyContext();
 
   // Requests a VA surface of size |size| and |va_rt_format|. Returns a
   // self-cleaning ScopedVASurface or nullptr if creation failed. If
@@ -344,7 +344,8 @@ class MEDIA_GPU_EXPORT VaapiWrapper
 
   // Upload contents of |frame| into |va_surface_id| for encode.
   bool UploadVideoFrameToSurface(const VideoFrame& frame,
-                                 VASurfaceID va_surface_id);
+                                 VASurfaceID va_surface_id,
+                                 const gfx::Size& va_surface_size);
 
   // Create a buffer of |size| bytes to be used as encode output.
   bool CreateVABuffer(size_t size, VABufferID* buffer_id);
@@ -379,8 +380,8 @@ class MEDIA_GPU_EXPORT VaapiWrapper
   // |va_surface_dest| applying pixel format conversion, cropping and scaling
   // if needed. |src_rect| and |dest_rect| are optional. They can be used to
   // specify the area used in the blit.
-  bool BlitSurface(const scoped_refptr<VASurface>& va_surface_src,
-                   const scoped_refptr<VASurface>& va_surface_dest,
+  bool BlitSurface(const VASurface& va_surface_src,
+                   const VASurface& va_surface_dest,
                    base::Optional<gfx::Rect> src_rect = base::nullopt,
                    base::Optional<gfx::Rect> dest_rect = base::nullopt);
 
@@ -389,7 +390,7 @@ class MEDIA_GPU_EXPORT VaapiWrapper
 
   // vaDestroySurfaces() a vector or a single VASurfaceID.
   void DestroySurfaces(std::vector<VASurfaceID> va_surfaces);
-  void DestroySurface(VASurfaceID va_surface_id);
+  virtual void DestroySurface(VASurfaceID va_surface_id);
 
  protected:
   VaapiWrapper(CodecMode mode);

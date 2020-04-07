@@ -10,7 +10,6 @@
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "url/gurl.h"
-#include "url/origin.h"
 
 namespace page_load_metrics {
 
@@ -88,7 +87,7 @@ PageResourceDataUse::PageResourceDataUse(const PageResourceDataUse& other) =
 PageResourceDataUse::~PageResourceDataUse() = default;
 
 void PageResourceDataUse::DidStartResponse(
-    const url::Origin& origin_of_final_response_url,
+    const GURL& response_url,
     int resource_id,
     const network::mojom::URLResponseHead& response_head,
     content::ResourceType resource_type,
@@ -111,10 +110,11 @@ void PageResourceDataUse::DidStartResponse(
   mime_type_ = response_head.mime_type;
   if (response_head.was_fetched_via_cache)
     cache_type_ = mojom::CacheType::kHttp;
+  is_secure_scheme_ = response_url.SchemeIsCryptographic();
   is_primary_frame_resource_ =
       resource_type == content::ResourceType::kMainFrame ||
       resource_type == content::ResourceType::kSubFrame;
-  origin_ = origin_of_final_response_url;
+  origin_ = url::Origin::Create(response_url);
   is_secure_scheme_ = GURL::SchemeIsCryptographic(origin_.scheme());
 }
 
@@ -128,6 +128,7 @@ void PageResourceDataUse::DidCompleteResponse(
   // Report the difference in received bytes.
   is_complete_ = true;
   encoded_body_length_ = status.encoded_body_length;
+  decoded_body_length_ = status.decoded_body_length;
   int64_t delta_bytes = status.encoded_data_length - total_received_bytes_;
   if (delta_bytes > 0) {
     total_received_bytes_ += delta_bytes;
@@ -194,6 +195,7 @@ mojom::ResourceDataUpdatePtr PageResourceDataUse::GetResourceDataUpdate() {
   resource_data_update->is_main_frame_resource = is_main_frame_resource_;
   resource_data_update->mime_type = mime_type_;
   resource_data_update->encoded_body_length = encoded_body_length_;
+  resource_data_update->decoded_body_length = decoded_body_length_;
   resource_data_update->cache_type = cache_type_;
   resource_data_update->is_secure_scheme = is_secure_scheme_;
   resource_data_update->proxy_used = proxy_used_;

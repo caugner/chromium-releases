@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.CARD_ALPHA;
+
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
@@ -13,6 +15,7 @@ import android.support.graphics.drawable.AnimatedVectorDrawableCompat;
 import android.support.v4.content.res.ResourcesCompat;
 import android.support.v4.graphics.drawable.DrawableCompat;
 import android.support.v4.view.ViewCompat;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
@@ -22,13 +25,14 @@ import androidx.annotation.Nullable;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.MathUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.FeatureUtilities;
-import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.widget.ButtonCompat;
+import org.chromium.ui.widget.ChipView;
 import org.chromium.ui.widget.ChromeImageView;
 import org.chromium.ui.widget.ViewLookupCachingFrameLayout;
 
@@ -121,6 +125,14 @@ class TabGridViewBinder {
                         (int) res.getDimension(R.dimen.tab_list_selected_inset));
                 view.setForeground(model.get(TabProperties.IS_SELECTED) ? drawable : null);
             }
+            if (TabUiFeatureUtilities.isSearchTermChipEnabled()) {
+                ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+                searchButton.getPrimaryTextView().setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                searchButton.getPrimaryTextView().setEllipsize(TextUtils.TruncateAt.END);
+                // TODO(crbug.com/1048255): The selected state of ChipView doesn't look elevated.
+                //  Fix the elevation in style instead.
+                searchButton.setSelected(false);
+            }
         } else if (TabProperties.FAVICON == propertyKey) {
             Drawable favicon = model.get(TabProperties.FAVICON);
             ImageView faviconView = (ImageView) view.fastFindViewById(R.id.tab_favicon);
@@ -161,8 +173,8 @@ class TabGridViewBinder {
                 int tabId = model.get(TabProperties.TAB_ID);
                 listener.run(tabId);
             });
-        } else if (TabProperties.ALPHA == propertyKey) {
-            view.setAlpha(model.get(TabProperties.ALPHA));
+        } else if (CARD_ALPHA == propertyKey) {
+            view.setAlpha(model.get(CARD_ALPHA));
         } else if (TabProperties.TITLE == propertyKey) {
             String title = model.get(TabProperties.TITLE);
             view.fastFindViewById(R.id.action_button)
@@ -178,6 +190,36 @@ class TabGridViewBinder {
                             model.get(TabProperties.CARD_ANIMATION_STATUS), isSelected);
         } else if (TabProperties.IS_INCOGNITO == propertyKey) {
             updateColor(view, model.get(TabProperties.IS_INCOGNITO), TabProperties.UiType.CLOSABLE);
+        } else if (TabProperties.ACCESSIBILITY_DELEGATE == propertyKey) {
+            view.setAccessibilityDelegate(model.get(TabProperties.ACCESSIBILITY_DELEGATE));
+        } else if (TabUiFeatureUtilities.isSearchTermChipEnabled()
+                && TabProperties.SEARCH_QUERY == propertyKey) {
+            String query = model.get(TabProperties.SEARCH_QUERY);
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            if (TextUtils.isEmpty(query)) {
+                searchButton.setVisibility(View.GONE);
+            } else {
+                searchButton.setVisibility(View.VISIBLE);
+                searchButton.getPrimaryTextView().setText(query);
+            }
+        } else if (TabUiFeatureUtilities.isSearchTermChipEnabled()
+                && TabProperties.SEARCH_LISTENER == propertyKey) {
+            TabListMediator.TabActionListener listener = model.get(TabProperties.SEARCH_LISTENER);
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            if (listener == null) {
+                searchButton.setOnClickListener(null);
+                return;
+            }
+            searchButton.setOnClickListener(v -> {
+                int tabId = model.get(TabProperties.TAB_ID);
+                listener.run(tabId);
+            });
+        } else if (TabUiFeatureUtilities.isSearchTermChipEnabled()
+                && TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID == propertyKey) {
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            int iconDrawableId = model.get(TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID);
+            boolean shouldTint = iconDrawableId != R.drawable.ic_logo_googleg_24dp;
+            searchButton.setIcon(iconDrawableId, shouldTint);
         }
     }
 

@@ -30,15 +30,17 @@ import org.junit.runner.RunWith;
 import org.chromium.base.Callback;
 import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DummyUiActivityTestCase;
+import org.chromium.components.browser_ui.widget.selectable_list.SelectionDelegate;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
+import org.chromium.ui.test.util.DummyUiActivityTestCase;
 import org.chromium.ui.widget.ButtonCompat;
+import org.chromium.ui.widget.ChipView;
+import org.chromium.ui.widget.ChromeImageView;
 
 import java.lang.ref.WeakReference;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -70,7 +72,7 @@ public class TabListViewHolderTest extends DummyUiActivityTestCase {
     private TabListMediator.ThumbnailFetcher mMockThumbnailProvider =
             new TabListMediator.ThumbnailFetcher(new TabListMediator.ThumbnailProvider() {
                 @Override
-                public void getTabThumbnailWithCallback(Tab tab, Callback<Bitmap> callback,
+                public void getTabThumbnailWithCallback(int tabId, Callback<Bitmap> callback,
                         boolean forceUpdate, boolean writeToCache) {
                     Bitmap bitmap = mShouldReturnBitmap
                             ? Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
@@ -119,6 +121,7 @@ public class TabListViewHolderTest extends DummyUiActivityTestCase {
     public void setUpTest() throws Exception {
         super.setUpTest();
         FeatureUtilities.enableTabThumbnailAspectRatioForTesting(false);
+        TabUiFeatureUtilities.setSearchTermChipEnabledForTesting(true);
         ViewGroup view = new LinearLayout(getActivity());
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -483,12 +486,73 @@ public class TabListViewHolderTest extends DummyUiActivityTestCase {
         Assert.assertEquals(View.GONE, actionButton.getVisibility());
     }
 
+    @Test
+    @MediumTest
+    @UiThreadTest
+    public void testSearchTermChip() {
+        String searchTerm = "hello world";
+
+        testGridSelected(mTabGridView, mGridModel);
+        ChipView searchButton = mTabGridView.findViewById(R.id.search_button);
+
+        mGridModel.set(TabProperties.SEARCH_QUERY, searchTerm);
+        Assert.assertEquals(View.VISIBLE, searchButton.getVisibility());
+        Assert.assertEquals(searchTerm, searchButton.getPrimaryTextView().getText());
+
+        mGridModel.set(TabProperties.SEARCH_QUERY, null);
+        Assert.assertEquals(View.GONE, searchButton.getVisibility());
+
+        mGridModel.set(TabProperties.SEARCH_QUERY, searchTerm);
+        Assert.assertEquals(View.VISIBLE, searchButton.getVisibility());
+
+        mGridModel.set(TabProperties.SEARCH_QUERY, null);
+        Assert.assertEquals(View.GONE, searchButton.getVisibility());
+    }
+
+    @Test
+    @MediumTest
+    @UiThreadTest
+    public void testSearchListener() {
+        ChipView searchButton = mTabGridView.findViewById(R.id.search_button);
+
+        AtomicInteger clickedTabId = new AtomicInteger(Tab.INVALID_TAB_ID);
+        TabListMediator.TabActionListener searchListener = clickedTabId::set;
+        mGridModel.set(TabProperties.SEARCH_LISTENER, searchListener);
+
+        searchButton.performClick();
+        Assert.assertEquals(TAB1_ID, clickedTabId.get());
+
+        clickedTabId.set(Tab.INVALID_TAB_ID);
+        mGridModel.set(TabProperties.SEARCH_LISTENER, null);
+        searchButton.performClick();
+        Assert.assertEquals(Tab.INVALID_TAB_ID, clickedTabId.get());
+    }
+
+    @Test
+    @MediumTest
+    @UiThreadTest
+    public void testSearchChipIcon() {
+        ChipView searchButton = mTabGridView.findViewById(R.id.search_button);
+        View iconView = searchButton.getChildAt(0);
+        Assert.assertTrue(iconView instanceof ChromeImageView);
+        ChromeImageView iconImageView = (ChromeImageView) iconView;
+
+        mGridModel.set(TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID, R.drawable.ic_logo_googleg_24dp);
+        Drawable googleDrawable = iconImageView.getDrawable();
+
+        mGridModel.set(TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID, R.drawable.ic_search);
+        Drawable magnifierDrawable = iconImageView.getDrawable();
+
+        Assert.assertNotEquals(magnifierDrawable, googleDrawable);
+    }
+
     @Override
     public void tearDownTest() throws Exception {
         mStripMCP.destroy();
         mGridMCP.destroy();
         mSelectableMCP.destroy();
         FeatureUtilities.enableTabThumbnailAspectRatioForTesting(null);
+        TabUiFeatureUtilities.setSearchTermChipEnabledForTesting(null);
         super.tearDownTest();
     }
 }

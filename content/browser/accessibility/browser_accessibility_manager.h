@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,6 +32,7 @@
 #include "ui/accessibility/ax_tree_manager.h"
 #include "ui/accessibility/ax_tree_observer.h"
 #include "ui/accessibility/ax_tree_update.h"
+#include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/gfx/native_widget_types.h"
 
 struct AccessibilityHostMsg_LocationChangeParams;
@@ -191,16 +194,14 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   // view lost focus.
   virtual void OnWindowBlurred();
 
-  virtual void UserIsReloading();
-
-  // WebContentsObserver implementation.
   // Notify the accessibility manager about page navigation.
-  // BrowserAccessibilityManager used to be manually notified at the same time
-  // WebContentsObserver's DidStartLoading(), DidStopLoading(), and
-  // DidFinishNavigation() methods were called. Since then, it was determined
-  // BrowserAccessibilityManager does not need to distinguish between
-  // DidFinishNavigation() and DidStopLoading().
-  void DidStartLoading() override;
+  // TODO(domfarolino, dmazzoni): Implement WebContentsObserver methods that
+  // correspond to the ones we provide today, so we can stop being manually
+  // notified of navigation events when they happen.
+  void UserIsNavigatingAway();
+  virtual void UserIsReloading();
+  void NavigationSucceeded();
+  void NavigationFailed();
   void DidStopLoading() override;
 
   // Keep track of if this page is hidden by an interstitial, in which case
@@ -232,6 +233,12 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   // this behavior and just fire all events with no delay as if the window
   // had focus.
   static void NeverSuppressOrDelayEventsForTesting();
+
+  // Extra mac nodes are temporarily disabled, except for in tests.
+  static void AllowExtraMacNodesForTesting();
+  // Are extra mac nodes allowed at all? Currently only allowed in tests.
+  // Even when returning true, platforms other than Mac OS do not enable them.
+  static bool GetExtraMacNodesAllowed();
 
   // Accessibility actions. All of these are implemented asynchronously
   // by sending a message to the renderer to perform the respective action
@@ -468,6 +475,14 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   virtual void SendLocationChangeEvents(
       const std::vector<AccessibilityHostMsg_LocationChangeParams>& params);
 
+  // Given the data from an atomic update, collect the nodes that need updating
+  // assuming that this platform is one where plain text node content is
+  // directly included in parents' hypertext.
+  void CollectChangedNodesAndParentsForAtomicUpdate(
+      ui::AXTree* tree,
+      const std::vector<ui::AXTreeObserver::Change>& changes,
+      std::set<ui::AXPlatformNode*>* nodes_needing_update);
+
   static void SetLastFocusedNode(BrowserAccessibility* node);
   static BrowserAccessibility* GetLastFocusedNode();
 
@@ -524,6 +539,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   // Fire all events regardless of focus and with no delay, to avoid test
   // flakiness. See NeverSuppressOrDelayEventsForTesting() for details.
   static bool never_suppress_or_delay_events_for_testing_;
+
+  // Extra mac nodes are disabled even on mac currently, except for in tests.
+  static bool allow_extra_mac_nodes_for_testing_;
 
   // Stores the id of the last focused node across all frames, as well as the id
   // of the tree that contains it, so that when focus might have changed we can

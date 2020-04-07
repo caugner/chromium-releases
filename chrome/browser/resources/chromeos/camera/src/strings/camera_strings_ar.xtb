@@ -18,7 +18,7 @@
 <translation id="2549985041256363841">بدء التسجيل</translation>
 <translation id="2599796128805996109">الكاميرا الخلفية</translation>
 <translation id="2912439424121107408">الوضع المختصّ غير متاح على هذا الجهاز</translation>
-<translation id="2968794441791257519">سيتم نقل الصور والفيديوهات الملتقَطة بالكاميرا إلى مجلد "التنزيلات". ويمكنك الوصول إليها من خلال "الملفات".
+<translation id="2968794441791257519">سيتم نقل الصور والفيديوهات الملتقَطة بالكاميرا إلى مجلد "المحتوى الذي تم تنزيله". ويمكنك الوصول إليها من خلال "الملفات".
 
         ستتمكن التطبيقات المزوّدة بأذونات مساحة التخزين من الوصول إلى صورك وفيديوهاتك.</translation>
 <translation id="3081586908890909590">التبديل لتسجيل فيديو</translation>
@@ -51,7 +51,7 @@
 <translation id="6420689864531458495">‏(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> - <ph name="WIDTH" />x<ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> ميغابكسل</translation>
 <translation id="6681668084120808868">التقاط صورة</translation>
 <translation id="6778482348691154169">تعذّر التقاط الصورة</translation>
-<translation id="6965382102122355670">موافق</translation>
+<translation id="6965382102122355670">حسنًا</translation>
 <translation id="698156982839284926">3 ثوانٍ</translation>
 <translation id="712848772518857951">هل تريد فعلاً إزالة <ph name="COUNT" /> من العناصر؟</translation>
 <translation id="7243947652761655814">درجة دقة الفيديو</translation>
